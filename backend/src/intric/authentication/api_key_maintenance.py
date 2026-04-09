@@ -31,6 +31,7 @@ class ApiKeyMaintenanceService:
         tenant_repo: TenantRepository,
         audit_service: "AuditService | None",
     ):
+        super().__init__()
         self.api_key_repo = api_key_repo
         self.tenant_repo = tenant_repo
         self.audit_service = audit_service

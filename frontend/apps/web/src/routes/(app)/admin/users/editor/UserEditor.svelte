@@ -14,6 +14,8 @@
   import { getIntric } from "$lib/core/Intric";
   import { getAdminUserCtx } from "../ctx";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const intric = getIntric();
 
@@ -32,7 +34,7 @@
 
   type Props = {
     mode?: "update" | "create";
-    hideTrigger?: boolean;  // Hide built-in trigger when controlled externally
+    hideTrigger?: boolean; // Hide built-in trigger when controlled externally
     user?: {
       id: string;
       username?: string | null | undefined;
@@ -41,7 +43,7 @@
       roles: Role[];
       user_groups: UserGroup[];
     };
-    showDialog: Dialog.OpenState;  // For parent component control (used in UserActions dropdown)
+    showDialog?: Dialog.OpenState; // For parent component control (used in UserActions dropdown)
   };
 
   let {
@@ -85,7 +87,7 @@
 
   async function updateUser() {
     if (!user.username) {
-      alert(m.cant_edit_user_without_username());
+      toast.warning(m.cant_edit_user_without_username());
       return;
     }
     const update = {
@@ -103,9 +105,9 @@
       // Invalidate does not update the user and userPassword values in this component, so we need to update
       user = editableUser;
       userPassword = "";
-      showDialog.set(false);
+      showDialog?.set(false);
     } catch (e) {
-      alert(e);
+      toastError(e);
     }
   }
 
@@ -124,9 +126,9 @@
       editableUser.updateWithValue(createEmptyUser());
       userPassword = "";
       invalidate("admin:users:load");
-      showDialog.set(false);
+      showDialog?.set(false);
     } catch (e) {
-      alert(e);
+      toastError(e);
     }
   }
 </script>

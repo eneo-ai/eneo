@@ -7,11 +7,11 @@
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
   import { LoadingScreen } from "$lib/components/layout";
-  import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import IntricWordMark from "$lib/assets/IntricWordMark.svelte";
   import TenantSelector from "$lib/components/TenantSelector.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { SvelteURLSearchParams } from "svelte/reactivity";
 
   type TenantInfo = {
     slug: string;
@@ -73,7 +73,9 @@
   let isSubmittingUPLogin = $state(false);
 
   let showUsernameAndPassword = $derived(page.url?.searchParams.get("showUsernameAndPassword"));
-  let tenantFederationEnabled = $derived(Boolean(data.featureFlags?.federationStatus?.has_multi_tenant_federation));
+  let tenantFederationEnabled = $derived(
+    Boolean(data.featureFlags?.federationStatus?.has_multi_tenant_federation)
+  );
 
   // Check if user explicitly wants to see login form (e.g., after logout)
   const hasQueryParams = $derived(
@@ -236,13 +238,17 @@
 
   async function clearOidcErrorFromUrl() {
     if (!browser) return;
-    const params = new URLSearchParams(window.location.search);
+    const params = new SvelteURLSearchParams(window.location.search);
     params.delete("message");
     params.delete("detailCode");
     params.delete("correlation");
     params.delete("rawDetail");
     const query = params.toString();
-    await goto(`${window.location.pathname}${query ? `?${query}` : ""}`, { replaceState: true, noScroll: true });
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from window.location
+    await goto(`${window.location.pathname}${query ? `?${query}` : ""}`, {
+      replaceState: true,
+      noScroll: true
+    });
   }
 
   async function beginTenantLogin(slug: string): Promise<boolean> {
@@ -324,14 +330,18 @@
       } catch {
         // ignore storage errors (private browsing, etc.)
       }
-      const params = new URLSearchParams(window.location.search);
+      const params = new SvelteURLSearchParams(window.location.search);
       params.delete("message");
       params.delete("detailCode");
       params.delete("correlation");
       params.delete("rawDetail");
       params.delete("tenant");
       const query = params.toString();
-      await goto(`${window.location.pathname}${query ? `?${query}` : ""}`, { replaceState: true, noScroll: true });
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from window.location
+      await goto(`${window.location.pathname}${query ? `?${query}` : ""}`, {
+        replaceState: true,
+        noScroll: true
+      });
     }
 
     await loadTenantsAndMaybeShow({ forceShow: true });
@@ -363,7 +373,9 @@
   function copyToClipboard(text: string) {
     navigator.clipboard.writeText(text).then(() => {
       copied = true;
-      setTimeout(() => { copied = false; }, 2000);
+      setTimeout(() => {
+        copied = false;
+      }, 2000);
     });
   }
 </script>
@@ -375,17 +387,22 @@
 {#if isInitializing || isAwaitingLoginResponse || isSubmittingUPLogin || ((data.zitadelLink || data.singleTenantOidcLink) && !hasQueryParams)}
   <div
     class="relative flex h-[100vh] w-[100vw] items-center justify-center"
-    transition:fade={{ duration: 200 }}>
+    transition:fade={{ duration: 200 }}
+  >
     <div class="flex flex-col items-center gap-6">
       <LoadingScreen message={loadingMessage} />
 
       {#if showSlowLoadingWarning}
-        <div class="bg-warning-dimmer text-warning-default max-w-md rounded-lg p-4 shadow-lg" role="alert">
+        <div
+          class="bg-warning-dimmer text-warning-default max-w-md rounded-lg p-4 shadow-lg"
+          role="alert"
+        >
           <p class="mb-2">{m.connection_slow_warning()}</p>
           <Button
             variant="outlined"
             on:click={() => window.location.reload()}
-            class="w-full justify-center">
+            class="w-full justify-center"
+          >
             {m.retry()}
           </Button>
         </div>
@@ -396,7 +413,8 @@
   <!-- Tenant Selector for Federation -->
   <div
     class="relative flex h-[100vh] w-[100vw] items-center justify-center py-8"
-    transition:fade={{ duration: 200 }}>
+    transition:fade={{ duration: 200 }}
+  >
     <div class="w-full max-w-6xl">
       <h1 class="mb-8 flex justify-center">
         <IntricWordMark class="text-brand-intric h-16 w-24" />
@@ -422,7 +440,8 @@
 {:else}
   <div
     class="relative flex h-[100vh] w-[100vw] items-center justify-center"
-    transition:fade={{ duration: 200 }}>
+    transition:fade={{ duration: 200 }}
+  >
     <div class="box w-[400px] justify-center">
       <h1 class="flex justify-center">
         <IntricWordMark class="text-brand-intric h-16 w-24" />
@@ -431,11 +450,12 @@
 
       <!-- Return to tenant selector button (visible on login form) -->
       {#if tenantFederationEnabled && activeTenantSlug}
-        <div class="mb-6 mt-2">
+        <div class="mt-2 mb-6">
           <Button
             variant="simple"
             on:click={chooseAnotherTenant}
-            class="text-dimmer hover:text-default transition-colors duration-150 p-0 -ml-1">
+            class="text-dimmer hover:text-default -ml-1 p-0 transition-colors duration-150"
+          >
             ← {m.oidc_choose_another_org()}
           </Button>
         </div>
@@ -444,42 +464,48 @@
       {#if oidcErrorCode}
         <!-- Error Box Container with WCAG AA-compliant colors -->
         <div
-          class="w-full max-w-md mx-auto bg-red-100 rounded-lg p-6 shadow-md mb-4"
+          class="mx-auto mb-4 w-full max-w-md rounded-lg bg-red-100 p-6 shadow-md"
           role="alert"
-          aria-live="assertive">
-
+          aria-live="assertive"
+        >
           <!-- Error Title Section -->
           <div class="flex items-start gap-2">
             <!-- Error Icon -->
-            <svg class="w-6 h-6 text-red-900 flex-shrink-0 mt-0.5"
-                 fill="none"
-                 viewBox="0 0 24 24"
-                 stroke="currentColor"
-                 aria-hidden="true">
-              <path stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            <svg
+              class="mt-0.5 h-6 w-6 flex-shrink-0 text-red-900"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
             </svg>
 
             <!-- Error Title -->
-            <h1 class="text-lg font-semibold text-red-900 leading-tight">
+            <h1 class="text-lg leading-tight font-semibold text-red-900">
               {m.failed_to_login()}
             </h1>
           </div>
 
           <!-- Error Message Section -->
           <div class="mt-4">
-            <p class="text-red-900 leading-relaxed">
+            <p class="leading-relaxed text-red-900">
               {getOidcErrorMessage()}
             </p>
             {#if !oidcErrorDetailCode && oidcRawDetail}
-              <p class="text-sm text-red-900 mt-2">{m.oidc_error_detail({ detail: oidcRawDetail })}</p>
+              <p class="mt-2 text-sm text-red-900">
+                {m.oidc_error_detail({ detail: oidcRawDetail })}
+              </p>
             {/if}
           </div>
 
           <!-- Action Buttons Section -->
-          <div class="mt-6 flex flex-col sm:flex-row gap-4 items-stretch">
+          <div class="mt-6 flex flex-col items-stretch gap-4 sm:flex-row">
             <!-- Primary Action: Retry Login -->
             {#if activeTenantSlug}
               <Button
@@ -487,7 +513,8 @@
                 variant="primary"
                 class="flex-1 justify-center"
                 disabled={isAwaitingLoginResponse}
-                on:click={handleRetryClick}>
+                on:click={handleRetryClick}
+              >
                 {#if isAwaitingLoginResponse}
                   {m.redirecting_to_authentication()}
                 {:else}
@@ -501,20 +528,21 @@
               type="button"
               variant="outlined"
               on:click={handleChooseAnotherClick}
-              class="flex-1 justify-center bg-white text-gray-900 border-gray-700 hover:bg-gray-50 hover:border-gray-800 hover:text-gray-900 shadow-sm">
+              class="flex-1 justify-center border-gray-700 bg-white text-gray-900 shadow-sm hover:border-gray-800 hover:bg-gray-50 hover:text-gray-900"
+            >
               {m.oidc_choose_another_org()}
             </Button>
           </div>
 
           <!-- Correlation ID Section -->
           {#if oidcCorrelationId}
-            <div class="mt-6 pt-4 border-t border-red-800">
+            <div class="mt-6 border-t border-red-800 pt-4">
               <div class="flex items-start gap-2">
                 <div class="flex-1">
-                  <p class="text-sm text-red-900 mb-1">
+                  <p class="mb-1 text-sm text-red-900">
                     {m.oidc_correlation_hint()}
                   </p>
-                  <code class="text-sm font-mono text-red-900 break-all select-all">
+                  <code class="font-mono text-sm break-all text-red-900 select-all">
                     {oidcCorrelationId}
                   </code>
                 </div>
@@ -522,32 +550,41 @@
                 <!-- Copy to Clipboard Button -->
                 <button
                   type="button"
-                  class="p-2 rounded bg-red-50 text-red-800 hover:bg-red-100 hover:border hover:border-red-300 transition-colors flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-900 focus-visible:ring-offset-2"
-                  onclick={() => copyToClipboard(oidcCorrelationId)}
-                  aria-label={copied ? m.copied_to_clipboard() : m.copy_correlation_id()}>
+                  class="flex-shrink-0 rounded bg-red-50 p-2 text-red-800 transition-colors hover:border hover:border-red-300 hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-900 focus-visible:ring-offset-2 focus-visible:outline-none"
+                  onclick={() => copyToClipboard(oidcCorrelationId!)}
+                  aria-label={copied ? m.copied_to_clipboard() : m.copy_correlation_id()}
+                >
                   {#if copied}
                     <!-- Check Icon (copied state) -->
-                    <svg class="w-5 h-5 text-green-800"
-                         fill="none"
-                         viewBox="0 0 24 24"
-                         stroke="currentColor"
-                         aria-hidden="true">
-                      <path stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M5 13l4 4L19 7" />
+                    <svg
+                      class="h-5 w-5 text-green-800"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 13l4 4L19 7"
+                      />
                     </svg>
                   {:else}
                     <!-- Copy Icon (default state) -->
-                    <svg class="w-5 h-5 text-red-900"
-                         fill="none"
-                         viewBox="0 0 24 24"
-                         stroke="currentColor"
-                         aria-hidden="true">
-                      <path stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    <svg
+                      class="h-5 w-5 text-red-900"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                      />
                     </svg>
                   {/if}
                 </button>
@@ -633,6 +670,7 @@
 
             return async ({ result }) => {
               if (result.type === "redirect") {
+                // eslint-disable-next-line svelte/no-navigation-without-resolve -- redirect location from server form action
                 await goto(result.location);
               } else {
                 isSubmittingUPLogin = false;
@@ -640,7 +678,7 @@
                 loginFailed = true;
                 // Capture correlation ID from form action result
                 if (result.type === "failure" && result.data) {
-                  upLoginCorrelationId = result.data.correlationId || null;
+                  upLoginCorrelationId = (result.data.correlationId as string) || null;
                 }
               }
             };
@@ -654,13 +692,13 @@
 
               <!-- Correlation ID Section for Developer Debugging -->
               {#if upLoginCorrelationId}
-                <div class="mt-4 pt-3 border-t border-red-300/30">
+                <div class="mt-4 border-t border-red-300/30 pt-3">
                   <div class="flex items-start gap-2">
                     <div class="flex-1">
-                      <p class="text-xs opacity-75 mb-1">
+                      <p class="mb-1 text-xs opacity-75">
                         {m.oidc_correlation_hint()}
                       </p>
-                      <code class="text-xs font-mono break-all select-all">
+                      <code class="font-mono text-xs break-all select-all">
                         {upLoginCorrelationId}
                       </code>
                     </div>
@@ -668,32 +706,41 @@
                     <!-- Copy to Clipboard Button -->
                     <button
                       type="button"
-                      class="p-1.5 rounded bg-red-100 hover:bg-red-200 transition-colors flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
-                      onclick={() => copyToClipboard(upLoginCorrelationId)}
-                      aria-label={copied ? m.copied_to_clipboard() : m.copy_correlation_id()}>
+                      class="flex-shrink-0 rounded bg-red-100 p-1.5 transition-colors hover:bg-red-200 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:outline-none"
+                      onclick={() => copyToClipboard(upLoginCorrelationId!)}
+                      aria-label={copied ? m.copied_to_clipboard() : m.copy_correlation_id()}
+                    >
                       {#if copied}
                         <!-- Check Icon (copied state) -->
-                        <svg class="w-4 h-4 text-green-700"
-                             fill="none"
-                             viewBox="0 0 24 24"
-                             stroke="currentColor"
-                             aria-hidden="true">
-                          <path stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M5 13l4 4L19 7" />
+                        <svg
+                          class="h-4 w-4 text-green-700"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M5 13l4 4L19 7"
+                          />
                         </svg>
                       {:else}
                         <!-- Copy Icon (default state) -->
-                        <svg class="w-4 h-4"
-                             fill="none"
-                             viewBox="0 0 24 24"
-                             stroke="currentColor"
-                             aria-hidden="true">
-                          <path stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        <svg
+                          class="h-4 w-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                          />
                         </svg>
                       {/if}
                     </button>
@@ -746,14 +793,16 @@
         <Button
           variant="outlined"
           class="bg-primary text-primary border-default hover:bg-hover-default"
-          href={localizeHref("/login")}>
+          href={localizeHref("/login")}
+        >
           {m.hide_login_fields()}
         </Button>
       {:else if data.mobilityguardLink || data.singleTenantOidcLink || oidcErrorCode}
         <Button
           variant="outlined"
           class="bg-primary text-primary border-default hover:bg-hover-default"
-          href={localizeHref("/login?showUsernameAndPassword=true")}>
+          href={localizeHref("/login?showUsernameAndPassword=true")}
+        >
           {m.show_login_fields()}
         </Button>
       {/if}

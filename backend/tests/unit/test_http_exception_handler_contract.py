@@ -24,7 +24,9 @@ def test_http_exception_string_detail_preserves_legacy_shape():
 
 
 def test_http_exception_code_message_preserved_and_request_id_added():
-    client = _build_client_for_exception({"code": "insufficient_scope", "message": "Denied"})
+    client = _build_client_for_exception(
+        {"code": "insufficient_scope", "message": "Denied"}
+    )
     response = client.get("/_test-http-exc", headers={"X-Correlation-ID": "req-2"})
 
     assert response.status_code == 503

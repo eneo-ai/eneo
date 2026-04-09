@@ -13,11 +13,11 @@ logger = get_logger(__name__)
 
 async def analyze_conversation_insights_task(
     *,
-    job_id: str,
+    job_id: UUID,
     params: AnalyzeConversationInsightsTask,
     container: Container,
 ):
-    parsed_job_id = UUID(job_id)
+    parsed_job_id = job_id
     user = container.user()
     manager = AnalysisJobManager(container.redis_client())
     await manager.mark_processing(tenant_id=user.tenant_id, job_id=parsed_job_id)
@@ -35,7 +35,7 @@ async def analyze_conversation_insights_task(
     except Exception as exc:
         logger.exception(
             "Async conversation insights job failed",
-            extra={"job_id": job_id, "tenant_id": str(user.tenant_id)},
+            extra={"job_id": str(job_id), "tenant_id": str(user.tenant_id)},
         )
         await manager.mark_failed(
             tenant_id=user.tenant_id,
@@ -49,4 +49,4 @@ async def analyze_conversation_insights_task(
         job_id=parsed_job_id,
         answer=answer,
     )
-    return {"job_id": job_id, "status": "completed"}
+    return {"job_id": str(job_id), "status": "completed"}

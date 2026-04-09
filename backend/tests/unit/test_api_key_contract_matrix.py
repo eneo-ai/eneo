@@ -20,7 +20,10 @@ from uuid import UUID, uuid4
 import pytest
 from starlette.datastructures import State
 
-from intric.authentication.api_key_resolver import ApiKeyValidationError, check_resource_permission
+from intric.authentication.api_key_resolver import (
+    ApiKeyValidationError,
+    check_resource_permission,
+)
 from intric.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyScopeType,
@@ -201,6 +204,7 @@ class TestAuthPrecedence:
 
         # Verify the authenticate method's structure: token checked before api_key
         import inspect
+
         source = inspect.getsource(UserService.authenticate)
         token_check_pos = source.find("if token is not None")
         api_key_check_pos = source.find("elif api_key is not None")
@@ -213,6 +217,7 @@ class TestAuthPrecedence:
         # Verify _resolve_api_key is called in the api_key branch
         from intric.users.user_service import UserService
         import inspect
+
         source = inspect.getsource(UserService.authenticate)
         assert "_resolve_api_key" in source
 
@@ -220,6 +225,7 @@ class TestAuthPrecedence:
         """Bearer token path calls _get_user_from_token, not _resolve_api_key."""
         from intric.users.user_service import UserService
         import inspect
+
         source = inspect.getsource(UserService.authenticate)
 
         # The token branch should NOT call _resolve_api_key
@@ -878,6 +884,7 @@ class TestUserListingEndpointGuards:
 
         with pytest.raises(ApiKeyValidationError) as exc_info:
             import asyncio
+
             asyncio.get_event_loop().run_until_complete(
                 svc._enforce_api_key_scope(
                     request,
@@ -912,6 +919,7 @@ class TestUserListingEndpointGuards:
         request = _scope_request()
         svc = _make_user_service()
         import asyncio
+
         # Should NOT raise — tenant scope bypasses all scope checks
         asyncio.get_event_loop().run_until_complete(
             svc._enforce_api_key_scope(
@@ -945,7 +953,10 @@ class TestAdminApiKeyGuardContract:
     def _route_has_dependency(self, route, dep_name: str) -> bool:
         deps = getattr(route, "dependencies", [])
         for dep in deps:
-            if hasattr(dep, "dependency") and getattr(dep.dependency, "__name__", "") == dep_name:
+            if (
+                hasattr(dep, "dependency")
+                and getattr(dep.dependency, "__name__", "") == dep_name
+            ):
                 return True
         return False
 
@@ -970,7 +981,9 @@ class TestAdminApiKeyGuardContract:
 
         list_route = None
         for route in root.routes:
-            if getattr(route, "path", "") == "/api-keys" and "GET" in getattr(route, "methods", set()):
+            if getattr(route, "path", "") == "/api-keys" and "GET" in getattr(
+                route, "methods", set()
+            ):
                 list_route = route
                 break
 
@@ -1001,7 +1014,9 @@ class TestModelProvidersBearerRoleContract:
     @pytest.mark.asyncio
     async def test_non_admin_denied_on_list(self):
         from intric.main.exceptions import UnauthorizedException
-        from intric.model_providers.presentation.model_provider_router import list_providers
+        from intric.model_providers.presentation.model_provider_router import (
+            list_providers,
+        )
 
         service = AsyncMock()
         user = SimpleNamespace(permissions=[])
@@ -1013,7 +1028,9 @@ class TestModelProvidersBearerRoleContract:
     @pytest.mark.asyncio
     async def test_admin_allowed_on_list(self):
         from intric.roles.permissions import Permission
-        from intric.model_providers.presentation.model_provider_router import list_providers
+        from intric.model_providers.presentation.model_provider_router import (
+            list_providers,
+        )
 
         provider = MagicMock()
         provider.to_dict.return_value = self._provider_dict()
@@ -1029,7 +1046,9 @@ class TestModelProvidersBearerRoleContract:
     @pytest.mark.asyncio
     async def test_non_admin_denied_on_get(self):
         from intric.main.exceptions import UnauthorizedException
-        from intric.model_providers.presentation.model_provider_router import get_provider
+        from intric.model_providers.presentation.model_provider_router import (
+            get_provider,
+        )
 
         service = AsyncMock()
         user = SimpleNamespace(permissions=[])
@@ -1041,7 +1060,9 @@ class TestModelProvidersBearerRoleContract:
     @pytest.mark.asyncio
     async def test_admin_allowed_on_get(self):
         from intric.roles.permissions import Permission
-        from intric.model_providers.presentation.model_provider_router import get_provider
+        from intric.model_providers.presentation.model_provider_router import (
+            get_provider,
+        )
 
         provider = MagicMock()
         provider.to_dict.return_value = self._provider_dict()
@@ -1078,9 +1099,9 @@ class TestSuperKeyIsolationContract:
             assert self._route_has_dependency(route, "authenticate_super_api_key"), (
                 f"{route.path} missing authenticate_super_api_key"
             )
-            assert not self._route_has_dependency(route, "authenticate_super_duper_api_key"), (
-                f"{route.path} should not use authenticate_super_duper_api_key"
-            )
+            assert not self._route_has_dependency(
+                route, "authenticate_super_duper_api_key"
+            ), f"{route.path} should not use authenticate_super_duper_api_key"
 
     def test_module_routes_use_super_duper_key_only(self):
         from intric.server.routers import router as root
@@ -1092,12 +1113,12 @@ class TestSuperKeyIsolationContract:
         ]
         assert module_routes, "No /modules routes found"
         for route in module_routes:
-            assert self._route_has_dependency(route, "authenticate_super_duper_api_key"), (
-                f"{route.path} missing authenticate_super_duper_api_key"
-            )
-            assert not self._route_has_dependency(route, "authenticate_super_api_key"), (
-                f"{route.path} should not use authenticate_super_api_key"
-            )
+            assert self._route_has_dependency(
+                route, "authenticate_super_duper_api_key"
+            ), f"{route.path} missing authenticate_super_duper_api_key"
+            assert not self._route_has_dependency(
+                route, "authenticate_super_api_key"
+            ), f"{route.path} should not use authenticate_super_api_key"
 
     def test_super_and_super_duper_keys_are_not_interchangeable(self, monkeypatch):
         from intric.authentication import auth
@@ -1114,9 +1135,13 @@ class TestSuperKeyIsolationContract:
         request_super_duper = SimpleNamespace(headers={"X-API-Key": "super-duper-key"})
 
         # In real requests, Security(APIKeyHeader) provides the header value directly.
-        assert auth.authenticate_super_api_key(request_super, "super-key") == "super-key"
         assert (
-            auth.authenticate_super_duper_api_key(request_super_duper, "super-duper-key")
+            auth.authenticate_super_api_key(request_super, "super-key") == "super-key"
+        )
+        assert (
+            auth.authenticate_super_duper_api_key(
+                request_super_duper, "super-duper-key"
+            )
             == "super-duper-key"
         )
 

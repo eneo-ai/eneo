@@ -21,7 +21,9 @@
     state: { currentStep, createButtonLabel, creationMode, showCreateDialog }
   } = getTemplateController();
 
-  let { settings, triggerSnippet }: { settings: Settings; triggerSnippet?: Snippet<[any]> } = $props();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let { settings, triggerSnippet }: { settings: Settings; triggerSnippet?: Snippet<[any]> } =
+    $props();
 
   let openAssistantAfterCreation = $state(true);
   let userTouchedToggle = $state(false);
@@ -86,6 +88,7 @@
               $showCreateDialog = false;
               resetForm();
               if (openAssistantAfterCreation) {
+                // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with space and assistant ids
                 goto(`/spaces/${$currentSpace.routeId}/assistants/${id}/edit?next=default`);
               }
             }

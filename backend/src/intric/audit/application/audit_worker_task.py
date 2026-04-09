@@ -1,6 +1,10 @@
 """Audit logging worker task."""
 
+from typing import Any
+from uuid import UUID, uuid4
+
 from sqlalchemy.exc import IntegrityError
+from typing_extensions import TypedDict
 
 from intric.audit.application.audit_task_params import AuditLogTaskParams
 from intric.audit.domain.audit_log import AuditLog
@@ -11,11 +15,17 @@ from intric.main.logging import get_logger
 logger = get_logger(__name__)
 
 
+class AuditLogTaskResult(TypedDict, total=False):
+    audit_log_id: str
+    skipped: bool
+    reason: str
+
+
 async def log_audit_event_task(
-    job_id: str,
-    params: dict,
+    job_id: UUID,
+    params: AuditLogTaskParams | dict[str, Any],
     session: AsyncSession,
-) -> dict:
+) -> AuditLogTaskResult:
     """
     Worker task to persist audit log to database.
 
@@ -27,12 +37,9 @@ async def log_audit_event_task(
     Returns:
         Dictionary with job result (audit_log_id)
     """
-    # Validate params
-    task_params = AuditLogTaskParams(**params)
+    task_params = AuditLogTaskParams.model_validate(params)
 
     # Create audit log
-    from uuid import uuid4
-
     audit_log = AuditLog(
         id=uuid4(),  # Generate unique ID for each audit log
         tenant_id=task_params.tenant_id,
@@ -66,14 +73,14 @@ async def log_audit_event_task(
                 f"entity_type={audit_log.entity_type.value}. "
                 f"Tenant may have been deleted or not yet created."
             )
-            return {"audit_log_id": None, "skipped": True, "reason": "tenant_not_found"}
+            return {"skipped": True, "reason": "tenant_not_found"}
         # Re-raise other integrity errors (actor_id FK, unique constraints, etc.)
         raise
 
     logger.info(
         "Audit log created",
         extra={
-            "job_id": job_id,
+            "job_id": str(job_id),
             "audit_log_id": str(created_log.id),
             "tenant_id": str(created_log.tenant_id),
             "action": created_log.action.value,

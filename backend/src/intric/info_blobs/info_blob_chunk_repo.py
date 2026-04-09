@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -16,19 +16,22 @@ from intric.info_blobs.info_blob import (
 
 
 class InfoBlobChunkRepo:
-    def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
-            session=session, table=InfoBlobChunks, in_db_model=InfoBlobChunkInDB
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
+        self.delegate: BaseRepositoryDelegate[InfoBlobChunkInDB] = (
+            BaseRepositoryDelegate(
+                session=session, table=InfoBlobChunks, in_db_model=InfoBlobChunkInDB
+            )
         )
         self.session = session
 
     @staticmethod
     def _filter_on_sources(
-        stmt: sa.Select,
+        stmt: sa.Select[Any],
         group_ids: list[UUID],
         website_ids: list[UUID],
         integration_knowledge_ids: list[UUID],
-    ):
+    ) -> sa.Select[Any]:
         return stmt.where(
             sa.or_(
                 InfoBlobs.group_id.in_(group_ids),
@@ -46,24 +49,28 @@ class InfoBlobChunkRepo:
             .returning(InfoBlobChunks)
         )
 
-        return await self.delegate.get_models_from_query(stmt)
+        return await self.delegate.get_models_from_query(
+            stmt  # pyright: ignore[reportArgumentType]  # ReturningInsert is structurally compatible with Select at runtime
+        )
 
-    async def delete_by_info_blob(self, info_blob_id: UUID):
+    async def delete_by_info_blob(self, info_blob_id: UUID) -> list[InfoBlobChunkInDB]:
         stmt = (
             sa.delete(InfoBlobChunks)
             .where(InfoBlobChunks.info_blob_id == info_blob_id)
             .returning(InfoBlobChunks)
         )
 
-        return await self.delegate.get_models_from_query(stmt)
+        return await self.delegate.get_models_from_query(
+            stmt  # pyright: ignore[reportArgumentType]  # ReturningDelete is structurally compatible with Select at runtime
+        )
 
     async def semantic_search(
         self,
         embedding: list[float],
         *,
-        group_ids: Optional[list[UUID]] = [],
-        website_ids: Optional[list[UUID]] = [],
-        integration_knowledge_ids: Optional[list[UUID]] = [],
+        group_ids: list[UUID] | None = None,
+        website_ids: list[UUID] | None = None,
+        integration_knowledge_ids: list[UUID] | None = None,
         limit: int = 30,
     ) -> list[InfoBlobChunkInDBWithScore]:
         # Postgres will sometimes think that a sequential scan of the whole table is
@@ -96,9 +103,9 @@ class InfoBlobChunkRepo:
 
         stmt = self._filter_on_sources(
             stmt,
-            group_ids,
-            website_ids,
-            integration_knowledge_ids=integration_knowledge_ids,
+            group_ids or [],
+            website_ids or [],
+            integration_knowledge_ids=integration_knowledge_ids or [],
         )
 
         chunks_in_db = await self.session.execute(stmt)
@@ -128,6 +135,8 @@ class InfoBlobChunkRepo:
         )
 
         if group_ids is not None:
-            stmt = self._filter_on_sources(stmt, group_ids)
+            stmt = self._filter_on_sources(
+                stmt, group_ids, [], integration_knowledge_ids=[]
+            )
 
         return await self.delegate.get_models_from_query(stmt)

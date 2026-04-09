@@ -74,7 +74,9 @@ class TestSuite:
         for r in self.results:
             status = "PASS" if r.passed else "FAIL"
             marker = "✓" if r.passed else "✗"
-            print(f"  {marker} [{status}] {r.name:<{max_name}}  ({r.duration_ms:.0f}ms)")
+            print(
+                f"  {marker} [{status}] {r.name:<{max_name}}  ({r.duration_ms:.0f}ms)"
+            )
             if not r.passed:
                 print(f"           expected: {r.expected}")
                 print(f"           actual:   {r.actual}")
@@ -175,40 +177,48 @@ def test_public_endpoints(client: httpx.Client, suite: TestSuite) -> None:
         ("/api/healthz", "GET /api/healthz (public)"),
     ]:
         resp, ms = _timed_request(client, "GET", path)
-        suite.add(TestResult(
-            name=name,
-            passed=resp.status_code not in (401, 403),
-            expected="not 401/403",
-            actual=str(resp.status_code),
-            duration_ms=ms,
-        ))
+        suite.add(
+            TestResult(
+                name=name,
+                passed=resp.status_code not in (401, 403),
+                expected="not 401/403",
+                actual=str(resp.status_code),
+                duration_ms=ms,
+            )
+        )
 
 
 def test_auth_required(client: httpx.Client, suite: TestSuite) -> None:
     """Authenticated endpoints must reject unauthenticated requests."""
     resp, ms = _timed_request(client, "GET", f"{API_PREFIX}/assistants")
-    suite.add(TestResult(
-        name="GET /assistants (no auth → 401/403)",
-        passed=resp.status_code in (401, 403),
-        expected="401 or 403",
-        actual=str(resp.status_code),
-        duration_ms=ms,
-    ))
+    suite.add(
+        TestResult(
+            name="GET /assistants (no auth → 401/403)",
+            passed=resp.status_code in (401, 403),
+            expected="401 or 403",
+            actual=str(resp.status_code),
+            duration_ms=ms,
+        )
+    )
 
 
 def test_bearer_auth(client: httpx.Client, bearer: str, suite: TestSuite) -> None:
     """Bearer token should authenticate successfully."""
     resp, ms = _timed_request(
-        client, "GET", f"{API_PREFIX}/settings/",
+        client,
+        "GET",
+        f"{API_PREFIX}/settings/",
         headers=_headers_bearer(bearer),
     )
-    suite.add(TestResult(
-        name="GET /settings (bearer → 200)",
-        passed=resp.status_code == 200,
-        expected="200",
-        actual=str(resp.status_code),
-        duration_ms=ms,
-    ))
+    suite.add(
+        TestResult(
+            name="GET /settings (bearer → 200)",
+            passed=resp.status_code == 200,
+            expected="200",
+            actual=str(resp.status_code),
+            duration_ms=ms,
+        )
+    )
 
 
 def test_read_key_enforcement(
@@ -217,16 +227,20 @@ def test_read_key_enforcement(
     """Read key: can GET, cannot DELETE."""
     # GET should pass
     resp, ms = _timed_request(
-        client, "GET", f"{API_PREFIX}/assistants",
+        client,
+        "GET",
+        f"{API_PREFIX}/assistants",
         headers=_headers_api_key(read_key_secret),
     )
-    suite.add(TestResult(
-        name="Read key + GET /assistants → 200",
-        passed=resp.status_code == 200,
-        expected="200",
-        actual=str(resp.status_code),
-        duration_ms=ms,
-    ))
+    suite.add(
+        TestResult(
+            name="Read key + GET /assistants → 200",
+            passed=resp.status_code == 200,
+            expected="200",
+            actual=str(resp.status_code),
+            duration_ms=ms,
+        )
+    )
 
 
 def test_write_key_enforcement(
@@ -234,17 +248,21 @@ def test_write_key_enforcement(
 ) -> None:
     """Write key: cannot access management endpoints."""
     resp, ms = _timed_request(
-        client, "GET", f"{API_PREFIX}/api-keys",
+        client,
+        "GET",
+        f"{API_PREFIX}/api-keys",
         headers=_headers_api_key(write_key_secret),
     )
     # GET list should work (no management guard on GET)
-    suite.add(TestResult(
-        name="Write key + GET /api-keys → 200",
-        passed=resp.status_code == 200,
-        expected="200",
-        actual=str(resp.status_code),
-        duration_ms=ms,
-    ))
+    suite.add(
+        TestResult(
+            name="Write key + GET /api-keys → 200",
+            passed=resp.status_code == 200,
+            expected="200",
+            actual=str(resp.status_code),
+            duration_ms=ms,
+        )
+    )
 
 
 def test_admin_key_management(
@@ -252,16 +270,20 @@ def test_admin_key_management(
 ) -> None:
     """Admin key: can access management endpoints."""
     resp, ms = _timed_request(
-        client, "GET", f"{API_PREFIX}/api-keys",
+        client,
+        "GET",
+        f"{API_PREFIX}/api-keys",
         headers=_headers_api_key(admin_key_secret),
     )
-    suite.add(TestResult(
-        name="Admin key + GET /api-keys → 200",
-        passed=resp.status_code == 200,
-        expected="200",
-        actual=str(resp.status_code),
-        duration_ms=ms,
-    ))
+    suite.add(
+        TestResult(
+            name="Admin key + GET /api-keys → 200",
+            passed=resp.status_code == 200,
+            expected="200",
+            actual=str(resp.status_code),
+            duration_ms=ms,
+        )
+    )
 
 
 def test_management_escalation_prevention(
@@ -278,13 +300,15 @@ def test_management_escalation_prevention(
         headers=_headers_api_key(read_key_secret),
         json={"reason_code": "admin_action"},
     )
-    suite.add(TestResult(
-        name="Read key + POST /suspend → 403 (escalation blocked)",
-        passed=resp.status_code == 403,
-        expected="403",
-        actual=str(resp.status_code),
-        duration_ms=ms,
-    ))
+    suite.add(
+        TestResult(
+            name="Read key + POST /suspend → 403 (escalation blocked)",
+            passed=resp.status_code == 403,
+            expected="403",
+            actual=str(resp.status_code),
+            duration_ms=ms,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

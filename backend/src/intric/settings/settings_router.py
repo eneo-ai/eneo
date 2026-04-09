@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -7,19 +7,14 @@ from intric.files.audio import AudioMimeTypes
 from intric.files.image import ImageMimeTypes
 from intric.files.text import TextMimeTypes
 from intric.main.container.container import Container
-from intric.main.exceptions import ErrorCodes
 from intric.main.logging import get_logger
-from intric.main.models import GeneralError, PaginatedResponse
+from intric.main.models import PaginatedResponse
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import to_paginated_response
 from intric.settings import settings_factory
 from intric.settings.setting_service import SettingService
 from intric.settings.settings import (
-    AIBuilderBudgetSettingsPublic,
-    AIBuilderBudgetSettingsUpdate,
-    FlowInputLimitsPublic,
-    FlowInputLimitsUpdate,
     GetModelsResponse,
     SettingsPublic,
     ToggleSettingUpdate,
@@ -31,31 +26,12 @@ router = APIRouter()
 settings_admin_router = APIRouter()
 
 
-def _error_response(
-    *,
-    description: str,
-    message: str,
-    intric_error_code: ErrorCodes,
-    code: str | None = None,
-) -> dict[str, Any]:
-    example: dict[str, Any] = {
-        "message": message,
-        "intric_error_code": int(intric_error_code),
-    }
-    if code is not None:
-        example["code"] = code
-    return {
-        "model": GeneralError,
-        "description": description,
-        "content": {"application/json": {"example": example}},
-    }
-
-
 @router.get("/", response_model=SettingsPublic)
 async def get_settings(
-    service: SettingService = Depends(
-        settings_factory.get_settings_service_allowing_read_only_key
-    ),
+    service: Annotated[
+        SettingService,
+        Depends(settings_factory.get_settings_service_allowing_read_only_key),
+    ],
 ):
     return await service.get_settings()
 
@@ -63,7 +39,7 @@ async def get_settings(
 @settings_admin_router.post("/", response_model=SettingsPublic)
 async def upsert_settings(
     settings: SettingsPublic,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Omitted fields are not updated."""
     validate_permission(container.user(), Permission.ADMIN)
@@ -73,7 +49,7 @@ async def upsert_settings(
 
 @router.get("/models/", response_model=GetModelsResponse)
 async def get_models(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     From the response:
@@ -135,7 +111,7 @@ Enable or disable the template management feature for your tenant.
 )
 async def update_template_setting(
     data: ToggleSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Toggle template feature for tenant.
@@ -182,7 +158,7 @@ Enable or disable global audit logging for your tenant.
 )
 async def update_audit_logging_setting(
     data: ToggleSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Toggle global audit logging for tenant.
@@ -229,7 +205,7 @@ Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
 )
 async def update_provisioning_setting(
     data: ToggleSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.settings_service()
     return await service.update_provisioning_setting(enabled=data.enabled)
@@ -254,7 +230,7 @@ Toggle API key scope enforcement for your tenant.
 )
 async def update_scope_enforcement_setting(
     data: ToggleSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.settings_service()
     return await service.update_scope_enforcement_setting(enabled=data.enabled)
@@ -279,131 +255,10 @@ Toggle API key strict mode for your tenant.
 )
 async def update_strict_mode_setting(
     data: ToggleSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.settings_service()
     return await service.update_strict_mode_setting(enabled=data.enabled)
-
-
-@settings_admin_router.patch(
-    "/flow-input-limits",
-    response_model=FlowInputLimitsPublic,
-    summary="Update Flow input size limits",
-    description="""
-Update tenant-level Flow input file size limits.
-
-**Admin Only:** Requires admin permissions.
-
-Values are persisted under tenant `flow_settings` and take effect immediately.
-
-Example:
-```json
-{
-  "audio_max_size_bytes": 104857600
-}
-```
-    """,
-    responses={
-        400: _error_response(
-            description="Invalid patch (range/type) or empty payload.",
-            message="Flow input limits patch is invalid.",
-            intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="flow_input_limits_invalid_patch",
-        ),
-        403: _error_response(
-            description="Forbidden: admin permission required.",
-            message="Admin permission required.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="forbidden",
-        ),
-    },
-)
-async def update_flow_input_limits(
-    payload: FlowInputLimitsUpdate,
-    container: Container = Depends(get_container(with_user=True)),
-):
-    service = container.settings_service()
-    return await service.update_flow_input_limits(payload)
-
-
-@settings_admin_router.get(
-    "/flow-input-limits",
-    response_model=FlowInputLimitsPublic,
-    summary="Get effective Flow input size limits",
-    description="""
-Returns effective tenant-level Flow input size limits, including defaults when no override exists.
-    """,
-    responses={
-        403: _error_response(
-            description="Forbidden: admin permission required.",
-            message="Admin permission required.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="forbidden",
-        ),
-    },
-)
-async def get_flow_input_limits(
-    container: Container = Depends(get_container(with_user=True)),
-):
-    service = container.settings_service()
-    return await service.get_flow_input_limits()
-
-
-@settings_admin_router.patch(
-    "/ai-builder-budget",
-    response_model=AIBuilderBudgetSettingsPublic,
-    summary="Update AI Builder conversation budget settings",
-    description="""
-Update tenant-level AI Builder conversation budgeting settings.
-
-**Admin Only:** Requires admin permissions.
-
-Values are persisted under tenant `flow_settings.ai_builder` and take effect immediately.
-    """,
-    responses={
-        400: _error_response(
-            description="Invalid patch (range/type) or empty payload.",
-            message="AI Builder budget settings patch is invalid.",
-            intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="ai_builder_budget_invalid_patch",
-        ),
-        403: _error_response(
-            description="Forbidden: admin permission required.",
-            message="Admin permission required.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="forbidden",
-        ),
-    },
-)
-async def update_ai_builder_budget_settings(
-    payload: AIBuilderBudgetSettingsUpdate,
-    container: Container = Depends(get_container(with_user=True)),
-):
-    service = container.settings_service()
-    return await service.update_ai_builder_budget_settings(payload)
-
-
-@settings_admin_router.get(
-    "/ai-builder-budget",
-    response_model=AIBuilderBudgetSettingsPublic,
-    summary="Get effective AI Builder conversation budget settings",
-    description="""
-Returns effective tenant-level AI Builder conversation budgeting settings, including defaults when no override exists.
-    """,
-    responses={
-        403: _error_response(
-            description="Forbidden: admin permission required.",
-            message="Admin permission required.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="forbidden",
-        ),
-    },
-)
-async def get_ai_builder_budget_settings(
-    container: Container = Depends(get_container(with_user=True)),
-):
-    service = container.settings_service()
-    return await service.get_ai_builder_budget_settings()
 
 
 @settings_admin_router.patch(
@@ -424,7 +279,7 @@ Toggle API key expiry notifications for your tenant.
 )
 async def update_api_key_expiry_notifications_setting(
     data: ToggleSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.settings_service()
     return await service.update_api_key_expiry_notifications_setting(

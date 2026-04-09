@@ -8,7 +8,9 @@ from intric.modules.module import Modules
 
 # Mocking external dependencies
 class MockUser:
-    def __init__(self, id, permissions=None, modules=None, role=None, user_groups_ids=None):
+    def __init__(
+        self, id, permissions=None, modules=None, role=None, user_groups_ids=None
+    ):
         self.id = id
         self.permissions = permissions or []
         self.modules = modules or []
@@ -23,7 +25,15 @@ class MockGroupMember:
 
 
 class MockSpace:
-    def __init__(self, user_id, personal=False, members=None, tenant_space_id=None, id=None, group_members=None):
+    def __init__(
+        self,
+        user_id,
+        personal=False,
+        members=None,
+        tenant_space_id=None,
+        id=None,
+        group_members=None,
+    ):
         self.user_id = user_id
         self.personal = personal
         self.members = members or {}
@@ -41,7 +51,7 @@ class MockSpace:
     # Org = saknar både user_id och tenant_space_id
     def is_organization(self):
         return (self.user_id is None) and (self.tenant_space_id is None)
-    
+
 
 class MockSpaceRole:
     ADMIN = "admin"
@@ -81,19 +91,16 @@ def editor_user():
 def admin_user():
     return MockUser(id=4, role=MockSpaceRole.ADMIN)
 
+
 @pytest.fixture
 def organization_space():
-    return MockSpace(
-        user_id=None, 
-        personal=False, 
-        tenant_space_id=None,
-        id="org-1"
-    )
+    return MockSpace(user_id=None, personal=False, tenant_space_id=None, id="org-1")
+
 
 @pytest.fixture
 def personal_space(organization_space, owner_user):
     return MockSpace(
-        user_id=owner_user.id, 
+        user_id=owner_user.id,
         personal=True,
         tenant_space_id=organization_space.id,
         id="personal-1",
@@ -488,112 +495,363 @@ def test_group_editor_cannot_manage_group_members(
 
 
 # ---------------------------------------------------------------------------
-# FLOW resource type permission tests
+# Service API key role derivation
 # ---------------------------------------------------------------------------
 
 
-class MockFlowPublished:
-    """Mock flow with published=True."""
-    published = True
+class MockServiceKey:
+    """Minimal stand-in for ApiKeyV2InDB used by SpaceActor."""
+
+    def __init__(self, scope_type, scope_id, permission, ownership="service"):
+        self.scope_type = scope_type
+        self.scope_id = scope_id
+        self.permission = permission
+        self.ownership = ownership
 
 
-class MockFlowUnpublished:
-    """Mock flow with published=False."""
-    published = False
+class MockServiceUser(MockUser):
+    def __init__(self, active_api_key, **kwargs):
+        super().__init__(**kwargs)
+        self.active_api_key = active_api_key
 
 
-def test_viewer_can_read_published_flow(viewer_user, shared_space):
+class MockAssistant:
+    def __init__(self, id):
+        self.id = id
+
+
+class MockApp:
+    def __init__(self, id):
+        self.id = id
+
+
+class MockSpaceWithResources(MockSpace):
+    def __init__(self, *, assistants=None, apps=None, **kwargs):
+        super().__init__(**kwargs)
+        self.assistants = assistants or []
+        self.apps = apps or []
+
+
+def test_service_key_tenant_scoped_grants_viewer():
+    key = MockServiceKey("tenant", None, "read")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+
+
+def test_service_key_tenant_scoped_admin_grants_edit():
+    key = MockServiceKey("tenant", None, "admin")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
+    actor = SpaceActor(user, space)
+    assert actor.can_edit_space()
+
+
+def test_service_key_space_scoped_matching():
+    key = MockServiceKey("space", "s1", "read")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+
+
+def test_service_key_space_scoped_non_matching():
+    key = MockServiceKey("space", "s1", "read")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="other")
+    actor = SpaceActor(user, space)
+    assert not actor.can_read_space()
+
+
+def test_service_key_assistant_scoped_matching():
+    key = MockServiceKey("assistant", "asst-1", "write")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpaceWithResources(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        assistants=[MockAssistant("asst-1")],
+    )
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+    assert actor.can_read_assistants()
+
+
+def test_service_key_assistant_scoped_non_matching():
+    key = MockServiceKey("assistant", "asst-other", "write")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpaceWithResources(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        assistants=[MockAssistant("asst-1")],
+    )
+    actor = SpaceActor(user, space)
+    assert not actor.can_read_space()
+
+
+def test_service_key_tenant_scoped_write_grants_editor():
+    """Write permission → EDITOR: can CRUD resources but NOT edit space."""
+    key = MockServiceKey("tenant", None, "write")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+    assert actor.can_read_assistants()
+    assert actor.can_create_assistants()
+    assert actor.can_edit_assistants()
+    assert actor.can_delete_assistants()
+    assert not actor.can_edit_space()
+    assert not actor.can_delete_space()
+
+
+def test_service_key_app_scoped_matching():
+    key = MockServiceKey("app", "app-1", "write")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpaceWithResources(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        apps=[MockApp("app-1")],
+    )
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+    assert actor.can_read_apps()
+
+
+def test_service_key_app_scoped_non_matching():
+    key = MockServiceKey("app", "app-other", "write")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpaceWithResources(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        apps=[MockApp("app-1")],
+    )
+    actor = SpaceActor(user, space)
+    assert not actor.can_read_space()
+
+
+def test_user_key_does_not_trigger_service_role():
+    """A user key (ownership=user) with active_api_key set must NOT derive a
+    synthetic role — it should fall through to normal membership checks."""
+    key = MockServiceKey("tenant", None, "admin", ownership="user")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
+    actor = SpaceActor(user, space)
+    # User has no membership → should be denied even though key has admin
+    assert not actor.can_read_space()
+
+
+def test_service_key_no_key_returns_none():
+    """Regular user without active_api_key — actor should fall through."""
+    user = MockUser(id=99)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
+    actor = SpaceActor(user, space)
+    # No membership, no service key → can_read_space should be False
+    assert not actor.can_read_space()
+
+
+# Integration Knowledge Permission Tests - Shared Spaces
+
+
+def test_viewer_cannot_create_integration_knowledge_in_shared_space(
+    viewer_user: MockUser, shared_space: MockSpace
+):
+    """Viewers should only be able to read integration knowledge, not create."""
     actor = SpaceActor(viewer_user, shared_space)
-    assert actor.can_read_flow(MockFlowPublished()) is True
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
 
 
-def test_viewer_cannot_read_unpublished_flow(viewer_user, shared_space):
+def test_viewer_cannot_edit_integration_knowledge_in_shared_space(
+    viewer_user: MockUser, shared_space: MockSpace
+):
     actor = SpaceActor(viewer_user, shared_space)
-    assert actor.can_read_flow(MockFlowUnpublished()) is False
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.EDIT,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
 
 
-def test_viewer_cannot_create_flows(viewer_user, shared_space):
+def test_viewer_cannot_delete_integration_knowledge_in_shared_space(
+    viewer_user: MockUser, shared_space: MockSpace
+):
     actor = SpaceActor(viewer_user, shared_space)
-    assert actor.can_create_flows() is False
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.DELETE,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
 
 
-def test_viewer_cannot_edit_flows(viewer_user, shared_space):
+def test_viewer_can_read_integration_knowledge_in_shared_space(
+    viewer_user: MockUser, shared_space: MockSpace
+):
     actor = SpaceActor(viewer_user, shared_space)
-    assert actor.can_edit_flows() is False
+    assert actor.can_perform_action(
+        action=SpaceAction.READ,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
 
 
-def test_viewer_cannot_delete_flows(viewer_user, shared_space):
-    actor = SpaceActor(viewer_user, shared_space)
-    assert actor.can_delete_flows() is False
-
-
-def test_viewer_cannot_publish_flows(viewer_user, shared_space):
-    actor = SpaceActor(viewer_user, shared_space)
-    assert actor.can_publish_flows() is False
-
-
-def test_editor_can_crud_and_publish_flows(editor_user, shared_space):
+def test_editor_can_create_integration_knowledge_in_shared_space(
+    editor_user: MockUser, shared_space: MockSpace
+):
     actor = SpaceActor(editor_user, shared_space)
-    assert actor.can_read_flows() is True
-    assert actor.can_create_flows() is True
-    assert actor.can_edit_flows() is True
-    assert actor.can_delete_flows() is True
-    assert actor.can_publish_flows() is True
+    assert actor.can_perform_action(
+        action=SpaceAction.CREATE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
 
 
-def test_admin_can_crud_and_publish_flows(admin_user, shared_space):
+def test_editor_can_delete_integration_knowledge_in_shared_space(
+    editor_user: MockUser, shared_space: MockSpace
+):
+    actor = SpaceActor(editor_user, shared_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.DELETE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+def test_admin_can_create_integration_knowledge_in_shared_space(
+    admin_user: MockUser, shared_space: MockSpace
+):
     actor = SpaceActor(admin_user, shared_space)
-    assert actor.can_read_flows() is True
-    assert actor.can_create_flows() is True
-    assert actor.can_edit_flows() is True
-    assert actor.can_delete_flows() is True
-    assert actor.can_publish_flows() is True
+    assert actor.can_perform_action(
+        action=SpaceAction.CREATE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
 
 
-def test_owner_can_publish_flows_in_personal_space(owner_user, personal_space):
-    """Flows require publishing before they can be run, so OWNER must have PUBLISH."""
-    owner_user.permissions = [MockPermission.FLOWS_VIEW, MockPermission.FLOWS_MANAGE]
-    actor = SpaceActor(owner_user, personal_space)
-    assert actor.can_read_flows() is True
-    assert actor.can_create_flows() is True
-    assert actor.can_edit_flows() is True
-    assert actor.can_delete_flows() is True
-    assert actor.can_publish_flows() is True
-
-
-def test_owner_without_flows_permission_cannot_create_flows_in_personal_space(
-    owner_user, personal_space,
+def test_admin_can_delete_integration_knowledge_in_shared_space(
+    admin_user: MockUser, shared_space: MockSpace
 ):
-    """User without FLOWS permission cannot create flows in personal space."""
-    owner_user.permissions = [MockPermission.ASSISTANTS]  # no FLOWS
-    actor = SpaceActor(owner_user, personal_space)
-    assert actor.can_create_flows() is False
-    assert actor.can_edit_flows() is False
-    assert actor.can_delete_flows() is False
-    # READ is also gated by permission in personal space
-    assert actor.can_read_flows() is False
+    actor = SpaceActor(admin_user, shared_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.DELETE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
 
 
-def test_owner_with_flows_view_only_can_read_but_not_manage_flows_in_personal_space(
-    owner_user, personal_space,
+# Integration Knowledge Permission Tests - Organization Spaces
+
+
+def test_viewer_cannot_create_integration_knowledge_in_org_space(
+    viewer_user: MockUser, organization_space: MockSpace
 ):
-    owner_user.permissions = [MockPermission.FLOWS_VIEW]
-    actor = SpaceActor(owner_user, personal_space)
-
-    assert actor.can_read_flows() is True
-    assert actor.can_create_flows() is False
-    assert actor.can_edit_flows() is False
-    assert actor.can_delete_flows() is False
-    assert actor.can_publish_flows() is False
-
-
-def test_flow_is_in_publishable_resources():
-    """FLOW is in PUBLISHABLE_RESOURCES so viewer publish-gating applies."""
-    from intric.actors.actors.space_actor import PUBLISHABLE_RESOURCES
-    assert SpaceResourceType.FLOW in PUBLISHABLE_RESOURCES
+    organization_space.members = {viewer_user.id: viewer_user}
+    actor = SpaceActor(viewer_user, organization_space)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
 
 
-def test_flow_is_in_permission_resources():
-    """FLOW is in PERMISSION_RESOURCES so personal space permission gating applies."""
-    from intric.actors.actors.space_actor import PERMISSION_RESOURCES
-    assert SpaceResourceType.FLOW in PERMISSION_RESOURCES
+def test_viewer_cannot_delete_integration_knowledge_in_org_space(
+    viewer_user: MockUser, organization_space: MockSpace
+):
+    organization_space.members = {viewer_user.id: viewer_user}
+    actor = SpaceActor(viewer_user, organization_space)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.DELETE,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
+
+
+def test_viewer_cannot_read_integration_knowledge_in_org_space(
+    viewer_user: MockUser, organization_space: MockSpace
+):
+    """Org spaces only grant permissions to admins, not viewers."""
+    organization_space.members = {viewer_user.id: viewer_user}
+    actor = SpaceActor(viewer_user, organization_space)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.READ,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
+
+
+def test_admin_can_read_integration_knowledge_in_org_space(
+    admin_user: MockUser, organization_space: MockSpace
+):
+    organization_space.members = {admin_user.id: admin_user}
+    actor = SpaceActor(admin_user, organization_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.READ,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+def test_admin_can_create_integration_knowledge_in_org_space(
+    admin_user: MockUser, organization_space: MockSpace
+):
+    organization_space.members = {admin_user.id: admin_user}
+    actor = SpaceActor(admin_user, organization_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.CREATE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+# Integration Knowledge Permission Tests - Group Membership
+
+
+def test_group_viewer_cannot_create_integration_knowledge(
+    group_member_user: MockUser, space_with_group_viewer: MockSpace
+):
+    """Viewer via group membership should not be able to create integration knowledge."""
+    actor = SpaceActor(group_member_user, space_with_group_viewer)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
+
+
+def test_group_editor_can_create_integration_knowledge(
+    group_member_user: MockUser, space_with_group_editor: MockSpace
+):
+    """Editor via group membership should be able to create integration knowledge."""
+    actor = SpaceActor(group_member_user, space_with_group_editor)
+    assert actor.can_perform_action(
+        action=SpaceAction.CREATE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+def test_group_admin_can_create_integration_knowledge(
+    group_member_user: MockUser, space_with_group_admin: MockSpace
+):
+    """Admin via group membership should be able to create integration knowledge."""
+    actor = SpaceActor(group_member_user, space_with_group_admin)
+    assert actor.can_perform_action(
+        action=SpaceAction.CREATE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )

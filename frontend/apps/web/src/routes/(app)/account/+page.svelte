@@ -5,15 +5,12 @@
   import { getAppContext } from "$lib/core/AppContext.js";
   import UpdateUserName from "./UpdateUserName.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   const {
     user,
     versions,
     featureFlags,
     state: { userInfo }
   } = getAppContext();
-
-  const currentLocale = getLocale();
 </script>
 
 <svelte:head>

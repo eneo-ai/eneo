@@ -1,8 +1,8 @@
 import json
 from enum import Enum
-from typing import Annotated
+from typing import Any, Mapping, cast
 
-from pydantic import Field, create_model
+from pydantic import BaseModel, Field, create_model
 
 from intric.main.exceptions import ValidationException
 
@@ -32,67 +32,110 @@ class JSONTypes(str, Enum):
     ARRAY = "array"
 
 
-TYPES = {
-    JSONTypes.STRING: str,
-    JSONTypes.NUMBER: float,
-    JSONTypes.INTEGER: int,
-    JSONTypes.ARRAY: list,
-    JSONTypes.BOOLEAN: bool,
+JSONSchemaDefinition = dict[str, object]
+
+
+TYPES: dict[str, type[object]] = {
+    JSONTypes.STRING.value: str,
+    JSONTypes.NUMBER.value: float,
+    JSONTypes.INTEGER.value: int,
+    JSONTypes.BOOLEAN.value: bool,
 }
 
 MODEL_NAME = "DynamicPydanticModel"
 
 
 class PydanticModelFactory:
-    def __init__(self, schema: dict):
+    def __init__(self, schema: JSONSchemaDefinition) -> None:
+        super().__init__()
         self.schema = schema
-        self._model_fields = {}
+        self._model_fields: dict[str, tuple[object, object]] = {}
 
-    def validate_schema(self):
+    def validate_schema(self) -> None:
         try:
             self.create_pydantic_model()
         except Exception as e:
             raise ValidationException("Not a valid JSON Schema") from e
 
-    def _create_nested(self, schema, field, description, is_list=False):
+    def _get_properties(
+        self, schema: Mapping[str, object]
+    ) -> dict[str, JSONSchemaDefinition]:
+        properties = schema.get(JSONSchema.PROPERTIES.value)
+        if not isinstance(properties, dict):
+            raise ValidationException("Schema is missing properties")
+
+        typed_properties: dict[str, JSONSchemaDefinition] = {}
+        for key, value in cast(dict[str, object], properties).items():
+            if not isinstance(value, dict):
+                raise ValidationException("Invalid schema property definition")
+            typed_properties[key] = cast(JSONSchemaDefinition, value)
+        return typed_properties
+
+    def _get_type(self, schema: Mapping[str, object]) -> str:
+        schema_type = schema.get(JSONSchema.TYPE.value)
+        if not isinstance(schema_type, str):
+            raise ValidationException("Schema node is missing type")
+        return schema_type
+
+    def _get_description(self, schema: Mapping[str, object]) -> str | None:
+        description = schema.get(JSONSchema.DESCRIPTION.value)
+        return description if isinstance(description, str) else None
+
+    def _get_items(self, schema: Mapping[str, object]) -> JSONSchemaDefinition:
+        items = schema.get(JSONSchema.ITEMS.value)
+        if not isinstance(items, dict):
+            raise ValidationException("Array schema is missing items")
+        return cast(JSONSchemaDefinition, items)
+
+    def _create_nested(
+        self,
+        schema: JSONSchemaDefinition,
+        field: str,
+        description: str | None,
+        *,
+        is_list: bool = False,
+    ) -> None:
         level = PydanticModelFactory(schema)
         model = level.create_pydantic_model()
+        field_type: object = list[model] if is_list else model
 
-        if is_list:
-            self._create_field(list[model], field, description)
-        else:
-            self._create_field(model, field, description)
+        self._create_field(field_type, field, description)
 
-    def _create_field(self, factory, field, description):
+    def _create_field(
+        self, field_type: object, field: str, description: str | None
+    ) -> None:
         self._model_fields[field] = (
-            Annotated[factory, Field(default_factory=factory, description=description)],
-            ...,
+            field_type,
+            Field(..., description=description),
         )
 
-    def create_pydantic_model(self):
-        for name, prop in self.schema[JSONSchema.PROPERTIES].items():
-            description = prop.get(JSONSchema.DESCRIPTION)
-            if prop[JSONSchema.TYPE] == JSONSchema.OBJECT:
+    def create_pydantic_model(self) -> type[BaseModel]:
+        for name, prop in self._get_properties(self.schema).items():
+            description = self._get_description(prop)
+            prop_type = self._get_type(prop)
+            if prop_type == JSONSchema.OBJECT.value:
                 self._create_nested(prop, name, description)
 
-            elif prop[JSONSchema.TYPE] == JSONTypes.ARRAY:
-                items = prop.get(JSONSchema.ITEMS)
-                type = items[JSONSchema.TYPE]
-                if type == JSONSchema.OBJECT:
+            elif prop_type == JSONTypes.ARRAY.value:
+                items = self._get_items(prop)
+                item_type = self._get_type(items)
+                if item_type == JSONSchema.OBJECT.value:
                     self._create_nested(items, name, description, is_list=True)
                 else:
-                    self._create_field(list[TYPES[type]], name, description)
+                    self._create_field(list[TYPES[item_type]], name, description)
 
             else:
-                self._create_field(TYPES[prop[JSONSchema.TYPE]], name, description)
+                self._create_field(TYPES[prop_type], name, description)
 
-        return create_model(MODEL_NAME, **self._model_fields)
+        return cast(
+            type[BaseModel], cast(Any, create_model)(MODEL_NAME, **self._model_fields)
+        )
 
-    def get_format_instructions(self):
-        reduced_schema = self.schema
+    def get_format_instructions(self) -> str:
+        reduced_schema = dict(self.schema)
 
-        if JSONSchema.TYPE in reduced_schema:
-            del reduced_schema[JSONSchema.TYPE]
+        if JSONSchema.TYPE.value in reduced_schema:
+            del reduced_schema[JSONSchema.TYPE.value]
 
         schema_str = json.dumps(reduced_schema)
 

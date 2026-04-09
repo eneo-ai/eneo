@@ -1,15 +1,15 @@
 """Database table for audit retention policies."""
 
-from sqlalchemy import Column, Integer, ForeignKey, TIMESTAMP, Boolean
+from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 
-from intric.database.tables.base_class import TimestampMixin, BaseWithTableName
+from intric.database.tables.base_class import BaseWithTableName, TimestampMixin
 
 
 class AuditRetentionPolicy(TimestampMixin, BaseWithTableName):
     """Table for per-tenant audit log retention configuration."""
 
-    __tablename__ = "audit_retention_policies"
+    __tablename__ = "audit_retention_policies"  # type: ignore[assignment]
 
     # Tenant ID is primary key (one policy per tenant)
     tenant_id = Column(

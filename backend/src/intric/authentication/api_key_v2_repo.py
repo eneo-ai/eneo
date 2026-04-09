@@ -15,6 +15,7 @@ from intric.database.tables.users_table import Users
 
 class ApiKeysV2Repository:
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.session = session
         self.table = ApiKeysV2
 
@@ -88,11 +89,11 @@ class ApiKeysV2Repository:
         scope_id: UUID | None = None,
         state: ApiKeyState | None = None,
         key_type: str | None = None,
-        ownership: str | None = None,
         owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
         search: str | None = None,
         expires_within_days: int | None = None,
+        ownership: str | None = None,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -104,11 +105,11 @@ class ApiKeysV2Repository:
             scope_id=scope_id,
             state=state,
             key_type=key_type,
-            ownership=ownership,
             owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
             search=search,
             expires_within_days=expires_within_days,
+            ownership=ownership,
         )
         if cursor is not None:
             if previous:
@@ -135,11 +136,11 @@ class ApiKeysV2Repository:
         scope_id: UUID | None = None,
         state: ApiKeyState | None = None,
         key_type: str | None = None,
-        ownership: str | None = None,
         owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
         search: str | None = None,
         expires_within_days: int | None = None,
+        ownership: str | None = None,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -151,11 +152,11 @@ class ApiKeysV2Repository:
             scope_id=scope_id,
             state=state,
             key_type=key_type,
-            ownership=ownership,
             owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
             search=search,
             expires_within_days=expires_within_days,
+            ownership=ownership,
         )
         query = query.order_by(self.table.created_at.desc())
         records = await self.session.scalars(query)
@@ -169,11 +170,11 @@ class ApiKeysV2Repository:
         scope_id: UUID | None = None,
         state: ApiKeyState | None = None,
         key_type: str | None = None,
-        ownership: str | None = None,
         owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
         search: str | None = None,
         expires_within_days: int | None = None,
+        ownership: str | None = None,
     ) -> int:
         query = cast(
             Select[Any],
@@ -187,11 +188,11 @@ class ApiKeysV2Repository:
             scope_id=scope_id,
             state=state,
             key_type=key_type,
-            ownership=ownership,
             owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
             search=search,
             expires_within_days=expires_within_days,
+            ownership=ownership,
         )
         result = await self.session.scalar(query)
         return int(result or 0)
@@ -204,12 +205,14 @@ class ApiKeysV2Repository:
         scope_id: UUID | None,
         state: ApiKeyState | None,
         key_type: str | None,
-        ownership: str | None,
         owner_user_id: UUID | None,
         created_by_user_id: UUID | None,
         search: str | None,
         expires_within_days: int | None,
+        ownership: str | None = None,
     ) -> Select[Any]:
+        if ownership is not None:
+            query = query.where(self.table.ownership == ownership)
         if scope_type is not None:
             query = query.where(self.table.scope_type == scope_type.value)
         if scope_id is not None:
@@ -232,10 +235,6 @@ class ApiKeysV2Repository:
                 query = query.where(self.table.state == state.value)
         if key_type is not None:
             query = query.where(self.table.key_type == key_type)
-        if ownership == "service":
-            query = query.where(self.table.owner_user_id.is_(None))
-        elif ownership == "user":
-            query = query.where(self.table.owner_user_id.is_not(None))
         if owner_user_id is not None:
             query = query.where(self.table.owner_user_id == owner_user_id)
         if created_by_user_id is not None:
@@ -275,7 +274,9 @@ class ApiKeysV2Repository:
                 sa.or_(
                     sa.func.lower(self.table.name).like(term),
                     sa.func.lower(self.table.key_suffix).like(term),
-                    sa.func.lower(sa.func.coalesce(self.table.description, "")).like(term),
+                    sa.func.lower(sa.func.coalesce(self.table.description, "")).like(
+                        term
+                    ),
                     owner_match,
                     creator_match,
                 )
@@ -430,9 +431,7 @@ class ApiKeysV2Repository:
 
         # Total count (uncapped)
         count_query = (
-            sa.select(sa.func.count())
-            .select_from(self.table)
-            .where(*base_where)
+            sa.select(sa.func.count()).select_from(self.table).where(*base_where)
         )
         total = int(await self.session.scalar(count_query) or 0)
 

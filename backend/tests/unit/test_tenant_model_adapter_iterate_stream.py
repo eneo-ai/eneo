@@ -173,7 +173,9 @@ async def test_iterate_stream_yields_approval_required_and_blocks():
             pending_approval_ids=set(),
         )
 
-    assert any(c.response_type == ResponseType.TOOL_APPROVAL_REQUIRED for c in completions)
+    assert any(
+        c.response_type == ResponseType.TOOL_APPROVAL_REQUIRED for c in completions
+    )
     approval_manager.request_approval.assert_awaited_once()
     approval_manager.wait_for_approval.assert_awaited_once()
 
@@ -187,7 +189,9 @@ async def test_iterate_stream_timeout_yields_timeout_event_and_auto_denies():
 
     approval_manager.wait_for_approval.return_value = ToolApprovalWaitResult(
         decisions=[
-            ToolApprovalDecision(tool_call_id="call_1", approved=False, reason="timeout")
+            ToolApprovalDecision(
+                tool_call_id="call_1", approved=False, reason="timeout"
+            )
         ],
         timed_out=True,
     )

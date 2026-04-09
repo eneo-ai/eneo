@@ -31,7 +31,8 @@ class SecurityClassificationService:
         user: UserInDB,
         repo: "SecurityClassificationRepoImpl",
         tenant_service: TenantService,
-    ):
+    ) -> None:
+        super().__init__()
         self.user = user
         self.repo = repo
         self.tenant_service = tenant_service
@@ -84,7 +85,9 @@ class SecurityClassificationService:
         # Validate all IDs exist before making any updates
         for sc_id in security_classifications:
             if sc_id not in db_classifications_map:
-                raise NotFoundException(f"Security classification with ID {sc_id} not found")
+                raise NotFoundException(
+                    f"Security classification with ID {sc_id} not found"
+                )
 
         for db_sc_id in list(db_classifications_map.keys()):
             if db_sc_id not in security_classifications:
@@ -93,14 +96,14 @@ class SecurityClassificationService:
                 )
 
         # Update all classifications in memory first
-        updated_domains = []
+        updated_domains: list[SecurityClassification] = []
         for i, sc_id in enumerate(security_classifications):
             existing_sc = db_classifications_map[sc_id]
             updated_domain = existing_sc.update(security_level=i)
             updated_domains.append(updated_domain)
 
         # Batch update to database
-        result = []
+        result: list[SecurityClassification] = []
         for updated_domain in updated_domains:
             updated_sc = await self.repo.update(updated_domain)
             result.append(updated_sc)

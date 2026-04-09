@@ -25,6 +25,9 @@
 exports/
 backend/exports/
 
+# test results
+backend/test-results/
+
 # claude
 .claude/*.local.json
 backend/openapi.json
@@ -43,28 +46,28 @@ specs/
 .serena/
 .speckit/
 .playwright-mcp/
-modules/
-progress*
-REVIEW-PLAYBOOK.md
 
-# Beads - track JSONL (git-friendly), ignore SQLite (local working copy)
-.beads/*.db
-.beads/*.db-shm
-.beads/*.db-wal
-!.beads/issues.jsonl
-!.beads/config.yaml
-
-backend/.venv
-backend/.venv-docker
-.beads/
-docs/agent-memory/
-modulesdocs
-.omx/
-.codex/*
-!.codex/agents/
-!.codex/agents/**
-!.codex/skills/
-!.codex/skills/**
-.codex/skills/.system/**
-!.codex/prompts/
-!.codex/prompts/**
+# ── GSD baseline (auto-generated) ──
+.gsd
+.gsd-id
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
+.env.*
+!.env.example
+node_modules/
+.next/
+dist/
+build/
+__pycache__/
+venv/
+target/
+vendor/
+*.log
+coverage/
+.cache/
+tmp/

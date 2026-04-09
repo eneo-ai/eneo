@@ -5,6 +5,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
 
   const { refreshCurrentSpace } = getSpacesManager();
   const { forceRefresh: refreshExpiringKeys } = getExpiringKeysStore();
@@ -41,7 +42,7 @@
       }
       $openController = false;
     } catch (e) {
-      alert(m.could_not_change_status({ name: resource.name }));
+      toastError(e, m.could_not_change_status({ name: resource.name }));
       console.error(e);
     }
   }
@@ -86,7 +87,7 @@
 
     <Dialog.Description>{strings.description}</Dialog.Description>
     {#if autoFollowHint}
-      <p class="mt-2 text-xs text-muted">{autoFollowHint}</p>
+      <p class="text-muted mt-2 text-xs">{autoFollowHint}</p>
     {/if}
 
     <Dialog.Controls let:close>

@@ -5,9 +5,11 @@
 */
 
 import { goto } from "$app/navigation";
+import { resolve } from "$app/paths";
 import { createContext } from "$lib/core/context";
 import type { Intric, ResourcePermission, Space, SpaceSparse } from "@intric/intric-js";
 import { derived, get, writable, type Readable } from "svelte/store";
+import { toastError } from "$lib/core/errors";
 
 const [getSpacesManager, setSpacesManager] = createContext<ReturnType<typeof SpacesManager>>(
   "Manages spaces / projects"
@@ -41,10 +43,7 @@ function SpacesManager(data: SpacesManagerParams) {
     return $spaces.find((s) => isOrganizationSpace(s))?.id ?? null;
   });
 
-  const organizationSpaceId = derived(
-    [organizationSpaceIdFromList],
-    ([$listId]) => $listId
-  );
+  const organizationSpaceId = derived([organizationSpaceIdFromList], ([$listId]) => $listId);
 
   const nonOrgSpaces = derived(userSpaces, ($spaces) =>
     $spaces.filter((s) => !isOrganizationSpace(s))
@@ -101,7 +100,7 @@ function SpacesManager(data: SpacesManagerParams) {
       refreshSpaces();
       return newSpace;
     } catch (e) {
-      alert(`Error creating new space ${space.name}`);
+      toastError(e);
       console.error(e);
     }
     return null;
@@ -128,7 +127,7 @@ function SpacesManager(data: SpacesManagerParams) {
       }
       return updatedSpace;
     } catch (e) {
-      alert(`Error updating space ${id}`);
+      toastError(e);
       console.error(e);
     }
   }
@@ -139,10 +138,10 @@ function SpacesManager(data: SpacesManagerParams) {
       await intric.spaces.delete({ id: space.id });
       await refreshSpaces();
       if (space.id === get(currentSpace).id) {
-        goto("/spaces/list");
+        goto(resolve("/spaces/list"));
       }
     } catch (e) {
-      alert(`Error deleting space ${space.id}`);
+      toastError(e);
       console.error(e);
     }
   }
@@ -159,7 +158,7 @@ function SpacesManager(data: SpacesManagerParams) {
         return $currentSpace;
       });
     } catch (e) {
-      alert("Error updating default assistant.");
+      toastError(e);
       console.error(e);
     }
   }
@@ -169,7 +168,7 @@ function SpacesManager(data: SpacesManagerParams) {
       accessibleSpaces: { subscribe: nonOrgSpaces.subscribe },
       nonOrgSpaces,
       currentSpace: derivedCurrentSpace(currentSpace),
-      organizationSpaceId,
+      organizationSpaceId
     },
     refreshSpaces,
     refreshCurrentSpace,
@@ -198,12 +197,11 @@ function derivedCurrentSpace(space: Readable<Space>) {
     return {
       ...$space,
       organization: isOrganizationSpace($space),
-      routeId: 
-        $space.personal 
-          ? "personal" 
-          : isOrganizationSpace($space) 
-            ? "organization"
-            : $space.id,
+      routeId: $space.personal
+        ? "personal"
+        : isOrganizationSpace($space)
+          ? "organization"
+          : $space.id,
       members: $space.members.items,
       applications: {
         assistants: $space.applications.assistants.items,

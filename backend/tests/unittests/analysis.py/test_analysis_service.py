@@ -7,7 +7,6 @@ import pytest
 from intric.ai_models.completion_models.completion_model import (
     CompletionModel,
 )
-from intric.ai_models.model_enums import ModelFamily, ModelHostingLocation, ModelStability
 from intric.analysis.analysis import AnalysisProcessingMode
 from intric.analysis.analysis_service import (
     ASYNC_AUTO_QUESTION_THRESHOLD,
@@ -25,11 +24,12 @@ def _make_completion_model() -> CompletionModel:
         id=uuid4(),
         name="test-model",
         nickname="test",
-        family=ModelFamily.OPEN_AI,
-        token_limit=4096,
+        family="openai",
+        max_input_tokens=128000,
+        max_output_tokens=4096,
         is_deprecated=False,
-        stability=ModelStability.STABLE,
-        hosting=ModelHostingLocation.USA,
+        stability="stable",
+        hosting="usa",
         vision=False,
         reasoning=False,
     )
@@ -104,7 +104,9 @@ def analysis_service(user, mock_space_service):
 
 async def test_ask_question_not_in_space(service: AnalysisService):
     service.assistant_service.get_assistant.return_value = (
-        AsyncMock(space_id=None, user=service.user, completion_model=_make_completion_model()),
+        AsyncMock(
+            space_id=None, user=service.user, completion_model=_make_completion_model()
+        ),
         MagicMock(),
     )
 
@@ -143,7 +145,11 @@ async def test_ask_question_personal_space_with_access(service: AnalysisService)
     service.space_service.get_space.return_value = MagicMock(user_id=uuid4())
     service.user = user
     service.assistant_service.get_assistant.return_value = (
-        AsyncMock(space_id=uuid4(), user=service.user, completion_model=_make_completion_model()),
+        AsyncMock(
+            space_id=uuid4(),
+            user=service.user,
+            completion_model=_make_completion_model(),
+        ),
         MagicMock(),
     )
 

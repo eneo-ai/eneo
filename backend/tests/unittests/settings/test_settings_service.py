@@ -41,6 +41,7 @@ class MockRepo:
 
 class MockFeatureFlagService:
     """Mock feature flag service for testing."""
+
     async def check_is_feature_enabled(self, feature_name: str, tenant_id=None):
         # Return False for using_templates by default (feature disabled)
         return False
@@ -57,36 +58,25 @@ class MockFeatureFlagService:
 class MockTenantRepo:
     """Mock tenant repo for testing."""
 
-    def __init__(self):
-        self.tenant = None
-
     async def get(self, tenant_id):
         # Return a mock tenant with provisioning=False
         from intric.tenants.tenant import TenantInDB, TenantState
 
-        if self.tenant is None:
-            self.tenant = TenantInDB(
-                id=tenant_id,
-                name="Test Tenant",
-                quota_limit=1024**3,
-                modules=[],
-                api_credentials={},
-                federation_config={},
-                state=TenantState.ACTIVE,
-                provisioning=False,
-                flow_settings={},
-            )
-
-        return self.tenant
-
-    async def set_flow_settings(self, tenant_id, flow_settings):
-        tenant = await self.get(tenant_id)
-        self.tenant = tenant.model_copy(update={"flow_settings": flow_settings})
-        return self.tenant
+        return TenantInDB(
+            id=tenant_id,
+            name="Test Tenant",
+            quota_limit=1024**3,
+            modules=[],
+            api_credentials={},
+            federation_config={},
+            state=TenantState.ACTIVE,
+            provisioning=False,
+        )
 
 
 class MockAuditService:
     """Mock audit service for testing."""
+
     async def log_async(self, *args, **kwargs):
         pass
 
@@ -227,7 +217,9 @@ async def test_update_flow_input_limits_rejects_empty_patch():
         audit_service=MockAuditService(),
     )
 
-    with pytest.raises(BadRequestException, match="At least one flow input limit field"):
+    with pytest.raises(
+        BadRequestException, match="At least one flow input limit field"
+    ):
         await service.update_flow_input_limits(FlowInputLimitsUpdate())
 
 
@@ -312,8 +304,12 @@ async def test_update_ai_builder_budget_settings_persists_and_audits(monkeypatch
     assert updated.unknown_model_context_window_tokens == 128000
 
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
-    assert tenant.flow_settings["ai_builder"]["conversation_safety_buffer_tokens"] == 1500
-    assert "unknown_model_context_window_tokens" not in tenant.flow_settings["ai_builder"]
+    assert (
+        tenant.flow_settings["ai_builder"]["conversation_safety_buffer_tokens"] == 1500
+    )
+    assert (
+        "unknown_model_context_window_tokens" not in tenant.flow_settings["ai_builder"]
+    )
     assert len(calls) == 1
     assert calls[0]["metadata"]["setting"] == "ai_builder_budget_settings"
 
@@ -331,5 +327,7 @@ async def test_update_ai_builder_budget_settings_rejects_empty_patch():
         audit_service=MockAuditService(),
     )
 
-    with pytest.raises(BadRequestException, match="At least one AI Builder budget field"):
+    with pytest.raises(
+        BadRequestException, match="At least one AI Builder budget field"
+    ):
         await service.update_ai_builder_budget_settings(AIBuilderBudgetSettingsUpdate())

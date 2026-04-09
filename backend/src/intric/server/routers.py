@@ -1,5 +1,17 @@
 from fastapi import APIRouter, Depends
 
+from intric.admin.admin_router import router as admin_router
+from intric.ai_models.ai_models_router import router as ai_models_router
+from intric.allowed_origins.allowed_origin_router import (
+    router as allowed_origins_router,
+)
+from intric.analysis.analysis_router import router as analysis_router
+from intric.api.audit.routes import router as audit_router
+from intric.api.documentation.openapi_endpoints import router as documentation_router
+from intric.apps.app_runs.api.app_run_router import router as app_run_router
+from intric.apps.apps.api.app_router import router as app_router
+from intric.assistants.api.assistant_router import router as assistants_router
+from intric.authentication.api_key_router import router as api_key_router
 from intric.authentication.auth_dependencies import (
     APPS_READ_OVERRIDES,
     ASSISTANTS_READ_OVERRIDES,
@@ -12,16 +24,7 @@ from intric.authentication.auth_dependencies import (
     require_tenant_scope_for_delete,
 )
 from intric.authentication.auth_models import ApiKeyPermission
-
-from intric.admin.admin_router import router as admin_router
-from intric.ai_models.ai_models_router import router as ai_models_router
-from intric.allowed_origins.allowed_origin_router import (
-    router as allowed_origins_router,
-)
-from intric.analysis.analysis_router import router as analysis_router
-from intric.apps.app_runs.api.app_run_router import router as app_run_router
-from intric.apps.apps.api.app_router import router as app_router
-from intric.assistants.api.assistant_router import router as assistants_router
+from intric.authentication.federation_router import router as federation_router
 from intric.completion_models.presentation.completion_models_router import (
     router as completion_models_router,
 )
@@ -38,30 +41,33 @@ from intric.embedding_models.presentation.tenant_embedding_models_router import 
     router as tenant_embedding_models_router,
 )
 from intric.files.file_router import router as files_router
-from intric.flows.api.flow_router import router as flow_router
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
 from intric.groups_legacy.api.group_router import router as groups_router
 from intric.icons.api.icon_router import router as icons_router
 from intric.info_blobs.info_blobs_router import router as info_blobs_router
+from intric.integration.presentation.admin_sharepoint_router import (
+    router as admin_sharepoint_router,
+)
 from intric.integration.presentation.integration_auth_router import (
     router as integration_auth_router,
 )
 from intric.integration.presentation.integration_router import (
     router as integration_router,
 )
-from intric.mcp_servers.presentation.mcp_server_router import (
-    router as mcp_server_router,
-)
 from intric.integration.presentation.sharepoint_webhook_router import (
     router as sharepoint_webhook_router,
-)
-from intric.integration.presentation.admin_sharepoint_router import (
-    router as admin_sharepoint_router,
 )
 from intric.jobs.job_router import router as jobs_router
 from intric.limits.limit_router import router as limit_router
 from intric.logging.logging_router import router as logging_router
 from intric.main.config import get_settings
+from intric.mcp_servers.presentation.mcp_server_router import (
+    router as mcp_server_router,
+)
+from intric.model_providers.presentation.model_provider_router import (
+    router as model_providers_router,
+)
+from intric.modules.module_router import router as module_router
 from intric.prompts.api.prompt_router import router as prompt_router
 from intric.security_classifications.presentation.security_classification_router import (
     router as security_classifications_router,
@@ -70,58 +76,51 @@ from intric.server.websockets.websocket_router import router as websocket_router
 from intric.services.service_router import router as services_router
 from intric.settings.settings_router import (
     router as settings_router,
+)
+from intric.settings.settings_router import (
     settings_admin_router,
 )
 from intric.spaces.api.space_router import router as space_router
 from intric.storage.presentation.storage_router import router as storage_router
+from intric.sysadmin.sysadmin_router import router as sysadmin_router
 from intric.templates.api.templates_router import router as template_router
+from intric.templates.app_template.api.admin_router import (
+    router as app_template_admin_router,
+)
 from intric.templates.app_template.api.app_template_router import (
     router as app_template_router,
-)
-from intric.templates.assistant_template.api.assistant_template_router import (
-    router as assistant_template_router,
 )
 from intric.templates.assistant_template.api.admin_router import (
     router as assistant_template_admin_router,
 )
-from intric.templates.app_template.api.admin_router import (
-    router as app_template_admin_router,
+from intric.templates.assistant_template.api.assistant_template_router import (
+    router as assistant_template_router,
+)
+from intric.tenants.presentation.tenant_crawler_settings_router import (
+    router as tenant_crawler_settings_router,
+)
+from intric.tenants.presentation.tenant_credentials_router import (
+    router as tenant_credentials_router,
+)
+from intric.tenants.presentation.tenant_federation_router import (
+    router as tenant_federation_router,
+)
+from intric.tenants.presentation.tenant_self_credentials_router import (
+    router as tenant_self_credentials_router,
 )
 from intric.token_usage.presentation.token_usage_router import (
     router as token_usage_router,
 )
-from intric.transcription_models.presentation.transcription_models_router import (
-    router as transcription_models_router,
-)
 from intric.transcription_models.presentation.tenant_transcription_models_router import (
     router as tenant_transcription_models_router,
+)
+from intric.transcription_models.presentation.transcription_models_router import (
+    router as transcription_models_router,
 )
 from intric.user_groups.user_groups_router import router as user_groups_router
 from intric.users.user_router import router as users_router
 from intric.users.user_router import users_admin_router
 from intric.websites.presentation.website_router import router as website_router
-from intric.modules.module_router import router as module_router
-from intric.sysadmin.sysadmin_router import router as sysadmin_router
-from intric.tenants.presentation.tenant_credentials_router import (
-    router as tenant_credentials_router,
-)
-from intric.tenants.presentation.tenant_crawler_settings_router import (
-    router as tenant_crawler_settings_router,
-)
-from intric.tenants.presentation.tenant_self_credentials_router import (
-    router as tenant_self_credentials_router,
-)
-from intric.tenants.presentation.tenant_federation_router import (
-    router as tenant_federation_router,
-)
-from intric.authentication.federation_router import router as federation_router
-from intric.authentication.api_key_router import router as api_key_router
-from intric.api.documentation.openapi_endpoints import router as documentation_router
-
-from intric.model_providers.presentation.model_provider_router import (
-    router as model_providers_router,
-)
-from intric.api.audit.routes import router as audit_router
 
 router = APIRouter()
 
@@ -138,7 +137,9 @@ router.include_router(
     tags=["crawl-runs"],
     dependencies=[
         Depends(require_resource_permission_for_method("knowledge")),
-        Depends(require_api_key_scope_check(resource_type="crawl_run", path_param="id")),
+        Depends(
+            require_api_key_scope_check(resource_type="crawl_run", path_param="id")
+        ),
     ],
 )
 router.include_router(
@@ -189,7 +190,9 @@ router.include_router(
     tags=["info-blobs"],
     dependencies=[
         Depends(require_resource_permission_for_method("knowledge")),
-        Depends(require_api_key_scope_check(resource_type="info_blob", path_param=None)),
+        Depends(
+            require_api_key_scope_check(resource_type="info_blob", path_param=None)
+        ),
     ],
 )
 router.include_router(
@@ -202,7 +205,9 @@ router.include_router(
                 "knowledge", read_override_endpoints=KNOWLEDGE_READ_OVERRIDES
             )
         ),
-        Depends(require_api_key_scope_check(resource_type="collection", path_param="id")),
+        Depends(
+            require_api_key_scope_check(resource_type="collection", path_param="id")
+        ),
     ],
 )
 router.include_router(settings_router, prefix="/settings", tags=["settings"])
@@ -225,7 +230,9 @@ router.include_router(
                 "assistants", read_override_endpoints=ASSISTANTS_READ_OVERRIDES
             )
         ),
-        Depends(require_api_key_scope_check(resource_type="assistant", path_param="id")),
+        Depends(
+            require_api_key_scope_check(resource_type="assistant", path_param="id")
+        ),
     ],
 )
 router.include_router(
@@ -234,7 +241,9 @@ router.include_router(
     tags=["group-chats"],
     dependencies=[
         Depends(require_resource_permission_for_method("assistants")),
-        Depends(require_api_key_scope_check(resource_type="group_chat", path_param="id")),
+        Depends(
+            require_api_key_scope_check(resource_type="group_chat", path_param="id")
+        ),
     ],
 )
 router.include_router(
@@ -247,7 +256,13 @@ router.include_router(
                 "assistants", read_override_endpoints=CONVERSATIONS_READ_OVERRIDES
             )
         ),
-        Depends(require_api_key_scope_check(resource_type="conversation", path_param="session_id", self_filtering=True)),
+        Depends(
+            require_api_key_scope_check(
+                resource_type="conversation",
+                path_param="session_id",
+                self_filtering=True,
+            )
+        ),
     ],
 )
 router.include_router(
@@ -364,7 +379,11 @@ router.include_router(
     prefix="/files",
     tags=["files"],
     dependencies=[
-        Depends(require_resource_permission_for_method("knowledge", read_override_endpoints=FILES_READ_OVERRIDES)),
+        Depends(
+            require_resource_permission_for_method(
+                "knowledge", read_override_endpoints=FILES_READ_OVERRIDES
+            )
+        ),
         Depends(require_api_key_scope_check(resource_type="file", path_param=None)),
         Depends(require_tenant_scope_for_delete()),
     ],
@@ -395,21 +414,6 @@ router.include_router(
     dependencies=[
         Depends(require_resource_permission_for_method("knowledge")),
         Depends(require_api_key_scope_check(resource_type="website", path_param="id")),
-    ],
-)
-router.include_router(
-    flow_router,
-    prefix="/flows",
-    tags=["flows"],
-    dependencies=[
-        Depends(require_resource_permission_for_method("apps")),
-        Depends(
-            require_api_key_scope_check(
-                resource_type="flow",
-                path_param="id",
-                self_filtering=True,
-            )
-        ),
     ],
 )
 router.include_router(websocket_router, prefix="", tags=["websockets"])

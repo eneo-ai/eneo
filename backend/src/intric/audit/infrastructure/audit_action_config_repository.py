@@ -1,8 +1,7 @@
 """Repository for managing per-action audit logging configuration."""
 
-from uuid import UUID
-
 from typing import Any, cast
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +17,7 @@ class AuditActionConfigRepository:
     """Repository for per-action audit logging configuration."""
 
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.session = session
 
     async def get_actions_for_tenant(self, tenant_id: UUID) -> list[AuditActionConfig]:
@@ -35,7 +35,8 @@ class AuditActionConfigRepository:
             .order_by(AuditActionConfig.action)
         )
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        configs: list[AuditActionConfig] = list(result.scalars().all())
+        return configs
 
     async def get_enabled_actions(self, tenant_id: UUID) -> set[str]:
         """Get set of enabled action types for a tenant.
@@ -51,7 +52,8 @@ class AuditActionConfigRepository:
             AuditActionConfig.enabled == True,  # noqa: E712
         )
         result = await self.session.execute(stmt)
-        return set(result.scalars().all())
+        enabled_actions: set[str] = set(result.scalars().all())
+        return enabled_actions
 
     async def is_action_enabled(self, tenant_id: UUID, action: str) -> bool:
         """Check if a specific action is enabled for a tenant.
@@ -126,7 +128,7 @@ class AuditActionConfigRepository:
         Returns:
             List of updated AuditActionConfig objects
         """
-        configs = []
+        configs: list[AuditActionConfig] = []
 
         for action, enabled in updates.items():
             # Try to find existing config

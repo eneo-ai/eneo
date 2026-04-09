@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 class UpdateWebsiteSizeService:
     def __init__(self, session: "AsyncSession"):
+        super().__init__()
         self.session = session
 
     async def update_website_size(self, website_id: "UUID") -> None:

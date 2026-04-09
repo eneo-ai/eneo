@@ -1,10 +1,12 @@
 import { browser } from "$app/environment";
 import { invalidate } from "$app/navigation";
 import { createContext } from "$lib/core/context";
-import type { Intric, Job } from "@intric/intric-js";
+import { type Intric, type Job } from "@intric/intric-js";
 import { derived, writable } from "svelte/store";
+import { getUploadErrorMessage } from "$lib/features/attachments/getUploadErrorMessage";
 
 import { m } from "$lib/paraglide/messages";
+import { toast } from "$lib/components/toast";
 export { getJobManager, initJobManager, jobCompletionEvents };
 
 // Global store for job completion events (can be subscribed to from any component)
@@ -59,7 +61,13 @@ function createJobManager(data: { intric: Intric }) {
       // Keep failed and completed jobs so we can show their status in the UI
       // Backend returns completed jobs for 5 minutes to allow UI to detect completion
       jobs
-        .filter((job) => job.status === "in progress" || job.status === "queued" || job.status === "failed" || job.status === "complete")
+        .filter(
+          (job) =>
+            job.status === "in progress" ||
+            job.status === "queued" ||
+            job.status === "failed" ||
+            job.status === "complete"
+        )
         .map((job) => [job.id, job])
     );
 
@@ -67,9 +75,11 @@ function createJobManager(data: { intric: Intric }) {
     let jobsCompleted = false;
     for (const [id, newJob] of updatedJobs) {
       const oldJob = currentJobs.get(id);
-      if (oldJob &&
-          (oldJob.status === "in progress" || oldJob.status === "queued") &&
-          newJob.status === "complete") {
+      if (
+        oldJob &&
+        (oldJob.status === "in progress" || oldJob.status === "queued") &&
+        newJob.status === "complete"
+      ) {
         jobsCompleted = true;
         break;
       }
@@ -105,7 +115,9 @@ function createJobManager(data: { intric: Intric }) {
       await updateJobs();
       updateJobsInterval = setInterval(async () => {
         const jobs = await updateJobs();
-        const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+        const hasActiveJobs = jobs.some(
+          (job) => job.status === "in progress" || job.status === "queued"
+        );
         if (!hasActiveJobs) {
           stopUpdatePolling();
         }
@@ -126,7 +138,9 @@ function createJobManager(data: { intric: Intric }) {
 
     updateJobsInterval = setInterval(async () => {
       const jobs = await updateJobs();
-      const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+      const hasActiveJobs = jobs.some(
+        (job) => job.status === "in progress" || job.status === "queued"
+      );
       const timeSinceJobAdded = Date.now() - lastJobAddedTime;
 
       // Switch to slow polling after 15 seconds or if no active jobs
@@ -138,7 +152,9 @@ function createJobManager(data: { intric: Intric }) {
           clearInterval(updateJobsInterval);
           updateJobsInterval = setInterval(async () => {
             const jobs = await updateJobs();
-            const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+            const hasActiveJobs = jobs.some(
+              (job) => job.status === "in progress" || job.status === "queued"
+            );
             if (!hasActiveJobs) {
               stopUpdatePolling();
             }
@@ -227,11 +243,8 @@ function createJobManager(data: { intric: Intric }) {
           })
           .catch((error) => {
             const fallbackMessage = m.file_upload_error();
-            const message =
-              error instanceof Error && error.message
-                ? error.message
-                : fallbackMessage;
-            alert(`${fallbackMessage}: ${upload.file.name}\n${message}`);
+            const message = getUploadErrorMessage(error, upload.file.name);
+            toast.error(`${fallbackMessage}: ${upload.file.name}: ${message}`);
             runningUploads.delete(uploadId);
             upload.status = "failed";
             upload.errorMessage = message;
@@ -281,9 +294,11 @@ function createJobManager(data: { intric: Intric }) {
   const currentlyRunningJobs = derived(
     [currentJobStore, currentUploadsStore],
     ([jobs, uploads]) => {
-      const activeJobs = jobs.filter((job) => job.status === "in progress" || job.status === "queued");
-      const activeUploads = uploads.filter((upload) =>
-        upload.status === "queued" || upload.status === "uploading"
+      const activeJobs = jobs.filter(
+        (job) => job.status === "in progress" || job.status === "queued"
+      );
+      const activeUploads = uploads.filter(
+        (upload) => upload.status === "queued" || upload.status === "uploading"
       );
       return activeJobs.length + activeUploads.length;
     }

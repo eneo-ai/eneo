@@ -22,8 +22,9 @@ from intric.info_blobs.info_blob import (
 
 
 class InfoBlobRepository:
-    def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
+        self.delegate: BaseRepositoryDelegate[InfoBlobInDB] = BaseRepositoryDelegate(
             session,
             InfoBlobs,
             InfoBlobInDB,
@@ -61,22 +62,28 @@ class InfoBlobRepository:
     async def add(self, info_blob: InfoBlobAdd):
         if info_blob.group_id is not None:
             group = await self._get_group(info_blob.group_id)
+            assert group is not None
+            assert group.embedding_model_id is not None
             embedding_model_id = group.embedding_model_id
 
         elif info_blob.website_id is not None:
             website = await self._get_website(info_blob.website_id)
+            assert website is not None
             embedding_model_id = website.embedding_model_id
 
         elif info_blob.integration_knowledge_id is not None:
             integration_knowledge = await self._get_integration_knowledge(
                 knowledge_id=info_blob.integration_knowledge_id
             )
+            assert integration_knowledge is not None
             embedding_model_id = integration_knowledge.embedding_model_id
 
         else:
             # Skydd mot none
-            raise ValueError("InfoBlob must reference a group, website, or integration_knowledge")
-        
+            raise ValueError(
+                "InfoBlob must reference a group, website, or integration_knowledge"
+            )
+
         info_blob_to_db = InfoBlobAddToDB(
             **info_blob.model_dump(),
             embedding_model_id=embedding_model_id,
@@ -97,7 +104,9 @@ class InfoBlobRepository:
         we never create duplicates - just update existing ones.
         """
         if not info_blob.integration_knowledge_id or not info_blob.title:
-            raise ValueError("title and integration_knowledge_id are required for upsert")
+            raise ValueError(
+                "title and integration_knowledge_id are required for upsert"
+            )
 
         # Check if blob already exists
         existing = await self.get_by_title_and_integration_knowledge(
@@ -139,7 +148,8 @@ class InfoBlobRepository:
         stmt = sa.select(InfoBlobs).where(
             sa.and_(
                 InfoBlobs.sharepoint_item_id == info_blob.sharepoint_item_id,
-                InfoBlobs.integration_knowledge_id == info_blob.integration_knowledge_id,
+                InfoBlobs.integration_knowledge_id
+                == info_blob.integration_knowledge_id,
             )
         )
         result = await self.session.execute(stmt)
@@ -175,7 +185,7 @@ class InfoBlobRepository:
         record = await self.delegate.update(info_blob)
         return InfoBlobInDB.model_validate(record)
 
-    async def update_size(self, info_blob_id: UUID) -> InfoBlobInDB:
+    async def update_size(self, info_blob_id: UUID) -> InfoBlobInDB | None:
         chunks_size_subquery = (
             sa.select(sa.func.coalesce(sa.func.sum(InfoBlobChunks.size), 0))
             .where(InfoBlobChunks.info_blob_id == info_blob_id)
@@ -245,7 +255,7 @@ class InfoBlobRepository:
             )
         )
 
-        space_conditions = []
+        space_conditions: list[Any] = []
         if group_ids:
             space_conditions.append(InfoBlobs.group_id.in_(group_ids))
         if website_ids:
@@ -295,7 +305,7 @@ class InfoBlobRepository:
         if not space_ids:
             return []
 
-        conditions = []
+        conditions: list[Any] = []
 
         if include_groups:
             group_ids = await self.session.scalars(
@@ -406,10 +416,11 @@ class InfoBlobRepository:
         result = await self.session.execute(stmt)
         blobs_to_delete = result.scalars().all()
 
-        deleted = []
+        deleted: list[InfoBlobInDB] = []
         for blob in blobs_to_delete:
             deleted_blob = await self.delegate.delete(blob.id)
-            deleted.append(deleted_blob)
+            if deleted_blob is not None:
+                deleted.append(deleted_blob)
 
         return deleted
 
@@ -438,7 +449,7 @@ class InfoBlobRepository:
         self,
         sharepoint_item_id: str,
         integration_knowledge_id: UUID,
-    ) -> InfoBlobInDB:
+    ) -> InfoBlobInDB | None:
         """Get an info_blob by sharepoint_item_id and integration_knowledge_id."""
         return await self.delegate.get_by(
             conditions={
@@ -464,7 +475,7 @@ class InfoBlobRepository:
         )
         return [InfoBlobInDB.model_validate(record) for record in records]
 
-    async def delete(self, id: int) -> InfoBlobInDB:
+    async def delete(self, id: UUID) -> InfoBlobInDB:
         record = await self.delegate.delete(id)
         return InfoBlobInDB.model_validate(record)
 
@@ -480,12 +491,16 @@ class InfoBlobRepository:
     async def get_count_by_integration_knowledge(self, integration_knowledge_id: UUID):
         """Get the count of info_blobs associated with a specific integration_knowledge."""
         stmt = (
-            sa.select(sa.func.count()).select_from(InfoBlobs).where(InfoBlobs.integration_knowledge_id == integration_knowledge_id)
+            sa.select(sa.func.count())
+            .select_from(InfoBlobs)
+            .where(InfoBlobs.integration_knowledge_id == integration_knowledge_id)
         )
 
         return await self.session.scalar(stmt)
 
-    async def get_by_filter_integration_knowledge(self, integration_knowledge_id: UUID) -> list[InfoBlobInDB]:
+    async def get_by_filter_integration_knowledge(
+        self, integration_knowledge_id: UUID
+    ) -> list[InfoBlobInDB]:
         """Get all info_blobs for a specific integration_knowledge."""
         query = (
             sa.select(InfoBlobs)
@@ -539,74 +554,6 @@ class InfoBlobRepository:
         stmt = sa.select(InfoBlobs.title).where(InfoBlobs.website_id == website_id)
         result = await self.session.scalars(stmt)
         return [title for title in result if title is not None]
-
-    async def get_reference_metadata_by_ids(
-        self,
-        ids: list[UUID],
-    ) -> dict[str, dict[str, Any]]:
-        if not ids:
-            return {}
-
-        stmt = (
-            sa.select(
-                InfoBlobs.id.label("id"),
-                InfoBlobs.title.label("title"),
-                InfoBlobs.url.label("url"),
-                InfoBlobs.group_id.label("group_id"),
-                InfoBlobs.website_id.label("website_id"),
-                InfoBlobs.integration_knowledge_id.label("integration_knowledge_id"),
-                CollectionsTable.name.label("group_name"),
-                Websites.name.label("website_name"),
-                IntegrationKnowledge.name.label("integration_knowledge_name"),
-                IntegrationKnowledge.wrapper_name.label("integration_wrapper_name"),
-            )
-            .select_from(InfoBlobs)
-            .outerjoin(CollectionsTable, CollectionsTable.id == InfoBlobs.group_id)
-            .outerjoin(Websites, Websites.id == InfoBlobs.website_id)
-            .outerjoin(
-                IntegrationKnowledge,
-                IntegrationKnowledge.id == InfoBlobs.integration_knowledge_id,
-            )
-            .where(InfoBlobs.id.in_(ids))
-        )
-
-        rows = (await self.session.execute(stmt)).mappings().all()
-        payload: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            source_kind: str | None = None
-            source_container_kind: str | None = None
-            source_container_id: UUID | None = None
-            source_container_name: str | None = None
-
-            if row["group_id"] is not None:
-                source_kind = "collection"
-                source_container_kind = "collection"
-                source_container_id = row["group_id"]
-                source_container_name = row["group_name"]
-            elif row["website_id"] is not None:
-                source_kind = "website"
-                source_container_kind = "website"
-                source_container_id = row["website_id"]
-                source_container_name = row["website_name"]
-            elif row["integration_knowledge_id"] is not None:
-                source_kind = "integration_knowledge"
-                source_container_kind = "integration_knowledge"
-                source_container_id = row["integration_knowledge_id"]
-                source_container_name = (
-                    row["integration_knowledge_name"] or row["integration_wrapper_name"]
-                )
-
-            payload[str(row["id"])] = {
-                "source_title": row["title"] or row["url"],
-                "source_url": row["url"],
-                "source_kind": source_kind,
-                "source_container_kind": source_container_kind,
-                "source_container_id": (
-                    str(source_container_id) if source_container_id is not None else None
-                ),
-                "source_container_name": source_container_name,
-            }
-        return payload
 
     async def batch_delete_by_titles_and_website(
         self, titles: list[str], website_id: UUID

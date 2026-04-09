@@ -9,7 +9,6 @@ from pydantic import (
     EmailStr,
     Field,
     ValidationInfo,
-    computed_field,
     field_validator,
 )
 
@@ -19,9 +18,9 @@ from intric.main.config import get_settings
 class JWTMeta(BaseModel):
     iss: str = get_settings().jwt_issuer  # who issued it
     aud: str = get_settings().jwt_audience  # who it's intended for
-    iat: float = datetime.timestamp(datetime.utcnow())  # issued at time
+    iat: float = datetime.timestamp(datetime.now(timezone.utc))  # issued at time
     exp: float = datetime.timestamp(
-        datetime.utcnow() + timedelta(minutes=get_settings().jwt_expiry_time)
+        datetime.now(timezone.utc) + timedelta(minutes=get_settings().jwt_expiry_time)
     )  # expiry time
 
 
@@ -43,6 +42,11 @@ class JWTPayload(JWTMeta, JWTCreds):
 class AccessToken(BaseModel):
     access_token: str
     token_type: str
+
+
+class ApiKeyOwnership(str, Enum):
+    USER = "user"
+    SERVICE = "service"
 
 
 class ApiKeyType(str, Enum):
@@ -114,11 +118,6 @@ class ApiKeyScopeType(str, Enum):
     APP = "app"
 
 
-class ApiKeyOwnership(str, Enum):
-    USER = "user"
-    SERVICE = "service"
-
-
 class ApiKeyNotificationTargetType(str, Enum):
     KEY = "key"
     ASSISTANT = "assistant"
@@ -156,18 +155,24 @@ def compute_effective_state(
     revoked_at: Optional[datetime],
     suspended_at: Optional[datetime],
     expires_at: Optional[datetime],
+    rotation_grace_until: Optional[datetime] = None,
     now: Optional[datetime] = None,
 ) -> ApiKeyState:
     if revoked_at is not None:
         return ApiKeyState.REVOKED
+    comparison_time = now or datetime.now(timezone.utc)
+    if comparison_time.tzinfo is None:
+        comparison_time = comparison_time.replace(tzinfo=timezone.utc)
     if expires_at is not None:
-        comparison_time = now or datetime.now(timezone.utc)
-        if comparison_time.tzinfo is None:
-            comparison_time = comparison_time.replace(tzinfo=timezone.utc)
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if expires_at < comparison_time:
             return ApiKeyState.EXPIRED
+    if rotation_grace_until is not None:
+        if rotation_grace_until.tzinfo is None:
+            rotation_grace_until = rotation_grace_until.replace(tzinfo=timezone.utc)
+        if rotation_grace_until < comparison_time:
+            return ApiKeyState.REVOKED
     if suspended_at is not None:
         return ApiKeyState.SUSPENDED
     return ApiKeyState.ACTIVE
@@ -218,6 +223,7 @@ class ApiKeyUserSnapshot(BaseModel):
 
 class ApiKeyV2(BaseModel):
     id: UUID
+    ownership: ApiKeyOwnership = ApiKeyOwnership.USER
     owner_user_id: Optional[UUID] = None
     key_prefix: str
     key_suffix: str
@@ -250,15 +256,6 @@ class ApiKeyV2(BaseModel):
     search_match_reasons: Optional[list[ApiKeySearchMatchReason]] = None
 
     model_config = ConfigDict(from_attributes=True)
-
-    @computed_field
-    @property
-    def ownership(self) -> ApiKeyOwnership:
-        return (
-            ApiKeyOwnership.SERVICE
-            if self.owner_user_id is None
-            else ApiKeyOwnership.USER
-        )
 
 
 class ApiKeyV2InDB(ApiKeyV2):
@@ -520,6 +517,7 @@ class ApiKeyUsageResponse(BaseModel):
 
 
 class ApiKeyPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     truncated_key: str
 
 

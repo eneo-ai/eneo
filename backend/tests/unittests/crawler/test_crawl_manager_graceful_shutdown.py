@@ -145,7 +145,9 @@ class TestRunCrawlWithTimeoutGracefulShutdown:
             def start_crawl(self, *args, **kwargs):
                 # Return a mock EventualResult that will timeout
                 mock_result = MagicMock()
-                mock_result.wait = MagicMock(side_effect=crochet.TimeoutError("timeout"))
+                mock_result.wait = MagicMock(
+                    side_effect=crochet.TimeoutError("timeout")
+                )
                 return mock_result
 
             def stop_crawl(self, reason="timeout"):
@@ -166,7 +168,9 @@ class TestRunCrawlWithTimeoutGracefulShutdown:
                 )
 
         assert stop_crawl_called.is_set(), "stop_crawl() should be called on timeout"
-        assert wait_for_completion_called.is_set(), "wait_for_completion() should be called"
+        assert wait_for_completion_called.is_set(), (
+            "wait_for_completion() should be called"
+        )
 
     @pytest.mark.asyncio
     async def test_shutdown_failure_raises_error(self):
@@ -179,7 +183,9 @@ class TestRunCrawlWithTimeoutGracefulShutdown:
 
             def start_crawl(self, *args, **kwargs):
                 mock_result = MagicMock()
-                mock_result.wait = MagicMock(side_effect=crochet.TimeoutError("timeout"))
+                mock_result.wait = MagicMock(
+                    side_effect=crochet.TimeoutError("timeout")
+                )
                 return mock_result
 
             def stop_crawl(self, reason="timeout"):
@@ -246,7 +252,9 @@ class TestHeartbeatDuringCrawl:
             )
 
         # With 0.3s crawl and 0.1s interval, expect 2-3 heartbeat calls
-        assert len(heartbeat_calls) >= 1, f"Expected heartbeat calls, got {len(heartbeat_calls)}"
+        assert len(heartbeat_calls) >= 1, (
+            f"Expected heartbeat calls, got {len(heartbeat_calls)}"
+        )
 
     @pytest.mark.asyncio
     async def test_heartbeat_stops_when_crawl_completes(self):
@@ -311,7 +319,9 @@ class TestHeartbeatDuringCrawl:
 
             def start_crawl(self, *args, **kwargs):
                 mock_result = MagicMock()
-                mock_result.wait = MagicMock(side_effect=crochet.TimeoutError("timeout"))
+                mock_result.wait = MagicMock(
+                    side_effect=crochet.TimeoutError("timeout")
+                )
                 return mock_result
 
             def stop_crawl(self, reason="timeout"):
@@ -368,9 +378,7 @@ class TestHeartbeatCallbackParameter:
             captured_interval = heartbeat_interval
             yield MagicMock()
 
-        with patch(
-            "intric.crawler.crawler.get_crawler_setting", return_value=60
-        ):
+        with patch("intric.crawler.crawler.get_crawler_setting", return_value=60):
             crawler = Crawler()
             crawler._crawl = capture_crawl
 
@@ -404,9 +412,7 @@ class TestHeartbeatCallbackParameter:
             captured_heartbeat = heartbeat_callback
             yield MagicMock()
 
-        with patch(
-            "intric.crawler.crawler.get_crawler_setting", return_value=60
-        ):
+        with patch("intric.crawler.crawler.get_crawler_setting", return_value=60):
             crawler = Crawler()
             crawler._crawl = capture_crawl
 
@@ -434,7 +440,9 @@ class TestSitemapCrawlGracefulShutdown:
 
             def start_crawl(self, *args, **kwargs):
                 mock_result = MagicMock()
-                mock_result.wait = MagicMock(side_effect=crochet.TimeoutError("timeout"))
+                mock_result.wait = MagicMock(
+                    side_effect=crochet.TimeoutError("timeout")
+                )
                 return mock_result
 
             def stop_crawl(self, reason="timeout"):
@@ -452,7 +460,9 @@ class TestSitemapCrawlGracefulShutdown:
                     max_length=1,
                 )
 
-        assert stop_crawl_called.is_set(), "stop_crawl() should be called for sitemap timeout"
+        assert stop_crawl_called.is_set(), (
+            "stop_crawl() should be called for sitemap timeout"
+        )
 
 
 class TestNoResourceLeakOnTimeout:
@@ -474,7 +484,9 @@ class TestNoResourceLeakOnTimeout:
 
             def start_crawl(self, *args, **kwargs):
                 mock_result = MagicMock()
-                mock_result.wait = MagicMock(side_effect=crochet.TimeoutError("timeout"))
+                mock_result.wait = MagicMock(
+                    side_effect=crochet.TimeoutError("timeout")
+                )
                 return mock_result
 
             def stop_crawl(self, reason="timeout"):

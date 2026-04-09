@@ -25,9 +25,5 @@
   let:labelId
   let:descriptionId
 >
-  <RetentionPolicyInput
-    bind:value={$update.data_retention_days}
-    {labelId}
-    {descriptionId}
-  />
+  <RetentionPolicyInput bind:value={$update.data_retention_days} {labelId} {descriptionId} />
 </Settings.Row>

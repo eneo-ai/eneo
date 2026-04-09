@@ -1,19 +1,19 @@
 """Unit tests for AuditConfigService - testing all 7 categories and configurations."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+import pytest
+
 from intric.audit.application.audit_config_service import (
-    AuditConfigService,
     AUDIT_CONFIG_CACHE_TTL,
+    AuditConfigService,
 )
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.category_mappings import (
     CATEGORY_DESCRIPTIONS,
     CATEGORY_MAPPINGS,
 )
-
 
 # === All 7 Categories (ordered) ===
 ALL_CATEGORIES = [
@@ -29,7 +29,7 @@ ALL_CATEGORIES = [
 # Expected action counts per category
 EXPECTED_CATEGORY_COUNTS = {
     "admin_actions": 23,
-    "user_actions": 50,
+    "user_actions": 29,
     "security_events": 6,
     "file_operations": 3,
     "integration_events": 19,
@@ -315,8 +315,8 @@ class TestUpdateConfig:
         tenant_id = uuid4()
         mock_repository.find_by_tenant.return_value = []
 
-        from intric.audit.schemas.audit_config_schemas import CategoryUpdate
         from intric.audit.domain.category_mappings import CATEGORY_MAPPINGS
+        from intric.audit.schemas.audit_config_schemas import CategoryUpdate
 
         updates = [CategoryUpdate(category="admin_actions", enabled=False)]
 
@@ -325,9 +325,9 @@ class TestUpdateConfig:
         # Category cache should be invalidated
         expected_category_key = f"audit_config:{tenant_id}:admin_actions"
         delete_calls = [str(call) for call in mock_redis.delete.call_args_list]
-        assert any(
-            expected_category_key in call for call in delete_calls
-        ), f"Category cache {expected_category_key} should be invalidated"
+        assert any(expected_category_key in call for call in delete_calls), (
+            f"Category cache {expected_category_key} should be invalidated"
+        )
 
         # All action caches for this category should also be invalidated
         actions_in_category = [
@@ -337,9 +337,9 @@ class TestUpdateConfig:
         ]
         # 1 category + N actions in admin_actions category
         expected_calls = 1 + len(actions_in_category)
-        assert (
-            mock_redis.delete.call_count == expected_calls
-        ), f"Expected {expected_calls} cache invalidations (1 category + {len(actions_in_category)} actions)"
+        assert mock_redis.delete.call_count == expected_calls, (
+            f"Expected {expected_calls} cache invalidations (1 category + {len(actions_in_category)} actions)"
+        )
 
     async def test_update_config_returns_updated_config(
         self, config_service, mock_repository, mock_redis
@@ -667,10 +667,10 @@ class TestAllCategoriesHaveCorrectActionCounts:
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "admin_actions")
         assert count == 23
 
-    def test_user_actions_has_50_actions(self):
-        """Verify user_actions has 50 action types."""
+    def test_user_actions_has_29_actions(self):
+        """Verify user_actions has 29 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "user_actions")
-        assert count == 50
+        assert count == 29
 
     def test_security_events_has_6_actions(self):
         """Verify security_events has 6 action types."""

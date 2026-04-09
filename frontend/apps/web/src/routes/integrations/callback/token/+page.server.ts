@@ -31,33 +31,33 @@ export const actions: Actions = {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${idToken}`,
+            Authorization: `Bearer ${idToken}`
           },
           body: JSON.stringify({
             auth_code: authCode,
-            state,
-          }),
+            state
+          })
         }
       );
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         return fail(response.status, {
-          error: errorData.detail || `HTTP ${response.status}`,
+          error: errorData.detail || `HTTP ${response.status}`
         });
       }
 
       const result = await response.json();
       return {
         success: true,
-        service_account_email: result.service_account_email,
+        service_account_email: result.service_account_email
       };
     } catch (error) {
       console.error("Service account auth callback error:", error);
       return fail(500, {
         error_key: "integration_callback_failed_to_complete_authentication",
-        error_detail: error instanceof Error ? error.message : undefined,
+        error_detail: error instanceof Error ? error.message : undefined
       });
     }
-  },
+  }
 };

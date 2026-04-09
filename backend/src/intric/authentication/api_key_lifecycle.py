@@ -7,13 +7,17 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+from intric.audit.domain.outcome import Outcome
 from intric.authentication.api_key_policy import ApiKeyPolicyService
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
-    ApiKeyUpdateRequest,
     ApiKeyHashVersion,
     ApiKeyOwnership,
     ApiKeyPermission,
@@ -21,16 +25,12 @@ from intric.authentication.auth_models import (
     ApiKeyState,
     ApiKeyStateChangeRequest,
     ApiKeyType,
+    ApiKeyUpdateRequest,
     ApiKeyV2,
     ApiKeyV2InDB,
     ResourcePermissions,
     compute_effective_state,
 )
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
-from intric.audit.domain.outcome import Outcome
 from intric.main.config import get_settings
 
 if TYPE_CHECKING:
@@ -46,6 +46,7 @@ class ApiKeyLifecycleService:
         audit_service: "AuditService | None",
         user: "UserInDB | None" = None,
     ):
+        super().__init__()
         self.api_key_repo = api_key_repo
         self.policy_service = policy_service
         self.audit_service = audit_service
@@ -72,13 +73,14 @@ class ApiKeyLifecycleService:
             else None
         )
 
+        owner_user_id = (
+            None if request.ownership == ApiKeyOwnership.SERVICE else user.id
+        )
+
         record = await self.api_key_repo.create(
             tenant_id=user.tenant_id,
-            owner_user_id=(
-                None
-                if request.ownership == ApiKeyOwnership.SERVICE
-                else user.id
-            ),
+            ownership=request.ownership.value,
+            owner_user_id=owner_user_id,
             created_by_user_id=user.id,
             scope_type=request.scope_type.value,
             scope_id=request.scope_id,
@@ -267,6 +269,7 @@ class ApiKeyLifecycleService:
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
             expires_at=key.expires_at,
+            rotation_grace_until=getattr(key, "rotation_grace_until", None),
         )
         if effective_state in (ApiKeyState.REVOKED, ApiKeyState.EXPIRED):
             metadata_only_fields = {"name", "description"}
@@ -408,6 +411,7 @@ class ApiKeyLifecycleService:
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
             expires_at=key.expires_at,
+            rotation_grace_until=getattr(key, "rotation_grace_until", None),
         )
         if effective_state == ApiKeyState.REVOKED:
             exc = ApiKeyValidationError(
@@ -519,6 +523,7 @@ class ApiKeyLifecycleService:
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
             expires_at=key.expires_at,
+            rotation_grace_until=getattr(key, "rotation_grace_until", None),
         )
         if effective_state == ApiKeyState.REVOKED:
             exc = ApiKeyValidationError(
@@ -625,6 +630,7 @@ class ApiKeyLifecycleService:
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
             expires_at=key.expires_at,
+            rotation_grace_until=getattr(key, "rotation_grace_until", None),
         )
         if effective_state == ApiKeyState.REVOKED:
             return ApiKeyV2.model_validate(key)

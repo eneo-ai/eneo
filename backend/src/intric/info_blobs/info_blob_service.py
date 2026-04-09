@@ -46,7 +46,8 @@ class InfoBlobService:
         update_website_size_service: "UpdateWebsiteSizeService",
         space_service: "SpaceService",
         actor_manager: "ActorManager",
-    ):
+    ) -> None:
+        super().__init__()
         self.repo = repo
         self.space_repo = space_repo
         self.group_service = group_service
@@ -113,6 +114,8 @@ class InfoBlobService:
             case SpaceAction.DELETE:
                 if not actor.can_delete_info_blobs():
                     raise UnauthorizedException()
+            case _:
+                pass  # Other SpaceAction values are not applicable to info blobs
 
     async def _delete_if_same_title(self, info_blob: InfoBlobAdd):
         if info_blob.title:
@@ -183,7 +186,9 @@ class InfoBlobService:
         """Idempotent upsert for SharePoint content keyed by item ID."""
         size_of_text = await self.quota_service.add_text(info_blob.text)
         info_blob.size = size_of_text
-        return await self.repo.upsert_by_sharepoint_item_and_integration_knowledge(info_blob)
+        return await self.repo.upsert_by_sharepoint_item_and_integration_knowledge(
+            info_blob
+        )
 
     async def add_info_blob(self, info_blob: InfoBlobAdd) -> InfoBlobInDB:
         info_blob_in_db = await self.add_info_blob_without_validation(info_blob)
@@ -201,6 +206,7 @@ class InfoBlobService:
 
     async def update_info_blob(self, info_blob: InfoBlobUpdate):
         current_info_blob = await self.repo.get(info_blob.id)
+        assert current_info_blob is not None
 
         if info_blob.title:
             if current_info_blob.group_id is None:
@@ -224,6 +230,7 @@ class InfoBlobService:
 
     async def update_info_blob_size(self, info_blob_id: UUID):
         updated_info_blob = await self.repo.update_size(info_blob_id=info_blob_id)
+        assert updated_info_blob is not None
 
         if updated_info_blob.group_id is not None:
             await self.group_service.update_group_size(updated_info_blob.group_id)
@@ -234,7 +241,7 @@ class InfoBlobService:
 
         return updated_info_blob
 
-    async def get_by_id(self, id: str):
+    async def get_by_id(self, id: UUID):
         blob = await self.repo.get(id)
 
         await self._validate(blob)
@@ -255,7 +262,7 @@ class InfoBlobService:
 
         if metadata_filter:
 
-            def filter_func(item: InfoBlobInDB):
+            def filter_func(item: InfoBlobInDBNoText) -> bool:
                 filter_dict = metadata_filter.model_dump(exclude_none=True)
                 item_dict = item.model_dump()
                 return filter_dict.items() <= item_dict.items()
@@ -286,7 +293,7 @@ class InfoBlobService:
 
         return await self.repo.get_by_website(website_id=id)
 
-    async def delete(self, id: str):
+    async def delete(self, id: UUID):
         # Fetch the blob first to validate authorization BEFORE deleting
         blob = await self.repo.get(id)
 
@@ -297,6 +304,7 @@ class InfoBlobService:
         info_blob_deleted = await self.repo.delete(id)
 
         return info_blob_deleted
+
     async def get_for_space(
         self, space_id: UUID, *, limit: int | None = None
     ) -> list[InfoBlobInDBNoText]:
@@ -308,7 +316,7 @@ class InfoBlobService:
 
         space_ids = effective_space_ids(space)
 
-        return await self.repo.list_by_space_ids(
+        return await self.repo.list_by_space_ids(  # type: ignore[attr-defined]
             space_ids=space_ids,
             include_groups=True,
             include_websites=True,

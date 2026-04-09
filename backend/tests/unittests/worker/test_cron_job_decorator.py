@@ -83,6 +83,7 @@ class TestCronJobDecoratorSessionBegin:
                 # This is the FIXED pattern with session.begin()
                 async with MockSessionManager() as session, session.begin():
                     return await func(session=session)
+
             return wrapper
 
         # Create a mock cron job function

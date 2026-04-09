@@ -71,9 +71,7 @@ class TestDeleteFile:
         await svc.delete_file(file_id)
 
         # Verify delete_by_owner is called with both id and user_id
-        repo.delete_by_owner.assert_awaited_once_with(
-            id=file_id, user_id=svc.user.id
-        )
+        repo.delete_by_owner.assert_awaited_once_with(id=file_id, user_id=svc.user.id)
         # Verify plain delete is NOT called
         repo.delete.assert_not_awaited()
 
@@ -195,9 +193,11 @@ class TestDeleteByOwnerRepo:
 
         repo = FileRepository(session=mock_session)
 
-        with patch.object(File, "model_validate", return_value=_make_file(
-            user_id=user_id, file_id=file_id
-        )) as mock_validate:
+        with patch.object(
+            File,
+            "model_validate",
+            return_value=_make_file(user_id=user_id, file_id=file_id),
+        ) as mock_validate:
             result = await repo.delete_by_owner(id=file_id, user_id=user_id)
 
         assert result is not None
@@ -268,72 +268,10 @@ class TestGetByIdRepo:
         repo = FileRepository(session=mock_session)
         repo._delegate.get = AsyncMock(return_value=MagicMock())
 
-        with patch.object(File, "model_validate", return_value=expected) as mock_validate:
+        with patch.object(
+            File, "model_validate", return_value=expected
+        ) as mock_validate:
             result = await repo.get_by_id(file_id=file_id)
 
         assert result is expected
         mock_validate.assert_called_once()
-
-
-class _RowWithDeferredTranscription:
-    def __init__(self):
-        self.id = uuid4()
-        self.created_at = None
-        self.updated_at = None
-        self.name = "template.docx"
-        self.checksum = "checksum"
-        self.size = 128
-        self.mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        self.file_type = FileType.DOCUMENT
-        self.text = "preview"
-        self.blob = b"docx"
-        self.user_id = uuid4()
-        self.tenant_id = uuid4()
-
-    @property
-    def transcription(self):
-        raise AssertionError("transcription should not be accessed when include_transcription=False")
-
-
-class TestGetListWithoutTranscriptionRepo:
-    @pytest.mark.asyncio
-    async def test_get_list_by_id_and_tenant_does_not_touch_deferred_transcription(self):
-        from intric.files.file_repo import FileRepository
-
-        row = _RowWithDeferredTranscription()
-        mock_session = AsyncMock()
-        mock_session.scalars = AsyncMock(return_value=[row])
-
-        repo = FileRepository(session=mock_session)
-
-        result = await repo.get_list_by_id_and_tenant(
-            ids=[row.id],
-            tenant_id=row.tenant_id,
-            include_transcription=False,
-        )
-
-        assert len(result) == 1
-        assert result[0].id == row.id
-        assert result[0].transcription is None
-        assert result[0].blob == b"docx"
-
-    @pytest.mark.asyncio
-    async def test_get_list_by_id_and_user_does_not_touch_deferred_transcription(self):
-        from intric.files.file_repo import FileRepository
-
-        row = _RowWithDeferredTranscription()
-        mock_session = AsyncMock()
-        mock_session.scalars = AsyncMock(return_value=[row])
-
-        repo = FileRepository(session=mock_session)
-
-        result = await repo.get_list_by_id_and_user(
-            ids=[row.id],
-            user_id=row.user_id,
-            include_transcription=False,
-        )
-
-        assert len(result) == 1
-        assert result[0].id == row.id
-        assert result[0].transcription is None
-        assert result[0].blob == b"docx"

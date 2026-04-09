@@ -17,6 +17,7 @@ from intric.database.database import sessionmanager
 
 # Helper functions for test setup
 
+
 async def _create_tenant(client, super_admin_token: str, name: str):
     """Create a tenant via sysadmin API."""
     payload = {
@@ -73,7 +74,7 @@ async def _create_user(
                         "INSERT INTO users_predefined_roles (user_id, predefined_role_id) "
                         "VALUES (:user_id, :role_id) ON CONFLICT DO NOTHING"
                     ),
-                    {"user_id": user["id"], "role_id": owner_role[0]}
+                    {"user_id": user["id"], "role_id": owner_role[0]},
                 )
 
     return user
@@ -102,6 +103,7 @@ async def _enable_templates_feature(client, token: str):
 
 
 # Tests
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -142,7 +144,12 @@ async def test_create_template_requires_feature_flag(
     # Create tenant and admin user
     tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
     admin = await _create_user(
-        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant["id"],
+        "admin@test.com",
+        "password123",
+        is_admin=True,
     )
     api_key = await _login_user(client, admin["email"], "password123")
 
@@ -182,10 +189,20 @@ async def test_tenant_isolation_templates_not_visible_across_tenants(
 
     # Create admin users for both tenants
     admin_a = await _create_user(
-        client, super_admin_token, tenant_a["id"], "admin-a@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant_a["id"],
+        "admin-a@test.com",
+        "password123",
+        is_admin=True,
     )
     admin_b = await _create_user(
-        client, super_admin_token, tenant_b["id"], "admin-b@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant_b["id"],
+        "admin-b@test.com",
+        "password123",
+        is_admin=True,
     )
 
     api_key_a = await _login_user(client, admin_a["email"], "password123")
@@ -247,7 +264,12 @@ async def test_duplicate_name_within_tenant_rejected(
     """Cannot create two templates with same name in one tenant."""
     tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
     admin = await _create_user(
-        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant["id"],
+        "admin@test.com",
+        "password123",
+        is_admin=True,
     )
     api_key = await _login_user(client, admin["email"], "password123")
     await _enable_templates_feature(client, api_key)
@@ -292,7 +314,12 @@ async def test_soft_delete_hides_template_from_gallery(
     """Soft-deleted templates don't appear in gallery."""
     tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
     admin = await _create_user(
-        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant["id"],
+        "admin@test.com",
+        "password123",
+        is_admin=True,
     )
     api_key = await _login_user(client, admin["email"], "password123")
     await _enable_templates_feature(client, api_key)
@@ -325,7 +352,9 @@ async def test_soft_delete_hides_template_from_gallery(
     assert response.status_code == 200
     initial_count = len(response.json()["items"])
     template_ids = [t["id"] for t in response.json()["items"]]
-    assert template_id in template_ids, "Newly created template should appear in gallery"
+    assert template_id in template_ids, (
+        "Newly created template should appear in gallery"
+    )
 
     # Soft-delete the template
     response = await client.delete(
@@ -341,7 +370,9 @@ async def test_soft_delete_hides_template_from_gallery(
     )
     assert response.status_code == 200
     remaining_ids = [t["id"] for t in response.json()["items"]]
-    assert template_id not in remaining_ids, "Deleted template should not appear in gallery"
+    assert template_id not in remaining_ids, (
+        "Deleted template should not appear in gallery"
+    )
     assert len(remaining_ids) == initial_count - 1, "Gallery count should decrease by 1"
 
     # Verify it appears in deleted list
@@ -367,7 +398,12 @@ async def test_rollback_restores_original_state(
     """Rollback restores template to original snapshot."""
     tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
     admin = await _create_user(
-        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant["id"],
+        "admin@test.com",
+        "password123",
+        is_admin=True,
     )
     api_key = await _login_user(client, admin["email"], "password123")
     await _enable_templates_feature(client, api_key)
@@ -437,7 +473,12 @@ async def test_delete_template_does_not_affect_existing_assistants(
     """Deleting a template doesn't affect assistants created from it."""
     tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
     admin = await _create_user(
-        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant["id"],
+        "admin@test.com",
+        "password123",
+        is_admin=True,
     )
     api_key = await _login_user(client, admin["email"], "password123")
     await _enable_templates_feature(client, api_key)
@@ -501,7 +542,9 @@ async def test_delete_template_does_not_affect_existing_assistants(
     assistants = response.json()["items"]
     # Find our assistant in the list
     our_assistant = next((a for a in assistants if a["id"] == assistant_id), None)
-    assert our_assistant is not None, "Assistant should still exist after template deletion"
+    assert our_assistant is not None, (
+        "Assistant should still exist after template deletion"
+    )
     assert our_assistant["name"] == "Support Bot"
 
 
@@ -516,7 +559,12 @@ async def test_app_template_crud_operations(
     """App templates follow same CRUD patterns as assistant templates."""
     tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
     admin = await _create_user(
-        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant["id"],
+        "admin@test.com",
+        "password123",
+        is_admin=True,
     )
     api_key = await _login_user(client, admin["email"], "password123")
     await _enable_templates_feature(client, api_key)
@@ -575,7 +623,12 @@ async def test_restore_soft_deleted_template(
     """Soft-deleted templates can be restored and appear in gallery again."""
     tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
     admin = await _create_user(
-        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant["id"],
+        "admin@test.com",
+        "password123",
+        is_admin=True,
     )
     api_key = await _login_user(client, admin["email"], "password123")
     await _enable_templates_feature(client, api_key)
@@ -656,7 +709,12 @@ async def test_permanent_delete_requires_soft_delete_first(
     """Can only permanently delete templates that are already soft-deleted."""
     tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
     admin = await _create_user(
-        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant["id"],
+        "admin@test.com",
+        "password123",
+        is_admin=True,
     )
     api_key = await _login_user(client, admin["email"], "password123")
     await _enable_templates_feature(client, api_key)
@@ -684,7 +742,10 @@ async def test_permanent_delete_requires_soft_delete_first(
         headers={"Authorization": f"Bearer {api_key}"},
     )
     # Backend returns 404 if template is not soft-deleted (it's not in deleted list)
-    assert response.status_code in [400, 404]  # Either bad request or not found is acceptable
+    assert response.status_code in [
+        400,
+        404,
+    ]  # Either bad request or not found is acceptable
 
     # Soft delete first
     response = await client.delete(
@@ -734,10 +795,20 @@ async def test_cross_tenant_access_denied(
 
     # Create admin users
     admin_a = await _create_user(
-        client, super_admin_token, tenant_a["id"], "admin-a@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant_a["id"],
+        "admin-a@test.com",
+        "password123",
+        is_admin=True,
     )
     admin_b = await _create_user(
-        client, super_admin_token, tenant_b["id"], "admin-b@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant_b["id"],
+        "admin-b@test.com",
+        "password123",
+        is_admin=True,
     )
 
     api_key_a = await _login_user(client, admin_a["email"], "password123")
@@ -792,12 +863,22 @@ async def test_gallery_endpoint_accessible_to_regular_users(
 
     # Create regular user (NOT admin)
     regular_user = await _create_user(
-        client, super_admin_token, tenant["id"], "user@test.com", "password123", is_admin=False
+        client,
+        super_admin_token,
+        tenant["id"],
+        "user@test.com",
+        "password123",
+        is_admin=False,
     )
 
     # Create admin user to enable feature and create a template
     admin = await _create_user(
-        client, super_admin_token, tenant["id"], "admin@test.com", "password123", is_admin=True
+        client,
+        super_admin_token,
+        tenant["id"],
+        "admin@test.com",
+        "password123",
+        is_admin=True,
     )
 
     user_key = await _login_user(client, regular_user["email"], "password123")
@@ -851,7 +932,9 @@ async def test_gallery_endpoint_accessible_to_regular_users(
         json=user_template_data,
         headers={"Authorization": f"Bearer {user_key}"},
     )
-    assert response.status_code == 403, "Regular user should not be able to create templates"
+    assert response.status_code == 403, (
+        "Regular user should not be able to create templates"
+    )
 
     # Try to update template
     response = await client.patch(
@@ -859,11 +942,15 @@ async def test_gallery_endpoint_accessible_to_regular_users(
         json={"name": "Hacked Name"},
         headers={"Authorization": f"Bearer {user_key}"},
     )
-    assert response.status_code == 403, "Regular user should not be able to update templates"
+    assert response.status_code == 403, (
+        "Regular user should not be able to update templates"
+    )
 
     # Try to delete template
     response = await client.delete(
         f"/api/v1/admin/templates/assistants/{template_id}",
         headers={"Authorization": f"Bearer {user_key}"},
     )
-    assert response.status_code == 403, "Regular user should not be able to delete templates"
+    assert response.status_code == 403, (
+        "Regular user should not be able to delete templates"
+    )

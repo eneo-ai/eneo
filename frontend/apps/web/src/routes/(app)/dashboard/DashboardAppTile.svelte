@@ -6,6 +6,7 @@
   export let app: AppSparse;
 </script>
 
+<!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
 <a
   aria-label={app.name}
   href={localizeHref(`/dashboard/app/${app.id}`)}
@@ -23,3 +24,4 @@
 
   <div class="flex-grow"></div>
 </a>
+<!-- eslint-enable svelte/no-navigation-without-resolve -->

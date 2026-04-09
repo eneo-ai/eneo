@@ -67,7 +67,9 @@
 </script>
 
 {#if iconUrl}
-  <div class="border-default bg-primary hover:bg-hover-dimmer flex h-16 items-center gap-3 border-b px-4">
+  <div
+    class="border-default bg-primary hover:bg-hover-dimmer flex h-16 items-center gap-3 border-b px-4"
+  >
     <button
       on:click={openPreview}
       class="h-12 w-12 overflow-hidden rounded-lg transition-opacity hover:opacity-80"
@@ -96,7 +98,7 @@
       </Dialog.Section>
 
       <Dialog.Controls let:close>
-        <Button is={close} variant="secondary">{m.close?.() || "Close"}</Button>
+        <Button is={close} variant="outlined">{m.close?.() || "Close"}</Button>
         <Button variant="primary" on:click={downloadAvatar}>
           <IconDownload />
           {m.download?.() || "Download"}
@@ -105,7 +107,9 @@
     </Dialog.Content>
   </Dialog.Root>
 {:else if uploading}
-  <div class="border-default bg-primary hover:bg-hover-dimmer flex h-16 w-full items-center gap-4 border-b px-4">
+  <div
+    class="border-default bg-primary hover:bg-hover-dimmer flex h-16 w-full items-center gap-4 border-b px-4"
+  >
     <IconLoadingSpinner class="animate-spin" />
     <span class="text-secondary line-clamp-1 text-sm">{m.avatar_uploading()}</span>
   </div>

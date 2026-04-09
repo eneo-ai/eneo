@@ -2,8 +2,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from intric.integration.domain.entities.tenant_integration import TenantIntegration
-from intric.main.exceptions import BadRequestException
 from intric.integration.presentation.models import TenantIntegrationFilter
+from intric.main.exceptions import BadRequestException
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,8 @@ class TenantIntegrationService:
         tenant_integration_repo: "TenantIntegrationRepository",
         integration_repo: "IntegrationRepository",
         user: "UserInDB",
-    ):
+    ) -> None:
+        super().__init__()
         self.tenant_integration_repo = tenant_integration_repo
         self.integration_repo = integration_repo
         self.user = user

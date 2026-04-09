@@ -695,7 +695,9 @@ async def test_admin_api_key_management_flow(client, default_user_token, default
         json={"permission": "admin"},
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
-    assert disallowed_update_response.status_code == 400, disallowed_update_response.text
+    assert disallowed_update_response.status_code == 400, (
+        disallowed_update_response.text
+    )
     disallowed_payload = disallowed_update_response.json()
     assert disallowed_payload["code"] == "invalid_request"
 
@@ -1001,7 +1003,9 @@ async def test_admin_list_supports_owner_relation_filters(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_admin_lookup_finds_exact_secret(client, default_user_token, default_user):
+async def test_admin_lookup_finds_exact_secret(
+    client, default_user_token, default_user
+):
     create_response = await client.post(
         "/api/v1/api-keys",
         json={
@@ -1817,43 +1821,6 @@ async def test_method_aware_guard_blocks_write_key_on_assistant_delete(
     )
     assert delete_response.status_code == 403, delete_response.text
     assert delete_response.json()["code"] == "insufficient_permission"
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_method_aware_guard_allows_read_override_for_assistant_token_estimate(
-    client, default_user_token
-):
-    _, assistant_id = await _create_space_and_assistant(
-        client,
-        bearer_token=default_user_token,
-    )
-
-    key_response = await client.post(
-        "/api/v1/api-keys",
-        json={
-            "name": "Assistant Estimate Key",
-            "key_type": "sk_",
-            "permission": "read",
-            "scope_type": "tenant",
-            "resource_permissions": {
-                "assistants": "read",
-                "apps": "none",
-                "spaces": "none",
-                "knowledge": "read",
-            },
-        },
-        headers={"Authorization": f"Bearer {default_user_token}"},
-    )
-    assert key_response.status_code == 201, key_response.text
-    secret = key_response.json()["secret"]
-
-    estimate_response = await client.post(
-        f"/api/v1/assistants/{assistant_id}/token-estimate",
-        json={"text": "hello world"},
-        headers={"X-API-Key": secret},
-    )
-    assert estimate_response.status_code == 200, estimate_response.text
 
 
 @pytest.mark.integration

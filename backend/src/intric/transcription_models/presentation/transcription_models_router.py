@@ -1,23 +1,25 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-
-from intric.main.container.container import Container
-from intric.main.models import NOT_PROVIDED, PaginatedResponse
-from intric.roles.permissions import Permission, validate_permission
-from intric.authentication.auth_dependencies import get_current_active_user
-from intric.server.dependencies.container import get_container
-from intric.server.protocol import responses
-from intric.users.user import UserInDB
-from intric.transcription_models.presentation.transcription_model_models import (
-    TranscriptionModelPublic,
-    TranscriptionModelUpdate,
-)
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.authentication.auth_dependencies import get_current_active_user
+from intric.main.container.container import Container
+from intric.main.models import PaginatedResponse, is_provided
+from intric.roles.permissions import Permission, validate_permission
+from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
+from intric.transcription_models.presentation.transcription_model_models import (
+    TranscriptionModelPublic,
+    TranscriptionModelUpdate,
+)
+from intric.users.user import UserInDB
+
+CurrentUser = Annotated[UserInDB, Depends(get_current_active_user)]
 
 router = APIRouter()
 
@@ -27,8 +29,8 @@ router = APIRouter()
     response_model=PaginatedResponse[TranscriptionModelPublic],
 )
 async def get_transcription_models(
-    user: UserInDB = Depends(get_current_active_user),
-    container: Container = Depends(get_container(with_user=True)),
+    user: CurrentUser,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     validate_permission(user, Permission.ADMIN)
 
@@ -49,7 +51,7 @@ async def get_transcription_models(
 async def update_transcription_model(
     id: UUID,
     update_flags: TranscriptionModelUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.transcription_model_crud_service()
     user = container.user()
@@ -70,10 +72,10 @@ async def update_transcription_model(
     )
 
     # Build consolidated changes dict (one API call = one audit log)
-    changes = {}
+    changes: dict[str, object] = {}
 
     # Track is_org_enabled changes
-    if update_flags.is_org_enabled is not NOT_PROVIDED:
+    if is_provided(update_flags.is_org_enabled):
         if old_model.is_org_enabled != transcription_model.is_org_enabled:
             changes["is_org_enabled"] = {
                 "old": old_model.is_org_enabled,
@@ -81,7 +83,7 @@ async def update_transcription_model(
             }
 
     # Track is_org_default changes
-    if update_flags.is_org_default is not NOT_PROVIDED:
+    if is_provided(update_flags.is_org_default):
         if old_model.is_org_default != transcription_model.is_org_default:
             changes["is_org_default"] = {
                 "old": old_model.is_org_default,
@@ -89,9 +91,17 @@ async def update_transcription_model(
             }
 
     # Track security classification changes
-    if update_flags.security_classification is not NOT_PROVIDED:
-        old_sc_name = old_model.security_classification.name if old_model.security_classification else None
-        new_sc_name = transcription_model.security_classification.name if transcription_model.security_classification else None
+    if is_provided(update_flags.security_classification):
+        old_sc_name = (
+            old_model.security_classification.name
+            if old_model.security_classification
+            else None
+        )
+        new_sc_name = (
+            transcription_model.security_classification.name
+            if transcription_model.security_classification
+            else None
+        )
         if old_sc_name != new_sc_name:
             changes["security_classification"] = {
                 "old": old_sc_name,

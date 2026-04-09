@@ -6,8 +6,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-
-from pydantic import computed_field, field_validator, model_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Version manifest lookup:
@@ -89,30 +88,103 @@ def validate_public_origin(origin: str | None) -> str | None:
     return f"{scheme}://{host}{port}"
 
 
+def validate_redirect_uri(uri: str | None) -> str | None:
+    """
+    Validate and normalize a full redirect URI for OIDC flows.
+
+    Rules:
+    - Must be HTTPS (or http://localhost for development)
+    - Must include a hostname and a path
+    - Must not include query parameters or fragment
+    - Must not include wildcard hostnames
+    - Normalize: lowercase scheme + host, strip trailing slash from path
+    """
+    if uri is None:
+        return None
+
+    uri = uri.strip()
+    if not uri:
+        raise ValueError("redirect_uri cannot be an empty string")
+
+    parsed = urlparse(uri)
+    if "*" in (parsed.hostname or ""):
+        raise ValueError(f"redirect_uri must not include wildcards: {uri}")
+
+    is_localhost = parsed.hostname in ("localhost", "127.0.0.1")
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and is_localhost):
+        raise ValueError(
+            "redirect_uri must use https:// "
+            f"(or http://localhost for development), got: {uri}"
+        )
+
+    if not parsed.hostname:
+        raise ValueError(f"redirect_uri missing hostname: {uri}")
+
+    path = parsed.path or ""
+    if not path or not path.startswith("/"):
+        raise ValueError(f"redirect_uri must include an absolute path: {uri}")
+
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"redirect_uri must not include query or fragment: {uri}")
+
+    host = parsed.hostname.lower()
+    scheme = parsed.scheme if is_localhost else "https"
+    default_port = 443 if scheme == "https" else 80
+    port = f":{parsed.port}" if parsed.port and parsed.port != default_port else ""
+    normalized_path = path.rstrip("/") or "/"
+
+    return f"{scheme}://{host}{port}{normalized_path}"
+
+
 def canonicalize_legacy_redirect_path(path: str | None) -> str | None:
+    """Canonicalize legacy redirect paths before strict validation.
+
+    This preserves strict validation for new writes while allowing reads/migrations
+    to normalize old values that previously slipped through, such as trailing slashes
+    or query/fragment suffixes.
+    """
     if path is None:
         return None
 
     path = path.strip()
     if not path:
-        return None
+        return path
 
     parsed = urlparse(path)
-    normalized_path = parsed.path or path
+    if parsed.scheme or parsed.netloc:
+        return path
+
+    normalized_path = parsed.path or ""
     if not normalized_path.startswith("/"):
-        return normalized_path
-    if len(normalized_path) > 1:
-        normalized_path = normalized_path.rstrip("/")
-    return normalized_path or "/"
+        return path
+
+    return normalized_path.rstrip("/") or "/"
 
 
 def validate_redirect_path(path: str | None) -> str | None:
-    path = canonicalize_legacy_redirect_path(path)
+    """Validate and normalize a redirect path used to build redirect_uri."""
     if path is None:
         return None
-    if not path.startswith("/"):
+
+    path = path.strip()
+    if not path:
+        raise ValueError("redirect_path cannot be an empty string")
+
+    parsed = urlparse(path)
+    if parsed.scheme or parsed.netloc:
+        raise ValueError(f"redirect_path must be a path only, got: {path}")
+
+    normalized_path = parsed.path or ""
+    if not normalized_path.startswith("/"):
         raise ValueError("redirect_path must start with /")
-    return path
+
+    if parsed.query or parsed.fragment:
+        raise ValueError("redirect_path must not include query or fragment")
+
+    if normalized_path != "/" and normalized_path.endswith("/"):
+        raise ValueError("redirect_path must not end with /")
+
+    return normalized_path
 
 
 def _set_app_version():
@@ -154,8 +226,6 @@ class Settings(BaseSettings):
     flux_api_key: Optional[str] = None
     tavily_api_key: Optional[str] = None
     vllm_api_key: Optional[str] = None
-    berget_api_key: Optional[str] = None
-    gdm_api_key: Optional[str] = None
     eneo_super_api_key: Optional[str] = None
     eneo_super_duper_api_key: Optional[str] = None
 
@@ -200,9 +270,7 @@ class Settings(BaseSettings):
         20  # Base pool size (permanent connections) - default: current behavior
     )
     db_pool_max_overflow: int = 10  # Extra connections above pool_size (total max = 30)
-    db_pool_timeout: int = (
-        30  # Seconds to wait for connection before raising error - default: SQLAlchemy default
-    )
+    db_pool_timeout: int = 30  # Seconds to wait for connection before raising error - default: SQLAlchemy default
     db_pool_pre_ping: bool = (
         True  # Verify connections before use - prevents stale connection errors
     )
@@ -267,8 +335,12 @@ class Settings(BaseSettings):
     export_max_concurrent_per_tenant: int = 2  # Max concurrent exports per tenant
     export_progress_interval: int = 5000  # Update progress every N records
 
-    # Federation per tenant feature flag
-    federation_per_tenant_enabled: bool = False
+    # Federation feature flag. Supports both single-tenant and multi-tenant setups.
+    federation_enabled: bool = False
+    federation_per_tenant_enabled: Optional[bool] = Field(
+        default=None,
+        description="Deprecated alias for federation_enabled.",
+    )
 
     # OIDC redirect safety controls
     oidc_state_ttl_seconds: int = 600
@@ -306,7 +378,6 @@ class Settings(BaseSettings):
     upload_image_to_session_max_size: int
     upload_max_file_size: int
     transcription_max_file_size: int
-    max_in_question: int
 
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
@@ -403,7 +474,7 @@ class Settings(BaseSettings):
     sharepoint_max_download_bytes: int = 50 * 1024 * 1024
 
     # Generic encryption key for sensitive data (HTTP auth, tenant API keys, etc.)
-    # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_PER_TENANT_ENABLED=true
+    # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_ENABLED=true
     # Also needed for worker/crawler HTTP authentication
     # Generate with: uv run python -m intric.cli.generate_encryption_key
     encryption_key: Optional[str] = None
@@ -413,7 +484,7 @@ class Settings(BaseSettings):
 
     @field_validator("export_dir", mode="before")
     @classmethod
-    def validate_export_dir_not_empty(cls, v):
+    def validate_export_dir_not_empty(cls, v: object) -> object:
         """
         Handle empty EXPORT_DIR env var by falling back to default.
 
@@ -433,24 +504,51 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
+    def resolve_deprecated_federation_flag(self):
+        """Support FEDERATION_PER_TENANT_ENABLED as a deprecated fallback alias."""
+        explicit_fields = self.model_fields_set
+        has_primary = "federation_enabled" in explicit_fields
+        has_deprecated = (
+            "federation_per_tenant_enabled" in explicit_fields
+            and self.federation_per_tenant_enabled is not None
+        )
+
+        if not has_deprecated:
+            return self
+
+        logging.warning(
+            "FEDERATION_PER_TENANT_ENABLED is deprecated and will be removed in a future release. "
+            "Use FEDERATION_ENABLED instead."
+        )
+
+        if has_primary:
+            if self.federation_per_tenant_enabled != self.federation_enabled:
+                logging.warning(
+                    "FEDERATION_ENABLED and deprecated FEDERATION_PER_TENANT_ENABLED are both set with "
+                    "different values. Using FEDERATION_ENABLED."
+                )
+            return self
+
+        self.federation_enabled = bool(self.federation_per_tenant_enabled)
+        return self
+
+    @model_validator(mode="after")
     def validate_encryption_key_requirements(self):
         """
         Validate that encryption_key is present and valid when features requiring it are enabled.
 
         Encryption is required for:
         - TENANT_CREDENTIALS_ENABLED=true (tenant-specific API keys)
-        - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
+        - FEDERATION_ENABLED=true (tenant-specific IdPs)
         - Worker/crawler HTTP authentication
         """
-        encryption_required = (
-            self.tenant_credentials_enabled or self.federation_per_tenant_enabled
-        )
+        encryption_required = self.tenant_credentials_enabled or self.federation_enabled
 
         if encryption_required:
             if not self.encryption_key or not self.encryption_key.strip():
                 logging.error(
                     "ENCRYPTION_KEY is required when TENANT_CREDENTIALS_ENABLED=true "
-                    "or FEDERATION_PER_TENANT_ENABLED=true.\n"
+                    "or FEDERATION_ENABLED=true.\n"
                     "Generate key: uv run python -m intric.cli.generate_encryption_key"
                 )
                 sys.exit(1)
@@ -482,7 +580,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_legacy_vars(cls, values):
+    def migrate_legacy_vars(cls, values: dict[str, object]) -> dict[str, object]:
         """Auto-migrate legacy env vars with deprecation warnings.
 
         MOBILITYGUARD_* → OIDC_*
@@ -637,24 +735,6 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
-        redis_db_values = (
-            self.redis_db,
-            self.redis_db_celery_broker,
-            self.redis_db_celery_result,
-            self.redis_db_auth_broker,
-        )
-        if len(set(redis_db_values)) != len(redis_db_values):
-            logging.error(
-                "Redis DB indexes for ARQ/Celery/Auth must be unique. "
-                "Configured values: redis_db=%s, redis_db_celery_broker=%s, "
-                "redis_db_celery_result=%s, redis_db_auth_broker=%s",
-                self.redis_db,
-                self.redis_db_celery_broker,
-                self.redis_db_celery_result,
-                self.redis_db_auth_broker,
-            )
-            sys.exit(1)
-
         if self.mcp_tool_approval_timeout_seconds <= 0:
             logging.error(
                 "MCP_TOOL_APPROVAL_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
@@ -723,49 +803,6 @@ class Settings(BaseSettings):
             logging.error(
                 "MCP_CIRCUIT_BREAKER_COOLDOWN_SECONDS must be greater than zero. Current value: %s",
                 self.mcp_circuit_breaker_cooldown_seconds,
-            )
-            sys.exit(1)
-
-        if self.flow_max_concurrent_runs_per_tenant <= 0:
-            logging.error(
-                "FLOW_MAX_CONCURRENT_RUNS_PER_TENANT must be greater than zero. Current value: %s",
-                self.flow_max_concurrent_runs_per_tenant,
-            )
-            sys.exit(1)
-
-        if self.flow_task_timeout_seconds <= 0:
-            logging.error(
-                "FLOW_TASK_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
-                self.flow_task_timeout_seconds,
-            )
-            sys.exit(1)
-
-        if self.flow_max_inline_text_bytes <= 0:
-            logging.error(
-                "FLOW_MAX_INLINE_TEXT_BYTES must be greater than zero. Current value: %s",
-                self.flow_max_inline_text_bytes,
-            )
-            sys.exit(1)
-
-        if self.flow_http_request_timeout_seconds <= 0:
-            logging.error(
-                "FLOW_HTTP_REQUEST_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
-                self.flow_http_request_timeout_seconds,
-            )
-            sys.exit(1)
-
-        if self.flow_http_max_timeout_seconds <= 0:
-            logging.error(
-                "FLOW_HTTP_MAX_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
-                self.flow_http_max_timeout_seconds,
-            )
-            sys.exit(1)
-
-        if self.flow_http_max_timeout_seconds < self.flow_http_request_timeout_seconds:
-            logging.error(
-                "FLOW_HTTP_MAX_TIMEOUT_SECONDS must be >= FLOW_HTTP_REQUEST_TIMEOUT_SECONDS. Current values: max=%s default=%s",
-                self.flow_http_max_timeout_seconds,
-                self.flow_http_request_timeout_seconds,
             )
             sys.exit(1)
 

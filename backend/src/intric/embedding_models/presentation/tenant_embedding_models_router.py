@@ -1,15 +1,13 @@
 # MIT License
 
+from typing import Annotated
 from uuid import UUID
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-import sqlalchemy as sa
-
-from intric.ai_models.model_enums import ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
-from intric.roles.permissions import Permission, validate_permission
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.database.tables.ai_models_table import EmbeddingModels
 from intric.database.tables.collections_table import CollectionsTable
@@ -17,8 +15,15 @@ from intric.database.tables.integration_table import IntegrationKnowledge
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.websites_table import Websites
 from intric.embedding_models.domain.embedding_model_repo import EmbeddingModelRepository
-from intric.embedding_models.presentation.embedding_model_models import EmbeddingModelPublic
-from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
+from intric.embedding_models.presentation.embedding_model_models import (
+    EmbeddingModelPublic,
+)
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
 
@@ -51,7 +56,9 @@ class TenantEmbeddingModelUpdate(BaseModel):
     max_input: int | None = Field(None, description="Maximum input tokens")
     hosting: str | None = Field(None, description="Hosting location (swe, eu, usa)")
     open_source: bool | None = Field(None, description="Is the model open source")
-    stability: str | None = Field(None, description="Model stability (stable, experimental)")
+    stability: str | None = Field(
+        None, description="Model stability (stable, experimental)"
+    )
 
 
 @router.post(
@@ -61,8 +68,8 @@ class TenantEmbeddingModelUpdate(BaseModel):
 )
 async def create_tenant_embedding_model(
     model_create: TenantEmbeddingModelCreate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
 ):
     """Create a new tenant-specific embedding model."""
     validate_permission(user, Permission.ADMIN)
@@ -76,7 +83,9 @@ async def create_tenant_embedding_model(
     provider = result.scalar_one_or_none()
 
     if not provider:
-        raise NotFoundException("Model provider not found or does not belong to your organization")
+        raise NotFoundException(
+            "Model provider not found or does not belong to your organization"
+        )
 
     if not provider.is_active:
         raise BadRequestException("Model provider is not active")
@@ -92,26 +101,29 @@ async def create_tenant_embedding_model(
 
     # Create the embedding model with settings directly on it
     new_model = EmbeddingModels(
-        tenant_id=user.tenant_id,
-        provider_id=model_create.provider_id,
-        name=model_create.name,
-        litellm_model_name=None,  # Constructed at runtime by TenantModelAdapter
-        dimensions=model_create.dimensions,
-        max_input=model_create.max_input,
-        family=model_create.family,  # User-specified family
-        # Simplified defaults for other fields
-        hosting=model_create.hosting,
-        org=None,
-        stability=ModelStability.STABLE.value,
-        open_source=False,
-        description=f"Tenant model: {model_create.display_name}",
-        hf_link=None,
-        is_deprecated=False,
-        max_batch_size=None,
-        # Settings (now directly on model)
-        is_enabled=model_create.is_active,
-        is_default=model_create.is_default,
-        security_classification_id=None,
+        **dict(  # type: ignore[call-arg]
+            tenant_id=user.tenant_id,
+            provider_id=model_create.provider_id,
+            name=model_create.name,
+            litellm_model_name=None,  # Constructed at runtime by TenantModelAdapter
+            dimensions=model_create.dimensions,
+            max_input=model_create.max_input,
+            family=model_create.family,  # User-specified family
+            # Simplified defaults for other fields
+            hosting=model_create.hosting,
+            org=None,
+            stability="stable",
+            open_source=False,
+            nickname=model_create.display_name,
+            description=None,
+            hf_link=None,
+            is_deprecated=False,
+            max_batch_size=None,
+            # Settings (now directly on model)
+            is_enabled=model_create.is_active,
+            is_default=model_create.is_default,
+            security_classification_id=None,
+        )
     )
 
     session.add(new_model)
@@ -135,8 +147,8 @@ async def create_tenant_embedding_model(
 async def update_tenant_embedding_model(
     model_id: UUID,
     model_update: TenantEmbeddingModelUpdate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
 ):
     """Update a tenant-specific embedding model."""
     validate_permission(user, Permission.ADMIN)
@@ -150,7 +162,9 @@ async def update_tenant_embedding_model(
     model = result.scalar_one_or_none()
 
     if not model:
-        raise NotFoundException("Model not found or does not belong to your organization")
+        raise NotFoundException(
+            "Model not found or does not belong to your organization"
+        )
 
     # Cannot update global models
     if model.tenant_id is None:
@@ -158,7 +172,7 @@ async def update_tenant_embedding_model(
 
     # Update fields that were provided
     if model_update.display_name is not None:
-        model.description = f"Tenant model: {model_update.display_name}"
+        model.nickname = model_update.display_name
     if model_update.description is not None:
         model.description = model_update.description
     if model_update.family is not None:
@@ -191,8 +205,8 @@ async def update_tenant_embedding_model(
 )
 async def delete_tenant_embedding_model(
     model_id: UUID,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
 ):
     """Delete a tenant-specific embedding model."""
     validate_permission(user, Permission.ADMIN)
@@ -206,7 +220,9 @@ async def delete_tenant_embedding_model(
     model = result.scalar_one_or_none()
 
     if not model:
-        raise NotFoundException("Model not found or does not belong to your organization")
+        raise NotFoundException(
+            "Model not found or does not belong to your organization"
+        )
 
     # Cannot delete global models
     if model.tenant_id is None:
@@ -215,9 +231,21 @@ async def delete_tenant_embedding_model(
     # Check if the model is in use by any collections, websites, or integrations
     usage_counts = await session.execute(
         sa.select(
-            sa.select(sa.func.count()).where(CollectionsTable.embedding_model_id == model_id).correlate(None).scalar_subquery().label("collections"),
-            sa.select(sa.func.count()).where(Websites.embedding_model_id == model_id).correlate(None).scalar_subquery().label("websites"),
-            sa.select(sa.func.count()).where(IntegrationKnowledge.embedding_model_id == model_id).correlate(None).scalar_subquery().label("integrations"),
+            sa.select(sa.func.count())
+            .where(CollectionsTable.embedding_model_id == model_id)
+            .correlate(None)
+            .scalar_subquery()
+            .label("collections"),
+            sa.select(sa.func.count())
+            .where(Websites.embedding_model_id == model_id)
+            .correlate(None)
+            .scalar_subquery()
+            .label("websites"),
+            sa.select(sa.func.count())
+            .where(IntegrationKnowledge.embedding_model_id == model_id)
+            .correlate(None)
+            .scalar_subquery()
+            .label("integrations"),
         )
     )
     row = usage_counts.one()

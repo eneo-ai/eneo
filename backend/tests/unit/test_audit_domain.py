@@ -111,7 +111,9 @@ class TestDescriptionValidation:
     def test_description_exceeds_max_length_raises_value_error(self):
         """Description > 500 chars should raise ValueError with specific message."""
         description = "a" * (MAX_DESCRIPTION_LENGTH + 1)
-        with pytest.raises(ValueError, match=f"must not exceed {MAX_DESCRIPTION_LENGTH}"):
+        with pytest.raises(
+            ValueError, match=f"must not exceed {MAX_DESCRIPTION_LENGTH}"
+        ):
             AuditLog(
                 id=uuid4(),
                 tenant_id=uuid4(),
@@ -205,7 +207,9 @@ class TestErrorMessageValidation:
     def test_error_message_exceeds_max_length_raises_value_error(self):
         """Error message > 2000 chars should raise ValueError."""
         error_message = "e" * (MAX_ERROR_MESSAGE_LENGTH + 1)
-        with pytest.raises(ValueError, match=f"must not exceed {MAX_ERROR_MESSAGE_LENGTH}"):
+        with pytest.raises(
+            ValueError, match=f"must not exceed {MAX_ERROR_MESSAGE_LENGTH}"
+        ):
             AuditLog(
                 id=uuid4(),
                 tenant_id=uuid4(),
@@ -458,8 +462,12 @@ def test_action_types_enum():
     assert ActionType.COMPLETION_MODEL_UPDATED == "completion_model_updated"
     assert ActionType.EMBEDDING_MODEL_UPDATED == "embedding_model_updated"
     assert ActionType.TRANSCRIPTION_MODEL_UPDATED == "transcription_model_updated"
-    assert ActionType.SECURITY_CLASSIFICATION_CREATED == "security_classification_created"
-    assert ActionType.SECURITY_CLASSIFICATION_ENABLED == "security_classification_enabled"
+    assert (
+        ActionType.SECURITY_CLASSIFICATION_CREATED == "security_classification_created"
+    )
+    assert (
+        ActionType.SECURITY_CLASSIFICATION_ENABLED == "security_classification_enabled"
+    )
     # MCP server action types
     assert ActionType.MCP_SERVER_CREATED == "mcp_server_created"
     assert ActionType.MCP_SERVER_UPDATED == "mcp_server_updated"

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createDateRangePicker } from "@melt-ui/svelte";
+  import { createDateRangePicker, type DateRange } from "@melt-ui/svelte";
   import { CalendarDate, type DateValue } from "@internationalized/date";
   import Button from "$lib/Button/Button.svelte";
   import { Tooltip } from "$lib/Tooltip/index.js";
@@ -8,7 +8,7 @@
   import { getUIMessage } from "$lib/utils/messages.js";
 
   const now = new Date();
-  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
+  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
 
   let cls = "";
   export { cls as class };
@@ -17,6 +17,10 @@
     start: DateValue | undefined;
     end: DateValue | undefined;
   } = getDefaultRange();
+
+  /** Called when a complete range (both start and end) is selected */
+  export let onValueCommit: ((range: { start: DateValue; end: DateValue }) => void) | undefined =
+    undefined;
 
   function getDefaultRange() {
     return {
@@ -48,8 +52,11 @@
     defaultValue: value,
     weekdayFormat: "short",
     locale: "en-GB",
-    onValueChange: ({ next }: { next: any }) => {
+    onValueChange: ({ next }: { next: DateRange }) => {
       value = next;
+      if (onValueCommit && next.start && next.end) {
+        onValueCommit({ start: next.start, end: next.end });
+      }
       return next;
     },
     preventScroll: true,
@@ -95,8 +102,17 @@
     }
   );
 
+  // When the calendar closes with only a start date selected, treat it as a single-day range
+  $: if (!$open && value.start && !value.end) {
+    const start = value.start;
+    value = { start, end: start };
+    if (onValueCommit) {
+      onValueCommit({ start, end: start });
+    }
+  }
+
   // When doing "use:field" svelte-check complains about the number of arguments... this "fixes" it for now
-  const fieldWrap = (_: unknown) => field(); // eslint-disable-line @typescript-eslint/no-unused-vars
+  const fieldWrap = (_: unknown) => field();
 </script>
 
 <div class="flex items-center justify-between gap-4 {cls}">

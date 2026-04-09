@@ -18,7 +18,7 @@
     table.column({ accessor: "email", header: m.email() }),
     table.column({
       accessor: (user) => user,
-      header: m.roles(),  // Changed to plural
+      header: m.roles(), // Changed to plural
       cell: (item) => {
         // Combine predefined_roles AND custom roles
         const roles = [...(item.value.predefined_roles || []), ...(item.value.roles || [])];
@@ -43,11 +43,11 @@
       accessor: (user) => user,
       header: m.user_groups(),
       cell: (item) => {
-        const content: { label: string; color: Label.LabelColor }[] = (item.value.user_groups || []).map(
-          (group) => {
-            return { label: group.name, color: "blue" };
-          }
-        );
+        const content: { label: string; color: Label.LabelColor }[] = (
+          item.value.user_groups || []
+        ).map((group) => {
+          return { label: group.name, color: "blue" };
+        });
         return createRender(Label.List, { content });
       },
       plugins: {
@@ -70,7 +70,7 @@
         // Note: 'deleted' state never appears (filtered by deleted_at IS NULL in queries)
         const stateLabels: Record<string, { label: string; color: Label.LabelColor }> = {
           active: { label: m.active(), color: "green" },
-          inactive: { label: m.inactive(), color: "gray" },  // Gray = neutral (temporary leave)
+          inactive: { label: m.inactive(), color: "gray" }, // Gray = neutral (temporary leave)
           invited: { label: m.invited(), color: "blue" }
         };
         const label = stateLabels[item.value.state] || stateLabels.active;
@@ -96,16 +96,17 @@
       }
     }),
     table.columnActions({
-      header: m.actions(),  // Add "Åtgärder" header for clarity
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      header: m.actions() as any, // Add "Åtgärder" header for clarity
       cell: (item) => {
-        return createRender(UserActions, { user: item.value });
+        return Table.renderComponent(UserActions, { user: item.value });
       }
     })
   ]);
 
   // Reactive update with defensive check
   $: {
-    table.update(users ?? []);  // Defensive: ensure always an array
+    table.update(users ?? []); // Defensive: ensure always an array
   }
 
   // Export filterValue so parent can watch for server-side search

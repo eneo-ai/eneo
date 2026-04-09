@@ -11,10 +11,16 @@
   import { IconFolder } from "@intric/icons/folder";
   import { IconFile } from "@intric/icons/file";
   import { Button } from "@intric/ui";
-  import type { GroupSparse, IntegrationKnowledge, WebsiteSparse, InfoBlob } from "@intric/intric-js";
+  import type {
+    GroupSparse,
+    IntegrationKnowledge,
+    WebsiteSparse,
+    InfoBlob
+  } from "@intric/intric-js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getAvailableKnowledge } from "../getAvailableKnowledge";
   import { tick } from "svelte";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import IntegrationVendorIcon from "$lib/features/integrations/components/IntegrationVendorIcon.svelte";
@@ -141,26 +147,22 @@
   });
 
   const {
-    state: { currentSpace, nonOrgSpaces, organizationSpaceId }
+    state: { currentSpace, organizationSpaceId }
   } = getSpacesManager();
 
   const intric = getIntric();
 
-  let expandedItems = new Set<string>();
-  let expandedWrapperSelections = new Set<string>();
-  let expandedWrapperOptions = new Set<string>();
-  let blobCache = new Map<string, InfoBlob[]>();
-  let loadingBlobs = new Set<string>();
-  let currentPages = new Map<string, number>(); 
+  let expandedItems = new SvelteSet<string>();
+  let expandedWrapperSelections = new SvelteSet<string>();
+  let expandedWrapperOptions = new SvelteSet<string>();
+  let blobCache = new SvelteMap<string, InfoBlob[]>();
+  let loadingBlobs = new SvelteSet<string>();
+  let currentPages = new SvelteMap<string, number>();
   const ITEMS_PER_PAGE = 10;
 
   type MessageFn = (args?: Record<string, unknown>) => string;
 
-  function resolveMessage(
-    key: string,
-    fallback: string,
-    args?: Record<string, unknown>
-  ): string {
+  function resolveMessage(key: string, fallback: string, args?: Record<string, unknown>): string {
     const maybeFn = (m as unknown as Record<string, MessageFn | undefined>)[key];
     if (typeof maybeFn === "function") {
       return maybeFn(args);
@@ -168,7 +170,11 @@
     return fallback;
   }
 
-  async function toggleExpanded(id: string, type: "collection" | "website" | "integration", item: GroupSparse | WebsiteSparse | IntegrationKnowledge) {
+  async function toggleExpanded(
+    id: string,
+    type: "collection" | "website" | "integration",
+    item: GroupSparse | WebsiteSparse | IntegrationKnowledge
+  ) {
     if (expandedItems.has(id)) {
       expandedItems.delete(id);
       expandedItems = expandedItems;
@@ -349,21 +355,26 @@
     return badges;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function ownerSpaceId(item: any): string | undefined {
+    const space = item?.space;
+    const metadata = item?.metadata;
     return (
-      item?.space_id ??
-      item?.spaceId ??
-      item?.space?.id ??
-      item?.metadata?.space_id ??
-      item?.metadata?.spaceId
+      (item?.space_id as string) ??
+      (item?.spaceId as string) ??
+      (space?.id as string) ??
+      (metadata?.space_id as string) ??
+      (metadata?.spaceId as string)
     );
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function isPersonalItem(item: any) {
     const sid = ownerSpaceId(item);
-    if (!sid) return true; 
+    if (!sid) return true;
     return sid === $currentSpace?.id;
   }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function isOrgItem(item: any) {
     const sid = ownerSpaceId(item);
     if ($organizationSpaceId) {
@@ -387,13 +398,11 @@
     return knowledge.name;
   }
 
-  function groupIntegrationByWrapper(
-    knowledgeItems: IntegrationKnowledge[]
-  ): {
-    wrappers: Map<string, IntegrationKnowledge[]>;
+  function groupIntegrationByWrapper(knowledgeItems: IntegrationKnowledge[]): {
+    wrappers: SvelteMap<string, IntegrationKnowledge[]>;
     singles: IntegrationKnowledge[];
   } {
-    const wrappers = new Map<string, IntegrationKnowledge[]>();
+    const wrappers = new SvelteMap<string, IntegrationKnowledge[]>();
     const singles: IntegrationKnowledge[] = [];
 
     for (const knowledge of knowledgeItems) {
@@ -525,19 +534,19 @@
   ) {
     let didChange = false;
     if ("collection" in item && selectedCollections) {
-      if (!selectedCollections.some(c => c.id === item.collection.id)) {
+      if (!selectedCollections.some((c) => c.id === item.collection.id)) {
         selectedCollections = [...selectedCollections, item.collection];
         didChange = true;
       }
     }
     if ("website" in item && selectedWebsites) {
-      if (!selectedWebsites.some(w => w.id === item.website.id)) {
+      if (!selectedWebsites.some((w) => w.id === item.website.id)) {
         selectedWebsites = [...selectedWebsites, item.website];
         didChange = true;
       }
     }
     if ("integrationKnowledge" in item && selectedIntegrationKnowledge) {
-      if (!selectedIntegrationKnowledge.some(k => k.id === item.integrationKnowledge.id)) {
+      if (!selectedIntegrationKnowledge.some((k) => k.id === item.integrationKnowledge.id)) {
         selectedIntegrationKnowledge = [...selectedIntegrationKnowledge, item.integrationKnowledge];
         didChange = true;
       }
@@ -564,21 +573,23 @@
     originMode === "organization"
       ? $inputValueOrg
       : originMode === "personal"
-      ? $inputValuePersonal
-      : ($openPersonal ? $inputValuePersonal : $inputValueOrg);
+        ? $inputValuePersonal
+        : $openPersonal
+          ? $inputValuePersonal
+          : $inputValueOrg;
 
-    $: availableKnowledge = getAvailableKnowledge(
-      $currentSpace,
-      selectedWebsites,
-      selectedCollections,
-      selectedIntegrationKnowledge,
-      activeFilter
+  $: availableKnowledge = getAvailableKnowledge(
+    $currentSpace,
+    selectedWebsites,
+    selectedCollections,
+    selectedIntegrationKnowledge,
+    activeFilter
   );
 
   $: sectionEntries = Object.entries(availableKnowledge.sections).map(([modelId, section]) => {
     const dedupe = <T extends { id: string }>(arr: T[] = []) => {
-      const seen = new Set<string>();
-      return arr.filter(x => (seen.has(x.id) ? false : (seen.add(x.id), true)));
+      const seen = new SvelteSet<string>();
+      return arr.filter((x) => (seen.has(x.id) ? false : (seen.add(x.id), true)));
     };
     return [
       modelId,
@@ -594,11 +605,12 @@
   $: enabledModels = $currentSpace.embedding_models.map((model) => model.id);
 
   $: partitionedSections = sectionEntries.flatMap(([modelId, section]) => {
-    const split = (arr: any[] = []) => {
-      const personal: any[] = [];
-      const org: any[] = [];
+    const split = <T,>(arr: T[] = []) => {
+      const personal: T[] = [];
+      const org: T[] = [];
       for (const item of arr) {
-        const sid = ownerSpaceId(item);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sid = ownerSpaceId(item as any);
         if (!sid || sid === $currentSpace?.id) personal.push(item);
         else {
           org.push(item);
@@ -611,6 +623,7 @@
     const w = split(section.websites);
     const k = split(section.integrationKnowledge);
 
+    /* eslint-disable @typescript-eslint/no-explicit-any */
     const mk = (
       origin: "personal" | "organization",
       groups: any[],
@@ -626,7 +639,7 @@
         (groups?.length ?? 0) + (websites?.length ?? 0) + (integrationKnowledge?.length ?? 0)
     });
 
-    const out: Array<[string, any]> = [];
+    const out: Array<[string, ReturnType<typeof mk>]> = [];
     if (g.personal.length || w.personal.length || k.personal.length)
       out.push([`${modelId}::personal`, mk("personal", g.personal, w.personal, k.personal)]);
     if (g.org.length || w.org.length || k.org.length)
@@ -634,6 +647,7 @@
 
     return out;
   });
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 
   $: partitionedSectionsPersonal = partitionedSections.filter(([, s]) => s.origin === "personal");
   $: partitionedSectionsOrg = partitionedSections.filter(([, s]) => s.origin === "organization");
@@ -643,11 +657,17 @@
 
   $: selectedWebsitesPersonal = (selectedWebsites ?? []).filter(isPersonalItem);
   $: selectedWebsitesOrg = (selectedWebsites ?? []).filter(isOrgItem);
-  
-  $: selectedIntegrationKnowledgePersonal = (selectedIntegrationKnowledge ?? []).filter(isPersonalItem);
+
+  $: selectedIntegrationKnowledgePersonal = (selectedIntegrationKnowledge ?? []).filter(
+    isPersonalItem
+  );
   $: selectedIntegrationKnowledgeOrg = (selectedIntegrationKnowledge ?? []).filter(isOrgItem);
-  $: allIntegrationKnowledgePersonal = ($currentSpace?.knowledge?.integrationKnowledge ?? []).filter(isPersonalItem);
-  $: allIntegrationKnowledgeOrg = ($currentSpace?.knowledge?.integrationKnowledge ?? []).filter(isOrgItem);
+  $: allIntegrationKnowledgePersonal = (
+    $currentSpace?.knowledge?.integrationKnowledge ?? []
+  ).filter(isPersonalItem);
+  $: allIntegrationKnowledgeOrg = ($currentSpace?.knowledge?.integrationKnowledge ?? []).filter(
+    isOrgItem
+  );
   $: selectedIntegrationDisplayPersonal = getSelectedIntegrationDisplay(
     selectedIntegrationKnowledgePersonal,
     allIntegrationKnowledgePersonal
@@ -664,11 +684,10 @@
 
   $: shouldRenderOrgSelectedSection =
     Boolean($organizationSpaceId) || hasOrgSelections || partitionedSectionsOrg.length > 0;
-
 </script>
+
 {#if originMode !== "organization"}
   <section class="knowledge-selected">
-
     {#each selectedCollectionsPersonal as collection (`group:${collection.id}`)}
       {@const isItemModelEnabled = enabledModels.includes(collection.embedding_model.id)}
       {@const isExpanded = expandedItems.has(collection.id)}
@@ -700,7 +719,7 @@
             <IconCancel />
           {/if}
           <button
-            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            class="flex-grow cursor-pointer truncate border-none bg-transparent px-2 text-left hover:underline"
             on:click={() => toggleExpanded(collection.id, "collection", collection)}
           >
             {collection.name}
@@ -708,20 +727,30 @@
           {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
           <div class="flex-grow"></div>
           {#if collection.metadata.num_info_blobs > 0}
-            <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-              {collection.metadata.num_info_blobs} {m.resource_files()}
+            <span
+              class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+            >
+              {collection.metadata.num_info_blobs}
+              {m.resource_files()}
             </span>
           {:else}
-            <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+            <span
+              class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+            >
               {m.empty()}
             </span>
           {/if}
-          <Button variant="destructive" padding="icon" on:click={() => {
-            selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);
-            if ($openPersonal) inputPersonalEl?.focus();
-            if ($openOrg)      inputOrgEl?.focus();
-            emitChange();
-          }}><IconTrash /></Button>
+          <Button
+            variant="destructive"
+            padding="icon"
+            on:click={() => {
+              selectedCollections = selectedCollections?.filter(
+                (item) => item.id !== collection.id
+              );
+              if ($openPersonal) inputPersonalEl?.focus();
+              if ($openOrg) inputOrgEl?.focus();
+            }}><IconTrash /></Button
+          >
         </div>
         {#if isExpanded}
           <div class="blob-list">
@@ -731,7 +760,9 @@
               {#each blobs as blob (blob.id)}
                 <BlobPreview {blob} let:showBlob>
                   <button class="blob-item blob-item-clickable" on:click={showBlob}>
-                    <span class="blob-title truncate">{blob.metadata?.title || blob.metadata?.url || "Untitled"}</span>
+                    <span class="blob-title truncate"
+                      >{blob.metadata?.title || blob.metadata?.url || "Untitled"}</span
+                    >
                     {#if blob.metadata?.size}
                       <span class="blob-size text-muted">{formatBlobSize(blob.metadata.size)}</span>
                     {/if}
@@ -748,7 +779,9 @@
                   >
                     {m.previous()}
                   </Button>
-                  <span class="text-muted text-sm">{m.page_x_of_y({ x: currentPage, y: totalPages })}</span>
+                  <span class="text-muted text-sm"
+                    >{m.page_x_of_y({ x: currentPage, y: totalPages })}</span
+                  >
                   <Button
                     variant="simple"
                     padding="text"
@@ -797,7 +830,7 @@
           {/if}
           {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
           <button
-            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            class="flex-grow cursor-pointer truncate border-none bg-transparent px-2 text-left hover:underline"
             on:click={() => toggleExpanded(website.id, "website", website)}
           >
             {formatWebsiteName(website)}
@@ -805,21 +838,28 @@
           {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
           <div class="flex-grow"></div>
           {#if hasFailures}
-            <span class="rounded-full border px-3 py-1 text-sm border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300">
+            <span
+              class="rounded-full border border-orange-300 bg-orange-50 px-3 py-1 text-sm text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300"
+            >
               {m.pages_failed({ count: pagesFailed })}
             </span>
           {/if}
           {#if pagesCrawled && pagesCrawled > 0}
-            <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+            <span
+              class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+            >
               {m.pageCount({ count: pagesCrawled })}
             </span>
           {/if}
-          <Button variant="destructive" padding="icon" on:click={() => {
-            selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
-            if ($openPersonal) inputPersonalEl?.focus();
-            if ($openOrg)      inputOrgEl?.focus();
-            emitChange();
-          }}><IconTrash /></Button>
+          <Button
+            variant="destructive"
+            padding="icon"
+            on:click={() => {
+              selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
+              if ($openPersonal) inputPersonalEl?.focus();
+              if ($openOrg) inputOrgEl?.focus();
+            }}><IconTrash /></Button
+          >
         </div>
         {#if isExpanded}
           <div class="blob-list">
@@ -829,7 +869,9 @@
               {#each blobs as blob (blob.id)}
                 <BlobPreview {blob} let:showBlob>
                   <button class="blob-item blob-item-clickable" on:click={showBlob}>
-                    <span class="blob-title truncate">{blob.metadata?.title || blob.metadata?.url || "Untitled"}</span>
+                    <span class="blob-title truncate"
+                      >{blob.metadata?.title || blob.metadata?.url || "Untitled"}</span
+                    >
                     {#if blob.metadata?.size}
                       <span class="blob-size text-muted">{formatBlobSize(blob.metadata.size)}</span>
                     {/if}
@@ -846,7 +888,9 @@
                   >
                     {m.previous()}
                   </Button>
-                  <span class="text-muted text-sm">{m.page_x_of_y({ x: currentPage, y: totalPages })}</span>
+                  <span class="text-muted text-sm"
+                    >{m.page_x_of_y({ x: currentPage, y: totalPages })}</span
+                  >
                   <Button
                     variant="simple"
                     padding="text"
@@ -884,24 +928,30 @@
               {/if}
             </button>
             {#if isItemModelEnabled}
-              <IntegrationVendorIcon size="sm" type={wrapper.integration_type}/>
+              <IntegrationVendorIcon size="sm" type={wrapper.integration_type} />
             {:else}
               <IconCancel />
             {/if}
             <span class="truncate px-2">{wrapper.name}</span>
             <div class="flex items-center gap-2">
               {#each getWrapperCountBadges(wrapper.items) as badge, index (`selected-personal-${wrapper.id}-${index}`)}
-                <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                <span
+                  class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+                >
                   {badge}
                 </span>
               {/each}
             </div>
             {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
             <div class="flex-grow"></div>
-            <Button variant="destructive" padding="icon" on:click={() => {
-              removeIntegrationKnowledgeItemsByIds(wrapper.items.map((item) => item.id));
-              focusOpenInput();
-            }}><IconTrash /></Button>
+            <Button
+              variant="destructive"
+              padding="icon"
+              on:click={() => {
+                removeIntegrationKnowledgeItemsByIds(wrapper.items.map((item) => item.id));
+                focusOpenInput();
+              }}><IconTrash /></Button
+            >
           </div>
           {#if isExpanded}
             <div class="blob-list">
@@ -909,14 +959,16 @@
                 <div class="blob-item">
                   <span class="flex min-w-0 flex-1 items-center gap-2">
                     {#if isWrapperFolderItem(wrapperItem)}
-                      <IconFolder class="w-4 h-4 flex-shrink-0 text-secondary" />
+                      <IconFolder class="text-secondary h-4 w-4 flex-shrink-0" />
                     {:else}
-                      <IconFile class="w-4 h-4 flex-shrink-0 text-secondary" />
+                      <IconFile class="text-secondary h-4 w-4 flex-shrink-0" />
                     {/if}
                     <span class="blob-title truncate">{wrapperItem.name}</span>
                   </span>
                   {#if wrapperItem.folder_path}
-                    <span class="blob-size text-muted truncate max-w-[50%]">{wrapperItem.folder_path}</span>
+                    <span class="blob-size text-muted max-w-[50%] truncate"
+                      >{wrapperItem.folder_path}</span
+                    >
                   {/if}
                 </div>
               {/each}
@@ -928,17 +980,21 @@
         {@const isItemModelEnabled = enabledModels.includes(knowledge.embedding_model.id)}
         <div class="knowledge-item">
           {#if isItemModelEnabled}
-            <IntegrationVendorIcon size="sm" type={knowledge.integration_type}/>
+            <IntegrationVendorIcon size="sm" type={knowledge.integration_type} />
           {:else}
             <IconCancel />
           {/if}
           <span class="truncate px-2">{knowledge.name}</span>
           {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
           <div class="flex-grow"></div>
-          <Button variant="destructive" padding="icon" on:click={() => {
-            removeIntegrationKnowledgeItemsByIds([knowledge.id]);
-            focusOpenInput();
-          }}><IconTrash /></Button>
+          <Button
+            variant="destructive"
+            padding="icon"
+            on:click={() => {
+              removeIntegrationKnowledgeItemsByIds([knowledge.id]);
+              focusOpenInput();
+            }}><IconTrash /></Button
+          >
         </div>
       {/if}
     {/each}
@@ -947,277 +1003,318 @@
 
 {#if originMode !== "personal"}
   {#if shouldRenderOrgSelectedSection}
-  <section class="knowledge-selected">
-    {#each selectedCollectionsOrg as collection (`group:${collection.id}`)}
-      {@const isItemModelEnabled = enabledModels.includes(collection.embedding_model.id)}
-      {@const isExpanded = expandedItems.has(collection.id)}
-      {@const isLoading = loadingBlobs.has(collection.id)}
-      {@const allBlobs = blobCache.get(collection.id)}
-      {@const blobs = getPaginatedBlobs(collection.id, allBlobs)}
-      {@const totalPages = getTotalPages(allBlobs)}
-      {@const currentPage = currentPages.get(collection.id) || 1}
-      <div class="knowledge-item-container">
-        <div class="knowledge-item" class:text-negative-default={!isItemModelEnabled}>
-          {#if collection.metadata.num_info_blobs > 0}
-            <button
-              class="expand-button"
-              on:click={() => toggleExpanded(collection.id, "collection", collection)}
-              aria-label={isExpanded ? "Collapse" : "Expand"}
-            >
-              {#if isExpanded}
-                <IconChevronDown />
-              {:else}
-                <IconChevronRight />
-              {/if}
-            </button>
-          {:else}
-            <div class="expand-button-placeholder"></div>
-          {/if}
-          {#if isItemModelEnabled}<IconCollections />{:else}<IconCancel />{/if}
-          <button
-            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
-            on:click={() => toggleExpanded(collection.id, "collection", collection)}
-          >
-            {collection.name}
-          </button>
-          {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
-          <div class="flex-grow"></div>
-          {#if collection.metadata.num_info_blobs > 0}
-            <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-              {collection.metadata.num_info_blobs} {m.resource_files()}
-            </span>
-          {:else}
-            <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-              {m.empty()}
-            </span>
-          {/if}
-          <Button variant="destructive" padding="icon" on:click={() => {
-            selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);
-            if ($openPersonal) inputPersonalEl?.focus();
-            if ($openOrg)      inputOrgEl?.focus();
-            emitChange();
-          }}><IconTrash /></Button>
-        </div>
-        {#if isExpanded}
-          <div class="blob-list">
-            {#if isLoading}
-              <div class="blob-item text-muted">{m.loading()}</div>
-            {:else if blobs && blobs.length > 0}
-              {#each blobs as blob (blob.id)}
-                <BlobPreview {blob} let:showBlob>
-                  <button class="blob-item blob-item-clickable" on:click={showBlob}>
-                    <span class="blob-title truncate">{blob.metadata?.title || blob.metadata?.url || "Untitled"}</span>
-                    {#if blob.metadata?.size}
-                      <span class="blob-size text-muted">{formatBlobSize(blob.metadata.size)}</span>
-                    {/if}
-                  </button>
-                </BlobPreview>
-              {/each}
-              {#if totalPages > 1}
-                <div class="pagination">
-                  <Button
-                    variant="simple"
-                    padding="text"
-                    disabled={currentPage === 1}
-                    on:click={() => changePage(collection.id, currentPage - 1)}
-                  >
-                    {m.previous()}
-                  </Button>
-                  <span class="text-muted text-sm">{m.page_x_of_y({ x: currentPage, y: totalPages })}</span>
-                  <Button
-                    variant="simple"
-                    padding="text"
-                    disabled={currentPage === totalPages}
-                    on:click={() => changePage(collection.id, currentPage + 1)}
-                  >
-                    {m.next()}
-                  </Button>
-                </div>
-              {/if}
-            {:else}
-              <div class="blob-item text-muted">No files found</div>
-            {/if}
-          </div>
-        {/if}
-      </div>
-    {/each}
-
-    {#each selectedWebsitesOrg as website (`website:${website.id}`)}
-      {@const isItemModelEnabled = enabledModels.includes(website.embedding_model.id)}
-      {@const isExpanded = expandedItems.has(website.id)}
-      {@const isLoading = loadingBlobs.has(website.id)}
-      {@const allBlobs = blobCache.get(website.id)}
-      {@const blobs = getPaginatedBlobs(website.id, allBlobs)}
-      {@const totalPages = getTotalPages(allBlobs)}
-      {@const currentPage = currentPages.get(website.id) || 1}
-      {@const pagesCrawled = website.latest_crawl?.pages_crawled}
-      {@const pagesFailed = website.latest_crawl?.pages_failed ?? 0}
-      {@const hasFailures = pagesFailed > 0}
-      <div class="knowledge-item-container">
-        <div class="knowledge-item" class:knowledge-item-warning={hasFailures}>
-          {#if pagesCrawled && pagesCrawled > 0}
-            <button
-              class="expand-button"
-              on:click={() => toggleExpanded(website.id, "website", website)}
-              aria-label={isExpanded ? "Collapse" : "Expand"}
-            >
-              {#if isExpanded}
-                <IconChevronDown />
-              {:else}
-                <IconChevronRight />
-              {/if}
-            </button>
-          {:else}
-            <div class="expand-button-placeholder"></div>
-          {/if}
-          {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
-          <button
-            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
-            on:click={() => toggleExpanded(website.id, "website", website)}
-          >
-            {formatWebsiteName(website)}
-          </button>
-          {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
-          <div class="flex-grow"></div>
-          {#if hasFailures}
-            <span class="rounded-full border px-3 py-1 text-sm border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300">
-              {m.pages_failed({ count: pagesFailed })}
-            </span>
-          {/if}
-          {#if pagesCrawled && pagesCrawled > 0}
-            <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-              {m.pageCount({ count: pagesCrawled })}
-            </span>
-          {/if}
-          <Button variant="destructive" padding="icon" on:click={() => {
-            selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
-            if ($openPersonal) inputPersonalEl?.focus();
-            if ($openOrg)      inputOrgEl?.focus();
-            emitChange();
-          }}><IconTrash /></Button>
-        </div>
-        {#if isExpanded}
-          <div class="blob-list">
-            {#if isLoading}
-              <div class="blob-item text-muted">{m.loading()}</div>
-            {:else if blobs && blobs.length > 0}
-              {#each blobs as blob (blob.id)}
-                <BlobPreview {blob} let:showBlob>
-                  <button class="blob-item blob-item-clickable" on:click={showBlob}>
-                    <span class="blob-title truncate">{blob.metadata?.title || blob.metadata?.url || "Untitled"}</span>
-                    {#if blob.metadata?.size}
-                      <span class="blob-size text-muted">{formatBlobSize(blob.metadata.size)}</span>
-                    {/if}
-                  </button>
-                </BlobPreview>
-              {/each}
-              {#if totalPages > 1}
-                <div class="pagination">
-                  <Button
-                    variant="simple"
-                    padding="text"
-                    disabled={currentPage === 1}
-                    on:click={() => changePage(website.id, currentPage - 1)}
-                  >
-                    {m.previous()}
-                  </Button>
-                  <span class="text-muted text-sm">{m.page_x_of_y({ x: currentPage, y: totalPages })}</span>
-                  <Button
-                    variant="simple"
-                    padding="text"
-                    disabled={currentPage === totalPages}
-                    on:click={() => changePage(website.id, currentPage + 1)}
-                  >
-                    {m.next()}
-                  </Button>
-                </div>
-              {/if}
-            {:else}
-              <div class="blob-item text-muted">{m.noPagesFound()}</div>
-            {/if}
-          </div>
-        {/if}
-      </div>
-    {/each}
-
-    {#each selectedIntegrationDisplayOrg as selectedEntry (selectedEntry.key)}
-      {#if selectedEntry.type === "wrapper"}
-        {@const wrapper = selectedEntry.wrapper}
-        {@const isItemModelEnabled = enabledModels.includes(wrapper.items[0]?.embedding_model.id)}
-        {@const isExpanded = expandedWrapperSelections.has(wrapper.id)}
+    <section class="knowledge-selected">
+      {#each selectedCollectionsOrg as collection (`group:${collection.id}`)}
+        {@const isItemModelEnabled = enabledModels.includes(collection.embedding_model.id)}
+        {@const isExpanded = expandedItems.has(collection.id)}
+        {@const isLoading = loadingBlobs.has(collection.id)}
+        {@const allBlobs = blobCache.get(collection.id)}
+        {@const blobs = getPaginatedBlobs(collection.id, allBlobs)}
+        {@const totalPages = getTotalPages(allBlobs)}
+        {@const currentPage = currentPages.get(collection.id) || 1}
         <div class="knowledge-item-container">
-          <div class="knowledge-item">
-            <button
-              class="expand-button"
-              on:click={(event) => toggleWrapperSelectionExpanded(wrapper.id, event)}
-              aria-label={isExpanded ? "Collapse" : "Expand"}
-            >
-              {#if isExpanded}
-                <IconChevronDown />
-              {:else}
-                <IconChevronRight />
-              {/if}
-            </button>
-            {#if isItemModelEnabled}
-              <IntegrationVendorIcon size="sm" type={wrapper.integration_type}/>
+          <div class="knowledge-item" class:text-negative-default={!isItemModelEnabled}>
+            {#if collection.metadata.num_info_blobs > 0}
+              <button
+                class="expand-button"
+                on:click={() => toggleExpanded(collection.id, "collection", collection)}
+                aria-label={isExpanded ? "Collapse" : "Expand"}
+              >
+                {#if isExpanded}
+                  <IconChevronDown />
+                {:else}
+                  <IconChevronRight />
+                {/if}
+              </button>
             {:else}
-              <IconCancel />
+              <div class="expand-button-placeholder"></div>
             {/if}
-            <span class="truncate px-2">{wrapper.name}</span>
-            <div class="flex items-center gap-2">
-              {#each getWrapperCountBadges(wrapper.items) as badge, index (`selected-org-${wrapper.id}-${index}`)}
-                <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-                  {badge}
-                </span>
-              {/each}
-            </div>
+            {#if isItemModelEnabled}<IconCollections />{:else}<IconCancel />{/if}
+            <button
+              class="flex-grow cursor-pointer truncate border-none bg-transparent px-2 text-left hover:underline"
+              on:click={() => toggleExpanded(collection.id, "collection", collection)}
+            >
+              {collection.name}
+            </button>
             {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
             <div class="flex-grow"></div>
-            <Button variant="destructive" padding="icon" on:click={() => {
-              removeIntegrationKnowledgeItemsByIds(wrapper.items.map((item) => item.id));
-              focusOpenInput();
-            }}><IconTrash /></Button>
+            {#if collection.metadata.num_info_blobs > 0}
+              <span
+                class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+              >
+                {collection.metadata.num_info_blobs}
+                {m.resource_files()}
+              </span>
+            {:else}
+              <span
+                class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+              >
+                {m.empty()}
+              </span>
+            {/if}
+            <Button
+              variant="destructive"
+              padding="icon"
+              on:click={() => {
+                selectedCollections = selectedCollections?.filter(
+                  (item) => item.id !== collection.id
+                );
+                if ($openPersonal) inputPersonalEl?.focus();
+                if ($openOrg) inputOrgEl?.focus();
+              }}><IconTrash /></Button
+            >
           </div>
           {#if isExpanded}
             <div class="blob-list">
-              {#each getSortedWrapperItems(wrapper.items) as wrapperItem (wrapperItem.id)}
-                <div class="blob-item">
-                  <span class="flex min-w-0 flex-1 items-center gap-2">
-                    {#if isWrapperFolderItem(wrapperItem)}
-                      <IconFolder class="w-4 h-4 flex-shrink-0 text-secondary" />
-                    {:else}
-                      <IconFile class="w-4 h-4 flex-shrink-0 text-secondary" />
-                    {/if}
-                    <span class="blob-title truncate">{wrapperItem.name}</span>
-                  </span>
-                  {#if wrapperItem.folder_path}
-                    <span class="blob-size text-muted truncate max-w-[50%]">{wrapperItem.folder_path}</span>
-                  {/if}
-                </div>
-              {/each}
+              {#if isLoading}
+                <div class="blob-item text-muted">{m.loading()}</div>
+              {:else if blobs && blobs.length > 0}
+                {#each blobs as blob (blob.id)}
+                  <BlobPreview {blob} let:showBlob>
+                    <button class="blob-item blob-item-clickable" on:click={showBlob}>
+                      <span class="blob-title truncate"
+                        >{blob.metadata?.title || blob.metadata?.url || "Untitled"}</span
+                      >
+                      {#if blob.metadata?.size}
+                        <span class="blob-size text-muted"
+                          >{formatBlobSize(blob.metadata.size)}</span
+                        >
+                      {/if}
+                    </button>
+                  </BlobPreview>
+                {/each}
+                {#if totalPages > 1}
+                  <div class="pagination">
+                    <Button
+                      variant="simple"
+                      padding="text"
+                      disabled={currentPage === 1}
+                      on:click={() => changePage(collection.id, currentPage - 1)}
+                    >
+                      {m.previous()}
+                    </Button>
+                    <span class="text-muted text-sm"
+                      >{m.page_x_of_y({ x: currentPage, y: totalPages })}</span
+                    >
+                    <Button
+                      variant="simple"
+                      padding="text"
+                      disabled={currentPage === totalPages}
+                      on:click={() => changePage(collection.id, currentPage + 1)}
+                    >
+                      {m.next()}
+                    </Button>
+                  </div>
+                {/if}
+              {:else}
+                <div class="blob-item text-muted">No files found</div>
+              {/if}
             </div>
           {/if}
         </div>
-      {:else}
-        {@const knowledge = selectedEntry.knowledge}
-        {@const isItemModelEnabled = enabledModels.includes(knowledge.embedding_model.id)}
-        <div class="knowledge-item">
-          {#if isItemModelEnabled}
-            <IntegrationVendorIcon size="sm" type={knowledge.integration_type}/>
-          {:else}
-            <IconCancel />
+      {/each}
+
+      {#each selectedWebsitesOrg as website (`website:${website.id}`)}
+        {@const isItemModelEnabled = enabledModels.includes(website.embedding_model.id)}
+        {@const isExpanded = expandedItems.has(website.id)}
+        {@const isLoading = loadingBlobs.has(website.id)}
+        {@const allBlobs = blobCache.get(website.id)}
+        {@const blobs = getPaginatedBlobs(website.id, allBlobs)}
+        {@const totalPages = getTotalPages(allBlobs)}
+        {@const currentPage = currentPages.get(website.id) || 1}
+        {@const pagesCrawled = website.latest_crawl?.pages_crawled}
+        {@const pagesFailed = website.latest_crawl?.pages_failed ?? 0}
+        {@const hasFailures = pagesFailed > 0}
+        <div class="knowledge-item-container">
+          <div class="knowledge-item" class:knowledge-item-warning={hasFailures}>
+            {#if pagesCrawled && pagesCrawled > 0}
+              <button
+                class="expand-button"
+                on:click={() => toggleExpanded(website.id, "website", website)}
+                aria-label={isExpanded ? "Collapse" : "Expand"}
+              >
+                {#if isExpanded}
+                  <IconChevronDown />
+                {:else}
+                  <IconChevronRight />
+                {/if}
+              </button>
+            {:else}
+              <div class="expand-button-placeholder"></div>
+            {/if}
+            {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
+            <button
+              class="flex-grow cursor-pointer truncate border-none bg-transparent px-2 text-left hover:underline"
+              on:click={() => toggleExpanded(website.id, "website", website)}
+            >
+              {formatWebsiteName(website)}
+            </button>
+            {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
+            <div class="flex-grow"></div>
+            {#if hasFailures}
+              <span
+                class="rounded-full border border-orange-300 bg-orange-50 px-3 py-1 text-sm text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300"
+              >
+                {m.pages_failed({ count: pagesFailed })}
+              </span>
+            {/if}
+            {#if pagesCrawled && pagesCrawled > 0}
+              <span
+                class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+              >
+                {m.pageCount({ count: pagesCrawled })}
+              </span>
+            {/if}
+            <Button
+              variant="destructive"
+              padding="icon"
+              on:click={() => {
+                selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
+                if ($openPersonal) inputPersonalEl?.focus();
+                if ($openOrg) inputOrgEl?.focus();
+              }}><IconTrash /></Button
+            >
+          </div>
+          {#if isExpanded}
+            <div class="blob-list">
+              {#if isLoading}
+                <div class="blob-item text-muted">{m.loading()}</div>
+              {:else if blobs && blobs.length > 0}
+                {#each blobs as blob (blob.id)}
+                  <BlobPreview {blob} let:showBlob>
+                    <button class="blob-item blob-item-clickable" on:click={showBlob}>
+                      <span class="blob-title truncate"
+                        >{blob.metadata?.title || blob.metadata?.url || "Untitled"}</span
+                      >
+                      {#if blob.metadata?.size}
+                        <span class="blob-size text-muted"
+                          >{formatBlobSize(blob.metadata.size)}</span
+                        >
+                      {/if}
+                    </button>
+                  </BlobPreview>
+                {/each}
+                {#if totalPages > 1}
+                  <div class="pagination">
+                    <Button
+                      variant="simple"
+                      padding="text"
+                      disabled={currentPage === 1}
+                      on:click={() => changePage(website.id, currentPage - 1)}
+                    >
+                      {m.previous()}
+                    </Button>
+                    <span class="text-muted text-sm"
+                      >{m.page_x_of_y({ x: currentPage, y: totalPages })}</span
+                    >
+                    <Button
+                      variant="simple"
+                      padding="text"
+                      disabled={currentPage === totalPages}
+                      on:click={() => changePage(website.id, currentPage + 1)}
+                    >
+                      {m.next()}
+                    </Button>
+                  </div>
+                {/if}
+              {:else}
+                <div class="blob-item text-muted">{m.noPagesFound()}</div>
+              {/if}
+            </div>
           {/if}
-          <span class="truncate px-2">{knowledge.name}</span>
-          {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
-          <div class="flex-grow"></div>
-          <Button variant="destructive" padding="icon" on:click={() => {
-            removeIntegrationKnowledgeItemsByIds([knowledge.id]);
-            focusOpenInput();
-          }}><IconTrash /></Button>
         </div>
-      {/if}
-    {/each}
-  </section>
+      {/each}
+
+      {#each selectedIntegrationDisplayOrg as selectedEntry (selectedEntry.key)}
+        {#if selectedEntry.type === "wrapper"}
+          {@const wrapper = selectedEntry.wrapper}
+          {@const isItemModelEnabled = enabledModels.includes(wrapper.items[0]?.embedding_model.id)}
+          {@const isExpanded = expandedWrapperSelections.has(wrapper.id)}
+          <div class="knowledge-item-container">
+            <div class="knowledge-item">
+              <button
+                class="expand-button"
+                on:click={(event) => toggleWrapperSelectionExpanded(wrapper.id, event)}
+                aria-label={isExpanded ? "Collapse" : "Expand"}
+              >
+                {#if isExpanded}
+                  <IconChevronDown />
+                {:else}
+                  <IconChevronRight />
+                {/if}
+              </button>
+              {#if isItemModelEnabled}
+                <IntegrationVendorIcon size="sm" type={wrapper.integration_type} />
+              {:else}
+                <IconCancel />
+              {/if}
+              <span class="truncate px-2">{wrapper.name}</span>
+              <div class="flex items-center gap-2">
+                {#each getWrapperCountBadges(wrapper.items) as badge, index (`selected-org-${wrapper.id}-${index}`)}
+                  <span
+                    class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+                  >
+                    {badge}
+                  </span>
+                {/each}
+              </div>
+              {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
+              <div class="flex-grow"></div>
+              <Button
+                variant="destructive"
+                padding="icon"
+                on:click={() => {
+                  removeIntegrationKnowledgeItemsByIds(wrapper.items.map((item) => item.id));
+                  focusOpenInput();
+                }}><IconTrash /></Button
+              >
+            </div>
+            {#if isExpanded}
+              <div class="blob-list">
+                {#each getSortedWrapperItems(wrapper.items) as wrapperItem (wrapperItem.id)}
+                  <div class="blob-item">
+                    <span class="flex min-w-0 flex-1 items-center gap-2">
+                      {#if isWrapperFolderItem(wrapperItem)}
+                        <IconFolder class="text-secondary h-4 w-4 flex-shrink-0" />
+                      {:else}
+                        <IconFile class="text-secondary h-4 w-4 flex-shrink-0" />
+                      {/if}
+                      <span class="blob-title truncate">{wrapperItem.name}</span>
+                    </span>
+                    {#if wrapperItem.folder_path}
+                      <span class="blob-size text-muted max-w-[50%] truncate"
+                        >{wrapperItem.folder_path}</span
+                      >
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {:else}
+          {@const knowledge = selectedEntry.knowledge}
+          {@const isItemModelEnabled = enabledModels.includes(knowledge.embedding_model.id)}
+          <div class="knowledge-item">
+            {#if isItemModelEnabled}
+              <IntegrationVendorIcon size="sm" type={knowledge.integration_type} />
+            {:else}
+              <IconCancel />
+            {/if}
+            <span class="truncate px-2">{knowledge.name}</span>
+            {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
+            <div class="flex-grow"></div>
+            <Button
+              variant="destructive"
+              padding="icon"
+              on:click={() => {
+                removeIntegrationKnowledgeItemsByIds([knowledge.id]);
+                focusOpenInput();
+              }}><IconTrash /></Button
+            >
+          </div>
+        {/if}
+      {/each}
+    </section>
   {/if}
 {/if}
 
@@ -1232,7 +1329,10 @@
           {...$inputPersonal}
           use:inputPersonal
         />
-        <label for="knowledgeFilterPersonal" class="text-muted pointer-events-none absolute top-0 bottom-0 left-3 flex items-center text-lg">
+        <label
+          for="knowledgeFilterPersonal"
+          class="text-muted pointer-events-none absolute top-0 bottom-0 left-3 flex items-center text-lg"
+        >
           Filter:
         </label>
       </div>
@@ -1252,21 +1352,31 @@
       </button>
     {/if}
 
-    <div class="border-default bg-primary z-20 flex flex-col overflow-hidden overflow-y-auto rounded-lg border shadow-xl"
-        class:inDialog
-        {...$menuPersonal}
-        use:menuPersonal>
+    <div
+      class="border-default bg-primary z-20 flex flex-col overflow-hidden overflow-y-auto rounded-lg border shadow-xl"
+      class:inDialog
+      {...$menuPersonal}
+      use:menuPersonal
+    >
       {#if partitionedSectionsPersonal.length > 0}
         {#each partitionedSectionsPersonal as [key, section] (key)}
-          <div {...$groupPersonal(section.name + '-Personal')} use:groupPersonal class="flex w-full flex-col">
-            <div class="bg-frosted-glass-secondary border-default sticky top-0 flex items-center gap-3 border-b px-4 py-2 font-mono text-sm"
-                {...$groupLabelPersonal(section.name + '-Personal')}
-                use:groupLabelPersonal>
+          <div
+            {...$groupPersonal(section.name + "-Personal")}
+            use:groupPersonal
+            class="flex w-full flex-col"
+          >
+            <div
+              class="bg-frosted-glass-secondary border-default sticky top-0 flex items-center gap-3 border-b px-4 py-2 font-mono text-sm"
+              {...$groupLabelPersonal(section.name + "-Personal")}
+              use:groupLabelPersonal
+            >
               <span>
                 {#if availableKnowledge.showHeaders}{section.name}{:else}{m.select_knowledge_source()}{/if}
               </span>
               <span class="flex-grow"></span>
-              <span class="rounded-full border px-2 py-0.5 text-xs border-label-default bg-label-dimmer text-label-stronger label-blue">
+              <span
+                class="border-label-default bg-label-dimmer text-label-stronger label-blue rounded-full border px-2 py-0.5 text-xs"
+              >
                 {m.personal()}
               </span>
             </div>
@@ -1279,18 +1389,27 @@
               <p class="knowledge-message">{m.no_more_sources()}</p>
             {:else}
               {#each section.groups as collection (`group:${collection.id}`)}
-                <div class="knowledge-item cursor-pointer" {...$optionPersonal({ value: { collection } })} use:optionPersonal>
+                <div
+                  class="knowledge-item cursor-pointer"
+                  {...$optionPersonal({ value: { collection } })}
+                  use:optionPersonal
+                >
                   <div class="flex max-w-full flex-grow items-center gap-3">
                     <IconCollections />
                     <span class="truncate">{collection.name}</span>
                   </div>
                   <div class="flex-grow"></div>
                   {#if collection.metadata.num_info_blobs > 0}
-                    <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-                      {collection.metadata.num_info_blobs} {m.resource_files()}
+                    <span
+                      class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+                    >
+                      {collection.metadata.num_info_blobs}
+                      {m.resource_files()}
                     </span>
                   {:else}
-                    <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                    <span
+                      class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+                    >
                       {m.empty()}
                     </span>
                   {/if}
@@ -1299,13 +1418,20 @@
 
               {#each section.websites as website (`website:${website.id}`)}
                 {@const wPagesFailed = website.latest_crawl?.pages_failed ?? 0}
-                <div class="knowledge-item cursor-pointer" class:knowledge-item-warning={wPagesFailed > 0} {...$optionPersonal({ value: { website } })} use:optionPersonal>
+                <div
+                  class="knowledge-item cursor-pointer"
+                  class:knowledge-item-warning={wPagesFailed > 0}
+                  {...$optionPersonal({ value: { website } })}
+                  use:optionPersonal
+                >
                   <div class="flex max-w-full flex-grow items-center gap-3">
                     <IconWeb />
                     <span class="truncate">{formatWebsiteName(website)}</span>
                   </div>
                   {#if wPagesFailed > 0}
-                    <span class="rounded-full border px-3 py-1 text-sm border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300">
+                    <span
+                      class="rounded-full border border-orange-300 bg-orange-50 px-3 py-1 text-sm text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300"
+                    >
                       {m.pages_failed({ count: wPagesFailed })}
                     </span>
                   {/if}
@@ -1314,12 +1440,21 @@
 
               {#each getIntegrationKnowledgeOptions(section.integrationKnowledge) as integrationOption (integrationOption.key)}
                 {#if integrationOption.type === "wrapper"}
-                  {@const isWrapperExpanded = expandedWrapperOptions.has(integrationOption.wrapper.id)}
+                  {@const isWrapperExpanded = expandedWrapperOptions.has(
+                    integrationOption.wrapper.id
+                  )}
                   <div class="knowledge-item-container">
-                    <div class="knowledge-item cursor-pointer" {...$optionPersonal({ value: { integrationWrapper: integrationOption.wrapper } })} use:optionPersonal>
+                    <div
+                      class="knowledge-item cursor-pointer"
+                      {...$optionPersonal({
+                        value: { integrationWrapper: integrationOption.wrapper }
+                      })}
+                      use:optionPersonal
+                    >
                       <button
                         class="expand-button"
-                        on:click={(event) => toggleWrapperOptionExpanded(integrationOption.wrapper.id, event)}
+                        on:click={(event) =>
+                          toggleWrapperOptionExpanded(integrationOption.wrapper.id, event)}
                         aria-label={isWrapperExpanded ? "Collapse" : "Expand"}
                       >
                         {#if isWrapperExpanded}
@@ -1329,13 +1464,18 @@
                         {/if}
                       </button>
                       <div class="flex max-w-full flex-grow items-center gap-3">
-                        <IntegrationVendorIcon size="sm" type={integrationOption.wrapper.integration_type} />
+                        <IntegrationVendorIcon
+                          size="sm"
+                          type={integrationOption.wrapper.integration_type}
+                        />
                         <span class="truncate">{integrationOption.wrapper.name}</span>
                       </div>
                       <div class="flex-grow"></div>
                       <div class="flex items-center gap-2">
                         {#each getWrapperCountBadges(integrationOption.wrapper.items) as badge, index (`option-personal-${integrationOption.wrapper.id}-${index}`)}
-                          <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                          <span
+                            class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+                          >
                             {badge}
                           </span>
                         {/each}
@@ -1347,14 +1487,16 @@
                           <div class="blob-item">
                             <span class="flex min-w-0 flex-1 items-center gap-2">
                               {#if isWrapperFolderItem(wrapperItem)}
-                                <IconFolder class="w-4 h-4 flex-shrink-0 text-secondary" />
+                                <IconFolder class="text-secondary h-4 w-4 flex-shrink-0" />
                               {:else}
-                                <IconFile class="w-4 h-4 flex-shrink-0 text-secondary" />
+                                <IconFile class="text-secondary h-4 w-4 flex-shrink-0" />
                               {/if}
                               <span class="blob-title truncate">{wrapperItem.name}</span>
                             </span>
                             {#if wrapperItem.folder_path}
-                              <span class="blob-size text-muted truncate max-w-[50%]">{wrapperItem.folder_path}</span>
+                              <span class="blob-size text-muted max-w-[50%] truncate"
+                                >{wrapperItem.folder_path}</span
+                              >
                             {/if}
                           </div>
                         {/each}
@@ -1362,9 +1504,18 @@
                     {/if}
                   </div>
                 {:else}
-                  <div class="knowledge-item cursor-pointer" {...$optionPersonal({ value: { integrationKnowledge: integrationOption.knowledge } })} use:optionPersonal>
+                  <div
+                    class="knowledge-item cursor-pointer"
+                    {...$optionPersonal({
+                      value: { integrationKnowledge: integrationOption.knowledge }
+                    })}
+                    use:optionPersonal
+                  >
                     <div class="flex max-w-full flex-grow items-center gap-3">
-                      <IntegrationVendorIcon size="sm" type={integrationOption.knowledge.integration_type} />
+                      <IntegrationVendorIcon
+                        size="sm"
+                        type={integrationOption.knowledge.integration_type}
+                      />
                       <span class="truncate">{integrationOption.knowledge.name}</span>
                     </div>
                   </div>
@@ -1391,7 +1542,10 @@
           {...$inputOrg}
           use:inputOrg
         />
-        <label for="knowledgeFilterOrg" class="text-muted pointer-events-none absolute top-0 bottom-0 left-3 flex items-center text-lg">
+        <label
+          for="knowledgeFilterOrg"
+          class="text-muted pointer-events-none absolute top-0 bottom-0 left-3 flex items-center text-lg"
+        >
           Filter:
         </label>
       </div>
@@ -1411,21 +1565,31 @@
       </button>
     {/if}
 
-    <div class="border-default bg-primary z-20 flex flex-col overflow-hidden overflow-y-auto rounded-lg border shadow-xl"
-        class:inDialog
-        {...$menuOrg}
-        use:menuOrg>
+    <div
+      class="border-default bg-primary z-20 flex flex-col overflow-hidden overflow-y-auto rounded-lg border shadow-xl"
+      class:inDialog
+      {...$menuOrg}
+      use:menuOrg
+    >
       {#if partitionedSectionsOrg.length > 0}
         {#each partitionedSectionsOrg as [key, section] (key)}
-          <div {...$groupOrg(section.name + '-Organization')} use:groupOrg class="flex w-full flex-col">
-            <div class="bg-frosted-glass-secondary border-default sticky top-0 flex items-center gap-3 border-b px-4 py-2 font-mono text-sm"
-                {...$groupLabelOrg(section.name + '-Organization')}
-                use:groupLabelOrg>
+          <div
+            {...$groupOrg(section.name + "-Organization")}
+            use:groupOrg
+            class="flex w-full flex-col"
+          >
+            <div
+              class="bg-frosted-glass-secondary border-default sticky top-0 flex items-center gap-3 border-b px-4 py-2 font-mono text-sm"
+              {...$groupLabelOrg(section.name + "-Organization")}
+              use:groupLabelOrg
+            >
               <span>
                 {#if availableKnowledge.showHeaders}{section.name}{:else}{m.select_knowledge_source()}{/if}
               </span>
               <span class="flex-grow"></span>
-              <span class="rounded-full border px-2 py-0.5 text-xs border-label-default bg-label-dimmer text-label-stronger label-warning">
+              <span
+                class="border-label-default bg-label-dimmer text-label-stronger label-warning rounded-full border px-2 py-0.5 text-xs"
+              >
                 {m.organization()}
               </span>
             </div>
@@ -1438,18 +1602,27 @@
               <p class="knowledge-message">{m.no_more_sources()}</p>
             {:else}
               {#each section.groups as collection (`group:${collection.id}`)}
-                <div class="knowledge-item cursor-pointer" {...$optionOrg({ value: { collection } })} use:optionOrg>
+                <div
+                  class="knowledge-item cursor-pointer"
+                  {...$optionOrg({ value: { collection } })}
+                  use:optionOrg
+                >
                   <div class="flex max-w-full flex-grow items-center gap-3">
                     <IconCollections />
                     <span class="truncate">{collection.name}</span>
                   </div>
                   <div class="flex-grow"></div>
                   {#if collection.metadata.num_info_blobs > 0}
-                    <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-                      {collection.metadata.num_info_blobs} {m.resource_files()}
+                    <span
+                      class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+                    >
+                      {collection.metadata.num_info_blobs}
+                      {m.resource_files()}
                     </span>
                   {:else}
-                    <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                    <span
+                      class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+                    >
                       {m.empty()}
                     </span>
                   {/if}
@@ -1458,13 +1631,20 @@
 
               {#each section.websites as website (`website:${website.id}`)}
                 {@const wPagesFailed = website.latest_crawl?.pages_failed ?? 0}
-                <div class="knowledge-item cursor-pointer" class:knowledge-item-warning={wPagesFailed > 0} {...$optionOrg({ value: { website } })} use:optionOrg>
+                <div
+                  class="knowledge-item cursor-pointer"
+                  class:knowledge-item-warning={wPagesFailed > 0}
+                  {...$optionOrg({ value: { website } })}
+                  use:optionOrg
+                >
                   <div class="flex max-w-full flex-grow items-center gap-3">
                     <IconWeb />
                     <span class="truncate">{formatWebsiteName(website)}</span>
                   </div>
                   {#if wPagesFailed > 0}
-                    <span class="rounded-full border px-3 py-1 text-sm border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300">
+                    <span
+                      class="rounded-full border border-orange-300 bg-orange-50 px-3 py-1 text-sm text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300"
+                    >
                       {m.pages_failed({ count: wPagesFailed })}
                     </span>
                   {/if}
@@ -1473,12 +1653,19 @@
 
               {#each getIntegrationKnowledgeOptions(section.integrationKnowledge) as integrationOption (integrationOption.key)}
                 {#if integrationOption.type === "wrapper"}
-                  {@const isWrapperExpanded = expandedWrapperOptions.has(integrationOption.wrapper.id)}
+                  {@const isWrapperExpanded = expandedWrapperOptions.has(
+                    integrationOption.wrapper.id
+                  )}
                   <div class="knowledge-item-container">
-                    <div class="knowledge-item cursor-pointer" {...$optionOrg({ value: { integrationWrapper: integrationOption.wrapper } })} use:optionOrg>
+                    <div
+                      class="knowledge-item cursor-pointer"
+                      {...$optionOrg({ value: { integrationWrapper: integrationOption.wrapper } })}
+                      use:optionOrg
+                    >
                       <button
                         class="expand-button"
-                        on:click={(event) => toggleWrapperOptionExpanded(integrationOption.wrapper.id, event)}
+                        on:click={(event) =>
+                          toggleWrapperOptionExpanded(integrationOption.wrapper.id, event)}
                         aria-label={isWrapperExpanded ? "Collapse" : "Expand"}
                       >
                         {#if isWrapperExpanded}
@@ -1488,13 +1675,18 @@
                         {/if}
                       </button>
                       <div class="flex max-w-full flex-grow items-center gap-3">
-                        <IntegrationVendorIcon size="sm" type={integrationOption.wrapper.integration_type} />
+                        <IntegrationVendorIcon
+                          size="sm"
+                          type={integrationOption.wrapper.integration_type}
+                        />
                         <span class="truncate">{integrationOption.wrapper.name}</span>
                       </div>
                       <div class="flex-grow"></div>
                       <div class="flex items-center gap-2">
                         {#each getWrapperCountBadges(integrationOption.wrapper.items) as badge, index (`option-org-${integrationOption.wrapper.id}-${index}`)}
-                          <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                          <span
+                            class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm"
+                          >
                             {badge}
                           </span>
                         {/each}
@@ -1506,14 +1698,16 @@
                           <div class="blob-item">
                             <span class="flex min-w-0 flex-1 items-center gap-2">
                               {#if isWrapperFolderItem(wrapperItem)}
-                                <IconFolder class="w-4 h-4 flex-shrink-0 text-secondary" />
+                                <IconFolder class="text-secondary h-4 w-4 flex-shrink-0" />
                               {:else}
-                                <IconFile class="w-4 h-4 flex-shrink-0 text-secondary" />
+                                <IconFile class="text-secondary h-4 w-4 flex-shrink-0" />
                               {/if}
                               <span class="blob-title truncate">{wrapperItem.name}</span>
                             </span>
                             {#if wrapperItem.folder_path}
-                              <span class="blob-size text-muted truncate max-w-[50%]">{wrapperItem.folder_path}</span>
+                              <span class="blob-size text-muted max-w-[50%] truncate"
+                                >{wrapperItem.folder_path}</span
+                              >
                             {/if}
                           </div>
                         {/each}
@@ -1521,9 +1715,18 @@
                     {/if}
                   </div>
                 {:else}
-                  <div class="knowledge-item cursor-pointer" {...$optionOrg({ value: { integrationKnowledge: integrationOption.knowledge } })} use:optionOrg>
+                  <div
+                    class="knowledge-item cursor-pointer"
+                    {...$optionOrg({
+                      value: { integrationKnowledge: integrationOption.knowledge }
+                    })}
+                    use:optionOrg
+                  >
                     <div class="flex max-w-full flex-grow items-center gap-3">
-                      <IntegrationVendorIcon size="sm" type={integrationOption.knowledge.integration_type} />
+                      <IntegrationVendorIcon
+                        size="sm"
+                        type={integrationOption.knowledge.integration_type}
+                      />
                       <span class="truncate">{integrationOption.knowledge.name}</span>
                     </div>
                   </div>
@@ -1537,7 +1740,7 @@
       {/if}
     </div>
   </section>
- {/if}
+{/if}
 
 <style lang="postcss">
   @reference "@intric/ui/styles";
@@ -1567,7 +1770,8 @@
     @apply opacity-30 hover:bg-transparent;
   }
 
-  .knowledge-section, .knowledge-selected {
+  .knowledge-section,
+  .knowledge-selected {
     @apply mt-6;
   }
 
@@ -1584,7 +1788,7 @@
   }
 
   .expand-button {
-    @apply flex items-center justify-center p-0 bg-transparent border-none cursor-pointer hover:opacity-70 transition-opacity;
+    @apply flex cursor-pointer items-center justify-center border-none bg-transparent p-0 transition-opacity hover:opacity-70;
     width: 24px;
     height: 24px;
   }
@@ -1603,7 +1807,7 @@
   }
 
   .blob-item-clickable {
-    @apply w-full text-left cursor-pointer hover:bg-hover-dimmer transition-colors;
+    @apply hover:bg-hover-dimmer w-full cursor-pointer text-left transition-colors;
   }
 
   .blob-title {
@@ -1615,6 +1819,6 @@
   }
 
   .pagination {
-    @apply flex items-center justify-center gap-3 py-3 border-t border-default;
+    @apply border-default flex items-center justify-center gap-3 border-t py-3;
   }
 </style>

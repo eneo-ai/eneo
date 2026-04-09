@@ -81,7 +81,7 @@ ENCRYPTION_KEY=<44-character-base64-key>
 - `FEDERATION_PER_TENANT_ENABLED=true` - Per-tenant identity providers
 
 **See Also:**
-- [Multi-Tenant Credentials Guide](./MULTI_TENANT_CREDENTIALS.md) - Credential management
+- [AI Providers Guide](https://docs.eneo.ai/guides/ai-providers) - Provider configuration & credential management
 - [Federation Per Tenant](./FEDERATION_PER_TENANT.md) - Per-tenant IdP setup
 - [Architecture - Multi-Tenancy](./ARCHITECTURE.md#-multi-tenancy-architecture) - System design
 

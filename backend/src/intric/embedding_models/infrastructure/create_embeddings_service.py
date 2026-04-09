@@ -1,7 +1,6 @@
 from typing import TYPE_CHECKING, Optional, Protocol
 from uuid import UUID
 
-from intric.ai_models.model_enums import ModelFamily
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from intric.embedding_models.infrastructure.adapters.litellm_embeddings import (
     LiteLLMEmbeddingAdapter,
@@ -27,12 +26,13 @@ class EmbeddingModelLike(Protocol):
     to be used interchangeably via duck typing. The adapters only access
     these attributes, so any object providing them will work.
     """
+
     id: UUID
     name: str
     provider_id: UUID | None
     litellm_model_name: str | None
-    family: ModelFamily | None
-    max_input: int
+    family: str | None
+    max_input: int | None
     max_batch_size: int | None
     dimensions: int | None
     open_source: bool
@@ -45,7 +45,8 @@ class CreateEmbeddingsService:
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.tenant = tenant
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
@@ -71,19 +72,23 @@ class CreateEmbeddingsService:
         )
 
         # All models must have provider_id
-        if not hasattr(model, 'provider_id') or not model.provider_id:
+        if not hasattr(model, "provider_id") or not model.provider_id:
             raise ValueError(
                 f"Model '{model.name}' is missing required provider_id. "
                 "All models must be associated with a ModelProvider."
             )
 
         # Check if provider data is pre-resolved on the model (e.g. from crawl bootstrap)
-        provider_type = getattr(model, 'provider_type', None)
-        provider_credentials = getattr(model, 'provider_credentials', None)
-        provider_config = getattr(model, 'provider_config', None)
+        provider_type = getattr(model, "provider_type", None)
+        provider_credentials = getattr(model, "provider_credentials", None)
+        provider_config = getattr(model, "provider_config", None)
 
         if provider_type and provider_credentials is not None:
             # Pre-resolved path: no DB session needed
+            if self.encryption_service is None:
+                raise ValueError(
+                    "CreateEmbeddingsService requires an encryption_service to resolve credentials."
+                )
             credential_resolver = TenantModelCredentialResolver(
                 provider_id=model.provider_id,
                 provider_type=provider_type,
@@ -95,24 +100,27 @@ class CreateEmbeddingsService:
         else:
             # DB lookup path: requires active session
             import sqlalchemy as sa
+
             from intric.database.tables.model_providers_table import ModelProviders
 
             if not self.session:
                 logger.error(
                     "Model requires database session but none available",
                     extra={
-                        "model_id": str(model.id) if hasattr(model, 'id') else None,
+                        "model_id": str(model.id) if hasattr(model, "id") else None,
                         "model_name": model.name,
                         "provider_id": str(model.provider_id),
                         "tenant_id": str(self.tenant.id) if self.tenant else None,
-                    }
+                    },
                 )
                 raise ValueError(
                     f"Model '{model.name}' requires database session to load provider credentials. "
                     "Please ensure the CreateEmbeddingsService is initialized with a database session."
                 )
 
-            stmt = sa.select(ModelProviders).where(ModelProviders.id == model.provider_id)
+            stmt = sa.select(ModelProviders).where(
+                ModelProviders.id == model.provider_id
+            )
             result = await self.session.execute(stmt)
             provider_db = result.scalar_one_or_none()
 
@@ -128,6 +136,10 @@ class CreateEmbeddingsService:
                     "Please contact your administrator to enable the provider."
                 )
 
+            if self.encryption_service is None:
+                raise ValueError(
+                    "CreateEmbeddingsService requires an encryption_service to resolve credentials."
+                )
             credential_resolver = TenantModelCredentialResolver(
                 provider_id=provider_db.id,
                 provider_type=provider_db.provider_type,
@@ -141,13 +153,13 @@ class CreateEmbeddingsService:
         logger.info(
             f"Using LiteLLMEmbeddingAdapter for model '{model.name}'",
             extra={
-                "model_id": str(model.id) if hasattr(model, 'id') else None,
+                "model_id": str(model.id) if hasattr(model, "id") else None,
                 "model_name": model.name,
                 "provider_id": str(model.provider_id),
                 "provider_type": provider_type,
                 "litellm_model_name": litellm_model_name,
                 "tenant_id": str(self.tenant.id) if self.tenant else None,
-            }
+            },
         )
 
         return LiteLLMEmbeddingAdapter(

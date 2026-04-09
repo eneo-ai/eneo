@@ -1,9 +1,16 @@
 from datetime import datetime
 from enum import Enum
 from typing import Generic, Optional, TypeVar
+from uuid import UUID
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
+from intric.authentication.auth_models import (
+    ApiKeyScopeType,
+    ApiKeyState,
+    ApiKeyType,
+    ApiKeyUserRelation,
+)
 from intric.users.user import SortField, SortOrder
 
 
@@ -26,7 +33,7 @@ class UserStateListItem(BaseModel):
         description="User's email address", examples=["jane.smith@municipality.se"]
     )
     state: str = Field(description="User's current state", examples=["inactive"])
-    state_changed_at: datetime = Field(
+    state_changed_at: datetime | None = Field(
         description="When the user state was last changed",
         examples=["2025-09-10T08:30:00Z"],
     )
@@ -45,7 +52,7 @@ class UserDeletedListItem(BaseModel):
         description="User's current state (always 'deleted' for this list)",
         examples=["deleted"],
     )
-    deleted_at: datetime = Field(
+    deleted_at: datetime | None = Field(
         description="When the user was deleted (for external tracking)",
         examples=["2025-08-15T14:20:00Z"],
     )
@@ -163,6 +170,30 @@ class AdminUsersQueryParams(BaseModel):
                 )
             return trimmed if trimmed else None
         return v
+
+
+class AdminApiKeysQueryParams(BaseModel):
+    limit: int = Field(default=50, ge=1, le=200)
+    cursor: datetime | None = None
+    previous: bool = False
+    scope_type: ApiKeyScopeType | None = None
+    scope_id: UUID | None = None
+    state: ApiKeyState | None = None
+    key_type: ApiKeyType | None = None
+    owner_user_id: UUID | None = None
+    created_by_user_id: UUID | None = None
+    user_relation: ApiKeyUserRelation = ApiKeyUserRelation.OWNER
+    search: str | None = None
+    expires_within_days: int | None = None
+
+
+class AdminApiKeyUsageQueryParams(BaseModel):
+    limit: int = Field(default=50, ge=1, le=200)
+    cursor: datetime | None = None
+
+
+class AdminExpiringKeysQueryParams(BaseModel):
+    days: int = Field(default=30, ge=1, le=90)
 
 
 class PaginationMetadata(BaseModel):

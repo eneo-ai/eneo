@@ -18,13 +18,16 @@ from intric.authentication.auth_dependencies import FILES_READ_OVERRIDES
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_router():
     from intric.server.routers import router
+
     return router
 
 
 def _get_app():
     from intric.server.main import app
+
     return app
 
 
@@ -68,14 +71,17 @@ def _get_intric_src_path():
     spec = importlib.util.find_spec("intric")
     if spec and spec.submodule_search_locations:
         import pathlib
+
         return pathlib.Path(spec.submodule_search_locations[0])
     import pathlib
+
     return pathlib.Path(__file__).parent.parent.parent / "src" / "intric"
 
 
 # ---------------------------------------------------------------------------
 # Step 17: /users/admin/* Admin-Role Enforcement (P0-1)
 # ---------------------------------------------------------------------------
+
 
 class TestUserAdminEndpointGuards:
     """Verify /users/admin/* endpoints have validate_permission(Permission.ADMIN).
@@ -110,7 +116,9 @@ class TestUserAdminEndpointGuards:
                 found_guards[node.name] = has_guard
 
         for fn_name in target_fns:
-            assert fn_name in found_guards, f"{fn_name} function not found in user_router.py"
+            assert fn_name in found_guards, (
+                f"{fn_name} function not found in user_router.py"
+            )
             assert found_guards[fn_name], (
                 f"{fn_name} missing validate_permission() guard in function body"
             )
@@ -119,6 +127,7 @@ class TestUserAdminEndpointGuards:
 # ---------------------------------------------------------------------------
 # Step 18: Model Provider + Tenant Model Admin Checks (P0-2)
 # ---------------------------------------------------------------------------
+
 
 class TestModelRouterAdminChecks:
     """Verify model provider and tenant model mutation endpoints have admin checks.
@@ -149,7 +158,10 @@ class TestModelRouterAdminChecks:
                 func = node.func
                 if isinstance(func, ast.Name) and func.id == "validate_permission":
                     admin_check_count += 1
-                elif isinstance(func, ast.Attribute) and func.attr == "validate_permission":
+                elif (
+                    isinstance(func, ast.Attribute)
+                    and func.attr == "validate_permission"
+                ):
                     admin_check_count += 1
 
         assert admin_check_count >= expected_count, (
@@ -161,6 +173,7 @@ class TestModelRouterAdminChecks:
 # ---------------------------------------------------------------------------
 # Step 21: Legacy GET /api-keys/ Removed
 # ---------------------------------------------------------------------------
+
 
 class TestLegacyGetApiKeysRemoved:
     """Verify the legacy GET /api-keys/ mutating endpoint is removed."""
@@ -187,7 +200,11 @@ class TestLegacyGetApiKeysRemoved:
         for route in router.routes:
             endpoint = getattr(route, "endpoint", None)
             methods = getattr(route, "methods", set())
-            if endpoint and endpoint.__name__ == "generate_api_key" and "POST" in methods:
+            if (
+                endpoint
+                and endpoint.__name__ == "generate_api_key"
+                and "POST" in methods
+            ):
                 found = True
                 break
         assert found, "POST /api-keys/ (generate_api_key) not found"
@@ -198,10 +215,14 @@ class TestLegacyGetApiKeysRemoved:
         for route in router.routes:
             endpoint = getattr(route, "endpoint", None)
             methods = getattr(route, "methods", set())
-            if endpoint and endpoint.__name__ == "generate_api_key" and "POST" in methods:
-                assert _route_has_dependency_named(
-                    route, "_api_key_permission_dep"
-                ), "generate_api_key route missing require_api_key_permission guard"
+            if (
+                endpoint
+                and endpoint.__name__ == "generate_api_key"
+                and "POST" in methods
+            ):
+                assert _route_has_dependency_named(route, "_api_key_permission_dep"), (
+                    "generate_api_key route missing require_api_key_permission guard"
+                )
                 return
         pytest.fail("generate_api_key endpoint not found")
 
@@ -209,6 +230,7 @@ class TestLegacyGetApiKeysRemoved:
 # ---------------------------------------------------------------------------
 # Step 22: Signed URL Read Override
 # ---------------------------------------------------------------------------
+
 
 class TestSignedUrlReadOverride:
     """Verify generate_signed_url is in FILES_READ_OVERRIDES and wired to /files."""
@@ -235,15 +257,21 @@ class TestSignedUrlReadOverride:
                                     val = cell.cell_contents
                                 except ValueError:
                                     continue
-                                if isinstance(val, frozenset) and "generate_signed_url" in val:
+                                if (
+                                    isinstance(val, frozenset)
+                                    and "generate_signed_url" in val
+                                ):
                                     return  # Found it
-                pytest.fail("/files route has resource guard but no generate_signed_url override")
+                pytest.fail(
+                    "/files route has resource guard but no generate_signed_url override"
+                )
         pytest.fail("No guarded /files route found")
 
 
 # ---------------------------------------------------------------------------
 # Step 23: /version Unauthenticated
 # ---------------------------------------------------------------------------
+
 
 class TestVersionEndpointPublic:
     """Verify /version is a public endpoint (no auth dependency)."""
@@ -268,6 +296,7 @@ class TestVersionEndpointPublic:
 # ---------------------------------------------------------------------------
 # Step 24: Error Code Consistency
 # ---------------------------------------------------------------------------
+
 
 class TestScopeErrorCodeConsistency:
     """Verify scope violations use 'insufficient_scope' not 'insufficient_permission'."""
@@ -294,7 +323,11 @@ class TestScopeErrorCodeConsistency:
 
             if in_scope_fn:
                 # Function ends when we hit a line at same or lower indent (non-blank)
-                if stripped and not stripped.startswith("#") and indent <= scope_fn_indent:
+                if (
+                    stripped
+                    and not stripped.startswith("#")
+                    and indent <= scope_fn_indent
+                ):
                     break
 
                 if 'code="insufficient_permission"' in stripped:
@@ -309,6 +342,7 @@ class TestScopeErrorCodeConsistency:
 # ---------------------------------------------------------------------------
 # Step 25: Limits Router Authentication
 # ---------------------------------------------------------------------------
+
 
 class TestLimitsRouterAuth:
     """Verify /limits requires authentication."""

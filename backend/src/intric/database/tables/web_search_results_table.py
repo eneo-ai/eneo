@@ -8,7 +8,7 @@ from intric.database.tables.questions_table import Questions
 
 
 class WebSearchResult(BasePublic):
-    __tablename__ = "web_search_results"
+    __tablename__ = "web_search_results"  # type: ignore[assignment]
 
     title: Mapped[str] = mapped_column()
     content: Mapped[str] = mapped_column()

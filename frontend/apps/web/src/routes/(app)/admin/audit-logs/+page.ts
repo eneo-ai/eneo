@@ -12,7 +12,7 @@ export const load = async (event) => {
     const from_date = event.url.searchParams.get("from_date") || undefined;
     const to_date = event.url.searchParams.get("to_date") || undefined;
     const action = event.url.searchParams.get("action") || undefined;
-    const actions = event.url.searchParams.get("actions") || undefined;  // Multi-select support
+    const actions = event.url.searchParams.get("actions") || undefined; // Multi-select support
     const actor_id = event.url.searchParams.get("actor_id") || undefined;
     const search = event.url.searchParams.get("search") || undefined;
 
@@ -27,12 +27,13 @@ export const load = async (event) => {
         page_size,
         from_date,
         to_date,
-        action: action !== "all" ? action : undefined,  // Legacy single-action support
-        actions: actionsArray,  // Multi-action support
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        action: action !== "all" ? (action as any) : undefined, // Legacy single-action support
+        actions: actionsArray, // Multi-action support
         actor_id,
-        search,
+        search
       }),
-      intric.audit.getRetentionPolicy(),
+      intric.audit.getRetentionPolicy()
     ]);
 
     return {
@@ -43,12 +44,12 @@ export const load = async (event) => {
       total_pages: response.total_pages || 0,
       hasSession: true, // Successfully loaded logs = valid session
       error: null,
-      retentionPolicy,
+      retentionPolicy
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Check if error is 401 (no session/justification required)
     // Updated from 403 to match backend error codes
-    const needsJustification = error?.status === 401;
+    const needsJustification = (error as { status?: number })?.status === 401;
 
     // Only log actual errors, not expected auth challenges
     if (!needsJustification) {
@@ -71,7 +72,7 @@ export const load = async (event) => {
       total_pages: 0,
       hasSession: false, // No valid session
       error: needsJustification ? null : "Failed to load audit logs. Please try again.",
-      retentionPolicy,
+      retentionPolicy
     };
   }
 };

@@ -41,7 +41,9 @@ def audit_service(mock_repository):
 
 
 @pytest.fixture
-def audit_service_with_config(mock_repository, mock_config_service, mock_feature_flag_service):
+def audit_service_with_config(
+    mock_repository, mock_config_service, mock_feature_flag_service
+):
     """Create AuditService with all dependencies."""
     return AuditService(
         mock_repository,
@@ -200,7 +202,9 @@ class TestTwoStageFiltering:
         self, mock_repository, mock_config_service, mock_feature_flag_service
     ):
         """Feature flag service error should default to enabled (log the action)."""
-        mock_feature_flag_service.check_is_feature_enabled.side_effect = Exception("Redis error")
+        mock_feature_flag_service.check_is_feature_enabled.side_effect = Exception(
+            "Redis error"
+        )
         mock_config_service.is_action_enabled.return_value = True
 
         service = AuditService(
@@ -239,7 +243,9 @@ class TestGetLogs:
     """Tests for get_logs method."""
 
     @pytest.mark.asyncio
-    async def test_get_logs_delegates_to_repository(self, audit_service, mock_repository):
+    async def test_get_logs_delegates_to_repository(
+        self, audit_service, mock_repository
+    ):
         """get_logs() should delegate to repository with correct params."""
         mock_repository.get_logs.return_value = ([], 0)
         tenant_id = uuid4()
@@ -282,7 +288,9 @@ class TestGetUserLogs:
     """Tests for get_user_logs method (GDPR export)."""
 
     @pytest.mark.asyncio
-    async def test_get_user_logs_delegates_to_repository(self, audit_service, mock_repository):
+    async def test_get_user_logs_delegates_to_repository(
+        self, audit_service, mock_repository
+    ):
         """get_user_logs() should delegate to repository correctly."""
         mock_repository.get_user_logs.return_value = ([], 0)
         tenant_id = uuid4()
@@ -312,7 +320,9 @@ class TestErrorHandling:
     """Tests for error handling paths."""
 
     @pytest.mark.asyncio
-    async def test_log_propagates_validation_errors(self, audit_service, mock_repository):
+    async def test_log_propagates_validation_errors(
+        self, audit_service, mock_repository
+    ):
         """log() should propagate AuditLog validation errors."""
         mock_repository.create.return_value = MagicMock(spec=AuditLog)
 
@@ -398,7 +408,9 @@ class TestLogAsync:
             feature_flag_service=mock_feature_flag_service,
         )
 
-        with patch("intric.audit.application.audit_service.job_manager", mock_job_manager):
+        with patch(
+            "intric.audit.application.audit_service.job_manager", mock_job_manager
+        ):
             await service.log_async(
                 tenant_id=uuid4(),
                 actor_id=uuid4(),
@@ -417,7 +429,9 @@ class TestLogAsync:
         """FAILURE outcome with error_message should enqueue successfully."""
         mock_job_manager = AsyncMock()
 
-        with patch("intric.audit.application.audit_service.job_manager", mock_job_manager):
+        with patch(
+            "intric.audit.application.audit_service.job_manager", mock_job_manager
+        ):
             result = await audit_service.log_async(
                 tenant_id=uuid4(),
                 actor_id=uuid4(),

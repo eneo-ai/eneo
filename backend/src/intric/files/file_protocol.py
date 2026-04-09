@@ -1,3 +1,4 @@
+import contextlib
 import os
 from pathlib import Path
 from typing import Callable
@@ -8,16 +9,9 @@ from intric.files.audio import AudioMimeTypes
 from intric.files.file_models import FileBaseWithContent, FileType
 from intric.files.file_size_service import FileSizeService
 from intric.files.image import ImageExtractor, ImageMimeTypes
-from intric.files.text import TextExtractor, TextMimeTypes
-from intric.files.docx_template_validation import (
-    normalize_template_extraction_error,
-    validate_docx_template_archive,
-    validate_template_extension,
-)
+from intric.files.text import TextExtractor
 from intric.main.config import get_settings
 from intric.main.exceptions import (
-    BadRequestException,
-    FileNotSupportedException,
     FileTooLargeException,
 )
 
@@ -45,6 +39,7 @@ class FileProtocol:
         text_extractor: TextExtractor,
         image_extractor: ImageExtractor,
     ):
+        super().__init__()
         self.file_size_service = file_size_service
         self.text_extractor = text_extractor
         self.image_extractor = image_extractor
@@ -55,17 +50,23 @@ class FileProtocol:
         file_type: FileType,
         max_size: int,
         extractor: Callable[[Path, str, str | None], str | bytes],
+        limit_setting_name: str | None = None,
     ):
-        if self.file_size_service.is_too_large(upload_file.file, max_size=max_size):
-            raise FileTooLargeException()
+        file_size = self.file_size_service.get_file_size(upload_file.file)
+        if file_size > max_size:
+            raise FileTooLargeException(
+                file_size=file_size,
+                max_size=max_size,
+                setting_name=limit_setting_name,
+            )
 
         filepath = await self.file_size_service.save_file_to_disk(upload_file.file)
         filepath = Path(filepath)
 
         try:
-            content = extractor(
-                filepath, upload_file.content_type, upload_file.filename
-            )
+            # content_type can be None for uploads without Content-Type header
+            content_type: str = upload_file.content_type or ""
+            content = extractor(filepath, content_type, upload_file.filename)
             checksum = self.file_size_service.get_file_checksum(filepath)
 
             if isinstance(content, str):
@@ -77,7 +78,8 @@ class FileProtocol:
                 upload_file, file_type, content, checksum, size
             )
         finally:
-            os.remove(filepath)
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(filepath)
 
     def _create_file_base(
         self,
@@ -90,105 +92,104 @@ class FileProtocol:
         # Sanitize filename to prevent path traversal attacks
         sanitized_filename = sanitize_filename(upload_file.filename)
 
-        file_base_kwargs = {
-            "name": sanitized_filename,
-            "checksum": checksum,
-            "size": size,
-            "file_type": file_type,
-            "mimetype": upload_file.content_type,
-        }
-
         if file_type == FileType.TEXT:
-            file_base_kwargs["text"] = content
+            return FileBaseWithContent(
+                name=sanitized_filename,
+                checksum=checksum,
+                size=size,
+                file_type=file_type,
+                mimetype=upload_file.content_type,
+                text=content if isinstance(content, str) else None,
+            )
         else:
-            file_base_kwargs["blob"] = content
-
-        return FileBaseWithContent(**file_base_kwargs)
+            return FileBaseWithContent(
+                name=sanitized_filename,
+                checksum=checksum,
+                size=size,
+                file_type=file_type,
+                mimetype=upload_file.content_type,
+                blob=content if isinstance(content, bytes) else None,
+            )
 
     async def text_to_domain(
-        self, upload_file: UploadFile, max_size: int | None = None
+        self,
+        upload_file: UploadFile,
+        max_size: int | None = None,
+        limit_setting_name: str | None = None,
     ):
         if max_size is None:
             max_size = get_settings().upload_file_to_session_max_size
+            if limit_setting_name is None:
+                limit_setting_name = "UPLOAD_FILE_TO_SESSION_MAX_SIZE"
 
         return await self._get_content(
             upload_file,
             file_type=FileType.TEXT,
             max_size=max_size,
             extractor=self.text_extractor.extract,
+            limit_setting_name=limit_setting_name,
         )
 
     async def image_to_domain(
-        self, upload_file: UploadFile, max_size: int | None = None
+        self,
+        upload_file: UploadFile,
+        max_size: int | None = None,
+        limit_setting_name: str | None = None,
     ):
         if max_size is None:
             max_size = get_settings().upload_image_to_session_max_size
+            if limit_setting_name is None:
+                limit_setting_name = "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"
 
         return await self._get_content(
             upload_file,
             file_type=FileType.IMAGE,
             max_size=max_size,
             extractor=self.image_extractor.extract,
+            limit_setting_name=limit_setting_name,
         )
 
     async def audio_to_domain(
-        self, upload_file: UploadFile, max_size: int | None = None
+        self,
+        upload_file: UploadFile,
+        max_size: int | None = None,
+        limit_setting_name: str | None = None,
     ):
         if max_size is None:
             max_size = get_settings().transcription_max_file_size
+            if limit_setting_name is None:
+                limit_setting_name = "TRANSCRIPTION_MAX_FILE_SIZE"
 
         return await self._get_content(
             upload_file,
             file_type=FileType.AUDIO,
             max_size=max_size,
             extractor=bytes_extractor,
+            limit_setting_name=limit_setting_name,
         )
 
-    async def docx_template_to_domain(
-        self, upload_file: UploadFile, max_size: int | None = None
-    ) -> FileBaseWithContent:
-        if max_size is None:
-            max_size = get_settings().upload_file_to_session_max_size
-
-        sanitized_filename = sanitize_filename(upload_file.filename)
-        validate_template_extension(filename=sanitized_filename)
-
-        if self.file_size_service.is_too_large(upload_file.file, max_size=max_size):
-            raise FileTooLargeException(
-                "Uploaded flow template exceeds the allowed size limit.",
-                code="flow_template_too_large",
+    async def to_domain(
+        self,
+        upload_file: UploadFile,
+        max_size: int | None = None,
+        limit_setting_name: str | None = None,
+    ):
+        content_type = upload_file.content_type or ""
+        if ImageMimeTypes.has_value(content_type):
+            return await self.image_to_domain(
+                upload_file,
+                max_size=max_size,
+                limit_setting_name=limit_setting_name,
+            )
+        elif AudioMimeTypes.has_value(content_type):
+            return await self.audio_to_domain(
+                upload_file,
+                max_size=max_size,
+                limit_setting_name=limit_setting_name,
             )
 
-        filepath = await self.file_size_service.save_file_to_disk(upload_file.file)
-        filepath = Path(filepath)
-
-        try:
-            blob = bytes_extractor(filepath, TextMimeTypes.DOCX.value, sanitized_filename)
-            validate_docx_template_archive(blob, filename=sanitized_filename)
-            try:
-                text = self.text_extractor.extract_from_docx(filepath, sanitized_filename)
-            except Exception as exc:
-                normalized_exc = normalize_template_extraction_error(exc)
-                raise normalized_exc from exc
-            checksum = self.file_size_service.get_file_checksum(filepath)
-            return FileBaseWithContent(
-                name=sanitized_filename,
-                checksum=checksum,
-                size=len(blob),
-                file_type=FileType.DOCUMENT,
-                mimetype=TextMimeTypes.DOCX.value,
-                text=text,
-                blob=blob,
-            )
-        except (BadRequestException, FileNotSupportedException):
-            raise
-        finally:
-            os.remove(filepath)
-
-    async def to_domain(self, upload_file: UploadFile, max_size: int | None = None):
-        if ImageMimeTypes.has_value(upload_file.content_type):
-            return await self.image_to_domain(upload_file, max_size=max_size)
-        elif AudioMimeTypes.has_value(upload_file.content_type):
-            return await self.audio_to_domain(upload_file, max_size=max_size)
-
-        return await self.text_to_domain(upload_file, max_size=max_size)
+        return await self.text_to_domain(
+            upload_file,
+            max_size=max_size,
+            limit_setting_name=limit_setting_name,
+        )

@@ -10,11 +10,10 @@ import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { getIntric } from "$lib/core/Intric";
 import { CalendarDate } from "@internationalized/date";
+import { SvelteSet } from "svelte/reactivity";
 import type { ChatPartner, Conversation, ConversationSparse, Intric } from "@intric/intric-js";
 
-type InsightStatistics = Awaited<
-  ReturnType<Intric["analytics"]["insights"]["statistics"]>
->;
+type InsightStatistics = Awaited<ReturnType<Intric["analytics"]["insights"]["statistics"]>>;
 
 class InsightsService {
   #intric: Intric;
@@ -253,7 +252,7 @@ class InsightsService {
         }
 
         if (append) {
-          const seen = new Set(this.conversations.map((conversation) => conversation.id));
+          const seen = new SvelteSet(this.conversations.map((conversation) => conversation.id));
           const merged = [...this.conversations];
           for (const conversation of conversations.items) {
             if (!seen.has(conversation.id)) {

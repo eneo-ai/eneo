@@ -24,7 +24,9 @@ def create_mock_container(embeddings_service):
     mock_session_provider = MagicMock()
     mock_session_provider.override = MagicMock()
     mock_container.session = mock_session_provider
-    mock_container.create_embeddings_service = MagicMock(return_value=embeddings_service)
+    mock_container.create_embeddings_service = MagicMock(
+        return_value=embeddings_service
+    )
     return mock_container
 
 
@@ -34,17 +36,20 @@ class TestPersistenceModuleImports:
     def test_import_from_crawl_package(self):
         """persist_batch should be importable from intric.worker.crawl."""
         from intric.worker.crawl import persist_batch
+
         assert callable(persist_batch)
 
     def test_import_from_crawl_tasks_backward_compat(self):
         """persist_batch should still be importable from crawl_tasks for backward compatibility."""
         from intric.worker.crawl_tasks import persist_batch
+
         assert callable(persist_batch)
 
     def test_both_imports_are_same_function(self):
         """Both import paths should resolve to the same function."""
         from intric.worker.crawl import persist_batch as pb1
         from intric.worker.crawl_tasks import persist_batch as pb2
+
         # Note: pb1 and pb2 might not be the exact same object due to re-export,
         # but they should have the same behavior. We test that both are callable.
         assert callable(pb1)
@@ -141,6 +146,7 @@ class TestEmbeddingSemaphore:
     def test_semaphore_getter_is_callable(self):
         """_get_embedding_semaphore should be callable."""
         from intric.worker.crawl.persistence import _get_embedding_semaphore
+
         assert callable(_get_embedding_semaphore)
 
     def test_semaphore_returns_asyncio_semaphore(self):

@@ -3,15 +3,11 @@ Fixtures for completion models (mirrors src/intric/completion_models/).
 
 These fixtures create completion models with settings stored directly on the model.
 """
+
 import pytest
 from sqlalchemy import select
 
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
+from intric.ai_models.model_enums import ModelOrg
 from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.model_providers_table import ModelProviders
 
@@ -90,25 +86,26 @@ def completion_model_factory(admin_user):
         name: str,
         nickname: str = None,
         provider: str = "openai",
-        token_limit: int = 8000,
+        max_input_tokens: int = 8000,
+        max_output_tokens: int = 4096,
         vision: bool = False,
         reasoning: bool = False,
         is_deprecated: bool = False,
         is_enabled: bool = True,
         is_default: bool = False,
-        family: ModelFamily = None,
-        **kwargs
+        family: str = None,
+        **kwargs,
     ) -> CompletionModels:
         """Create a completion model with the specified properties."""
         # Auto-determine family based on provider if not specified
         if family is None:
             family_map = {
-                "openai": ModelFamily.OPEN_AI,
-                "anthropic": ModelFamily.CLAUDE,
-                "mistral": ModelFamily.MISTRAL,
-                "azure": ModelFamily.AZURE,
+                "openai": "openai",
+                "anthropic": "claude",
+                "mistral": "mistral",
+                "azure": "azure",
             }
-            family = family_map.get(provider, ModelFamily.OPEN_AI)
+            family = family_map.get(provider, "openai")
 
         # Default nickname to name if not provided
         if nickname is None:
@@ -124,7 +121,9 @@ def completion_model_factory(admin_user):
         org = org_map.get(provider)
 
         # Get or create provider for this tenant (required by check constraint)
-        provider_id = await _get_or_create_provider(session, admin_user.tenant_id, provider)
+        provider_id = await _get_or_create_provider(
+            session, admin_user.tenant_id, provider
+        )
 
         # Create the completion model with settings directly on it
         model = CompletionModels(
@@ -132,13 +131,14 @@ def completion_model_factory(admin_user):
             provider_id=provider_id,
             name=name,
             nickname=nickname,
-            token_limit=token_limit,
+            max_input_tokens=max_input_tokens,
+            max_output_tokens=max_output_tokens,
             vision=vision,
             reasoning=reasoning,
-            family=family.value,
-            hosting=kwargs.get("hosting", ModelHostingLocation.USA.value),
+            family=family,
+            hosting=kwargs.get("hosting", "usa"),
             org=org.value if org else None,
-            stability=kwargs.get("stability", ModelStability.STABLE.value),
+            stability=kwargs.get("stability", "stable"),
             open_source=kwargs.get("open_source", False),
             description=kwargs.get("description"),
             nr_billion_parameters=kwargs.get("nr_billion_parameters"),

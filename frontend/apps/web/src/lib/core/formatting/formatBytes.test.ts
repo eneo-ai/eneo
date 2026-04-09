@@ -14,20 +14,20 @@ test("Format bytes", () => {
 });
 
 test("Format kilobytes", () => {
-  expect(formatBytes(1024)).toEqual("1 KiB");
-  expect(formatBytes(1536)).toEqual("2 KiB");
+  expect(formatBytes(1024)).toEqual("1 KB");
+  expect(formatBytes(1536)).toEqual("2 KB");
 });
 
 test("Format megabytes", () => {
-  expect(formatBytes(1024 * 1024)).toEqual("1 MiB");
-  expect(formatBytes(1.5 * 1024 * 1024)).toEqual("2 MiB");
+  expect(formatBytes(1024 * 1024)).toEqual("1 MB");
+  expect(formatBytes(1.5 * 1024 * 1024)).toEqual("2 MB");
 });
 
 test("Format gigabytes", () => {
-  expect(formatBytes(1024 * 1024 * 1024)).toEqual("1 GiB");
+  expect(formatBytes(1024 * 1024 * 1024)).toEqual("1 GB");
 });
 
 test("Format with decimals", () => {
-  expect(formatBytes(1536, 1)).toEqual("1.5 KiB");
-  expect(formatBytes(1.5 * 1024 * 1024, 2)).toEqual("1.50 MiB");
+  expect(formatBytes(1536, 1)).toEqual("1.5 KB");
+  expect(formatBytes(1.5 * 1024 * 1024, 2)).toEqual("1.50 MB");
 });

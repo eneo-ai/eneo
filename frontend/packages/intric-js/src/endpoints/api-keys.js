@@ -12,6 +12,12 @@
 /** @typedef {import('../types/resources').ApiKeyScopeType} ApiKeyScopeType */
 /** @typedef {import('../types/resources').ApiKeyState} ApiKeyState */
 /** @typedef {import('../types/resources').ApiKeyType} ApiKeyType */
+/** @typedef {import('../types/schema').components['schemas']['ExpiringKeysSummary']} ExpiringKeysSummary */
+/** @typedef {import('../types/schema').components['schemas']['ApiKeyNotificationPreferencesResponse']} ApiKeyNotificationPreferences */
+/** @typedef {import('../types/schema').components['schemas']['ApiKeyNotificationPreferencesUpdate']} ApiKeyNotificationPreferencesUpdate */
+/** @typedef {import('../types/schema').components['schemas']['ApiKeyNotificationPolicyResponse']} ApiKeyNotificationPolicy */
+/** @typedef {import('../types/schema').components['schemas']['ApiKeyNotificationPolicyUpdate']} ApiKeyNotificationPolicyUpdate */
+/** @typedef {import('../types/schema').components['schemas']['ApiKeyExactLookupResponse']} ApiKeyExactLookupResponse */
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
@@ -20,7 +26,7 @@ export function initApiKeys(client) {
   return {
     /**
      * List API keys for the current user (scoped by permissions).
-     * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: ApiKeyScopeType | null, scope_id?: string, state?: ApiKeyState | null, key_type?: ApiKeyType | null}} [params]
+     * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: ApiKeyScopeType | null, scope_id?: string, state?: ApiKeyState | null, key_type?: ApiKeyType | null, ownership?: "user" | "service" | null}} [params]
      * @returns {Promise<ApiKeyPage>}
      * @throws {IntricError}
      * */
@@ -182,7 +188,7 @@ export function initApiKeys(client) {
     /**
      * Get expiring API key summary (user-scoped visibility).
      * @param {{days?: number, mode?: "all"|"subscribed"}} [params]
-     * @returns {Promise<{total_count: number, counts_by_severity: Record<string, number>, earliest_expiration: string | null, items: Array<{id: string, name: string, scope_type: ApiKeyScopeType, scope_id: string | null, expires_at: string, suspended_at: string | null, severity: string}>, truncated: boolean, generated_at: string}>}
+     * @returns {Promise<ExpiringKeysSummary>}
      * @throws {IntricError}
      * */
     expiringSoon: async (params) => {
@@ -195,7 +201,7 @@ export function initApiKeys(client) {
 
     /**
      * Get API key notification preferences for current user.
-     * @returns {Promise<{enabled: boolean, days_before_expiry: number[]}>}
+     * @returns {Promise<ApiKeyNotificationPreferences>}
      * @throws {IntricError}
      * */
     getNotificationPreferences: async () => {
@@ -207,8 +213,8 @@ export function initApiKeys(client) {
 
     /**
      * Update API key notification preferences for current user.
-     * @param {{enabled?: boolean, days_before_expiry?: number[]}} updates
-     * @returns {Promise<{enabled: boolean, days_before_expiry: number[]}>}
+     * @param {ApiKeyNotificationPreferencesUpdate} updates
+     * @returns {Promise<ApiKeyNotificationPreferences>}
      * @throws {IntricError}
      * */
     updateNotificationPreferences: async (updates) => {
@@ -289,7 +295,7 @@ export function initApiKeys(client) {
       /**
        * Get expiring API key summary (tenant-wide, admin only).
        * @param {{days?: number}} [params]
-       * @returns {Promise<{total_count: number, counts_by_severity: Record<string, number>, earliest_expiration: string | null, items: Array<{id: string, name: string, scope_type: ApiKeyScopeType, scope_id: string | null, expires_at: string, suspended_at: string | null, severity: string}>, truncated: boolean, generated_at: string}>}
+       * @returns {Promise<ExpiringKeysSummary>}
        * @throws {IntricError}
        * */
       expiringSoon: async (params) => {
@@ -303,7 +309,7 @@ export function initApiKeys(client) {
       /**
        * Find an API key by exact full secret within current tenant (admin only).
        * @param {{secret: string}} params
-       * @returns {Promise<{api_key: ApiKeyV2, match_reason: string}>}
+       * @returns {Promise<ApiKeyExactLookupResponse>}
        * @throws {IntricError}
        * */
       lookup: async ({ secret }) => {
@@ -464,7 +470,7 @@ export function initApiKeys(client) {
 
       /**
        * Fetch tenant API key notification policy (admin only).
-       * @returns {Promise<{enabled: boolean, default_days_before_expiry: number[], max_days_before_expiry: number | null}>}
+       * @returns {Promise<ApiKeyNotificationPolicy>}
        * @throws {IntricError}
        * */
       getNotificationPolicy: async () => {
@@ -476,8 +482,8 @@ export function initApiKeys(client) {
 
       /**
        * Update tenant API key notification policy (admin only).
-       * @param {{enabled?: boolean, default_days_before_expiry?: number[], max_days_before_expiry?: number}} updates
-       * @returns {Promise<{enabled: boolean, default_days_before_expiry: number[], max_days_before_expiry: number | null}>}
+       * @param {ApiKeyNotificationPolicyUpdate} updates
+       * @returns {Promise<ApiKeyNotificationPolicy>}
        * @throws {IntricError}
        * */
       updateNotificationPolicy: async (updates) => {

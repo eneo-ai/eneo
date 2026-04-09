@@ -26,18 +26,22 @@
   // - mcp_tool_calls: runtime property added during streaming
   // - tool_calls: persisted field from API response (chat history)
   const mcpToolCalls = $derived(
-    ((message as any).mcp_tool_calls ?? message.tool_calls) as Array<{ server_name: string; tool_name: string; arguments?: Record<string, unknown>; tool_call_id?: string; approved?: boolean }> | undefined
+    ((message as Record<string, unknown>).mcp_tool_calls ?? message.tool_calls) as
+      | Array<{
+          server_name: string;
+          tool_name: string;
+          arguments?: Record<string, unknown>;
+          tool_call_id?: string;
+          approved?: boolean;
+        }>
+      | undefined
   );
 
   // Check if there's a pending tool approval for this message (only on last message)
-  const hasPendingApproval = $derived(
-    isLast() && chat.pendingToolApproval !== null
-  );
+  const hasPendingApproval = $derived(isLast() && chat.pendingToolApproval !== null);
 
   // Get pending tool IDs for matching
-  const pendingToolIds = $derived(
-    chat.pendingToolApproval?.tools.map(t => t.tool_call_id) ?? []
-  );
+  const pendingToolIds = $derived(chat.pendingToolApproval?.tools.map((t) => t.tool_call_id) ?? []);
 
   // Check if there are multiple pending tools (for showing bulk actions)
   const hasMultiplePendingTools = $derived(pendingToolIds.length > 1);
@@ -61,7 +65,7 @@
     try {
       await chat.approveTool(toolCallId);
     } catch (error) {
-      console.error('Failed to approve tool:', error);
+      console.error("Failed to approve tool:", error);
     } finally {
       submittingToolIds.delete(toolCallId);
     }
@@ -73,7 +77,7 @@
       await chat.denyTool(toolCallId);
       deniedToolIds.add(toolCallId);
     } catch (error) {
-      console.error('Failed to deny tool:', error);
+      console.error("Failed to deny tool:", error);
     } finally {
       submittingToolIds.delete(toolCallId);
     }
@@ -84,7 +88,7 @@
     try {
       await chat.approveAllTools();
     } catch (error) {
-      console.error('Failed to approve all tools:', error);
+      console.error("Failed to approve all tools:", error);
     } finally {
       isSubmittingBulk = false;
     }
@@ -94,11 +98,12 @@
     isSubmittingBulk = true;
     try {
       // Track all denied tools before clearing
-      const toolIds = chat.pendingToolApproval?.tools.map(t => t.tool_call_id).filter(Boolean) ?? [];
+      const toolIds =
+        chat.pendingToolApproval?.tools.map((t) => t.tool_call_id).filter(Boolean) ?? [];
       await chat.rejectAllTools();
-      toolIds.forEach(id => deniedToolIds.add(id!));
+      toolIds.forEach((id) => deniedToolIds.add(id!));
     } catch (error) {
-      console.error('Failed to deny all tools:', error);
+      console.error("Failed to deny all tools:", error);
     } finally {
       isSubmittingBulk = false;
     }
@@ -134,7 +139,8 @@
     <div class="mb-5 flex flex-col gap-2">
       {#each mcpToolCalls as toolCall, idx (toolCall.tool_call_id ?? idx)}
         {@const isLastToolCall = idx === mcpToolCalls.length - 1}
-        {@const isPendingTool = toolCall.tool_call_id && pendingToolIds.includes(toolCall.tool_call_id)}
+        {@const isPendingTool =
+          toolCall.tool_call_id && pendingToolIds.includes(toolCall.tool_call_id)}
         {@const isDeniedLocally = toolCall.tool_call_id && deniedToolIds.has(toolCall.tool_call_id)}
         {@const isDeniedFromBackend = toolCall.approved === false}
         {@const isDenied = isDeniedLocally || isDeniedFromBackend}
@@ -142,64 +148,91 @@
         {@const shouldPulse = isLastToolCall && toolsStillExecuting && !hasPendingApproval}
         {@const hasArgs = toolCall.arguments && Object.keys(toolCall.arguments).length > 0}
         {@const isExpanded = expandedToolCalls.has(idx)}
-        {@const isSubmitting = toolCall.tool_call_id ? submittingToolIds.has(toolCall.tool_call_id) : false}
+        {@const isSubmitting = toolCall.tool_call_id
+          ? submittingToolIds.has(toolCall.tool_call_id)
+          : false}
         {@const statusStyle = isDenied
-          ? 'border-negative-default/20 bg-negative-dimmer/50'
+          ? "border-negative-default/20 bg-negative-dimmer/50"
           : isApproved
-            ? 'border-positive-default/20 bg-positive-dimmer/50'
-            : 'border-default bg-secondary/80'}
-        <div class="group rounded-lg border {statusStyle} transition-all duration-200 {shouldPulse ? 'animate-pulse' : ''}">
+            ? "border-positive-default/20 bg-positive-dimmer/50"
+            : "border-default bg-secondary/80"}
+        <div
+          class="group rounded-lg border {statusStyle} transition-all duration-200 {shouldPulse
+            ? 'animate-pulse'
+            : ''}"
+        >
           <!-- Tool header -->
           <button
             type="button"
-            class="flex w-full items-center gap-3 px-3 py-2.5 text-left {hasArgs ? 'cursor-pointer' : 'cursor-default'}"
+            class="flex w-full items-center gap-3 px-3 py-2.5 text-left {hasArgs
+              ? 'cursor-pointer'
+              : 'cursor-default'}"
             onclick={() => hasArgs && toggleToolCallExpanded(idx)}
             disabled={!hasArgs}
           >
             <!-- Status indicator -->
-            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md {isDenied ? 'bg-negative-default/10 text-negative-default' : isApproved ? 'bg-positive-default/10 text-positive-default' : 'bg-accent-default/10 text-accent-default'}">
+            <div
+              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md {isDenied
+                ? 'bg-negative-default/10 text-negative-default'
+                : isApproved
+                  ? 'bg-positive-default/10 text-positive-default'
+                  : 'bg-accent-default/10 text-accent-default'}"
+            >
               <Wrench class="h-4 w-4" />
             </div>
 
             <!-- Tool info -->
             <div class="flex min-w-0 flex-1 flex-col gap-0.5">
               <div class="flex items-center gap-2">
-                <span class="truncate text-sm font-medium text-default">{toolCall.tool_name}</span>
+                <span class="text-default truncate text-sm font-medium">{toolCall.tool_name}</span>
                 {#if isDenied}
-                  <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide bg-negative-dimmer text-negative-default">
+                  <span
+                    class="bg-negative-dimmer text-negative-default inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
+                  >
                     {m.tool_rejected_by_user()}
                   </span>
                 {:else if isApproved}
-                  <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide bg-positive-dimmer text-positive-default">
+                  <span
+                    class="bg-positive-dimmer text-positive-default inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
+                  >
                     <Check class="h-2.5 w-2.5" />
                   </span>
                 {/if}
               </div>
-              <span class="text-xs text-muted">{toolCall.server_name}</span>
+              <span class="text-muted text-xs">{toolCall.server_name}</span>
             </div>
 
             <!-- Expand indicator -->
             {#if hasArgs}
-              <ChevronRight class="h-4 w-4 shrink-0 text-muted transition-transform duration-200 {isExpanded ? 'rotate-90' : ''}" />
+              <ChevronRight
+                class="text-muted h-4 w-4 shrink-0 transition-transform duration-200 {isExpanded
+                  ? 'rotate-90'
+                  : ''}"
+              />
             {/if}
           </button>
 
           <!-- Expanded arguments -->
           {#if hasArgs && isExpanded}
-            <div class="border-t border-dimmer px-3 py-2.5">
-              <div class="rounded-md bg-primary/60 p-3">
-                <pre class="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-secondary leading-relaxed">{JSON.stringify(toolCall.arguments, null, 2)}</pre>
+            <div class="border-dimmer border-t px-3 py-2.5">
+              <div class="bg-primary/60 rounded-md p-3">
+                <pre
+                  class="text-secondary overflow-x-auto font-mono text-xs leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
+                    toolCall.arguments,
+                    null,
+                    2
+                  )}</pre>
               </div>
             </div>
           {/if}
 
           <!-- Approval actions -->
           {#if isPendingTool && toolCall.tool_call_id}
-            <div class="flex items-center gap-2 border-t border-dimmer px-3 py-2.5">
-              <span class="mr-auto text-xs text-muted">{m.tool_waiting_approval?.({ tool: '', server: '' }) ?? 'Väntar på godkännande'}</span>
+            <div class="border-dimmer flex items-center gap-2 border-t px-3 py-2.5">
+              <span class="text-muted mr-auto text-xs">Väntar på godkännande</span>
               <button
                 type="button"
-                class="inline-flex items-center gap-1.5 rounded-md bg-positive-default px-3 py-1.5 text-xs font-medium text-on-fill shadow-sm transition-colors hover:bg-positive-stronger disabled:opacity-50"
+                class="bg-positive-default text-on-fill hover:bg-positive-stronger inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium shadow-sm transition-colors disabled:opacity-50"
                 onclick={() => handleApproveTool(toolCall.tool_call_id!)}
                 disabled={isSubmitting}
               >
@@ -208,7 +241,7 @@
               </button>
               <button
                 type="button"
-                class="inline-flex items-center gap-1.5 rounded-md border border-default bg-primary px-3 py-1.5 text-xs font-medium text-secondary shadow-sm transition-colors hover:bg-hover-default disabled:opacity-50"
+                class="border-default bg-primary text-secondary hover:bg-hover-default inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium shadow-sm transition-colors disabled:opacity-50"
                 onclick={() => handleDenyTool(toolCall.tool_call_id!)}
                 disabled={isSubmitting}
               >
@@ -222,11 +255,13 @@
 
       <!-- Bulk approval actions -->
       {#if hasPendingApproval && hasMultiplePendingTools}
-        <div class="mt-1 flex items-center justify-end gap-2 rounded-lg border border-dashed border-default bg-secondary/50 px-3 py-2.5">
-          <span class="mr-auto text-xs text-muted">{pendingToolIds.length} verktyg väntar</span>
+        <div
+          class="border-default bg-secondary/50 mt-1 flex items-center justify-end gap-2 rounded-lg border border-dashed px-3 py-2.5"
+        >
+          <span class="text-muted mr-auto text-xs">{pendingToolIds.length} verktyg väntar</span>
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 rounded-md bg-positive-default px-3 py-1.5 text-xs font-medium text-on-fill shadow-sm transition-colors hover:bg-positive-stronger disabled:opacity-50"
+            class="bg-positive-default text-on-fill hover:bg-positive-stronger inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium shadow-sm transition-colors disabled:opacity-50"
             onclick={handleApproveAll}
             disabled={isSubmittingBulk}
           >
@@ -235,7 +270,7 @@
           </button>
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 rounded-md border border-default bg-primary px-3 py-1.5 text-xs font-medium text-secondary shadow-sm transition-colors hover:bg-hover-default disabled:opacity-50"
+            class="border-default bg-primary text-secondary hover:bg-hover-default inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium shadow-sm transition-colors disabled:opacity-50"
             onclick={handleDenyAll}
             disabled={isSubmittingBulk}
           >

@@ -29,4 +29,4 @@ class PromptSparse(InDB, ResourcePermissionsMixin):
 
 class PromptPublic(PromptSparse):
     text: str
-    is_selected: Optional[bool] = None
+    is_selected: Optional[bool] = None  # type: ignore[assignment]  # intentionally widens parent's non-optional is_selected to Optional for public API

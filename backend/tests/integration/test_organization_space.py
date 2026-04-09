@@ -7,6 +7,7 @@ Tests cover:
 - Space hierarchy properties
 - Race condition prevention
 """
+
 import pytest
 from sqlalchemy import select
 
@@ -115,7 +116,9 @@ class TestOrganizationSpaceCreation:
             assert child_space.is_organization() is False
             assert child_space.tenant_space_id == org_space_db.id
 
-    async def test_personal_space_is_not_organization(self, db_container, tenant_factory, user_factory):
+    async def test_personal_space_is_not_organization(
+        self, db_container, tenant_factory, user_factory
+    ):
         """Verify personal space is_organization() returns False."""
         async with db_container() as container:
             session = container.session()
@@ -147,7 +150,9 @@ class TestOrganizationSpaceCreation:
             assert personal_space.is_organization() is False
             assert personal_space.user_id == user.id
 
-    async def test_unique_constraint_prevents_duplicate_org_spaces(self, db_container, tenant_factory):
+    async def test_unique_constraint_prevents_duplicate_org_spaces(
+        self, db_container, tenant_factory
+    ):
         """Verify unique constraint prevents creating multiple org spaces per tenant."""
         async with db_container() as container:
             session = container.session()
@@ -214,7 +219,9 @@ class TestOrganizationSpaceHierarchy:
                 assert child.tenant_space_id == org_space_db.id
                 assert child.tenant_id == tenant.id
 
-    async def test_query_all_child_spaces_of_org_space(self, db_container, tenant_factory):
+    async def test_query_all_child_spaces_of_org_space(
+        self, db_container, tenant_factory
+    ):
         """Verify query to find all child spaces of org space works correctly."""
         async with db_container() as container:
             session = container.session()
@@ -264,13 +271,17 @@ class TestOrganizationSpaceHierarchy:
             for child in child_spaces:
                 assert child.tenant_space_id == org_space_db.id
 
-    async def test_multiple_organizations_in_same_instance(self, db_container, tenant_factory):
+    async def test_multiple_organizations_in_same_instance(
+        self, db_container, tenant_factory
+    ):
         """Verify multiple tenants can each have their own org space."""
         async with db_container() as container:
             session = container.session()
 
             # Create 3 tenants
-            tenants = [await tenant_factory(session, name=f"Tenant {i}") for i in range(3)]
+            tenants = [
+                await tenant_factory(session, name=f"Tenant {i}") for i in range(3)
+            ]
 
             # Create org space for each tenant
             org_spaces = []

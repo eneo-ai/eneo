@@ -12,7 +12,9 @@
   const {
     state: { currentlyRunningJobs, showJobManagerPanel }
   } = getJobManager();
-  const { state: { hasUrgent: hasUrgentKeys, hasWarning: hasWarningKeys } } = getExpiringKeysStore();
+  const {
+    state: { hasUrgent: hasUrgentKeys, hasWarning: hasWarningKeys }
+  } = getExpiringKeysStore();
 
   const {
     elements: { menu, trigger, overlay, arrow },

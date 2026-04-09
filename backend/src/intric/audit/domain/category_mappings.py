@@ -2,7 +2,6 @@
 
 from intric.audit.domain.action_types import ActionType
 
-
 # Category descriptions for UI display
 CATEGORY_DESCRIPTIONS = {
     "admin_actions": "User management, role changes, API keys, tenant settings",
@@ -41,7 +40,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",
     ActionType.MODULE_ADDED_TO_TENANT.value: "admin_actions",
-    # User Actions
+    # User Actions (29 actions)
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
     ActionType.ASSISTANT_DELETED.value: "user_actions",

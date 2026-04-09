@@ -1,13 +1,9 @@
 from typing import TYPE_CHECKING, Optional, Union
 
+from typing_extensions import override
+
 from intric.ai_models.ai_model import AIModel
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
-from intric.main.models import NOT_PROVIDED
+from intric.main.models import is_provided
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -32,16 +28,16 @@ class EmbeddingModel(AIModel):
         user: "UserInDB",
         nickname: Optional[str],
         name: str,
-        family: Union[ModelFamily, str],
-        hosting: Union[ModelHostingLocation, str],
-        org: Optional[Union[ModelOrg, str]],
-        stability: Union[ModelStability, str],
+        family: Optional[str],
+        hosting: Optional[str],
+        org: Optional[str],
+        stability: Optional[str],
         open_source: bool,
         description: Optional[str],
         hf_link: Optional[str],
         is_deprecated: bool,
         is_org_enabled: bool,
-        max_input: int,
+        max_input: Optional[int],
         dimensions: Optional[int],
         security_classification: Optional[SecurityClassification],
         max_batch_size: Optional[int] = None,
@@ -70,7 +66,7 @@ class EmbeddingModel(AIModel):
             security_classification=security_classification,
         )
 
-        self.max_input = max_input
+        self.max_input: Optional[int] = max_input
         self.dimensions = dimensions
         self.max_batch_size = max_batch_size
         self.litellm_model_name = litellm_model_name
@@ -79,6 +75,7 @@ class EmbeddingModel(AIModel):
         self.provider_name = provider_name
         self.provider_type = provider_type
 
+    @override
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
         # If litellm_model_name is set, extract provider from prefix (e.g. "azure/gpt-4" → "azure")
@@ -88,14 +85,15 @@ class EmbeddingModel(AIModel):
         # Fall back to base implementation (checks family)
         return super().get_credential_provider_name()
 
+    @override
     @classmethod
-    def to_domain(
+    def to_domain(  # type: ignore[override]  # noqa: PYI019 – parent uses generic DB TypeVar, we specialize
         cls,
         db_model: "EmbeddingModelDB",
         user: "UserInDB",
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
-    ):
+    ) -> "EmbeddingModel":
         # Settings are now directly on the model table
         return cls(
             id=db_model.id,
@@ -103,7 +101,7 @@ class EmbeddingModel(AIModel):
             updated_at=db_model.updated_at,
             user=user,
             name=db_model.name,
-            nickname=None,
+            nickname=db_model.nickname,
             family=db_model.family,
             hosting=db_model.hosting,
             org=db_model.org,
@@ -127,5 +125,5 @@ class EmbeddingModel(AIModel):
         )
 
     def update(self, is_org_enabled: Union[bool, "NotProvided"]):
-        if is_org_enabled is not NOT_PROVIDED:
+        if is_provided(is_org_enabled):
             self.is_org_enabled = is_org_enabled

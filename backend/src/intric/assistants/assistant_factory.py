@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -8,7 +9,7 @@ from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.completion_models.domain.completion_model import CompletionModel
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.prompts_table import Prompts
-from intric.files.file_models import File
+from intric.files.file_models import FileInfo
 from intric.main.logging import get_logger
 from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from intric.prompts.prompt_factory import PromptFactory
@@ -16,7 +17,6 @@ from intric.users.user import UserInDB, UserSparse
 
 if TYPE_CHECKING:
     from intric.collections.domain.collection import Collection
-    from intric.files.file_models import FileInfo
     from intric.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
         AssistantTemplateFactory,
     )
     from intric.websites.domain.website import Website
+
 logger = get_logger(__name__)
 
 
@@ -35,6 +36,7 @@ class AssistantFactory:
         prompt_factory: PromptFactory,
         assistant_template_factory: "AssistantTemplateFactory",
     ):
+        super().__init__()
         self.prompt_factory = prompt_factory
         self.assistant_template_factory = assistant_template_factory
 
@@ -43,7 +45,7 @@ class AssistantFactory:
         name: str,
         user: UserInDB,
         space_id: UUID,
-        prompt: "Prompt" | None = None,
+        prompt: Prompt | None = None,
         completion_model: CompletionModel | None = None,
         completion_model_kwargs: ModelKwargs | None = None,
         logging_enabled: bool = False,
@@ -54,7 +56,7 @@ class AssistantFactory:
         is_default: bool = False,
         insight_enabled: bool = False,
         data_retention_days: int | None = None,
-        metadata_json: dict | None = None,
+        metadata_json: dict[str, object] | None = None,
         description: str | None = None,
         hidden: bool = False,
         origin: AssistantOrigin = AssistantOrigin.USER,
@@ -64,9 +66,11 @@ class AssistantFactory:
         if completion_model_kwargs is None:
             completion_model_kwargs = ModelKwargs()
 
+        user_sparse = UserSparse.model_validate(user)
+
         return Assistant(
             id=None,
-            user=user,
+            user=user_sparse,
             space_id=space_id,
             name=name,
             prompt=prompt,
@@ -93,10 +97,11 @@ class AssistantFactory:
         self,
         assistant_in_db: Assistants,
         completion_model: CompletionModel | None = None,
-        completion_model_list: list[CompletionModel] = [],
+        completion_model_list: Sequence[CompletionModel] | None = None,
         prompt: Prompts | None = None,
     ) -> Assistant:
-        if completion_model is None and completion_model_list:
+        if completion_model is None and completion_model_list is not None:
+            completion_model_list = list(completion_model_list)
             completion_model = next(
                 (
                     cm
@@ -106,32 +111,44 @@ class AssistantFactory:
                 None,
             )
 
+        prompt_model: Prompt | None = None
         if prompt is not None:
-            prompt = self.prompt_factory.create_prompt_from_db(
+            prompt_model = self.prompt_factory.create_prompt_from_db(
                 prompt_in_db=prompt, is_selected=True
             )
 
         attachments = [
-            File(**attachment.file.to_dict()) for attachment in assistant_in_db.attachments
+            FileInfo.model_validate(attachment.file)
+            for attachment in assistant_in_db.attachments
         ]
 
         user = UserSparse.model_validate(assistant_in_db.user)
-        completion_model_kwargs = ModelKwargs.model_validate(
+        # JSONB columns are Mapped[Optional[dict]] (unparameterised) in the ORM table;
+        # cast to a concrete type so ModelKwargs.model_validate is fully typed.
+        # reportUnknownMemberType is suppressed here because the root cause is the
+        # unparameterised dict column in assistant_table.py (out of scope).
+        completion_model_kwargs_raw: dict[str, object] = (
             assistant_in_db.completion_model_kwargs or {}
+        )
+        completion_model_kwargs = ModelKwargs.model_validate(
+            completion_model_kwargs_raw
         )
 
         source_template = (
-            self.assistant_template_factory.create_assistant_template(assistant_in_db.template)
+            self.assistant_template_factory.create_assistant_template(
+                assistant_in_db.template
+            )
             if assistant_in_db.template
             else None
         )
 
+        assert assistant_in_db.space_id is not None, "Assistants must belong to a space"
         return Assistant(
             id=assistant_in_db.id,
             user=user,
             space_id=assistant_in_db.space_id,
             name=assistant_in_db.name,
-            prompt=prompt,
+            prompt=prompt_model,
             completion_model=completion_model,
             completion_model_kwargs=completion_model_kwargs,
             attachments=attachments,
@@ -149,26 +166,33 @@ class AssistantFactory:
             insight_enabled=assistant_in_db.insight_enabled,
             icon_id=assistant_in_db.icon_id,
             hidden=assistant_in_db.hidden,
-            origin=AssistantOrigin(assistant_in_db.origin or AssistantOrigin.USER.value),
+            origin=AssistantOrigin(
+                assistant_in_db.origin or AssistantOrigin.USER.value
+            ),
             managing_flow_id=assistant_in_db.managing_flow_id,
         )
 
     def create_space_assistant_from_db(
         self,
         assistant_in_db: Assistants,
-        completion_models: list[CompletionModel] = [],
-        collections: list["Collection"] = [],
-        websites: list["Website"] = [],
-        integration_knowledge_list: list["IntegrationKnowledge"] = [],
-        user: UserInDB = None,
+        user: UserInDB,
+        completion_models: Sequence[CompletionModel] | None = None,
+        collections: Sequence["Collection"] | None = None,
+        websites: Sequence["Website"] | None = None,
+        integration_knowledge_list: Sequence["IntegrationKnowledge"] | None = None,
     ) -> Assistant:
-        user = UserSparse.model_validate(user)
+        completion_models = list(completion_models or [])
+        collections = list(collections or [])
+        websites = list(websites or [])
+        integration_knowledge_list = list(integration_knowledge_list or [])
+        user_sparse = UserSparse.model_validate(user)
         collection_ids = [
             assistant_collection.group_id
             for assistant_collection in assistant_in_db.assistant_groups
         ]
         websites_ids = [
-            assistant_website.website_id for assistant_website in assistant_in_db.assistant_websites
+            assistant_website.website_id
+            for assistant_website in assistant_in_db.assistant_websites
         ]
         integration_knowledge_ids = [
             assistant_integration_knowledge.integration_knowledge_id
@@ -176,17 +200,23 @@ class AssistantFactory:
         ]
 
         prompt = None
-        if assistant_in_db.prompt is not None:
+        if assistant_in_db.prompt is not None:  # type: ignore[attr-defined]
             prompt = self.prompt_factory.create_prompt_from_db(
-                prompt_in_db=assistant_in_db.prompt, is_selected=True
+                prompt_in_db=assistant_in_db.prompt,  # type: ignore[attr-defined]
+                is_selected=True,
             )
 
         attachments = [
-            File(**attachment.file.to_dict()) for attachment in assistant_in_db.attachments
+            FileInfo.model_validate(attachment.file)
+            for attachment in assistant_in_db.attachments
         ]
 
-        collections = [collection for collection in collections if collection.id in collection_ids]
-        assistant_websites = [website for website in websites if website.id in websites_ids]
+        collections = [
+            collection for collection in collections if collection.id in collection_ids
+        ]
+        assistant_websites = [
+            website for website in websites if website.id in websites_ids
+        ]
 
         integration_knowledge_list = [
             integration_knowledge
@@ -195,30 +225,41 @@ class AssistantFactory:
         ]
 
         # Use filtered MCP servers if available (set by space repo), otherwise map from DB
-        _mcp_server_entities = getattr(assistant_in_db, '_mcp_server_entities', None)
+        _mcp_server_entities = getattr(assistant_in_db, "_mcp_server_entities", None)
         if _mcp_server_entities is not None:
             mcp_servers = _mcp_server_entities
         else:
             # Fallback: Map MCP servers from database to domain entities (without filtering)
             mcp_servers = MCPServerMapper.to_entities(assistant_in_db.mcp_servers)
 
-        completion_model_kwargs = ModelKwargs.model_validate(
+        # JSONB columns are Mapped[Optional[dict]] (unparameterised) in the ORM table;
+        completion_model_kwargs_raw: dict[str, object] = (
             assistant_in_db.completion_model_kwargs or {}
         )
+        completion_model_kwargs = ModelKwargs.model_validate(
+            completion_model_kwargs_raw
+        )
         completion_model = next(
-            (cm for cm in completion_models if cm.id == assistant_in_db.completion_model_id),
+            (
+                cm
+                for cm in completion_models
+                if cm.id == assistant_in_db.completion_model_id
+            ),
             None,
         )
 
         source_template = (
-            self.assistant_template_factory.create_assistant_template(assistant_in_db.template)
+            self.assistant_template_factory.create_assistant_template(
+                assistant_in_db.template
+            )
             if assistant_in_db.template
             else None
         )
 
+        assert assistant_in_db.space_id is not None, "Assistants must belong to a space"
         return Assistant(
             id=assistant_in_db.id,
-            user=user,
+            user=user_sparse,
             space_id=assistant_in_db.space_id,
             name=assistant_in_db.name,
             prompt=prompt,
@@ -241,6 +282,8 @@ class AssistantFactory:
             metadata_json=assistant_in_db.metadata_json,
             icon_id=assistant_in_db.icon_id,
             hidden=assistant_in_db.hidden,
-            origin=AssistantOrigin(assistant_in_db.origin or AssistantOrigin.USER.value),
+            origin=AssistantOrigin(
+                assistant_in_db.origin or AssistantOrigin.USER.value
+            ),
             managing_flow_id=assistant_in_db.managing_flow_id,
         )

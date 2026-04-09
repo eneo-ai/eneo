@@ -1,31 +1,16 @@
 from typing import TYPE_CHECKING
 
 from intric.ai_models.ai_models_service import AIModelsService
+from intric.ai_models.completion_models.completion_model import CompletionModelPublic
+from intric.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.flows.ai_builder.ai_builder_settings import (
-    apply_ai_builder_budget_policy_patch,
-    resolve_ai_builder_budget_policy,
-)
-from intric.flows.flow_input_limits import (
-    FlowInputLimits,
-    apply_flow_input_limits_patch,
-    resolve_flow_input_limits,
-)
 from intric.main.config import get_settings as get_app_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permissions
-from intric.settings.settings import (
-    AIBuilderBudgetSettingsPublic,
-    AIBuilderBudgetSettingsUpdate,
-    FlowInputLimitsPublic,
-    FlowInputLimitsUpdate,
-    SettingsInDB,
-    SettingsPublic,
-    SettingsUpsert,
-)
+from intric.settings.settings import SettingsInDB, SettingsPublic, SettingsUpsert
 from intric.settings.settings_repo import SettingsRepository
 from intric.tenants.tenant import TenantUpdate
 from intric.tenants.tenant_repo import TenantRepository
@@ -48,6 +33,7 @@ class SettingService:
         tenant_repo: TenantRepository,
         audit_service: AuditService,
     ):
+        super().__init__()
         self.repo = repo
         self.user = user
         self.ai_models_service = ai_models_service
@@ -56,7 +42,7 @@ class SettingService:
         self.audit_service = audit_service
 
     async def _require_feature_flag(self, name: str) -> "FeatureFlag":
-        feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
+        feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(  # type: ignore[reportUnknownMemberType]  # feature_flag_repo.one_or_none uses **filters which lacks type annotations
             name=name
         )
         if not feature_flag:
@@ -64,11 +50,7 @@ class SettingService:
         return feature_flag
 
     async def _set_feature_flag_for_tenant(self, *, name: str, enabled: bool) -> None:
-        feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
-            name=name
-        )
-        if feature_flag is None:
-            feature_flag = await self.feature_flag_service.create_feature_flag(name=name)
+        feature_flag = await self._require_feature_flag(name)
         if feature_flag.feature_id is None:
             raise ValueError(f"{name} feature flag is missing an id")
 
@@ -144,13 +126,16 @@ class SettingService:
         provisioning = (
             overrides["provisioning"]
             if "provisioning" in overrides
-            else tenant.provisioning if tenant else False
+            else tenant.provisioning
+            if tenant
+            else False
         )
 
         app_settings = get_app_settings()
 
         return SettingsPublic(
-            chatbot_widget=(settings_in_db.chatbot_widget if settings_in_db else {}) or {},
+            chatbot_widget=(settings_in_db.chatbot_widget if settings_in_db else {})
+            or {},
             using_templates=using_templates,
             audit_logging_enabled=audit_logging_enabled,
             tenant_credentials_enabled=app_settings.tenant_credentials_enabled,
@@ -160,11 +145,11 @@ class SettingService:
             api_key_expiry_notifications=api_key_expiry_notifications,
         )
 
-    async def get_settings(self):
+    async def get_settings(self) -> SettingsPublic:
         settings = await self.repo.get(self.user.id)
         return await self._build_settings_public(settings_in_db=settings)
 
-    async def update_settings(self, settings: SettingsPublic):
+    async def update_settings(self, settings: SettingsPublic) -> SettingsInDB:
         settings_upsert = SettingsUpsert(**settings.model_dump(), user_id=self.user.id)
 
         settings_in_db = await self.repo.update(settings_upsert)
@@ -174,10 +159,12 @@ class SettingService:
 
         return settings_in_db
 
-    async def get_available_completion_models(self):
+    async def get_available_completion_models(self) -> list[CompletionModelPublic]:
         return await self.ai_models_service.get_completion_models()
 
-    async def get_available_embedding_models(self):
+    async def get_available_embedding_models(
+        self,
+    ) -> list[EmbeddingModelPublicLegacy]:
         return await self.ai_models_service.get_embedding_models()
 
     @validate_permissions(Permission.ADMIN)
@@ -327,16 +314,20 @@ class SettingService:
             self.user.tenant_id,
         )
 
-        old_enabled = await self.feature_flag_service.check_is_feature_enabled_fail_closed(
-            feature_name="api_key_scope_enforcement",
-            tenant_id=self.user.tenant_id,
+        old_enabled = (
+            await self.feature_flag_service.check_is_feature_enabled_fail_closed(
+                feature_name="api_key_scope_enforcement",
+                tenant_id=self.user.tenant_id,
+            )
         )
 
         strict_was_enabled = False
         if not enabled:
-            strict_was_enabled = await self.feature_flag_service.check_is_feature_enabled(
-                feature_name="api_key_strict_mode",
-                tenant_id=self.user.tenant_id,
+            strict_was_enabled = (
+                await self.feature_flag_service.check_is_feature_enabled(
+                    feature_name="api_key_strict_mode",
+                    tenant_id=self.user.tenant_id,
+                )
             )
 
         await self._set_feature_flag_for_tenant(
@@ -407,7 +398,9 @@ class SettingService:
             feature_name="api_key_strict_mode",
             tenant_id=self.user.tenant_id,
         )
-        await self._set_feature_flag_for_tenant(name="api_key_strict_mode", enabled=enabled)
+        await self._set_feature_flag_for_tenant(
+            name="api_key_strict_mode", enabled=enabled
+        )
 
         settings = await self.repo.get(self.user.id)
 
@@ -420,7 +413,9 @@ class SettingService:
             description=f"Toggled api_key_strict_mode to {enabled}",
             metadata={
                 "setting": "api_key_strict_mode",
-                "changes": {"api_key_strict_mode": {"old": old_enabled, "new": enabled}},
+                "changes": {
+                    "api_key_strict_mode": {"old": old_enabled, "new": enabled}
+                },
             },
         )
 
@@ -473,180 +468,4 @@ class SettingService:
         return await self._build_settings_public(
             settings_in_db=settings,
             overrides={"api_key_expiry_notifications": enabled},
-        )
-
-    async def get_flow_input_limits_resolved(self) -> FlowInputLimits:
-        """Return domain-level flow input limits (no permission check)."""
-        tenant = await self.tenant_repo.get(self.user.tenant_id)
-        return resolve_flow_input_limits(tenant.flow_settings if tenant else None)
-
-    @validate_permissions(Permission.ADMIN)
-    async def get_flow_input_limits(self) -> FlowInputLimitsPublic:
-        limits = await self.get_flow_input_limits_resolved()
-        return FlowInputLimitsPublic(
-            file_max_size_bytes=limits.file_max_size_bytes,
-            audio_max_size_bytes=limits.audio_max_size_bytes,
-            max_files_per_run=limits.max_files_per_run,
-            audio_max_files_per_run=limits.audio_max_files_per_run,
-        )
-
-    @validate_permissions(Permission.ADMIN)
-    async def update_flow_input_limits(
-        self, payload: FlowInputLimitsUpdate
-    ) -> FlowInputLimitsPublic:
-        if not payload.model_fields_set:
-            raise BadRequestException(
-                "At least one flow input limit field must be provided."
-            )
-
-        tenant = await self.tenant_repo.get(self.user.tenant_id)
-        current_flow_settings = tenant.flow_settings if tenant else {}
-        previous = resolve_flow_input_limits(current_flow_settings)
-
-        # Tri-state: omitted = no change, explicit null = remove (revert to default), value = set
-        remove_keys: set[str] = set()
-        file_count_fields = ("max_files_per_run", "audio_max_files_per_run")
-        for field_name in file_count_fields:
-            if field_name in payload.model_fields_set:
-                value = getattr(payload, field_name)
-                if value is None:
-                    remove_keys.add(field_name)
-
-        updated_flow_settings = apply_flow_input_limits_patch(
-            current_flow_settings=current_flow_settings,
-            file_max_size_bytes=payload.file_max_size_bytes,
-            audio_max_size_bytes=payload.audio_max_size_bytes,
-            max_files_per_run=payload.max_files_per_run,
-            audio_max_files_per_run=payload.audio_max_files_per_run,
-            remove_keys=remove_keys,
-        )
-        updated_tenant = await self.tenant_repo.set_flow_settings(
-            tenant_id=self.user.tenant_id,
-            flow_settings=updated_flow_settings,
-        )
-        current = resolve_flow_input_limits(updated_tenant.flow_settings)
-
-        changes: dict[str, dict[str, int | None]] = {}
-        if payload.file_max_size_bytes is not None:
-            changes["file_max_size_bytes"] = {
-                "old": previous.file_max_size_bytes,
-                "new": current.file_max_size_bytes,
-            }
-        if payload.audio_max_size_bytes is not None:
-            changes["audio_max_size_bytes"] = {
-                "old": previous.audio_max_size_bytes,
-                "new": current.audio_max_size_bytes,
-            }
-        if "max_files_per_run" in payload.model_fields_set:
-            changes["max_files_per_run"] = {
-                "old": previous.max_files_per_run,
-                "new": current.max_files_per_run,
-            }
-        if "audio_max_files_per_run" in payload.model_fields_set:
-            changes["audio_max_files_per_run"] = {
-                "old": previous.audio_max_files_per_run,
-                "new": current.audio_max_files_per_run,
-            }
-
-        await self.audit_service.log_async(
-            tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
-            action=ActionType.TENANT_SETTINGS_UPDATED,
-            entity_type=EntityType.TENANT_SETTINGS,
-            entity_id=self.user.tenant_id,
-            description="Updated flow input limits",
-            metadata={
-                "setting": "flow_input_limits",
-                "changes": changes,
-            },
-        )
-
-        return FlowInputLimitsPublic(
-            file_max_size_bytes=current.file_max_size_bytes,
-            audio_max_size_bytes=current.audio_max_size_bytes,
-            max_files_per_run=current.max_files_per_run,
-            audio_max_files_per_run=current.audio_max_files_per_run,
-        )
-
-    async def get_ai_builder_budget_settings_resolved(self):
-        tenant = await self.tenant_repo.get(self.user.tenant_id)
-        return resolve_ai_builder_budget_policy(tenant.flow_settings if tenant else None)
-
-    @validate_permissions(Permission.ADMIN)
-    async def get_ai_builder_budget_settings(self) -> AIBuilderBudgetSettingsPublic:
-        settings = await self.get_ai_builder_budget_settings_resolved()
-        return AIBuilderBudgetSettingsPublic(
-            conversation_safety_buffer_tokens=settings.conversation_safety_buffer_tokens,
-            minimum_conversation_budget_tokens=settings.minimum_conversation_budget_tokens,
-            unknown_model_context_window_tokens=settings.unknown_model_context_window_tokens,
-        )
-
-    @validate_permissions(Permission.ADMIN)
-    async def update_ai_builder_budget_settings(
-        self,
-        payload: AIBuilderBudgetSettingsUpdate,
-    ) -> AIBuilderBudgetSettingsPublic:
-        if not payload.model_fields_set:
-            raise BadRequestException(
-                "At least one AI Builder budget field must be provided."
-            )
-
-        tenant = await self.tenant_repo.get(self.user.tenant_id)
-        current_flow_settings = tenant.flow_settings if tenant else {}
-        previous = resolve_ai_builder_budget_policy(current_flow_settings)
-
-        remove_keys: set[str] = set()
-        if (
-            "unknown_model_context_window_tokens" in payload.model_fields_set
-            and payload.unknown_model_context_window_tokens is None
-        ):
-            remove_keys.add("unknown_model_context_window_tokens")
-
-        updated_flow_settings = apply_ai_builder_budget_policy_patch(
-            current_flow_settings=current_flow_settings,
-            conversation_safety_buffer_tokens=payload.conversation_safety_buffer_tokens,
-            minimum_conversation_budget_tokens=payload.minimum_conversation_budget_tokens,
-            unknown_model_context_window_tokens=payload.unknown_model_context_window_tokens,
-            remove_keys=remove_keys,
-        )
-        updated_tenant = await self.tenant_repo.set_flow_settings(
-            tenant_id=self.user.tenant_id,
-            flow_settings=updated_flow_settings,
-        )
-        current = resolve_ai_builder_budget_policy(updated_tenant.flow_settings)
-
-        changes: dict[str, dict[str, int | None]] = {}
-        if "conversation_safety_buffer_tokens" in payload.model_fields_set:
-            changes["conversation_safety_buffer_tokens"] = {
-                "old": previous.conversation_safety_buffer_tokens,
-                "new": current.conversation_safety_buffer_tokens,
-            }
-        if "minimum_conversation_budget_tokens" in payload.model_fields_set:
-            changes["minimum_conversation_budget_tokens"] = {
-                "old": previous.minimum_conversation_budget_tokens,
-                "new": current.minimum_conversation_budget_tokens,
-            }
-        if "unknown_model_context_window_tokens" in payload.model_fields_set:
-            changes["unknown_model_context_window_tokens"] = {
-                "old": previous.unknown_model_context_window_tokens,
-                "new": current.unknown_model_context_window_tokens,
-            }
-
-        await self.audit_service.log_async(
-            tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
-            action=ActionType.TENANT_SETTINGS_UPDATED,
-            entity_type=EntityType.TENANT_SETTINGS,
-            entity_id=self.user.tenant_id,
-            description="Updated AI Builder budget settings",
-            metadata={
-                "setting": "ai_builder_budget_settings",
-                "changes": changes,
-            },
-        )
-
-        return AIBuilderBudgetSettingsPublic(
-            conversation_safety_buffer_tokens=current.conversation_safety_buffer_tokens,
-            minimum_conversation_budget_tokens=current.minimum_conversation_budget_tokens,
-            unknown_model_context_window_tokens=current.unknown_model_context_window_tokens,
         )

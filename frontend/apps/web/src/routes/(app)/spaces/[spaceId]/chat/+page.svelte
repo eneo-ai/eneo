@@ -29,7 +29,7 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  const chat = initChatService(data);
+  const chat = untrack(() => initChatService(data));
 
   let currentTab = writable("chat");
 
@@ -91,8 +91,10 @@
       {#if chat.partner.type === "default-assistant"}
         <DefaultAssistantModelSwitcher></DefaultAssistantModelSwitcher>
       {:else if chat.partner.permissions?.includes("edit")}
-        <Button href={localizeHref(`/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`)}
-          >{m.edit()}</Button
+        <Button
+          href={localizeHref(
+            `/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`
+          )}>{m.edit()}</Button
         >
       {/if}
       <Button
@@ -100,13 +102,12 @@
         on:click={() => {
           chat.newConversation();
           const tab = "chat";
-          pushState(
-            `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`,
-            {
-              conversation: undefined,
-              tab
-            }
-          );
+          const nextUrl = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`;
+          // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with query string
+          pushState(nextUrl, {
+            conversation: undefined,
+            tab
+          });
         }}
         class="!line-clamp-1"
         >{m.new_conversation()}
@@ -135,23 +136,21 @@
       <HistoryTable
         onConversationLoaded={(conversation) => {
           const tab = "chat";
-          pushState(
-            `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, conversation, tab })}`,
-            {
-              conversation,
-              tab
-            }
-          );
+          const nextUrl = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, conversation, tab })}`;
+          // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with query string
+          pushState(nextUrl, {
+            conversation,
+            tab
+          });
         }}
         onConversationDeleted={() => {
           const tab = "history";
-          pushState(
-            `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`,
-            {
-              conversation: undefined,
-              tab
-            }
-          );
+          const nextUrl = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`;
+          // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with query string
+          pushState(nextUrl, {
+            conversation: undefined,
+            tab
+          });
         }}
       />
 

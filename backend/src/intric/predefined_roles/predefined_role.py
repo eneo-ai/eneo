@@ -25,7 +25,7 @@ class PredefinedRoleCreate(PredefinedRoleBase):
     pass
 
 
-class PredefinedRoleUpdateRequest(PredefinedRoleBase):
+class PredefinedRoleUpdateRequest(BaseModel):
     name: Optional[str] = None
     permissions: Optional[list[Permission]] = None
 

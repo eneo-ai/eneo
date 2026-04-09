@@ -16,8 +16,9 @@ class ApiKeysV2(BasePublic):
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False
     )
-    owner_user_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Users.id, ondelete="CASCADE"), nullable=False
+    ownership: Mapped[str] = mapped_column(nullable=False, server_default="user")
+    owner_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
     )
     scope_type: Mapped[str] = mapped_column(nullable=False)
     scope_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
@@ -32,7 +33,9 @@ class ApiKeysV2(BasePublic):
     rate_limit: Mapped[Optional[int]] = mapped_column(nullable=True)
     allowed_origins: Mapped[Optional[list[str]]] = mapped_column(JSONB, nullable=True)
     allowed_ips: Mapped[Optional[list[str]]] = mapped_column(JSONB, nullable=True)
-    resource_permissions: Mapped[Optional[dict[str, str]]] = mapped_column(JSONB, nullable=True)
+    resource_permissions: Mapped[Optional[dict[str, str]]] = mapped_column(
+        JSONB, nullable=True
+    )
     state: Mapped[str] = mapped_column(nullable=False, server_default="active")
     expires_at: Mapped[Optional[datetime]] = mapped_column(
         sa.DateTime(timezone=True), nullable=True

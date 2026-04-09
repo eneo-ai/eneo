@@ -40,20 +40,20 @@ class ParsedMessage(BaseModel):
     type: IncomingMessageType
     data: MessagePayload | None = None
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     def validate_data(cls, values: Any):
-        message_type = values.get('type')
+        message_type = values.get("type")
 
         if message_type is None:
             raise ValueError("Message type is invalid")
 
         match message_type:
             case IncomingMessageType.PING:
-                values['data'] = WsPing()
+                values["data"] = WsPing()
             case IncomingMessageType.SUBSCRIBE:
-                values['data'] = WsSubscribeMessage(**values['data'])
+                values["data"] = WsSubscribeMessage(**values["data"])
             case IncomingMessageType.UNSUBSCRIBE:
-                values['data'] = WsUnSubscribeMessage(**values['data'])
+                values["data"] = WsUnSubscribeMessage(**values["data"])
             case _:
                 raise ValueError(f"Unsupported message type: {message_type}")
 

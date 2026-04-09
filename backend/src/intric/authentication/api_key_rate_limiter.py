@@ -6,6 +6,8 @@ from intric.audit.infrastructure.rate_limiting import (
     RateLimitConfig,
     RateLimitResult,
     RateLimitServiceUnavailableError,
+)
+from intric.audit.infrastructure.rate_limiting import (
     check_rate_limit as _raw_check_rate_limit,  # pyright: ignore[reportUnknownVariableType]
 )
 from intric.authentication.api_key_resolver import ApiKeyValidationError
@@ -22,6 +24,7 @@ _check_rate_limit = cast(CheckRateLimit, _raw_check_rate_limit)  # pyright: igno
 
 class ApiKeyRateLimiter:
     def __init__(self, redis_client: Any):
+        super().__init__()
         self.redis_client = redis_client
         self.settings = get_settings()
 

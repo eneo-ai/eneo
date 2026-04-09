@@ -247,3 +247,6 @@ The branch is not fully green because the latest develop-aligned baseline carrie
 ## Ralph restart
 - User provided new evidence that the prior merge was stale.
 - Updated execution order: checkpoint current fixes, fetch latest origin/develop, merge it, verify ancestry with git merge-base, then continue verification.
+
+- Fetched latest origin/develop at 5187f8dc and re-ran the merge using  to systematically favor latest develop on shared/non-flows conflicts.
+- Only residual conflicts were stale deleted legacy files; resolved by accepting develop-side deletions.

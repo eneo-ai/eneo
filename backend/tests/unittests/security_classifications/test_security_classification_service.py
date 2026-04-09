@@ -70,7 +70,9 @@ def service(user, security_repo, tenant_service):
 
 
 @pytest.fixture
-def service_without_permissions(user_without_permissions, security_repo, tenant_service):
+def service_without_permissions(
+    user_without_permissions, security_repo, tenant_service
+):
     return SecurityClassificationService(
         user=user_without_permissions,
         repo=security_repo,
@@ -85,13 +87,22 @@ class TestSecurityClassificationService:
 
         # Create test classifications
         sc1 = SecurityClassification(
-            id=uuid.uuid4(), tenant_id=tenant_id, name="Classification 1", security_level=0
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            name="Classification 1",
+            security_level=0,
         )
         sc2 = SecurityClassification(
-            id=uuid.uuid4(), tenant_id=tenant_id, name="Classification 2", security_level=1
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            name="Classification 2",
+            security_level=1,
         )
         sc3 = SecurityClassification(
-            id=uuid.uuid4(), tenant_id=tenant_id, name="Classification 3", security_level=2
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            name="Classification 3",
+            security_level=2,
         )
 
         # Configure repo mock to return all classifications
@@ -108,7 +119,9 @@ class TestSecurityClassificationService:
         model_ids = [sc3.id, sc1.id, sc2.id]
 
         # When updating security levels
-        result = await service.update_security_levels(security_classifications=model_ids)
+        result = await service.update_security_levels(
+            security_classifications=model_ids
+        )
 
         # Then the security levels should be updated based on new order
         assert len(result) == 3
@@ -137,7 +150,9 @@ class TestSecurityClassificationService:
 
         # When trying to update with a non-existent ID
         with pytest.raises(NotFoundException) as excinfo:
-            await service.update_security_levels(security_classifications=[uuid.uuid4()])
+            await service.update_security_levels(
+                security_classifications=[uuid.uuid4()]
+            )
 
         # Then a NotFoundException should be raised
         assert "not found" in str(excinfo.value)
@@ -145,7 +160,9 @@ class TestSecurityClassificationService:
         # And no updates should be performed
         service.repo.update.assert_not_called()
 
-    async def test_toggle_security_enabled_to_true(self, service, user, tenant_service, tenant_id):
+    async def test_toggle_security_enabled_to_true(
+        self, service, user, tenant_service, tenant_id
+    ):
         # Given the tenant has security_enabled=False (set in fixture)
         # And the tenant_service toggle_security method returns a tenant with security_enabled=True
         updated_tenant = TenantInDB(
@@ -164,7 +181,9 @@ class TestSecurityClassificationService:
         # And the result should be the updated tenant with security_enabled=True
         assert result.security_enabled is True
 
-    async def test_toggle_security_enabled_to_false(self, service, user, tenant_service, tenant_id):
+    async def test_toggle_security_enabled_to_false(
+        self, service, user, tenant_service, tenant_id
+    ):
         # Given the tenant has security_enabled=True
         user.tenant.security_enabled = True
 

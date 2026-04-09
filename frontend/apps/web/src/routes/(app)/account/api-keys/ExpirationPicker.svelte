@@ -1,8 +1,13 @@
 <script lang="ts">
-  import { Calendar, Clock, AlertTriangle, Infinity } from "lucide-svelte";
+  import { Calendar, Clock, AlertTriangle, Infinity as InfinityIcon } from "lucide-svelte";
   import { fly } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
+  import { SvelteDate } from "svelte/reactivity";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Label } from "$lib/components/ui/label/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
 
   let {
     value = $bindable<string | null>(null),
@@ -30,20 +35,18 @@
   const presets = $derived(getPresets());
 
   // Filter presets based on maxDays policy
-  const availablePresets = $derived(
-    maxDays ? presets.filter((p) => p.days <= maxDays) : presets
-  );
+  const availablePresets = $derived(maxDays ? presets.filter((p) => p.days <= maxDays) : presets);
 
   // Calculate date from days offset
   function getDateFromDays(days: number): string {
-    const date = new Date();
+    const date = new SvelteDate();
     date.setDate(date.getDate() + days);
     return date.toISOString();
   }
 
   // Get minimum date for custom picker (tomorrow)
   const minDate = $derived(() => {
-    const tomorrow = new Date();
+    const tomorrow = new SvelteDate();
     tomorrow.setDate(tomorrow.getDate() + 1);
     return tomorrow.toISOString().split("T")[0];
   });
@@ -51,7 +54,7 @@
   // Get maximum date for custom picker
   const maxDate = $derived(() => {
     if (!maxDays) return null;
-    const max = new Date();
+    const max = new SvelteDate();
     max.setDate(max.getDate() + maxDays);
     return max.toISOString().split("T")[0];
   });
@@ -62,9 +65,7 @@
     const presetDate = new Date(getDateFromDays(days));
     const selectedDate = new Date(value);
     // Compare dates (ignoring time for preset matching)
-    return (
-      presetDate.toISOString().split("T")[0] === selectedDate.toISOString().split("T")[0]
-    );
+    return presetDate.toISOString().split("T")[0] === selectedDate.toISOString().split("T")[0];
   }
 
   // Check if "No expiration" is selected
@@ -95,7 +96,7 @@
       customTime = date.toTimeString().slice(0, 5);
     } else {
       // Default to 30 days from now
-      const defaultDate = new Date();
+      const defaultDate = new SvelteDate();
       defaultDate.setDate(defaultDate.getDate() + 30);
       customDate = defaultDate.toISOString().split("T")[0];
       customTime = "23:59";
@@ -138,106 +139,97 @@
 </script>
 
 <div class="space-y-3">
-  <span id="expiration-label" class="block text-sm font-medium text-default">
+  <span id="expiration-label" class="text-default block text-sm font-medium">
     {m.api_keys_expiration()}
     {#if requireExpiration}
-      <span class="text-negative">*</span>
+      <span class="text-negative-stronger">*</span>
     {/if}
   </span>
 
   <!-- Preset buttons -->
   <div role="group" aria-labelledby="expiration-label" class="flex flex-wrap gap-2">
-    {#each availablePresets as preset}
-      <button
+    {#each availablePresets as preset (preset.days)}
+      <Button
         type="button"
+        variant={isPresetSelected(preset.days) ? "default" : "outline"}
         onclick={() => selectPreset(preset.days)}
-        disabled={disabled}
-        class="rounded-lg border px-4 py-2 text-sm font-medium transition-all duration-150
-               {isPresetSelected(preset.days)
-          ? 'border-accent-default bg-accent-default/10 text-accent-default ring-2 ring-accent-default/20'
-          : 'border-default bg-primary text-default hover:border-dimmer hover:bg-subtle'}
-               disabled:opacity-50 disabled:cursor-not-allowed"
+        {disabled}
+        aria-pressed={isPresetSelected(preset.days)}
       >
         {preset.label}
-      </button>
+      </Button>
     {/each}
 
     <!-- Custom button -->
-    <button
+    <Button
       type="button"
+      variant={showCustom ? "default" : "outline"}
       onclick={showCustomPicker}
-      disabled={disabled}
-      class="rounded-lg border px-4 py-2 text-sm font-medium transition-all duration-150
-             flex items-center gap-2
-             {showCustom
-        ? 'border-accent-default bg-accent-default/10 text-accent-default ring-2 ring-accent-default/20'
-        : 'border-default bg-primary text-default hover:border-dimmer hover:bg-subtle'}
-             disabled:opacity-50 disabled:cursor-not-allowed"
+      {disabled}
+      aria-pressed={showCustom}
     >
-      <Calendar class="h-4 w-4" />
+      <Calendar />
       {m.api_keys_exp_custom()}
-    </button>
+    </Button>
 
     <!-- No expiration button -->
     {#if !requireExpiration}
-      <button
+      <Button
         type="button"
+        variant={isNoExpiration ? "default" : "outline"}
         onclick={selectNoExpiration}
-        disabled={disabled}
-        class="rounded-lg border px-4 py-2 text-sm font-medium transition-all duration-150
-               flex items-center gap-2
-               {isNoExpiration
-          ? 'border-accent-default bg-accent-default/10 text-accent-default ring-2 ring-accent-default/20'
-          : 'border-default bg-primary text-default hover:border-dimmer hover:bg-subtle'}
-               disabled:opacity-50 disabled:cursor-not-allowed"
+        {disabled}
+        aria-pressed={isNoExpiration}
       >
-        <Infinity class="h-4 w-4" />
+        <InfinityIcon />
         {m.api_keys_exp_no_expiration()}
-      </button>
+      </Button>
     {/if}
   </div>
 
   <!-- Custom date picker -->
   {#if showCustom}
     <div
-      class="rounded-lg border border-default bg-subtle p-4 space-y-3"
+      class="border-default bg-subtle space-y-3 rounded-lg border p-4"
       transition:fly={{ y: -4, duration: 150 }}
     >
       <div class="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label for="expiration-date" class="mb-1.5 block text-xs font-medium text-muted">{m.api_keys_exp_date()}</label>
-          <input
+        <div class="flex flex-col gap-1.5">
+          <Label for="expiration-date" class="text-muted text-xs">
+            {m.api_keys_exp_date()}
+          </Label>
+          <Input
             id="expiration-date"
             type="date"
             bind:value={customDate}
             min={minDate()}
             max={maxDate()}
-            disabled={disabled}
-            class="h-10 w-full rounded-lg border border-default bg-primary px-3 text-sm
-                   focus:border-accent-default focus:ring-2 focus:ring-accent-default/20
-                   disabled:opacity-50 disabled:cursor-not-allowed"
+            {disabled}
           />
         </div>
-        <div>
-          <label for="expiration-time" class="mb-1.5 block text-xs font-medium text-muted">{m.api_keys_exp_time()}</label>
+        <div class="flex flex-col gap-1.5">
+          <Label for="expiration-time" class="text-muted text-xs">
+            {m.api_keys_exp_time()}
+          </Label>
           <div class="relative">
-            <Clock class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted pointer-events-none" />
-            <input
+            <Clock
+              class="text-muted pointer-events-none absolute top-1/2 left-3 z-10 h-4 w-4 -translate-y-1/2"
+              aria-hidden="true"
+            />
+            <Input
               id="expiration-time"
               type="time"
               bind:value={customTime}
-              disabled={disabled}
-              class="h-10 w-full rounded-lg border border-default bg-primary pl-10 pr-3 text-sm
-                     focus:border-accent-default focus:ring-2 focus:ring-accent-default/20
-                     disabled:opacity-50 disabled:cursor-not-allowed"
+              {disabled}
+              class="pl-9"
             />
           </div>
         </div>
       </div>
 
       {#if maxDays}
-        <p class="text-xs text-muted flex items-center gap-1.5">
-          <AlertTriangle class="h-3.5 w-3.5" />
+        <p class="text-muted flex items-center gap-1.5 text-xs">
+          <AlertTriangle class="h-3.5 w-3.5" aria-hidden="true" />
           {m.api_keys_exp_max_days({ days: maxDays })}
         </p>
       {/if}
@@ -248,43 +240,47 @@
   {#if value}
     {@const daysUntil = getDaysUntil(value)}
     <div
-      class="rounded-lg border border-accent-default/30 bg-accent-default/5 px-4 py-3
-             flex items-center justify-between"
+      class="border-accent-default/30 bg-accent-default/5 flex items-center justify-between rounded-lg
+             border px-4 py-3"
     >
       <div class="flex items-center gap-3">
-        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-default/15">
-          <Calendar class="h-4 w-4 text-accent-default" />
+        <div class="bg-accent-default/15 flex h-8 w-8 items-center justify-center rounded-lg">
+          <Calendar class="text-accent-default h-4 w-4" />
         </div>
         <div>
-          <p class="text-sm font-medium text-default">
+          <p class="text-default text-sm font-medium">
             {m.api_keys_exp_expires_on({ date: formatDisplayDate(value) })}
           </p>
-          <p class="text-xs text-muted">
-            {daysUntil === 1 ? m.api_keys_exp_1_day_from_now() : m.api_keys_exp_days_from_now({ count: daysUntil })}
+          <p class="text-muted text-xs">
+            {daysUntil === 1
+              ? m.api_keys_exp_1_day_from_now()
+              : m.api_keys_exp_days_from_now({ count: daysUntil })}
           </p>
         </div>
       </div>
     </div>
   {:else if !showCustom}
     <div
-      class="rounded-lg border border-accent-default/30 bg-accent-default/5 px-4 py-3
-             flex items-center gap-3"
+      class="border-accent-default/30 bg-accent-default/5 flex items-center gap-3 rounded-lg
+             border px-4 py-3"
     >
-      <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-default/15">
-        <Infinity class="h-4 w-4 text-accent-default" />
+      <div class="bg-accent-default/15 flex h-8 w-8 items-center justify-center rounded-lg">
+        <InfinityIcon class="text-accent-default h-4 w-4" />
       </div>
       <div>
-        <p class="text-sm font-medium text-default">{m.api_keys_exp_no_expiration()}</p>
-        <p class="text-xs text-muted">{m.api_keys_exp_valid_until_revoked()}</p>
+        <p class="text-default text-sm font-medium">{m.api_keys_exp_no_expiration()}</p>
+        <p class="text-muted text-xs">{m.api_keys_exp_valid_until_revoked()}</p>
       </div>
     </div>
   {/if}
 
   <!-- Warning for no expiration -->
   {#if !value && !requireExpiration}
-    <div class="flex items-start gap-2.5 rounded-lg border border-caution/20 bg-caution/5 px-3 py-2.5 text-xs text-caution">
-      <AlertTriangle class="h-4 w-4 flex-shrink-0" />
-      <span>{m.api_keys_exp_warning()}</span>
-    </div>
+    <Alert.Root class="border-caution/30 bg-caution/5">
+      <AlertTriangle class="text-caution" />
+      <Alert.Description class="text-caution text-xs">
+        {m.api_keys_exp_warning()}
+      </Alert.Description>
+    </Alert.Root>
   {/if}
 </div>

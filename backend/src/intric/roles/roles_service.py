@@ -22,17 +22,18 @@ class RolesService:
         self,
         user: UserInDB,
         repo: RolesRepository,
-    ):
+    ) -> None:
+        super().__init__()
         self.user = user
         self.repo = repo
 
-    def _validate(self, role: RoleInDB, role_id: UUID):
+    def _validate(self, role: RoleInDB | None, role_id: UUID) -> None:
         if role is None or self.user.tenant_id != role.tenant_id:
             raise NotFoundException(
                 f"Role {role_id} not found for tenant({self.user.tenant_id})"
             )
 
-    async def get_permissions(self) -> dict:
+    async def get_permissions(self) -> list[PermissionPublic]:
         return [
             PermissionPublic(name=key, description=value)
             for key, value in PERMISSIONS_WITH_DESCRIPTION.items()
@@ -46,7 +47,7 @@ class RolesService:
         return await self.repo.create_role(role)
 
     @validate_permissions(Permission.ADMIN)
-    async def get_role_by_uuid(self, role_id: UUID) -> RoleInDB:
+    async def get_role_by_uuid(self, role_id: UUID) -> RoleInDB | None:
         role = await self.repo.get_role(role_id)
         self._validate(role, role_id)
 
@@ -56,6 +57,7 @@ class RolesService:
     async def update_role(self, role_update: RoleUpdateRequest, role_id: UUID):
         role = await self.get_role_by_uuid(role_id)
         self._validate(role, role_id)
+        assert role is not None
 
         role_update = RoleUpdate(
             **role_update.model_dump(exclude_unset=True), id=role.id

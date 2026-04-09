@@ -15,12 +15,14 @@ async def check_columns():
         print(f"Current migration: {current_migration}\n")
 
         # Check columns in both tables
-        for table in ['assistant_templates', 'app_templates']:
-            result = await conn.execute(text(f"""
+        for table in ["assistant_templates", "app_templates"]:
+            result = await conn.execute(
+                text(f"""
                 SELECT column_name, data_type, is_nullable
                 FROM information_schema.columns
                 WHERE table_name='{table}' AND column_name='icon_name'
-            """))
+            """)
+            )
             row = result.fetchone()
             if row:
                 print(f"✓ {table}.icon_name: {row[0]} ({row[1]}) - nullable={row[2]}")

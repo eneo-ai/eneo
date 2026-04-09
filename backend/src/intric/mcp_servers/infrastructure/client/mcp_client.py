@@ -1,5 +1,6 @@
 """MCP Client for connecting to and executing HTTP-based MCP servers."""
 
+import asyncio
 from datetime import timedelta
 from types import TracebackType
 from typing import Any, Optional
@@ -69,7 +70,9 @@ async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
                 },
             )
             if resp.status_code == 401:
-                return "Authentication failed (401 Unauthorized). Check your bearer token."
+                return (
+                    "Authentication failed (401 Unauthorized). Check your bearer token."
+                )
             elif resp.status_code == 403:
                 return "Access denied (403 Forbidden). Check your credentials."
             elif resp.status_code >= 500:
@@ -104,6 +107,7 @@ class MCPClient:
             auth_credentials: Authentication credentials from tenant settings
             timeout: Connection timeout in seconds (defaults to 30s)
         """
+        super().__init__()
         self.mcp_server = mcp_server
         self.auth_credentials = auth_credentials or {}
         self.timeout = timeout or MCP_CONNECTION_TIMEOUT_DEFAULT
@@ -144,7 +148,9 @@ class MCPClient:
                 error_msg = await _diagnose_http(
                     self.mcp_server.http_url, self._build_auth_headers()
                 )
-            logger.error(f"Failed to connect to MCP server {self.mcp_server.name}: {error_msg}")
+            logger.error(
+                f"Failed to connect to MCP server {self.mcp_server.name}: {error_msg}"
+            )
             await self._cleanup_contexts()
             raise MCPClientError(error_msg) from e
 
@@ -189,7 +195,9 @@ class MCPClient:
         # Successfully entered - now save the reference
         self._streams_context = streams_context
         read, write, _ = streams
-        logger.debug(f"Streamable HTTP transport connected to {self.mcp_server.http_url}")
+        logger.debug(
+            f"Streamable HTTP transport connected to {self.mcp_server.http_url}"
+        )
 
         # Create and enter session context
         session_context = ClientSession(read, write)
@@ -228,30 +236,48 @@ class MCPClient:
             raise MCPClientError("Not connected to MCP server")
 
         try:
-            response = await self.session.list_tools()
+            response = await asyncio.wait_for(
+                self.session.list_tools(),
+                timeout=self.list_tools_timeout,
+            )
             tools: list[dict[str, Any]] = []
 
             for tool in response.tools:
-                tools.append({
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": tool.inputSchema,
-                })
+                tools.append(
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.inputSchema,
+                    }
+                )
 
             logger.debug(f"Listed {len(tools)} tools from {self.mcp_server.name}")
             return tools
 
+        except asyncio.TimeoutError as e:
+            raise MCPClientError(
+                f"Failed to list tools: request timed out after {self.list_tools_timeout}s"
+            ) from e
         except MCPClientError:
             raise
         except BaseException as e:
             error_msg = _extract_error_message(e) or str(e)
             lowered = error_msg.lower()
-            if any(x in lowered for x in ("401", "403", "unauthorized", "forbidden", "authentication")):
-                raise MCPAuthenticationError("Failed to list tools: upstream authentication failed") from e
-            logger.error(f"Failed to list tools from {self.mcp_server.name}: {error_msg}")
+            if any(
+                x in lowered
+                for x in ("401", "403", "unauthorized", "forbidden", "authentication")
+            ):
+                raise MCPAuthenticationError(
+                    f"Failed to list tools: {error_msg}"
+                ) from e
+            logger.error(
+                f"Failed to list tools from {self.mcp_server.name}: {error_msg}"
+            )
             raise MCPClientError(f"Failed to list tools: {error_msg}") from e
 
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call_tool(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Call a tool on the MCP server.
 
@@ -266,29 +292,38 @@ class MCPClient:
             raise MCPClientError("Not connected to MCP server")
 
         try:
-            response = await self.session.call_tool(tool_name, arguments=arguments)
+            response = await asyncio.wait_for(
+                self.session.call_tool(tool_name, arguments=arguments),
+                timeout=self.tool_call_timeout,
+            )
 
             # Extract content from response
             content_list: list[dict[str, Any]] = []
 
             for content_item in response.content:
                 if content_item.type == "text":
-                    content_list.append({
-                        "type": "text",
-                        "text": content_item.text,
-                    })
+                    content_list.append(
+                        {
+                            "type": "text",
+                            "text": content_item.text,
+                        }
+                    )
                 elif content_item.type == "image":
-                    content_list.append({
-                        "type": "image",
-                        "data": content_item.data,
-                        "mime_type": content_item.mimeType,
-                    })
+                    content_list.append(
+                        {
+                            "type": "image",
+                            "data": content_item.data,
+                            "mime_type": content_item.mimeType,
+                        }
+                    )
                 elif content_item.type == "resource":
-                    content_list.append({
-                        "type": "resource",
-                        "uri": getattr(content_item, "uri", None),
-                        "text": getattr(content_item, "text", None),
-                    })
+                    content_list.append(
+                        {
+                            "type": "resource",
+                            "uri": getattr(content_item, "uri", None),
+                            "text": getattr(content_item, "text", None),
+                        }
+                    )
 
             result: dict[str, Any] = {
                 "content": content_list,
@@ -298,14 +333,23 @@ class MCPClient:
             logger.info(f"Called tool {tool_name} on {self.mcp_server.name}")
             return result
 
+        except asyncio.TimeoutError as e:
+            raise MCPClientError(
+                f"Tool call failed: request timed out after {self.tool_call_timeout}s"
+            ) from e
         except MCPClientError:
             raise
         except BaseException as e:
             error_msg = _extract_error_message(e) or str(e)
             lowered = error_msg.lower()
-            if any(x in lowered for x in ("401", "403", "unauthorized", "forbidden", "authentication")):
-                raise MCPAuthenticationError("Tool call failed: upstream authentication failed") from e
-            logger.error(f"Failed to call tool {tool_name} on {self.mcp_server.name}: {error_msg}")
+            if any(
+                x in lowered
+                for x in ("401", "403", "unauthorized", "forbidden", "authentication")
+            ):
+                raise MCPAuthenticationError(f"Tool call failed: {error_msg}") from e
+            logger.error(
+                f"Failed to call tool {tool_name} on {self.mcp_server.name}: {error_msg}"
+            )
             raise MCPClientError(f"Tool call failed: {error_msg}") from e
 
     async def disconnect(self) -> None:

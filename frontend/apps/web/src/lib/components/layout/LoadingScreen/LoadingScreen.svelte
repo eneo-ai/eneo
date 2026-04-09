@@ -14,7 +14,8 @@
     class="absolute inset-0 flex flex-col items-center justify-center gap-4"
     role="status"
     aria-live="polite"
-    aria-busy="true">
+    aria-busy="true"
+  >
     <EneoWordMark class="text-brand-intric h-8 w-20"></EneoWordMark>
     <IconLoadingSpinner class="animate-spin" aria-hidden="true" />
     <p class="text-dimmer text-sm">{message}</p>

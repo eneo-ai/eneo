@@ -6,7 +6,6 @@
 
 <script lang="ts">
   import {
-    IntricError,
     type CompletionModel,
     type EmbeddingModel,
     type SecurityClassification,
@@ -19,6 +18,8 @@
   import { Button } from "@intric/ui";
   import { IconChevronRight } from "@intric/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
+  import { SvelteSet } from "svelte/reactivity";
 
   type Props =
     | {
@@ -45,7 +46,7 @@
   }
 
   function listOrgs(models: { org?: string | null | undefined }[]) {
-    const uniqueOrgs = new Set<string>();
+    const uniqueOrgs = new SvelteSet<string>();
 
     for (const model of models) {
       if (model.org) uniqueOrgs.add(model.org);
@@ -65,7 +66,7 @@
       // @ts-expect-error doesnt understand [type]
       await intric.models.update({ [type]: model, update: { security_classification } });
     } catch (error) {
-      alert(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toastError(error);
     }
   }
 
@@ -123,7 +124,7 @@
                         model.security_classification = next;
                         classifiedCount = countClassifiedModels();
                       } catch (error) {
-                        alert(error);
+                        toastError(error);
                       }
                     }}
                   ></SelectSecurityClassification>

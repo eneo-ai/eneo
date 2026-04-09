@@ -25,7 +25,9 @@ class Settings(BaseSettings):
     default_user_email: Optional[str] = None
     default_user_password: Optional[str] = None
 
+
 settings = Settings()
+
 
 # Alembic command
 def run_alembic_migrations():
@@ -33,21 +35,27 @@ def run_alembic_migrations():
         subprocess.run(["alembic", "upgrade", "head"], check=True)
         print("Alembic migrations ran successfully.")
     except FileNotFoundError:
-        print("Error: alembic not found on PATH. Ensure it's installed in /app/.venv and PATH includes /app/.venv/bin")
+        print(
+            "Error: alembic not found on PATH. Ensure it's installed in /app/.venv and PATH includes /app/.venv/bin"
+        )
         exit(1)
     except subprocess.CalledProcessError as e:
         print(f"Error running alembic migrations: {e}")
         exit(1)
 
+
 # Password hashing
 def create_salt_and_hashed_password(plaintext_password: str):
-    pwd_bytes = plaintext_password.encode('utf-8')
+    pwd_bytes = plaintext_password.encode("utf-8")
     salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
-    return salt.decode(), hashed_password.decode('utf-8')
+    return salt.decode(), hashed_password.decode("utf-8")
+
 
 # Add tenant and user
-def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_password):
+def add_tenant_user(
+    conn, tenant_name, quota_limit, user_name, user_email, user_password
+):
     try:
         cur = conn.cursor()
 
@@ -67,7 +75,9 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
             tenant_id = tenant[0]
 
         # Check if user already exists
-        check_user_query = sql.SQL("SELECT id FROM users WHERE email = %s AND tenant_id = %s")
+        check_user_query = sql.SQL(
+            "SELECT id FROM users WHERE email = %s AND tenant_id = %s"
+        )
         cur.execute(check_user_query, (user_email, tenant_id))
         user = cur.fetchone()
 
@@ -140,7 +150,14 @@ def add_tenant_user(conn, tenant_name, quota_limit, user_name, user_email, user_
             )
             cur.execute(
                 add_org_space_query,
-                (org_space_id, "Organization space", "Delad knowledge för hela tenant", tenant_id, now, now),
+                (
+                    org_space_id,
+                    "Organization space",
+                    "Delad knowledge för hela tenant",
+                    tenant_id,
+                    now,
+                    now,
+                ),
             )
 
         conn.commit()
@@ -165,12 +182,16 @@ if __name__ == "__main__":
         password=settings.postgres_password,
     )
 
-    if (settings.default_tenant_name is None or
-        settings.default_tenant_quota_limit is None or
-        settings.default_user_name is None or
-        settings.default_user_email is None or
-        settings.default_user_password is None):
-        print("Note! One or more environment variables for default tenant and user are not set. Skipping creation of default tenant and user.")
+    if (
+        settings.default_tenant_name is None
+        or settings.default_tenant_quota_limit is None
+        or settings.default_user_name is None
+        or settings.default_user_email is None
+        or settings.default_user_password is None
+    ):
+        print(
+            "Note! One or more environment variables for default tenant and user are not set. Skipping creation of default tenant and user."
+        )
     else:
         add_tenant_user(
             conn,

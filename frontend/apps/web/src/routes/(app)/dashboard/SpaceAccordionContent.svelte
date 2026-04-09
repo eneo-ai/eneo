@@ -43,8 +43,8 @@
         <span>Assistants ({allAssistants.length})</span>
         <IconChevronRight
           class={$isSelected(`${space.id}-assistants`)
-            ? "rotate-90 transition-all h-4 w-4"
-            : "transition-all h-4 w-4"}
+            ? "h-4 w-4 rotate-90 transition-all"
+            : "h-4 w-4 transition-all"}
         />
       </button>
 
@@ -74,8 +74,8 @@
         <span>Apps ({space.applications.apps.count})</span>
         <IconChevronRight
           class={$isSelected(`${space.id}-apps`)
-            ? "rotate-90 transition-all h-4 w-4"
-            : "transition-all h-4 w-4"}
+            ? "h-4 w-4 rotate-90 transition-all"
+            : "h-4 w-4 transition-all"}
         />
       </button>
 

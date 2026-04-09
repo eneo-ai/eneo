@@ -313,9 +313,7 @@ class TestAuditMetadataModelRouterPatterns:
             actor=AuditActor(id="admin-123", name="Admin User"),
             target=AuditTarget(id="model-456", name="GPT-4"),
             changes={
-                "security_classification": AuditChange(
-                    old=None, new="Confidential"
-                ),
+                "security_classification": AuditChange(old=None, new="Confidential"),
             },
         )
 

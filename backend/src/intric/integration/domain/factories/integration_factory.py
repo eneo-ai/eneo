@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from intric.integration.domain.entities.integration import Integration
 
@@ -20,6 +20,6 @@ class IntegrationFactory:
 
     @classmethod
     def create_entities(
-        cls, records: list["IntegrationDBModel"]
+        cls, records: Sequence["IntegrationDBModel"]
     ) -> list["Integration"]:
         return [cls.create_entity(record=record) for record in records]

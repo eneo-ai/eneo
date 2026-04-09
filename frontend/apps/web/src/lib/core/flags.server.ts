@@ -157,7 +157,7 @@ export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
       federationStatus = await response.json();
     }
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
+    if (error instanceof Error && error.name === "AbortError") {
       console.warn("[FeatureFlags] Federation status check timed out after 3s");
     } else {
       console.error("[FeatureFlags] Failed to check federation status:", error);

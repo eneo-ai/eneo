@@ -7,8 +7,10 @@ extracted from the monolithic CrawlFeeder class for better testability.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
+
+from typing_extensions import TypedDict
 
 from intric.jobs.job_manager import job_manager
 from intric.main.logging import get_logger
@@ -17,6 +19,16 @@ if TYPE_CHECKING:
     import redis.asyncio as aioredis
 
 logger = get_logger(__name__)
+
+
+class CrawlPendingJobData(TypedDict):
+    job_id: str
+    user_id: str
+    website_id: str
+    run_id: str
+    url: str
+    download_files: bool
+    crawl_type: str
 
 
 class PendingQueue:
@@ -30,6 +42,7 @@ class PendingQueue:
     """
 
     def __init__(self, redis_client: aioredis.Redis) -> None:
+        super().__init__()
         self._redis = redis_client
 
     @staticmethod
@@ -39,7 +52,7 @@ class PendingQueue:
 
     async def get_pending(
         self, tenant_id: UUID, limit: int
-    ) -> list[tuple[bytes, dict]]:
+    ) -> list[tuple[bytes, CrawlPendingJobData]]:
         """Get pending crawl jobs from the queue.
 
         Args:
@@ -52,17 +65,20 @@ class PendingQueue:
             serialization mismatch issues.
         """
         key = self._key(tenant_id)
+        redis_client = cast(Any, self._redis)
 
         try:
-            pending_bytes = await self._redis.lrange(key, 0, limit - 1)
+            pending_bytes = cast(
+                list[bytes], await redis_client.lrange(key, 0, limit - 1)
+            )
 
             if not pending_bytes:
                 return []
 
-            pending_jobs = []
+            pending_jobs: list[tuple[bytes, CrawlPendingJobData]] = []
             for raw_bytes in pending_bytes:
                 try:
-                    job_data = json.loads(raw_bytes.decode())
+                    job_data = cast(CrawlPendingJobData, json.loads(raw_bytes.decode()))
                     pending_jobs.append((raw_bytes, job_data))
                 except json.JSONDecodeError as parse_exc:
                     # Remove poison message to prevent infinite retry loop
@@ -71,7 +87,7 @@ class PendingQueue:
                         extra={"tenant_id": str(tenant_id), "error": str(parse_exc)},
                     )
                     try:
-                        await self._redis.lrem(key, 1, raw_bytes)
+                        await redis_client.lrem(key, 1, raw_bytes)
                     except Exception:
                         pass  # Best effort removal
                     continue
@@ -96,16 +112,17 @@ class PendingQueue:
             raw_bytes: Original raw bytes from lrange (NOT re-serialized).
         """
         key = self._key(tenant_id)
+        redis_client = cast(Any, self._redis)
 
         try:
-            await self._redis.lrem(key, 1, raw_bytes)
+            await redis_client.lrem(key, 1, raw_bytes)
         except Exception as exc:
             logger.warning(
                 "Failed to remove from pending queue",
                 extra={"tenant_id": str(tenant_id), "error": str(exc)},
             )
 
-    async def add(self, tenant_id: UUID, job_data: dict) -> bool:
+    async def add(self, tenant_id: UUID, job_data: CrawlPendingJobData) -> bool:
         """Add a crawl job to the pending queue for feeder processing.
 
         Appends to the right side of the list (FIFO queue). The job_data
@@ -121,11 +138,12 @@ class PendingQueue:
             True if successfully added, False on error.
         """
         key = self._key(tenant_id)
+        redis_client = cast(Any, self._redis)
 
         try:
             # Serialize with sorted keys for deterministic bytes
             job_json = json.dumps(job_data, default=str, sort_keys=True)
-            await self._redis.rpush(key, job_json)
+            await redis_client.rpush(key, job_json)
 
             logger.debug(
                 "Added crawl to pending queue",
@@ -157,7 +175,9 @@ class JobEnqueuer:
     # Patterns indicating a duplicate job (case-insensitive matching)
     _DUPLICATE_PATTERNS = ("already exists", "duplicate", "job exists")
 
-    async def enqueue(self, job_data: dict, tenant_id: UUID) -> tuple[bool, bool, UUID]:
+    async def enqueue(
+        self, job_data: CrawlPendingJobData, tenant_id: UUID
+    ) -> tuple[bool, bool, UUID]:
         """Enqueue a crawl job to ARQ using pre-created job record.
 
         Job and CrawlRun records are already created by the scheduler.
@@ -223,7 +243,11 @@ class JobEnqueuer:
             return self._handle_enqueue_error(exc, job_id, job_data, tenant_id)
 
     def _handle_enqueue_error(
-        self, exc: Exception, job_id: UUID, job_data: dict, tenant_id: UUID
+        self,
+        exc: Exception,
+        job_id: UUID,
+        job_data: CrawlPendingJobData,
+        tenant_id: UUID,
     ) -> tuple[bool, bool, UUID]:
         """Handle enqueue errors with duplicate detection.
 

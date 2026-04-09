@@ -5,10 +5,18 @@ from fastapi import UploadFile
 from intric.files.file_size_service import FileSizeService
 from intric.icons.icon import Icon, IconCreate
 from intric.icons.icon_repo import IconRepository
-from intric.main.exceptions import BadRequestException, FileTooLargeException, NotFoundException
+from intric.main.exceptions import (
+    BadRequestException,
+    FileTooLargeException,
+    NotFoundException,
+)
 
 ICON_MAX_SIZE = 262144  # 256 KB
-ICON_ALLOWED_MIMETYPES = ("image/jpeg", "image/png", "image/webp")  # Tuple for deterministic order in tests
+ICON_ALLOWED_MIMETYPES = (
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+)  # Tuple for deterministic order in tests
 
 
 class IconService:
@@ -16,7 +24,8 @@ class IconService:
         self,
         icon_repo: IconRepository,
         file_size_service: FileSizeService,
-    ):
+    ) -> None:
+        super().__init__()
         self.icon_repo = icon_repo
         self.file_size_service = file_size_service
 
@@ -31,18 +40,26 @@ class IconService:
     def validate_size(data: bytes) -> None:
         if len(data) > ICON_MAX_SIZE:
             raise FileTooLargeException(
-                f"Icon exceeds maximum size of 256 KB (got {len(data)} bytes)"
+                file_size=len(data),
+                max_size=ICON_MAX_SIZE,
             )
 
     async def create_icon(self, upload_file: UploadFile, tenant_id: UUID) -> Icon:
         """Validates and stores an icon. Raises BadRequestException or FileTooLargeException."""
         self.validate_mimetype(upload_file.content_type)
 
-        if self.file_size_service.is_too_large(upload_file.file, ICON_MAX_SIZE):
-            raise FileTooLargeException("Icon exceeds maximum size of 256 KB")
+        file_size = self.file_size_service.get_file_size(upload_file.file)
+        if file_size > ICON_MAX_SIZE:
+            raise FileTooLargeException(
+                file_size=file_size,
+                max_size=ICON_MAX_SIZE,
+            )
 
         content = await upload_file.read()
-        self.validate_size(content)
+
+        assert (
+            upload_file.content_type is not None
+        )  # validated above by validate_mimetype
 
         icon_create = IconCreate(
             blob=content,

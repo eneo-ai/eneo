@@ -3,29 +3,30 @@ from __future__ import annotations
 import hashlib
 import hmac
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
+from typing_extensions import TypedDict
 
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication.api_key_repo import ApiKeysRepository
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
-    ApiKeyInDB,
+    PERMISSION_LEVEL_ORDER,
     ApiKeyHashVersion,
+    ApiKeyInDB,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
-    PERMISSION_LEVEL_ORDER,
     ResourcePermissions,
 )
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.users_table import Users
 from intric.main.config import get_settings
@@ -113,15 +114,23 @@ def check_resource_permission(
         granted_level = 0
     else:
         granted_level = PERMISSION_LEVEL_ORDER.get(
-            granted_value.value if hasattr(granted_value, "value") else str(granted_value),
+            granted_value.value
+            if hasattr(granted_value, "value")
+            else str(granted_value),
             0,
         )
 
     required_level = PERMISSION_LEVEL_ORDER.get(required, 0)
     if granted_level < required_level:
         granted_str = (
-            granted_value.value if hasattr(granted_value, "value") else str(granted_value)
-        ) if granted_value is not None else "none"
+            (
+                granted_value.value
+                if hasattr(granted_value, "value")
+                else str(granted_value)
+            )
+            if granted_value is not None
+            else "none"
+        )
         raise ApiKeyValidationError(
             status_code=403,
             code="insufficient_resource_permission",
@@ -150,6 +159,7 @@ class ApiKeyAuthResolver:
         legacy_repo: ApiKeysRepository,
         audit_service: "AuditService | None",
     ):
+        super().__init__()
         self.api_key_repo = api_key_repo
         self.legacy_repo = legacy_repo
         self.audit_service = audit_service
@@ -301,7 +311,9 @@ class ApiKeyAuthResolver:
                     state=ApiKeyState.ACTIVE.value,
                 )
             except IntegrityError:
-                migrated = await self._fetch_concurrent_migration(plain_key, prefix, tenant_id)
+                migrated = await self._fetch_concurrent_migration(
+                    plain_key, prefix, tenant_id
+                )
             await self._log_legacy_migration(
                 migrated=migrated,
                 legacy_record=legacy_record,
@@ -331,7 +343,9 @@ class ApiKeyAuthResolver:
                     state=ApiKeyState.ACTIVE.value,
                 )
             except IntegrityError:
-                migrated = await self._fetch_concurrent_migration(plain_key, prefix, tenant_id)
+                migrated = await self._fetch_concurrent_migration(
+                    plain_key, prefix, tenant_id
+                )
             await self._log_legacy_migration(
                 migrated=migrated,
                 legacy_record=legacy_record,

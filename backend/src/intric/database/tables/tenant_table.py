@@ -47,8 +47,8 @@ class Tenants(BasePublic):
             ")"
         ),
     )
-    flow_settings: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default="{}"
+    favorite_providers: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
     )
 
     modules: Mapped[list[Modules]] = relationship(secondary="tenants_modules")
@@ -59,7 +59,7 @@ class Tenants(BasePublic):
 
 tenants_modules_table = Table(
     "tenants_modules",
-    Base.metadata,  # pyright: ignore[reportAttributeAccessIssue]
-    Column("tenant_id", ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True),
-    Column("module_id", ForeignKey(Modules.id, ondelete="CASCADE"), primary_key=True),
+    Base.metadata,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]  # SQLAlchemy declarative metadata
+    Column("tenant_id", ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
+    Column("module_id", ForeignKey(Modules.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
 )

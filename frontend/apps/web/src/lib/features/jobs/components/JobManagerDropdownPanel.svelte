@@ -11,7 +11,9 @@
   const {
     state: { uploads, jobs, currentlyRunningJobs }
   } = jobManager;
-  const { state: { displayItems: expiringDisplayItems } } = getExpiringKeysStore();
+  const {
+    state: { displayItems: expiringDisplayItems }
+  } = getExpiringKeysStore();
 
   const jobsUploadingBlob = derived(jobs, (jobs) => {
     return jobs.filter((job) => job.task === "upload_info_blob");
@@ -56,7 +58,9 @@
                 {/if}
               </div>
             {:else if upload.status === "completed"}
-              <div class="text-positive-default w-48 min-w-48 text-right font-medium">{m.done()}</div>
+              <div class="text-positive-default w-48 min-w-48 text-right font-medium">
+                {m.done()}
+              </div>
             {:else}
               <div class="flex w-48 min-w-48 items-center gap-x-4">
                 <ProgressBar progress={upload.progress}></ProgressBar>

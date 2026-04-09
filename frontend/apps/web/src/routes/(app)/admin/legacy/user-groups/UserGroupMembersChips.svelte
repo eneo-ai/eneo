@@ -15,7 +15,7 @@
 {#if users.length > 0}
   <div class="flex items-center">
     {#each users.slice(0, 3) as user (user.id)}
-      <MemberChip member={{ ...user, role: "member" }}></MemberChip>
+      <MemberChip member={{ id: user.id, email: user.email }}></MemberChip>
     {/each}
     {#if users.length > 3}
       <span class="text-secondary ml-2 text-sm">

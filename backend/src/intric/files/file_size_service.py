@@ -1,10 +1,10 @@
 import asyncio
+import contextlib
 import hashlib
 import os
 import shutil
 import uuid
 from pathlib import Path
-from tempfile import SpooledTemporaryFile
 from typing import IO
 
 from intric.main.config import get_settings
@@ -12,20 +12,24 @@ from intric.main.config import get_settings
 
 class FileSizeService:
     @staticmethod
-    async def save_file_to_disk(file: SpooledTemporaryFile):
+    async def save_file_to_disk(file: IO[bytes]):
         destination = os.path.join(str(get_settings().upload_tmp_dir), uuid.uuid4().hex)
         destination_path = Path(destination)
 
         try:
             with destination_path.open("wb") as buffer:
                 await asyncio.to_thread(shutil.copyfileobj, file, buffer)
+        except BaseException:
+            with contextlib.suppress(FileNotFoundError):
+                destination_path.unlink()
+            raise
         finally:
             file.close()
 
         return destination
 
     @staticmethod
-    def is_too_large(file: IO, max_size: int):
+    def is_too_large(file: IO[bytes], max_size: int):
         real_file_size = 0
         for chunk in file:
             real_file_size += len(chunk)
@@ -39,7 +43,7 @@ class FileSizeService:
         return False
 
     @staticmethod
-    def get_file_size(file: IO):
+    def get_file_size(file: IO[bytes]):
         if hasattr(file, "seekable") and file.seekable():
             current_position = file.tell()
             file.seek(0, os.SEEK_END)

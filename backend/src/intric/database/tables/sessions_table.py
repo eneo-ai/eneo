@@ -24,7 +24,9 @@ class Sessions(BasePublic):
     assistant_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Assistants.id, ondelete="CASCADE")
     )
-    service_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey(Services.id, ondelete="CASCADE"))
+    service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Services.id, ondelete="CASCADE")
+    )
     group_chat_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(GroupChatsTable.id, ondelete="CASCADE")
     )

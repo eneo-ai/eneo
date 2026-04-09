@@ -99,30 +99,6 @@ export function initSettings(client) {
         requestBody: { "application/json": { enabled } }
       });
       return res;
-    },
-
-    /**
-     * Get effective Flow input limits for the tenant.
-     * @throws {IntricError}
-     * @returns {Promise<import('../types/resources').FlowInputLimits>}
-     */
-    getFlowInputLimits: async () => {
-      return client.fetch("/api/v1/settings/flow-input-limits", {
-        method: "get"
-      });
-    },
-
-    /**
-     * Update Flow input limits for the tenant.
-     * @param {{file_max_size_bytes?: number, audio_max_size_bytes?: number, max_files_per_run?: number | null, audio_max_files_per_run?: number | null}} patch
-     * @throws {IntricError}
-     * @returns {Promise<import('../types/resources').FlowInputLimits>}
-     */
-    updateFlowInputLimits: async (patch) => {
-      return client.fetch("/api/v1/settings/flow-input-limits", {
-        method: "patch",
-        requestBody: { "application/json": patch }
-      });
     }
   };
 }

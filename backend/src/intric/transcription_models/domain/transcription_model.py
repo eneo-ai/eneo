@@ -1,12 +1,6 @@
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional
 
 from intric.ai_models.ai_model import AIModel
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -30,10 +24,10 @@ class TranscriptionModel(AIModel):
         updated_at: "datetime",
         nickname: str,
         name: str,
-        family: Union[ModelFamily, str],
-        hosting: Union[ModelHostingLocation, str],
-        org: Optional[Union[ModelOrg, str]],
-        stability: Union[ModelStability, str],
+        family: Optional[str],
+        hosting: Optional[str],
+        org: Optional[str],
+        stability: Optional[str],
         open_source: bool,
         description: Optional[str],
         hf_link: Optional[str],
@@ -102,7 +96,7 @@ class TranscriptionModel(AIModel):
             hosting=transcription_model_db.hosting,
             org=transcription_model_db.org,
             stability=transcription_model_db.stability,
-            open_source=transcription_model_db.open_source,
+            open_source=transcription_model_db.open_source or False,
             description=transcription_model_db.description,
             hf_link=transcription_model_db.hf_link,
             base_url=transcription_model_db.base_url,

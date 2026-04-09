@@ -5,11 +5,8 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, computed_field
 
-from intric.ai_models.model_enums import ModelFamily as CompletionModelFamily
-from intric.ai_models.model_enums import ModelHostingLocation, ModelStability
-from intric.ai_models.model_enums import ModelOrg as Orgs
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
 from intric.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, partial_model
@@ -25,6 +22,14 @@ if TYPE_CHECKING:
     from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 
 
+class TokenUsage(BaseModel):
+    """Actual token usage as reported by the LLM provider."""
+
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    reasoning_tokens: Optional[int] = None
+
+
 class ResponseType(str, Enum):
     TEXT = "text"
     INTRIC_EVENT = "intric_event"
@@ -33,6 +38,7 @@ class ResponseType(str, Enum):
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
+    TOKEN_USAGE = "token_usage"
     ERROR = "error"
 
 
@@ -40,7 +46,7 @@ class ResponseType(str, Enum):
 class FunctionDefinition:
     name: str
     description: str
-    schema: dict
+    schema: dict[str, object]
 
 
 @dataclass
@@ -52,9 +58,12 @@ class FunctionCall:
 @dataclass
 class ToolCallMetadata:
     """Metadata for MCP tool calls to be rendered by frontend."""
+
     server_name: str
     tool_name: str
-    arguments: Optional[dict] = None  # The input values provided to the tool
+    arguments: Optional[dict[str, object]] = (
+        None  # The input values provided to the tool
+    )
     tool_call_id: Optional[str] = None  # The tool call ID for approval flow
     approved: Optional[bool] = None  # True=approved, False=denied, None=pending/auto
     # Additive state field for richer clients; legacy `approved` remains authoritative.
@@ -76,65 +85,34 @@ class Completion:
     stop: bool = False
     error: Optional[str] = None
     error_code: Optional[int] = None
+    usage: Optional[TokenUsage] = None
 
 
 class CompletionModelBase(BaseModel):
     name: str
-    nickname: str
-    # Allow both enum and string for tenant models with dynamic values
-    family: Union[CompletionModelFamily, str]
+    nickname: Optional[str] = None
+    family: Optional[str] = None
     max_input_tokens: int
     max_output_tokens: int
     is_deprecated: bool
     nr_billion_parameters: Optional[int] = None
     hf_link: Optional[str] = None
-    stability: Union[ModelStability, str]
-    hosting: Union[ModelHostingLocation, str]
+    stability: Optional[str] = None
+    hosting: Optional[str] = None
     open_source: Optional[bool] = None
     description: Optional[str] = None
     deployment_name: Optional[str] = None
-    org: Optional[Union[Orgs, str]] = None
+    org: Optional[str] = None
     vision: bool
     reasoning: bool
     supports_tool_calling: bool = False
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_token_fields(cls, value: Any) -> Any:
-        if isinstance(value, dict):
-            data = dict(value)
-            token_limit = data.get("token_limit")
-        else:
-            missing = object()
-            data = {}
-            for field in cls.model_fields:
-                attr = getattr(value, field, missing)
-                if attr is not missing:
-                    data[field] = attr
-            token_limit = getattr(value, "token_limit", None)
-
-        max_input_tokens = data.get("max_input_tokens")
-        if max_input_tokens is None and token_limit is not None:
-            max_input_tokens = token_limit
-            data["max_input_tokens"] = token_limit
-
-        if data.get("max_output_tokens") is None:
-            defaults = lookup_model_defaults(
-                data.get("litellm_model_name"),
-                data.get("name"),
-            )
-            if defaults is not None and defaults.max_output_tokens is not None:
-                data["max_output_tokens"] = defaults.max_output_tokens
-            elif token_limit is not None:
-                data["max_output_tokens"] = token_limit
-
-        return data
-
     @computed_field  # type: ignore[prop-decorator]
     @property
     def token_limit(self) -> int:
+        """Backward-compat: exposed in JSON responses for frontend."""
         return self.max_input_tokens
 
 
@@ -150,9 +128,15 @@ class CompletionModelCreate(CompletionModelBase):
         if defaults is None:
             return data
 
-        if data.get("max_input_tokens") is None and defaults.max_input_tokens is not None:
+        if (
+            data.get("max_input_tokens") is None
+            and defaults.max_input_tokens is not None
+        ):
             data["max_input_tokens"] = defaults.max_input_tokens
-        if data.get("max_output_tokens") is None and defaults.max_output_tokens is not None:
+        if (
+            data.get("max_output_tokens") is None
+            and defaults.max_output_tokens is not None
+        ):
             max_input_tokens = data.get("max_input_tokens")
             data["max_output_tokens"] = (
                 min(int(max_input_tokens), defaults.max_output_tokens)
@@ -239,11 +223,13 @@ class CompletionModelSecurityStatus(CompletionModelPublic):
 
 
 class CompletionModelResponse(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     completion: Union[str, Any]  # Pydantic doesn't support AsyncIterable
     model: CompletionModel
     extended_logging: Optional[LoggingDetails] = None
     total_token_count: int
-    knowledge_trace: Optional["KnowledgeTrace"] = None
+    usage: Optional[TokenUsage] = None
 
 
 class Message(BaseModel):
@@ -293,7 +279,7 @@ class ModelKwargs(BaseModel):
     top_p: Optional[float] = None
     reasoning_effort: Optional[str] = None
     verbosity: Optional[str] = None
-    response_format: Optional[dict] = None
+    response_format: Optional[dict[str, object]] = None
     presence_penalty: Optional[float] = None
     frequency_penalty: Optional[float] = None
     top_k: Optional[int] = None

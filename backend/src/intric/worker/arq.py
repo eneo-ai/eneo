@@ -2,10 +2,10 @@ from intric.apps.app_runs.api.app_run_worker import worker as app_worker
 from intric.data_retention.infrastructure.data_retention_worker import (
     worker as data_retention_worker,
 )
-from intric.integration.tasks.integration_task import worker as integration_worker
 from intric.integration.infrastructure.sharepoint_subscription_worker import (
     worker as sharepoint_subscription_worker,
 )
+from intric.integration.tasks.integration_task import worker as integration_worker
 from intric.worker.routes import worker as sub_worker
 from intric.worker.worker import Worker
 

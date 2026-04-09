@@ -4,15 +4,20 @@ from datetime import datetime
 from typing import Any, NoReturn, cast
 from uuid import UUID
 
+import sqlalchemy as sa
 from fastapi import HTTPException
 from pydantic import BaseModel
-import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
-from intric.authentication.auth_models import ApiKeyUsageEvent, ApiKeyUsageSummary, ApiKeyV2, ApiKeyV2InDB
+from intric.authentication.auth_models import (
+    ApiKeyUsageEvent,
+    ApiKeyUsageSummary,
+    ApiKeyV2,
+    ApiKeyV2InDB,
+)
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.main.request_context import get_request_context
@@ -219,9 +224,9 @@ async def build_api_key_usage_summary(
     tenant_id: UUID,
     key_id: UUID,
 ) -> ApiKeyUsageSummary:
-    from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
+    from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 
     stmt = (
         sa.select(
@@ -271,9 +276,9 @@ async def build_api_key_usage_page(
     limit: int,
     cursor: datetime | None,
 ) -> tuple[list[ApiKeyUsageEvent], datetime | None]:
-    from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
+    from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 
     stmt = (
         sa.select(AuditLogTable)
@@ -300,13 +305,15 @@ async def build_api_key_usage_page(
     usage_events: list[ApiKeyUsageEvent] = []
     for record in page:
         raw_metadata = cast(dict[str, Any] | None, record.log_metadata)
-        metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+        metadata: dict[str, Any] = (
+            raw_metadata if isinstance(raw_metadata, dict) else {}
+        )
         raw_extra: Any = metadata.get("extra")
         extra = cast(dict[str, Any], raw_extra if isinstance(raw_extra, dict) else {})
         ip_addr = cast(str | None, record.ip_address)
         usage_events.append(
             ApiKeyUsageEvent(
-                id=cast(UUID, record.id),
+                id=record.id,
                 timestamp=cast(datetime, record.timestamp),
                 action=cast(str, record.action),
                 outcome=cast(str, record.outcome),

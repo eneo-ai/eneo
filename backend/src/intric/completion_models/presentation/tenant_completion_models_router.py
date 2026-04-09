@@ -1,18 +1,16 @@
 # MIT License
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel
 
-from intric.ai_models.model_enums import ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
-from intric.roles.permissions import Permission, validate_permission
 from intric.completion_models.presentation import CompletionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.container.container import Container
-from intric.main.exceptions import BadRequestException
-from intric.model_providers.domain.model_defaults import lookup_model_defaults
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
@@ -21,22 +19,18 @@ router = APIRouter()
 
 
 class TenantCompletionModelCreate(BaseModel):
-    provider_id: UUID = Field(..., description="Model provider ID")
-    name: str = Field(
-        ...,
-        description="Model identifier (e.g., 'gpt-4o', 'meta-llama/Meta-Llama-3-70B-Instruct')",
-    )
-    display_name: str = Field(..., description="User-friendly display name")
-    max_input_tokens: int | None = Field(None, description="Maximum input context tokens")
-    max_output_tokens: int | None = Field(None, description="Maximum output tokens")
-    token_limit: int | None = Field(None, description="Backward-compatible alias for max_input_tokens")
-    vision: bool = Field(default=False, description="Supports vision/image inputs")
-    reasoning: bool = Field(default=False, description="Supports extended reasoning")
-    supports_tool_calling: bool = Field(default=False, description="Supports function/tool calling")
-    hosting: str = Field(default="swe", description="Hosting location (swe, eu, usa)")
-    family: str = Field(default="openai", description="Model family (e.g., 'openai', 'anthropic', 'deepseek')")
-    is_active: bool = Field(default=True, description="Enable in organization")
-    is_default: bool = Field(default=False, description="Set as default model")
+    provider_id: UUID
+    name: str
+    display_name: str
+    max_input_tokens: int
+    max_output_tokens: int
+    vision: bool = False
+    reasoning: bool = False
+    supports_tool_calling: bool = False
+    hosting: str = "swe"
+    family: str = "openai"
+    is_active: bool = True
+    is_default: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -45,9 +39,17 @@ class TenantCompletionModelCreate(BaseModel):
         if data.get("max_input_tokens") is None and data.get("token_limit") is not None:
             data["max_input_tokens"] = data["token_limit"]
         defaults = lookup_model_defaults(data.get("name"))
-        if data.get("max_input_tokens") is None and defaults and defaults.max_input_tokens is not None:
+        if (
+            data.get("max_input_tokens") is None
+            and defaults
+            and defaults.max_input_tokens is not None
+        ):
             data["max_input_tokens"] = defaults.max_input_tokens
-        if data.get("max_output_tokens") is None and defaults and defaults.max_output_tokens is not None:
+        if (
+            data.get("max_output_tokens") is None
+            and defaults
+            and defaults.max_output_tokens is not None
+        ):
             max_input_tokens = data.get("max_input_tokens")
             data["max_output_tokens"] = (
                 min(int(max_input_tokens), defaults.max_output_tokens)
@@ -58,18 +60,17 @@ class TenantCompletionModelCreate(BaseModel):
 
 
 class TenantCompletionModelUpdate(BaseModel):
-    name: str | None = Field(None, description="Model identifier (e.g., 'gpt-4o', 'claude-3-sonnet')")
-    display_name: str | None = Field(None, description="User-friendly display name")
-    description: str | None = Field(None, description="Model description")
-    max_input_tokens: int | None = Field(None, description="Maximum input context tokens")
-    max_output_tokens: int | None = Field(None, description="Maximum output tokens")
-    token_limit: int | None = Field(None, description="Backward-compatible alias for max_input_tokens")
-    vision: bool | None = Field(None, description="Supports vision/image inputs")
-    reasoning: bool | None = Field(None, description="Supports extended reasoning")
-    supports_tool_calling: bool | None = Field(None, description="Supports function/tool calling")
-    hosting: str | None = Field(None, description="Hosting location (swe, eu, usa)")
-    open_source: bool | None = Field(None, description="Is the model open source")
-    stability: str | None = Field(None, description="Model stability (stable, experimental)")
+    name: str | None = None
+    display_name: str | None = None
+    description: str | None = None
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+    vision: bool | None = None
+    reasoning: bool | None = None
+    supports_tool_calling: bool | None = None
+    hosting: str | None = None
+    open_source: bool | None = None
+    stability: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -87,16 +88,17 @@ class TenantCompletionModelUpdate(BaseModel):
 )
 async def create_tenant_completion_model(
     model_create: TenantCompletionModelCreate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
-    container: Container = Depends(get_container(with_user=True)),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Create a new tenant-specific completion model."""
     validate_permission(user, Permission.ADMIN)
+    import sqlalchemy as sa
+
     from intric.database.tables.ai_models_table import CompletionModels
     from intric.database.tables.model_providers_table import ModelProviders
-    import sqlalchemy as sa
-    from intric.main.exceptions import NotFoundException
+    from intric.main.exceptions import BadRequestException, NotFoundException
 
     assembler = container.completion_model_assembler()
 
@@ -109,7 +111,9 @@ async def create_tenant_completion_model(
     provider = result.scalar_one_or_none()
 
     if not provider:
-        raise NotFoundException("Model provider not found or does not belong to your organization")
+        raise NotFoundException(
+            "Model provider not found or does not belong to your organization"
+        )
 
     if not provider.is_active:
         raise BadRequestException("Model provider is not active")
@@ -131,43 +135,44 @@ async def create_tenant_completion_model(
     # Create the completion model with settings directly on it
     # Note: litellm_model_name is set to None - TenantModelAdapter constructs it
     # at runtime as f"{provider.provider_type}/{model.name}"
-    new_model = CompletionModels(
-        tenant_id=user.tenant_id,
-        provider_id=model_create.provider_id,
-        name=model_create.name,  # Model identifier (may contain slashes)
-        nickname=model_create.display_name,
-        litellm_model_name=None,  # Constructed at runtime by TenantModelAdapter
-        token_limit=model_create.max_input_tokens,
-        max_input_tokens=model_create.max_input_tokens,  # type: ignore[call-arg]
-        max_output_tokens=model_create.max_output_tokens,  # type: ignore[call-arg]
-        vision=model_create.vision,
-        reasoning=model_create.reasoning,
-        supports_tool_calling=model_create.supports_tool_calling,  # type: ignore[call-arg]
-        # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
-        family=model_create.family,
-        hosting=model_create.hosting,
-        org=None,
-        stability=ModelStability.STABLE.value,
-        open_source=False,
-        description=f"Tenant model: {model_create.display_name}",
-        nr_billion_parameters=None,
-        hf_link=None,
-        is_deprecated=False,
-        deployment_name=None,
-        base_url=None,
-        # Settings (now directly on model)
-        is_enabled=model_create.is_active,
-        is_default=model_create.is_default,
-        security_classification_id=None,
-    )
+    new_model = CompletionModels()
+    new_model.tenant_id = user.tenant_id
+    new_model.provider_id = model_create.provider_id
+    new_model.name = model_create.name  # Model identifier (may contain slashes)
+    new_model.nickname = model_create.display_name
+    new_model.litellm_model_name = None  # Constructed at runtime by TenantModelAdapter
+    new_model.max_input_tokens = model_create.max_input_tokens
+    new_model.max_output_tokens = model_create.max_output_tokens
+    new_model.vision = model_create.vision
+    new_model.reasoning = model_create.reasoning
+    new_model.supports_tool_calling = model_create.supports_tool_calling
+    # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
+    new_model.family = model_create.family
+    new_model.hosting = model_create.hosting
+    new_model.org = None
+    new_model.stability = "stable"
+    new_model.open_source = False
+    new_model.description = f"Tenant model: {model_create.display_name}"
+    new_model.nr_billion_parameters = None
+    new_model.hf_link = None
+    new_model.is_deprecated = False
+    new_model.deployment_name = None
+    new_model.base_url = None
+    # Settings (now directly on model)
+    new_model.is_enabled = model_create.is_active
+    new_model.is_default = model_create.is_default
+    new_model.security_classification_id = None
 
     session.add(new_model)
     await session.flush()
 
     # Load the model BEFORE committing
-    from intric.completion_models.domain.completion_model_repo import CompletionModelRepository
+    from intric.completion_models.domain.completion_model_repo import (
+        CompletionModelRepository,
+    )
+
     repo = CompletionModelRepository(session, user)
-    completion_model = await repo.one(new_model.id)
+    completion_model = await repo.one(model_id=new_model.id)
 
     # Commit the transaction
     await session.commit()
@@ -183,15 +188,16 @@ async def create_tenant_completion_model(
 async def update_tenant_completion_model(
     model_id: UUID,
     model_update: TenantCompletionModelUpdate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
-    container: Container = Depends(get_container(with_user=True)),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Update a tenant-specific completion model."""
     validate_permission(user, Permission.ADMIN)
-    from intric.database.tables.ai_models_table import CompletionModels
     import sqlalchemy as sa
-    from intric.main.exceptions import UnauthorizedException, NotFoundException
+
+    from intric.database.tables.ai_models_table import CompletionModels
+    from intric.main.exceptions import NotFoundException, UnauthorizedException
 
     assembler = container.completion_model_assembler()
 
@@ -204,7 +210,9 @@ async def update_tenant_completion_model(
     model = result.scalar_one_or_none()
 
     if not model:
-        raise NotFoundException("Model not found or does not belong to your organization")
+        raise NotFoundException(
+            "Model not found or does not belong to your organization"
+        )
 
     # Cannot update global models
     if model.tenant_id is None:
@@ -218,7 +226,6 @@ async def update_tenant_completion_model(
     if model_update.description is not None:
         model.description = model_update.description
     if model_update.max_input_tokens is not None:
-        model.token_limit = model_update.max_input_tokens
         model.max_input_tokens = model_update.max_input_tokens
     if model_update.max_output_tokens is not None:
         model.max_output_tokens = model_update.max_output_tokens
@@ -238,9 +245,12 @@ async def update_tenant_completion_model(
     await session.flush()
 
     # Load the updated model
-    from intric.completion_models.domain.completion_model_repo import CompletionModelRepository
+    from intric.completion_models.domain.completion_model_repo import (
+        CompletionModelRepository,
+    )
+
     repo = CompletionModelRepository(session, user)
-    completion_model = await repo.one(model.id)
+    completion_model = await repo.one(model_id=model.id)
 
     await session.commit()
 
@@ -253,14 +263,19 @@ async def update_tenant_completion_model(
 )
 async def delete_tenant_completion_model(
     model_id: UUID,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
 ):
     """Delete a tenant-specific completion model."""
     validate_permission(user, Permission.ADMIN)
-    from intric.database.tables.ai_models_table import CompletionModels
     import sqlalchemy as sa
-    from intric.main.exceptions import UnauthorizedException, NotFoundException, BadRequestException
+
+    from intric.database.tables.ai_models_table import CompletionModels
+    from intric.main.exceptions import (
+        BadRequestException,
+        NotFoundException,
+        UnauthorizedException,
+    )
 
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(CompletionModels).where(
@@ -271,7 +286,9 @@ async def delete_tenant_completion_model(
     model = result.scalar_one_or_none()
 
     if not model:
-        raise NotFoundException("Model not found or does not belong to your organization")
+        raise NotFoundException(
+            "Model not found or does not belong to your organization"
+        )
 
     # Cannot delete global models
     if model.tenant_id is None:

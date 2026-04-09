@@ -5,6 +5,7 @@ from intric.templates.app_template.api.app_template_models import (
     AppTemplateListPublic,
     AppTemplateOrganization,
     AppTemplatePublic,
+    AppTemplateWizard,
     CompletionModelPublicAppTemplate,
     PromptPublicAppTemplate,
 )
@@ -31,12 +32,15 @@ class AppTemplateAssembler:
         app = AppInTemplatePublic(
             name=app_template.name,
             completion_model=completion_model,
-            completion_model_kwargs=app_template.completion_model_kwargs,
+            completion_model_kwargs=app_template.completion_model_kwargs or {},
             prompt=prompt,
             input_type=app_template.input_type,
             input_description=app_template.input_description,
         )
         organization = AppTemplateOrganization(name=app_template.organization)
+        wizard = app_template.wizard or AppTemplateWizard(
+            attachments=None, collections=None
+        )
         return AppTemplatePublic(
             id=app_template.id,
             created_at=app_template.created_at,
@@ -45,7 +49,7 @@ class AppTemplateAssembler:
             description=app_template.description,
             category=app_template.category,
             app=app,
-            wizard=app_template.wizard,
+            wizard=wizard,
             type="app",
             organization=organization,
             is_default=app_template.is_default,

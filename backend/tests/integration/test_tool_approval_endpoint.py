@@ -36,8 +36,13 @@ async def _create_app(client, bearer_token: str, space_id: str) -> str:
         json={"name": f"approval-app-{uuid4().hex[:8]}"},
         headers={"Authorization": f"Bearer {bearer_token}"},
     )
-    if response.status_code == 400 and "No transcription model available" in response.text:
-        pytest.skip("App creation requires a transcription model in this test environment.")
+    if (
+        response.status_code == 400
+        and "No transcription model available" in response.text
+    ):
+        pytest.skip(
+            "App creation requires a transcription model in this test environment."
+        )
     assert response.status_code == 201, response.text
     return response.json()["id"]
 
@@ -75,7 +80,9 @@ async def _create_session_for_assistant(db_container, assistant_id: str) -> UUID
     return session.id
 
 
-async def _seed_approval_context(redis_client, *, user_id, tenant_id, session_id, assistant_id):
+async def _seed_approval_context(
+    redis_client, *, user_id, tenant_id, session_id, assistant_id
+):
     manager = get_approval_manager(redis_client=redis_client)
     approval_id = str(uuid4())
     await manager.request_approval(
@@ -403,7 +410,9 @@ async def test_approval_flow_fails_closed_when_redis_unavailable_mid_approval(
     )
 
     failing_manager = AsyncMock()
-    failing_manager.get_approval_context.side_effect = ConnectionError("redis unavailable")
+    failing_manager.get_approval_context.side_effect = ConnectionError(
+        "redis unavailable"
+    )
 
     with patch(
         "intric.conversations.conversations_router.get_approval_manager",

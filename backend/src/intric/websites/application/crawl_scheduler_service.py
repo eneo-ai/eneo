@@ -4,7 +4,7 @@ Why: Centralizes scheduling logic for better maintainability and testing.
 Engine-agnostic design allows future crawler engines without changes.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
 
 from intric.main.logging import get_logger
@@ -24,6 +24,7 @@ class CrawlSchedulerService:
     """
 
     def __init__(self, website_sparse_repo: "WebsiteSparseRepository"):
+        super().__init__()
         self.website_sparse_repo = website_sparse_repo
 
     async def get_websites_due_for_crawl(self) -> list["WebsiteSparse"]:
@@ -50,9 +51,7 @@ class CrawlSchedulerService:
 
         return due_websites
 
-    def _is_website_due_for_crawl(
-        self, website: "WebsiteSparse", today: datetime.date
-    ) -> bool:
+    def _is_website_due_for_crawl(self, website: "WebsiteSparse", today: date) -> bool:
         """DEPRECATED: Logic moved to WebsiteSparseRepository.get_due_websites() for performance.
 
         Why: Database-side filtering is much faster with 1000+ websites.

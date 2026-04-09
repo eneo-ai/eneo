@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -28,11 +28,13 @@ router = APIRouter()
     responses=responses.get_responses([404, 500]),
 )
 async def get_models(
-    space_id: Optional[UUID] = Query(
-        None,
-        description="Optional space ID to provide security classification status.",  # noqa: E501
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    space_id: Annotated[
+        Optional[UUID],
+        Query(
+            description="Optional space ID to provide security classification status."
+        ),
+    ] = None,
 ) -> ModelsPresentation:
     # Get services and assemblers
     completion_model_crud_service = container.completion_model_crud_service()
@@ -48,7 +50,7 @@ async def get_models(
     tms = await transcription_model_crud_service.get_transcription_models()
     ems = await embedding_model_crud_service.get_embedding_models()
 
-    completion_models = []
+    completion_models: list[CompletionModelSecurityStatus] = []
     for cm in cms:
         completion_model_public = CompletionModelSecurityStatus.from_domain(cm)
         if space:
@@ -65,7 +67,7 @@ async def get_models(
                 completion_model_public.meets_security_classification = None
         completion_models.append(completion_model_public)
 
-    transcription_models = []
+    transcription_models: list[TranscriptionModelSecurityStatus] = []
     for tm in tms:
         transcription_model_public = TranscriptionModelSecurityStatus.from_domain(tm)
         if space:
@@ -82,7 +84,7 @@ async def get_models(
                 transcription_model_public.meets_security_classification = None
         transcription_models.append(transcription_model_public)
 
-    embedding_models = []
+    embedding_models: list[EmbeddingModelSecurityStatus] = []
     for em in ems:
         embedding_model_public = EmbeddingModelSecurityStatus.from_domain(em)
         if space:

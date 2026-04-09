@@ -1,6 +1,6 @@
 from datetime import datetime
 from types import SimpleNamespace
-from typing import NoReturn, Optional, cast
+from typing import Annotated, NoReturn, Optional, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
@@ -16,16 +16,16 @@ from intric.audit.infrastructure.rate_limiting import (
     enforce_rate_limit,
 )
 from intric.conversations.conversation_models import ConversationRequest
+from intric.database.database import AsyncSession
+from intric.main.config import get_settings
+from intric.main.container.container import Container
+from intric.main.exceptions import NotFoundException
+from intric.main.logging import get_logger
+from intric.main.models import CursorPaginatedResponse
 from intric.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     get_approval_manager,
 )
-from intric.database.database import AsyncSession
-from intric.main.container.container import Container
-from intric.main.config import get_settings
-from intric.main.exceptions import NotFoundException
-from intric.main.logging import get_logger
-from intric.main.models import CursorPaginatedResponse
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.sessions.session import (
@@ -38,8 +38,8 @@ from intric.sessions.session import (
     SSEIntricEvent,
     SSEText,
     SSEToolApprovalRequired,
-    SSEToolCall,
     SSEToolApprovalTimeout,
+    SSEToolCall,
     ToolApprovalResponse,
 )
 from intric.sessions.session_protocol import (
@@ -53,9 +53,9 @@ router = APIRouter()
 
 
 def _raise_conversation_scope_denied(http_request: Request, message: str) -> NoReturn:
-    request_id = http_request.headers.get("x-correlation-id") or http_request.headers.get(
-        "x-request-id"
-    )
+    request_id = http_request.headers.get(
+        "x-correlation-id"
+    ) or http_request.headers.get("x-request-id")
     detail: dict[str, object] = {
         "code": "insufficient_scope",
         "message": message,
@@ -150,6 +150,7 @@ async def _validate_conversation_scope(
                 http_request, "Unable to verify API key scope for this session."
             )
 
+        assert session is not None
         if scope_type == "assistant":
             session_assistant_id = session.assistant.id if session.assistant else None
             if session_assistant_id != scope_id:
@@ -164,6 +165,7 @@ async def _validate_conversation_scope(
             # Resolve session to space via assistant or group_chat
             try:
                 space = await space_repo.get_space_by_session(session_id)
+                assert space is not None
                 if space.id != scope_id:
                     _raise_conversation_scope_denied(
                         http_request,
@@ -265,8 +267,10 @@ async def _validate_conversation_scope(
 async def chat(
     request: ConversationRequest,
     http_request: Request,
-    version: int = Query(default=1, ge=1, le=2),
-    container: Container = Depends(get_container(with_user=True, with_transaction=False)),
+    version: Annotated[int, Query(ge=1, le=2)] = 1,
+    container: Container = Depends(
+        get_container(with_user=True, with_transaction=False)  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
+    ),
 ):
     """Unified endpoint for communicating with an assistant or a group chat.
 
@@ -353,12 +357,16 @@ async def chat(
 )
 async def list_conversations(
     http_request: Request,
-    assistant_id: Optional[UUID] = Query(None, description="The UUID of the assistant"),
-    group_chat_id: Optional[UUID] = Query(None, description="The UUID of the group chat"),
-    limit: int = Query(default=None, gt=0),
-    cursor: datetime = None,
+    assistant_id: Annotated[
+        Optional[UUID], Query(description="The UUID of the assistant")
+    ] = None,
+    group_chat_id: Annotated[
+        Optional[UUID], Query(description="The UUID of the group chat")
+    ] = None,
+    limit: Annotated[Optional[int], Query(gt=0)] = None,
+    cursor: Optional[datetime] = None,
     previous: bool = False,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(get_container(with_user=True)),  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
 ):
     """Gets conversations (sessions) for an assistant or group chat.
 
@@ -406,6 +414,8 @@ async def list_conversations(
         )
     else:
         # Get group chat service to validate the group chat exists and user has access
+        # group_chat_id is non-None here: validated above (at least one of assistant_id/group_chat_id must be set)
+        assert group_chat_id is not None
         group_chat_service = container.group_chat_service()
         await group_chat_service.get_group_chat(group_chat_id=group_chat_id)
 
@@ -419,7 +429,7 @@ async def list_conversations(
     return to_sessions_paginated_response(
         sessions=sessions,
         limit=limit,
-        cursor=cursor,
+        cursor=cursor,  # pyright: ignore[reportArgumentType]  # session_protocol cursor param has wrong annotation (datetime instead of Optional[datetime])
         previous=previous,
         total_count=total_count,
     )
@@ -431,12 +441,15 @@ async def list_conversations(
     responses=responses.get_responses([400, 404]),
 )
 async def get_conversation(
-    session_id: UUID = Path(..., description="The UUID of the conversation/session"),
-    container: Container = Depends(get_container(with_user=True)),
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
 ):
     """Gets a specific conversation by its session ID"""
     session_service = container.session_service()
     session = await session_service.get_session_by_uuid(session_id)
+    assert session is not None
 
     return to_session_public(session)
 
@@ -447,17 +460,21 @@ async def get_conversation(
     responses=responses.get_responses([400, 404]),
 )
 async def delete_conversation(
-    session_id: UUID = Path(..., description="The UUID of the conversation/session"),
-    container: Container = Depends(get_container(with_user=True)),
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Deletes a specific conversation"""
     session_service = container.session_service()
     # Note: We'll need to determine if this is an assistant or group chat session
     session = await session_service.get_session_by_uuid(session_id)
+    assert session is not None
 
     if session.group_chat_id:
         await session_service.delete(session_id, group_chat_id=session.group_chat_id)
     else:
+        assert session.assistant is not None
         await session_service.delete(session_id, assistant_id=session.assistant.id)
 
     # Return None to produce 204 No Content response
@@ -471,14 +488,17 @@ async def delete_conversation(
 )
 async def leave_feedback(
     feedback: SessionFeedback,
-    session_id: UUID = Path(..., description="The UUID of the conversation/session"),
-    container: Container = Depends(get_container(with_user=True)),
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Leave feedback for a conversation"""
     session_service = container.session_service()
 
     # Determine if this is a group chat or assistant session
     session = await session_service.get_session_by_uuid(session_id)
+    assert session is not None
 
     if session.group_chat_id:
         updated_session = await session_service.leave_feedback(
@@ -487,6 +507,7 @@ async def leave_feedback(
             feedback=feedback,
         )
     else:
+        assert session.assistant is not None
         updated_session = await session_service.leave_feedback(
             session_id=session_id, assistant_id=session.assistant.id, feedback=feedback
         )
@@ -501,11 +522,12 @@ async def leave_feedback(
 )
 async def set_title_of_conversation(
     session_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Set the title of a conversation"""
     conversation_service = container.conversation_service()
     session = await conversation_service.set_title_of_conversation(session_id)
+    assert session is not None
     return to_session_public(session)
 
 
@@ -516,9 +538,11 @@ async def set_title_of_conversation(
 )
 async def approve_tools(
     http_request: Request,
-    approval_id: UUID = Query(..., description="The approval ID from the tool_approval_required event"),
-    decisions: list[ToolApprovalDecision] = Body(default_factory=list),
-    container: Container = Depends(get_container(with_user=True)),
+    approval_id: Annotated[
+        UUID, Query(description="The approval ID from the tool_approval_required event")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
+    decisions: list[ToolApprovalDecision] = Body(default_factory=list),  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI Body evaluated at request time
 ):
     """Submit approval decisions for pending tool calls.
 
@@ -632,7 +656,9 @@ async def approve_tools(
     if submit_result.response_status != "already_processed":
         approved_count = sum(1 for decision in decisions if decision.approved)
         denied_count = sum(1 for decision in decisions if not decision.approved)
-        entity_id = context_result.context.assistant_id or context_result.context.session_id
+        entity_id = (
+            context_result.context.assistant_id or context_result.context.session_id
+        )
         entity_type = (
             EntityType.ASSISTANT
             if context_result.context.assistant_id
@@ -669,6 +695,8 @@ async def approve_tools(
             ),
         )
 
+    # response_status is set for all non-error paths; assert to narrow away None
+    assert submit_result.response_status is not None
     return ToolApprovalResponse(
         status=submit_result.response_status,
         approval_id=str(approval_id),

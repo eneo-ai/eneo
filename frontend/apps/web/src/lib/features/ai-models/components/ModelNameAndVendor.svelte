@@ -42,9 +42,12 @@
   export let size: "card" | "table" = "table";
   export let showTokenLimit: boolean = true;
 
-  // Format token limit for display (e.g., 128000 -> "128K")
+  // Format token limit for display (e.g., 128000 -> "128K", 1000000 -> "1M")
   function formatTokenLimit(limit: number): string {
-    if (limit >= 1_000_000) return `${(limit / 1_000_000).toFixed(limit % 1_000_000 === 0 ? 0 : 1)}M`;
+    if (limit >= 1_000_000 || (limit >= 1_000 && Math.round(limit / 1_000) >= 1_000)) {
+      const val = limit / 1_000_000;
+      return `${val % 1 === 0 ? val.toFixed(0) : val.toFixed(1)}M`;
+    }
     if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
     return limit.toString();
   }
@@ -64,12 +67,12 @@
       </h4>
     </Tooltip>
     {#if "nickname" in model && model.name !== model.nickname}
-      <span class="text-xs text-muted leading-tight truncate max-w-48" title={model.name}>
+      <span class="text-muted max-w-48 truncate text-xs leading-tight" title={model.name}>
         {model.name}
       </span>
     {/if}
     {#if showTokenLimit && "token_limit" in model && model.token_limit}
-      <span class="text-[11px] text-muted/70 tabular-nums leading-none">
+      <span class="text-muted/70 text-[11px] leading-none tabular-nums">
         {m.token_limit_context({ limit: formatTokenLimit(model.token_limit) })}
       </span>
     {/if}

@@ -40,6 +40,7 @@ def test_validate_mimetype_invalid_raises():
     with pytest.raises(BadRequestException):
         IconService.validate_mimetype("application/pdf")
 
+
 def test_validate_size_under_limit_ok():
     data = b"x" * (ICON_MAX_SIZE - 1)
     IconService.validate_size(data)
@@ -55,6 +56,7 @@ def test_validate_size_over_limit_raises():
     with pytest.raises(FileTooLargeException):
         IconService.validate_size(data)
 
+
 async def test_create_icon_rejects_invalid_mimetype(service: IconService):
     upload_file = UploadFile(
         file=BytesIO(b"test"),
@@ -67,7 +69,7 @@ async def test_create_icon_rejects_invalid_mimetype(service: IconService):
 
 
 async def test_create_icon_rejects_oversized_file(service: IconService):
-    service.file_size_service.is_too_large.return_value = True
+    service.file_size_service.get_file_size.return_value = ICON_MAX_SIZE + 1
 
     upload_file = UploadFile(
         file=BytesIO(b"x" * (ICON_MAX_SIZE + 1)),

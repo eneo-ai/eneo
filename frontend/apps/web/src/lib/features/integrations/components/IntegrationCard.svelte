@@ -13,20 +13,25 @@
   let { integration, action }: Props = $props();
 
   const descriptionKey = $derived(integrationData[integration.integration_type].descriptionKey);
-  const description = $derived(m[descriptionKey as keyof typeof m]?.() ?? descriptionKey);
+  const description = $derived(
+    (m as Record<string, ((...args: unknown[]) => string) | undefined>)[descriptionKey]?.() ??
+      descriptionKey
+  );
   const name = $derived(integrationData[integration.integration_type].displayName);
 
   // Check if integration has auth_type property (UserIntegration)
-  const authType = $derived('auth_type' in integration ? integration.auth_type : undefined);
+  const authType = $derived("auth_type" in integration ? integration.auth_type : undefined);
 
   // Check if tenant app is configured (for SharePoint user_oauth integrations)
   const isTenantAppConfigured = $derived(
-    'tenant_app_configured' in integration ? integration.tenant_app_configured !== false : true
+    "tenant_app_configured" in integration ? integration.tenant_app_configured !== false : true
   );
 </script>
 
 <div
-  class="border-default flex flex-col overflow-y-auto rounded-lg border p-4 shadow-md hover:shadow-lg {!isTenantAppConfigured ? 'opacity-60' : ''}"
+  class="border-default flex flex-col overflow-y-auto rounded-lg border p-4 shadow-md hover:shadow-lg {!isTenantAppConfigured
+    ? 'opacity-60'
+    : ''}"
 >
   <div
     class="from-accent-dimmer -mx-4 -mt-4 bg-gradient-to-b to-[var(--background-primary)] px-4 pt-4"
@@ -39,11 +44,15 @@
     <div class="flex items-center gap-2">
       <h2 class="text-2xl font-extrabold">{name}</h2>
       {#if authType === "tenant_app"}
-        <span class="text-accent-stronger bg-accent-dimmer border-accent-default rounded px-1.5 py-0.5 text-xs font-semibold border">
+        <span
+          class="text-accent-stronger bg-accent-dimmer border-accent-default rounded border px-1.5 py-0.5 text-xs font-semibold"
+        >
           Organization
         </span>
       {:else if authType === "user_oauth"}
-        <span class="text-secondary bg-dimmer border-default rounded px-1.5 py-0.5 text-xs font-semibold border">
+        <span
+          class="text-secondary bg-dimmer border-default rounded border px-1.5 py-0.5 text-xs font-semibold"
+        >
           Personal
         </span>
       {/if}

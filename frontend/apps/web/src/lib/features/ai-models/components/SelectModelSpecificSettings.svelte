@@ -1,12 +1,13 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import { IconQuestionMark } from "@intric/icons/question-mark";
-  import { Input, Tooltip } from "@intric/ui";
+  import { Tooltip } from "@intric/ui";
   import type { ModelKwargs } from "@intric/intric-js";
 
   const dispatch = createEventDispatcher<{ change: { kwArgs: ModelKwargs } }>();
 
   export let kwArgs: ModelKwargs;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   export let selectedModel: any = null; // CompletionModel from the parent
 
   // Determine which parameters to show based on model capabilities

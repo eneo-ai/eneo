@@ -26,7 +26,9 @@ def _build_assistant_service_with_mocks():
         scalar=AsyncMock(),
         execute=AsyncMock(),
     )
-    service.space_repo = SimpleNamespace(get_space_by_assistant=AsyncMock(return_value=space))
+    service.space_repo = SimpleNamespace(
+        get_space_by_assistant=AsyncMock(return_value=space)
+    )
     service.actor_manager = SimpleNamespace(
         get_space_actor_from_space=MagicMock(return_value=actor)
     )
@@ -41,7 +43,9 @@ async def test_add_mcp_to_assistant_rejects_server_not_enabled_for_tenant():
     session.scalar.return_value = None
 
     with pytest.raises(BadRequestException, match="not enabled for this tenant"):
-        await service.add_mcp_to_assistant(assistant_id=assistant_id, mcp_server_id=uuid4())
+        await service.add_mcp_to_assistant(
+            assistant_id=assistant_id, mcp_server_id=uuid4()
+        )
 
     assert session.scalar.await_count == 1
 
@@ -54,8 +58,12 @@ async def test_add_mcp_to_assistant_rejects_server_not_assigned_to_space():
         None,  # missing space mapping
     ]
 
-    with pytest.raises(BadRequestException, match="not assigned to this assistant's space"):
-        await service.add_mcp_to_assistant(assistant_id=assistant_id, mcp_server_id=uuid4())
+    with pytest.raises(
+        BadRequestException, match="not assigned to this assistant's space"
+    ):
+        await service.add_mcp_to_assistant(
+            assistant_id=assistant_id, mcp_server_id=uuid4()
+        )
 
     assert session.scalar.await_count == 2
 

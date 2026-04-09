@@ -4,9 +4,9 @@
  * @typedef {Object} CredentialInfo
  * @property {string} provider
  * @property {string} masked_key
- * @property {string | null} configured_at
+ * @property {string | null} [configured_at]
  * @property {"encrypted" | "plaintext"} encryption_status
- * @property {Record<string, any>} config
+ * @property {Record<string, any>} [config]
  */
 
 /**
@@ -44,7 +44,7 @@ export function initCredentials(client) {
 
     /**
      * Set or update API credential for a specific provider
-     * @param {string} provider - Provider name (e.g., "openai", "azure", "anthropic")
+     * @param {"openai" | "anthropic" | "azure" | "mistral" | "ovhcloud" | "gemini" | "cohere"} provider - Provider name
      * @param {SetCredentialRequest} credential - Credential data
      * @throws {IntricError}
      * @returns {Promise<SetCredentialResponse>}

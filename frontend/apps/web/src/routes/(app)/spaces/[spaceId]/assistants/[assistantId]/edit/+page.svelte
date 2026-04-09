@@ -24,6 +24,7 @@
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
+  import { untrack } from "svelte";
 
   let { data } = $props();
 
@@ -36,18 +37,20 @@
     state: { resource, update, currentChanges, isSaving },
     saveChanges,
     discardChanges
-  } = initAssistantEditor({
-    assistant: data.assistant,
-    intric: data.intric,
-    onUpdateDone() {
-      refreshCurrentSpace("applications");
-    }
-  });
+  } = untrack(() =>
+    initAssistantEditor({
+      assistant: data.assistant,
+      intric: data.intric,
+      onUpdateDone() {
+        refreshCurrentSpace("applications");
+      }
+    })
+  );
 
-  let cancelUploadsAndClearQueue: () => void;
+  let cancelUploadsAndClearQueue = $state<() => void>(() => {});
 
   // Icon state
-  let currentIconId = $state<string | null>($resource.icon_id);
+  let currentIconId = $state<string | null>($resource.icon_id ?? null);
   let iconUploading = $state(false);
   let iconError = $state<string | null>(null);
 
@@ -127,9 +130,14 @@
     discardChanges();
   });
 
-  let showSavesChangedNotice = false;
+  let showSavesChangedNotice = $state(false);
 
-  let previousRoute = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.assistant, tab: "chat" })}`;
+  let previousRoute = $state(
+    untrack(
+      () =>
+        `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.assistant, tab: "chat" })}`
+    )
+  );
   afterNavigate(({ from }) => {
     if (page.url.searchParams.get("next") === "default") return;
     if (from) previousRoute = from.url.toString();
@@ -294,7 +302,7 @@
             rows={4}
             {...aria}
             bind:value={$update.prompt.text}
-            on:change={() => {
+            onchange={() => {
               $update.prompt.description = "";
             }}
             class="border-default bg-primary ring-default min-h-24 rounded-lg border px-6 py-4 text-lg shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
@@ -314,6 +322,15 @@
           ></AssistantSettingsAttachments>
         </Settings.Row>
 
+        <!-- Knowledge and MCP are mutually exclusive. Only disable knowledge when MCP is active
+             AND no knowledge exists. If both somehow exist (legacy data), allow editing both
+             so the user can remove one to resolve the conflict. -->
+        {@const hasAnyKnowledge =
+          ($update.groups?.length ?? 0) > 0 ||
+          ($update.websites?.length ?? 0) > 0 ||
+          ($update.integration_knowledge_list?.length ?? 0) > 0}
+        {@const hasAnyMCP = ($update.mcp_servers?.length ?? 0) > 0}
+        {@const knowledgeDisabledByMCP = hasAnyMCP && !hasAnyKnowledge}
         <Settings.Row
           title={m.knowledge()}
           description={m.select_additional_knowledge()}
@@ -326,12 +343,22 @@
             discardChanges("integration_knowledge_list");
           }}
         >
-          <SelectKnowledgeV2
-            originMode="personal"
-            bind:selectedWebsites={$update.websites}
-            bind:selectedCollections={$update.groups}
-            bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
-          />
+          {#if knowledgeDisabledByMCP}
+            <p
+              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
+            >
+              <span class="font-bold">{m.warning()}:&nbsp;</span
+              >{m.knowledge_disabled_when_mcp_active()}
+            </p>
+          {/if}
+          <div class={knowledgeDisabledByMCP ? "pointer-events-none opacity-50" : ""}>
+            <SelectKnowledgeV2
+              originMode="personal"
+              bind:selectedWebsites={$update.websites}
+              bind:selectedCollections={$update.groups}
+              bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
+            />
+          </div>
         </Settings.Row>
 
         <Settings.Row
@@ -346,12 +373,22 @@
             discardChanges("integration_knowledge_list");
           }}
         >
-          <SelectKnowledgeV2
-            originMode="organization"
-            bind:selectedWebsites={$update.websites}
-            bind:selectedCollections={$update.groups}
-            bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
-          />
+          {#if knowledgeDisabledByMCP}
+            <p
+              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
+            >
+              <span class="font-bold">{m.warning()}:&nbsp;</span
+              >{m.knowledge_disabled_when_mcp_active()}
+            </p>
+          {/if}
+          <div class={knowledgeDisabledByMCP ? "pointer-events-none opacity-50" : ""}>
+            <SelectKnowledgeV2
+              originMode="organization"
+              bind:selectedWebsites={$update.websites}
+              bind:selectedCollections={$update.groups}
+              bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
+            />
+          </div>
         </Settings.Row>
       </Settings.Group>
 
@@ -406,18 +443,40 @@
         {/if}
       </Settings.Group>
 
+      <!-- Same mutual exclusivity logic as above: only disable MCP when knowledge
+           is active AND no MCP exists. If both exist (legacy data), keep both editable. -->
+      {@const mcpDisabledByKnowledge =
+        (($update.groups?.length ?? 0) > 0 ||
+          ($update.websites?.length ?? 0) > 0 ||
+          ($update.integration_knowledge_list?.length ?? 0) > 0) &&
+        ($update.mcp_servers?.length ?? 0) === 0}
       <Settings.Group title={m.mcp_servers()}>
         <Settings.Row
           title={m.mcp_servers()}
           description={m.select_mcp_servers_description()}
-          hasChanges={$currentChanges.diff.mcp_servers !== undefined || $currentChanges.diff.mcp_tools !== undefined}
+          hasChanges={$currentChanges.diff.mcp_servers !== undefined ||
+            $currentChanges.diff.mcp_tools !== undefined}
           revertFn={() => {
             discardChanges("mcp_servers");
             discardChanges("mcp_tools");
           }}
         >
-          <SelectMCPServers bind:selectedMCPServers={$update.mcp_servers} bind:selectedMCPTools={$update.mcp_tools} selectedModel={$update.completion_model} />
-       </Settings.Row>
+          {#if mcpDisabledByKnowledge}
+            <p
+              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
+            >
+              <span class="font-bold">{m.warning()}:&nbsp;</span
+              >{m.mcp_disabled_when_knowledge_active()}
+            </p>
+          {/if}
+          <div class={mcpDisabledByKnowledge ? "pointer-events-none opacity-50" : ""}>
+            <SelectMCPServers
+              bind:selectedMCPServers={$update.mcp_servers}
+              bind:selectedMCPTools={$update.mcp_tools}
+              selectedModel={$update.completion_model}
+            />
+          </div>
+        </Settings.Row>
       </Settings.Group>
 
       <Settings.Group title={m.security_and_privacy()}>
@@ -431,6 +490,7 @@
           let:labelId
           let:descriptionId
         >
+          <!-- @ts-ignore data_retention_days nullability -->
           <RetentionPolicyInput
             bind:value={$update.data_retention_days}
             hasChanges={$currentChanges.diff.data_retention_days !== undefined}

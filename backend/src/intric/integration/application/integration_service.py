@@ -13,7 +13,8 @@ class IntegrationService:
     def __init__(
         self,
         integration_repo: "IntegrationRepository",
-    ):
+    ) -> None:
+        super().__init__()
         self.integration_repo = integration_repo
 
     async def get_integrations(self) -> list["Integration"]:

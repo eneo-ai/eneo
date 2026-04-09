@@ -1,5 +1,6 @@
 # MIT License
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -22,7 +23,7 @@ router = APIRouter()
     response_model=PaginatedResponse[UserGroupPublic],
 )
 async def get_user_groups(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.user_group_service()
     user_groups = await service.get_all_user_groups()
@@ -37,7 +38,7 @@ async def get_user_groups(
 )
 async def get_user_group_by_uuid(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.user_group_service()
     return await service.get_user_group_by_uuid(id)
@@ -46,7 +47,7 @@ async def get_user_group_by_uuid(
 @router.post("/", response_model=UserGroupPublic)
 async def create_user_group(
     user_group: UserGroupCreateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.user_group_service()
     return await service.create_user_group(user_group)
@@ -60,7 +61,7 @@ async def create_user_group(
 async def update_user_group(
     id: UUID,
     user_group: UserGroupUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.user_group_service()
     return await service.update_user_group(
@@ -75,7 +76,7 @@ async def update_user_group(
 )
 async def delete_user_group_by_uuid(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.user_group_service()
     return await service.delete_user_group(id)
@@ -89,7 +90,7 @@ async def delete_user_group_by_uuid(
 async def add_user_to_user_group(
     id: UUID,
     user_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.user_group_service()
     return await service.add_user(user_group_uuid=id, user_id=user_id)
@@ -103,7 +104,7 @@ async def add_user_to_user_group(
 async def delete_user_from_user_group(
     id: UUID,
     user_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.user_group_service()
     return await service.remove_user(user_group_uuid=id, user_id=user_id)

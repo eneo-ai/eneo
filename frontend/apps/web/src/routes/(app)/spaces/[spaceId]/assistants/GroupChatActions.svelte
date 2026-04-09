@@ -12,6 +12,7 @@
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   export let groupChat: GroupChatSparse;
@@ -29,7 +30,7 @@
       refreshCurrentSpace("applications");
       $showDeleteDialog = false;
     } catch (e) {
-      alert(m.could_not_delete_group_chat());
+      toastError(e, m.could_not_delete_group_chat());
       console.error(e);
     }
   });
@@ -111,7 +112,7 @@
 
 <PublishingDialog
   resource={groupChat}
-  endpoints={intric.assistants}
+  endpoints={intric.groupChats}
   openController={showPublishDialog}
   awaitUpdate
 ></PublishingDialog>

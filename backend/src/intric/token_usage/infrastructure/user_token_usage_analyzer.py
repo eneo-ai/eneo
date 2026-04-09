@@ -1,7 +1,7 @@
-from typing import TYPE_CHECKING
 import logging
+from typing import TYPE_CHECKING
 
-from sqlalchemy import func, select, union_all, desc, asc
+from sqlalchemy import asc, desc, func, select, union_all
 
 from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.app_table import AppRuns
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 class UserTokenUsageAnalyzer:
     """
     Analyzer for user-level token usage statistics.
@@ -33,10 +34,17 @@ class UserTokenUsageAnalyzer:
     using a traditional repository.
     """
 
-    def __init__(self, session: "AsyncSession"):
+    def __init__(self, session: "AsyncSession") -> None:
+        super().__init__()
         self.session = session
 
-    def _build_questions_query(self, tenant_id: "UUID", start_date: "datetime", end_date: "datetime", user_id: "UUID" = None):
+    def _build_questions_query(
+        self,
+        tenant_id: "UUID",
+        start_date: "datetime",
+        end_date: "datetime",
+        user_id: "UUID | None" = None,
+    ):
         """
         Build the questions query for token usage calculation.
 
@@ -59,11 +67,12 @@ class UserTokenUsageAnalyzer:
                 func.count(Questions.id).label("request_count"),
             )
             .join(Sessions, Users.id == Sessions.user_id)
-            .join(Questions,
-                (Questions.session_id == Sessions.id) &
-                (Questions.tenant_id == tenant_id) &
-                (Questions.created_at >= start_date) &
-                (Questions.created_at <= end_date)
+            .join(
+                Questions,
+                (Questions.session_id == Sessions.id)
+                & (Questions.tenant_id == tenant_id)
+                & (Questions.created_at >= start_date)
+                & (Questions.created_at <= end_date),
             )
             .where(Users.tenant_id == tenant_id)
         )
@@ -73,7 +82,13 @@ class UserTokenUsageAnalyzer:
 
         return query.group_by(Users.id, Users.username, Users.email)
 
-    def _build_app_runs_query(self, tenant_id: "UUID", start_date: "datetime", end_date: "datetime", user_id: "UUID" = None):
+    def _build_app_runs_query(
+        self,
+        tenant_id: "UUID",
+        start_date: "datetime",
+        end_date: "datetime",
+        user_id: "UUID | None" = None,
+    ):
         """
         Build the app runs query for token usage calculation.
 
@@ -95,11 +110,12 @@ class UserTokenUsageAnalyzer:
                 func.sum(AppRuns.num_tokens_output).label("output_tokens"),
                 func.count(AppRuns.id).label("request_count"),
             )
-            .join(AppRuns,
-                (AppRuns.user_id == Users.id) &
-                (AppRuns.tenant_id == tenant_id) &
-                (AppRuns.created_at >= start_date) &
-                (AppRuns.created_at <= end_date)
+            .join(
+                AppRuns,
+                (AppRuns.user_id == Users.id)
+                & (AppRuns.tenant_id == tenant_id)
+                & (AppRuns.created_at >= start_date)
+                & (AppRuns.created_at <= end_date),
             )
             .where(Users.tenant_id == tenant_id)
         )
@@ -109,7 +125,13 @@ class UserTokenUsageAnalyzer:
 
         return query.group_by(Users.id, Users.username, Users.email)
 
-    def _build_combined_usage_query(self, tenant_id: "UUID", start_date: "datetime", end_date: "datetime", user_id: "UUID" = None):
+    def _build_combined_usage_query(
+        self,
+        tenant_id: "UUID",
+        start_date: "datetime",
+        end_date: "datetime",
+        user_id: "UUID | None" = None,
+    ):
         """
         Build the combined usage query that merges questions and app runs data.
 
@@ -122,11 +144,17 @@ class UserTokenUsageAnalyzer:
         Returns:
             A SQLAlchemy select query for combined token usage
         """
-        questions_query = self._build_questions_query(tenant_id, start_date, end_date, user_id)
-        app_runs_query = self._build_app_runs_query(tenant_id, start_date, end_date, user_id)
+        questions_query = self._build_questions_query(
+            tenant_id, start_date, end_date, user_id
+        )
+        app_runs_query = self._build_app_runs_query(
+            tenant_id, start_date, end_date, user_id
+        )
 
         # Combine the results from both queries using union_all
-        combined_usage_query = union_all(questions_query, app_runs_query).alias("combined_usage")
+        combined_usage_query = union_all(questions_query, app_runs_query).alias(
+            "combined_usage"
+        )
 
         # Sum up the input/output tokens and request counts
         base_query = select(
@@ -136,8 +164,10 @@ class UserTokenUsageAnalyzer:
             func.sum(combined_usage_query.c.input_tokens).label("input_tokens"),
             func.sum(combined_usage_query.c.output_tokens).label("output_tokens"),
             func.sum(combined_usage_query.c.request_count).label("request_count"),
-            (func.sum(combined_usage_query.c.input_tokens) +
-             func.sum(combined_usage_query.c.output_tokens)).label("total_tokens"),
+            (
+                func.sum(combined_usage_query.c.input_tokens)
+                + func.sum(combined_usage_query.c.output_tokens)
+            ).label("total_tokens"),
         ).group_by(
             combined_usage_query.c.user_id,
             combined_usage_query.c.username,
@@ -147,14 +177,24 @@ class UserTokenUsageAnalyzer:
         if not user_id:
             # Only add HAVING clause for multi-user queries to filter out users with no usage
             base_query = base_query.having(
-                (func.sum(combined_usage_query.c.input_tokens) +
-                 func.sum(combined_usage_query.c.output_tokens)) > 0
+                (
+                    func.sum(combined_usage_query.c.input_tokens)
+                    + func.sum(combined_usage_query.c.output_tokens)
+                )
+                > 0
             )
 
         return base_query
 
     async def get_user_token_usage(
-        self, tenant_id: "UUID", start_date: "datetime", end_date: "datetime", page: int = 1, per_page: int = 15, sort_by: str = "total_tokens", sort_order: str = "desc"
+        self,
+        tenant_id: "UUID",
+        start_date: "datetime",
+        end_date: "datetime",
+        page: int = 1,
+        per_page: int = 15,
+        sort_by: str = "total_tokens",
+        sort_order: str = "desc",
     ) -> UserTokenUsageSummary:
         """
         Get token usage statistics aggregated by user.
@@ -171,7 +211,9 @@ class UserTokenUsageAnalyzer:
         Returns:
             A UserTokenUsageSummary with token usage per user
         """
-        logger.info(f"Getting user token usage for tenant {tenant_id} with sort_by={sort_by} and sort_order={sort_order}")
+        logger.info(
+            f"Getting user token usage for tenant {tenant_id} with sort_by={sort_by} and sort_order={sort_order}"
+        )
 
         # Build the base query using the helper method
         base_query = self._build_combined_usage_query(tenant_id, start_date, end_date)
@@ -198,7 +240,7 @@ class UserTokenUsageAnalyzer:
         rows = result.all()
 
         # Transform the result into UserTokenUsage objects
-        user_token_usages = []
+        user_token_usages: list[UserTokenUsage] = []
         for row in rows:
             if row.user_id is not None:
                 user_token_usages.append(
@@ -215,7 +257,9 @@ class UserTokenUsageAnalyzer:
 
         # Calculate total tokens and requests for the current page
         total_input_tokens = sum(user.total_input_tokens for user in user_token_usages)
-        total_output_tokens = sum(user.total_output_tokens for user in user_token_usages)
+        total_output_tokens = sum(
+            user.total_output_tokens for user in user_token_usages
+        )
         total_requests = sum(user.total_requests for user in user_token_usages)
 
         return UserTokenUsageSummary(
@@ -241,7 +285,11 @@ class UserTokenUsageAnalyzer:
             return "total_tokens"
 
     async def get_user_model_breakdown(
-        self, tenant_id: "UUID", user_id: "UUID", start_date: "datetime", end_date: "datetime"
+        self,
+        tenant_id: "UUID",
+        user_id: "UUID",
+        start_date: "datetime",
+        end_date: "datetime",
     ) -> TokenUsageSummary:
         """
         Get model breakdown for a specific user.
@@ -255,10 +303,16 @@ class UserTokenUsageAnalyzer:
         Returns:
             A TokenUsageSummary with model breakdown for the user
         """
-        return await self._get_user_model_breakdown(tenant_id, user_id, start_date, end_date)
+        return await self._get_user_model_breakdown(
+            tenant_id, user_id, start_date, end_date
+        )
 
     async def get_single_user_summary(
-        self, tenant_id: "UUID", user_id: "UUID", start_date: "datetime", end_date: "datetime"
+        self,
+        tenant_id: "UUID",
+        user_id: "UUID",
+        start_date: "datetime",
+        end_date: "datetime",
     ) -> UserTokenUsage:
         """
         Get token usage summary for a single user efficiently.
@@ -272,10 +326,14 @@ class UserTokenUsageAnalyzer:
         Returns:
             A UserTokenUsage object for the specific user
         """
-        logger.info(f"Getting single user summary for user {user_id} in tenant {tenant_id}")
+        logger.info(
+            f"Getting single user summary for user {user_id} in tenant {tenant_id}"
+        )
 
         # Build the base query using the helper method
-        query = self._build_combined_usage_query(tenant_id, start_date, end_date, user_id)
+        query = self._build_combined_usage_query(
+            tenant_id, start_date, end_date, user_id
+        )
 
         result = await self.session.execute(query)
         row = result.first()
@@ -284,7 +342,9 @@ class UserTokenUsageAnalyzer:
             raise ValueError(f"User with ID {user_id} not found in tenant {tenant_id}")
 
         # Get model breakdown for this user
-        model_breakdown = await self._get_user_model_breakdown(tenant_id, user_id, start_date, end_date)
+        model_breakdown = await self._get_user_model_breakdown(
+            tenant_id, user_id, start_date, end_date
+        )
 
         return UserTokenUsage(
             user_id=row.user_id,
@@ -309,7 +369,11 @@ class UserTokenUsageAnalyzer:
         )
 
     async def _get_user_model_breakdown(
-        self, tenant_id: "UUID", user_id: "UUID", start_date: "datetime", end_date: "datetime"
+        self,
+        tenant_id: "UUID",
+        user_id: "UUID",
+        start_date: "datetime",
+        end_date: "datetime",
     ) -> TokenUsageSummary:
         """
         Internal method to get model breakdown for a specific user.
@@ -415,7 +479,7 @@ class UserTokenUsageAnalyzer:
         rows = result.all()
 
         # Transform the result into ModelTokenUsage objects
-        token_usage_by_model = []
+        token_usage_by_model: list[ModelTokenUsage] = []
         for row in rows:
             if row.model_id is not None:
                 token_usage_by_model.append(

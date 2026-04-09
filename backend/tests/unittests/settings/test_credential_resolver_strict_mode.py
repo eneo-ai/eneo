@@ -42,8 +42,6 @@ class MockSettings:
         openai_api_key: str | None = None,
         anthropic_api_key: str | None = None,
         azure_api_key: str | None = None,
-        berget_api_key: str | None = None,
-        gdm_api_key: str | None = None,
         mistral_api_key: str | None = None,
         ovhcloud_api_key: str | None = None,
         vllm_api_key: str | None = None,
@@ -52,8 +50,6 @@ class MockSettings:
         self.openai_api_key = openai_api_key
         self.anthropic_api_key = anthropic_api_key
         self.azure_api_key = azure_api_key
-        self.berget_api_key = berget_api_key
-        self.gdm_api_key = gdm_api_key
         self.mistral_api_key = mistral_api_key
         self.ovhcloud_api_key = ovhcloud_api_key
         self.vllm_api_key = vllm_api_key
@@ -194,9 +190,7 @@ class TestCredentialResolverStrictMode:
             tenant_id="sundsvall-municipality",
             name="Sundsvall Municipality",
             api_credentials={
-                "openai": {
-                    "api_key": "tenant-specific-openai-key-sk-proj-xyz123"
-                }
+                "openai": {"api_key": "tenant-specific-openai-key-sk-proj-xyz123"}
             },
         )
 
@@ -283,7 +277,7 @@ class TestCredentialResolverStrictMode:
                 provider="vllm",
                 field="endpoint",
                 fallback="http://global-vllm-endpoint:8000",
-                required=True  # vLLM endpoint is required in strict mode
+                required=True,  # vLLM endpoint is required in strict mode
             )
 
         # Verify error message is helpful

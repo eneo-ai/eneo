@@ -6,7 +6,9 @@ from pydantic import AliasChoices, AliasPath, BaseModel, Field
 from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelLegacy,
 )
-from intric.embedding_models.presentation.embedding_model_models import EmbeddingModelPublic
+from intric.embedding_models.presentation.embedding_model_models import (
+    EmbeddingModelPublic,
+)
 from intric.main.models import InDB, ModelId, ResourcePermissionsMixin, partial_model
 
 

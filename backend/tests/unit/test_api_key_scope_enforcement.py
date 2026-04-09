@@ -26,6 +26,8 @@ from intric.authentication.auth_models import (
     ApiKeyScopeType,
 )
 from intric.authentication.api_key_resolver import ApiKeyValidationError
+from intric.roles.permissions import Permission
+from intric.users.user import UserState
 from intric.conversations.conversations_router import _validate_conversation_scope
 from tests.unit.api_key_test_utils import make_api_key
 
@@ -69,7 +71,9 @@ def _make_user_service(
     mock_session.scalar = AsyncMock(return_value=session_scalar_return)
     mock_session.scalars = AsyncMock(
         return_value=SimpleNamespace(
-            all=lambda: [session_scalar_return] if session_scalar_return is not None else []
+            all=lambda: [session_scalar_return]
+            if session_scalar_return is not None
+            else []
         )
     )
     svc.repo = SimpleNamespace(session=mock_session)
@@ -105,9 +109,7 @@ class TestScopeEnforcementUnit:
         """Space-scoped key on admin route → 403 insufficient_scope."""
         space_id = uuid4()
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.SPACE, scope_id=space_id
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=space_id)
         request = _scope_request()
         scope_config = {"resource_type": "admin", "path_param": None}
 
@@ -121,9 +123,7 @@ class TestScopeEnforcementUnit:
     async def test_assistant_key_admin_route_denied(self):
         """Assistant-scoped key on admin route → 403."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4())
         request = _scope_request()
         scope_config = {"resource_type": "admin", "path_param": None}
 
@@ -135,9 +135,7 @@ class TestScopeEnforcementUnit:
     async def test_app_key_admin_route_denied(self):
         """App-scoped key on admin route → 403."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.APP, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=uuid4())
         request = _scope_request()
         scope_config = {"resource_type": "admin", "path_param": None}
 
@@ -151,9 +149,7 @@ class TestScopeEnforcementUnit:
         space_id = uuid4()
         assistant_id = uuid4()
         svc = _make_user_service(session_scalar_return=space_id)
-        key = _make_key(
-            scope_type=ApiKeyScopeType.SPACE, scope_id=space_id
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=space_id)
         request = _scope_request(path_params={"id": str(assistant_id)})
         scope_config = {"resource_type": "assistant", "path_param": "id"}
 
@@ -166,9 +162,7 @@ class TestScopeEnforcementUnit:
         other_space = uuid4()
         assistant_id = uuid4()
         svc = _make_user_service(session_scalar_return=other_space)
-        key = _make_key(
-            scope_type=ApiKeyScopeType.SPACE, scope_id=key_space
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=key_space)
         request = _scope_request(path_params={"id": str(assistant_id)})
         scope_config = {"resource_type": "assistant", "path_param": "id"}
 
@@ -182,9 +176,7 @@ class TestScopeEnforcementUnit:
         """Space-scoped key accessing its own space directly → pass."""
         space_id = uuid4()
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.SPACE, scope_id=space_id
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=space_id)
         request = _scope_request(path_params={"id": str(space_id)})
         scope_config = {"resource_type": "space", "path_param": "id"}
 
@@ -196,9 +188,7 @@ class TestScopeEnforcementUnit:
         key_space = uuid4()
         other_space = uuid4()
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.SPACE, scope_id=key_space
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=key_space)
         request = _scope_request(path_params={"id": str(other_space)})
         scope_config = {"resource_type": "space", "path_param": "id"}
 
@@ -211,9 +201,7 @@ class TestScopeEnforcementUnit:
         """Assistant-scoped key accessing its own assistant → pass."""
         assistant_id = uuid4()
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.ASSISTANT, scope_id=assistant_id
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=assistant_id)
         request = _scope_request(path_params={"id": str(assistant_id)})
         scope_config = {"resource_type": "assistant", "path_param": "id"}
 
@@ -225,9 +213,7 @@ class TestScopeEnforcementUnit:
         key_assistant = uuid4()
         other_assistant = uuid4()
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.ASSISTANT, scope_id=key_assistant
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=key_assistant)
         request = _scope_request(path_params={"id": str(other_assistant)})
         scope_config = {"resource_type": "assistant", "path_param": "id"}
 
@@ -243,9 +229,7 @@ class TestScopeEnforcementUnit:
         assistant_id = uuid4()
         session_id = uuid4()
         svc = _make_user_service(session_scalar_return=assistant_id)
-        key = _make_key(
-            scope_type=ApiKeyScopeType.ASSISTANT, scope_id=assistant_id
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=assistant_id)
         request = _scope_request(path_params={"session_id": str(session_id)})
         scope_config = {"resource_type": "conversation", "path_param": "session_id"}
 
@@ -258,9 +242,7 @@ class TestScopeEnforcementUnit:
         other_assistant = uuid4()
         session_id = uuid4()
         svc = _make_user_service(session_scalar_return=other_assistant)
-        key = _make_key(
-            scope_type=ApiKeyScopeType.ASSISTANT, scope_id=key_assistant
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=key_assistant)
         request = _scope_request(path_params={"session_id": str(session_id)})
         scope_config = {"resource_type": "conversation", "path_param": "session_id"}
 
@@ -272,9 +254,7 @@ class TestScopeEnforcementUnit:
     async def test_assistant_key_app_endpoint_denied(self):
         """Assistant-scoped key accessing app endpoint → 403 (wrong scope type)."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4())
         app_id = uuid4()
         request = _scope_request(path_params={"id": str(app_id)})
         scope_config = {"resource_type": "app", "path_param": "id"}
@@ -288,9 +268,7 @@ class TestScopeEnforcementUnit:
         """App-scoped key accessing its own app → pass."""
         app_id = uuid4()
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.APP, scope_id=app_id
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=app_id)
         request = _scope_request(path_params={"id": str(app_id)})
         scope_config = {"resource_type": "app", "path_param": "id"}
 
@@ -302,9 +280,7 @@ class TestScopeEnforcementUnit:
         key_app = uuid4()
         other_app = uuid4()
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.APP, scope_id=key_app
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=key_app)
         request = _scope_request(path_params={"id": str(other_app)})
         scope_config = {"resource_type": "app", "path_param": "id"}
 
@@ -320,9 +296,7 @@ class TestScopeEnforcementUnit:
         app_run_id = uuid4()
         svc = _make_user_service(session_scalar_return=app_id)
         # _resolve_app_run_app_id uses repo.session.scalar
-        key = _make_key(
-            scope_type=ApiKeyScopeType.APP, scope_id=app_id
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=app_id)
         request = _scope_request(path_params={"id": str(app_run_id)})
         scope_config = {"resource_type": "app_run", "path_param": "id"}
 
@@ -335,9 +309,7 @@ class TestScopeEnforcementUnit:
         other_app = uuid4()
         app_run_id = uuid4()
         svc = _make_user_service(session_scalar_return=other_app)
-        key = _make_key(
-            scope_type=ApiKeyScopeType.APP, scope_id=key_app
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=key_app)
         request = _scope_request(path_params={"id": str(app_run_id)})
         scope_config = {"resource_type": "app_run", "path_param": "id"}
 
@@ -349,9 +321,7 @@ class TestScopeEnforcementUnit:
     async def test_app_key_assistant_endpoint_denied(self):
         """App-scoped key accessing assistant endpoint → 403."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.APP, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=uuid4())
         assistant_id = uuid4()
         request = _scope_request(path_params={"id": str(assistant_id)})
         scope_config = {"resource_type": "assistant", "path_param": "id"}
@@ -364,9 +334,7 @@ class TestScopeEnforcementUnit:
     async def test_app_key_service_endpoint_denied(self):
         """App-scoped key accessing service endpoint → 403 (services are not app sub-resources)."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.APP, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=uuid4())
         service_id = uuid4()
         request = _scope_request(path_params={"id": str(service_id)})
         scope_config = {"resource_type": "service", "path_param": "id"}
@@ -386,7 +354,9 @@ class TestScopeEnforcementUnit:
         await svc._enforce_api_key_scope(request, key, scope_config)
 
     @pytest.mark.asyncio
-    async def test_assistant_key_single_resource_file_route_passes_defense_in_depth(self):
+    async def test_assistant_key_single_resource_file_route_passes_defense_in_depth(
+        self,
+    ):
         svc = _make_user_service()
         key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4())
         request = _scope_request(path_params={"id": str(uuid4())})
@@ -407,9 +377,7 @@ class TestScopeEnforcementUnit:
     async def test_space_key_unresolvable_resource_denied(self):
         """Space-scoped key with unresolvable resource → 403 (fail-closed)."""
         svc = _make_user_service(session_scalar_return=None)
-        key = _make_key(
-            scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
         request = _scope_request(path_params={"id": str(uuid4())})
         scope_config = {"resource_type": "assistant", "path_param": "id"}
 
@@ -430,7 +398,9 @@ class TestScopeEnforcementUnit:
         await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
 
     @pytest.mark.asyncio
-    async def test_space_key_space_scoped_info_blob_listing_route_passes_in_strict_mode(self):
+    async def test_space_key_space_scoped_info_blob_listing_route_passes_in_strict_mode(
+        self,
+    ):
         """Space-scoped key + /info-blobs/spaces/{space_id} is deterministic and allowed."""
         space_id = uuid4()
         svc = _make_user_service()
@@ -441,7 +411,9 @@ class TestScopeEnforcementUnit:
         await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
 
     @pytest.mark.asyncio
-    async def test_space_key_space_scoped_info_blob_listing_route_wrong_space_denied(self):
+    async def test_space_key_space_scoped_info_blob_listing_route_wrong_space_denied(
+        self,
+    ):
         """Space-scoped key + /info-blobs/spaces/{other} is denied."""
         key_space_id = uuid4()
         other_space_id = uuid4()
@@ -451,11 +423,15 @@ class TestScopeEnforcementUnit:
         scope_config = {"resource_type": "info_blob", "path_param": None}
 
         with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
+            await svc._enforce_api_key_scope(
+                request, key, scope_config, strict_mode=True
+            )
         assert exc_info.value.code == "insufficient_scope"
 
     @pytest.mark.asyncio
-    async def test_info_blob_route_ignores_non_deterministic_session_id_in_strict_mode(self):
+    async def test_info_blob_route_ignores_non_deterministic_session_id_in_strict_mode(
+        self,
+    ):
         """info_blob fallback only supports id/space_id; session_id must not be inferred."""
         space_id = uuid4()
         svc = _make_user_service()
@@ -464,7 +440,9 @@ class TestScopeEnforcementUnit:
         scope_config = {"resource_type": "info_blob", "path_param": None}
 
         with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
+            await svc._enforce_api_key_scope(
+                request, key, scope_config, strict_mode=True
+            )
         assert exc_info.value.code == "insufficient_scope"
         assert "path parameter 'id' or 'space_id'" in exc_info.value.message
 
@@ -506,9 +484,7 @@ class TestScopeEnforcementUnit:
     async def test_error_code_is_insufficient_scope(self):
         """All scope denials should use code 'insufficient_scope' (distinct from permission)."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
         request = _scope_request()
         scope_config = {"resource_type": "admin", "path_param": None}
 
@@ -530,9 +506,7 @@ class TestScopeListEndpoints:
     async def test_space_key_list_apps_passes(self):
         """Space-scoped key listing apps (no path ID) → pass (service filters)."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
         request = _scope_request(path_params={})  # No 'id' in path
         scope_config = {"resource_type": "app", "path_param": "id"}
 
@@ -542,9 +516,7 @@ class TestScopeListEndpoints:
     async def test_space_key_list_assistants_passes(self):
         """Space-scoped key listing assistants → pass."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
         request = _scope_request(path_params={})
         scope_config = {"resource_type": "assistant", "path_param": "id"}
 
@@ -554,9 +526,7 @@ class TestScopeListEndpoints:
     async def test_assistant_key_list_assistants_passes(self):
         """Assistant-scoped key listing assistants → pass (own type)."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4())
         request = _scope_request(path_params={})
         scope_config = {"resource_type": "assistant", "path_param": "id"}
 
@@ -566,9 +536,7 @@ class TestScopeListEndpoints:
     async def test_assistant_key_list_conversations_passes(self):
         """Assistant-scoped key listing conversations → pass (related type)."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4())
         request = _scope_request(path_params={})
         scope_config = {"resource_type": "conversation", "path_param": "session_id"}
 
@@ -578,9 +546,7 @@ class TestScopeListEndpoints:
     async def test_assistant_key_list_apps_denied(self):
         """Assistant-scoped key listing apps → 403 (wrong type)."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4())
         request = _scope_request(path_params={})
         scope_config = {"resource_type": "app", "path_param": "id"}
 
@@ -593,9 +559,7 @@ class TestScopeListEndpoints:
     async def test_assistant_key_list_services_denied(self):
         """Assistant-scoped key listing services → 403."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4())
         request = _scope_request(path_params={})
         scope_config = {"resource_type": "service", "path_param": "id"}
 
@@ -617,9 +581,7 @@ class TestScopeListEndpoints:
     async def test_app_key_list_apps_passes(self):
         """App-scoped key listing apps → pass (own type)."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.APP, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=uuid4())
         request = _scope_request(path_params={})
         scope_config = {"resource_type": "app", "path_param": "id"}
 
@@ -629,9 +591,7 @@ class TestScopeListEndpoints:
     async def test_app_key_list_app_runs_passes(self):
         """App-scoped key listing app_runs → pass (related type)."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.APP, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=uuid4())
         request = _scope_request(path_params={})
         scope_config = {"resource_type": "app_run", "path_param": "id"}
 
@@ -641,9 +601,7 @@ class TestScopeListEndpoints:
     async def test_app_key_list_assistants_denied(self):
         """App-scoped key listing assistants → 403."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.APP, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=uuid4())
         request = _scope_request(path_params={})
         scope_config = {"resource_type": "assistant", "path_param": "id"}
 
@@ -656,9 +614,7 @@ class TestScopeListEndpoints:
     async def test_app_key_list_services_denied(self):
         """App-scoped key listing services → 403 (services are not app sub-resources)."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.APP, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=uuid4())
         request = _scope_request(path_params={})
         scope_config = {"resource_type": "service", "path_param": "id"}
 
@@ -685,9 +641,14 @@ class TestScopeListEndpoints:
         scope_config = {"resource_type": "assistant", "path_param": "id"}
 
         with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
+            await svc._enforce_api_key_scope(
+                request, key, scope_config, strict_mode=True
+            )
         assert exc_info.value.code == "insufficient_scope"
-        assert "Strict mode requires deterministic scope filtering" in exc_info.value.message
+        assert (
+            "Strict mode requires deterministic scope filtering"
+            in exc_info.value.message
+        )
         assert "path parameter 'id'" in exc_info.value.message
 
     @pytest.mark.asyncio
@@ -699,11 +660,16 @@ class TestScopeListEndpoints:
         scope_config = {"resource_type": "assistant", "path_param": "id"}
 
         with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
+            await svc._enforce_api_key_scope(
+                request, key, scope_config, strict_mode=True
+            )
         assert exc_info.value.code == "insufficient_scope"
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("scope_type", [ApiKeyScopeType.SPACE, ApiKeyScopeType.ASSISTANT, ApiKeyScopeType.APP])
+    @pytest.mark.parametrize(
+        "scope_type",
+        [ApiKeyScopeType.SPACE, ApiKeyScopeType.ASSISTANT, ApiKeyScopeType.APP],
+    )
     async def test_file_list_allowed_in_strict_mode_for_scoped_keys(self, scope_type):
         """Strict mode keeps intentionally-allowed file routes working for scoped keys."""
         svc = _make_user_service()
@@ -822,7 +788,10 @@ class TestResolveApiKeyStrictModeWiring:
             state=State(),
             url=SimpleNamespace(path="/api/v1/assistants"),
         )
-        request.state._scope_check_config = {"resource_type": "assistant", "path_param": "id"}
+        request.state._scope_check_config = {
+            "resource_type": "assistant",
+            "path_param": "id",
+        }
         return request
 
     @staticmethod
@@ -838,12 +807,15 @@ class TestResolveApiKeyStrictModeWiring:
                 return_value=SimpleNamespace(
                     id=key.owner_user_id,
                     tenant_id=key.tenant_id,
+                    permissions={Permission.ADMIN},
+                    state=UserState.ACTIVE,
                 )
             )
         )
         svc.allowed_origin_repo = AsyncMock()
         svc.space_service = AsyncMock()
         svc.api_key_rate_limiter = None
+        svc._session = None
         svc.api_key_v2_repo = SimpleNamespace(update_last_used_at=AsyncMock())
         svc._log_api_key_auth_failed = AsyncMock()
         svc._maybe_log_api_key_used = AsyncMock()
@@ -865,7 +837,9 @@ class TestResolveApiKeyStrictModeWiring:
             async def enforce_guardrails(self, *, key, origin, client_ip):
                 return None
 
-        monkeypatch.setattr("intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub)
+        monkeypatch.setattr(
+            "intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
+        )
         monkeypatch.setattr(
             "intric.users.user_service.get_settings",
             lambda: SimpleNamespace(
@@ -894,7 +868,9 @@ class TestResolveApiKeyStrictModeWiring:
             async def enforce_guardrails(self, *, key, origin, client_ip):
                 return None
 
-        monkeypatch.setattr("intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub)
+        monkeypatch.setattr(
+            "intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
+        )
         monkeypatch.setattr(
             "intric.users.user_service.get_settings",
             lambda: SimpleNamespace(
@@ -911,7 +887,9 @@ class TestResolveApiKeyStrictModeWiring:
         assert svc._enforce_api_key_scope.await_args.kwargs["strict_mode"] is False
 
     @pytest.mark.asyncio
-    async def test_resolve_api_key_skips_scope_check_when_env_toggle_off(self, monkeypatch):
+    async def test_resolve_api_key_skips_scope_check_when_env_toggle_off(
+        self, monkeypatch
+    ):
         key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
         svc = self._build_service(key)
         request = self._build_request()
@@ -923,7 +901,9 @@ class TestResolveApiKeyStrictModeWiring:
             async def enforce_guardrails(self, *, key, origin, client_ip):
                 return None
 
-        monkeypatch.setattr("intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub)
+        monkeypatch.setattr(
+            "intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
+        )
         monkeypatch.setattr(
             "intric.users.user_service.get_settings",
             lambda: SimpleNamespace(
@@ -940,7 +920,9 @@ class TestResolveApiKeyStrictModeWiring:
         svc._enforce_api_key_scope.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_resolve_api_key_skips_scope_check_when_tenant_flag_off(self, monkeypatch):
+    async def test_resolve_api_key_skips_scope_check_when_tenant_flag_off(
+        self, monkeypatch
+    ):
         key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
         svc = self._build_service(key)
         request = self._build_request()
@@ -952,7 +934,9 @@ class TestResolveApiKeyStrictModeWiring:
             async def enforce_guardrails(self, *, key, origin, client_ip):
                 return None
 
-        monkeypatch.setattr("intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub)
+        monkeypatch.setattr(
+            "intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
+        )
         monkeypatch.setattr(
             "intric.users.user_service.get_settings",
             lambda: SimpleNamespace(
@@ -970,7 +954,9 @@ class TestResolveApiKeyStrictModeWiring:
         svc._enforce_api_key_scope.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_resolve_api_key_tenant_scoped_key_skips_scope_enforcement(self, monkeypatch):
+    async def test_resolve_api_key_tenant_scoped_key_skips_scope_enforcement(
+        self, monkeypatch
+    ):
         key = _make_key(scope_type=ApiKeyScopeType.TENANT, scope_id=None)
         svc = self._build_service(key)
         request = self._build_request()
@@ -982,7 +968,9 @@ class TestResolveApiKeyStrictModeWiring:
             async def enforce_guardrails(self, *, key, origin, client_ip):
                 return None
 
-        monkeypatch.setattr("intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub)
+        monkeypatch.setattr(
+            "intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
+        )
         monkeypatch.setattr(
             "intric.users.user_service.get_settings",
             lambda: SimpleNamespace(
@@ -1066,10 +1054,16 @@ class TestScopeRouteGuardCoverage:
 
         # Routes are flattened by FastAPI — match by prefix (startswith).
         required_prefixes = {
-            "/spaces", "/assistants", "/apps", "/app-runs",
-            "/conversations", "/services", "/group-chats",
-            "/groups", "/websites", "/crawl-runs",
-            "/flows",
+            "/spaces",
+            "/assistants",
+            "/apps",
+            "/app-runs",
+            "/conversations",
+            "/services",
+            "/group-chats",
+            "/groups",
+            "/websites",
+            "/crawl-runs",
         }
         found_prefixes = set()
         routes_missing_scope_dep = []
@@ -1081,7 +1075,8 @@ class TestScopeRouteGuardCoverage:
                     deps = getattr(route, "dependencies", [])
                     has_scope_dep = any(
                         hasattr(dep, "dependency")
-                        and getattr(dep.dependency, "__name__", "") == "_scope_check_dep"
+                        and getattr(dep.dependency, "__name__", "")
+                        == "_scope_check_dep"
                         for dep in deps
                     )
                     if not has_scope_dep:
@@ -1113,7 +1108,8 @@ class TestScopeRouteGuardCoverage:
                 )
                 has_admin_key_dep = any(
                     hasattr(dep, "dependency")
-                    and getattr(dep.dependency, "__name__", "") == "_api_key_permission_dep"
+                    and getattr(dep.dependency, "__name__", "")
+                    == "_api_key_permission_dep"
                     for dep in deps
                 )
                 patch_routes.append((path, has_scope_dep, has_admin_key_dep))
@@ -1122,8 +1118,12 @@ class TestScopeRouteGuardCoverage:
             f"Expected at least 5 PATCH /settings endpoints, found {len(patch_routes)}"
         )
         for path, has_scope_dep, has_admin_key_dep in patch_routes:
-            assert has_scope_dep, f"Settings PATCH endpoint {path} missing _scope_check_dep"
-            assert has_admin_key_dep, f"Settings PATCH endpoint {path} missing _api_key_permission_dep"
+            assert has_scope_dep, (
+                f"Settings PATCH endpoint {path} missing _scope_check_dep"
+            )
+            assert has_admin_key_dep, (
+                f"Settings PATCH endpoint {path} missing _api_key_permission_dep"
+            )
 
     def test_template_admin_routes_have_scope_check(self):
         """Template admin router mounts should have admin scope check."""
@@ -1157,7 +1157,11 @@ class TestScopeRouteGuardCoverage:
         for route in router.routes:
             path = getattr(route, "path", "")
             methods = getattr(route, "methods", set())
-            if path == "/users/" or path.startswith("/users/admin") or path.startswith("/users/api-keys"):
+            if (
+                path == "/users/"
+                or path.startswith("/users/admin")
+                or path.startswith("/users/api-keys")
+            ):
                 deps = getattr(route, "dependencies", [])
                 has_scope_dep = any(
                     hasattr(dep, "dependency")
@@ -1166,17 +1170,24 @@ class TestScopeRouteGuardCoverage:
                 )
                 has_admin_key_dep = any(
                     hasattr(dep, "dependency")
-                    and getattr(dep.dependency, "__name__", "") == "_api_key_permission_dep"
+                    and getattr(dep.dependency, "__name__", "")
+                    == "_api_key_permission_dep"
                     for dep in deps
                 )
-                admin_routes.append((path, sorted(methods), has_scope_dep, has_admin_key_dep))
+                admin_routes.append(
+                    (path, sorted(methods), has_scope_dep, has_admin_key_dep)
+                )
 
         assert len(admin_routes) >= 5, (
             f"Expected at least 5 user admin routes, found {len(admin_routes)}"
         )
         for path, methods, has_scope_dep, has_admin_key_dep in admin_routes:
-            assert has_scope_dep, f"User admin route {path} {methods} missing _scope_check_dep"
-            assert has_admin_key_dep, f"User admin route {path} {methods} missing _api_key_permission_dep"
+            assert has_scope_dep, (
+                f"User admin route {path} {methods} missing _scope_check_dep"
+            )
+            assert has_admin_key_dep, (
+                f"User admin route {path} {methods} missing _api_key_permission_dep"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1220,21 +1231,32 @@ class TestScopeBodyDriven:
 
         space_repo = AsyncMock()
         if space_by_assistant is not None:
-            space_repo.get_space_by_assistant = AsyncMock(return_value=space_by_assistant)
+            space_repo.get_space_by_assistant = AsyncMock(
+                return_value=space_by_assistant
+            )
         else:
             from intric.main.exceptions import NotFoundException
-            space_repo.get_space_by_assistant = AsyncMock(side_effect=NotFoundException())
+
+            space_repo.get_space_by_assistant = AsyncMock(
+                side_effect=NotFoundException()
+            )
 
         if space_by_group_chat is not None:
-            space_repo.get_space_by_group_chat = AsyncMock(return_value=space_by_group_chat)
+            space_repo.get_space_by_group_chat = AsyncMock(
+                return_value=space_by_group_chat
+            )
         else:
             from intric.main.exceptions import NotFoundException
-            space_repo.get_space_by_group_chat = AsyncMock(side_effect=NotFoundException())
+
+            space_repo.get_space_by_group_chat = AsyncMock(
+                side_effect=NotFoundException()
+            )
 
         if space_by_session is not None:
             space_repo.get_space_by_session = AsyncMock(return_value=space_by_session)
         else:
             from intric.main.exceptions import NotFoundException
+
             space_repo.get_space_by_session = AsyncMock(side_effect=NotFoundException())
 
         container.space_repo = MagicMock(return_value=space_repo)
@@ -1244,9 +1266,14 @@ class TestScopeBodyDriven:
             session_service.get_session_by_uuid = AsyncMock(return_value=session_obj)
         elif session_not_found:
             from intric.main.exceptions import NotFoundException
-            session_service.get_session_by_uuid = AsyncMock(side_effect=NotFoundException())
+
+            session_service.get_session_by_uuid = AsyncMock(
+                side_effect=NotFoundException()
+            )
         else:
-            session_service.get_session_by_uuid = AsyncMock(side_effect=Exception("not found"))
+            session_service.get_session_by_uuid = AsyncMock(
+                side_effect=Exception("not found")
+            )
         container.session_service = MagicMock(return_value=session_service)
 
         # Feature flag service (for _validate_conversation_scope flag gating)
@@ -1254,7 +1281,9 @@ class TestScopeBodyDriven:
         flag.is_enabled = MagicMock(return_value=True)
         feature_flag_service = MagicMock()
         feature_flag_service.feature_flag_repo = MagicMock()
-        feature_flag_service.feature_flag_repo.one_or_none = AsyncMock(return_value=flag)
+        feature_flag_service.feature_flag_repo.one_or_none = AsyncMock(
+            return_value=flag
+        )
         container.feature_flag_service = MagicMock(return_value=feature_flag_service)
 
         # User (needed for feature flag tenant check)
@@ -1337,7 +1366,9 @@ class TestScopeBodyDriven:
         """Assistant-scoped key + different assistant_id → 403."""
         key_assistant = uuid4()
         other_assistant = uuid4()
-        request = self._make_http_request(scope_type="assistant", scope_id=key_assistant)
+        request = self._make_http_request(
+            scope_type="assistant", scope_id=key_assistant
+        )
         container = self._make_container()
 
         with pytest.raises(HTTPException) as exc_info:
@@ -1398,7 +1429,9 @@ class TestScopeBodyDriven:
             assistant=SimpleNamespace(id=other_assistant),
             group_chat_id=None,
         )
-        request = self._make_http_request(scope_type="assistant", scope_id=key_assistant)
+        request = self._make_http_request(
+            scope_type="assistant", scope_id=key_assistant
+        )
         container = self._make_container(session_obj=session_obj)
 
         with pytest.raises(HTTPException) as exc_info:
@@ -1417,9 +1450,7 @@ class TestScopeBodyDriven:
         space_id = uuid4()
         assistant_id = uuid4()
         request = self._make_http_request(scope_type="space", scope_id=space_id)
-        container = self._make_container(
-            space_by_assistant=_make_space(space_id)
-        )
+        container = self._make_container(space_by_assistant=_make_space(space_id))
 
         await _validate_conversation_scope(
             http_request=request,
@@ -1436,9 +1467,7 @@ class TestScopeBodyDriven:
         other_space = uuid4()
         assistant_id = uuid4()
         request = self._make_http_request(scope_type="space", scope_id=key_space)
-        container = self._make_container(
-            space_by_assistant=_make_space(other_space)
-        )
+        container = self._make_container(space_by_assistant=_make_space(other_space))
 
         with pytest.raises(HTTPException) as exc_info:
             await _validate_conversation_scope(
@@ -1456,9 +1485,7 @@ class TestScopeBodyDriven:
         space_id = uuid4()
         group_chat_id = uuid4()
         request = self._make_http_request(scope_type="space", scope_id=space_id)
-        container = self._make_container(
-            space_by_group_chat=_make_space(space_id)
-        )
+        container = self._make_container(space_by_group_chat=_make_space(space_id))
 
         await _validate_conversation_scope(
             http_request=request,
@@ -1474,9 +1501,7 @@ class TestScopeBodyDriven:
         key_space = uuid4()
         other_space = uuid4()
         request = self._make_http_request(scope_type="space", scope_id=key_space)
-        container = self._make_container(
-            space_by_group_chat=_make_space(other_space)
-        )
+        container = self._make_container(space_by_group_chat=_make_space(other_space))
 
         with pytest.raises(HTTPException) as exc_info:
             await _validate_conversation_scope(
@@ -1589,7 +1614,9 @@ class TestScopeBodyDriven:
         request = self._make_http_request(scope_type="assistant", scope_id=assistant_id)
         container = self._make_container()
 
-        with patch("intric.conversations.conversations_router.get_settings") as mock_settings:
+        with patch(
+            "intric.conversations.conversations_router.get_settings"
+        ) as mock_settings:
             mock_settings.return_value = SimpleNamespace(api_key_enforce_scope=False)
             # Should NOT raise even though assistant doesn't match
             await _validate_conversation_scope(
@@ -1616,7 +1643,9 @@ class TestScopeBodyDriven:
         ff_service.feature_flag_repo.one_or_none = AsyncMock(return_value=flag)
         container.feature_flag_service = MagicMock(return_value=ff_service)
 
-        with patch("intric.conversations.conversations_router.get_settings") as mock_settings:
+        with patch(
+            "intric.conversations.conversations_router.get_settings"
+        ) as mock_settings:
             mock_settings.return_value = SimpleNamespace(api_key_enforce_scope=True)
             # Should NOT raise even though assistant doesn't match
             await _validate_conversation_scope(
@@ -1705,9 +1734,7 @@ class TestScopeErrorMessages:
     async def test_admin_denial_mentions_tenant_requirement(self):
         """Admin scope denial should tell user they need a tenant-scoped key."""
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4()
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
         request = _scope_request()
         scope_config = {"resource_type": "admin", "path_param": None}
 
@@ -1723,9 +1750,7 @@ class TestScopeErrorMessages:
         key_space = uuid4()
         other_space = uuid4()
         svc = _make_user_service(session_scalar_return=other_space)
-        key = _make_key(
-            scope_type=ApiKeyScopeType.SPACE, scope_id=key_space
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=key_space)
         request = _scope_request(path_params={"id": str(uuid4())})
         scope_config = {"resource_type": "assistant", "path_param": "id"}
 
@@ -1740,9 +1765,7 @@ class TestScopeErrorMessages:
         """Assistant denial should explain what the key can access."""
         assistant_id = uuid4()
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.ASSISTANT, scope_id=assistant_id
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=assistant_id)
         request = _scope_request(path_params={"id": str(uuid4())})
         scope_config = {"resource_type": "app", "path_param": "id"}
 
@@ -1757,9 +1780,7 @@ class TestScopeErrorMessages:
         """App denial should explain what the key can access."""
         app_id = uuid4()
         svc = _make_user_service()
-        key = _make_key(
-            scope_type=ApiKeyScopeType.APP, scope_id=app_id
-        )
+        key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=app_id)
         request = _scope_request(path_params={"id": str(uuid4())})
         scope_config = {"resource_type": "assistant", "path_param": "id"}
 
@@ -1844,7 +1865,9 @@ class TestRequireTenantScopeForDelete:
     @pytest.mark.asyncio
     async def test_stashes_marker_on_delete_request(self):
         """DELETE request → marker stashed on request.state."""
-        from intric.authentication.auth_dependencies import require_tenant_scope_for_delete
+        from intric.authentication.auth_dependencies import (
+            require_tenant_scope_for_delete,
+        )
 
         dep = require_tenant_scope_for_delete()
         state = State()
@@ -1855,24 +1878,32 @@ class TestRequireTenantScopeForDelete:
     @pytest.mark.asyncio
     async def test_no_marker_on_get_request(self):
         """GET request → no marker stashed."""
-        from intric.authentication.auth_dependencies import require_tenant_scope_for_delete
+        from intric.authentication.auth_dependencies import (
+            require_tenant_scope_for_delete,
+        )
 
         dep = require_tenant_scope_for_delete()
         state = State()
         request = SimpleNamespace(method="GET", state=state)
         await dep(request)
-        assert getattr(request.state, "_require_tenant_scope_for_delete", False) is False
+        assert (
+            getattr(request.state, "_require_tenant_scope_for_delete", False) is False
+        )
 
     @pytest.mark.asyncio
     async def test_no_marker_on_post_request(self):
         """POST request → no marker stashed."""
-        from intric.authentication.auth_dependencies import require_tenant_scope_for_delete
+        from intric.authentication.auth_dependencies import (
+            require_tenant_scope_for_delete,
+        )
 
         dep = require_tenant_scope_for_delete()
         state = State()
         request = SimpleNamespace(method="POST", state=state)
         await dep(request)
-        assert getattr(request.state, "_require_tenant_scope_for_delete", False) is False
+        assert (
+            getattr(request.state, "_require_tenant_scope_for_delete", False) is False
+        )
 
 
 class TestTenantScopeForDeleteEnforcement:
@@ -1910,12 +1941,15 @@ class TestTenantScopeForDeleteEnforcement:
                 return_value=SimpleNamespace(
                     id=key.owner_user_id,
                     tenant_id=key.tenant_id,
+                    permissions={Permission.ADMIN},
+                    state=UserState.ACTIVE,
                 )
             )
         )
         svc.allowed_origin_repo = AsyncMock()
         svc.space_service = AsyncMock()
         svc.api_key_rate_limiter = None
+        svc._session = None
         svc.api_key_v2_repo = SimpleNamespace(update_last_used_at=AsyncMock())
         svc._log_api_key_auth_failed = AsyncMock()
         svc._maybe_log_api_key_used = AsyncMock()
@@ -1933,7 +1967,9 @@ class TestTenantScopeForDeleteEnforcement:
             async def enforce_guardrails(self, *, key, origin, client_ip):
                 return None
 
-        monkeypatch.setattr("intric.users.user_service.ApiKeyPolicyService", _PolicyStub)
+        monkeypatch.setattr(
+            "intric.users.user_service.ApiKeyPolicyService", _PolicyStub
+        )
 
     @staticmethod
     def _patch_settings(monkeypatch, *, enforce_scope: bool):
@@ -2023,7 +2059,9 @@ class TestTenantScopeForDeleteEnforcement:
     @pytest.mark.asyncio
     async def test_no_marker_space_scoped_key_allowed(self, monkeypatch):
         """Space-scoped key WITHOUT marker → passes (GET/POST routes)."""
-        key = _make_key(scope_type="space", scope_id=uuid4(), permission=ApiKeyPermission.ADMIN)
+        key = _make_key(
+            scope_type="space", scope_id=uuid4(), permission=ApiKeyPermission.ADMIN
+        )
         svc = self._build_service(key)
         self._patch_policy(monkeypatch)
         self._patch_settings(monkeypatch, enforce_scope=True)
@@ -2032,55 +2070,3 @@ class TestTenantScopeForDeleteEnforcement:
 
         _, returned_key = await svc._resolve_api_key("sk_test", request=request)
         assert returned_key is key
-
-
-class TestFlowScopeResolution:
-    """Scope enforcement coverage for flow and flow_run resources."""
-
-    @pytest.mark.asyncio
-    async def test_space_key_matching_flow_scope_passes(self):
-        space_id = uuid4()
-        flow_id = uuid4()
-        svc = _make_user_service(session_scalar_return=space_id)
-        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=space_id)
-        request = _scope_request(path_params={"id": str(flow_id)})
-        scope_config = {"resource_type": "flow", "path_param": "id"}
-
-        await svc._enforce_api_key_scope(request, key, scope_config)
-
-    @pytest.mark.asyncio
-    async def test_space_key_other_flow_scope_denied(self):
-        key_space = uuid4()
-        flow_id = uuid4()
-        svc = _make_user_service(session_scalar_return=uuid4())
-        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=key_space)
-        request = _scope_request(path_params={"id": str(flow_id)})
-        scope_config = {"resource_type": "flow", "path_param": "id"}
-
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(request, key, scope_config)
-        assert exc_info.value.code == "insufficient_scope"
-
-    @pytest.mark.asyncio
-    async def test_space_key_matching_flow_run_scope_passes(self):
-        space_id = uuid4()
-        run_id = uuid4()
-        svc = _make_user_service(session_scalar_return=space_id)
-        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=space_id)
-        request = _scope_request(path_params={"id": str(run_id)})
-        scope_config = {"resource_type": "flow_run", "path_param": "id"}
-
-        await svc._enforce_api_key_scope(request, key, scope_config)
-
-    @pytest.mark.asyncio
-    async def test_space_key_other_flow_run_scope_denied(self):
-        key_space = uuid4()
-        run_id = uuid4()
-        svc = _make_user_service(session_scalar_return=uuid4())
-        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=key_space)
-        request = _scope_request(path_params={"id": str(run_id)})
-        scope_config = {"resource_type": "flow_run", "path_param": "id"}
-
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(request, key, scope_config)
-        assert exc_info.value.code == "insufficient_scope"

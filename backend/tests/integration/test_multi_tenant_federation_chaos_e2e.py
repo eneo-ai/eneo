@@ -111,7 +111,9 @@ async def _patch_federation_config(tenant_id: UUID, new_config: dict):
     async with sessionmanager.session() as session:
         async with session.begin():
             result = await session.execute(
-                sa.select(Tenants.__table__.c.federation_config).where(Tenants.__table__.c.id == tenant_id)
+                sa.select(Tenants.__table__.c.federation_config).where(
+                    Tenants.__table__.c.id == tenant_id
+                )
             )
             current = dict(result.scalar_one())
             config = {**current, **new_config}
@@ -252,9 +254,13 @@ async def test_federation_config_drift_rejected_with_zero_grace(
         )
 
         # With grace=0 and strict=true, should reject due to origin mismatch
-        assert response.status_code == 400, f"Expected 400, got {response.status_code}: {response.text}"
+        assert response.status_code == 400, (
+            f"Expected 400, got {response.status_code}: {response.text}"
+        )
         error_detail = response.json()["detail"]
-        assert "redirect" in error_detail.lower(), f"Error should mention redirect: {error_detail}"
+        assert "redirect" in error_detail.lower(), (
+            f"Error should mention redirect: {error_detail}"
+        )
 
     finally:
         test_settings.oidc_redirect_grace_period_seconds = original_grace
@@ -315,7 +321,13 @@ async def test_federation_grace_period_allows_recent_config_change(
     jwks_mock()
 
     allowed_email = f"user@{slug}.gov"
-    await _create_user(client, super_admin_token, tenant["id"], allowed_email, password="ValidPassw0rd!")
+    await _create_user(
+        client,
+        super_admin_token,
+        tenant["id"],
+        allowed_email,
+        password="ValidPassw0rd!",
+    )
 
     monkeypatch.setattr(
         AuthService,
@@ -362,7 +374,9 @@ async def test_federation_grace_period_allows_recent_config_change(
         # Callback should succeed (within grace period)
         response = await _callback(client, code="code-grace", state=state_token)
 
-        assert response.status_code == 200, f"Expected 200 (grace period), got {response.status_code}: {response.text}"
+        assert response.status_code == 200, (
+            f"Expected 200 (grace period), got {response.status_code}: {response.text}"
+        )
 
     finally:
         test_settings.oidc_redirect_grace_period_seconds = original_grace
@@ -461,17 +475,22 @@ async def test_concurrent_federation_config_updates_last_write_wins(
             # Verify one of the concurrent updates won (check allowed_domains has update prefix)
             allowed_domains = config.get("allowed_domains", [])
             assert len(allowed_domains) > 0, f"Expected allowed_domains, got {config}"
-            assert any("update" in domain for domain in allowed_domains), \
+            assert any("update" in domain for domain in allowed_domains), (
                 f"Expected domain with 'update' prefix from concurrent updates, got {allowed_domains}"
+            )
 
             # Verify client_id also matches one of the updates
             client_id = config.get("client_id", "")
-            assert "client-" in client_id, f"Expected client_id with prefix, got {client_id}"
+            assert "client-" in client_id, (
+                f"Expected client_id with prefix, got {client_id}"
+            )
 
             # Verify updated_at is recent
             assert tenant_obj.updated_at is not None
             time_since_update = datetime.now(timezone.utc) - tenant_obj.updated_at
-            assert time_since_update < timedelta(seconds=10), "updated_at should be very recent"
+            assert time_since_update < timedelta(seconds=10), (
+                "updated_at should be very recent"
+            )
 
 
 @pytest.mark.integration
@@ -527,7 +546,13 @@ async def test_tenant_deleted_during_oidc_flow_returns_404(
     jwks_mock()
 
     allowed_email = f"user@{slug}.gov"
-    await _create_user(client, super_admin_token, tenant["id"], allowed_email, password="ValidPassw0rd!")
+    await _create_user(
+        client,
+        super_admin_token,
+        tenant["id"],
+        allowed_email,
+        password="ValidPassw0rd!",
+    )
 
     monkeypatch.setattr(
         AuthService,
@@ -560,19 +585,18 @@ async def test_tenant_deleted_during_oidc_flow_returns_404(
         async with session.begin():
             # Delete associated user first (foreign key)
             from intric.database.tables.users_table import Users
-            await session.execute(
-                sa.delete(Users).where(Users.tenant_id == tenant_id)
-            )
+
+            await session.execute(sa.delete(Users).where(Users.tenant_id == tenant_id))
             # Delete tenant
-            await session.execute(
-                sa.delete(Tenants).where(Tenants.id == tenant_id)
-            )
+            await session.execute(sa.delete(Tenants).where(Tenants.id == tenant_id))
 
     # Attempt callback
     response = await _callback(client, code="code-deleted", state=state_token)
 
     # Should return 404 (tenant not found)
-    assert response.status_code in {404, 400}, f"Expected 404 or 400, got {response.status_code}: {response.text}"
+    assert response.status_code in {404, 400}, (
+        f"Expected 404 or 400, got {response.status_code}: {response.text}"
+    )
 
 
 @pytest.mark.integration
@@ -632,7 +656,13 @@ async def test_state_token_tampering_rejected(
     jwks_mock()
 
     allowed_email = f"user@{slug_a}.gov"
-    await _create_user(client, super_admin_token, tenant_a["id"], allowed_email, password="ValidPassw0rd!")
+    await _create_user(
+        client,
+        super_admin_token,
+        tenant_a["id"],
+        allowed_email,
+        password="ValidPassw0rd!",
+    )
 
     monkeypatch.setattr(
         AuthService,
@@ -673,7 +703,9 @@ async def test_state_token_tampering_rejected(
     response = await _callback(client, code="code-tamper", state=tampered_state)
 
     # Should reject (tenant mismatch or not found)
-    assert response.status_code in {400, 404}, f"Expected 400/404, got {response.status_code}: {response.text}"
+    assert response.status_code in {400, 404}, (
+        f"Expected 400/404, got {response.status_code}: {response.text}"
+    )
 
 
 @pytest.mark.integration
@@ -731,7 +763,13 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
     jwks_mock()
 
     allowed_email = f"user@{slug}.gov"
-    await _create_user(client, super_admin_token, tenant["id"], allowed_email, password="ValidPassw0rd!")
+    await _create_user(
+        client,
+        super_admin_token,
+        tenant["id"],
+        allowed_email,
+        password="ValidPassw0rd!",
+    )
 
     monkeypatch.setattr(
         AuthService,
@@ -751,6 +789,7 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
         test_settings.oidc_state_ttl_seconds = 600
         test_settings.oidc_redirect_grace_period_seconds = 900
         from intric.main.config import set_settings
+
         set_settings(test_settings)
 
         # Configure federation
@@ -770,13 +809,18 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
 
         # Initiate and callback immediately (no time drift)
         state_payload = await _initiate(client, tenant["slug"])
-        response = await _callback(client, code="code-boundary", state=state_payload["state"])
+        response = await _callback(
+            client, code="code-boundary", state=state_payload["state"]
+        )
 
         # Should succeed (no config drift yet)
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        assert response.status_code == 200, (
+            f"Expected 200, got {response.status_code}: {response.text}"
+        )
 
     finally:
         test_settings.oidc_state_ttl_seconds = original_ttl
         test_settings.oidc_redirect_grace_period_seconds = original_grace
         from intric.main.config import set_settings
+
         set_settings(test_settings)

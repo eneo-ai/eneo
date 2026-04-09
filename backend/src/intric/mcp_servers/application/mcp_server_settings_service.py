@@ -1,13 +1,19 @@
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from intric.main.logging import get_logger
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 from intric.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
-    from intric.mcp_servers.domain.repositories.mcp_server_repo import MCPServerRepository
+    from intric.mcp_servers.domain.repositories.mcp_server_repo import (
+        MCPServerRepository,
+    )
     from intric.settings.encryption_service import EncryptionService
     from intric.users.user import UserInDB
 
@@ -37,6 +43,7 @@ class MCPServerSettingsService:
         user: "UserInDB",
         encryption_service: "EncryptionService | None" = None,
     ):
+        super().__init__()
         self.mcp_server_repo = mcp_server_repo
         self.user = user
         self.encryption_service = encryption_service or _NoopEncryptionService()
@@ -52,7 +59,9 @@ class MCPServerSettingsService:
             validated[key] = value
         return validated
 
-    def _encrypt_env_vars(self, env_vars: dict[str, str] | None) -> dict[str, str] | None:
+    def _encrypt_env_vars(
+        self, env_vars: dict[str, str] | None
+    ) -> dict[str, str] | None:
         if env_vars is None:
             return None
         if not self.encryption_service.is_active():
@@ -66,7 +75,48 @@ class MCPServerSettingsService:
             )
         return encrypted
 
-    def _decrypt_env_vars(self, env_vars: dict[str, str] | None) -> dict[str, str] | None:
+    def _decrypt_env_vars(
+        self, env_vars: dict[str, str] | None
+    ) -> dict[str, str] | None:
+        if env_vars is None:
+            return None
+        if not self.encryption_service.is_active():
+            return env_vars
+        decrypted: dict[str, str] = {}
+        for key, value in env_vars.items():
+            decrypted[key] = self.encryption_service.decrypt(value)
+        return decrypted
+
+    @staticmethod
+    def _validate_env_vars(env_vars: dict[str, Any] | None) -> dict[str, str] | None:
+        if env_vars is None:
+            return None
+        validated: dict[str, str] = {}
+        for key, value in env_vars.items():
+            if not isinstance(value, str):
+                raise BadRequestException("env_vars values must be strings")
+            validated[key] = value
+        return validated
+
+    def _encrypt_env_vars(
+        self, env_vars: dict[str, str] | None
+    ) -> dict[str, str] | None:
+        if env_vars is None:
+            return None
+        if not self.encryption_service.is_active():
+            return env_vars
+        encrypted: dict[str, str] = {}
+        for key, value in env_vars.items():
+            encrypted[key] = (
+                value
+                if self.encryption_service.is_encrypted(value)
+                else self.encryption_service.encrypt(value)
+            )
+        return encrypted
+
+    def _decrypt_env_vars(
+        self, env_vars: dict[str, str] | None
+    ) -> dict[str, str] | None:
         if env_vars is None:
             return None
         if not self.encryption_service.is_active():
@@ -79,7 +129,9 @@ class MCPServerSettingsService:
     @validate_permissions(Permission.ADMIN)
     async def get_available_mcp_servers(self) -> list[MCPServer]:
         """Get all MCP servers for the current tenant (enabled and disabled)."""
-        servers = await self.mcp_server_repo.query_by_tenant(tenant_id=self.user.tenant_id)
+        servers = await self.mcp_server_repo.query_by_tenant(
+            tenant_id=self.user.tenant_id
+        )
         for server in servers:
             status = "missing"
             if server.env_vars:
@@ -192,9 +244,7 @@ class MCPServerSettingsService:
 
         await self.mcp_server_repo.delete(id=mcp_server_id)
 
-    async def is_enabled_for_tenant(
-        self, mcp_server_id: UUID, tenant_id: UUID
-    ) -> bool:
+    async def is_enabled_for_tenant(self, mcp_server_id: UUID, tenant_id: UUID) -> bool:
         """Check if an MCP server is enabled for a specific tenant."""
         try:
             mcp_server = await self.mcp_server_repo.one(id=mcp_server_id)

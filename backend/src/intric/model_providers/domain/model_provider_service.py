@@ -15,7 +15,10 @@ if TYPE_CHECKING:
 class ModelProviderService:
     """Service for managing model providers with credential encryption."""
 
-    def __init__(self, repository: ModelProviderRepository, encryption: EncryptionService):
+    def __init__(
+        self, repository: ModelProviderRepository, encryption: EncryptionService
+    ):
+        super().__init__()
         self.repository = repository
         self.encryption = encryption
 
@@ -25,7 +28,9 @@ class ModelProviderService:
 
         # Encrypt API key if present
         if "api_key" in encrypted_creds and encrypted_creds["api_key"]:
-            encrypted_creds["api_key"] = self.encryption.encrypt(encrypted_creds["api_key"])
+            encrypted_creds["api_key"] = self.encryption.encrypt(
+                encrypted_creds["api_key"]
+            )
 
         # Add more credential fields here if needed in the future
         # e.g., client_secret, access_token, etc.
@@ -38,7 +43,9 @@ class ModelProviderService:
 
         # Decrypt API key if present
         if "api_key" in decrypted_creds and decrypted_creds["api_key"]:
-            decrypted_creds["api_key"] = self.encryption.decrypt(decrypted_creds["api_key"])
+            decrypted_creds["api_key"] = self.encryption.decrypt(
+                decrypted_creds["api_key"]
+            )
 
         return decrypted_creds
 
@@ -49,6 +56,25 @@ class ModelProviderService:
     async def get_by_id(self, provider_id: UUID) -> ModelProvider:
         """Get a provider by ID."""
         return await self.repository.get_by_id(provider_id)
+
+    @staticmethod
+    def _validate_required_fields(
+        provider_type: str,
+        credentials: dict[str, Any],
+        config: dict[str, Any],
+    ) -> None:
+        """Validate that all required fields are present for the provider type."""
+        from intric.tenants.provider_field_config import get_field_definitions
+
+        field_defs = get_field_definitions(provider_type)
+        for field in field_defs:
+            if field["required"]:
+                source = credentials if field["in_"] == "credentials" else config
+                value = source.get(field["name"])
+                if not value or (isinstance(value, str) and not value.strip()):
+                    raise ValueError(
+                        f"Field '{field['name']}' is required for provider '{provider_type}'"
+                    )
 
     async def create(
         self,
@@ -64,6 +90,9 @@ class ModelProviderService:
         existing = await self.repository.get_by_name(name)
         if existing is not None:
             raise NameCollisionException(f"Provider with name '{name}' already exists")
+
+        # Validate required fields for this provider type
+        self._validate_required_fields(provider_type, credentials, config)
 
         # Encrypt credentials before storing
         encrypted_credentials = self._encrypt_credentials(credentials)
@@ -90,7 +119,6 @@ class ModelProviderService:
         self,
         provider_id: UUID,
         name: Optional[str] = None,
-        provider_type: Optional[str] = None,
         credentials: Optional[dict[str, Any]] = None,
         config: Optional[dict[str, Any]] = None,
         is_active: Optional[bool] = None,
@@ -103,18 +131,18 @@ class ModelProviderService:
         if name is not None and name != provider.name:
             existing = await self.repository.get_by_name(name)
             if existing is not None:
-                raise NameCollisionException(f"Provider with name '{name}' already exists")
+                raise NameCollisionException(
+                    f"Provider with name '{name}' already exists"
+                )
             provider.name = name
-
-        # Update fields if provided
-        if provider_type is not None:
-            provider.provider_type = provider_type
 
         if credentials is not None:
             provider.credentials = self._encrypt_credentials(credentials)
 
         if config is not None:
-            provider.config = config
+            # Merge with existing config so unchanged fields are preserved
+            merged = {**provider.config, **config}
+            provider.config = merged
 
         if is_active is not None:
             provider.is_active = is_active
@@ -152,7 +180,10 @@ class ModelProviderService:
         For transcription models: skips validation (requires audio file).
         """
         if model_type == "transcription":
-            return {"success": True, "message": "Validation skipped for transcription models"}
+            return {
+                "success": True,
+                "message": "Validation skipped for transcription models",
+            }
 
         import litellm
 
@@ -181,11 +212,14 @@ class ModelProviderService:
         elif provider_type in ("vllm",) or provider.config.get("endpoint"):
             kwargs["api_base"] = provider.config.get("endpoint", "")
 
+        aembedding: Any = getattr(litellm, "aembedding")
+        acompletion: Any = getattr(litellm, "acompletion")
+
         try:
             if model_type == "embedding":
-                await litellm.aembedding(input=["test"], **kwargs)
+                await aembedding(input=["test"], **kwargs)
             else:
-                await litellm.acompletion(
+                await acompletion(
                     messages=[{"role": "user", "content": "hi"}],
                     max_completion_tokens=10,
                     drop_params=True,
@@ -258,9 +292,7 @@ class ModelProviderService:
                         data = resp.json()
                         return [
                             {"name": m["id"]}
-                            for m in sorted(
-                                data.get("data", []), key=lambda m: m["id"]
-                            )
+                            for m in sorted(data.get("data", []), key=lambda m: m["id"])
                         ]
                     return []
 
@@ -274,6 +306,8 @@ class ModelProviderService:
         have been deprecated.
         """
         import litellm
+
+        acompletion: Any = getattr(litellm, "acompletion")
 
         provider = await self.repository.get_by_id(provider_id)
         decrypted_creds = self._decrypt_credentials(provider.credentials)
@@ -339,7 +373,7 @@ class ModelProviderService:
         for model in candidates:
             kwargs = {**base_kwargs, "model": model}
             try:
-                await litellm.acompletion(**kwargs)
+                await acompletion(**kwargs)
                 return {"success": True, "message": "Connection successful"}
             except Exception as e:
                 error_name = e.__class__.__name__

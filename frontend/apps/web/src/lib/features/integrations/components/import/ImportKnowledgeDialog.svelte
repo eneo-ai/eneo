@@ -9,33 +9,34 @@
   import { integrationData } from "../../IntegrationData";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { resolve } from "$app/paths";
 
   const contextIntegrations = getAvailableIntegrations();
-  const { state: { currentSpace } } = getSpacesManager();
+  const {
+    state: { currentSpace }
+  } = getSpacesManager();
 
   let isPersonalSpace = $derived($currentSpace.personal);
-  let isOrgSpace = $derived($currentSpace.organization);
 
   // Filter integrations based on current space type
   // This ensures the dialog always shows the correct integrations even if space changes
   let availableIntegrations = $derived.by(() => {
-    // Guard against undefined/empty context data (race condition on initial load)
-    const integrations = contextIntegrations || [];
+    // Subscribe to the store so we react to space changes
+    const integrations = $contextIntegrations || [];
 
     if (isPersonalSpace) {
       // Personal spaces: only user_oauth integrations
-      return integrations.filter(i => i.auth_type === "user_oauth" || !i.connected);
-    } else if (isOrgSpace) {
-      // Organization spaces: only tenant_app integrations
-      return integrations.filter(i => i.connected && i.auth_type === "tenant_app");
+      return integrations.filter((i) => i.auth_type === "user_oauth" || !i.connected);
     }
 
-    // Fallback: all connected integrations
-    return integrations.filter(i => i.connected);
+    // Organization and shared spaces: only tenant_app integrations (admin-only)
+    return integrations.filter((i) => i.connected && i.auth_type === "tenant_app");
   });
 
   // Check if integrations are still loading
-  let isLoading = $derived(availableIntegrations.length === 0 && contextIntegrations !== undefined);
+  let isLoading = $derived(
+    availableIntegrations.length === 0 && $contextIntegrations === undefined
+  );
 
   let showSelectDialog = writable(false);
   let showImportDialog = writable(false);
@@ -45,7 +46,10 @@
   $effect(() => {
     // Find first connected integration when space or integrations change
     const firstConnected = availableIntegrations.find(({ connected }) => connected) ?? null;
-    if (!selectedIntegration || !availableIntegrations.some(i => i.id === selectedIntegration.id)) {
+    if (
+      !selectedIntegration ||
+      !availableIntegrations.some((i) => i.id === selectedIntegration?.id)
+    ) {
       selectedIntegration = firstConnected;
     }
   });
@@ -71,12 +75,16 @@
       <div class="flex items-center gap-2">
         <span class="text-lg font-extrabold">{integration.name}</span>
         {#if integration.auth_type === "tenant_app"}
-          <span class="text-accent-stronger bg-accent-dimmer border-accent-default rounded px-1.5 py-0.5 text-xs font-semibold border">
-            Organization
+          <span
+            class="text-accent-stronger bg-accent-dimmer border-accent-default rounded border px-1.5 py-0.5 text-xs font-semibold"
+          >
+            {m.organization()}
           </span>
         {:else}
-          <span class="text-secondary bg-dimmer border-default rounded px-1.5 py-0.5 text-xs font-semibold border">
-            Personal
+          <span
+            class="text-secondary bg-dimmer border-default rounded border px-1.5 py-0.5 text-xs font-semibold"
+          >
+            {m.personal()}
           </span>
         {/if}
       </div>
@@ -102,10 +110,18 @@
         <p class="text-secondary max-w-[60ch] pr-48 pl-4">
           {#if isPersonalSpace}
             {m.import_knowledge_from_third_party()}
-            <a href={localizeHref("/account/integrations?tab=providers")} class="underline">{m.personal_account()}</a>.
+            <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+            <a href={localizeHref("/account/integrations?tab=providers")} class="underline"
+              >{m.personal_account()}</a
+            >.
+            <!-- eslint-enable svelte/no-navigation-without-resolve -->
           {:else}
-            Import knowledge from organization-wide integrations. Configure them in
-            <a href={localizeHref("/admin/integrations?tab=providers")} class="underline">admin settings</a>.
+            {m.import_knowledge_from_org_integrations()}
+            <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+            <a href={localizeHref("/admin/integrations?tab=providers")} class="underline"
+              >{m.admin_settings()}</a
+            >.
+            <!-- eslint-enable svelte/no-navigation-without-resolve -->
           {/if}
         </p>
         <!-- <div class="h-8"></div> -->
@@ -114,19 +130,23 @@
         <div class="flex flex-col gap-2">
           {#if isLoading}
             <div class="text-secondary flex items-center justify-center py-8 text-center">
-              <p>Loading integrations...</p>
+              <p>{m.loading_integrations()}</p>
             </div>
           {:else if availableIntegrations.length === 0}
             <div class="text-secondary flex flex-col items-center justify-center py-8 text-center">
-              <p class="mb-2">No integrations available.</p>
+              <p class="mb-2">{m.no_integrations_available()}</p>
               <p class="text-sm">
                 {#if isPersonalSpace}
-                  <a href="/account/integrations?tab=providers" class="underline">Connect a personal integration</a>
-                  to get started.
+                  <a href={resolve("/account/integrations?tab=providers")} class="underline"
+                    >{m.connect_personal_integration()}</a
+                  >
+                  {m.to_get_started()}
                 {:else}
-                  Configure a
-                  <a href="/admin/integrations?tab=providers" class="underline">tenant app integration</a>
-                  in admin settings.
+                  {m.configure_a()}
+                  <a href={resolve("/admin/integrations?tab=providers")} class="underline"
+                    >{m.tenant_app_integration()}</a
+                  >
+                  {m.in_admin_settings()}
                 {/if}
               </p>
             </div>

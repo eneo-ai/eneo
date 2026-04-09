@@ -31,26 +31,20 @@ def _lookup_litellm_values():
 
 
 def upgrade() -> None:
-    conn = op.get_bind()
-    inspector = sa.inspect(conn)
-    existing_columns = {
-        column["name"] for column in inspector.get_columns("completion_models")
-    }
-
-    # 1. Add nullable columns if they do not already exist
-    if "max_input_tokens" not in existing_columns:
-        op.add_column(
-            "completion_models",
-            sa.Column("max_input_tokens", sa.Integer(), nullable=True),
-        )
-    if "max_output_tokens" not in existing_columns:
-        op.add_column(
-            "completion_models",
-            sa.Column("max_output_tokens", sa.Integer(), nullable=True),
-        )
+    # 1. Add nullable columns
+    op.add_column(
+        "completion_models",
+        sa.Column("max_input_tokens", sa.Integer(), nullable=True),
+    )
+    op.add_column(
+        "completion_models",
+        sa.Column("max_output_tokens", sa.Integer(), nullable=True),
+    )
 
     # 2. Populate from litellm model_cost where possible, else fall back
     litellm_map = _lookup_litellm_values()
+
+    conn = op.get_bind()
     rows = conn.execute(
         sa.text(
             "SELECT id, name, litellm_model_name, token_limit "
@@ -85,27 +79,32 @@ def upgrade() -> None:
         )
 
     # 3. Make NOT NULL
-    op.alter_column("completion_models", "max_input_tokens", nullable=False)
-    op.alter_column("completion_models", "max_output_tokens", nullable=False)
+    op.alter_column(
+        "completion_models", "max_input_tokens", nullable=False
+    )
+    op.alter_column(
+        "completion_models", "max_output_tokens", nullable=False
+    )
 
-    # 4. Keep token_limit as a backward-compatible alias for existing ORM/tests.
+    # 4. Drop old column
+    op.drop_column("completion_models", "token_limit")
 
 
 def downgrade() -> None:
+    # Recreate token_limit from max_input_tokens
+    op.add_column(
+        "completion_models",
+        sa.Column("token_limit", sa.Integer(), nullable=True),
+    )
+
     conn = op.get_bind()
-    inspector = sa.inspect(conn)
-    existing_columns = {
-        column["name"] for column in inspector.get_columns("completion_models")
-    }
-    if "token_limit" not in existing_columns:
-        op.add_column(
-            "completion_models",
-            sa.Column("token_limit", sa.Integer(), nullable=True),
+    conn.execute(
+        sa.text(
+            "UPDATE completion_models SET token_limit = max_input_tokens"
         )
-        conn.execute(
-            sa.text("UPDATE completion_models SET token_limit = max_input_tokens")
-        )
-        op.alter_column("completion_models", "token_limit", nullable=False)
+    )
+
+    op.alter_column("completion_models", "token_limit", nullable=False)
 
     op.drop_column("completion_models", "max_output_tokens")
     op.drop_column("completion_models", "max_input_tokens")

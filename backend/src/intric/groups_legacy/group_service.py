@@ -1,7 +1,9 @@
-from typing import TYPE_CHECKING
+from tempfile import SpooledTemporaryFile
+from typing import TYPE_CHECKING, BinaryIO, cast
 from uuid import UUID
 
 from intric.ai_models.ai_models_service import AIModelsService
+from intric.collections.domain.collection import Collection
 from intric.groups_legacy.api.group_models import (
     CreateGroupRequest,
     CreateSpaceGroup,
@@ -19,8 +21,6 @@ from intric.tenants.tenant_repo import TenantRepository
 from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
-    from tempfile import SpooledTemporaryFile
-
     from intric.actors import ActorManager
     from intric.jobs.task_service import TaskService
     from intric.spaces.space_repo import SpaceRepository
@@ -48,18 +48,11 @@ class GroupService:
         self.space_service = space_service
         self.actor_manager = actor_manager
         self.task_service = task_service
-
-    async def check_space_embedding_model(self, group: Group):
-        space = await self.space_service.get_space(group.space_id)
-
-        if not space.is_embedding_model_in_space(group.embedding_model_id):
-            raise BadRequestException(
-                f"Space does not have embedding model {group.embedding_model.name} enabled."
-            )
+        super().__init__()
 
     async def _validate_embedding_model(self, group: GroupCreate | GroupUpdate):
-        if group.embedding_model_id is not None:
-            await self.ai_models_service.get_embedding_model(group.embedding_model_id)
+        if group.embedding_model_id is not None:  # type: ignore[attr-defined]
+            await self.ai_models_service.get_embedding_model(group.embedding_model_id)  # type: ignore[attr-defined]
 
     @validate_permissions(Permission.COLLECTIONS)
     async def create_group(self, group: CreateGroupRequest):
@@ -95,7 +88,9 @@ class GroupService:
 
         if embedding_model_id is None:
             if space.is_personal():
-                embedding_model = await self.ai_models_service.get_latest_available_embedding_model()
+                embedding_model = (
+                    await self.ai_models_service.get_latest_available_embedding_model()
+                )
             else:
                 embedding_model = space.get_latest_embedding_model()
             if embedding_model is None:
@@ -135,7 +130,7 @@ class GroupService:
             return await self.repo.get_groups_by_space(space_id_filter)
         return await self.repo.get_groups_by_user(self.user.id)
 
-    async def get_group(self, group_id: UUID) -> Group:
+    async def get_group(self, group_id: UUID) -> Collection:
         space = await self.space_repo.get_space_by_collection(collection_id=group_id)
         group = space.get_collection(collection_id=group_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
@@ -157,6 +152,8 @@ class GroupService:
         groups = await self.repo.get_groups_by_ids(ids)
 
         for group in groups:
+            if group.space_id is None:
+                continue
             space = await self.space_service.get_space(group.space_id)
             actor = self.actor_manager.get_space_actor_from_space(space)
 
@@ -188,7 +185,9 @@ class GroupService:
                 },
             )
 
-        group_update = GroupUpdate(**group_update.model_dump(exclude_unset=True), id=group_id)
+        group_update = GroupUpdate(
+            **group_update.model_dump(exclude_unset=True), id=group_id
+        )
         group_in_db = await self.repo.update_group(group_update)
 
         return group_in_db
@@ -197,7 +196,7 @@ class GroupService:
         return await self.repo.update_group_size(group_id=group_id)
 
     async def add_file_to_group(
-        self, group_id: UUID, file: "SpooledTemporaryFile", mimetype: str, filename: str
+        self, group_id: UUID, file: BinaryIO, mimetype: str, filename: str
     ):
         space = await self.space_repo.get_space_by_collection(collection_id=group_id)
         group = space.get_collection(collection_id=group_id)
@@ -220,10 +219,12 @@ class GroupService:
                 f"Space does not have embedding model {group.embedding_model.name} enabled."
             )
 
-        return await self.task_service.queue_upload_file(
+        assert space.id is not None  # space from DB always has an id
+        return await self.task_service.queue_upload_file(  # pyright: ignore[reportUnknownMemberType]  # TaskService.queue_upload_file uses unparameterized SpooledTemporaryFile
             group_id=group_id,
             space_id=space.id,
-            file=file,
+            # FastAPI UploadFile.file is SpooledTemporaryFile at runtime
+            file=cast(SpooledTemporaryFile[bytes], file),
             mimetype=mimetype,
             filename=filename,
         )
@@ -244,7 +245,8 @@ class GroupService:
                 },
             )
 
-        count = await self.get_count_for_group(group)
+        assert group.id is not None  # collection from DB always has an id
+        count = await self.info_blob_repo.get_count_of_group(group.id)
 
         group_in_db = await self.repo.delete_group_by_id(group.id)
 
@@ -260,10 +262,16 @@ class GroupService:
         self,
         group_id: UUID,
         space_id: UUID,
-        assistant_ids: list[UUID] = [],
-        service_ids: list[UUID] = [],
+        assistant_ids: list[UUID] | None = None,
+        service_ids: list[UUID] | None = None,
     ):
-        source_space = await self.space_repo.get_space_by_collection(collection_id=group_id)
+        if assistant_ids is None:
+            assistant_ids = []
+        if service_ids is None:
+            service_ids = []
+        source_space = await self.space_repo.get_space_by_collection(
+            collection_id=group_id
+        )
         group = source_space.get_collection(collection_id=group_id)
         source_actor = self.actor_manager.get_space_actor_from_space(source_space)
         target_space = await self.space_service.get_space(space_id)
@@ -306,7 +314,9 @@ class GroupService:
         await self.repo.remove_group_from_all_assistants(
             group_id=group_id, assistant_ids=assistant_ids
         )
-        await self.repo.remove_group_from_all_services(group_id=group_id, service_ids=service_ids)
+        await self.repo.remove_group_from_all_services(
+            group_id=group_id, service_ids=service_ids
+        )
 
         return group_in_db
 
@@ -330,7 +340,9 @@ class GroupService:
         group_id: UUID,
         space_id: UUID,
     ):
-        source_space = await self.space_repo.get_space_by_collection(collection_id=group_id)
+        source_space = await self.space_repo.get_space_by_collection(
+            collection_id=group_id
+        )
         group = source_space.get_collection(collection_id=group_id)
         target_space = await self.space_service.get_space(space_id)
 

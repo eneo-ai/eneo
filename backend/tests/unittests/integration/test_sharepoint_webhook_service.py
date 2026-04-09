@@ -10,7 +10,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.infrastructure.sharepoint_webhook_service import SharepointWebhookService
+from intric.integration.infrastructure.sharepoint_webhook_service import (
+    SharepointWebhookService,
+)
 from intric.jobs.job_models import Task
 
 
@@ -177,7 +179,12 @@ async def test_missing_value_key_handled_gracefully(setup: Setup):
 
 
 async def test_changekey_deduplication_prevents_duplicate_processing(
-    setup: Setup, mock_notification, mock_knowledge_db, mock_user_integration_db, mock_user, mock_oauth_token
+    setup: Setup,
+    mock_notification,
+    mock_knowledge_db,
+    mock_user_integration_db,
+    mock_user,
+    mock_oauth_token,
 ):
     """Duplicate ChangeKeys are filtered out to prevent reprocessing."""
     # First notification should process, second with same ChangeKey should skip
@@ -197,7 +204,7 @@ async def test_changekey_deduplication_prevents_duplicate_processing(
 
     with patch(
         "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
-        return_value=mock_job_service
+        return_value=mock_job_service,
     ):
         # Send two identical notifications
         notifications = {
@@ -217,7 +224,12 @@ async def test_changekey_deduplication_prevents_duplicate_processing(
 
 
 async def test_changekey_deduplication_allows_new_changekeys(
-    setup: Setup, mock_notification, mock_knowledge_db, mock_user_integration_db, mock_user, mock_oauth_token
+    setup: Setup,
+    mock_notification,
+    mock_knowledge_db,
+    mock_user_integration_db,
+    mock_user,
+    mock_oauth_token,
 ):
     """New ChangeKeys are processed normally."""
     # Both notifications should process (different ChangeKeys)
@@ -254,7 +266,7 @@ async def test_changekey_deduplication_allows_new_changekeys(
 
     with patch(
         "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
-        return_value=mock_job_service
+        return_value=mock_job_service,
     ):
         notifications = {"value": [notification1, notification2]}
 
@@ -264,37 +276,51 @@ async def test_changekey_deduplication_allows_new_changekeys(
         assert setup.change_key_service.update_change_key.call_count == 2
 
 
-def test_site_root_integration_processes_all_notifications(setup: Setup, mock_notification, mock_knowledge_db):
+def test_site_root_integration_processes_all_notifications(
+    setup: Setup, mock_notification, mock_knowledge_db
+):
     """Site-level integrations process all notifications."""
     mock_knowledge_db.selected_item_type = "site_root"
     mock_knowledge_db.folder_id = None
 
-    result = setup.service._is_notification_in_scope(mock_notification, mock_knowledge_db)
+    result = setup.service._is_notification_in_scope(
+        mock_notification, mock_knowledge_db
+    )
 
     assert result is True
 
 
-def test_file_integration_filters_by_exact_item_id(setup: Setup, mock_notification, mock_knowledge_db):
+def test_file_integration_filters_by_exact_item_id(
+    setup: Setup, mock_notification, mock_knowledge_db
+):
     """File-level integrations filter by exact item ID match."""
     mock_knowledge_db.selected_item_type = "file"
-    mock_knowledge_db.folder_id = "item-123"  # folder_id stores the file ID for file-level
+    mock_knowledge_db.folder_id = (
+        "item-123"  # folder_id stores the file ID for file-level
+    )
 
     # Notification for the exact file
     notification_matching = mock_notification.copy()
     notification_matching["resourceData"]["id"] = "item-123"
 
-    result_match = setup.service._is_notification_in_scope(notification_matching, mock_knowledge_db)
+    result_match = setup.service._is_notification_in_scope(
+        notification_matching, mock_knowledge_db
+    )
     assert result_match is True
 
     # Notification for a different file
     notification_not_matching = mock_notification.copy()
     notification_not_matching["resourceData"]["id"] = "item-999"
 
-    result_no_match = setup.service._is_notification_in_scope(notification_not_matching, mock_knowledge_db)
+    result_no_match = setup.service._is_notification_in_scope(
+        notification_not_matching, mock_knowledge_db
+    )
     assert result_no_match is False
 
 
-def test_file_integration_without_item_id_queues_anyway(setup: Setup, mock_notification, mock_knowledge_db):
+def test_file_integration_without_item_id_queues_anyway(
+    setup: Setup, mock_notification, mock_knowledge_db
+):
     """File-level integrations without item_id in notification queue for delta sync."""
     mock_knowledge_db.selected_item_type = "file"
     mock_knowledge_db.folder_id = "item-123"
@@ -305,25 +331,35 @@ def test_file_integration_without_item_id_queues_anyway(setup: Setup, mock_notif
         "@odata.type": "#Microsoft.Graph.driveItem",
     }
 
-    result = setup.service._is_notification_in_scope(notification_no_id, mock_knowledge_db)
+    result = setup.service._is_notification_in_scope(
+        notification_no_id, mock_knowledge_db
+    )
 
     # Should queue (True) to let delta sync handle it
     assert result is True
 
 
-def test_folder_integration_queues_for_sync_service_filtering(setup: Setup, mock_notification, mock_knowledge_db):
+def test_folder_integration_queues_for_sync_service_filtering(
+    setup: Setup, mock_notification, mock_knowledge_db
+):
     """Folder-level integrations queue notifications for sync service filtering."""
     mock_knowledge_db.selected_item_type = "folder"
     mock_knowledge_db.folder_id = "folder-456"
 
-    result = setup.service._is_notification_in_scope(mock_notification, mock_knowledge_db)
+    result = setup.service._is_notification_in_scope(
+        mock_notification, mock_knowledge_db
+    )
 
     # Should queue (True) and let sync service do full filtering
     assert result is True
 
 
 async def test_tenant_app_integration_uses_tenant_app_id(
-    setup: Setup, mock_notification, mock_knowledge_db, mock_tenant_app_integration_db, mock_user
+    setup: Setup,
+    mock_notification,
+    mock_knowledge_db,
+    mock_tenant_app_integration_db,
+    mock_user,
 ):
     """Tenant app integrations use tenant_app_id, no OAuth token."""
     # Mock database responses
@@ -344,7 +380,7 @@ async def test_tenant_app_integration_uses_tenant_app_id(
 
     with patch(
         "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
-        return_value=mock_job_service
+        return_value=mock_job_service,
     ):
         notifications = {"value": [mock_notification]}
 
@@ -367,7 +403,12 @@ async def test_tenant_app_integration_uses_tenant_app_id(
 
 
 async def test_user_oauth_integration_uses_oauth_token(
-    setup: Setup, mock_notification, mock_knowledge_db, mock_user_integration_db, mock_user, mock_oauth_token
+    setup: Setup,
+    mock_notification,
+    mock_knowledge_db,
+    mock_user_integration_db,
+    mock_user,
+    mock_oauth_token,
 ):
     """User OAuth integrations use OAuth token, no tenant_app_id."""
     # Mock database responses
@@ -391,7 +432,7 @@ async def test_user_oauth_integration_uses_oauth_token(
 
     with patch(
         "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
-        return_value=mock_job_service
+        return_value=mock_job_service,
     ):
         notifications = {"value": [mock_notification]}
 
@@ -414,7 +455,11 @@ async def test_user_oauth_integration_uses_oauth_token(
 
 
 async def test_tenant_app_integration_uses_admin_user_for_job(
-    setup: Setup, mock_notification, mock_knowledge_db, mock_tenant_app_integration_db, mock_user
+    setup: Setup,
+    mock_notification,
+    mock_knowledge_db,
+    mock_tenant_app_integration_db,
+    mock_user,
 ):
     """Tenant app integrations use tenant admin as job owner."""
     # Mock database responses
@@ -423,7 +468,7 @@ async def test_tenant_app_integration_uses_admin_user_for_job(
     )
 
     # Mock admin user lookup
-    admin_user = mock_user.copy() if hasattr(mock_user, 'copy') else mock_user
+    admin_user = mock_user.copy() if hasattr(mock_user, "copy") else mock_user
     admin_user.id = uuid4()
     setup.user_repo.list_tenant_admins.return_value = [admin_user]
 
@@ -437,7 +482,7 @@ async def test_tenant_app_integration_uses_admin_user_for_job(
 
     with patch(
         "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
-        return_value=mock_job_service
+        return_value=mock_job_service,
     ):
         notifications = {"value": [mock_notification]}
 
@@ -472,7 +517,7 @@ async def test_missing_tenant_admin_skips_integration(
 
     with patch(
         "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
-        return_value=mock_job_service
+        return_value=mock_job_service,
     ):
         notifications = {"value": [mock_notification]}
 
@@ -504,7 +549,7 @@ async def test_missing_oauth_token_skips_integration(
 
     with patch(
         "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
-        return_value=mock_job_service
+        return_value=mock_job_service,
     ):
         notifications = {"value": [mock_notification]}
 
@@ -515,7 +560,12 @@ async def test_missing_oauth_token_skips_integration(
 
 
 async def test_delta_sync_when_delta_token_exists(
-    setup: Setup, mock_notification, mock_knowledge_db, mock_user_integration_db, mock_user, mock_oauth_token
+    setup: Setup,
+    mock_notification,
+    mock_knowledge_db,
+    mock_user_integration_db,
+    mock_user,
+    mock_oauth_token,
 ):
     """Delta sync task is queued when delta_token exists."""
     # Set delta token
@@ -539,7 +589,7 @@ async def test_delta_sync_when_delta_token_exists(
 
     with patch(
         "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
-        return_value=mock_job_service
+        return_value=mock_job_service,
     ):
         notifications = {"value": [mock_notification]}
 
@@ -552,7 +602,12 @@ async def test_delta_sync_when_delta_token_exists(
 
 
 async def test_full_sync_when_no_delta_token(
-    setup: Setup, mock_notification, mock_knowledge_db, mock_user_integration_db, mock_user, mock_oauth_token
+    setup: Setup,
+    mock_notification,
+    mock_knowledge_db,
+    mock_user_integration_db,
+    mock_user,
+    mock_oauth_token,
 ):
     """Full sync task is queued when delta_token is None."""
     # No delta token
@@ -576,7 +631,7 @@ async def test_full_sync_when_no_delta_token(
 
     with patch(
         "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
-        return_value=mock_job_service
+        return_value=mock_job_service,
     ):
         notifications = {"value": [mock_notification]}
 
@@ -590,9 +645,7 @@ async def test_full_sync_when_no_delta_token(
 
 def test_extract_site_id_from_resource_url(setup: Setup):
     """Site ID extracted correctly from resource URL."""
-    notification = {
-        "resource": "sites/site-abc-123/drives/drive-456/root"
-    }
+    notification = {"resource": "sites/site-abc-123/drives/drive-456/root"}
 
     site_id = setup.service._extract_site_id_from_notification(notification)
 
@@ -601,11 +654,7 @@ def test_extract_site_id_from_resource_url(setup: Setup):
 
 def test_extract_site_id_from_resource_data_fallback(setup: Setup):
     """Site ID extracted from resourceData if resource URL missing."""
-    notification = {
-        "resourceData": {
-            "siteId": "site-xyz-789"
-        }
-    }
+    notification = {"resourceData": {"siteId": "site-xyz-789"}}
 
     site_id = setup.service._extract_site_id_from_notification(notification)
 
@@ -615,7 +664,10 @@ def test_extract_site_id_from_resource_data_fallback(setup: Setup):
 def test_parse_site_id_from_various_formats(setup: Setup):
     """_parse_site_id handles various resource URL formats."""
     # Format 1: sites/{siteId}/drives/{driveId}/root
-    assert setup.service._parse_site_id("sites/site-123/drives/drive-456/root") == "site-123"
+    assert (
+        setup.service._parse_site_id("sites/site-123/drives/drive-456/root")
+        == "site-123"
+    )
 
     # Format 2: sites/{siteId}/lists/{listId}
     assert setup.service._parse_site_id("sites/site-789/lists/list-012") == "site-789"
@@ -643,7 +695,9 @@ async def test_onedrive_notifications_use_drive_lookup(setup: Setup):
 
     await setup.service.handle_notifications({"value": [notification]})
 
-    setup.service._fetch_knowledge_by_drive.assert_called_once_with(drive_id="drive-456")
+    setup.service._fetch_knowledge_by_drive.assert_called_once_with(
+        drive_id="drive-456"
+    )
     setup.service._fetch_knowledge_by_site.assert_not_called()
 
 
@@ -683,7 +737,9 @@ async def test_onedrive_queued_job_contains_drive_id(
         },
     }
 
-    setup.service._fetch_knowledge_by_drive = AsyncMock(return_value=[(knowledge, user_integration)])
+    setup.service._fetch_knowledge_by_drive = AsyncMock(
+        return_value=[(knowledge, user_integration)]
+    )
     setup.oauth_token_repo.one_or_none.return_value = mock_oauth_token
     setup.user_repo.get_user_by_id.return_value = mock_user
     setup.change_key_service.should_process.return_value = True
@@ -694,7 +750,7 @@ async def test_onedrive_queued_job_contains_drive_id(
 
     with patch(
         "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
-        return_value=mock_job_service
+        return_value=mock_job_service,
     ):
         await setup.service.handle_notifications({"value": [notification]})
 

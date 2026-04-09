@@ -15,12 +15,13 @@ import redis.asyncio as aioredis
 
 from intric.main.config import get_loglevel
 
-
 FLAG_KEY = "observability:oidc_debug"
 REFRESH_INTERVAL = timedelta(seconds=5)
 MAX_DURATION = timedelta(hours=2)
 DEFAULT_DURATION = timedelta(minutes=30)
-FLAG_PATH = Path(os.getenv("OIDC_DEBUG_FLAG_PATH", "/app/data/debug_flags/oidc_debug.json"))
+FLAG_PATH = Path(
+    os.getenv("OIDC_DEBUG_FLAG_PATH", "/app/data/debug_flags/oidc_debug.json")
+)
 
 
 @dataclass
@@ -214,7 +215,9 @@ async def get_debug_flag(redis_client: Optional[aioredis.Redis]) -> DebugFlag:
     now = _now()
     if now - _last_refresh < REFRESH_INTERVAL:
         if _cache.is_expired(now):
-            await set_debug_flag(redis_client, enabled=False, enabled_by="system", reason="expired")
+            await set_debug_flag(
+                redis_client, enabled=False, enabled_by="system", reason="expired"
+            )
         return _cache
 
     async with _lock:
@@ -223,7 +226,9 @@ async def get_debug_flag(redis_client: Optional[aioredis.Redis]) -> DebugFlag:
 
         flag = await _read_flag(redis_client)
         if flag.is_expired(now):
-            flag = await set_debug_flag(redis_client, enabled=False, enabled_by="system", reason="expired")
+            flag = await set_debug_flag(
+                redis_client, enabled=False, enabled_by="system", reason="expired"
+            )
         else:
             _update_cache(flag)
         return flag

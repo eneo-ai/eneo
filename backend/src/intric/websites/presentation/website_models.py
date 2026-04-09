@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_serializer, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_serializer, field_validator
 from pydantic.networks import HttpUrl
 
 from intric.embedding_models.presentation.embedding_model_models import (
@@ -17,6 +17,7 @@ from intric.main.models import (
     NotProvided,
     ResourcePermissionsMixin,
     Status,
+    is_provided,
 )
 from intric.websites.crawl_dependencies.crawl_models import CrawlRunSparse
 from intric.websites.domain.crawl_run import CrawlRun, CrawlType
@@ -32,18 +33,22 @@ class WebsiteBase(BaseModel):
     update_interval: UpdateInterval = UpdateInterval.NEVER
 
 
-class WebsiteCreateRequestDeprecated(WebsiteBase):
+class WebsiteCreateRequestDeprecated(BaseModel):
+    name: Optional[str] = None
     url: HttpUrl
+    space_id: Optional[UUID] = None
+    download_files: bool = False
+    crawl_type: CrawlType = CrawlType.CRAWL
+    update_interval: UpdateInterval = UpdateInterval.NEVER
     embedding_model: ModelId
 
     @field_serializer("url")
-    def serialize_to_string(url: HttpUrl):
+    def serialize_to_string(url: object):
         return str(url)
 
 
 class WebsiteInDBBase(InDB):
     space_id: Optional[UUID] = None
-    embedding_model_id: Optional[UUID] = None
     user_id: UUID
     tenant_id: UUID
     embedding_model_id: UUID
@@ -169,7 +174,9 @@ class WebsiteCreate(BaseModel):
 
     @field_validator("http_auth_password")
     @classmethod
-    def validate_auth_fields_together(cls, v, info):
+    def validate_auth_fields_together(
+        cls, v: Optional[str], info: ValidationInfo
+    ) -> Optional[str]:
         """Ensure username and password are provided together."""
         username = info.data.get("http_auth_username")
 
@@ -202,14 +209,16 @@ class WebsiteUpdate(BaseModel):
 
     @field_validator("http_auth_password")
     @classmethod
-    def validate_auth_update_together(cls, v, info):
+    def validate_auth_update_together(
+        cls, v: Union[str, None, NotProvided], info: ValidationInfo
+    ) -> Union[str, None, NotProvided]:
         """Ensure username and password are updated together."""
         username = info.data.get("http_auth_username")
 
         # Both must be NOT_PROVIDED, both must be None, or both must have values
-        if username is NOT_PROVIDED and v is not NOT_PROVIDED:
+        if username is NOT_PROVIDED and is_provided(v):
             raise ValueError("Cannot update password without username")
-        if v is NOT_PROVIDED and username is not NOT_PROVIDED:
+        if v is NOT_PROVIDED and is_provided(username):
             raise ValueError("Cannot update username without password")
 
         # If updating to None (removing auth), both must be None

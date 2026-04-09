@@ -235,6 +235,7 @@ class TestAssemblerHasCredentials:
         server.tags = None
         server.icon_url = None
         server.documentation_url = None
+        server.security_classification = None
 
         assembler = MCPServerAssembler()
         dto = assembler.from_domain_to_model(server)
@@ -255,6 +256,7 @@ class TestAssemblerHasCredentials:
         server.tags = None
         server.icon_url = None
         server.documentation_url = None
+        server.security_classification = None
 
         assembler = MCPServerAssembler()
         dto = assembler.from_domain_to_model(server)
@@ -276,6 +278,7 @@ class TestAssemblerHasCredentials:
         server.tags = None
         server.icon_url = None
         server.documentation_url = None
+        server.security_classification = None
         server.is_enabled = True
         server.tools = []
 
@@ -298,6 +301,7 @@ class TestAssemblerHasCredentials:
         server.tags = None
         server.icon_url = None
         server.documentation_url = None
+        server.security_classification = None
         server.is_enabled = False
         server.tools = []
 
@@ -325,6 +329,7 @@ class TestAssemblerHasCredentials:
         server.tags = None
         server.icon_url = None
         server.documentation_url = None
+        server.security_classification = None
 
         assembler = MCPServerAssembler(encryption_service=enc)
         dto = assembler.from_domain_to_model(server)
@@ -351,6 +356,7 @@ class TestAssemblerHasCredentials:
         server.tags = None
         server.icon_url = None
         server.documentation_url = None
+        server.security_classification = None
 
         assembler = MCPServerAssembler(encryption_service=None)
         dto = assembler.from_domain_to_model(server)
@@ -471,7 +477,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="Connection refused"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="Connection refused"),
+            )
         )
 
         result = await service.update_mcp_server(
@@ -512,7 +521,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="Unauthorized"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="Unauthorized"),
+            )
         )
 
         result = await service.update_mcp_server(
@@ -532,7 +544,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="should not be called"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="should not be called"),
+            )
         )
 
         result = await service.update_mcp_server(
@@ -554,7 +569,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="Invalid token"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="Invalid token"),
+            )
         )
 
         result = await service.update_mcp_server(
@@ -617,7 +635,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="should not be called"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="should not be called"),
+            )
         )
 
         await service.update_mcp_server(

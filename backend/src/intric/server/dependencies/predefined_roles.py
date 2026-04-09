@@ -1,10 +1,12 @@
 import os
 import pathlib
+from typing import Any, cast
 
 import yaml
 
 from intric.database.database import sessionmanager
 from intric.main.logging import get_logger
+from intric.main.models import IdAndName
 from intric.predefined_roles.predefined_role import (
     PredefinedRoleCreate,
     PredefinedRoleUpdate,
@@ -16,7 +18,7 @@ PREDEFINED_ROLES_FILE_NAME = "predefined_roles.yml"
 logger = get_logger(__name__)
 
 
-def load_predefined_roles_from_config():
+def load_predefined_roles_from_config() -> list[dict[str, Any]]:
     config_path = os.path.join(
         pathlib.Path(__file__).parent.resolve(), PREDEFINED_ROLES_FILE_NAME
     )
@@ -25,13 +27,13 @@ def load_predefined_roles_from_config():
         return data["roles"]
 
 
-async def init_predefined_roles():
+async def init_predefined_roles() -> None:
     try:
         predefined_roles = load_predefined_roles_from_config()
         async with sessionmanager.session() as session, session.begin():
             repository = PredefinedRolesRepository(session=session)
 
-            existing_roles = await repository.get_ids_and_names()
+            existing_roles = cast(list[IdAndName], await repository.get_ids_and_names())
             existing_role_names = {role.name: role.id for role in existing_roles}
             new_role_names = [role["name"] for role in predefined_roles]
 

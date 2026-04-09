@@ -2,7 +2,6 @@
   import { Page } from "$lib/components/layout";
   import { IconCopy } from "@intric/icons/copy";
   import { IconDownload } from "@intric/icons/download";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconPrint } from "@intric/icons/print";
   import { Button, Markdown, Tooltip } from "@intric/ui";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -21,7 +20,9 @@
   import { getIntric } from "$lib/core/Intric.js";
   import { browser } from "$app/environment";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { untrack } from "svelte";
   dayjs.extend(utc);
 
   const { data } = $props();
@@ -35,12 +36,12 @@
 
   const attachmentUrlService = getAttachmentUrlService();
 
-  let result = $state(data.result);
+  let result = $state(untrack(() => data.result));
   const resultTitle = $derived(getResultTitle(result));
 
   async function downloadAsText(text?: string | null) {
     if (!text) {
-      alert(m.not_output_to_save());
+      toast.warning(m.not_output_to_save());
       return;
     }
     const file = new Blob([text], { type: "application/octet-stream;charset=utf-8" });
@@ -80,7 +81,7 @@
       navigator.clipboard.writeText(text);
       setTimeout(() => {}, 2000);
     } else {
-      alert(m.no_copyable_output());
+      toast.warning(m.no_copyable_output());
     }
   }
 
@@ -166,13 +167,15 @@
     ></Page.Title>
 
     <Page.Flex>
-      <Button href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}/edit`)} class="!line-clamp-1"
-        >{m.edit()}</Button
+      <Button
+        href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}/edit`)}
+        class="!line-clamp-1">{m.edit()}</Button
       >
       <Button
         variant="primary"
         class="!line-clamp-1"
-        href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}`)}>{m.new_run()}</Button
+        href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}`)}
+        >{m.new_run()}</Button
       >
     </Page.Flex>
   </Page.Header>
@@ -239,7 +242,7 @@
                 </span>
 
                 {#each result.input.files as file (file.id)}
-                  {#await intric.files.generateSignedUrl({ fileId: file.id, contentDisposition: "attachment" }) then { url }}
+                  {#await intric.files.generateSignedUrl( { fileId: file.id, contentDisposition: "attachment" } ) then { url }}
                     <Button href={url} class="outlined no-underline"
                       ><IconDownload></IconDownload>{m.download()} "{file.name}"</Button
                     >

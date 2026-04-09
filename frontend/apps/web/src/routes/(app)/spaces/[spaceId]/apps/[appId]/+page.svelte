@@ -55,7 +55,9 @@
 
     <Page.Flex>
       {#if data.app.permissions?.includes("edit")}
-        <Button href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}/edit`)}>{m.edit()}</Button>
+        <Button href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}/edit`)}
+          >{m.edit()}</Button
+        >
       {/if}
       <Page.TabTrigger asFragment let:trigger tab="run">
         <Button is={trigger} variant="primary" class="!line-clamp-1">{m.new_run()}</Button>

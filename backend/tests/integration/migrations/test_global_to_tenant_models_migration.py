@@ -81,25 +81,19 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
     # Tenant 1: Full credentials (OpenAI + Azure)
     tenant1_id = str(uuid4())
     tenant1_credentials = {
-        "openai": {
-            "api_key": "sk-test-tenant1-openai-key",
-            "set_at": now.isoformat()
-        },
+        "openai": {"api_key": "sk-test-tenant1-openai-key", "set_at": now.isoformat()},
         "azure": {
             "api_key": "azure-test-tenant1-key",
             "endpoint": "https://tenant1.openai.azure.com",
             "api_version": "2024-02-01",
-            "set_at": now.isoformat()
-        }
+            "set_at": now.isoformat(),
+        },
     }
 
     # Tenant 2: Only OpenAI credentials
     tenant2_id = str(uuid4())
     tenant2_credentials = {
-        "openai": {
-            "api_key": "sk-test-tenant2-openai-key",
-            "set_at": now.isoformat()
-        }
+        "openai": {"api_key": "sk-test-tenant2-openai-key", "set_at": now.isoformat()}
     }
 
     # Tenant 3: No credentials (empty)
@@ -112,37 +106,126 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
         (tenant2_id, "Tenant Two", tenant2_credentials),
         (tenant3_id, "Tenant Three", tenant3_credentials),
     ]:
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO tenants (id, name, quota_limit, api_credentials, state, created_at, updated_at)
             VALUES (%s, %s, %s, %s::jsonb, 'active', %s, %s)
-        """, (tenant_id, name, 1000000, json.dumps(creds), now, now))
+        """,
+            (tenant_id, name, 1000000, json.dumps(creds), now, now),
+        )
 
     # =====================================================================
     # USERS - One per tenant
     # =====================================================================
     user_ids = {}
-    for tenant_id, tenant_name in [(tenant1_id, "one"), (tenant2_id, "two"), (tenant3_id, "three")]:
+    for tenant_id, tenant_name in [
+        (tenant1_id, "one"),
+        (tenant2_id, "two"),
+        (tenant3_id, "three"),
+    ]:
         user_id = str(uuid4())
         user_ids[tenant_id] = user_id
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO users (id, tenant_id, username, email, used_tokens, state, created_at, updated_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (user_id, tenant_id, f"user_{tenant_name}", f"user@tenant{tenant_name}.com", 0, 'active', now, now))
+        """,
+            (
+                user_id,
+                tenant_id,
+                f"user_{tenant_name}",
+                f"user@tenant{tenant_name}.com",
+                0,
+                "active",
+                now,
+                now,
+            ),
+        )
 
     # =====================================================================
     # GLOBAL COMPLETION MODELS (tenant_id=NULL, provider_id=NULL)
     # =====================================================================
     completion_models = [
-        {"name": "gpt-4o", "nickname": "GPT-4o", "family": "openai", "token_limit": 128000, "vision": True, "reasoning": False},
-        {"name": "gpt-4-turbo", "nickname": "GPT-4 Turbo", "family": "openai", "token_limit": 128000, "vision": True, "reasoning": False},
-        {"name": "gpt-3.5-turbo", "nickname": "GPT-3.5 Turbo", "family": "openai", "token_limit": 16385, "vision": False, "reasoning": False},
-        {"name": "claude-3-opus", "nickname": "Claude 3 Opus", "family": "claude", "token_limit": 200000, "vision": True, "reasoning": False},
-        {"name": "claude-3-sonnet", "nickname": "Claude 3 Sonnet", "family": "claude", "token_limit": 200000, "vision": True, "reasoning": False},
-        {"name": "claude-3-haiku", "nickname": "Claude 3 Haiku", "family": "claude", "token_limit": 200000, "vision": True, "reasoning": False},
-        {"name": "mistral-large", "nickname": "Mistral Large", "family": "mistral", "token_limit": 32000, "vision": False, "reasoning": False},
-        {"name": "mistral-small", "nickname": "Mistral Small", "family": "mistral", "token_limit": 32000, "vision": False, "reasoning": False},
-        {"name": "gpt-4o-azure", "nickname": "GPT-4o (Azure)", "family": "azure", "token_limit": 128000, "vision": True, "reasoning": False},
-        {"name": "o1-preview", "nickname": "O1 Preview", "family": "openai", "token_limit": 128000, "vision": False, "reasoning": True},
+        {
+            "name": "gpt-4o",
+            "nickname": "GPT-4o",
+            "family": "openai",
+            "token_limit": 128000,
+            "vision": True,
+            "reasoning": False,
+        },
+        {
+            "name": "gpt-4-turbo",
+            "nickname": "GPT-4 Turbo",
+            "family": "openai",
+            "token_limit": 128000,
+            "vision": True,
+            "reasoning": False,
+        },
+        {
+            "name": "gpt-3.5-turbo",
+            "nickname": "GPT-3.5 Turbo",
+            "family": "openai",
+            "token_limit": 16385,
+            "vision": False,
+            "reasoning": False,
+        },
+        {
+            "name": "claude-3-opus",
+            "nickname": "Claude 3 Opus",
+            "family": "claude",
+            "token_limit": 200000,
+            "vision": True,
+            "reasoning": False,
+        },
+        {
+            "name": "claude-3-sonnet",
+            "nickname": "Claude 3 Sonnet",
+            "family": "claude",
+            "token_limit": 200000,
+            "vision": True,
+            "reasoning": False,
+        },
+        {
+            "name": "claude-3-haiku",
+            "nickname": "Claude 3 Haiku",
+            "family": "claude",
+            "token_limit": 200000,
+            "vision": True,
+            "reasoning": False,
+        },
+        {
+            "name": "mistral-large",
+            "nickname": "Mistral Large",
+            "family": "mistral",
+            "token_limit": 32000,
+            "vision": False,
+            "reasoning": False,
+        },
+        {
+            "name": "mistral-small",
+            "nickname": "Mistral Small",
+            "family": "mistral",
+            "token_limit": 32000,
+            "vision": False,
+            "reasoning": False,
+        },
+        {
+            "name": "gpt-4o-azure",
+            "nickname": "GPT-4o (Azure)",
+            "family": "azure",
+            "token_limit": 128000,
+            "vision": True,
+            "reasoning": False,
+        },
+        {
+            "name": "o1-preview",
+            "nickname": "O1 Preview",
+            "family": "openai",
+            "token_limit": 128000,
+            "vision": False,
+            "reasoning": True,
+        },
     ]
 
     completion_model_ids = {}
@@ -151,7 +234,8 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
         completion_model_ids[model["name"]] = model_id
         # Note: Before f7f7647d5327, tenant_id and provider_id columns
         # don't exist yet - they are added by that migration
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO completion_models (
                 id, name, nickname, family,
                 token_limit, vision, reasoning, is_deprecated,
@@ -164,18 +248,54 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
                 'stable', 'usa', false,
                 %s, %s
             )
-        """, (model_id, model["name"], model["nickname"], model["family"],
-              model["token_limit"], model["vision"], model["reasoning"], now, now))
+        """,
+            (
+                model_id,
+                model["name"],
+                model["nickname"],
+                model["family"],
+                model["token_limit"],
+                model["vision"],
+                model["reasoning"],
+                now,
+                now,
+            ),
+        )
 
     # =====================================================================
     # GLOBAL EMBEDDING MODELS
     # =====================================================================
     embedding_models = [
-        {"name": "text-embedding-3-small", "family": "openai", "dimensions": 1536, "max_input": 8191},
-        {"name": "text-embedding-3-large", "family": "openai", "dimensions": 3072, "max_input": 8191},
-        {"name": "text-embedding-ada-002", "family": "openai", "dimensions": 1536, "max_input": 8191},
-        {"name": "multilingual-e5-large", "family": "e5", "dimensions": 1024, "max_input": 512},
-        {"name": "embed-multilingual-v3.0", "family": "cohere", "dimensions": 1024, "max_input": 512},
+        {
+            "name": "text-embedding-3-small",
+            "family": "openai",
+            "dimensions": 1536,
+            "max_input": 8191,
+        },
+        {
+            "name": "text-embedding-3-large",
+            "family": "openai",
+            "dimensions": 3072,
+            "max_input": 8191,
+        },
+        {
+            "name": "text-embedding-ada-002",
+            "family": "openai",
+            "dimensions": 1536,
+            "max_input": 8191,
+        },
+        {
+            "name": "multilingual-e5-large",
+            "family": "e5",
+            "dimensions": 1024,
+            "max_input": 512,
+        },
+        {
+            "name": "embed-multilingual-v3.0",
+            "family": "cohere",
+            "dimensions": 1024,
+            "max_input": 512,
+        },
     ]
 
     embedding_model_ids = {}
@@ -184,7 +304,8 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
         embedding_model_ids[model["name"]] = model_id
         # Note: Before f7f7647d5327, tenant_id and provider_id columns
         # don't exist yet - they are added by that migration
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO embedding_models (
                 id, name, family,
                 dimensions, max_input, max_batch_size, is_deprecated,
@@ -197,8 +318,17 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
                 'stable', 'usa', false,
                 %s, %s
             )
-        """, (model_id, model["name"], model["family"],
-              model["dimensions"], model["max_input"], now, now))
+        """,
+            (
+                model_id,
+                model["name"],
+                model["family"],
+                model["dimensions"],
+                model["max_input"],
+                now,
+                now,
+            ),
+        )
 
     # =====================================================================
     # GLOBAL TRANSCRIPTION MODELS
@@ -214,7 +344,8 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
         transcription_model_ids[model["name"]] = model_id
         # Note: Before f7f7647d5327, tenant_id and provider_id columns
         # don't exist yet - they are added by that migration
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO transcription_models (
                 id, name, model_name, family,
                 is_deprecated, stability, hosting, open_source, base_url,
@@ -225,7 +356,9 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
                 false, 'stable', 'usa', false, '',
                 %s, %s
             )
-        """, (model_id, model["name"], model["model_name"], model["family"], now, now))
+        """,
+            (model_id, model["name"], model["model_name"], model["family"], now, now),
+        )
 
     # =====================================================================
     # SPACES - Per tenant (one org space + one personal space per tenant)
@@ -236,18 +369,24 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
         # First space: org space (user_id = NULL)
         org_space_id = str(uuid4())
         space_ids.setdefault(tenant_id, []).append(org_space_id)
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO spaces (id, tenant_id, user_id, name, created_at, updated_at)
             VALUES (%s, %s, NULL, %s, %s, %s)
-        """, (org_space_id, tenant_id, "Organization Space", now, now))
+        """,
+            (org_space_id, tenant_id, "Organization Space", now, now),
+        )
 
         # Second space: personal space (user_id = user)
         personal_space_id = str(uuid4())
         space_ids[tenant_id].append(personal_space_id)
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO spaces (id, tenant_id, user_id, name, created_at, updated_at)
             VALUES (%s, %s, %s, %s, %s, %s)
-        """, (personal_space_id, tenant_id, user_id, "Personal Space", now, now))
+        """,
+            (personal_space_id, tenant_id, user_id, "Personal Space", now, now),
+        )
 
     # =====================================================================
     # ASSISTANTS - Linked to global completion models
@@ -275,7 +414,8 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
         user_id = user_ids[tenant_id]
         space_id = space_ids[tenant_id][0]  # Use first space
 
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO assistants (
                 id, user_id, space_id, name, completion_model_id,
                 logging_enabled, is_default, published, type, insight_enabled,
@@ -286,7 +426,9 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
                 false, false, false, 'assistant', false,
                 %s, %s
             )
-        """, (assistant_id, user_id, space_id, name, model_id, now, now))
+        """,
+            (assistant_id, user_id, space_id, name, model_id, now, now),
+        )
 
     # =====================================================================
     # APPS - Linked to global completion models (and some to transcription models)
@@ -308,7 +450,8 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
         user_id = user_ids[tenant_id]
         space_id = space_ids[tenant_id][0]
 
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO apps (
                 id, tenant_id, user_id, space_id, name, completion_model_id,
                 transcription_model_id, published,
@@ -319,7 +462,9 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
                 %s, false,
                 %s, %s
             )
-        """, (app_id, tenant_id, user_id, space_id, name, cm_id, tm_id, now, now))
+        """,
+            (app_id, tenant_id, user_id, space_id, name, cm_id, tm_id, now, now),
+        )
 
     # =====================================================================
     # SERVICES - Linked to global completion models
@@ -338,7 +483,8 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
         user_id = user_ids[tenant_id]
         space_id = space_ids[tenant_id][0]
 
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO services (
                 id, user_id, space_id, name, completion_model_id,
                 prompt,
@@ -349,7 +495,9 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
                 'Service prompt',
                 %s, %s
             )
-        """, (service_id, user_id, space_id, name, model_id, now, now))
+        """,
+            (service_id, user_id, space_id, name, model_id, now, now),
+        )
 
     # =====================================================================
     # GROUPS (Collections) - Linked to global embedding models
@@ -369,7 +517,8 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
         user_id = user_ids[tenant_id]
         space_id = space_ids[tenant_id][0]
 
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO groups (
                 id, tenant_id, user_id, space_id, name, embedding_model_id,
                 size,
@@ -380,7 +529,9 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
                 0,
                 %s, %s
             )
-        """, (group_id, tenant_id, user_id, space_id, name, model_id, now, now))
+        """,
+            (group_id, tenant_id, user_id, space_id, name, model_id, now, now),
+        )
 
     # =====================================================================
     # SPACES_COMPLETION_MODELS - Many-to-many
@@ -391,11 +542,14 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
             models_to_add = ["gpt-4o", "gpt-3.5-turbo", "claude-3-sonnet"]
             for model_name in models_to_add:
                 model_id = completion_model_ids[model_name]
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO spaces_completion_models (space_id, completion_model_id, created_at, updated_at)
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT DO NOTHING
-                """, (space_id, model_id, now, now))
+                """,
+                    (space_id, model_id, now, now),
+                )
 
     # =====================================================================
     # SPACES_EMBEDDING_MODELS - Many-to-many
@@ -406,11 +560,14 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
             models_to_add = ["text-embedding-3-small", "multilingual-e5-large"]
             for model_name in models_to_add:
                 model_id = embedding_model_ids[model_name]
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO spaces_embedding_models (space_id, embedding_model_id, created_at, updated_at)
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT DO NOTHING
-                """, (space_id, model_id, now, now))
+                """,
+                    (space_id, model_id, now, now),
+                )
 
     # =====================================================================
     # SPACES_TRANSCRIPTION_MODELS - Many-to-many
@@ -419,11 +576,14 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
         for space_id in space_ids[tenant_id]:
             for model_name in ["whisper-1", "kb-whisper"]:
                 model_id = transcription_model_ids[model_name]
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO spaces_transcription_models (space_id, transcription_model_id, created_at, updated_at)
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT DO NOTHING
-                """, (space_id, model_id, now, now))
+                """,
+                    (space_id, model_id, now, now),
+                )
 
     # =====================================================================
     # COMPLETION_MODEL_SETTINGS - Per tenant settings for global models
@@ -432,14 +592,17 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
         for model_name, model_id in completion_model_ids.items():
             # Enable most models, set one as default
             is_default = model_name == "gpt-4o"
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO completion_model_settings (
                     tenant_id, completion_model_id, is_org_enabled, is_org_default,
                     created_at, updated_at
                 )
                 VALUES (%s, %s, true, %s, %s, %s)
                 ON CONFLICT DO NOTHING
-            """, (tenant_id, model_id, is_default, now, now))
+            """,
+                (tenant_id, model_id, is_default, now, now),
+            )
 
     # =====================================================================
     # EMBEDDING_MODEL_SETTINGS - Per tenant settings for global models
@@ -447,14 +610,17 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
     for tenant_id in [tenant1_id, tenant2_id, tenant3_id]:
         for model_name, model_id in embedding_model_ids.items():
             is_default = model_name == "text-embedding-3-small"
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO embedding_model_settings (
                     tenant_id, embedding_model_id, is_org_enabled, is_org_default,
                     created_at, updated_at
                 )
                 VALUES (%s, %s, true, %s, %s, %s)
                 ON CONFLICT DO NOTHING
-            """, (tenant_id, model_id, is_default, now, now))
+            """,
+                (tenant_id, model_id, is_default, now, now),
+            )
 
     # =====================================================================
     # TRANSCRIPTION_MODEL_SETTINGS - Per tenant settings for global models
@@ -462,14 +628,17 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
     for tenant_id in [tenant1_id, tenant2_id, tenant3_id]:
         for model_name, model_id in transcription_model_ids.items():
             is_default = model_name == "whisper-1"
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO transcription_model_settings (
                     tenant_id, transcription_model_id, is_org_enabled, is_org_default,
                     created_at, updated_at
                 )
                 VALUES (%s, %s, true, %s, %s, %s)
                 ON CONFLICT DO NOTHING
-            """, (tenant_id, model_id, is_default, now, now))
+            """,
+                (tenant_id, model_id, is_default, now, now),
+            )
 
     return {
         "tenant_ids": [tenant1_id, tenant2_id, tenant3_id],
@@ -486,7 +655,7 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
             tenant1_id: tenant1_credentials,
             tenant2_id: tenant2_credentials,
             tenant3_id: tenant3_credentials,
-        }
+        },
     }
 
 
@@ -555,11 +724,15 @@ def migration_test_db(test_settings):
             print("Downgrading stepwise to restore settings tables...")
             # This triggers consolidate_model_settings downgrade which recreates settings tables
             command.downgrade(alembic_cfg, "migrate_global_to_tenant_models")
-            print("Downgraded past consolidate_model_settings (settings tables recreated)")
+            print(
+                "Downgraded past consolidate_model_settings (settings tables recreated)"
+            )
 
             # Now downgrade to before f7f7647d5327 (which adds model_providers)
             command.downgrade(alembic_cfg, pre_migration_revision)
-            print(f"Downgraded to {pre_migration_revision} (before model_providers migration)")
+            print(
+                f"Downgraded to {pre_migration_revision} (before model_providers migration)"
+            )
         except Exception as e:
             print(f"Downgrade not possible (may already be at base): {e}")
             # If downgrade fails, upgrade to that revision instead
@@ -611,7 +784,9 @@ def migration_test_db(test_settings):
             cur.execute("SELECT COUNT(*) FROM completion_model_settings")
             settings_count = cur.fetchone()[0]
             print(f"Completion model settings before migration: {settings_count}")
-            assert settings_count > 0, "Should have completion model settings before migration"
+            assert settings_count > 0, (
+                "Should have completion model settings before migration"
+            )
 
         # Run migrate_global_to_tenant_models
         print("\nRunning migrate_global_to_tenant_models...")
@@ -650,15 +825,20 @@ class TestGlobalToTenantModelsMigration:
 
         with conn.cursor() as cur:
             for tenant_id in legacy_data["tenant_ids"]:
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT name, provider_type, is_active
                     FROM model_providers
                     WHERE tenant_id = %s
                     ORDER BY name
-                """, (tenant_id,))
+                """,
+                    (tenant_id,),
+                )
                 providers = cur.fetchall()
 
-                assert len(providers) > 0, f"No providers created for tenant {tenant_id}"
+                assert len(providers) > 0, (
+                    f"No providers created for tenant {tenant_id}"
+                )
 
                 # Check provider types
                 provider_types = {p[1] for p in providers}
@@ -674,26 +854,34 @@ class TestGlobalToTenantModelsMigration:
         with conn.cursor() as cur:
             for tenant_id in legacy_data["tenant_ids"]:
                 # Count completion models for this tenant
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT COUNT(*) FROM completion_models
                     WHERE tenant_id = %s
-                """, (tenant_id,))
+                """,
+                    (tenant_id,),
+                )
                 cm_count = cur.fetchone()[0]
 
                 original_cm_count = len(legacy_data["completion_model_ids"])
-                assert cm_count >= original_cm_count, \
+                assert cm_count >= original_cm_count, (
                     f"Tenant {tenant_id} should have {original_cm_count} completion models, got {cm_count}"
+                )
 
                 # Count embedding models for this tenant
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT COUNT(*) FROM embedding_models
                     WHERE tenant_id = %s
-                """, (tenant_id,))
+                """,
+                    (tenant_id,),
+                )
                 em_count = cur.fetchone()[0]
 
                 original_em_count = len(legacy_data["embedding_model_ids"])
-                assert em_count >= original_em_count, \
+                assert em_count >= original_em_count, (
                     f"Tenant {tenant_id} should have {original_em_count} embedding models, got {em_count}"
+                )
 
     def test_migration_updates_assistant_fk_references(self, migration_test_db):
         """
@@ -711,24 +899,29 @@ class TestGlobalToTenantModelsMigration:
                 WHERE cm.tenant_id IS NULL
             """)
             orphan_count = cur.fetchone()[0]
-            assert orphan_count == 0, \
+            assert orphan_count == 0, (
                 f"Found {orphan_count} assistants still referencing global models"
+            )
 
             # Verify each assistant references a model from their tenant
             for tenant_id, assistant_ids in legacy_data["assistant_ids"].items():
                 for assistant_id in assistant_ids:
-                    cur.execute("""
+                    cur.execute(
+                        """
                         SELECT cm.tenant_id
                         FROM assistants a
                         JOIN completion_models cm ON a.completion_model_id = cm.id
                         WHERE a.id = %s
-                    """, (assistant_id,))
+                    """,
+                        (assistant_id,),
+                    )
                     row = cur.fetchone()
 
                     if row:
                         model_tenant_id = str(row[0]) if row[0] else None
-                        assert model_tenant_id == tenant_id, \
+                        assert model_tenant_id == tenant_id, (
                             f"Assistant {assistant_id} references model from wrong tenant"
+                        )
 
     def test_migration_updates_app_fk_references(self, migration_test_db):
         """
@@ -745,8 +938,9 @@ class TestGlobalToTenantModelsMigration:
                 WHERE cm.tenant_id IS NULL
             """)
             orphan_count = cur.fetchone()[0]
-            assert orphan_count == 0, \
+            assert orphan_count == 0, (
                 f"Found {orphan_count} apps still referencing global models"
+            )
 
     def test_migration_updates_spaces_completion_models(self, migration_test_db):
         """
@@ -763,10 +957,13 @@ class TestGlobalToTenantModelsMigration:
                 WHERE cm.tenant_id IS NULL
             """)
             orphan_count = cur.fetchone()[0]
-            assert orphan_count == 0, \
+            assert orphan_count == 0, (
                 f"Found {orphan_count} space-model links still referencing global models"
+            )
 
-    def test_migration_updates_app_transcription_model_references(self, migration_test_db):
+    def test_migration_updates_app_transcription_model_references(
+        self, migration_test_db
+    ):
         """
         Test that app.transcription_model_id references are updated to tenant-specific models.
         """
@@ -781,8 +978,9 @@ class TestGlobalToTenantModelsMigration:
                 WHERE tm.tenant_id IS NULL
             """)
             orphan_count = cur.fetchone()[0]
-            assert orphan_count == 0, \
+            assert orphan_count == 0, (
                 f"Found {orphan_count} apps still referencing global transcription models"
+            )
 
             # Verify apps with transcription models reference the correct tenant's model
             cur.execute("""
@@ -792,8 +990,9 @@ class TestGlobalToTenantModelsMigration:
             """)
             for row in cur.fetchall():
                 app_name, model_tenant_id, app_tenant_id = row
-                assert str(model_tenant_id) == str(app_tenant_id), \
+                assert str(model_tenant_id) == str(app_tenant_id), (
                     f"App '{app_name}' references transcription model from wrong tenant"
+                )
 
     def test_migration_updates_spaces_transcription_models(self, migration_test_db):
         """
@@ -810,8 +1009,9 @@ class TestGlobalToTenantModelsMigration:
                 WHERE tm.tenant_id IS NULL
             """)
             orphan_count = cur.fetchone()[0]
-            assert orphan_count == 0, \
+            assert orphan_count == 0, (
                 f"Found {orphan_count} space-transcription-model links still referencing global models"
+            )
 
             # Verify each space's transcription model belongs to the same tenant
             cur.execute("""
@@ -822,10 +1022,13 @@ class TestGlobalToTenantModelsMigration:
             """)
             for row in cur.fetchall():
                 space_tenant, model_tenant = row
-                assert str(space_tenant) == str(model_tenant), \
+                assert str(space_tenant) == str(model_tenant), (
                     "Space-transcription-model link crosses tenant boundary"
+                )
 
-    def test_migration_updates_groups_embedding_model_references(self, migration_test_db):
+    def test_migration_updates_groups_embedding_model_references(
+        self, migration_test_db
+    ):
         """
         Test that groups.embedding_model_id references are updated to tenant-specific models.
         """
@@ -840,8 +1043,9 @@ class TestGlobalToTenantModelsMigration:
                 WHERE em.tenant_id IS NULL
             """)
             orphan_count = cur.fetchone()[0]
-            assert orphan_count == 0, \
+            assert orphan_count == 0, (
                 f"Found {orphan_count} groups still referencing global embedding models"
+            )
 
     def test_migration_deletes_global_models(self, migration_test_db):
         """
@@ -869,7 +1073,9 @@ class TestGlobalToTenantModelsMigration:
                 SELECT COUNT(*) FROM transcription_models
                 WHERE tenant_id IS NULL AND provider_id IS NULL
             """)
-            assert cur.fetchone()[0] == 0, "Global transcription models should be deleted"
+            assert cur.fetchone()[0] == 0, (
+                "Global transcription models should be deleted"
+            )
 
     def test_migration_preserves_model_settings(self, migration_test_db):
         """
@@ -886,26 +1092,34 @@ class TestGlobalToTenantModelsMigration:
             # Verify each tenant has models with settings migrated to columns
             for tenant_id in legacy_data["tenant_ids"]:
                 # Check is_enabled column (should have enabled models)
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT COUNT(*)
                     FROM completion_models
                     WHERE tenant_id = %s AND is_enabled = true
-                """, (tenant_id,))
+                """,
+                    (tenant_id,),
+                )
                 enabled_count = cur.fetchone()[0]
 
-                assert enabled_count > 0, \
+                assert enabled_count > 0, (
                     f"Tenant {tenant_id} should have enabled completion models"
+                )
 
                 # Check is_default column (should have one default model)
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT COUNT(*)
                     FROM completion_models
                     WHERE tenant_id = %s AND is_default = true
-                """, (tenant_id,))
+                """,
+                    (tenant_id,),
+                )
                 default_count = cur.fetchone()[0]
 
-                assert default_count >= 1, \
+                assert default_count >= 1, (
                     f"Tenant {tenant_id} should have at least one default completion model"
+                )
 
 
 class TestMigrationDataIntegrity:
@@ -925,15 +1139,20 @@ class TestMigrationDataIntegrity:
         with conn.cursor() as cur:
             # Get model names for first tenant
             tenant1_id = legacy_data["tenant_ids"][0]
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT name FROM completion_models
                 WHERE tenant_id = %s
-            """, (tenant1_id,))
+            """,
+                (tenant1_id,),
+            )
             tenant_model_names = {row[0] for row in cur.fetchall()}
 
             # All original model names should exist
             for name in original_model_names:
-                assert name in tenant_model_names, f"Model '{name}' should exist for tenant"
+                assert name in tenant_model_names, (
+                    f"Model '{name}' should exist for tenant"
+                )
 
     def test_model_attributes_preserved(self, migration_test_db):
         """
@@ -946,11 +1165,14 @@ class TestMigrationDataIntegrity:
 
         with conn.cursor() as cur:
             # Check GPT-4o attributes
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT token_limit, vision, reasoning
                 FROM completion_models
                 WHERE tenant_id = %s AND name = 'gpt-4o'
-            """, (tenant1_id,))
+            """,
+                (tenant1_id,),
+            )
             row = cur.fetchone()
 
             assert row is not None, "gpt-4o should exist for tenant"
@@ -960,10 +1182,13 @@ class TestMigrationDataIntegrity:
             assert reasoning is False, "reasoning flag should be preserved"
 
             # Check O1-preview (reasoning model)
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT reasoning FROM completion_models
                 WHERE tenant_id = %s AND name = 'o1-preview'
-            """, (tenant1_id,))
+            """,
+                (tenant1_id,),
+            )
             row = cur.fetchone()
 
             if row:  # Model might not exist if migration filtered it
@@ -989,8 +1214,9 @@ class TestMigrationDataIntegrity:
                 assistant_name, model_name, model_tenant_id, user_tenant_id = row
 
                 # Model tenant should match user tenant
-                assert str(model_tenant_id) == str(user_tenant_id), \
+                assert str(model_tenant_id) == str(user_tenant_id), (
                     f"Assistant '{assistant_name}' using model from wrong tenant"
+                )
 
 
 class TestMigrationCredentialHandling:
@@ -1009,11 +1235,14 @@ class TestMigrationCredentialHandling:
         with conn.cursor() as cur:
             # Check tenant 1's OpenAI provider has credentials
             tenant1_id = legacy_data["tenant_ids"][0]
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT credentials
                 FROM model_providers
                 WHERE tenant_id = %s AND provider_type = 'openai'
-            """, (tenant1_id,))
+            """,
+                (tenant1_id,),
+            )
             row = cur.fetchone()
 
             assert row is not None, "OpenAI provider should exist for tenant 1"
@@ -1021,9 +1250,12 @@ class TestMigrationCredentialHandling:
 
             if isinstance(credentials, str):
                 import json
+
                 credentials = json.loads(credentials)
 
-            assert "api_key" in credentials, "Provider should have api_key in credentials"
+            assert "api_key" in credentials, (
+                "Provider should have api_key in credentials"
+            )
             assert credentials["api_key"], "api_key should not be empty"
 
     def test_tenant_without_credentials_has_inactive_providers(self, migration_test_db):
@@ -1036,25 +1268,32 @@ class TestMigrationCredentialHandling:
         with conn.cursor() as cur:
             # Tenant 3 has no credentials
             tenant3_id = legacy_data["tenant_ids"][2]
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT name, provider_type, is_active, credentials
                 FROM model_providers
                 WHERE tenant_id = %s
-            """, (tenant3_id,))
+            """,
+                (tenant3_id,),
+            )
             providers = cur.fetchall()
 
-            assert len(providers) > 0, "Tenant without credentials should still have providers"
+            assert len(providers) > 0, (
+                "Tenant without credentials should still have providers"
+            )
 
             # Providers without credentials should have is_active=false
             for name, provider_type, is_active, credentials in providers:
                 if isinstance(credentials, str):
                     import json
+
                     credentials = json.loads(credentials)
 
                 api_key = credentials.get("api_key", "")
                 if not api_key:
-                    assert not is_active, \
+                    assert not is_active, (
                         f"Provider {name} with empty api_key should be inactive"
+                    )
 
     def test_provider_credentials_format(self, migration_test_db):
         """
@@ -1067,11 +1306,14 @@ class TestMigrationCredentialHandling:
             tenant1_id = legacy_data["tenant_ids"][0]
 
             # Check Azure provider has extra config fields
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT credentials, config
                 FROM model_providers
                 WHERE tenant_id = %s AND provider_type = 'azure'
-            """, (tenant1_id,))
+            """,
+                (tenant1_id,),
+            )
             row = cur.fetchone()
 
             if row:
@@ -1079,9 +1321,11 @@ class TestMigrationCredentialHandling:
 
                 if isinstance(credentials, str):
                     import json
+
                     credentials = json.loads(credentials)
                 if isinstance(config, str):
                     import json
+
                     config = json.loads(config)
 
                 # Azure should have api_key in credentials
@@ -1127,23 +1371,31 @@ class TestConsolidateModelSettings:
         with conn.cursor() as cur:
             # Each tenant should have at least one default completion model
             for tenant_id in legacy_data["tenant_ids"]:
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT COUNT(*) FROM completion_models
                     WHERE tenant_id = %s AND is_default = true
-                """, (tenant_id,))
+                """,
+                    (tenant_id,),
+                )
                 default_count = cur.fetchone()[0]
-                assert default_count >= 1, \
+                assert default_count >= 1, (
                     f"Tenant {tenant_id} should have at least one default completion model"
+                )
 
             # Each tenant should have at least one default embedding model
             for tenant_id in legacy_data["tenant_ids"]:
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT COUNT(*) FROM embedding_models
                     WHERE tenant_id = %s AND is_default = true
-                """, (tenant_id,))
+                """,
+                    (tenant_id,),
+                )
                 default_count = cur.fetchone()[0]
-                assert default_count >= 1, \
+                assert default_count >= 1, (
                     f"Tenant {tenant_id} should have at least one default embedding model"
+                )
 
     def test_settings_tables_removed(self, migration_test_db):
         """Verify settings tables are dropped after consolidate migration."""
@@ -1157,8 +1409,9 @@ class TestConsolidateModelSettings:
                     WHERE table_name = 'completion_model_settings'
                 )
             """)
-            assert cur.fetchone()[0] is False, \
+            assert cur.fetchone()[0] is False, (
                 "completion_model_settings should be dropped"
+            )
 
             # embedding_model_settings should not exist
             cur.execute("""
@@ -1167,8 +1420,9 @@ class TestConsolidateModelSettings:
                     WHERE table_name = 'embedding_model_settings'
                 )
             """)
-            assert cur.fetchone()[0] is False, \
+            assert cur.fetchone()[0] is False, (
                 "embedding_model_settings should be dropped"
+            )
 
             # transcription_model_settings should not exist
             cur.execute("""
@@ -1177,8 +1431,9 @@ class TestConsolidateModelSettings:
                     WHERE table_name = 'transcription_model_settings'
                 )
             """)
-            assert cur.fetchone()[0] is False, \
+            assert cur.fetchone()[0] is False, (
                 "transcription_model_settings should be dropped"
+            )
 
     def test_model_columns_exist(self, migration_test_db):
         """Verify is_enabled, is_default columns exist on model tables."""
@@ -1192,8 +1447,12 @@ class TestConsolidateModelSettings:
                 AND column_name IN ('is_enabled', 'is_default', 'security_classification_id')
             """)
             columns = {row[0] for row in cur.fetchall()}
-            assert 'is_enabled' in columns, "completion_models should have is_enabled column"
-            assert 'is_default' in columns, "completion_models should have is_default column"
+            assert "is_enabled" in columns, (
+                "completion_models should have is_enabled column"
+            )
+            assert "is_default" in columns, (
+                "completion_models should have is_default column"
+            )
 
             # Check embedding_models has required columns
             cur.execute("""
@@ -1202,8 +1461,12 @@ class TestConsolidateModelSettings:
                 AND column_name IN ('is_enabled', 'is_default', 'security_classification_id')
             """)
             columns = {row[0] for row in cur.fetchall()}
-            assert 'is_enabled' in columns, "embedding_models should have is_enabled column"
-            assert 'is_default' in columns, "embedding_models should have is_default column"
+            assert "is_enabled" in columns, (
+                "embedding_models should have is_enabled column"
+            )
+            assert "is_default" in columns, (
+                "embedding_models should have is_default column"
+            )
 
     def test_coalesce_defaults_applied(self, migration_test_db):
         """
@@ -1219,8 +1482,9 @@ class TestConsolidateModelSettings:
                 WHERE tenant_id IS NOT NULL AND is_enabled IS NULL
             """)
             null_enabled_count = cur.fetchone()[0]
-            assert null_enabled_count == 0, \
+            assert null_enabled_count == 0, (
                 "All tenant models should have is_enabled set (not NULL)"
+            )
 
             # All tenant models should have is_default set (not NULL)
             cur.execute("""
@@ -1228,5 +1492,6 @@ class TestConsolidateModelSettings:
                 WHERE tenant_id IS NOT NULL AND is_default IS NULL
             """)
             null_default_count = cur.fetchone()[0]
-            assert null_default_count == 0, \
+            assert null_default_count == 0, (
                 "All tenant models should have is_default set (not NULL)"
+            )

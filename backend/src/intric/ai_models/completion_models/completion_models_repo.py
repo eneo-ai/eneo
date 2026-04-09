@@ -16,9 +16,10 @@ from intric.main.models import IdAndName
 
 
 class CompletionModelsRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.session = session
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[CompletionModel] = BaseRepositoryDelegate(
             session, CompletionModels, CompletionModel
         )
 
@@ -28,29 +29,26 @@ class CompletionModelsRepository:
             CompletionModels.id == id,
             sa.or_(
                 CompletionModels.tenant_id.is_(None),
-                CompletionModels.tenant_id == tenant_id
-            )
+                CompletionModels.tenant_id == tenant_id,
+            ),
         )
         result = await self.session.execute(stmt)
         db_model = result.scalar_one_or_none()
 
         if db_model is None:
             from intric.main.exceptions import NotFoundException
+
             raise NotFoundException()
 
         model = CompletionModel.model_validate(db_model)
         model.is_org_enabled = db_model.is_enabled
         return model
 
-    async def get_model_by_name(self, name: str) -> CompletionModel:
+    async def get_model_by_name(self, name: str) -> CompletionModel | None:
         return await self.delegate.get_by(conditions={CompletionModels.name: name})
 
     async def create_model(self, model: CompletionModelCreate) -> CompletionModel:
-        return await self.delegate.add(
-            model,
-            exclude={"token_limit"},
-            token_limit=model.max_input_tokens,
-        )
+        return await self.delegate.add(model, exclude={"token_limit"})
 
     async def enable_completion_model(
         self,
@@ -73,17 +71,12 @@ class CompletionModelsRepository:
         except IntegrityError as e:
             raise UniqueException("Default completion model already exists.") from e
 
-    async def update_model(self, model: CompletionModelUpdate) -> CompletionModel:
-        extra_kwargs = {}
-        if model.max_input_tokens is not None:
-            extra_kwargs["token_limit"] = model.max_input_tokens
-        return await self.delegate.update(
-            model,
-            exclude={"token_limit"},
-            **extra_kwargs,
-        )
+    async def update_model(
+        self, model: CompletionModelUpdate
+    ) -> CompletionModel | None:
+        return await self.delegate.update(model, exclude={"token_limit"})
 
-    async def delete_model(self, id: UUID) -> CompletionModel:
+    async def delete_model(self, id: UUID) -> CompletionModel | None:
         stmt = (
             sa.delete(CompletionModels)
             .where(CompletionModels.id == id)
@@ -94,9 +87,9 @@ class CompletionModelsRepository:
 
     async def get_models(
         self,
-        tenant_id: UUID = None,
+        tenant_id: UUID | None = None,
         is_deprecated: bool = False,
-        id_list: list[UUID] = None,
+        id_list: list[UUID] | None = None,
     ) -> list[CompletionModel]:
         query = (
             sa.select(CompletionModels)
@@ -112,14 +105,14 @@ class CompletionModelsRepository:
             query = query.where(
                 sa.or_(
                     CompletionModels.tenant_id.is_(None),
-                    CompletionModels.tenant_id == tenant_id
+                    CompletionModels.tenant_id == tenant_id,
                 )
             )
 
         result = await self.session.execute(query)
         db_models = result.scalars().all()
 
-        models = []
+        models: list[CompletionModel] = []
         for db_model in db_models:
             model = CompletionModel.model_validate(db_model)
             model.is_org_enabled = db_model.is_enabled
@@ -127,9 +120,9 @@ class CompletionModelsRepository:
 
         return models
 
-    async def get_ids_and_names(self) -> list[(UUID, str)]:
+    async def get_ids_and_names(self) -> list[tuple[UUID, str]]:  # type: ignore[type-arg]
         stmt = sa.select(CompletionModels)
 
         models = await self.delegate.get_records_from_query(stmt)
 
-        return [IdAndName(id=model.id, name=model.name) for model in models.all()]
+        return [IdAndName(id=model.id, name=model.name) for model in models.all()]  # type: ignore[return-value]

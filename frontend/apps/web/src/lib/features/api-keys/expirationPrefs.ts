@@ -8,12 +8,7 @@ interface PrefsContext {
   userId: string;
 }
 
-function dismissKey(
-  ctx: PrefsContext,
-  keyId: string,
-  expiresAtIso: string,
-  level: string
-): string {
+function dismissKey(ctx: PrefsContext, keyId: string, expiresAtIso: string, level: string): string {
   return `${DISMISS_PREFIX}${ctx.tenantId}:${ctx.userId}:${keyId}:${expiresAtIso}:${level}`;
 }
 

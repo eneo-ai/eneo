@@ -3,7 +3,7 @@
 # Licensed under the MIT License.
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, model_validator
 from intric.files.file_models import FilePublic, FileRestrictions
 from intric.main.models import (
     NOT_PROVIDED,
+    NotProvided,
     ResourcePermission,
     ResourcePermissionsMixin,
 )
@@ -31,7 +32,7 @@ class GroupChatCreate(BaseModel):
 
 class GroupChatAssistantUpdateSchema(BaseModel):
     id: UUID
-    user_description: Optional[str] = Field(
+    user_description: Optional[str] = Field(  # type: ignore[call-overload]
         description=(
             "Custom description provided by the user. "
             "Cannot be null if 'description' of assistant is null."
@@ -69,9 +70,13 @@ class GroupChatUpdateSchema(BaseModel):
             "appropriate permissions can see all sessions for this group chat."
         ),
     )
-    metadata_json: Optional[dict] = Field(
+    metadata_json: Optional[dict[str, object]] = Field(  # type: ignore[assignment]
         default=NOT_PROVIDED,
         description="Metadata for the group chat.",
+    )
+    icon_id: Union[UUID, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description="Icon ID referencing an uploaded icon. Set to null to remove.",
     )
 
 
@@ -84,7 +89,8 @@ class GroupChatSparse(ResourcePermissionsMixin):
     user_id: UUID
     published: bool
     type: Literal["group-chat"]
-    metadata_json: Optional[dict]
+    metadata_json: Optional[dict[str, object]]
+    icon_id: Optional[UUID] = None
 
 
 class GroupChatAssistantPublic(ToolAssistant):
@@ -94,7 +100,9 @@ class GroupChatAssistantPublic(ToolAssistant):
     @model_validator(mode="after")
     def validate_descriptions(self) -> "GroupChatAssistantPublic":
         if self.default_description is None and self.user_description is None:
-            raise ValueError("Both default_description and user_description cannot be null")
+            raise ValueError(
+                "Both default_description and user_description cannot be null"
+            )
         return self
 
 
@@ -142,4 +150,5 @@ class GroupChatPublic(BaseModel):
     # NOTE: Atm, the front-end does not check this list for permissions regarding group chats.
     # Instead it checks against assistant permissions.
     permissions: list[ResourcePermission]
-    metadata_json: Optional[dict]
+    metadata_json: Optional[dict[str, object]]
+    icon_id: Optional[UUID] = None

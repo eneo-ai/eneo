@@ -9,19 +9,7 @@
   import { m } from "$lib/paraglide/messages";
 
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
-
-  // Determine model type from properties
-  function getModelType(): "completionModel" | "embeddingModel" | "transcriptionModel" {
-    if ("vision" in model || "reasoning" in model || "token_limit" in model) {
-      return "completionModel";
-    }
-    if ("family" in model) {
-      return "embeddingModel";
-    }
-    return "transcriptionModel";
-  }
-
-  $: modelType = getModelType();
+  export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
   $: isTenantModel = model.provider_id != null;
 
   const showEditDialog = writable(false);
@@ -42,11 +30,11 @@
     <Tooltip text={m.default_model_tooltip()}>
       <div
         class="
-          inline-flex items-center px-2 py-[2px]
-          rounded-full text-[11px] font-medium tracking-wide cursor-default
-          bg-transparent
-          text-[oklch(50%_0.08_78)] dark:text-[oklch(70%_0.08_78)]
-          border border-[oklch(75%_0.06_78)] dark:border-[oklch(40%_0.06_78)]
+          inline-flex cursor-default items-center rounded-full
+          border border-[oklch(75%_0.06_78)] bg-transparent px-2 py-[2px]
+          text-[11px]
+          font-medium tracking-wide
+          text-[oklch(50%_0.08_78)] dark:border-[oklch(40%_0.06_78)] dark:text-[oklch(70%_0.08_78)]
         "
       >
         {m.default_model()}
@@ -56,5 +44,5 @@
 </div>
 
 {#if isTenantModel}
-  <EditModelDialog {model} type={modelType} openController={showEditDialog} />
+  <EditModelDialog {model} {type} openController={showEditDialog} />
 {/if}

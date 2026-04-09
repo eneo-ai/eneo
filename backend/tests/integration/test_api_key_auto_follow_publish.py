@@ -71,8 +71,13 @@ async def _create_app_id(client, bearer_token: str, space_id: str) -> str:
         json={"name": f"auto-follow-app-{uuid4().hex[:8]}"},
         headers={"Authorization": f"Bearer {bearer_token}"},
     )
-    if response.status_code == 400 and "No transcription model available" in response.text:
-        pytest.skip("App creation requires a transcription model in this test environment.")
+    if (
+        response.status_code == 400
+        and "No transcription model available" in response.text
+    ):
+        pytest.skip(
+            "App creation requires a transcription model in this test environment."
+        )
     assert response.status_code == 201, response.text
     return response.json()["id"]
 
@@ -117,10 +122,9 @@ async def test_publish_assistant_auto_follows_when_user_and_policy_allow(
     )
     assert subscriptions_response.status_code == 200, subscriptions_response.text
     items = subscriptions_response.json()["items"]
-    assert {
-        (item["target_type"], item["target_id"])
-        for item in items
-    } >= {("assistant", assistant_id)}
+    assert {(item["target_type"], item["target_id"]) for item in items} >= {
+        ("assistant", assistant_id)
+    }
 
 
 @pytest.mark.integration
@@ -203,8 +207,7 @@ async def test_publish_assistant_does_not_auto_follow_when_opt_out(
     assert subscriptions_response.status_code == 200, subscriptions_response.text
     items = subscriptions_response.json()["items"]
     assert ("assistant", assistant_id) not in {
-        (item["target_type"], item["target_id"])
-        for item in items
+        (item["target_type"], item["target_id"]) for item in items
     }
 
 
@@ -300,7 +303,6 @@ async def test_publish_app_auto_follows_when_user_and_policy_allow(
     )
     assert subscriptions_response.status_code == 200, subscriptions_response.text
     items = subscriptions_response.json()["items"]
-    assert {
-        (item["target_type"], item["target_id"])
-        for item in items
-    } >= {("app", app_id)}
+    assert {(item["target_type"], item["target_id"]) for item in items} >= {
+        ("app", app_id)
+    }

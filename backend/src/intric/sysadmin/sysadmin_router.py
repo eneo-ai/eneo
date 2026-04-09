@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
-from typing import cast
+from typing import Annotated, cast
 from uuid import UUID
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query, Security
 from pydantic import BaseModel, Field
 
@@ -20,25 +21,36 @@ from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelLegacy,
     EmbeddingModelPublicLegacy,
     EmbeddingModelSparse,
-    EmbeddingModelUpdate as EmbeddingModelMetadataUpdate,
     EmbeddingModelUpdateFlags,
+)
+from intric.ai_models.embedding_models.embedding_model import (
+    EmbeddingModelUpdate as EmbeddingModelMetadataUpdate,
 )
 from intric.ai_models.embedding_models.embedding_models_repo import (
     AdminEmbeddingModelsService,
 )
-import sqlalchemy as sa
-from intric.database.tables.ai_models_table import CompletionModels
-from intric.database.tables.collections_table import CollectionsTable
-from intric.database.tables.integration_table import IntegrationKnowledge
-from intric.database.tables.websites_table import Websites
-from intric.main.exceptions import BadRequestException
 from intric.allowed_origins.allowed_origin_models import (
     AllowedOriginCreate,
     AllowedOriginInDB,
 )
+
+# Audit logging - module level imports for sysadmin operations
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+from intric.authentication import auth
 from intric.authentication.api_key_policy import ApiKeyPolicyService
+from intric.completion_models.presentation.completion_model_models import (
+    MigrationResult,
+    ModelMigrationRequest,
+)
 from intric.database.database import AsyncSession
+from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.websites_table import Websites
 from intric.main.container.container import Container
+from intric.main.container.container_overrides import override_user
+from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
 from intric.observability.debug_toggle import DebugFlag, get_debug_flag, set_debug_flag
@@ -49,23 +61,14 @@ from intric.server.dependencies.container import (
 )
 from intric.server.dependencies.get_repository import get_repository
 from intric.server.protocol import responses
+from intric.sysadmin.sysadmin_service import SysAdminService
 from intric.tenants.tenant import (
     TenantBase,
     TenantUpdatePublic,
     TenantWithMaskedCredentials,
 )
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
-from intric.authentication import auth
 from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
-from intric.completion_models.presentation.completion_model_models import (
-    ModelMigrationRequest,
-    MigrationResult,
-)
-
-# Audit logging - module level imports for sysadmin operations
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
 
 logger = get_logger(__name__)
 
@@ -122,7 +125,8 @@ class OIDCDebugToggleResponse(BaseModel):
     responses=responses.get_responses([400, 401]),
 )
 async def register_new_user(
-    new_user: UserAddSuperAdmin, container: Container = Depends(get_container())
+    new_user: UserAddSuperAdmin,
+    container: Annotated[Container, Depends(get_container())],
 ):
     user_service = container.user_service()
 
@@ -160,7 +164,7 @@ async def register_new_user(
 
 @router.get("/users/", response_model=PaginatedResponse[UserInDB])
 async def get_all_users(
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ):
     user_service = container.user_service()
     users_in_db = await user_service.get_all_users()
@@ -171,7 +175,7 @@ async def get_all_users(
 @router.get("/users/{user_id}/", response_model=UserInDB)
 async def get_user(
     user_id: UUID,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ):
     user_service = container.user_service()
     return await user_service.get_user(user_id)
@@ -180,7 +184,7 @@ async def get_user(
 @router.delete("/users/{user_id}/", response_model=DeleteResponse)
 async def delete_user(
     user_id: UUID,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ):
     user_service = container.user_service()
 
@@ -219,7 +223,7 @@ async def delete_user(
 async def update_user(
     user_id: UUID,
     user_update: UserUpdatePublic,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ):
     """Omitted fields are not updated."""
     user_service = container.user_service()
@@ -231,7 +235,7 @@ async def update_user(
     updated_user = await user_service.update_user(user_id, user_update)
 
     # Track changes
-    changes = {}
+    changes: dict[str, dict[str, object]] = {}
     if user_update.email and user_update.email != old_user.email:
         changes["email"] = {"old": old_user.email, "new": user_update.email}
     if user_update.username and user_update.username != old_user.username:
@@ -264,7 +268,8 @@ async def update_user(
 
 @router.post("/users/{user_id}/access-token/", include_in_schema=False)
 async def get_access_token(
-    user_id: UUID, container: Container = Depends(get_container())
+    user_id: UUID,
+    container: Annotated[Container, Depends(get_container())],
 ):
     user_service = container.user_service()
     auth_service = container.auth_service()
@@ -276,7 +281,8 @@ async def get_access_token(
 
 @router.get("/tenants/", response_model=PaginatedResponse[TenantWithMaskedCredentials])
 async def get_tenants(
-    domain: str | None = None, container: Container = Depends(get_container())
+    container: Annotated[Container, Depends(get_container())],
+    domain: Annotated[str | None, Query()] = None,
 ):
     """Get all tenants with masked API credentials.
 
@@ -295,7 +301,9 @@ async def get_tenants(
     tenants = await tenant_service.get_all_tenants(domain)
 
     # Mask API credentials before returning
-    masked_tenants = [TenantWithMaskedCredentials.from_tenant(t) for t in tenants]
+    masked_tenants: list[TenantWithMaskedCredentials] = [
+        TenantWithMaskedCredentials.from_tenant(t) for t in tenants
+    ]
 
     return protocol.to_paginated_response(masked_tenants)
 
@@ -306,12 +314,14 @@ async def get_tenants(
     responses=responses.get_responses([400]),
 )
 async def create_tenant(
-    tenant: TenantBase, container: Container = Depends(get_container())
+    tenant: TenantBase,
+    container: Annotated[Container, Depends(get_container())],
 ):
     tenant_service = container.tenant_service()
 
     # Create tenant
     created_tenant = await tenant_service.create_tenant(tenant)
+    assert created_tenant is not None
 
     # Audit logging (sysadmin - system actor)
     audit_service = container.audit_service()
@@ -346,18 +356,20 @@ async def create_tenant(
 async def update_tenant(
     id: UUID,
     tenant: TenantUpdatePublic,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ):
     tenant_service = container.tenant_service()
 
     # Get old state
     old_tenant = await tenant_service.get_tenant_by_id(id)
+    assert old_tenant is not None
 
     # Update tenant
     updated_tenant = await tenant_service.update_tenant(tenant, id)
+    assert updated_tenant is not None
 
     # Track changes
-    changes = {}
+    changes: dict[str, dict[str, object]] = {}
 
     if tenant.display_name and tenant.display_name != old_tenant.display_name:
         changes["display_name"] = {
@@ -397,15 +409,18 @@ async def update_tenant(
     responses=responses.get_responses([404]),
 )
 async def delete_tenant_by_id(
-    id: UUID, container: Container = Depends(get_container())
+    id: UUID,
+    container: Annotated[Container, Depends(get_container())],
 ):
     tenant_service = container.tenant_service()
 
     # Get tenant BEFORE deletion
     tenant_to_delete = await tenant_service.get_tenant_by_id(id)
+    assert tenant_to_delete is not None
 
     # Delete tenant
     deleted_tenant = await tenant_service.delete_tenant(id)
+    assert deleted_tenant is not None
 
     # Audit logging
     audit_service = container.audit_service()
@@ -433,16 +448,16 @@ async def delete_tenant_by_id(
 
 @router.get("/predefined-roles/")
 async def get_predefined_roles(
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ):
     return await container.predefined_role_service().get_predefined_roles()
 
 
 @router.post("/crawl-all-weekly-websites/")
 async def crawl_all_weekly_websites(
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ):
-    sysadmin_service = container.sysadmin_service()
+    sysadmin_service = SysAdminService()
 
     return await sysadmin_service.run_crawl_on_weekly_websites()
 
@@ -451,7 +466,7 @@ def _mask_actor_label() -> str:
     return "super_api_key"
 
 
-def _get_storage_backend(redis_client) -> str:
+def _get_storage_backend(redis_client: object | None) -> str:
     return "redis" if redis_client is not None else "file"
 
 
@@ -470,7 +485,7 @@ def _get_storage_backend(redis_client) -> str:
 )
 async def toggle_oidc_debug(
     payload: OIDCDebugToggleRequest,
-    container: Container = Depends(get_container_for_sysadmin()),
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
 ):
     try:
         redis_client = container.redis_client()
@@ -513,7 +528,7 @@ async def toggle_oidc_debug(
     },
 )
 async def get_oidc_debug_status(
-    container: Container = Depends(get_container_for_sysadmin()),
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
 ):
     try:
         redis_client = container.redis_client()
@@ -533,9 +548,10 @@ async def get_oidc_debug_status(
     responses=responses.get_responses([404]),
 )
 async def get_embedding_models(
-    embedding_model_repo: AdminEmbeddingModelsService = Depends(
-        get_repository(AdminEmbeddingModelsService)
-    ),
+    embedding_model_repo: Annotated[
+        AdminEmbeddingModelsService,
+        Depends(get_repository(AdminEmbeddingModelsService)),
+    ],
 ):
     models = await embedding_model_repo.get_models(with_deprecated=False)
     return protocol.to_paginated_response(models)
@@ -547,11 +563,15 @@ async def get_embedding_models(
     responses=responses.get_responses([404]),
 )
 async def get_completion_models(
-    completion_model_repo: CompletionModelsRepository = Depends(
-        get_repository(CompletionModelsRepository)
-    ),
+    completion_model_repo: Annotated[
+        CompletionModelsRepository,
+        Depends(get_repository(CompletionModelsRepository)),
+    ],
 ):
-    models = await completion_model_repo.get_models(is_deprecated=False)
+    models = [
+        CompletionModelPublic.model_validate(model)
+        for model in await completion_model_repo.get_models(is_deprecated=False)
+    ]
     return protocol.to_paginated_response(models)
 
 
@@ -564,12 +584,16 @@ async def enable_completion_model(
     id: UUID,
     completion_model_id: UUID,
     data: CompletionModelUpdateFlags,
-    completion_model_repo: CompletionModelsRepository = Depends(
-        get_repository(CompletionModelsRepository)
-    ),
-    container: Container = Depends(get_container()),
+    completion_model_repo: Annotated[
+        CompletionModelsRepository,
+        Depends(get_repository(CompletionModelsRepository)),
+    ],
+    container: Annotated[Container, Depends(get_container())],
 ):
     # Enable model
+    if data.is_org_enabled is None:
+        raise BadRequestException("is_org_enabled is required")
+
     await completion_model_repo.enable_completion_model(
         is_org_enabled=data.is_org_enabled,
         completion_model_id=completion_model_id,
@@ -612,12 +636,16 @@ async def enable_embedding_model(
     id: UUID,
     embedding_model_id: UUID,
     data: EmbeddingModelUpdateFlags,
-    embedding_model_repo: AdminEmbeddingModelsService = Depends(
-        get_repository(AdminEmbeddingModelsService)
-    ),
-    container: Container = Depends(get_container()),
+    embedding_model_repo: Annotated[
+        AdminEmbeddingModelsService,
+        Depends(get_repository(AdminEmbeddingModelsService)),
+    ],
+    container: Annotated[Container, Depends(get_container())],
 ):
     # Enable model
+    if data.is_org_enabled is None:
+        raise BadRequestException("is_org_enabled is required")
+
     await embedding_model_repo.enable_embedding_model(
         is_org_enabled=data.is_org_enabled,
         embedding_model_id=embedding_model_id,
@@ -654,7 +682,7 @@ async def enable_embedding_model(
 @router.post("/allowed-origins/", response_model=AllowedOriginInDB)
 async def add_origin(
     origin: AllowedOriginCreate,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ):
     allowed_origin_repo = container.allowed_origin_repo()
     created = await allowed_origin_repo.add_origin(
@@ -662,28 +690,27 @@ async def add_origin(
     )
     _invalidate_api_key_origin_cache(container, origin.tenant_id)
     audit_service = container.audit_service()
-    if audit_service is not None:
-        await audit_service.log_async(
-            tenant_id=origin.tenant_id,
-            actor_id=None,
-            actor_type=ActorType.SYSTEM,
-            action=ActionType.TENANT_POLICY_UPDATED,
-            entity_type=EntityType.TENANT_SETTINGS,
-            entity_id=origin.tenant_id,
-            description="Updated tenant API key policy (allowed origin added)",
-            metadata={
-                "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
-                "target": {"tenant_id": str(origin.tenant_id)},
-                "changes": {"allowed_origins": {"added": [origin.url]}},
-            },
-        )
+    await audit_service.log_async(
+        tenant_id=origin.tenant_id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_POLICY_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=origin.tenant_id,
+        description="Updated tenant API key policy (allowed origin added)",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {"tenant_id": str(origin.tenant_id)},
+            "changes": {"allowed_origins": {"added": [origin.url]}},
+        },
+    )
     return created
 
 
 @router.get("/allowed-origins/", response_model=PaginatedResponse[AllowedOriginInDB])
 async def get_origins(
-    tenant_id: UUID | None = None,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
+    tenant_id: Annotated[UUID | None, Query()] = None,
 ):
     allowed_origin_repo = container.allowed_origin_repo()
 
@@ -698,7 +725,7 @@ async def get_origins(
 @router.delete("/allowed-origins/{id}/", status_code=204)
 async def delete_origin(
     id: UUID,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ):
     allowed_origin_repo = container.allowed_origin_repo()
     origin = await allowed_origin_repo.get_by_id(id)
@@ -707,21 +734,20 @@ async def delete_origin(
         return
     _invalidate_api_key_origin_cache(container, origin.tenant_id)
     audit_service = container.audit_service()
-    if audit_service is not None:
-        await audit_service.log_async(
-            tenant_id=origin.tenant_id,
-            actor_id=None,
-            actor_type=ActorType.SYSTEM,
-            action=ActionType.TENANT_POLICY_UPDATED,
-            entity_type=EntityType.TENANT_SETTINGS,
-            entity_id=origin.tenant_id,
-            description="Updated tenant API key policy (allowed origin removed)",
-            metadata={
-                "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
-                "target": {"tenant_id": str(origin.tenant_id)},
-                "changes": {"allowed_origins": {"removed": [origin.url]}},
-            },
-        )
+    await audit_service.log_async(
+        tenant_id=origin.tenant_id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.TENANT_POLICY_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=origin.tenant_id,
+        description="Updated tenant API key policy (allowed origin removed)",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "target": {"tenant_id": str(origin.tenant_id)},
+            "changes": {"allowed_origins": {"removed": [origin.url]}},
+        },
+    )
 
 
 @router.post(
@@ -730,8 +756,8 @@ async def delete_origin(
 )
 async def recalculate_tenant_usage_statistics(
     tenant_id: UUID,
-    container: Container = Depends(get_container_for_sysadmin()),
-):
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> dict[str, str | bool]:
     """
     Recalculate usage statistics for a specific tenant.
 
@@ -775,8 +801,8 @@ async def recalculate_tenant_usage_statistics(
     responses=responses.get_responses([500]),
 )
 async def recalculate_all_tenants_usage_statistics(
-    container: Container = Depends(get_container_for_sysadmin()),
-):
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> dict[str, str | bool]:
     """
     Recalculate usage statistics for all active tenants.
 
@@ -823,7 +849,7 @@ async def migrate_completion_model_for_tenant(
     tenant_id: UUID,
     model_id: UUID,
     migration_request: ModelMigrationRequest,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ):
     """
     Migrate completion model usage for a specific tenant.
@@ -873,14 +899,15 @@ async def migrate_completion_model_for_tenant(
             )
 
         # Get a user from this tenant to set the context (needed for domain repo)
-        from intric.database.tables.users_table import Users
         from sqlalchemy import select
 
-        stmt = select(Users).where(Users.tenant_id == tenant_id).limit(1)
-        result = await session.execute(stmt)
-        user_row = result.scalar_one_or_none()
+        from intric.database.tables.users_table import Users
 
-        if not user_row:
+        stmt = select(Users.id).where(Users.tenant_id == tenant_id).limit(1)
+        result = await session.execute(stmt)
+        user_id = result.scalar_one_or_none()
+
+        if user_id is None:
             from fastapi import HTTPException
 
             raise HTTPException(
@@ -889,13 +916,17 @@ async def migrate_completion_model_for_tenant(
             )
 
         # Get the user object
-        user = await user_repo.get_user_by_id(user_row.id)
+        user = await user_repo.get_user_by_id(user_id)
+        if user is None:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=400,
+                detail=f"User {user_id} not found for tenant {tenant_id}",
+            )
 
         # Override container context with this user and tenant
-        from dependency_injector import providers
-
-        container.user.override(providers.Object(user))
-        container.tenant.override(providers.Object(tenant))
+        override_user(container, user)
 
         # Get the migration service with proper context
         migration_service = container.completion_model_migration_service()
@@ -949,8 +980,8 @@ async def migrate_completion_model_for_tenant(
 async def migrate_completion_model_for_all_tenants(
     model_id: UUID,
     migration_request: ModelMigrationRequest,
-    container: Container = Depends(get_container()),
-):
+    container: Annotated[Container, Depends(get_container())],
+) -> dict[str, object]:
     """
     Migrate completion model usage for all active tenants.
 
@@ -1006,7 +1037,7 @@ async def migrate_completion_model_for_all_tenants(
         # Process each tenant
         successful_migrations = 0
         failed_migrations = 0
-        migration_results = []
+        migration_results: list[dict[str, object]] = []
         session = cast(AsyncSession, container.session())
 
         for tenant in active_tenants:
@@ -1018,14 +1049,15 @@ async def migrate_completion_model_for_all_tenants(
                 # Process each tenant in its own transaction
                 async with session.begin():
                     # Get a user from this tenant to set the context
-                    from intric.database.tables.users_table import Users
                     from sqlalchemy import select
 
-                    stmt = select(Users).where(Users.tenant_id == tenant.id).limit(1)
-                    result = await session.execute(stmt)
-                    user_row = result.scalar_one_or_none()
+                    from intric.database.tables.users_table import Users
 
-                    if not user_row:
+                    stmt = select(Users.id).where(Users.tenant_id == tenant.id).limit(1)
+                    result = await session.execute(stmt)
+                    user_id = result.scalar_one_or_none()
+
+                    if user_id is None:
                         logger.warning(
                             f"No users found for tenant {tenant.id}, skipping migration",
                             extra={
@@ -1046,13 +1078,29 @@ async def migrate_completion_model_for_all_tenants(
                         continue
 
                     # Get the user object
-                    user = await user_repo.get_user_by_id(user_row.id)
+                    user = await user_repo.get_user_by_id(user_id)
+                    if user is None:
+                        logger.warning(
+                            f"User {user_id} not found for tenant {tenant.id}, skipping migration",
+                            extra={
+                                "tenant_id": str(tenant.id),
+                                "tenant_name": tenant.name,
+                            },
+                        )
+                        migration_results.append(
+                            {
+                                "tenant_id": str(tenant.id),
+                                "tenant_name": tenant.name,
+                                "success": False,
+                                "error": "User not found for tenant",
+                                "migrated_count": 0,
+                            }
+                        )
+                        failed_migrations += 1
+                        continue
 
                     # Override container context with this user and tenant
-                    from dependency_injector import providers
-
-                    container.user.override(providers.Object(user))
-                    container.tenant.override(providers.Object(tenant))
+                    override_user(container, user)
 
                     # Get the migration service with proper context
                     migration_service = container.completion_model_migration_service()
@@ -1171,7 +1219,7 @@ async def migrate_completion_model_for_all_tenants(
 )
 async def create_completion_model(
     model_data: CompletionModelCreate,
-    container: Container = Depends(get_container_for_sysadmin()),
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
 ) -> CompletionModelSparse:
     """
     Create a new completion model (system-wide operation).
@@ -1197,7 +1245,7 @@ async def create_completion_model(
 async def update_completion_model_metadata(
     id: UUID,
     model_data: CompletionModelUpdate,
-    container: Container = Depends(get_container_for_sysadmin()),
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
 ) -> CompletionModelSparse:
     """
     Update completion model metadata (system-wide operation).
@@ -1238,8 +1286,8 @@ async def update_completion_model_metadata(
 )
 async def delete_completion_model(
     id: UUID,
-    force: bool = Query(False, description="Force delete even if in use"),
-    container: Container = Depends(get_container_for_sysadmin()),
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+    force: Annotated[bool, Query(description="Force delete even if in use")] = False,
 ):
     """
     Delete a completion model (system-wide operation).
@@ -1249,10 +1297,6 @@ async def delete_completion_model(
     WARNING: Deletion affects all tenants. Use with caution.
     Set force=true to delete even if model is in use (may break references).
     """
-    # TODO: Check usage across ALL tenants before deletion
-    # For now, we allow deletion with force parameter
-    # Future enhancement: Add cross-tenant usage check
-
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
@@ -1271,7 +1315,7 @@ async def delete_completion_model(
 )
 async def create_embedding_model(
     model_data: EmbeddingModelCreate,
-    container: Container = Depends(get_container_for_sysadmin()),
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
 ) -> EmbeddingModelSparse:
     """
     Create a new embedding model (system-wide operation).
@@ -1297,7 +1341,7 @@ async def create_embedding_model(
 async def update_embedding_model_metadata(
     id: UUID,
     model_data: EmbeddingModelMetadataUpdate,
-    container: Container = Depends(get_container_for_sysadmin()),
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
 ) -> EmbeddingModelSparse:
     """
     Update embedding model metadata (system-wide operation).
@@ -1330,8 +1374,8 @@ async def update_embedding_model_metadata(
 )
 async def delete_embedding_model(
     id: UUID,
-    force: bool = Query(False, description="Force delete even if in use"),
-    container: Container = Depends(get_container_for_sysadmin()),
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+    force: Annotated[bool, Query(description="Force delete even if in use")] = False,
 ):
     """
     Delete an embedding model (system-wide operation).
@@ -1342,18 +1386,19 @@ async def delete_embedding_model(
     """
     session = cast(AsyncSession, container.session())
 
-
     async with session.begin():
         if not force:
             usage_counts = await session.execute(
                 sa.select(
-                    sa.select(sa.func.count()).where(CollectionsTable.embedding_model_id == id).correlate(None).scalar_subquery().label("collections"),
-                    sa.select(sa.func.count()).where(Websites.embedding_model_id == id).correlate(None).scalar_subquery().label("websites"),
-                    sa.select(sa.func.count()).where(IntegrationKnowledge.embedding_model_id == id).correlate(None).scalar_subquery().label("integrations"),
+                    sa.func.count().filter(CollectionsTable.embedding_model_id == id),
+                    sa.func.count().filter(Websites.embedding_model_id == id),
+                    sa.func.count().filter(
+                        IntegrationKnowledge.embedding_model_id == id
+                    ),
                 )
             )
-            row = usage_counts.one()
-            if row.collections > 0 or row.websites > 0 or row.integrations > 0:
+            collections_count, websites_count, integrations_count = usage_counts.one()
+            if collections_count > 0 or websites_count > 0 or integrations_count > 0:
                 raise BadRequestException("MODEL_IN_USE")
 
         repo = AdminEmbeddingModelsService(session=session)

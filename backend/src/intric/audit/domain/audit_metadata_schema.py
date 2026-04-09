@@ -18,7 +18,7 @@ Usage:
     await audit_service.log_async(..., metadata=metadata.to_dict())
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -85,9 +85,9 @@ class AuditMetadata(BaseModel):
 
     actor: AuditActor
     target: AuditTarget
-    changes: Dict[str, AuditChange] = Field(default_factory=dict)
+    changes: dict[str, AuditChange] = Field(default_factory=dict)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSONB storage.
 
         Excludes None values for optional fields (actor.email, target.name, etc.)
@@ -126,7 +126,11 @@ class AuditMetadata(BaseModel):
         Returns:
             AuditMetadata instance ready for to_dict()
         """
-        target_data = {"id": target_id, "name": target_name, **target_extra}
+        target_data: dict[str, Any] = {
+            "id": target_id,
+            "name": target_name,
+            **target_extra,
+        }
         return cls(
             actor=AuditActor(id=actor_id, name=actor_name, email=actor_email),
             target=AuditTarget(**target_data),

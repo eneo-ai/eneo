@@ -99,7 +99,6 @@ def test_mask_multiple_providers():
         "openai": {"api_key": "sk-openai-key-123456"},  # Long
         "anthropic": {"api_key": "sk-anthropic-key-abcdef"},  # Long
         "azure": {"api_key": "abc"},  # Short
-        "berget": {"api_key": "test"},  # Short (4 chars)
         "mistral": {"api_key": "mistral-key-7890"},  # Long
     }
 
@@ -109,7 +108,6 @@ def test_mask_multiple_providers():
         "openai": "sk-...3456",
         "anthropic": "sk-...cdef",
         "azure": "***",
-        "berget": "***",
         "mistral": "...7890",
     }
 
@@ -227,7 +225,6 @@ def test_mask_credentials_handles_none_api_key():
         ("sk-proj-1234567890abcdef", "...cdef"),  # OpenAI project key
         ("sk-ant-1234567890abcdef", "sk-...cdef"),  # Anthropic key
         ("azure_key_1234567890", "...7890"),  # Azure key format
-        ("berget_key_xyz", "...xyz"),  # Berget key
         ("mistral_key_abc", "...abc"),  # Mistral key
         ("ovh_key_12345", "...2345"),  # OVHcloud key
         ("a", "***"),  # Single char
@@ -257,7 +254,6 @@ def test_mask_credentials_real_world_example():
             "api_version": "2024-02-15-preview",
             "deployment_name": "gpt-4-turbo",
         },
-        "berget": {"api_key": "berget_secret_key_xyz123"},
         "mistral": {"api_key": "mst_key_abc456def789"},
     }
 
@@ -267,9 +263,8 @@ def test_mask_credentials_real_world_example():
     assert masked["openai"] == "...hijk"
     assert masked["anthropic"] == "sk-...cdef"
     assert masked["azure"] == "...cdef"
-    assert masked["berget"] == "...z123"
     assert masked["mistral"] == "...f789"
 
     # Verify other Azure fields not included
     assert "endpoint" not in masked
-    assert len(masked) == 5  # Only 5 providers, not Azure fields
+    assert len(masked) == 4  # Only 4 providers, not Azure fields

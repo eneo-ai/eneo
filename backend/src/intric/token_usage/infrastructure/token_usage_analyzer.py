@@ -25,7 +25,8 @@ class TokenUsageAnalyzer:
     repository.
     """
 
-    def __init__(self, session: "AsyncSession"):
+    def __init__(self, session: "AsyncSession") -> None:
+        super().__init__()
         self.session = session
 
     async def get_model_token_usage(
@@ -139,7 +140,7 @@ class TokenUsageAnalyzer:
         rows = result.all()
 
         # Transform the result into ModelTokenUsage objects
-        token_usage_by_model = []
+        token_usage_by_model: list[ModelTokenUsage] = []
         for row in rows:
             if row.model_id is not None:
                 token_usage_by_model.append(

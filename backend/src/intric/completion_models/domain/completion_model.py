@@ -1,13 +1,8 @@
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional
+
+from typing_extensions import override
 
 from intric.ai_models.ai_model import AIModel
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
-from intric.model_providers.domain.model_defaults import lookup_model_defaults
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -29,12 +24,13 @@ class CompletionModel(AIModel):
         updated_at: "datetime",
         nickname: str,
         name: str,
-        token_limit: int,
+        max_input_tokens: int,
+        max_output_tokens: int,
         vision: bool,
-        family: Union[ModelFamily, str],
-        hosting: ModelHostingLocation,
-        org: Optional[ModelOrg],
-        stability: ModelStability,
+        family: Optional[str],
+        hosting: Optional[str],
+        org: Optional[str],
+        stability: Optional[str],
         open_source: bool,
         description: Optional[str],
         nr_billion_parameters: Optional[int],
@@ -80,20 +76,8 @@ class CompletionModel(AIModel):
         self.reasoning = reasoning
         self.vision = vision
         self.supports_tool_calling = supports_tool_calling
-        defaults = lookup_model_defaults(litellm_model_name, name)
-        self.max_input_tokens = max_input_tokens or token_limit or (
-            defaults.max_input_tokens if defaults else None
-        )
-        if self.max_input_tokens is None:
-            raise ValueError("Completion model is missing max_input_tokens")
-        self.token_limit = self.max_input_tokens
-        self.max_output_tokens = (
-            max_output_tokens
-            or (defaults.max_output_tokens if defaults else None)
-            or token_limit
-        )
-        if self.max_output_tokens is None:
-            raise ValueError("Completion model is missing max_output_tokens")
+        self.max_input_tokens = max_input_tokens
+        self.max_output_tokens = max_output_tokens
         self.deployment_name = deployment_name
         self.nr_billion_parameters = nr_billion_parameters
         self.tenant_id = tenant_id
@@ -101,6 +85,12 @@ class CompletionModel(AIModel):
         self.provider_name = provider_name
         self.provider_type = provider_type
 
+    @property
+    def token_limit(self) -> int:
+        """Backward-compat alias: returns max_input_tokens."""
+        return self.max_input_tokens
+
+    @override
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
         # If litellm_model_name is set, extract provider from prefix (e.g. "azure/gpt-4" → "azure")
@@ -117,7 +107,7 @@ class CompletionModel(AIModel):
         user: "UserInDB",
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
-    ):
+    ) -> "CompletionModel":
         # Settings are now directly on the model table
         return cls(
             user=user,
@@ -126,13 +116,14 @@ class CompletionModel(AIModel):
             updated_at=completion_model_db.updated_at,
             nickname=completion_model_db.nickname,
             name=completion_model_db.name,
-            token_limit=completion_model_db.token_limit,
+            max_input_tokens=completion_model_db.max_input_tokens,
+            max_output_tokens=completion_model_db.max_output_tokens,
             vision=completion_model_db.vision,
             family=completion_model_db.family,
             hosting=completion_model_db.hosting,
             org=completion_model_db.org,
             stability=completion_model_db.stability,
-            open_source=completion_model_db.open_source,
+            open_source=bool(completion_model_db.open_source),
             description=completion_model_db.description,
             nr_billion_parameters=completion_model_db.nr_billion_parameters,
             hf_link=completion_model_db.hf_link,

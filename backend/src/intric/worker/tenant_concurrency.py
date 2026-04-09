@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Tuple
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -14,6 +13,10 @@ from intric.main.logging import get_logger
 from intric.worker.redis.lua_scripts import LuaScripts
 
 logger = get_logger(__name__)
+
+
+def _empty_local_counts() -> dict[UUID, tuple[int, float]]:
+    return {}
 
 
 @dataclass(slots=True)
@@ -33,8 +36,8 @@ class TenantConcurrencyLimiter:
     local_ttl_seconds: int = 120
     local_limit: int | None = None
     _circuit_open_until: float = field(init=False, default=0.0, repr=False)
-    _local_counts: Dict[UUID, Tuple[int, float]] = field(
-        init=False, default_factory=dict, repr=False
+    _local_counts: dict[UUID, tuple[int, float]] = field(
+        init=False, default_factory=_empty_local_counts, repr=False
     )
     _lock: asyncio.Lock = field(init=False, repr=False)
 
@@ -132,7 +135,7 @@ class TenantConcurrencyLimiter:
         if not task:
             return
 
-        fallback_map: Dict[UUID, bool] | None = getattr(
+        fallback_map: dict[UUID, bool] | None = getattr(
             task, "_tenant_limiter_fallback", None
         )
         if fallback_map is None:
@@ -147,7 +150,7 @@ class TenantConcurrencyLimiter:
         if not task:
             return False
 
-        fallback_map: Dict[UUID, bool] | None = getattr(
+        fallback_map: dict[UUID, bool] | None = getattr(
             task, "_tenant_limiter_fallback", None
         )
         if not fallback_map:

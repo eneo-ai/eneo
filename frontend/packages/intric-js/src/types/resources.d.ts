@@ -35,7 +35,9 @@ export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic
 export type SecurityClassification = components["schemas"]["SecurityClassificationPublic"];
 export type Job = components["schemas"]["JobPublic"];
 export type JobStatus = components["schemas"]["Status"];
-export type Tenant = components["schemas"]["TenantPublic"];
+// Backend's TenantPublic schema omits `id`, but the actual API response includes it.
+// Until the schema is fixed upstream we extend the type so consumers can use `tenant.id`.
+export type Tenant = components["schemas"]["TenantPublic"] & { id: string };
 export type ModelProviderPublic = components["schemas"]["ModelProviderPublic"];
 export type AnalyticsData = components["schemas"]["MetadataStatistics"];
 export type AnalyticsAggregateRow = {
@@ -73,6 +75,7 @@ export type Prompt = components["schemas"]["PromptPublic"];
 export type PromptSparse = components["schemas"]["PromptSparse"];
 export type IntricErrorCode = components["schemas"]["ErrorCodes"] | 0;
 export type ApiKeyType = components["schemas"]["ApiKeyType"];
+export type ApiKeyOwnership = components["schemas"]["ApiKeyOwnership"];
 export type ApiKeyPermission = components["schemas"]["ApiKeyPermission"];
 export type ApiKeyScopeType = components["schemas"]["ApiKeyScopeType"];
 export type ApiKeyState = components["schemas"]["ApiKeyState"];
@@ -528,8 +531,31 @@ export namespace SSE {
       tool_call_id?: string;
     }>;
   };
+  export type ToolApprovalTimeout = {
+    session_id: string;
+    intric_event_type: "tool_approval_timeout";
+    approval_id: string;
+    tools: Array<{
+      server_name: string;
+      tool_name: string;
+      arguments?: Record<string, unknown>;
+      tool_call_id?: string;
+      approved?: boolean;
+      result_status?: string;
+    }>;
+  };
+  export type TokenUsage = Omit<components["schemas"]["SSETokenUsage"], "$defs">;
   export type Error = Omit<components["schemas"]["SSEError"], "$defs">;
-  export type Event = Text | FirstChunk | Files | Intric | ToolCall | ToolApprovalRequired | Error;
+  export type Event =
+    | Text
+    | FirstChunk
+    | Files
+    | Intric
+    | ToolCall
+    | ToolApprovalRequired
+    | ToolApprovalTimeout
+    | TokenUsage
+    | Error;
 }
 
 export type UserTokenUsageSummary = components["schemas"]["UserTokenUsageSummary"];

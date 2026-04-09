@@ -16,19 +16,14 @@ export const load = async (event) => {
   const id = event.params.assistantId;
   const searchParams = event.url.searchParams;
   const now = new Date();
-  const today = new CalendarDate(
-    now.getFullYear(),
-    now.getMonth() + 1,
-    now.getUTCDate()
-  );
+  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
   const defaultStart = today.subtract({ days: 30 });
 
   const fromQuery = searchParams.get("from");
   const toQuery = searchParams.get("to");
   const followupsQuery = searchParams.get("followups");
 
-  const includeFollowups =
-    followupsQuery === null ? true : followupsQuery === "true";
+  const includeFollowups = followupsQuery === null ? true : followupsQuery === "true";
 
   const start = (() => {
     if (!fromQuery) return defaultStart;

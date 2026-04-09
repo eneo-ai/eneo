@@ -85,7 +85,9 @@ async def test_logging_on_error(test_tenant, test_settings, caplog):
                 and hasattr(r, "tenant_id")
                 and getattr(r, "provider", None) == "openai"
                 for r in caplog.records
-            ), f"Error not logged with proper context. Records: {[(r.getMessage(), getattr(r, 'provider', None)) for r in caplog.records]}"
+            ), (
+                f"Error not logged with proper context. Records: {[(r.getMessage(), getattr(r, 'provider', None)) for r in caplog.records]}"
+            )
 
         finally:
             cr_logger.removeHandler(caplog.handler)

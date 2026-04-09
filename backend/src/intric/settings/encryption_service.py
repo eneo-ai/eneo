@@ -7,6 +7,7 @@ Uses versioned format (enc:fernet:v1:) for future-proofing.
 from typing import Optional, Protocol, Union
 
 from cryptography.fernet import Fernet, InvalidToken
+from typing_extensions import override
 
 from intric.main.logging import get_logger
 
@@ -27,7 +28,9 @@ class EncryptionService:
 
     def __init__(
         self,
-        encryption_key: Optional[Union[str, "EncryptionService._HasEncryptionKey"]] = None,
+        encryption_key: Optional[
+            Union[str, "EncryptionService._HasEncryptionKey"]
+        ] = None,
     ):
         """Initialize with optional encryption key or settings wrapper.
 
@@ -35,10 +38,13 @@ class EncryptionService:
             encryption_key: Base64-encoded Fernet key (32 bytes) or object exposing
                 an ``encryption_key`` attribute (e.g. ``Settings`` instance).
         """
+        super().__init__()
         self._fernet: Optional[Fernet] = None
 
         key_value: Optional[str]
-        if hasattr(encryption_key, "encryption_key") and not isinstance(encryption_key, str):
+        if hasattr(encryption_key, "encryption_key") and not isinstance(
+            encryption_key, str
+        ):
             key_value = getattr(encryption_key, "encryption_key", None)
         else:
             key_value = encryption_key  # type: ignore[assignment]
@@ -61,6 +67,7 @@ class EncryptionService:
         """Check if encryption is enabled."""
         return self._fernet is not None
 
+    @override
     def __repr__(self) -> str:
         """Safe representation for debugging (doesn't expose key material)."""
         return f"<EncryptionService active={self.is_active()}>"
@@ -126,7 +133,7 @@ class EncryptionService:
         if len(parts) != 4:
             raise ValueError(f"Invalid encrypted format: {ciphertext[:30]}...")
 
-        scheme, algorithm, version, token = parts
+        _scheme, algorithm, version, token = parts
 
         if algorithm != "fernet" or version != "v1":
             raise ValueError(

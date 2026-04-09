@@ -1,19 +1,24 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Input, Tooltip } from "@intric/ui";
+  import { Button, Input } from "@intric/ui";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
   import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
+  import HelpTooltip from "../../../models/components/HelpTooltip.svelte";
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
 
   let { data } = $props();
 
-  const intric = data.intric;
+  const intric = $derived(data.intric);
 
   // Template state
   let name = $state("");
@@ -21,7 +26,7 @@
   let category = $state("");
   let iconName = $state<string | null>(null);
   let promptText = $state("");
-  let completionModel = $state(data.completionModels?.[0] || null);
+  let completionModel = $state(untrack(() => data.completionModels?.[0] || null));
   let completionModelKwargs = $state({});
   let isSaving = $state(false);
 
@@ -38,7 +43,7 @@
 
   async function handleCreateTemplate() {
     if (!name || !category) {
-      alert(m.category_required());
+      toast.warning(m.category_required());
       return;
     }
 
@@ -47,33 +52,38 @@
       // Transform wizard configuration to backend format
       // IMPORTANT: Always send wizard object with both properties (backend requires non-null wizard)
       const wizard = {
-        attachments: wizardAttachmentsEnabled ? {
-          required: wizardAttachmentsRequired,
-          title: wizardAttachmentsTitle || undefined,
-          description: wizardAttachmentsDescription || undefined
-        } : null,
-        collections: wizardCollectionsEnabled ? {
-          required: wizardCollectionsRequired,
-          title: wizardCollectionsTitle || undefined,
-          description: wizardCollectionsDescription || undefined
-        } : null
+        attachments: wizardAttachmentsEnabled
+          ? {
+              required: wizardAttachmentsRequired,
+              title: wizardAttachmentsTitle || undefined,
+              description: wizardAttachmentsDescription || undefined
+            }
+          : null,
+        collections: wizardCollectionsEnabled
+          ? {
+              required: wizardCollectionsRequired,
+              title: wizardCollectionsTitle || undefined,
+              description: wizardCollectionsDescription || undefined
+            }
+          : null
       };
 
       const templateData = {
         name,
         description,
         category,
-        prompt: promptText,  // Backend expects string, not object
+        prompt: promptText, // Backend expects string, not object
+        completion_model_id: completionModel?.id,
         completion_model_kwargs: completionModelKwargs,
-        wizard,  // Always send wizard object, never undefined
-        icon_name: iconName || undefined  // Include icon if selected
+        wizard, // Always send wizard object, never undefined
+        icon_name: iconName || undefined // Include icon if selected
       };
 
       await intric.templates.admin.createAssistant(templateData);
-      goto("/admin/templates?success=template_created");
+      goto(resolve("/admin/templates?success=template_created"));
     } catch (error) {
       console.error("Failed to create template:", error);
-      alert(m.failed_to_create_template());
+      toastError(error, m.failed_to_create_template());
     } finally {
       isSaving = false;
     }
@@ -88,17 +98,12 @@
   <Page.Header>
     <Page.Title
       title={m.create_assistant_template()}
-      parent={{ href: "/admin/templates", label: m.templates() }}
+      parent={{ href: "/admin/templates", title: m.templates() }}
     />
 
     <Page.Flex>
       <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
-      <Button
-        variant="positive"
-        class="w-32"
-        onclick={handleCreateTemplate}
-        disabled={isSaving}
-      >
+      <Button variant="positive" class="w-32" onclick={handleCreateTemplate} disabled={isSaving}>
         {isSaving ? m.loading() : m.create_template()}
       </Button>
     </Page.Flex>
@@ -214,6 +219,7 @@
           hasChanges={false}
           fullWidth
         >
+          <HelpTooltip slot="title" text={m.wizard_attachments_help()} />
           <div class="flex flex-col gap-4">
             <Input.RadioSwitch
               bind:value={wizardAttachmentsEnabled}
@@ -222,10 +228,14 @@
             />
 
             {#if wizardAttachmentsEnabled}
-              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
+              <div
+                class="border-default bg-hover-default flex flex-col gap-4 rounded-lg border p-4"
+              >
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardAttachmentsRequired} />
-                  <span class="text-sm text-default">{m.wizard_attachments_required_description()}</span>
+                  <span class="text-default text-sm"
+                    >{m.wizard_attachments_required_description()}</span
+                  >
                 </label>
 
                 <Input.Text
@@ -235,7 +245,10 @@
                 />
 
                 <div class="flex flex-col gap-1">
-                  <label for="wizard-attachments-description" class="text-sm font-medium text-default">{m.description()}</label>
+                  <label
+                    for="wizard-attachments-description"
+                    class="text-default text-sm font-medium">{m.description()}</label
+                  >
                   <textarea
                     id="wizard-attachments-description"
                     bind:value={wizardAttachmentsDescription}
@@ -254,6 +267,7 @@
           hasChanges={false}
           fullWidth
         >
+          <HelpTooltip slot="title" text={m.wizard_collections_help()} />
           <div class="flex flex-col gap-4">
             <Input.RadioSwitch
               bind:value={wizardCollectionsEnabled}
@@ -262,10 +276,14 @@
             />
 
             {#if wizardCollectionsEnabled}
-              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
+              <div
+                class="border-default bg-hover-default flex flex-col gap-4 rounded-lg border p-4"
+              >
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardCollectionsRequired} />
-                  <span class="text-sm text-default">{m.wizard_collections_required_description()}</span>
+                  <span class="text-default text-sm"
+                    >{m.wizard_collections_required_description()}</span
+                  >
                 </label>
 
                 <Input.Text
@@ -275,7 +293,10 @@
                 />
 
                 <div class="flex flex-col gap-1">
-                  <label for="wizard-collections-description" class="text-sm font-medium text-default">{m.description()}</label>
+                  <label
+                    for="wizard-collections-description"
+                    class="text-default text-sm font-medium">{m.description()}</label
+                  >
                   <textarea
                     id="wizard-collections-description"
                     bind:value={wizardCollectionsDescription}

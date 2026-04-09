@@ -12,14 +12,14 @@ from intric.allowed_origins.origin_matching import origin_matches_pattern
 from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import (
-    ApiKeyPermission,
+    PERMISSION_LEVEL_ORDER,
     ApiKeyCreateRequest,
     ApiKeyOwnership,
+    ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
-    PERMISSION_LEVEL_ORDER,
     ResourcePermissions,
     compute_effective_state,
 )
@@ -29,6 +29,7 @@ from intric.roles.permissions import Permission
 
 if TYPE_CHECKING:
     from starlette.requests import Request
+
     from intric.spaces.space import Space
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
@@ -49,6 +50,7 @@ class ApiKeyPolicyService:
         space_service: "SpaceService | None" = None,
         user: "UserInDB | None" = None,
     ):
+        super().__init__()
         self.allowed_origin_repo = allowed_origin_repo
         self.space_service = space_service
         self.user = user
@@ -86,12 +88,34 @@ class ApiKeyPolicyService:
                 message="scope_id must be null for tenant-scoped keys.",
             )
 
+        # Service key guardrails
+        if request.ownership == ApiKeyOwnership.SERVICE:
+            user = self._require_user()
+            if Permission.ADMIN not in user.permissions:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_permission",
+                    message="Only tenant admins can create service keys.",
+                )
+            # Extra guardrail: service write/admin keys need IP allowlist or expiration
+            if request.permission in (ApiKeyPermission.WRITE, ApiKeyPermission.ADMIN):
+                has_ip = (
+                    request.allowed_ips is not None and len(request.allowed_ips) > 0
+                )
+                has_expiry = request.expires_at is not None
+                if not has_ip and not has_expiry:
+                    raise ApiKeyValidationError(
+                        status_code=400,
+                        code="invalid_request",
+                        message="Service keys with write/admin permission require an IP allowlist or expiration.",
+                    )
+
         if request.key_type == ApiKeyType.PK:
-            if request.permission == ApiKeyPermission.ADMIN:
+            if request.permission != ApiKeyPermission.READ:
                 raise ApiKeyValidationError(
                     status_code=400,
                     code="invalid_request",
-                    message="pk_ keys cannot have admin permission.",
+                    message="pk_ keys can only have read permission.",
                 )
             if request.allowed_origins is None:
                 raise ApiKeyValidationError(
@@ -139,27 +163,6 @@ class ApiKeyPolicyService:
 
         await self._validate_expiration(request.expires_at)
         await self._validate_rate_limit(request.rate_limit)
-
-        if request.ownership == ApiKeyOwnership.SERVICE:
-            user = self._require_user()
-            if Permission.ADMIN not in user.permissions:
-                raise ApiKeyValidationError(
-                    status_code=403,
-                    code="insufficient_permission",
-                    message="Service-owned keys require tenant admin permission.",
-                )
-            if (
-                request.permission in (ApiKeyPermission.WRITE, ApiKeyPermission.ADMIN)
-                and request.allowed_ips is None
-                and request.expires_at is None
-            ):
-                raise ApiKeyValidationError(
-                    status_code=400,
-                    code="invalid_request",
-                    message=(
-                        "Service-owned write/admin keys require an IP allowlist or expiration."
-                    ),
-                )
 
         if request.resource_permissions is not None:
             if request.key_type == ApiKeyType.PK:
@@ -298,11 +301,14 @@ class ApiKeyPolicyService:
                     if isinstance(raw_permission, ApiKeyPermission)
                     else ApiKeyPermission(raw_permission)
                 )
-                if key_type == ApiKeyType.PK and new_permission == ApiKeyPermission.ADMIN:
+                if (
+                    key_type == ApiKeyType.PK
+                    and new_permission != ApiKeyPermission.READ
+                ):
                     raise ApiKeyValidationError(
                         status_code=400,
                         code="invalid_request",
-                        message="pk_ keys cannot have admin permission.",
+                        message="pk_ keys can only have read permission.",
                     )
 
         if "allowed_origins" in updates:
@@ -377,7 +383,9 @@ class ApiKeyPolicyService:
         elif new_permission is not None:
             # Permission is being lowered — check existing resource_permissions still fit
             if key.resource_permissions is not None:
-                existing_rp = ResourcePermissions.model_validate(key.resource_permissions)
+                existing_rp = ResourcePermissions.model_validate(
+                    key.resource_permissions
+                )
                 self._validate_resource_permissions_ceiling(
                     resource_permissions=existing_rp,
                     permission=new_permission,
@@ -414,6 +422,7 @@ class ApiKeyPolicyService:
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
             expires_at=key.expires_at,
+            rotation_grace_until=getattr(key, "rotation_grace_until", None),
         )
         if effective_state != ApiKeyState.ACTIVE:
             raise ApiKeyValidationError(
@@ -564,7 +573,10 @@ class ApiKeyPolicyService:
                 message="Origin header required for pk_ keys.",
             )
 
-        if self._is_localhost_origin(origin) and self.settings.api_key_allow_localhost_origin:
+        if (
+            self._is_localhost_origin(origin)
+            and self.settings.api_key_allow_localhost_origin
+        ):
             return
         # When allow_localhost_origin is off, localhost falls through to
         # normal tenant/key pattern matching — no free pass.

@@ -76,6 +76,7 @@
     return () => unsub();
   });
 
+  /* eslint-disable svelte/infinite-reactive-loop -- safe: async fetch then state update, called from reactive statement */
   async function loadSyncHistory(page: number = 1) {
     if (!localKnowledge?.id) return;
     loading = true;
@@ -90,7 +91,7 @@
 
       console.log("Sync logs response:", response);
 
-      syncLogs = response.items || [];
+      syncLogs = (response.items || []) as unknown as SyncLog[];
       totalCount = response.total_count || 0;
       totalPages = response.total_pages || 1;
       currentPage = page;
@@ -105,6 +106,7 @@
       loading = false;
     }
   }
+  /* eslint-enable svelte/infinite-reactive-loop */
 
   function goToPage(page: number) {
     if (page >= 1 && page <= totalPages) {
@@ -175,6 +177,7 @@
   }
 
   // Ladda historik när dialogen öppnas eller när knowledge ändras
+  /* eslint-disable svelte/infinite-reactive-loop -- safe: async fetch then state update */
   $: if ($openController && knowledge) {
     // If knowledge changed, reset and reload
     if (localKnowledge?.id !== knowledge?.id) {
@@ -189,6 +192,7 @@
       loadSyncHistory(1);
     }
   }
+  /* eslint-enable svelte/infinite-reactive-loop */
 
   function close() {
     openController.set(false);
@@ -196,42 +200,44 @@
 </script>
 
 <!-- Använd bind:openController (eller bind:isOpen) i stället för bind:open -->
-<Dialog.Root bind:openController={openController}>
+<Dialog.Root bind:openController>
   <!-- Dialog.Content accepterar inte class; använd width-prop + yttre wrapper för styling -->
   <Dialog.Content width="large" form={false}>
-    <div class="w-full flex flex-col gap-6">
+    <div class="flex w-full flex-col gap-6">
       <!-- Header -->
       <div>
         <Dialog.Title>{m.sync_history()} - {knowledge?.name}</Dialog.Title>
       </div>
 
       <!-- Content area -->
-      <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+      <div class="max-h-[60vh] space-y-4 overflow-y-auto pr-2">
         {#if loading}
           <div class="flex items-center justify-center py-8">
             <IconLoadingSpinner size="lg" class="animate-spin" />
             <span class="ml-2">{m.loading_available_sites()}...</span>
           </div>
         {:else if error}
-          <div class="flex items-center gap-2 text-negative-stronger bg-negative-dimmer p-4 rounded">
+          <div
+            class="text-negative-stronger bg-negative-dimmer flex items-center gap-2 rounded p-4"
+          >
             <IconXMark size="md" />
             <span>{error}</span>
           </div>
         {:else if syncLogs.length === 0}
-          <div class="text-center py-8 text-secondary">
+          <div class="text-secondary py-8 text-center">
             <IconHistory size="lg" class="mx-auto mb-2 opacity-50" />
             <p>{m.integration_sync_summary_none()}</p>
           </div>
         {:else}
           <!-- Overall Statistics -->
           {(() => {
-            const stats = getPageStats();
+            getPageStats();
             return null;
           })()}
-          <div class="bg-primary border border-default rounded-lg p-4 space-y-3">
-            <div class="flex justify-between items-center">
-              <div class="font-semibold text-sm">{m.overall_statistics()}</div>
-              <div class="text-xs text-secondary-muted">
+          <div class="bg-primary border-default space-y-3 rounded-lg border p-4">
+            <div class="flex items-center justify-between">
+              <div class="text-sm font-semibold">{m.overall_statistics()}</div>
+              <div class="text-secondary-muted text-xs">
                 {m.total_syncs()}: {totalCount}
               </div>
             </div>
@@ -250,94 +256,106 @@
               </div>
               <div class="flex justify-between">
                 <span class="text-secondary">{m.files_deleted()}:</span>
-                <span class="font-medium text-negative-default">{getPageStats().pageDeleted}</span>
+                <span class="text-negative-default font-medium">{getPageStats().pageDeleted}</span>
               </div>
-              <div class="flex justify-between col-span-2">
+              <div class="col-span-2 flex justify-between">
                 <span class="text-secondary">{m.pages_synced()}:</span>
                 <span class="font-medium">{getPageStats().pagePages}</span>
               </div>
             </div>
           </div>
-            {#each syncLogs as log (log.id)}
-              <div class="border border-default rounded-lg p-3 hover:bg-hover-default transition-colors">
-                <!-- Status row -->
-                <div class="flex items-center justify-between mb-3">
-                  <div class="flex items-center gap-2">
-                    {#if log.status === "success"}
-                      <IconCheck size="sm" class="text-positive-default flex-shrink-0" />
-                    {:else if log.status === "error"}
-                      <IconXMark size="sm" class="text-negative-default flex-shrink-0" />
-                    {:else}
-                      <IconLoadingSpinner size="sm" class="text-warning-default animate-spin flex-shrink-0" />
-                    {/if}
-                    <span class="font-medium text-sm">
-                      {getSyncTypeLabel(log.sync_type)}
-                    </span>
-                    <span
-                      class="text-xs px-2 py-0.5 rounded-full font-medium"
-                      class:bg-positive-dimmer={log.status === "success"}
-                      class:text-positive-stronger={log.status === "success"}
-                      class:bg-negative-dimmer={log.status === "error"}
-                      class:text-negative-stronger={log.status === "error"}
-                      class:bg-warning-dimmer={log.status === "in_progress"}
-                      class:text-warning-stronger={log.status === "in_progress"}
-                    >
-                      {log.status}
-                    </span>
-                  </div>
-                  <span class="text-xs text-secondary-muted flex-shrink-0">{formatDate(log.started_at)}</span>
-                </div>
-
-                <!-- Summary -->
-                <div class="text-xs text-secondary mb-2">
-                  {getSyncSummary(log)}
-                </div>
-
-                <!-- Skipped details -->
-                {#if log.skipped_items > 0 && log.skipped_details?.length > 0}
-                  <details class="mb-2">
-                    <summary class="text-xs text-warning-default cursor-pointer hover:underline">
-                      {m.item_s_skipped({ count: log.skipped_items })}
-                    </summary>
-                    <ul class="mt-1 ml-4 text-xs text-secondary space-y-0.5">
-                      {#each log.skipped_details as detail}
-                        <li class="flex gap-1">
-                          <span class="font-medium text-primary truncate max-w-[200px]" title={detail.file}>{detail.file}</span>
-                          <span class="text-secondary-muted">&mdash;</span>
-                          <span class="text-secondary-muted">{detail.reason}</span>
-                        </li>
-                      {/each}
-                    </ul>
-                  </details>
-                {/if}
-
-                <!-- Duration and error -->
-                <div class="flex items-center gap-4 text-xs text-secondary-muted">
-                  <span>{m.duration()}: {getDuration(log)}</span>
-                  {#if log.error_message}
-                    <span class="text-negative-default font-medium">{m.error()}: {log.error_message}</span>
+          {#each syncLogs as log (log.id)}
+            <div
+              class="border-default hover:bg-hover-default rounded-lg border p-3 transition-colors"
+            >
+              <!-- Status row -->
+              <div class="mb-3 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  {#if log.status === "success"}
+                    <IconCheck size="sm" class="text-positive-default flex-shrink-0" />
+                  {:else if log.status === "error"}
+                    <IconXMark size="sm" class="text-negative-default flex-shrink-0" />
+                  {:else}
+                    <IconLoadingSpinner
+                      size="sm"
+                      class="text-warning-default flex-shrink-0 animate-spin"
+                    />
                   {/if}
+                  <span class="text-sm font-medium">
+                    {getSyncTypeLabel(log.sync_type)}
+                  </span>
+                  <span
+                    class="rounded-full px-2 py-0.5 text-xs font-medium"
+                    class:bg-positive-dimmer={log.status === "success"}
+                    class:text-positive-stronger={log.status === "success"}
+                    class:bg-negative-dimmer={log.status === "error"}
+                    class:text-negative-stronger={log.status === "error"}
+                    class:bg-warning-dimmer={log.status === "in_progress"}
+                    class:text-warning-stronger={log.status === "in_progress"}
+                  >
+                    {log.status}
+                  </span>
                 </div>
+                <span class="text-secondary-muted flex-shrink-0 text-xs"
+                  >{formatDate(log.started_at)}</span
+                >
               </div>
-            {/each}
+
+              <!-- Summary -->
+              <div class="text-secondary mb-2 text-xs">
+                {getSyncSummary(log)}
+              </div>
+
+              <!-- Skipped details -->
+              {#if log.skipped_items > 0 && log.skipped_details?.length > 0}
+                <details class="mb-2">
+                  <summary class="text-warning-default cursor-pointer text-xs hover:underline">
+                    {m.item_s_skipped({ count: log.skipped_items })}
+                  </summary>
+                  <ul class="text-secondary mt-1 ml-4 space-y-0.5 text-xs">
+                    {#each log.skipped_details as detail (detail.file)}
+                      <li class="flex gap-1">
+                        <span
+                          class="text-primary max-w-[200px] truncate font-medium"
+                          title={detail.file}>{detail.file}</span
+                        >
+                        <span class="text-secondary-muted">&mdash;</span>
+                        <span class="text-secondary-muted">{detail.reason}</span>
+                      </li>
+                    {/each}
+                  </ul>
+                </details>
+              {/if}
+
+              <!-- Duration and error -->
+              <div class="text-secondary-muted flex items-center gap-4 text-xs">
+                <span>{m.duration()}: {getDuration(log)}</span>
+                {#if log.error_message}
+                  <span class="text-negative-default font-medium"
+                    >{m.error()}: {log.error_message}</span
+                  >
+                {/if}
+              </div>
+            </div>
+          {/each}
         {/if}
       </div>
 
       <!-- Footer -->
-      <div class="flex justify-between items-center border-t border-default pt-4">
+      <div class="border-default flex items-center justify-between border-t pt-4">
         {#if totalPages > 1}
           <div class="flex gap-2">
             <button
               disabled={currentPage === 1 || loading}
               on:click={() => goToPage(currentPage - 1)}
-              class="px-3 py-2 text-sm rounded-md bg-secondary hover:bg-secondary/90 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              class="bg-secondary hover:bg-secondary/90 rounded-md px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               {m.previous()}
             </button>
             <button
               disabled={currentPage === totalPages || loading}
               on:click={() => goToPage(currentPage + 1)}
-              class="px-3 py-2 text-sm rounded-md bg-secondary hover:bg-secondary/90 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              class="bg-secondary hover:bg-secondary/90 rounded-md px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               {m.next()}
             </button>
@@ -345,7 +363,7 @@
         {/if}
         <button
           on:click={close}
-          class="px-3 py-2 text-sm rounded-md bg-secondary hover:bg-secondary/90 transition-colors font-medium"
+          class="bg-secondary hover:bg-secondary/90 rounded-md px-3 py-2 text-sm font-medium transition-colors"
         >
           {m.close()}
         </button>

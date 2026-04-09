@@ -140,7 +140,9 @@ async def _create_assistant_with_prompt(
     return assistant_id, str(prompt_id)
 
 
-async def _create_group(client, *, token: str, space_id: str, name: str | None = None) -> str:
+async def _create_group(
+    client, *, token: str, space_id: str, name: str | None = None
+) -> str:
     """Create a legacy knowledge group/collection in a space and return its ID."""
     resp = await client.post(
         f"/api/v1/spaces/{space_id}/knowledge/groups/",
@@ -240,7 +242,9 @@ async def _create_file_scoped_key(
             try:
                 scope_id = await _create_app(client, token=token, space_id=space_id)
             except AssertionError as exc:
-                pytest.skip(f"Cannot provision app-scoped key fixture in this environment: {exc}")
+                pytest.skip(
+                    f"Cannot provision app-scoped key fixture in this environment: {exc}"
+                )
     else:
         space_id = await _create_space(
             client, token=token, name=f"file-scope-{scope_type}-{uuid4().hex[:6]}"
@@ -950,7 +954,9 @@ async def test_space_scoped_key_post_files_allowed(api_client, bearer_token):
         headers={"X-API-Key": key},
     )
     # Should succeed (200 or 201) — not blocked by scope
-    assert resp.status_code in (200, 201), f"Expected 200/201, got {resp.status_code}: {resp.text}"
+    assert resp.status_code in (200, 201), (
+        f"Expected 200/201, got {resp.status_code}: {resp.text}"
+    )
 
 
 @pytest.mark.integration
@@ -985,7 +991,9 @@ async def test_space_scoped_key_get_file_by_id_allowed(api_client, bearer_token)
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope_type", ["assistant", "app"])
-async def test_non_space_scoped_keys_get_files_allowed(api_client, bearer_token, scope_type):
+async def test_non_space_scoped_keys_get_files_allowed(
+    api_client, bearer_token, scope_type
+):
     """Assistant/app scoped keys can GET /files/."""
     key = await _create_file_scoped_key(
         api_client,
@@ -1004,7 +1012,9 @@ async def test_non_space_scoped_keys_get_files_allowed(api_client, bearer_token,
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope_type", ["assistant", "app"])
-async def test_non_space_scoped_keys_post_files_allowed(api_client, bearer_token, scope_type):
+async def test_non_space_scoped_keys_post_files_allowed(
+    api_client, bearer_token, scope_type
+):
     """Assistant/app scoped keys can POST /files/ (upload)."""
     key = await _create_file_scoped_key(
         api_client,
@@ -1024,7 +1034,9 @@ async def test_non_space_scoped_keys_post_files_allowed(api_client, bearer_token
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope_type", ["assistant", "app"])
-async def test_non_space_scoped_keys_get_file_by_id_allowed(api_client, bearer_token, scope_type):
+async def test_non_space_scoped_keys_get_file_by_id_allowed(
+    api_client, bearer_token, scope_type
+):
     """Assistant/app scoped keys can GET /files/{id}/ for owned files."""
     key = await _create_file_scoped_key(
         api_client,
@@ -1035,7 +1047,9 @@ async def test_non_space_scoped_keys_get_file_by_id_allowed(api_client, bearer_t
 
     upload_resp = await api_client.post(
         "/api/v1/files/",
-        files={"upload_file": (f"{scope_type}-lookup.txt", b"file-content", "text/plain")},
+        files={
+            "upload_file": (f"{scope_type}-lookup.txt", b"file-content", "text/plain")
+        },
         headers={"X-API-Key": key},
     )
     assert upload_resp.status_code in (200, 201), upload_resp.text
@@ -1052,7 +1066,9 @@ async def test_non_space_scoped_keys_get_file_by_id_allowed(api_client, bearer_t
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope_type", ["assistant", "app"])
-async def test_non_space_scoped_keys_delete_files_denied_403(api_client, bearer_token, scope_type):
+async def test_non_space_scoped_keys_delete_files_denied_403(
+    api_client, bearer_token, scope_type
+):
     """Assistant/app scoped keys remain blocked on DELETE /files/{id}/."""
     key = await _create_file_scoped_key(
         api_client,
@@ -1071,7 +1087,9 @@ async def test_non_space_scoped_keys_delete_files_denied_403(api_client, bearer_
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_tenant_admin_key_delete_files_not_blocked_by_scope(api_client, bearer_token):
+async def test_tenant_admin_key_delete_files_not_blocked_by_scope(
+    api_client, bearer_token
+):
     """Tenant-scoped ADMIN key DELETE /files/{id} → not blocked by scope check.
 
     Should get 404 (file doesn't exist) rather than 403 (scope denied).
@@ -1090,8 +1108,12 @@ async def test_tenant_admin_key_delete_files_not_blocked_by_scope(api_client, be
     )
     # Should NOT be 403 — tenant keys pass the scope check.
     # Non-existent file should return 404 from FileService.delete_file.
-    assert resp.status_code != 403, f"Tenant admin key should not be scope-blocked: {resp.text}"
-    assert resp.status_code == 404, f"Expected 404 for non-existent file, got {resp.status_code}"
+    assert resp.status_code != 403, (
+        f"Tenant admin key should not be scope-blocked: {resp.text}"
+    )
+    assert resp.status_code == 404, (
+        f"Expected 404 for non-existent file, got {resp.status_code}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1106,8 +1128,12 @@ async def test_kill_switch_off_disables_scope_list_filtering(
     api_client, bearer_token, db_container, default_user, kill_switch_mode
 ):
     """When scope enforcement is off, scoped keys should see cross-space list results."""
-    space_a = await _create_space(api_client, token=bearer_token, name=f"ks-{kill_switch_mode}-A")
-    space_b = await _create_space(api_client, token=bearer_token, name=f"ks-{kill_switch_mode}-B")
+    space_a = await _create_space(
+        api_client, token=bearer_token, name=f"ks-{kill_switch_mode}-A"
+    )
+    space_b = await _create_space(
+        api_client, token=bearer_token, name=f"ks-{kill_switch_mode}-B"
+    )
 
     asst_a = await _create_assistant(api_client, token=bearer_token, space_id=space_a)
     asst_b = await _create_assistant(api_client, token=bearer_token, space_id=space_b)
@@ -1160,7 +1186,9 @@ async def test_kill_switch_off_disables_scope_list_filtering(
             headers={"X-API-Key": key_a},
         )
         assert resp_dashboard.status_code == 200, resp_dashboard.text
-        dashboard_space_ids = {item["id"] for item in resp_dashboard.json()["spaces"]["items"]}
+        dashboard_space_ids = {
+            item["id"] for item in resp_dashboard.json()["spaces"]["items"]
+        }
         assert space_a in dashboard_space_ids
         assert space_b in dashboard_space_ids
 

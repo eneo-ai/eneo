@@ -35,6 +35,7 @@
     nextUrl.searchParams.set("from", timeframe.start.toString());
     nextUrl.searchParams.set("to", timeframe.end.toString());
     nextUrl.searchParams.set("followups", includeFollowups ? "true" : "false");
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic query string
     await goto(nextUrl.toString(), {
       replaceState: true,
       noScroll: true,
@@ -61,7 +62,7 @@
   </Page.Header>
 
   <div
-    class="filter-bar mx-6 mt-3 mb-1 flex flex-wrap items-center justify-between gap-4 rounded-lg border-default bg-primary border px-4 py-2.5"
+    class="filter-bar border-default bg-primary mx-6 mt-3 mb-1 flex flex-wrap items-center justify-between gap-4 rounded-lg border px-4 py-2.5"
     style="--delay: 0ms"
   >
     <Input.DateRange bind:value={timeframe} class="border-0 p-0"
@@ -78,7 +79,7 @@
     </Page.Tab>
     <Page.Tab id="questions">
       <QuestionTable
-        assistantId={$page.params.assistantId}
+        assistantId={$page.params.assistantId ?? ""}
         intric={data.intric}
         {includeFollowups}
         {timeframe}

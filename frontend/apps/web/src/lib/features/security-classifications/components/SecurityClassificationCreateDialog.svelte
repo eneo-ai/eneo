@@ -8,7 +8,7 @@
   import { Button, Dialog, Input } from "@intric/ui";
   import { writable } from "svelte/store";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
-  import { IntricError } from "@intric/intric-js";
+  import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
 
@@ -25,7 +25,7 @@
       name = "";
       description = "";
     } catch (error) {
-      alert(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toastError(error);
     }
   });
 </script>

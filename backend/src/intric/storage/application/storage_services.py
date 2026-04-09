@@ -6,7 +6,8 @@ from intric.storage.domain.storage_repo import StorageInfoRepository
 
 
 class StorageInfoService:
-    def __init__(self, repo: StorageInfoRepository):
+    def __init__(self, repo: StorageInfoRepository) -> None:
+        super().__init__()
         self.repo = repo
 
     async def get_storage_info(self):

@@ -6,7 +6,13 @@
 
 import type { AnalyticsAggregatedData } from "@intric/intric-js";
 import type { Chart } from "@intric/ui";
-import { fromAbsolute, getDayOfWeek, parseAbsolute, parseZonedDateTime, toCalendarDate } from "@internationalized/date";
+import {
+  fromAbsolute,
+  getDayOfWeek,
+  parseAbsolute,
+  parseZonedDateTime,
+  toCalendarDate
+} from "@internationalized/date";
 import { m } from "$lib/paraglide/messages";
 
 // {sessions: { "Monday": {count: 12, total: 12}}}
@@ -52,8 +58,9 @@ const flatten = (obj: UsageData) => {
     totalEntries += Object.keys(obj[types[i]]).length;
   }
 
-  const rows: Array<{ created_at: string; type: string; count: number; total: number }> =
-    new Array(totalEntries);
+  const rows: Array<{ created_at: string; type: string; count: number; total: number }> = new Array(
+    totalEntries
+  );
   let idx = 0;
 
   for (let i = 0; i < types.length; i++) {
@@ -135,7 +142,10 @@ type PreparedData = Chart.Config["options"] & { dataset: Record<string, unknown>
 
 // Optimized: Find earliest and latest dates in single pass without array allocations
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-function getDataDateBounds(usageByDate: UsageData): { earliest: string | null; latest: string | null } {
+function getDataDateBounds(usageByDate: UsageData): {
+  earliest: string | null;
+  latest: string | null;
+} {
   let earliest: string | null = null;
   let latest: string | null = null;
 
@@ -202,12 +212,26 @@ export function prepareData(
   const requestedStartDate = timeframe.start.split("T")[0];
 
   // Determine effective x-axis start: use actual data start if later than requested
-  const effectiveStartDate = dataBounds.earliest && dataBounds.earliest > requestedStartDate
-    ? dataBounds.earliest
-    : requestedStartDate;
+  const effectiveStartDate =
+    dataBounds.earliest && dataBounds.earliest > requestedStartDate
+      ? dataBounds.earliest
+      : requestedStartDate;
 
   // Swedish month abbreviations for date formatting
-  const monthNames = ["jan", "feb", "mar", "apr", "maj", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
+  const monthNames = [
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "maj",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "okt",
+    "nov",
+    "dec"
+  ];
 
   // Count unique dates to determine label density
   const dateDataPointCount = Object.keys(usageByDate.sessions || {}).length;
@@ -392,7 +416,7 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
         containLabel: true
       },
       xAxis: {
-        ...data.xAxis,
+        ...(data.xAxis as object),
         // Subtle baseline at y=0 for grounding
         axisLine: {
           show: true,
@@ -403,7 +427,7 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
         },
         axisTick: { show: false },
         axisLabel: {
-          ...data.xAxis?.axisLabel,
+          ...(((data.xAxis as Record<string, unknown>)?.axisLabel as object) ?? {}),
           // Use actual color value - ECharts canvas doesn't support CSS variables
           // #9CA3AF (gray-400) is visible on both light and dark backgrounds
           color: "#9CA3AF",
@@ -413,7 +437,7 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
         }
       },
       yAxis: {
-        ...data.yAxis,
+        ...(data.yAxis as object),
         // Remove Y-axis left line for cleaner minimal look
         axisLine: { show: false },
         axisTick: { show: false },
@@ -444,7 +468,6 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
           fontSize: 13
         },
         extraCssText: "box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); backdrop-filter: blur(8px);",
-        // @ts-expect-error formatter typing
         formatter: (params: { name: string; value: number; data: { count?: number } }[]) => {
           const item = Array.isArray(params) ? params[0] : params;
           const value = item.data?.count ?? item.value;
@@ -509,8 +532,8 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
               x2: 0,
               y2: 1,
               colorStops: [
-                { offset: 0, color: "#60A5FA" },  // blue-400
-                { offset: 1, color: "#2563EB" }   // blue-600
+                { offset: 0, color: "#60A5FA" }, // blue-400
+                { offset: 1, color: "#2563EB" } // blue-600
               ]
             }
           },

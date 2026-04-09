@@ -45,16 +45,18 @@
 
       await invalidate("admin:templates:load");
       openController.set(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error deleting template:", error);
-      if (error.status === 400 && error.message?.includes("used by")) {
+      const err = error as { status?: number; message?: string };
+      if (err.status === 400 && err.message?.includes("used by")) {
         // Extract usage count from error message like "used by 3 app(s)" or "used by 1 assistant(s)"
-        const match = error.message.match(/used by (\d+)/);
+        const match = err.message.match(/used by (\d+)/);
         const count = match ? parseInt(match[1]) : 0;
-        const resource = type === "assistant" ? m.assistants().toLowerCase() : m.apps().toLowerCase();
+        const resource =
+          type === "assistant" ? m.assistants().toLowerCase() : m.apps().toLowerCase();
         errorMessage = m.template_in_use_count({ count, resource });
       } else {
-        errorMessage = error.message || "Failed to delete template";
+        errorMessage = err.message || "Failed to delete template";
       }
     } finally {
       isLoading = false;
@@ -71,18 +73,18 @@
 
     <Dialog.Section>
       <div class="flex flex-col gap-4">
-        <div class="rounded-lg border border-warning-default bg-warning-default/15 px-4 py-3">
+        <div class="border-warning-default bg-warning-default/15 rounded-lg border px-4 py-3">
           <div class="flex items-start gap-3">
             <AlertTriangle class="text-warning-default shrink-0" size={20} />
             <div class="flex flex-col gap-1">
-              <div class="font-semibold text-default">{template.name}</div>
-              <div class="text-sm text-dimmer">{m.permanent_action()}</div>
+              <div class="text-default font-semibold">{template.name}</div>
+              <div class="text-dimmer text-sm">{m.permanent_action()}</div>
             </div>
           </div>
         </div>
 
         {#if errorMessage}
-          <div class="rounded-lg bg-negative-default/10 px-3 py-2 text-sm text-negative-default">
+          <div class="bg-negative-default/10 text-negative-default rounded-lg px-3 py-2 text-sm">
             {errorMessage}
           </div>
         {/if}

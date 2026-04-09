@@ -23,6 +23,7 @@ Changed to use get_settings() directly:
         encryption_key=get_settings().encryption_key,  # ← Direct value
     )
 """
+
 import os
 from unittest.mock import patch
 
@@ -51,6 +52,7 @@ class TestEncryptionServiceInitialization:
             # Need to reload settings module to pick up new env vars
             from intric.main import config
             from importlib import reload
+
             reload(config)
 
             # Act: Create container (mimics what happens in API requests)

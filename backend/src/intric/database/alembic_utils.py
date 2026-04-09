@@ -1,7 +1,11 @@
+from datetime import datetime
+
 import sqlalchemy as sa
 
 
-def timestamps(indexed: bool = False) -> tuple[sa.Column, sa.Column]:
+def timestamps(
+    indexed: bool = False,
+) -> tuple[sa.Column[datetime], sa.Column[datetime]]:
     return (
         sa.Column(
             "created_at",

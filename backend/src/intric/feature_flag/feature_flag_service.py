@@ -8,7 +8,8 @@ class FeatureFlagService:
     def __init__(
         self,
         feature_flag_repo: FeatureFlagRepository,
-    ):
+    ) -> None:
+        super().__init__()
         self.feature_flag_repo = feature_flag_repo
 
     async def create_feature_flag(

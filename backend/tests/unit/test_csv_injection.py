@@ -1,6 +1,5 @@
 """Unit tests for CSV injection prevention in audit export service."""
 
-
 from intric.audit.application.audit_export_service import _sanitize_csv_cell
 
 
@@ -118,11 +117,17 @@ class TestSanitizeCsvCell:
         """Test against real-world CSV injection attack payloads."""
         # DDE (Dynamic Data Exchange) attacks
         assert _sanitize_csv_cell("=cmd|' /C calc'!A0") == "'=cmd|' /C calc'!A0"
-        assert _sanitize_csv_cell("=HYPERLINK(\"http://evil.com\")") == "'=HYPERLINK(\"http://evil.com\")"
+        assert (
+            _sanitize_csv_cell('=HYPERLINK("http://evil.com")')
+            == '\'=HYPERLINK("http://evil.com")'
+        )
 
         # Shell command execution via formula
         assert _sanitize_csv_cell("-2+3+cmd|' /C calc'!A0") == "'-2+3+cmd|' /C calc'!A0"
-        assert _sanitize_csv_cell("@SUM(1+1)*cmd|' /C calc'!A0") == "'@SUM(1+1)*cmd|' /C calc'!A0"
+        assert (
+            _sanitize_csv_cell("@SUM(1+1)*cmd|' /C calc'!A0")
+            == "'@SUM(1+1)*cmd|' /C calc'!A0"
+        )
 
         # Tab-separated injection
         assert _sanitize_csv_cell("\t=1+1") == "'\t=1+1"

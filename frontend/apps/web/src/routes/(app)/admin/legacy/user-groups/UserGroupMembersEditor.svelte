@@ -11,6 +11,7 @@
   import { Dialog, Button } from "@intric/ui";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
   import { IconSearch } from "@intric/icons/search";
   import { IconTrash } from "@intric/icons/trash";
   import { IconCheck } from "@intric/icons/check";
@@ -65,7 +66,7 @@
       selectedUsers = [];
       searchQuery = "";
     } catch (e) {
-      alert(m.could_not_add_user_to_group());
+      toastError(e, m.could_not_add_user_to_group());
       console.error(e);
     }
   });
@@ -75,7 +76,7 @@
       await intric.userGroups.removeUser({ userGroup, user });
       invalidate("admin:user-groups:load");
     } catch (e) {
-      alert(m.could_not_remove_user_from_group());
+      toastError(e, m.could_not_remove_user_from_group());
       console.error(e);
     }
   });
@@ -129,10 +130,16 @@
                 onclick={() => !isMember && toggleUserSelection(user)}
                 disabled={isMember}
                 class="border-default flex w-full items-center gap-4 border-b px-4 py-2 text-left last:border-b-0
-                  {isMember ? 'cursor-not-allowed opacity-50' : 'hover:bg-hover-dimmer cursor-pointer'}
+                  {isMember
+                  ? 'cursor-not-allowed opacity-50'
+                  : 'hover:bg-hover-dimmer cursor-pointer'}
                   {isSelected ? 'bg-accent-dimmer' : ''}"
               >
-                <div class="border-stronger flex h-5 w-5 shrink-0 items-center justify-center rounded border {isSelected ? 'bg-accent-default border-accent-default' : 'bg-primary'}">
+                <div
+                  class="border-stronger flex h-5 w-5 shrink-0 items-center justify-center rounded border {isSelected
+                    ? 'bg-accent-default border-accent-default'
+                    : 'bg-primary'}"
+                >
                   {#if isSelected}
                     <IconCheck class="h-3 w-3 text-white" />
                   {/if}
@@ -184,7 +191,9 @@
       </div>
 
       <div class="px-4 py-4">
-        <span class="text-primary mb-2 block font-medium">{m.current_members()} ({userGroup.users?.length ?? 0})</span>
+        <span class="text-primary mb-2 block font-medium"
+          >{m.current_members()} ({userGroup.users?.length ?? 0})</span
+        >
         <div class="border-default max-h-64 overflow-y-auto rounded-lg border">
           {#if (userGroup.users ?? []).length > 0}
             {#each userGroup.users ?? [] as user (user.id)}
@@ -192,7 +201,7 @@
                 class="border-default hover:bg-hover-dimmer flex items-center justify-between gap-4 border-b px-4 py-3 last:border-b-0"
               >
                 <div class="flex items-center gap-3">
-                  <MemberChip member={{ ...user, role: "member" }}></MemberChip>
+                  <MemberChip member={{ id: user.id, email: user.email }}></MemberChip>
                   <div class="flex flex-col">
                     <span class="text-primary">{user.email}</span>
                     {#if user.username}

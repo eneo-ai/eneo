@@ -7,6 +7,7 @@
   import { getAppContext } from "$lib/core/AppContext";
   import InviteLinkDialog from "./InviteLinkDialog.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
 
   const intric = getIntric();
   const { defaultRoles } = getAdminUserCtx();
@@ -24,13 +25,13 @@
     try {
       await intric.users.invite({
         email: userEmail,
-        predefined_role: userRole[0]  // Get first role from array
+        predefined_role: userRole[0] // Get first role from array
       });
       invalidate("admin:users:load");
       $showDialog = false;
       $showInviteLink = true;
     } catch (e) {
-      alert(e);
+      toastError(e);
     }
   }
 </script>

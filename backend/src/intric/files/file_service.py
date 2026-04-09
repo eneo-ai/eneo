@@ -8,13 +8,13 @@ from fastapi import UploadFile
 from intric.files.file_models import File, FileBaseWithContent, FileCreate, FileType
 from intric.files.file_protocol import FileProtocol
 from intric.files.file_repo import FileRepository
-from intric.main.config import get_settings
 from intric.main.exceptions import NotFoundException, UnauthorizedException
 from intric.users.user import UserInDB
 
 
 class FileService:
     def __init__(self, user: UserInDB, repo: FileRepository, protocol: FileProtocol):
+        super().__init__()
         self.user = user
         self.repo = repo
         self.protocol = protocol
@@ -30,34 +30,21 @@ class FileService:
         async with session.begin():
             yield
 
-    async def save_file(self, upload_file: UploadFile, *, max_size: int | None = None):
-        file = await self.protocol.to_domain(
-            upload_file,
-            max_size=(
-                max_size
-                if max_size is not None
-                else get_settings().upload_max_file_size
-            ),
-        )
+    async def save_file(self, upload_file: UploadFile):
+        file = await self.protocol.to_domain(upload_file)
 
-        return await self._save_file_record(file)
-
-    async def save_docx_template(
-        self, upload_file: UploadFile, *, max_size: int | None = None
-    ):
-        file = await self.protocol.docx_template_to_domain(
-            upload_file,
-            max_size=(
-                max_size
-                if max_size is not None
-                else get_settings().upload_max_file_size
-            ),
-        )
+        async with self._write_transaction():
+            saved_file = await self.repo.add(
+                FileCreate(
+                    **file.model_dump(),
+                    user_id=self.user.id,
+                    tenant_id=self.user.tenant_id,
+                )
+            )
 
         return await self._save_file_record(file)
 
     async def _save_file_record(self, file: FileBaseWithContent):
-
         async with self._write_transaction():
             saved_file = await self.repo.add(
                 FileCreate(

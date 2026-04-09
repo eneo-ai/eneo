@@ -1,9 +1,18 @@
-from fastapi import FastAPI
+import logging
+from typing import Protocol, cast
+
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from intric.main.exceptions import EXCEPTION_MAP, UnauthorizedException
+from intric.main.exceptions import EXCEPTION_MAP, ErrorCodes, UnauthorizedException
 from intric.main.models import GeneralError
 from intric.main.request_context import get_request_context
+
+
+class ExceptionContext(Protocol):
+    context: dict[str, object] | None
+    details: dict[str, object] | None
+    code: str | None
 
 
 def _default_message_for_status(status_code: int) -> str:
@@ -14,7 +23,7 @@ def _default_message_for_status(status_code: int) -> str:
     if status_code == 403:
         return "Forbidden: you do not have permission to perform this action."
     if status_code == 404:
-        return "Not found."
+        return "Not found"
     if status_code == 409:
         return "Conflict."
     if status_code >= 500:
@@ -22,7 +31,7 @@ def _default_message_for_status(status_code: int) -> str:
     return "Request failed."
 
 
-def _extract_request_id(request) -> str | None:
+def _extract_request_id(request: Request) -> str | None:
     request_id = request.headers.get("x-correlation-id") or request.headers.get(
         "x-request-id"
     )
@@ -36,9 +45,13 @@ def _exception_context(
     status_code: int,
     exc: Exception,
 ) -> dict[str, object] | None:
-    context = getattr(exc, "context", None)
-    if isinstance(context, dict):
-        result = dict(context)
+    typed_exc = cast(ExceptionContext, exc)
+    raw_context = getattr(typed_exc, "context", None)
+    if isinstance(raw_context, dict):
+        context_dict = cast(dict[object, object], raw_context)
+        result: dict[str, object] = {
+            str(key): value for key, value in context_dict.items()
+        }
     else:
         result = {}
 
@@ -51,21 +64,44 @@ def _exception_context(
     return result or None
 
 
+logger = logging.getLogger(__name__)
+
+
 def add_exception_handlers(app: FastAPI):
     for exception, (status_code, error_message, error_code) in EXCEPTION_MAP.items():
 
         def handler(
-            request,
-            exc,
-            status_code=status_code,
-            error_message=error_message,
-            error_code=error_code,
-        ):
+            request: Request,
+            exc: Exception,
+            status_code: int = status_code,
+            error_message: str | None = error_message,
+            error_code: ErrorCodes = error_code,
+        ) -> JSONResponse:
             message = error_message or str(exc)
             if not message or not message.strip():
                 message = _default_message_for_status(status_code)
             request_id = _extract_request_id(request)
             context = _exception_context(status_code=status_code, exc=exc)
+            raw_details = getattr(exc, "details", None)
+            details: dict[str, object] | None
+            if isinstance(raw_details, dict) and raw_details:
+                detail_dict = cast(dict[object, object], raw_details)
+                details = {str(key): value for key, value in detail_dict.items()}
+            else:
+                details = None
+
+            if status_code >= 400:
+                log_level = logging.WARNING if status_code < 500 else logging.ERROR
+                logger.log(
+                    log_level,
+                    "%s %s → %d: %s",
+                    request.method,
+                    request.url.path,
+                    status_code,
+                    message,
+                    extra={"details": details, "error_code": error_code},
+                )
+
             return JSONResponse(
                 status_code=status_code,
                 content=GeneralError(
@@ -74,6 +110,7 @@ def add_exception_handlers(app: FastAPI):
                     code=getattr(exc, "code", None),
                     context=context,
                     request_id=request_id,
+                    details=details,
                 ).model_dump(exclude_none=True),
             )
 
