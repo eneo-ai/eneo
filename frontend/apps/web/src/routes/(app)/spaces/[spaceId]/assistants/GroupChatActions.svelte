@@ -112,7 +112,7 @@
 
 <PublishingDialog
   resource={groupChat}
-  endpoints={intric.assistants}
+  endpoints={intric.groupChats}
   openController={showPublishDialog}
   awaitUpdate
 ></PublishingDialog>
