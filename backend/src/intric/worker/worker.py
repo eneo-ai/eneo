@@ -33,7 +33,12 @@ def _job_id_from_ctx(ctx: ARQContext) -> UUID | None:
     job_id = cast(UUID | str | None, ctx.get("job_id"))
     if job_id is None:
         return None
-    return job_id if isinstance(job_id, UUID) else UUID(str(job_id))
+    if isinstance(job_id, UUID):
+        return job_id
+    try:
+        return UUID(str(job_id))
+    except ValueError:
+        return None
 
 
 def _log_startup_diagnostics(settings: Settings) -> None:
