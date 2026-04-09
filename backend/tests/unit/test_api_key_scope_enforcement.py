@@ -397,7 +397,7 @@ class TestScopeEnforcementUnit:
         await svc._enforce_api_key_scope(request, key, scope_config)
 
     @pytest.mark.asyncio
-    async def test_space_key_space_scoped_info_blob_listing_route_passes_in_strict_mode(
+    async def test_space_key_space_scoped_info_blob_listing_route_passes(
         self,
     ):
         """Space-scoped key + /info-blobs/spaces/{space_id} is deterministic and allowed."""
@@ -422,9 +422,7 @@ class TestScopeEnforcementUnit:
         scope_config = {"resource_type": "info_blob", "path_param": None}
 
         with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(
-                request, key, scope_config, strict_mode=True
-            )
+            await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
     @pytest.mark.asyncio
