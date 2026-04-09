@@ -212,56 +212,6 @@ async def update_provisioning_setting(
 
 
 @settings_admin_router.patch(
-    "/scope-enforcement",
-    response_model=SettingsPublic,
-    summary="Toggle API key scope enforcement",
-    description="""
-Toggle API key scope enforcement for your tenant.
-
-**Admin Only:** Requires admin permissions.
-
-**Behavior:**
-- Updates the `api_key_scope_enforcement` feature flag for your tenant
-- When enabled: API keys are restricted to resources within their configured scope
-- When disabled: All API keys can access resources beyond their configured scope
-- Disabling scope enforcement also disables strict mode for consistency
-- Change takes effect immediately for all API key requests
-    """,
-)
-async def update_scope_enforcement_setting(
-    data: ToggleSettingUpdate,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-):
-    service = container.settings_service()
-    return await service.update_scope_enforcement_setting(enabled=data.enabled)
-
-
-@settings_admin_router.patch(
-    "/strict-mode",
-    response_model=SettingsPublic,
-    summary="Toggle API key strict mode",
-    description="""
-Toggle API key strict mode for your tenant.
-
-**Admin Only:** Requires admin permissions.
-
-**Behavior:**
-- Updates the `api_key_strict_mode` feature flag for your tenant
-- When enabled: scoped API keys are enforced with strict fail-closed semantics
-- When disabled: default scope enforcement behavior applies
-- Enabling strict mode requires `api_key_scope_enforcement` to be enabled
-- Change takes effect immediately for API key requests
-    """,
-)
-async def update_strict_mode_setting(
-    data: ToggleSettingUpdate,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-):
-    service = container.settings_service()
-    return await service.update_strict_mode_setting(enabled=data.enabled)
-
-
-@settings_admin_router.patch(
     "/api-key-expiry-notifications",
     response_model=SettingsPublic,
     summary="Toggle API key expiry notifications",

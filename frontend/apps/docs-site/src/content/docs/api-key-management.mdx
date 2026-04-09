@@ -289,13 +289,6 @@ Every key lifecycle event is logged to the audit system:
 - **Actions tracked**: creation, rotation, update, suspension, reactivation, revocation, expiration
 - **Metadata captured**: scope, permission, IP address, user agent, request ID, before/after field values, reason codes
 
-### Feature Flags
+### Scope Enforcement
 
-Two feature flags control enforcement behavior:
-
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `api_key_scope_enforcement` | Enabled | Enforce scope boundaries |
-| `api_key_strict_mode` | Disabled | Deny ambiguous list requests for scoped keys |
-
-Both flags can be toggled globally and per-tenant, allowing staged rollout.
+Scope enforcement and strict mode are always active. API keys are always restricted to resources within their configured scope.
