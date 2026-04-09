@@ -89,13 +89,19 @@ export function collectUnresolvedTemplateTokens(
 
 export type VariableCategory = "field" | "system" | "step" | "structured" | "technical" | "unknown";
 
-export const VARIABLE_CATEGORY_CLASSES: Record<VariableCategory, { chip: string; text: string }> = {
-  field:      { chip: "bg-blue-100 text-blue-700",     text: "text-blue-700" },
-  system:     { chip: "bg-indigo-100 text-indigo-700",  text: "text-indigo-700" },
-  step:       { chip: "bg-emerald-100 text-emerald-700", text: "text-emerald-700" },
-  structured: { chip: "bg-purple-100 text-purple-700",  text: "text-purple-700" },
-  technical:  { chip: "bg-sky-100 text-sky-700",        text: "text-sky-700" },
-  unknown:    { chip: "bg-rose-100 text-rose-700",       text: "text-rose-700" },
+type VariableCategoryClasses = {
+  chip: string;
+  text: string;
+  scopeClass: string;
+};
+
+export const VARIABLE_CATEGORY_CLASSES: Record<VariableCategory, VariableCategoryClasses> = {
+  field:      { chip: "label-blue bg-label-dimmer text-label-stronger",      text: "text-label-stronger", scopeClass: "label-blue" },
+  system:     { chip: "label-amethyst bg-label-dimmer text-label-stronger",  text: "text-label-stronger", scopeClass: "label-amethyst" },
+  step:       { chip: "label-green bg-label-dimmer text-label-stronger",     text: "text-label-stronger", scopeClass: "label-green" },
+  structured: { chip: "label-amethyst bg-label-dimmer text-label-stronger",  text: "text-label-stronger", scopeClass: "label-amethyst" },
+  technical:  { chip: "label-blue bg-label-dimmer text-label-stronger",      text: "text-label-stronger", scopeClass: "label-blue" },
+  unknown:    { chip: "label-red bg-label-dimmer text-label-stronger",       text: "text-label-stronger", scopeClass: "label-red" },
 };
 
 export function getChipClasses(category: VariableCategory): string {

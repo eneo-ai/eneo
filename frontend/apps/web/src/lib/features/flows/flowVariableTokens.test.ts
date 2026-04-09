@@ -173,11 +173,12 @@ describe("collectInvalidStructuredOutputReferences", () => {
 
 describe("getChipClasses", () => {
   it("returns correct classes for each category", () => {
-    expect(getChipClasses("field")).toContain("bg-blue-100");
-    expect(getChipClasses("system")).toContain("bg-indigo-100");
-    expect(getChipClasses("step")).toContain("bg-emerald-100");
-    expect(getChipClasses("structured")).toContain("bg-purple-100");
-    expect(getChipClasses("technical")).toContain("bg-sky-100");
-    expect(getChipClasses("unknown")).toContain("bg-rose-100");
+    expect(getChipClasses("field")).toContain("label-blue");
+    expect(getChipClasses("field")).toContain("bg-label-dimmer");
+    expect(getChipClasses("system")).toContain("label-amethyst");
+    expect(getChipClasses("step")).toContain("label-green");
+    expect(getChipClasses("structured")).toContain("label-amethyst");
+    expect(getChipClasses("technical")).toContain("label-blue");
+    expect(getChipClasses("unknown")).toContain("label-red");
   });
 });
