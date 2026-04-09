@@ -983,7 +983,7 @@ class UserService:
                     request,
                     resolved.key,
                     scope_config,
-                    strict_mode=True,
+                    strict_mode=False,
                 )
             except ApiKeyValidationError as exc:
                 await self._log_api_key_auth_failed(

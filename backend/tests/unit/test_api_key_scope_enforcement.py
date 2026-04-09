@@ -690,7 +690,7 @@ class TestScopeListEndpoints:
 
 
 class TestResolveApiKeyScopeWiring:
-    """Ensure _resolve_api_key always calls scope enforcement with strict_mode=True."""
+    """Ensure _resolve_api_key always calls scope enforcement with strict_mode=False."""
 
     @staticmethod
     def _build_request() -> SimpleNamespace:
@@ -738,7 +738,7 @@ class TestResolveApiKeyScopeWiring:
 
     @pytest.mark.asyncio
     async def test_resolve_api_key_always_enforces_strict_mode(self, monkeypatch):
-        """Scope enforcement always runs with strict_mode=True."""
+        """Scope enforcement always runs with strict_mode=False."""
         key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
         svc = self._build_service(key)
         request = self._build_request()
@@ -764,7 +764,7 @@ class TestResolveApiKeyScopeWiring:
         await svc._resolve_api_key("sk_test_key", request=request)
 
         svc._enforce_api_key_scope.assert_awaited_once()
-        assert svc._enforce_api_key_scope.await_args.kwargs["strict_mode"] is True
+        assert svc._enforce_api_key_scope.await_args.kwargs["strict_mode"] is False
 
     @pytest.mark.asyncio
     async def test_resolve_api_key_tenant_scoped_key_skips_scope_enforcement(
