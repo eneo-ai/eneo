@@ -819,7 +819,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # calls in Phase 1 (sessionless) don't need a DB lookup.
                 orm_embedding_model = website_row.embedding_model
                 embedding_model_spec: EmbeddingModelSpec | None = None
-                embedding_model = None
                 if orm_embedding_model:
                     family_str: str | None = orm_embedding_model.family or None
 
@@ -856,25 +855,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         )
 
                     assert orm_embedding_model.max_input is not None
-                    from intric.embedding_models.domain.embedding_model import (
-                        EmbeddingModel,
-                    )
-                    from intric.websites.domain.website import Website
-
-                    embedding_model = EmbeddingModel.to_domain(
-                        db_model=orm_embedding_model,
-                        user=container.user(),
-                        provider_name=provider_type,
-                        provider_type=provider_type,
-                    )
-
-                    website = Website.to_domain(
-                        record=website_row,
-                        embedding_model=embedding_model,
-                    )
 
                     embedding_model_spec = EmbeddingModelSpec(
-                        id=embedding_model.id,
+                        id=orm_embedding_model.id,
                         name=orm_embedding_model.name,
                         litellm_model_name=litellm_model_name,
                         family=family_str,

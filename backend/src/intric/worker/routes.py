@@ -66,22 +66,19 @@ class AuditPurgeResult(TypedDict):
 
 
 @worker.function()
-async def upload_info_blob(job_id: str, params: UploadInfoBlob, container: Container):
-    job_uuid = UUID(job_id)
+async def upload_info_blob(job_id: UUID, params: UploadInfoBlob, container: Container):
     return await upload_info_blob_task(
-        job_id=job_uuid, params=params, container=container
+        job_id=job_id, params=params, container=container
     )
 
 
 @worker.function()
-async def transcription(job_id: str, params: Transcription, container: Container):
-    return await transcription_task(
-        job_id=UUID(job_id), params=params, container=container
-    )
+async def transcription(job_id: UUID, params: Transcription, container: Container):
+    return await transcription_task(job_id=job_id, params=params, container=container)
 
 
 @worker.long_running_function()
-async def crawl(job_id: str, params: CrawlTask, container: Container):
+async def crawl(job_id: UUID, params: CrawlTask, container: Container):
     """Crawl task uses long_running_function to avoid DB pool exhaustion.
 
     Unlike regular worker.function(), this:
@@ -91,7 +88,7 @@ async def crawl(job_id: str, params: CrawlTask, container: Container):
 
     This prevents holding a DB connection for the entire crawl (5-30 minutes).
     """
-    return await crawl_task(job_id=UUID(job_id), params=params, container=container)
+    return await crawl_task(job_id=job_id, params=params, container=container)
 
 
 @worker.cron_job(
@@ -114,7 +111,7 @@ async def crawl_all_websites(container: Container) -> bool:
 
 @worker.function()
 async def update_model_usage_stats(
-    job_id: str, params: dict[str, object], container: Container
+    job_id: UUID, params: dict[str, object], container: Container
 ):
     """Worker function for updating model usage statistics.
 
@@ -122,7 +119,7 @@ async def update_model_usage_stats(
     by creating UpdateUsageStatsTaskParams inside the task function.
     """
     return await update_model_usage_stats_task(
-        job_id=UUID(job_id),
+        job_id=job_id,
         params=UpdateUsageStatsTaskParams.model_validate(params),
         container=container,
     )
@@ -130,7 +127,7 @@ async def update_model_usage_stats(
 
 @worker.function(with_user=False)
 async def recalculate_tenant_usage_stats_job(
-    job_id: str, params: dict[str, object], container: Container
+    job_id: UUID, params: dict[str, object], container: Container
 ):
     """Worker function for recalculating usage statistics for a specific tenant.
 
@@ -139,8 +136,6 @@ async def recalculate_tenant_usage_stats_job(
         params: Dictionary containing tenant_id
         container: Dependency injection container
     """
-    from uuid import UUID
-
     # Extract tenant_id from params
     tenant_id = UUID(str(params["tenant_id"]))
 
@@ -156,7 +151,9 @@ async def recalculate_usage_stats(container: Container) -> bool:
 
 
 @worker.function(with_user=False)
-async def log_audit_event(job_id: str, params: dict[str, object], container: Container):
+async def log_audit_event(
+    job_id: UUID, params: dict[str, object], container: Container
+):
     """Worker function for async audit logging.
 
     Args:
@@ -169,7 +166,7 @@ async def log_audit_event(job_id: str, params: dict[str, object], container: Con
     """
     session = cast(AsyncSession, container.session())
     return await log_audit_event_task(
-        job_id=UUID(job_id),
+        job_id=job_id,
         params=AuditLogTaskParams.model_validate(params),
         session=session,
     )
@@ -177,7 +174,7 @@ async def log_audit_event(job_id: str, params: dict[str, object], container: Con
 
 @worker.function(with_user=False)
 async def export_audit_logs(
-    job_id: str, params: dict[str, object], container: Container
+    job_id: UUID, params: dict[str, object], container: Container
 ):
     """Worker function for async audit log export.
 
@@ -195,7 +192,7 @@ async def export_audit_logs(
     session = cast(AsyncSession, container.session())
     redis = container.redis_client()
     return await export_audit_logs_task(
-        job_id=UUID(job_id),
+        job_id=job_id,
         params=AuditExportTaskParams.model_validate(params),
         session=session,
         redis=redis,
@@ -204,12 +201,12 @@ async def export_audit_logs(
 
 @worker.function()
 async def analyze_conversation_insights(
-    job_id: str,
+    job_id: UUID,
     params: AnalyzeConversationInsightsTask,
     container: Container,
 ):
     return await analyze_conversation_insights_task(
-        job_id=UUID(job_id), params=params, container=container
+        job_id=job_id, params=params, container=container
     )
 
 
