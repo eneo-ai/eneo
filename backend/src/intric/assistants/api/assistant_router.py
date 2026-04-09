@@ -819,8 +819,6 @@ async def get_assistant_sessions(
         cursor=cursor,
         previous=previous,
     )
-    if cursor is None:
-        cursor = datetime.min
 
     return to_sessions_paginated_response(
         sessions=sessions,

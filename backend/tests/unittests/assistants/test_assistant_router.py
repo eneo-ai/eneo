@@ -19,7 +19,7 @@ from intric.assistants.api.assistant_models import (
     AskAssistant,
     AssistantResponse,
 )
-from intric.assistants.api.assistant_router import ask_assistant
+from intric.assistants.api.assistant_router import ask_assistant, get_assistant_sessions
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.sessions.session import SessionInDB
@@ -344,7 +344,28 @@ class TestAssistantResponseStructure:
         session_id = mock_response.session.id
         assert session_id == mock_session.id
 
-        # Attempting to access response.session_id should either:
-        # - Return the mock's default (if not using spec)
-        # - Raise AttributeError (if using strict spec)
-        # Our mock uses spec=AssistantResponse, so session_id won't be a real attribute
+
+class TestAssistantSessionPagination:
+    async def test_missing_cursor_stays_none_in_paginated_response(
+        self, mock_container
+    ):
+        assistant_id = uuid.uuid4()
+        session = SessionInDB(
+            id=uuid.uuid4(),
+            name="Session",
+            user_id=uuid.uuid4(),
+            created_at=None,
+        )
+        session_service = AsyncMock()
+        session_service.get_sessions_by_assistant.return_value = ([session], 1)
+        mock_container.session_service.return_value = session_service
+
+        response = await get_assistant_sessions(
+            id=assistant_id,
+            container=mock_container,
+            limit=10,
+            cursor=None,
+            previous=False,
+        )
+
+        assert response.previous_cursor is None

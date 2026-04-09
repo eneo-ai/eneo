@@ -1,6 +1,5 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import TYPE_CHECKING, Union, cast
 from uuid import UUID
 
@@ -18,6 +17,7 @@ from intric.embedding_models.application.embedding_model_crud_service import (
     EmbeddingModelCRUDService,
 )
 from intric.icons.icon_repo import IconRepository
+from intric.main.datetime_utils import datetime_or_utc_min
 from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -149,7 +149,7 @@ class SpaceService:
         ) -> "EmbeddingModel | None":
             for model in sorted(
                 models,
-                key=lambda model: model.created_at or datetime.min,
+                key=lambda model: datetime_or_utc_min(model.created_at),
                 reverse=True,
             ):
                 if model.can_access:

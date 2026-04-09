@@ -308,7 +308,7 @@ class AuditService:
 
         # Enqueue to ARQ
         await job_manager.enqueue(
-            cast(Task, "log_audit_event"), job_id, cast(TaskParams, params)
+            Task.LOG_AUDIT_EVENT, job_id, cast(TaskParams, params)
         )
 
         return job_id

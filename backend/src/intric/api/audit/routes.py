@@ -966,7 +966,7 @@ async def request_async_export(
 
     # Enqueue to ARQ
     await job_manager.enqueue(
-        cast(Task, "export_audit_logs"),
+        Task.EXPORT_AUDIT_LOGS,
         job_id=job_id,
         params=cast(TaskParams, task_params.to_dict()),
     )
