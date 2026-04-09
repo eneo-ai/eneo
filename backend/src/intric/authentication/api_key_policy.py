@@ -14,6 +14,7 @@ from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyCreateRequest,
+    ApiKeyOwnership,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
@@ -138,6 +139,27 @@ class ApiKeyPolicyService:
 
         await self._validate_expiration(request.expires_at)
         await self._validate_rate_limit(request.rate_limit)
+
+        if request.ownership == ApiKeyOwnership.SERVICE:
+            user = self._require_user()
+            if Permission.ADMIN not in user.permissions:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_permission",
+                    message="Service-owned keys require tenant admin permission.",
+                )
+            if (
+                request.permission in (ApiKeyPermission.WRITE, ApiKeyPermission.ADMIN)
+                and request.allowed_ips is None
+                and request.expires_at is None
+            ):
+                raise ApiKeyValidationError(
+                    status_code=400,
+                    code="invalid_request",
+                    message=(
+                        "Service-owned write/admin keys require an IP allowlist or expiration."
+                    ),
+                )
 
         if request.resource_permissions is not None:
             if request.key_type == ApiKeyType.PK:

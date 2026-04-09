@@ -87,8 +87,10 @@ class CompletionModel(AIModel):
         if self.max_input_tokens is None:
             raise ValueError("Completion model is missing max_input_tokens")
         self.token_limit = self.max_input_tokens
-        self.max_output_tokens = max_output_tokens or (
-            defaults.max_output_tokens if defaults else None
+        self.max_output_tokens = (
+            max_output_tokens
+            or (defaults.max_output_tokens if defaults else None)
+            or token_limit
         )
         if self.max_output_tokens is None:
             raise ValueError("Completion model is missing max_output_tokens")

@@ -88,6 +88,7 @@ class ApiKeysV2Repository:
         scope_id: UUID | None = None,
         state: ApiKeyState | None = None,
         key_type: str | None = None,
+        ownership: str | None = None,
         owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
         search: str | None = None,
@@ -103,6 +104,7 @@ class ApiKeysV2Repository:
             scope_id=scope_id,
             state=state,
             key_type=key_type,
+            ownership=ownership,
             owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
             search=search,
@@ -133,6 +135,7 @@ class ApiKeysV2Repository:
         scope_id: UUID | None = None,
         state: ApiKeyState | None = None,
         key_type: str | None = None,
+        ownership: str | None = None,
         owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
         search: str | None = None,
@@ -148,6 +151,7 @@ class ApiKeysV2Repository:
             scope_id=scope_id,
             state=state,
             key_type=key_type,
+            ownership=ownership,
             owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
             search=search,
@@ -165,6 +169,7 @@ class ApiKeysV2Repository:
         scope_id: UUID | None = None,
         state: ApiKeyState | None = None,
         key_type: str | None = None,
+        ownership: str | None = None,
         owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
         search: str | None = None,
@@ -182,6 +187,7 @@ class ApiKeysV2Repository:
             scope_id=scope_id,
             state=state,
             key_type=key_type,
+            ownership=ownership,
             owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
             search=search,
@@ -198,6 +204,7 @@ class ApiKeysV2Repository:
         scope_id: UUID | None,
         state: ApiKeyState | None,
         key_type: str | None,
+        ownership: str | None,
         owner_user_id: UUID | None,
         created_by_user_id: UUID | None,
         search: str | None,
@@ -225,6 +232,10 @@ class ApiKeysV2Repository:
                 query = query.where(self.table.state == state.value)
         if key_type is not None:
             query = query.where(self.table.key_type == key_type)
+        if ownership == "service":
+            query = query.where(self.table.owner_user_id.is_(None))
+        elif ownership == "user":
+            query = query.where(self.table.owner_user_id.is_not(None))
         if owner_user_id is not None:
             query = query.where(self.table.owner_user_id == owner_user_id)
         if created_by_user_id is not None:

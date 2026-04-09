@@ -129,6 +129,18 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         if not v:
             return {}
 
+        redirect_only_fields = {
+            "canonical_public_origin",
+            "redirect_path",
+            "additional_redirect_uris",
+        }
+        if set(v.keys()) <= redirect_only_fields:
+            if "redirect_path" in v:
+                from intric.main.config import canonicalize_legacy_redirect_path
+
+                v["redirect_path"] = canonicalize_legacy_redirect_path(v["redirect_path"])
+            return v
+
         # Required fields for federation
         required = {
             "provider",
@@ -158,11 +170,14 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
 
         # Validate redirect_path (optional field)
         if "redirect_path" in v:
-            redirect_path = v["redirect_path"]
+            from intric.main.config import canonicalize_legacy_redirect_path
+
+            redirect_path = canonicalize_legacy_redirect_path(v["redirect_path"])
             if not isinstance(redirect_path, str):
                 raise ValueError("redirect_path must be a string")
             if not redirect_path.startswith("/"):
                 raise ValueError("redirect_path must start with /")
+            v["redirect_path"] = redirect_path
 
         # Validate allowed_domains (optional but recommended)
         if "allowed_domains" in v:

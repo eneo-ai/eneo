@@ -9,6 +9,7 @@ from pydantic import (
     EmailStr,
     Field,
     ValidationInfo,
+    computed_field,
     field_validator,
 )
 
@@ -113,6 +114,11 @@ class ApiKeyScopeType(str, Enum):
     APP = "app"
 
 
+class ApiKeyOwnership(str, Enum):
+    USER = "user"
+    SERVICE = "service"
+
+
 class ApiKeyNotificationTargetType(str, Enum):
     KEY = "key"
     ASSISTANT = "assistant"
@@ -179,6 +185,7 @@ class ApiKeyCreateRequest(BaseModel):
     permission: ApiKeyPermission = ApiKeyPermission.READ
     scope_type: ApiKeyScopeType
     scope_id: Optional[UUID] = None
+    ownership: ApiKeyOwnership = ApiKeyOwnership.USER
     allowed_origins: Optional[list[str]] = None
     allowed_ips: Optional[list[str]] = None
     expires_at: Optional[datetime] = None
@@ -211,7 +218,7 @@ class ApiKeyUserSnapshot(BaseModel):
 
 class ApiKeyV2(BaseModel):
     id: UUID
-    owner_user_id: UUID
+    owner_user_id: Optional[UUID] = None
     key_prefix: str
     key_suffix: str
     name: str
@@ -243,6 +250,15 @@ class ApiKeyV2(BaseModel):
     search_match_reasons: Optional[list[ApiKeySearchMatchReason]] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @computed_field
+    @property
+    def ownership(self) -> ApiKeyOwnership:
+        return (
+            ApiKeyOwnership.SERVICE
+            if self.owner_user_id is None
+            else ApiKeyOwnership.USER
+        )
 
 
 class ApiKeyV2InDB(ApiKeyV2):

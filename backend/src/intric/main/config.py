@@ -89,6 +89,32 @@ def validate_public_origin(origin: str | None) -> str | None:
     return f"{scheme}://{host}{port}"
 
 
+def canonicalize_legacy_redirect_path(path: str | None) -> str | None:
+    if path is None:
+        return None
+
+    path = path.strip()
+    if not path:
+        return None
+
+    parsed = urlparse(path)
+    normalized_path = parsed.path or path
+    if not normalized_path.startswith("/"):
+        return normalized_path
+    if len(normalized_path) > 1:
+        normalized_path = normalized_path.rstrip("/")
+    return normalized_path or "/"
+
+
+def validate_redirect_path(path: str | None) -> str | None:
+    path = canonicalize_legacy_redirect_path(path)
+    if path is None:
+        return None
+    if not path.startswith("/"):
+        raise ValueError("redirect_path must start with /")
+    return path
+
+
 def _set_app_version():
     # Try Docker path first, then local dev path
     manifest_path = _DOCKER_MANIFEST if _DOCKER_MANIFEST.exists() else _LOCAL_MANIFEST

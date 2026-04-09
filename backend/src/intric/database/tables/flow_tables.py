@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlalchemy import CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, UniqueConstraint
@@ -321,7 +321,7 @@ class FlowRuns(BasePublic):
         nullable=False,
         index=True,
     )
-    trace_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    trace_id: Mapped[UUID] = mapped_column(default=uuid4, nullable=False, index=True)
     status: Mapped[str] = mapped_column(
         sa.String(32),
         nullable=False,

@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from intric.flows.ai_builder.ai_builder_models import InputSource, InputType, OutputType
+from intric.flows.ai_builder.ai_builder_domain_models import AssistantSpec
 
 DocumentDeliveryMode = Literal["not_applicable", "generated", "template_fill"]
 StructuredFieldType = Literal["string", "number", "boolean", "object", "array"]
@@ -45,7 +46,8 @@ class NewStepDraft(BaseModel):
     """Shared authoring contract for a brand-new step."""
 
     name: str
-    instructions: str
+    instructions: str | None = None
+    assistant_spec: AssistantSpec | None = None
     input_source: InputSource
     input_type: InputType = InputType.TEXT
     output_type: OutputType = OutputType.TEXT
@@ -61,7 +63,9 @@ class NewStepDraft(BaseModel):
 
     @field_validator("name", "instructions")
     @classmethod
-    def _normalize_required_text(cls, value: str) -> str:
+    def _normalize_required_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.strip()
         if not normalized:
             raise ValueError("Steps require non-empty text values.")
@@ -69,7 +73,9 @@ class NewStepDraft(BaseModel):
 
     @field_validator("instructions")
     @classmethod
-    def _reject_template_tokens(cls, value: str) -> str:
+    def _reject_template_tokens(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         if "{{" in value or "}}" in value:
             raise ValueError("Step instructions must not contain template variables.")
         return value
@@ -104,6 +110,15 @@ class NewStepDraft(BaseModel):
 
     @model_validator(mode="after")
     def _validate_structured_depth(self) -> "NewStepDraft":
+        if self.instructions is None and self.assistant_spec is not None:
+            self.instructions = self.assistant_spec.instructions
+        if self.instructions is None:
+            raise ValueError("Steps require non-empty text values.")
+        if self.assistant_spec is not None:
+            if self.model_ref is None:
+                self.model_ref = self.assistant_spec.model_ref
+            if not self.knowledge_refs:
+                self.knowledge_refs = list(self.assistant_spec.knowledge_refs)
         if self.output_fields:
             _ensure_field_depth(self.output_fields)
         return self

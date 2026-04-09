@@ -29,12 +29,12 @@ ALL_CATEGORIES = [
 # Expected action counts per category
 EXPECTED_CATEGORY_COUNTS = {
     "admin_actions": 23,
-    "user_actions": 41,
+    "user_actions": 50,
     "security_events": 6,
-    "file_operations": 2,
+    "file_operations": 3,
     "integration_events": 19,
     "system_actions": 3,
-    "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
+    "audit_access": 5,
 }
 
 
@@ -667,20 +667,20 @@ class TestAllCategoriesHaveCorrectActionCounts:
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "admin_actions")
         assert count == 23
 
-    def test_user_actions_has_41_actions(self):
-        """Verify user_actions has 41 action types."""
+    def test_user_actions_has_50_actions(self):
+        """Verify user_actions has 50 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "user_actions")
-        assert count == 41
+        assert count == 50
 
     def test_security_events_has_6_actions(self):
         """Verify security_events has 6 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "security_events")
         assert count == 6
 
-    def test_file_operations_has_2_actions(self):
-        """Verify file_operations has 2 action types."""
+    def test_file_operations_has_3_actions(self):
+        """Verify file_operations has 3 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "file_operations")
-        assert count == 2
+        assert count == 3
 
     def test_integration_events_has_19_actions(self):
         """Verify integration_events has 19 action types."""
@@ -694,12 +694,11 @@ class TestAllCategoriesHaveCorrectActionCounts:
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "system_actions")
         assert count == 3
 
-    def test_audit_access_has_3_actions(self):
-        """Verify audit_access has 3 action types (including AUDIT_SESSION_CREATED)."""
+    def test_audit_access_has_5_actions(self):
+        """Verify audit_access has 5 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "audit_access")
-        assert count == 3, (
-            "audit_access should have 3 actions: "
-            "AUDIT_SESSION_CREATED, AUDIT_LOG_VIEWED, AUDIT_LOG_EXPORTED"
+        assert count == 5, (
+            "audit_access should have 5 actions including audit-log and flow-evidence access events"
         )
 
     def test_total_actions_equals_action_type_count(self):
@@ -733,6 +732,8 @@ class TestAuditAccessCategory:
             ActionType.AUDIT_SESSION_CREATED.value,
             ActionType.AUDIT_LOG_VIEWED.value,
             ActionType.AUDIT_LOG_EXPORTED.value,
+            ActionType.FLOW_EVIDENCE_VIEWED.value,
+            ActionType.FLOW_EVIDENCE_EXPORTED_JSON.value,
         }
         actual_actions = {
             action for action, cat in CATEGORY_MAPPINGS.items() if cat == "audit_access"

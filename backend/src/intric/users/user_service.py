@@ -45,6 +45,7 @@ from intric.main.logging import get_logger
 from intric.main.models import ModelId
 from intric.predefined_roles.predefined_role import PredefinedRoleName
 from intric.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
+from intric.roles.permissions import Permission
 from intric.settings.settings import SettingsUpsert
 from intric.settings.settings_repo import SettingsRepository
 from intric.tenants.tenant import TenantState
@@ -691,6 +692,28 @@ class UserService:
                 status_code=401,
                 code="invalid_api_key",
                 message="API key tenant mismatch.",
+            )
+        scope_type = (
+            resolved.key.scope_type.value
+            if hasattr(resolved.key.scope_type, "value")
+            else resolved.key.scope_type
+        )
+        permission = (
+            resolved.key.permission.value
+            if hasattr(resolved.key.permission, "value")
+            else resolved.key.permission
+        )
+        user_permissions = getattr(user, "permissions", [])
+        if (
+            resolved.key.owner_user_id is not None
+            and scope_type == ApiKeyScopeType.TENANT.value
+            and permission == ApiKeyPermission.ADMIN.value
+            and Permission.ADMIN not in user_permissions
+        ):
+            raise ApiKeyValidationError(
+                status_code=403,
+                code="insufficient_permission",
+                message="API key owner no longer has tenant admin permission.",
             )
 
         ip_address, request_id, user_agent = extract_audit_context(request)

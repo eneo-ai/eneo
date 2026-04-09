@@ -97,8 +97,8 @@ class TestCategoryMappings:
             action for action, cat in CATEGORY_MAPPINGS.items() if cat == "user_actions"
         ]
         assert (
-            len(user_actions) == 41
-        ), f"Expected 41 user actions, got {len(user_actions)}"
+            len(user_actions) == 50
+        ), f"Expected 50 user actions, got {len(user_actions)}"
         assert ActionType.TOOL_APPROVAL_SUBMITTED.value in user_actions
         assert ActionType.FLOW_CREATED.value in user_actions
         assert ActionType.FLOW_RUN_CREATED.value in user_actions
@@ -300,12 +300,12 @@ class TestCategoryDistribution:
         """Verify exact counts for each category."""
         expected_counts = {
             "admin_actions": 23,
-            "user_actions": 41,
+            "user_actions": 50,
             "security_events": 6,
-            "file_operations": 2,
+            "file_operations": 3,
             "integration_events": 19,
             "system_actions": 3,
-            "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
+            "audit_access": 5,
         }
 
         for category, expected_count in expected_counts.items():

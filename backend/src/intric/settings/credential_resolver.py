@@ -366,7 +366,7 @@ class CredentialResolver:
         """
         # SINGLE-TENANT MODE (federation_per_tenant_enabled=false):
         # ONLY use environment variables, never check database
-        if not self.settings.federation_per_tenant_enabled:
+        if not getattr(self.settings, "federation_per_tenant_enabled", False):
             if self.settings.oidc_discovery_endpoint and self.settings.oidc_client_secret:
                 config = {
                     "provider": "mobilityguard",  # Legacy global provider

@@ -243,3 +243,7 @@ The branch is not fully green because the latest develop-aligned baseline carrie
   - Frontend production build still fails in the merged baseline with Vite/esbuild ending on `error during build: undefined` after large volumes of Svelte diagnostics.
   - Full backend test suite still fails outside flows scope on the API-key ownership import contract.
   - Frontend unit tests still fail in Vitest worker startup/teardown before finishing cleanly.
+
+## Ralph restart
+- User provided new evidence that the prior merge was stale.
+- Updated execution order: checkpoint current fixes, fetch latest origin/develop, merge it, verify ancestry with git merge-base, then continue verification.

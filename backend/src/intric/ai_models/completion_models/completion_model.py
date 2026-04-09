@@ -120,6 +120,16 @@ class CompletionModelBase(BaseModel):
             max_input_tokens = token_limit
             data["max_input_tokens"] = token_limit
 
+        if data.get("max_output_tokens") is None:
+            defaults = lookup_model_defaults(
+                data.get("litellm_model_name"),
+                data.get("name"),
+            )
+            if defaults is not None and defaults.max_output_tokens is not None:
+                data["max_output_tokens"] = defaults.max_output_tokens
+            elif token_limit is not None:
+                data["max_output_tokens"] = token_limit
+
         return data
 
     @computed_field  # type: ignore[prop-decorator]

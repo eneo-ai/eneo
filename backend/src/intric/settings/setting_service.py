@@ -64,7 +64,11 @@ class SettingService:
         return feature_flag
 
     async def _set_feature_flag_for_tenant(self, *, name: str, enabled: bool) -> None:
-        feature_flag = await self._require_feature_flag(name)
+        feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
+            name=name
+        )
+        if feature_flag is None:
+            feature_flag = await self.feature_flag_service.create_feature_flag(name=name)
         if feature_flag.feature_id is None:
             raise ValueError(f"{name} feature flag is missing an id")
 

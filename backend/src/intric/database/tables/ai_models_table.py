@@ -13,6 +13,16 @@ from intric.database.tables.tenant_table import Tenants
 
 
 class CompletionModels(BasePublic):
+    def __init__(self, *args, **kwargs):
+        token_limit = kwargs.get("token_limit")
+        if "max_input_tokens" not in kwargs:
+            kwargs["max_input_tokens"] = token_limit
+        if "max_output_tokens" not in kwargs:
+            kwargs["max_output_tokens"] = (
+                min(token_limit // 4, 4096) if token_limit is not None else None
+            )
+        super().__init__(*args, **kwargs)
+
     name: Mapped[str] = mapped_column()
     nickname: Mapped[str] = mapped_column()
     open_source: Mapped[Optional[bool]] = mapped_column()
