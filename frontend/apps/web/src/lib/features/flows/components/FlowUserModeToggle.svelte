@@ -17,7 +17,7 @@
     </Tabs.Trigger>
     <Tabs.Trigger value="power_user" title={m.flow_power_user_mode_tooltip()} class="px-3.5 py-1.5">
       {m.flow_power_user_mode()}
-      {#if $mode === "power_user"}<span class="ml-1 inline-block size-1.5 rounded-full bg-amber-400"></span>{/if}
+      {#if $mode === "power_user"}<span class="bg-warning-default ml-1 inline-block size-1.5 rounded-full"></span>{/if}
     </Tabs.Trigger>
   </Tabs.List>
 </Tabs.Root>
