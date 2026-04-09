@@ -166,6 +166,10 @@ class AssistantCreatePublic(AssistantBase):
 class AssistantUpdatePublic(AssistantCreatePublic):
     prompt: Optional[PromptCreate] = None
     attachments: Optional[list[ModelId]] = None
+    groups: Optional[list[ModelId]] = None  # type: ignore[assignment]
+    websites: Optional[list[ModelId]] = None  # type: ignore[assignment]
+    integration_knowledge_list: Optional[list[ModelId]] = None  # type: ignore[assignment]
+    mcp_servers: Optional[list[ModelId]] = None  # type: ignore[assignment]
     mcp_tools: Optional[list[MCPToolSetting]] = None
     description: Optional[str] = Field(  # type: ignore[call-overload]
         default=NOT_PROVIDED,
