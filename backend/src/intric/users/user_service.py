@@ -983,7 +983,6 @@ class UserService:
                     request,
                     resolved.key,
                     scope_config,
-                    strict_mode=False,
                 )
             except ApiKeyValidationError as exc:
                 await self._log_api_key_auth_failed(
@@ -1280,20 +1279,11 @@ class UserService:
 
         return None, None
 
-    def _strict_scope_hint(self, *, resource_type: str, path_param: str | None) -> str:
-        if path_param is not None:
-            return f"path parameter '{path_param}'"
-        if resource_type == "info_blob":
-            return "path parameter 'id' or 'space_id'"
-        return "a deterministic scoped path parameter"
-
     async def _enforce_api_key_scope(
         self,
         request: Request,
         key: ApiKeyV2InDB,
         scope_config: dict[str, object],
-        *,
-        strict_mode: bool = False,
     ) -> None:
         """Enforce API key scope restrictions.
 
@@ -1302,7 +1292,6 @@ class UserService:
         """
         resource_type = cast(str, scope_config["resource_type"])
         path_param = cast("str | None", scope_config["path_param"])
-        self_filtering = cast(bool, scope_config.get("self_filtering", False))
         scope_type = ApiKeyScopeType(key.scope_type)
 
         # 1. Tenant-scoped keys always pass (fast path)
@@ -1329,20 +1318,6 @@ class UserService:
 
         # 4. LIST-ENDPOINT RULES (no resource_id in path)
         if resource_id is None:
-            # Files are intentionally user-scoped (not space-scoped). They are allowed for
-            # scoped keys on GET/POST and restricted on DELETE by a separate tenant-only guard.
-            # Keep strict-mode protections for all other ambiguous list endpoints.
-            if strict_mode and not self_filtering and resource_type != "file":
-                raise ApiKeyValidationError(
-                    status_code=403,
-                    code="insufficient_scope",
-                    message=(
-                        f"API key is scoped to {key.scope_type} '{key.scope_id}'. "
-                        f"Strict mode requires deterministic scope filtering for "
-                        f"resource type '{resource_type}'. "
-                        f"Expected {self._strict_scope_hint(resource_type=resource_type, path_param=path_param)}."
-                    ),
-                )
             if scope_type == ApiKeyScopeType.SPACE:
                 # Space-scoped: pass — service layer filters by space membership
                 return

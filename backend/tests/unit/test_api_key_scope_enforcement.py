@@ -394,7 +394,7 @@ class TestScopeEnforcementUnit:
         request = _scope_request(path_params={"id": str(blob_id)})
         scope_config = {"resource_type": "info_blob", "path_param": None}
 
-        await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
+        await svc._enforce_api_key_scope(request, key, scope_config)
 
     @pytest.mark.asyncio
     async def test_space_key_space_scoped_info_blob_listing_route_passes_in_strict_mode(
@@ -407,7 +407,7 @@ class TestScopeEnforcementUnit:
         request = _scope_request(path_params={"space_id": str(space_id)})
         scope_config = {"resource_type": "info_blob", "path_param": None}
 
-        await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
+        await svc._enforce_api_key_scope(request, key, scope_config)
 
     @pytest.mark.asyncio
     async def test_space_key_space_scoped_info_blob_listing_route_wrong_space_denied(
@@ -428,26 +428,8 @@ class TestScopeEnforcementUnit:
         assert exc_info.value.code == "insufficient_scope"
 
     @pytest.mark.asyncio
-    async def test_info_blob_route_ignores_non_deterministic_session_id_in_strict_mode(
-        self,
-    ):
-        """info_blob fallback only supports id/space_id; session_id must not be inferred."""
-        space_id = uuid4()
-        svc = _make_user_service()
-        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=space_id)
-        request = _scope_request(path_params={"session_id": str(uuid4())})
-        scope_config = {"resource_type": "info_blob", "path_param": None}
-
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(
-                request, key, scope_config, strict_mode=True
-            )
-        assert exc_info.value.code == "insufficient_scope"
-        assert "path parameter 'id' or 'space_id'" in exc_info.value.message
-
-    @pytest.mark.asyncio
-    async def test_space_key_file_detail_route_strict_mode_allowed(self):
-        """File routes are intentionally allowed in strict mode (user-scoped policy)."""
+    async def test_space_key_file_detail_route_allowed(self):
+        """File routes are allowed (user-scoped policy)."""
         space_id = uuid4()
         file_id = uuid4()
         svc = _make_user_service()
@@ -455,10 +437,10 @@ class TestScopeEnforcementUnit:
         request = _scope_request(path_params={"id": str(file_id)})
         scope_config = {"resource_type": "file", "path_param": None}
 
-        await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
+        await svc._enforce_api_key_scope(request, key, scope_config)
 
     @pytest.mark.asyncio
-    async def test_space_key_file_detail_route_non_strict_mode_stays_list_path(self):
+    async def test_space_key_file_detail_route_stays_list_path(self):
         """File detail route should not reinterpret file id as space id."""
         space_id = uuid4()
         svc = _make_user_service(session_scalar_return=space_id)
@@ -466,7 +448,7 @@ class TestScopeEnforcementUnit:
         request = _scope_request(path_params={"id": str(uuid4())})
         scope_config = {"resource_type": "file", "path_param": None}
 
-        await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=False)
+        await svc._enforce_api_key_scope(request, key, scope_config)
         svc.repo.session.scalar.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -631,66 +613,14 @@ class TestScopeListEndpoints:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
-    async def test_space_key_list_denied_in_strict_mode(self):
-        """Strict mode denies non-tenant scoped list endpoints when scope cannot be proven."""
-        svc = _make_user_service()
-        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
-        request = _scope_request(path_params={})  # list endpoint (no resource id)
-        scope_config = {"resource_type": "assistant", "path_param": "id"}
-
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(
-                request, key, scope_config, strict_mode=True
-            )
-        assert exc_info.value.code == "insufficient_scope"
-        assert (
-            "Strict mode requires deterministic scope filtering"
-            in exc_info.value.message
-        )
-        assert "path parameter 'id'" in exc_info.value.message
-
-    @pytest.mark.asyncio
-    async def test_assistant_key_list_denied_in_strict_mode(self):
-        """Strict mode denies assistant-scoped list endpoints as well."""
-        svc = _make_user_service()
-        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4())
-        request = _scope_request(path_params={})  # list endpoint (no resource id)
-        scope_config = {"resource_type": "assistant", "path_param": "id"}
-
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(
-                request, key, scope_config, strict_mode=True
-            )
-        assert exc_info.value.code == "insufficient_scope"
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "scope_type",
-        [ApiKeyScopeType.SPACE, ApiKeyScopeType.ASSISTANT, ApiKeyScopeType.APP],
-    )
-    async def test_file_list_allowed_in_strict_mode_for_scoped_keys(self, scope_type):
-        """Strict mode keeps intentionally-allowed file routes working for scoped keys."""
-        svc = _make_user_service()
-        key = _make_key(scope_type=scope_type, scope_id=uuid4())
-        request = _scope_request(path_params={})
-        scope_config = {"resource_type": "file", "path_param": None}
-
-        await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
-
 
 # ---------------------------------------------------------------------------
-# TestScopeToggle — env flag + tenant feature flag
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# TestResolveApiKeyScopeWiring — runtime scope enforcement forwarding checks
+# TestResolveApiKeyScopeWiring — runtime scope enforcement checks
 # ---------------------------------------------------------------------------
 
 
 class TestResolveApiKeyScopeWiring:
-    """Ensure _resolve_api_key always calls scope enforcement with strict_mode=False."""
+    """Ensure _resolve_api_key calls scope enforcement for non-tenant keys."""
 
     @staticmethod
     def _build_request() -> SimpleNamespace:
@@ -737,8 +667,8 @@ class TestResolveApiKeyScopeWiring:
         return svc
 
     @pytest.mark.asyncio
-    async def test_resolve_api_key_always_enforces_strict_mode(self, monkeypatch):
-        """Scope enforcement always runs with strict_mode=False."""
+    async def test_resolve_api_key_enforces_scope_for_non_tenant_key(self, monkeypatch):
+        """Scope enforcement is called for non-tenant scoped keys."""
         key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
         svc = self._build_service(key)
         request = self._build_request()
@@ -764,7 +694,6 @@ class TestResolveApiKeyScopeWiring:
         await svc._resolve_api_key("sk_test_key", request=request)
 
         svc._enforce_api_key_scope.assert_awaited_once()
-        assert svc._enforce_api_key_scope.await_args.kwargs["strict_mode"] is False
 
     @pytest.mark.asyncio
     async def test_resolve_api_key_tenant_scoped_key_skips_scope_enforcement(
