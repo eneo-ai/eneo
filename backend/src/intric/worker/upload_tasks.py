@@ -41,8 +41,7 @@ async def transcription_task(
         uploader = container.text_processor()
         group_service = container.group_service()
         group = await group_service.get_group(params.group_id)
-        embedding_model_repo = container.embedding_model_repo2()
-        embedding_model = await embedding_model_repo.one(group.embedding_model_id)
+        embedding_model = group.embedding_model
 
         text = await transcriber.transcribe_from_filepath(
             filepath=filepath, transcription_model=transcription_model
@@ -76,8 +75,7 @@ async def upload_info_blob_task(
         uploader = container.text_processor()
         group_service = container.group_service()
         group = await group_service.get_group(params.group_id)
-        embedding_model_repo = container.embedding_model_repo2()
-        embedding_model = await embedding_model_repo.one(group.embedding_model_id)
+        embedding_model = group.embedding_model
 
         info_blob = await uploader.process_file(
             filepath=filepath,

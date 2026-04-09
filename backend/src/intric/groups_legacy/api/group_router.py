@@ -1,4 +1,4 @@
-from typing import Annotated, cast
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, UploadFile
@@ -16,7 +16,6 @@ from intric.collections.presentation.collection_models import (
     CollectionPublic,
     CollectionUpdate,
 )
-from intric.embedding_models.domain.embedding_model import EmbeddingModel
 from intric.groups_legacy.api import group_protocol
 from intric.groups_legacy.api.group_models import (
     CreateGroupRequest,
@@ -264,9 +263,7 @@ async def add_info_blobs(
     for info_blob in info_blobs_added:
         await datastore.add(
             info_blob=info_blob,
-            # EmbeddingModelLegacy is structurally compatible — legacy groups predate
-            # the new EmbeddingModel domain type; cast avoids runtime cost.
-            embedding_model=cast(EmbeddingModel, group.embedding_model),
+            embedding_model=group.embedding_model,
         )
         info_blob_updated = await service.update_info_blob_size(info_blob.id)
         info_blobs_updated.append(info_blob_updated)

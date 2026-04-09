@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, BinaryIO, cast
 from uuid import UUID
 
 from intric.ai_models.ai_models_service import AIModelsService
+from intric.collections.domain.collection import Collection
 from intric.groups_legacy.api.group_models import (
     CreateGroupRequest,
     CreateSpaceGroup,
@@ -48,16 +49,6 @@ class GroupService:
         self.actor_manager = actor_manager
         self.task_service = task_service
         super().__init__()
-
-    async def check_space_embedding_model(self, group: Group):
-        if group.space_id is None:
-            raise BadRequestException("Group has no space_id")
-        space = await self.space_service.get_space(group.space_id)
-
-        if not space.is_embedding_model_in_space(group.embedding_model_id):
-            raise BadRequestException(
-                f"Space does not have embedding model {group.embedding_model.name} enabled."
-            )
 
     async def _validate_embedding_model(self, group: GroupCreate | GroupUpdate):
         if group.embedding_model_id is not None:  # type: ignore[attr-defined]
@@ -139,7 +130,7 @@ class GroupService:
             return await self.repo.get_groups_by_space(space_id_filter)
         return await self.repo.get_groups_by_user(self.user.id)
 
-    async def get_group(self, group_id: UUID) -> Group:
+    async def get_group(self, group_id: UUID) -> Collection:
         space = await self.space_repo.get_space_by_collection(collection_id=group_id)
         group = space.get_collection(collection_id=group_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
@@ -155,7 +146,7 @@ class GroupService:
                 },
             )
 
-        return group  # type: ignore[return-value]
+        return group
 
     async def get_groups_by_ids(self, ids: list[UUID]) -> list[Group]:
         groups = await self.repo.get_groups_by_ids(ids)
