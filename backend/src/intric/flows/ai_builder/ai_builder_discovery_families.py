@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 DiscoveryFamily = Literal[
     "case_scope",
@@ -33,4 +33,4 @@ ALL_DISCOVERY_FAMILIES: frozenset[DiscoveryFamily] = frozenset(QUESTION_FAMILY.v
 
 
 def family_for_issue(issue_id: str, *, default: DiscoveryFamily | None = None) -> DiscoveryFamily | None:
-    return QUESTION_FAMILY.get(issue_id, default)
+    return cast(DiscoveryFamily | None, QUESTION_FAMILY.get(issue_id, default))

@@ -175,9 +175,9 @@ def redact_payload_with_manifest(
     path: str | None = None,
 ) -> RedactionResult:
     if isinstance(value, dict):
-        redacted: dict[str, Any] = {}
-        masked_paths: list[str] = []
-        masked_fields: list[MaskedField] = []
+        redacted_dict: dict[str, Any] = {}
+        dict_masked_paths: list[str] = []
+        dict_masked_fields: list[MaskedField] = []
         for item_key, item_value in value.items():
             child_path = f"{path}.{item_key}" if path else item_key
             child_result = redact_payload_with_manifest(
@@ -185,18 +185,18 @@ def redact_payload_with_manifest(
                 key=item_key,
                 path=child_path,
             )
-            redacted[item_key] = child_result.value
-            masked_paths.extend(child_result.masked_paths)
-            masked_fields.extend(child_result.masked_fields)
+            redacted_dict[item_key] = child_result.value
+            dict_masked_paths.extend(child_result.masked_paths)
+            dict_masked_fields.extend(child_result.masked_fields)
         return RedactionResult(
-            value=redacted,
-            masked_paths=tuple(masked_paths),
-            masked_fields=tuple(masked_fields),
+            value=redacted_dict,
+            masked_paths=tuple(dict_masked_paths),
+            masked_fields=tuple(dict_masked_fields),
         )
     if isinstance(value, list):
         redacted_items: list[Any] = []
-        masked_paths: list[str] = []
-        masked_fields: list[MaskedField] = []
+        list_masked_paths: list[str] = []
+        list_masked_fields: list[MaskedField] = []
         for index, item in enumerate(value):
             child_path = f"{path}[{index}]" if path else f"[{index}]"
             child_result = redact_payload_with_manifest(
@@ -205,29 +205,29 @@ def redact_payload_with_manifest(
                 path=child_path,
             )
             redacted_items.append(child_result.value)
-            masked_paths.extend(child_result.masked_paths)
-            masked_fields.extend(child_result.masked_fields)
+            list_masked_paths.extend(child_result.masked_paths)
+            list_masked_fields.extend(child_result.masked_fields)
         return RedactionResult(
             value=redacted_items,
-            masked_paths=tuple(masked_paths),
-            masked_fields=tuple(masked_fields),
+            masked_paths=tuple(list_masked_paths),
+            masked_fields=tuple(list_masked_fields),
         )
     if isinstance(value, str):
-        redacted = redact_string_with_reason(value, key=key)
-        masked_paths = (path,) if path and redacted.value != value else ()
-        masked_fields: tuple[MaskedField, ...] = ()
-        if path and redacted.value != value:
-            masked_fields = (
+        redacted_string = redact_string_with_reason(value, key=key)
+        string_masked_paths = (path,) if path and redacted_string.value != value else ()
+        string_masked_fields: tuple[MaskedField, ...] = ()
+        if path and redacted_string.value != value:
+            string_masked_fields = (
                 MaskedField(
                     path=path,
                     key=key,
-                    reason=redacted.reason or "sensitive_value",
+                    reason=redacted_string.reason or "sensitive_value",
                 ),
             )
         return RedactionResult(
-            value=redacted.value,
-            masked_paths=masked_paths,
-            masked_fields=masked_fields,
+            value=redacted_string.value,
+            masked_paths=string_masked_paths,
+            masked_fields=string_masked_fields,
         )
     return RedactionResult(value=value, masked_paths=())
 

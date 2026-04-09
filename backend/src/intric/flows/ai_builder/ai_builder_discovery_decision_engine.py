@@ -156,7 +156,7 @@ def build_candidate(
         impact=_QUESTION_IMPACT.get(issue.issue_id, "quality"),
         confidence=confidence,
         assumption_safe=candidate_assumption_safe(issue.issue_id, profile),
-        family=family_for_issue(issue.issue_id, default=issue.category) or issue.category,
+        family=family_for_issue(issue.issue_id) or issue.category,
         resolved_by=resolved_by,
         evidence=evidence,
     )
