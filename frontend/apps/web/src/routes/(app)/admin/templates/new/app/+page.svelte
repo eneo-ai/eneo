@@ -26,7 +26,7 @@
 
   let { data } = $props();
 
-  const intric = data.intric;
+  const intric = $derived(data.intric);
 
   // Template state
   let name = $state("");
@@ -34,7 +34,7 @@
   let category = $state("");
   let iconName = $state<string | null>(null);
   let promptText = $state("");
-  let completionModel = $state(data.completionModels?.[0] || null);
+  let completionModel = $state(untrack(() => data.completionModels?.[0] || null));
   let completionModelKwargs = $state({});
   let isSaving = $state(false);
 

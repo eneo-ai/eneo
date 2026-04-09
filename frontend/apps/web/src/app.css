@@ -2,6 +2,23 @@
 @source "../../../packages/ui/src/";
 
 /* ------------------------------------------------------------------ */
+/* Tailwind v4 dark variant — class-based, not OS-based               */
+/* ------------------------------------------------------------------ */
+/* Tailwind v4's default `dark:` variant fires on                     */
+/* `@media (prefers-color-scheme: dark)`. This app, however, manages  */
+/* its own theme via a `.dark` class on `<html>` and explicitly pins  */
+/* `color-scheme: light` so the browser doesn't paint native widgets  */
+/* with the OS dark palette. Without overriding the variant, every    */
+/* `dark:` utility on a vendored shadcn component (Select, Input,     */
+/* Textarea, Checkbox, Switch, Button, …) silently fires whenever the */
+/* user's OS is in dark mode — even though the app is rendering in    */
+/* light mode. The most visible symptom is shadcn Select/Input        */
+/* triggers picking up `dark:bg-input/30`, which paints them grey on  */
+/* the otherwise white surface. Re-binding `dark:` to the `.dark`     */
+/* class keeps the variant aligned with the app's actual theme state. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ------------------------------------------------------------------ */
 /* shadcn-svelte token mappings                                       */
 /* ------------------------------------------------------------------ */
 /* Maps shadcn-svelte's semantic tokens to eneo's design system       */
@@ -17,6 +34,130 @@
   --color-muted-foreground: var(--text-secondary);
   --color-border: var(--border-default);
   --color-ring: var(--border-stronger);
+
+  /* Popover (dropdown menu, command palette, popover, tooltip surfaces) */
+  --color-popover: var(--background-primary);
+  --color-popover-foreground: var(--text-primary);
+
+  /* ---------------------------------------------------------------- */
+  /* `--color-primary` namespace conflict (shadcn vs eneo)             */
+  /* ---------------------------------------------------------------- */
+  /* eneo and shadcn both use the word "primary" but for OPPOSITE      */
+  /* concepts:                                                         */
+  /*                                                                   */
+  /*   - eneo:    "primary" = page background + body text (the         */
+  /*              fundamental surface, declared as                     */
+  /*              `--background-color-primary` and `--text-color-      */
+  /*              primary` in packages/ui/src/styles/main.css).        */
+  /*   - shadcn:  "primary" = brand action color (filled button bg,    */
+  /*              checked switch track, etc.).                         */
+  /*                                                                   */
+  /* The `--color-primary` declaration below maps shadcn's token to    */
+  /* eneo's accent so the *intent* matches. But Tailwind v4 picks the  */
+  /* MORE SPECIFIC variable when generating utilities — so for the     */
+  /* `bg-primary` utility, eneo's `--background-color-primary` (page   */
+  /* bg) wins over shadcn's generic `--color-primary` (accent). The    */
+  /* same is true for `text-primary` vs `--text-color-primary`. The    */
+  /* end result is that any vendored shadcn component using            */
+  /* `bg-primary` / `text-primary-foreground` paints itself with the   */
+  /* page background and disappears.                                   */
+  /*                                                                   */
+  /* WORKAROUND (per-component, applied today):                        */
+  /*   We vendor the affected shadcn-svelte components and replace     */
+  /*   `bg-primary` → `bg-accent-default` and `text-primary-foreground`*/
+  /*   → `text-on-fill` directly. This bypasses the shadowed utility   */
+  /*   and paints with eneo's accent tokens. Currently applied in:     */
+  /*     - lib/components/ui/button/button.svelte (default variant)    */
+  /*     - lib/components/ui/switch/switch.svelte                      */
+  /*     - lib/components/ui/checkbox/checkbox.svelte                  */
+  /*     - lib/components/ui/radio-group/radio-group-item.svelte       */
+  /*     - lib/components/ui/field/field-label.svelte                  */
+  /*     - lib/components/ui/badge/badge.svelte (default + link)       */
+  /*   Any future shadcn component that uses bg-primary / text-primary-*/
+  /*   foreground in its checked/active state needs the same patch.    */
+  /*                                                                   */
+  /* HOW TO REMOVE THE WORKAROUND (when migrating fully to shadcn):    */
+  /*   1. In packages/ui/src/styles/main.css, rename eneo's            */
+  /*      `--background-color-primary` → `--background-color-page` and */
+  /*      `--text-color-primary` → `--text-color-body` (or equivalent  */
+  /*      non-conflicting names). This frees the "primary" namespace.  */
+  /*   2. Search-and-replace every `bg-primary` / `text-primary` usage */
+  /*      across apps/web AND packages/ui internals that meant "page   */
+  /*      bg" or "body text" — point them at the new tokens.           */
+  /*   3. Drop the two `--color-primary` / `--color-primary-foreground`*/
+  /*      overrides below. Tailwind will then resolve `bg-primary` /   */
+  /*      `text-primary-foreground` against shadcn's canonical defs    */
+  /*      (which we don't redeclare, so they fall back to upstream).   */
+  /*   4. Revert the `bg-accent-default` / `text-on-fill` workaround   */
+  /*      in the four files listed above back to upstream shadcn's     */
+  /*      `bg-primary` / `text-primary-foreground`.                    */
+  /*                                                                   */
+  /*   After step 4 the vendored shadcn components match upstream byte-*/
+  /*   for-byte, so future shadcn updates can be pulled cleanly.       */
+  /* ---------------------------------------------------------------- */
+  --color-primary: var(--accent-default);
+  --color-primary-foreground: var(--text-on-fill);
+
+  /* Secondary surfaces (used by ghost/secondary buttons, badges) */
+  --color-secondary: var(--background-secondary);
+  --color-secondary-foreground: var(--text-primary);
+
+  /* Accent (hover/highlight, used by dropdown items, command items) */
+  --color-accent: var(--background-hover-default);
+  --color-accent-foreground: var(--text-primary);
+
+  /* Destructive (revoke/delete actions) */
+  --color-destructive: var(--negative-default);
+  --color-destructive-foreground: var(--text-on-fill);
+
+  /* Input border + Switch unchecked track (shadcn references the `--input` */
+  /* token for both input/textarea borders AND the Switch's unchecked       */
+  /* track background). The original mapping to `--border-default` (15%     */
+  /* opacity ≈ 1.37:1) was invisible for the Switch and far below WCAG      */
+  /* 1.4.11 (≥3:1 for non-text UI components). The literal value below is   */
+  /* eneo's `--color-ui-grey-300`, which renders at ~3.67:1 against the     */
+  /* page background in both light and dark modes — visible enough that     */
+  /* switches are findable without tabbing, and input borders meet the      */
+  /* non-text contrast requirement. (Inlined as a literal because Tailwind  */
+  /* v4 `@theme inline` doesn't resolve `var()` references against other    */
+  /* CSS variables defined outside its own @theme block.)                   */
+  --color-input: oklch(61.87% 0.005 56.33);
+
+  /* ---------------------------------------------------------------- */
+  /* Aliases for legacy class names used across the app                */
+  /* ---------------------------------------------------------------- */
+  /* Several features (api-keys, audit-logs, ...) were written with    */
+  /* alternative token names that were never defined in the design     */
+  /* system, so the corresponding utilities silently no-op'd. These    */
+  /* aliases bridge those names to existing eneo tokens so the         */
+  /* intended colours actually render in both light and dark mode.     */
+  --background-color-subtle: var(--background-secondary);
+  --background-color-default: var(--background-primary);
+  --background-color-caution: var(--warning-dimmer);
+  --text-color-default: var(--text-primary);
+  --text-color-caution: var(--warning-stronger);
+  --border-color-caution: var(--warning-default);
+
+  /* ---------------------------------------------------------------- */
+  /* WCAG AA contrast remediation for `text-muted`                     */
+  /* ---------------------------------------------------------------- */
+  /* eneo's raw `--text-muted` token (from packages/ui themes) is      */
+  /* intended for placeholders only — its light grey value renders at  */
+  /* about 2.7:1 contrast on the page background, far below WCAG AA    */
+  /* (4.5:1 for normal text, 3:1 for non-text and large text). But the */
+  /* web app has 500+ usages of the `text-muted` utility for ordinary  */
+  /* secondary content (labels, captions, helper text, meaningful      */
+  /* icons), so the convention has clearly drifted from the design     */
+  /* system's intent.                                                  */
+  /*                                                                   */
+  /* Re-point the `text-muted` Tailwind utility at `--text-secondary`  */
+  /* (≈6:1, AA-compliant). The raw `--text-muted` CSS variable is left */
+  /* untouched so any internal eneo component that genuinely needs the */
+  /* placeholder shade can still reference it directly. Code that      */
+  /* legitimately wants the very-dim decoration colour should use the  */
+  /* `text-tertiary` utility, which is mapped to it below.             */
+  --text-color-muted: var(--text-secondary);
+  --text-color-tertiary: var(--text-muted);
 }
 
 @font-face {
@@ -80,6 +221,25 @@ html.dark {
 
 *::placeholder {
   color: var(--text-color-muted) !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Hide native number-input spinner arrows on shadcn Inputs           */
+/* ------------------------------------------------------------------ */
+/* Chrome/Safari render up/down spin buttons inside `<input            */
+/* type="number">` that overlap right-aligned values (e.g. policy     */
+/* config inputs in admin/api-keys), and they ignore the input's      */
+/* padding. shadcn's design treats numeric inputs the same as text    */
+/* inputs, so we hide the native spinners globally — users can still  */
+/* type, paste, or use arrow keys to change values.                   */
+[data-slot="input"][type="number"]::-webkit-outer-spin-button,
+[data-slot="input"][type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+[data-slot="input"][type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 /* ------------------------------------------ */

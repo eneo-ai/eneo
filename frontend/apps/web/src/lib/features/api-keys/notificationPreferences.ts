@@ -43,7 +43,7 @@ export function normalizePreferences(raw: unknown): ApiKeyNotificationPreference
   const days = normalizeDayValues(data.days_before_expiry);
   return {
     enabled: Boolean(data.enabled),
-    days_before_expiry: days.length > 0 ? days : [30, 14, 7, 3, 1],
+    days_before_expiry: days.length > 0 ? days : [30],
     auto_follow_published_assistants: Boolean(data.auto_follow_published_assistants),
     auto_follow_published_apps: Boolean(data.auto_follow_published_apps)
   };
@@ -55,7 +55,7 @@ export function normalizePolicy(raw: unknown): ApiKeyNotificationPolicy {
   const parsedMax = Number(data.max_days_before_expiry);
   return {
     enabled: data.enabled !== false,
-    default_days_before_expiry: defaultDays.length > 0 ? defaultDays : [30, 14, 7, 3, 1],
+    default_days_before_expiry: defaultDays.length > 0 ? defaultDays : [30],
     max_days_before_expiry:
       Number.isFinite(parsedMax) && parsedMax > 0 ? Math.floor(parsedMax) : null,
     allow_auto_follow_published_assistants: Boolean(data.allow_auto_follow_published_assistants),

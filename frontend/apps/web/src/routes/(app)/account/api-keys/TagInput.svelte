@@ -3,6 +3,9 @@
   import { fly, scale } from "svelte/transition";
   import { flip } from "svelte/animate";
   import { m } from "$lib/paraglide/messages";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
 
   type TagType = "origin" | "ip";
 
@@ -25,7 +28,7 @@
   }>();
 
   let inputValue = $state("");
-  let inputElement: HTMLInputElement;
+  let inputElement = $state<HTMLInputElement | null>(null);
   let validationError = $state<string | null>(null);
 
   // Quick-add patterns for origins (using getter for translations)
@@ -151,7 +154,7 @@
     <span id="tag-input-label" class="text-default block text-sm font-medium">
       {label}
       {#if required}
-        <span class="text-negative">*</span>
+        <span class="text-negative-stronger">*</span>
       {/if}
     </span>
   {/if}
@@ -166,65 +169,66 @@
            duration-150 ease-out focus-within:ring-2
            {disabled ? 'cursor-not-allowed opacity-50' : ''}
            {validationError
-      ? 'border-negative focus-within:border-negative focus-within:ring-negative/20'
+      ? 'border-negative-default focus-within:border-negative-default focus-within:ring-negative-default/20'
       : ''}"
   >
     <div class="flex flex-wrap items-center gap-1.5">
       <!-- Existing tags -->
       {#each value as tag (tag)}
         <div
-          class="group bg-subtle hover:border-dimmer hover:bg-hover-subtle inline-flex items-center gap-1.5 rounded-md
-                 border border-transparent px-2.5 py-1
-                 transition-all duration-150 ease-out"
           animate:flip={{ duration: 200 }}
           in:scale={{ duration: 150 }}
           out:scale={{ duration: 150 }}
         >
-          <Icon class="text-muted h-3 w-3" />
-          <span class="text-default max-w-[200px] truncate font-mono text-sm" title={tag}>
-            {tag}
-          </span>
-          {#if !disabled}
-            <button
-              type="button"
-              onclick={() => removeTag(tag)}
-              class="text-muted hover:bg-negative/10 hover:text-negative rounded p-0.5
-                     opacity-0 transition-all
-                     duration-150 ease-out group-hover:opacity-100"
-              aria-label="Remove {tag}"
-            >
-              <X class="h-3 w-3" />
-            </button>
-          {/if}
+          <Badge
+            variant="secondary"
+            class="group h-auto gap-1.5 rounded-md border border-transparent px-2.5 py-1 text-sm font-normal"
+          >
+            <Icon class="text-muted h-3 w-3" />
+            <span class="text-default max-w-[200px] truncate font-mono text-sm" title={tag}>
+              {tag}
+            </span>
+            {#if !disabled}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onclick={() => removeTag(tag)}
+                class="hover:bg-negative-default/10 hover:text-negative-stronger text-muted size-4 rounded p-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                aria-label="Remove {tag}"
+              >
+                <X />
+              </Button>
+            {/if}
+          </Badge>
         </div>
       {/each}
 
       <!-- Input field -->
-      <div class="min-w-[150px] flex-1">
-        <input
-          bind:this={inputElement}
-          bind:value={inputValue}
-          onkeydown={handleKeydown}
-          onblur={() => {
-            if (inputValue.trim()) addTag();
-          }}
-          {placeholder}
-          {disabled}
-          class="text-default placeholder:text-muted w-full bg-transparent text-sm
-                 focus:outline-none disabled:cursor-not-allowed"
-        />
-      </div>
+      <Input
+        bind:ref={inputElement}
+        bind:value={inputValue}
+        onkeydown={handleKeydown}
+        onblur={() => {
+          if (inputValue.trim()) addTag();
+        }}
+        {placeholder}
+        {disabled}
+        class="text-default placeholder:text-muted h-auto min-w-[150px] flex-1 rounded-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
+      />
 
       <!-- Add button -->
       {#if inputValue.trim()}
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           onclick={addTag}
-          class="text-muted hover:bg-accent-default/10 hover:text-accent-default rounded-md p-1.5 transition-colors"
+          class="text-muted hover:bg-accent-default/10 hover:text-accent-default"
           aria-label="Add tag"
         >
-          <Plus class="h-4 w-4" />
-        </button>
+          <Plus />
+        </Button>
       {/if}
     </div>
   </div>
@@ -232,7 +236,7 @@
   <!-- Validation error -->
   {#if validationError}
     <p
-      class="text-negative flex items-center gap-1.5 text-xs"
+      class="text-negative-stronger flex items-center gap-1.5 text-xs"
       transition:fly={{ y: -4, duration: 150 }}
     >
       <AlertCircle class="h-3.5 w-3.5 flex-shrink-0" />
@@ -245,19 +249,17 @@
     <div class="flex flex-wrap items-center gap-2">
       <span class="text-muted text-xs">{m.api_keys_tag_quick_add()}</span>
       {#each quickAddOptions as opt (opt.pattern)}
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="xs"
           onclick={() => addQuickPattern(opt.pattern)}
           disabled={value.includes(opt.pattern)}
-          class="border-dimmer text-muted hover:border-accent-default/60 hover:bg-accent-default/5 hover:text-accent-default inline-flex items-center
-                 gap-1 rounded-md border border-dashed
-                 px-2 py-1 text-xs
-                 transition-all duration-150 ease-out
-                 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+          class="border-dimmer text-muted hover:border-accent-default/60 hover:bg-accent-default/5 hover:text-accent-default border-dashed disabled:opacity-40"
         >
-          <Plus class="h-3 w-3" />
+          <Plus />
           {opt.label}
-        </button>
+        </Button>
       {/each}
     </div>
   {/if}

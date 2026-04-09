@@ -11,10 +11,11 @@
   import SecurityClassificationListSetting from "$lib/features/security-classifications/components/SecurityClassificationListSetting.svelte";
   import { initSecurityClassificationService } from "$lib/features/security-classifications/SecurityClassificationsService.svelte.js";
   import { m } from "$lib/paraglide/messages";
+  import { untrack } from "svelte";
 
   const { data } = $props();
 
-  initSecurityClassificationService(data.intric, data.securityClassifications);
+  untrack(() => initSecurityClassificationService(data.intric, data.securityClassifications));
   // Using a JS string so we can have a newline in this
   const description = m.classify_models_description();
 </script>

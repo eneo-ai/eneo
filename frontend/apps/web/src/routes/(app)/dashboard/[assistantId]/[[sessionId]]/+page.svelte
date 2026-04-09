@@ -7,13 +7,14 @@
   import { initChatService } from "$lib/features/chat/ChatService.svelte.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { untrack } from "svelte";
   import dayjs from "dayjs";
   import relativeTime from "dayjs/plugin/relativeTime";
   dayjs.extend(relativeTime);
 
   let { data } = $props();
 
-  const chat = initChatService(data);
+  const chat = untrack(() => initChatService(data));
 
   let showHistory = $state(false);
 

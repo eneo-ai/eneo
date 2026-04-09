@@ -17,10 +17,15 @@
   const intric = getIntric();
   let { data } = $props();
 
-  // Initialize from server data
-  let usingTemplates = $state(data.settings.using_templates);
-  let auditLoggingEnabled = $state(data.settings.audit_logging_enabled);
-  let provisioningEnabled = $state(data.settings.provisioning ?? false);
+  // Initialize from server data, re-sync after invalidateAll() refreshes props
+  let usingTemplates = $state<boolean | undefined>(undefined);
+  let auditLoggingEnabled = $state<boolean | undefined>(undefined);
+  let provisioningEnabled = $state(false);
+  $effect.pre(() => {
+    usingTemplates = data.settings.using_templates;
+    auditLoggingEnabled = data.settings.audit_logging_enabled;
+    provisioningEnabled = data.settings.provisioning ?? false;
+  });
 
   // Handle toggle change - receives new value from Switch component
   async function handleToggleTemplates({ current, next }: { current: boolean; next: boolean }) {

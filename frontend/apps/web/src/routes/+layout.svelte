@@ -5,6 +5,7 @@
   import { setContext } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { MESSAGES_CONTEXT_KEY } from "@intric/ui";
+  import { Toaster } from "$lib/components/ui/sonner/index.js";
 
   initThemeStore();
   initLanguageStore();
@@ -14,3 +15,4 @@
 </script>
 
 <slot />
+<Toaster richColors closeButton />

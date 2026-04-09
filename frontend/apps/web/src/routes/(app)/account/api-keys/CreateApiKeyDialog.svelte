@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { writable } from "svelte/store";
+  import { onMount, untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
   import type {
     ApiKeyCreatedResponse,
@@ -11,7 +10,12 @@
     ResourcePermissionLevel,
     SpaceSparse
   } from "@intric/intric-js";
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { toast } from "svelte-sonner";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { getIntric } from "$lib/core/Intric";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
@@ -63,8 +67,9 @@
   } = $props();
 
   const scopeLocked = $derived(!!lockedScopeType && !!lockedScopeId);
+  const LockedScopeIcon = $derived(getScopeIcon(lockedScopeType));
 
-  const showDialog = writable(false);
+  let showDialog = $state(false);
   let isSubmitting = $state(false);
   let errorMessage = $state<string | null>(null);
   let createdSecret = $state<string | null>(null);
@@ -84,8 +89,8 @@
   // Step 2: Scope & permissions
   let ownership = $state<"user" | "service">("user");
   let permission = $state<ApiKeyPermission>("read");
-  let scopeType = $state<ApiKeyScopeType>(lockedScopeType ?? "tenant");
-  let scopeId = $state<string | null>(lockedScopeId ?? null);
+  let scopeType = $state<ApiKeyScopeType>(untrack(() => lockedScopeType ?? "tenant"));
+  let scopeId = $state<string | null>(untrack(() => lockedScopeId ?? null));
   let manualScopeId = $state("");
 
   // Fine-grained permissions (HuggingFace-style)
@@ -409,11 +414,15 @@
     }
   }
 
-  function copySecret() {
-    if (createdSecret) {
-      navigator.clipboard.writeText(createdSecret);
+  async function copySecret() {
+    if (!createdSecret) return;
+    try {
+      await navigator.clipboard.writeText(createdSecret);
       secretCopied = true;
+      toast.success(m.api_keys_copied_message());
       setTimeout(() => (secretCopied = false), 2000);
+    } catch {
+      toast.error(m.something_went_wrong());
     }
   }
 
@@ -423,7 +432,7 @@
       // Prevent duplicate callback when the dialog emits on:close next.
       createdResponse = null;
     }
-    $showDialog = false;
+    showDialog = false;
     resetForm();
   }
 
@@ -470,7 +479,12 @@
     knowledgePermission = level;
   }
 
-  // Permission level display config using Tailwind classes for dark mode support
+  // Permission level display config — uses eneo's semantic state tokens
+  // (warning = elevated write access, negative = destructive admin) so the
+  // colours match ApiKeyTable's permission badges and render identically
+  // across browsers (raw `purple-*`/`red-*` palettes go through Tailwind v4
+  // oklch() + color-mix() opacity which Chrome and Firefox gamut-map
+  // differently).
   function getLevelClasses(level: ResourcePermission, isSelected: boolean): string {
     if (!isSelected)
       return "border-default bg-primary text-muted hover:border-dimmer hover:bg-subtle";
@@ -480,9 +494,9 @@
       case "read":
         return "border-accent-default bg-accent-default/10 text-accent-default";
       case "write":
-        return "border-purple-500 bg-purple-500/10 text-purple-600 dark:text-purple-400";
+        return "border-warning-default bg-warning-default/10 text-warning-stronger";
       case "admin":
-        return "border-red-500 bg-red-500/10 text-red-600 dark:text-red-400";
+        return "border-negative-default bg-negative-default/10 text-negative-stronger";
     }
   }
 
@@ -493,9 +507,9 @@
       case "read":
         return "bg-accent-default/15 text-accent-default";
       case "write":
-        return "bg-purple-500/15 text-purple-600 dark:text-purple-400";
+        return "bg-warning-default/15 text-warning-stronger";
       case "admin":
-        return "bg-red-500/15 text-red-600 dark:text-red-400";
+        return "bg-negative-default/15 text-negative-stronger";
     }
   }
 
@@ -560,17 +574,23 @@
   }
 </script>
 
-<Dialog.Root openController={showDialog} on:close={() => handleOpenChange(false)}>
-  <Dialog.Trigger asFragment let:trigger>
-    <Button is={trigger} variant={triggerVariant} class="gap-2">
-      <Key class="h-4 w-4" />
-      {m.generate_api_key()}
-    </Button>
+<Dialog.Root
+  bind:open={showDialog}
+  onOpenChange={(open) => {
+    if (!open) handleOpenChange(false);
+  }}
+>
+  <Dialog.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant={triggerVariant === "outlined" ? "outline" : "default"}>
+        <Key />
+        {m.generate_api_key()}
+      </Button>
+    {/snippet}
   </Dialog.Trigger>
 
   <Dialog.Content
-    width="large"
-    class="!bg-primary flex max-h-[90vh] flex-col overflow-hidden !rounded-2xl !p-0"
+    class="bg-primary !flex max-h-[90vh] !max-w-4xl flex-col overflow-hidden !rounded-2xl !p-0"
   >
     {#if currentStep <= totalSteps}
       <!-- Header with subtle gradient -->
@@ -619,7 +639,9 @@
                     {isActive
                       ? 'border-accent-default bg-accent-default text-on-fill shadow-accent-default/40 step-bounce shadow-lg'
                       : ''}
-                    {isCompleted ? 'border-positive bg-positive/10 text-positive' : ''}
+                    {isCompleted
+                      ? 'border-positive-default bg-positive-default/10 text-positive-stronger'
+                      : ''}
                     {!isActive && !isCompleted ? 'border-dimmer bg-primary text-secondary' : ''}"
                     aria-hidden="true"
                   >
@@ -635,7 +657,7 @@
                     <p
                       class="text-sm font-semibold
                       {isActive ? 'text-accent-default' : ''}
-                      {isCompleted ? 'text-positive' : ''}
+                      {isCompleted ? 'text-positive-stronger' : ''}
                       {!isActive && !isCompleted ? 'text-default' : ''}"
                     >
                       {step.title}
@@ -648,7 +670,7 @@
                   <div class="mx-3 flex-1" aria-hidden="true">
                     <div
                       class="h-1 w-full rounded-full transition-all duration-300
-                      {isCompleted ? 'bg-positive' : 'bg-tertiary'}"
+                      {isCompleted ? 'bg-positive-default' : 'bg-tertiary'}"
                     ></div>
                   </div>
                 {/if}
@@ -668,7 +690,7 @@
               disabled={step.number > currentStep + 1}
               class="h-2.5 w-2.5 rounded-full transition-all duration-200
               {isActive ? 'bg-accent-default scale-125' : ''}
-              {isCompleted ? 'bg-positive' : ''}
+              {isCompleted ? 'bg-positive-default' : ''}
               {!isActive && !isCompleted ? 'bg-tertiary' : ''}
               disabled:opacity-40"
               aria-label="Step {step.number}"
@@ -683,17 +705,13 @@
       <!-- Error message - sticky outside scrollable area -->
       {#if errorMessage}
         <div
-          role="alert"
-          aria-live="assertive"
-          class="border-negative-default/30 bg-negative-dimmer mx-6 mt-4 mb-3 flex flex-shrink-0 items-center gap-3 rounded-xl border px-4 py-3"
+          class="mx-6 mt-4 mb-3 flex-shrink-0"
           transition:fly={{ y: -8, duration: 180, easing: cubicOut }}
         >
-          <div
-            class="bg-negative-default/15 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
-          >
-            <AlertCircle class="text-negative-default h-4 w-4" aria-hidden="true" />
-          </div>
-          <p class="text-negative-default text-sm font-medium">{errorMessage}</p>
+          <Alert.Root variant="destructive" aria-live="assertive">
+            <AlertCircle />
+            <Alert.Description>{errorMessage}</Alert.Description>
+          </Alert.Root>
         </div>
       {/if}
 
@@ -726,13 +744,13 @@
                         for="api-key-name"
                         class="text-default mb-2 block text-sm font-semibold tracking-wide"
                       >
-                        {m.name()} <span class="text-negative">*</span>
+                        {m.name()} <span class="text-negative-stronger">*</span>
                       </label>
-                      <Input.Text
+                      <Input
                         id="api-key-name"
                         bind:value={name}
                         placeholder={m.api_keys_name_placeholder()}
-                        class="!h-12 !text-base"
+                        class="h-12 text-base"
                       />
                       <p class="text-muted mt-2 text-xs">
                         {m.api_keys_name_help()}
@@ -746,7 +764,7 @@
                       >
                         {m.description()}
                       </label>
-                      <Input.TextArea
+                      <Textarea
                         id="api-key-description"
                         bind:value={description}
                         placeholder={m.api_keys_description_placeholder()}
@@ -814,21 +832,25 @@
                       </button>
 
                       <!-- Public Key -->
+                      <!-- Wraps in `label-amethyst` so the inner `*-label-*`
+                           utilities resolve to eneo's amethyst palette,
+                           matching ApiKeyTable's public-key avatar without
+                           introducing new tokens. -->
                       <button
                         type="button"
                         onclick={() => (keyType = "pk_")}
                         aria-pressed={keyType === "pk_"}
-                        class="group focus-visible:ring-accent-default relative rounded-xl border-2 p-5 text-left transition-all duration-200 hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 active:scale-[0.98]
+                        class="label-amethyst group focus-visible:ring-accent-default relative rounded-xl border-2 p-5 text-left transition-all duration-200 hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 active:scale-[0.98]
                         {keyType === 'pk_'
-                          ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30'
+                          ? 'border-label-default bg-label-default/10 ring-label-default/30 ring-2'
                           : 'border-default bg-primary hover:border-dimmer'}"
                       >
                         <div class="flex items-start gap-4">
                           <div
                             class="flex h-12 w-12 items-center justify-center rounded-lg transition-all duration-200
                             {keyType === 'pk_'
-                              ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/30'
-                              : 'bg-orange-500/15 text-orange-600 dark:text-orange-400'}"
+                              ? 'bg-label-default text-on-fill shadow-label-default/30 shadow-lg'
+                              : 'bg-label-dimmer text-label-stronger'}"
                           >
                             <Globe class="h-5 w-5" />
                           </div>
@@ -838,7 +860,7 @@
                                 >{m.api_keys_public_key()}</span
                               >
                               <span
-                                class="rounded-md bg-orange-500/15 px-2 py-0.5 font-mono text-xs font-bold text-orange-600 dark:text-orange-400"
+                                class="bg-label-dimmer text-label-stronger rounded-md px-2 py-0.5 font-mono text-xs font-bold"
                               >
                                 pk_
                               </span>
@@ -851,9 +873,9 @@
                         {#if keyType === "pk_"}
                           <div class="absolute -top-2 -right-2">
                             <div
-                              class="flex h-6 w-6 items-center justify-center rounded-full bg-orange-500 shadow-lg shadow-orange-500/40"
+                              class="bg-label-default shadow-label-default/40 flex h-6 w-6 items-center justify-center rounded-full shadow-lg"
                             >
-                              <Check class="h-4 w-4 text-white" strokeWidth={3} />
+                              <Check class="text-on-fill h-4 w-4" strokeWidth={3} />
                             </div>
                           </div>
                         {/if}
@@ -865,46 +887,45 @@
                 <!-- Step 2: Scope & Permissions -->
                 <div class="space-y-6">
                   <h3 class="sr-only">{m.api_keys_step_scope_sr()}</h3>
-                  <!-- Permission Mode Toggle -->
-                  <div class="border-default flex items-center justify-between border-b pb-4">
-                    <div>
-                      <span
-                        id="permission-type-label"
-                        class="text-default text-sm font-semibold tracking-wide"
-                        >{m.api_keys_permission_type()}</span
+                  <!-- Permission Mode Toggle (hidden for public keys: only simple mode is supported) -->
+                  {#if keyType !== "pk_"}
+                    <div class="border-default flex items-center justify-between border-b pb-4">
+                      <div>
+                        <span
+                          id="permission-type-label"
+                          class="text-default text-sm font-semibold tracking-wide"
+                          >{m.api_keys_permission_type()}</span
+                        >
+                        <p class="text-muted mt-0.5 text-xs">{m.api_keys_permission_choose()}</p>
+                      </div>
+                      <div
+                        role="group"
+                        aria-labelledby="permission-type-label"
+                        class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1"
                       >
-                      <p class="text-muted mt-0.5 text-xs">{m.api_keys_permission_choose()}</p>
-                    </div>
-                    <div
-                      role="group"
-                      aria-labelledby="permission-type-label"
-                      class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1"
-                    >
-                      <button
-                        type="button"
-                        onclick={() => (permissionMode = "simple")}
-                        class="rounded-md px-4 py-2 text-sm font-medium transition-all
-                             {permissionMode === 'simple'
-                          ? 'bg-primary text-default shadow-sm'
-                          : 'text-muted hover:text-secondary'}"
-                      >
-                        {m.api_keys_simple()}
-                      </button>
-                      <button
-                        type="button"
-                        onclick={() => (permissionMode = "fine-grained")}
-                        disabled={keyType === "pk_"}
-                        class="rounded-md px-4 py-2 text-sm font-medium transition-all
-                             {permissionMode === 'fine-grained'
-                          ? 'bg-primary text-default shadow-sm'
-                          : keyType === 'pk_'
-                            ? 'text-muted cursor-not-allowed opacity-50'
+                        <button
+                          type="button"
+                          onclick={() => (permissionMode = "simple")}
+                          class="rounded-md px-4 py-2 text-sm font-medium transition-all
+                               {permissionMode === 'simple'
+                            ? 'bg-primary text-default shadow-sm'
                             : 'text-muted hover:text-secondary'}"
-                      >
-                        {m.api_keys_fine_grained()}
-                      </button>
+                        >
+                          {m.api_keys_simple()}
+                        </button>
+                        <button
+                          type="button"
+                          onclick={() => (permissionMode = "fine-grained")}
+                          class="rounded-md px-4 py-2 text-sm font-medium transition-all
+                               {permissionMode === 'fine-grained'
+                            ? 'bg-primary text-default shadow-sm'
+                            : 'text-muted hover:text-secondary'}"
+                        >
+                          {m.api_keys_fine_grained()}
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  {/if}
 
                   <!-- Key Ownership Toggle (admin only) -->
                   {#if isAdmin}
@@ -950,7 +971,7 @@
                     </div>
                     {#if ownership === "service" && scopeType === "tenant" && (permission === "write" || permission === "admin")}
                       <div
-                        class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-900/20 dark:text-amber-300"
+                        class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger dark:bg-warning-dimmer/20 rounded-lg border p-3 text-xs"
                       >
                         <span class="inline-flex items-center gap-1.5">
                           <AlertCircle class="h-3.5 w-3.5" />
@@ -972,10 +993,7 @@
                             <div
                               class="bg-accent-default/15 flex h-10 w-10 items-center justify-center rounded-lg"
                             >
-                              <svelte:component
-                                this={getScopeIcon(lockedScopeType)}
-                                class="text-accent-default h-5 w-5"
-                              />
+                              <LockedScopeIcon class="text-accent-default h-5 w-5" />
                             </div>
                             <div>
                               <p class="text-default text-sm font-semibold">{lockedScopeName}</p>
@@ -1080,10 +1098,10 @@
                                   <Info class="h-3.5 w-3.5" />
                                   {m.api_keys_enter_id_manually({ scopeType })}
                                 </button>
-                                <Input.Text
+                                <Input
                                   bind:value={manualScopeId}
                                   placeholder={m.api_keys_enter_uuid()}
-                                  class="!font-mono !text-sm"
+                                  class="font-mono text-sm"
                                 />
                               </div>
                             {/if}
@@ -1114,29 +1132,29 @@
                                   : "border-default bg-primary hover:border-dimmer"
                                 : opt.value === "write"
                                   ? isSelected
-                                    ? "border-purple-500 bg-purple-500/10"
+                                    ? "border-warning-default bg-warning-default/10"
                                     : "border-default bg-primary hover:border-dimmer"
                                   : isSelected
-                                    ? "border-red-500 bg-red-500/10"
+                                    ? "border-negative-default bg-negative-default/10"
                                     : "border-default bg-primary hover:border-dimmer"}
                             {@const iconClasses =
                               opt.value === "read"
                                 ? isSelected
-                                  ? "bg-accent-default text-white"
+                                  ? "bg-accent-default text-on-fill"
                                   : "bg-accent-default/15 text-accent-default"
                                 : opt.value === "write"
                                   ? isSelected
-                                    ? "bg-purple-500 text-white"
-                                    : "bg-purple-500/15 text-purple-600 dark:text-purple-400"
+                                    ? "bg-warning-default text-on-fill"
+                                    : "bg-warning-default/15 text-warning-stronger"
                                   : isSelected
-                                    ? "bg-red-500 text-white"
-                                    : "bg-red-500/15 text-red-600 dark:text-red-400"}
+                                    ? "bg-negative-default text-on-fill"
+                                    : "bg-negative-default/15 text-negative-stronger"}
                             {@const checkBgClass =
                               opt.value === "read"
                                 ? "bg-accent-default shadow-accent-default/30"
                                 : opt.value === "write"
-                                  ? "bg-purple-500 shadow-purple-500/30"
-                                  : "bg-red-500 shadow-red-500/30"}
+                                  ? "bg-warning-default shadow-warning-default/30"
+                                  : "bg-negative-default shadow-negative-default/30"}
                             <button
                               type="button"
                               role="radio"
@@ -1145,9 +1163,9 @@
                                 !isDisabled && (permission = opt.value as ApiKeyPermission)}
                               disabled={isDisabled}
                               class="focus-visible:ring-accent-default relative rounded-xl border-2 p-4 text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 {levelClasses}
-                                   {isDisabled ? 'cursor-not-allowed opacity-50' : ''}"
+                                   {isDisabled ? 'cursor-not-allowed' : ''}"
                             >
-                              <div class="flex items-center gap-3">
+                              <div class="flex items-center gap-3 {isDisabled ? 'opacity-50' : ''}">
                                 <div
                                   class="flex h-10 w-10 items-center justify-center rounded-lg transition-colors {iconClasses}"
                                 >
@@ -1165,12 +1183,12 @@
                                   <div
                                     class="flex h-5 w-5 items-center justify-center rounded-full shadow-lg {checkBgClass}"
                                   >
-                                    <Check class="h-3 w-3 text-white" strokeWidth={3} />
+                                    <Check class="text-on-fill h-3 w-3" strokeWidth={3} />
                                   </div>
                                 </div>
                               {/if}
                               {#if isDisabled}
-                                <p class="mt-2 text-xs text-yellow-600 dark:text-yellow-400">
+                                <p class="text-warning-stronger mt-2 text-xs font-medium">
                                   {m.api_keys_not_available_public()}
                                 </p>
                               {/if}
@@ -1188,12 +1206,9 @@
                           {#if permission === "read"}
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15"
+                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Check
-                                  class="h-3 w-3 text-emerald-600 dark:text-emerald-400"
-                                  strokeWidth={3}
-                                />
+                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
                               </div>
                               <span class="text-default text-sm"
                                 >{m.api_keys_capability_read_resources()}</span
@@ -1201,12 +1216,9 @@
                             </div>
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/10"
+                                class="bg-negative-default/10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Ban
-                                  class="h-3 w-3 text-red-400 dark:text-red-500"
-                                  strokeWidth={2.5}
-                                />
+                                <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
                               </div>
                               <span class="text-muted text-sm"
                                 >{m.api_keys_capability_no_create()}</span
@@ -1214,12 +1226,9 @@
                             </div>
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/10"
+                                class="bg-negative-default/10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Ban
-                                  class="h-3 w-3 text-red-400 dark:text-red-500"
-                                  strokeWidth={2.5}
-                                />
+                                <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
                               </div>
                               <span class="text-muted text-sm"
                                 >{m.api_keys_capability_no_space_settings()}</span
@@ -1228,12 +1237,9 @@
                           {:else if permission === "write"}
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15"
+                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Check
-                                  class="h-3 w-3 text-emerald-600 dark:text-emerald-400"
-                                  strokeWidth={3}
-                                />
+                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
                               </div>
                               <span class="text-default text-sm"
                                 >{m.api_keys_capability_read_resources()}</span
@@ -1241,12 +1247,9 @@
                             </div>
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15"
+                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Check
-                                  class="h-3 w-3 text-emerald-600 dark:text-emerald-400"
-                                  strokeWidth={3}
-                                />
+                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
                               </div>
                               <span class="text-default text-sm"
                                 >{m.api_keys_capability_write_resources()}</span
@@ -1254,12 +1257,9 @@
                             </div>
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/10"
+                                class="bg-negative-default/10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Ban
-                                  class="h-3 w-3 text-red-400 dark:text-red-500"
-                                  strokeWidth={2.5}
-                                />
+                                <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
                               </div>
                               <span class="text-muted text-sm"
                                 >{m.api_keys_capability_no_space_settings()}</span
@@ -1268,12 +1268,9 @@
                           {:else if permission === "admin"}
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15"
+                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Check
-                                  class="h-3 w-3 text-emerald-600 dark:text-emerald-400"
-                                  strokeWidth={3}
-                                />
+                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
                               </div>
                               <span class="text-default text-sm"
                                 >{m.api_keys_capability_read_resources()}</span
@@ -1281,12 +1278,9 @@
                             </div>
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15"
+                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Check
-                                  class="h-3 w-3 text-emerald-600 dark:text-emerald-400"
-                                  strokeWidth={3}
-                                />
+                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
                               </div>
                               <span class="text-default text-sm"
                                 >{m.api_keys_capability_write_resources()}</span
@@ -1294,12 +1288,9 @@
                             </div>
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15"
+                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Check
-                                  class="h-3 w-3 text-emerald-600 dark:text-emerald-400"
-                                  strokeWidth={3}
-                                />
+                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
                               </div>
                               <span class="text-default text-sm"
                                 >{m.api_keys_capability_admin_space()}</span
@@ -1312,13 +1303,13 @@
                               <div
                                 class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full {ownership ===
                                 'service'
-                                  ? 'bg-cyan-500/15'
-                                  : 'bg-amber-500/15'}"
+                                  ? 'bg-accent-default/15'
+                                  : 'bg-tertiary'}"
                               >
                                 <Link2
                                   class="h-3 w-3 {ownership === 'service'
-                                    ? 'text-cyan-600 dark:text-cyan-400'
-                                    : 'text-amber-600 dark:text-amber-400'}"
+                                    ? 'text-accent-default'
+                                    : 'text-muted'}"
                                   strokeWidth={2.5}
                                 />
                               </div>
@@ -1629,14 +1620,14 @@
                     >
                       {m.api_keys_rate_limit()}
                     </label>
-                    <Input.Text
+                    <Input
                       id="api-key-rate-limit"
                       bind:value={rateLimit}
                       placeholder={m.api_keys_rate_limit_placeholder()}
                       type="number"
                       min="1"
                       max={maxRateLimit ?? undefined}
-                      class="!h-11"
+                      class="h-11"
                     />
                     <p class="text-muted mt-2 text-xs">
                       {m.api_keys_rate_limit_help()}
@@ -1660,8 +1651,8 @@
       >
         <div class="flex-shrink-0">
           {#if currentStep > 1 && currentStep <= totalSteps}
-            <Button variant="simple" on:click={prevStep} class="gap-2">
-              <ChevronLeft class="h-4 w-4" />
+            <Button variant="ghost" onclick={prevStep}>
+              <ChevronLeft />
               {m.api_keys_back()}
             </Button>
           {/if}
@@ -1670,9 +1661,9 @@
         <div class="flex flex-wrap items-center gap-2 sm:gap-3">
           {#if currentStep <= totalSteps}
             <Button
-              variant="outlined"
-              on:click={() => {
-                $showDialog = false;
+              variant="outline"
+              onclick={() => {
+                showDialog = false;
                 resetForm();
               }}
             >
@@ -1681,28 +1672,25 @@
           {/if}
 
           {#if currentStep < totalSteps}
-            <Button
-              variant="primary"
-              on:click={nextStep}
-              class="min-w-[80px] gap-2 sm:min-w-[100px]"
-            >
+            <Button variant="default" onclick={nextStep} class="min-w-[80px] sm:min-w-[100px]">
               {m.api_keys_next()}
-              <ChevronRight class="h-4 w-4" />
+              <ChevronRight />
             </Button>
           {:else if currentStep === totalSteps}
             <Button
-              variant="primary"
-              on:click={createKey}
+              variant="default"
+              onclick={createKey}
               disabled={isSubmitting}
-              class="min-w-[100px] gap-2 sm:min-w-[140px] {isSubmitting ? 'submit-pulse' : ''}"
+              class="min-w-[100px] sm:min-w-[140px] {isSubmitting ? 'submit-pulse' : ''}"
             >
               {#if isSubmitting}
                 <div
                   class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                  aria-hidden="true"
                 ></div>
                 <span class="hidden sm:inline">{m.api_keys_creating()}</span>
               {:else}
-                <Key class="h-4 w-4" />
+                <Key />
                 <span class="hidden sm:inline">{m.api_keys_create()}</span>
                 <span class="sm:hidden">{m.api_keys_create_short()}</span>
               {/if}
@@ -1720,11 +1708,13 @@
             in:fly={{ y: 12, duration: 350, easing: cubicOut }}
           >
             <div class="relative">
-              <div class="bg-positive/8 secret-ring-pulse absolute -inset-2 rounded-full"></div>
               <div
-                class="bg-positive/15 ring-positive/10 relative flex h-14 w-14 items-center justify-center rounded-full ring-4"
+                class="bg-positive-default/10 secret-ring-pulse absolute -inset-2 rounded-full"
+              ></div>
+              <div
+                class="bg-positive-default/15 ring-positive-default/10 relative flex h-14 w-14 items-center justify-center rounded-full ring-4"
               >
-                <CheckCircle2 class="text-positive h-7 w-7" strokeWidth={2.5} />
+                <CheckCircle2 class="text-positive-stronger h-7 w-7" strokeWidth={2.5} />
               </div>
             </div>
 
@@ -1744,52 +1734,42 @@
           </div>
 
           <!-- Warning banner -->
-          <div
-            class="border-caution/40 bg-caution/8 dark:bg-caution/12 mt-5 flex items-start gap-3 rounded-xl border px-4 py-3"
-            in:fly={{ y: 10, duration: 300, delay: 100, easing: cubicOut }}
-          >
-            <AlertCircle class="text-caution mt-0.5 h-4 w-4 flex-shrink-0" />
-            <p class="text-default/80 dark:text-muted text-sm leading-relaxed">
-              <strong class="text-caution font-semibold">{m.api_keys_important()}</strong>
-              {m.api_keys_copy_warning()}
-            </p>
+          <div class="mt-5" in:fly={{ y: 10, duration: 300, delay: 100, easing: cubicOut }}>
+            <Alert.Root class="border-caution/40 bg-caution/8 dark:bg-caution/12">
+              <AlertCircle class="text-caution" />
+              <Alert.Title class="text-caution">{m.api_keys_important()}</Alert.Title>
+              <Alert.Description>{m.api_keys_copy_warning()}</Alert.Description>
+            </Alert.Root>
           </div>
 
           <!-- Secret display -->
           <div class="mt-5" in:fly={{ y: 10, duration: 300, delay: 160, easing: cubicOut }}>
-            <p class="text-muted mb-2 text-xs font-semibold tracking-wider uppercase">
+            <p
+              id="created-secret-label"
+              class="text-muted mb-2 text-xs font-semibold tracking-wider uppercase"
+            >
               {m.api_keys_your_new_key()}
             </p>
             <div class="border-default bg-subtle overflow-hidden rounded-xl border">
               <pre
+                aria-labelledby="created-secret-label"
                 class="text-default overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-relaxed break-all whitespace-pre-wrap select-all">{createdSecret}</pre>
             </div>
 
             <div class="mt-3 flex items-center gap-3">
               <Button
-                variant={secretCopied ? "outlined" : "primary"}
-                on:click={copySecret}
-                class="gap-2 transition-all duration-200 {secretCopied
-                  ? '!bg-positive/10 !border-positive/30 !text-positive'
-                  : ''}"
+                variant={secretCopied ? "outline" : "default"}
+                onclick={copySecret}
+                aria-label={m.api_keys_copy_to_clipboard()}
               >
                 {#if secretCopied}
-                  <Check class="h-4 w-4" />
+                  <Check class="text-positive-stronger" />
                   {m.api_keys_copied()}
                 {:else}
-                  <Copy class="h-4 w-4" />
+                  <Copy />
                   {m.api_keys_copy_to_clipboard()}
                 {/if}
               </Button>
-              {#if secretCopied}
-                <span
-                  class="text-positive text-sm font-medium"
-                  in:fade={{ duration: 150 }}
-                  out:fade={{ duration: 150 }}
-                >
-                  {m.api_keys_copied_message()}
-                </span>
-              {/if}
             </div>
           </div>
         </div>
@@ -1799,8 +1779,8 @@
       <div
         class="border-default bg-subtle flex flex-shrink-0 items-center justify-end gap-3 rounded-b-2xl border-t px-6 py-4"
       >
-        <Button variant="primary" on:click={finishAndClose} class="gap-2">
-          <Check class="h-4 w-4" />
+        <Button variant="default" onclick={finishAndClose}>
+          <Check />
           {m.done()}
         </Button>
       </div>

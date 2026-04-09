@@ -19,6 +19,7 @@
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
+  import { untrack } from "svelte";
 
   let { data } = $props();
   const {
@@ -30,15 +31,17 @@
     state: { resource, update, currentChanges, isSaving },
     saveChanges,
     discardChanges
-  } = initAppEditor({
-    app: data.app,
-    intric: data.intric,
-    onUpdateDone() {
-      refreshCurrentSpace("applications");
-    }
-  });
+  } = untrack(() =>
+    initAppEditor({
+      app: data.app,
+      intric: data.intric,
+      onUpdateDone() {
+        refreshCurrentSpace("applications");
+      }
+    })
+  );
 
-  let cancelUploadsAndClearQueue: () => void;
+  let cancelUploadsAndClearQueue = $state<() => void>(() => {});
 
   // Icon state
   let currentIconId = $state<string | null>($resource.icon_id ?? null);
@@ -99,13 +102,13 @@
     discardChanges();
   });
 
-  let previousRoute = `/spaces/${$currentSpace.routeId}/apps/${data.app.id}`;
+  let previousRoute = $state(untrack(() => `/spaces/${$currentSpace.routeId}/apps/${data.app.id}`));
   afterNavigate(({ from }) => {
     if (page.url.searchParams.get("next") === "default") return;
     if (from) previousRoute = from.url.toString();
   });
 
-  let showSavesChangedNotice = false;
+  let showSavesChangedNotice = $state(false);
 </script>
 
 <svelte:head>
@@ -243,7 +246,7 @@
             rows={4}
             {...aria}
             bind:value={$update.prompt.text}
-            on:change={() => {
+            onchange={() => {
               $update.prompt.description = "";
             }}
             class="border-stronger bg-primary text-primary ring-default min-h-24 rounded-lg border px-6 py-4 text-lg shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"

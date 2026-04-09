@@ -19,9 +19,11 @@
     Shield,
     Lock,
     Bell,
-    AlertTriangle
+    AlertTriangle,
+    Eye,
+    Pencil
   } from "lucide-svelte";
-  import { slide, fade } from "svelte/transition";
+  import { slide } from "svelte/transition";
   import ApiKeyActions from "./ApiKeyActions.svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import {
@@ -29,6 +31,14 @@
     getExpiryLevel,
     getEffectiveState
   } from "$lib/features/api-keys/expirationUtils";
+  import { Skeleton } from "$lib/components/ui/skeleton/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import * as Tabs from "$lib/components/ui/tabs/index.js";
+  import * as Table from "$lib/components/ui/table/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
 
   type ApiKeyUsageEvent = {
     id: string;
@@ -228,31 +238,20 @@
     return formatter.format(d);
   }
 
-  // Scope display helpers with theme-aware Tailwind classes
-  function getScopeStyle(scopeType: string) {
+  // Scope display helper — returns just a label. Visual identity comes from
+  // the scope icon (getScopeIcon) inside an outline Badge, no saturated background.
+  function getScopeStyle(scopeType: string): { label: string } {
     switch (scopeType) {
       case "tenant":
-        return {
-          label: m.api_keys_scope_tenant(),
-          classes: "bg-gray-700 dark:bg-gray-600 text-white"
-        };
+        return { label: m.api_keys_scope_tenant() };
       case "space":
-        return {
-          label: m.api_keys_scope_space(),
-          classes: "bg-emerald-600 dark:bg-emerald-500 text-white"
-        };
+        return { label: m.api_keys_scope_space() };
       case "assistant":
-        return {
-          label: m.api_keys_scope_assistant(),
-          classes: "bg-violet-600 dark:bg-violet-500 text-white"
-        };
+        return { label: m.api_keys_scope_assistant() };
       case "app":
-        return {
-          label: m.api_keys_scope_app(),
-          classes: "bg-orange-600 dark:bg-orange-500 text-white"
-        };
+        return { label: m.api_keys_scope_app() };
       default:
-        return { label: m.api_keys_unknown(), classes: "bg-gray-500 dark:bg-gray-400 text-white" };
+        return { label: m.api_keys_unknown() };
     }
   }
 
@@ -272,86 +271,116 @@
   }
 
   function getStateStyle(state: string) {
+    // Use eneo's semantic state tokens. The raw `emerald/amber/red/gray-*`
+    // utilities resolve to Tailwind v4 oklch() values that Chrome and
+    // Firefox gamut-map differently; the `*-default` tokens below are
+    // single CSS variable lookups that render identically across browsers
+    // and switch automatically between light and dark themes.
     switch (state) {
       case "active":
         return {
           label: m.api_keys_status_active(),
-          dotClasses: "bg-emerald-500 dark:bg-emerald-400"
+          dotClasses: "bg-positive-default"
         };
       case "suspended":
         return {
           label: m.api_keys_status_suspended(),
-          dotClasses: "bg-amber-500 dark:bg-amber-400"
+          dotClasses: "bg-warning-default"
         };
       case "revoked":
-        return { label: m.api_keys_status_revoked(), dotClasses: "bg-red-500 dark:bg-red-400" };
+        return { label: m.api_keys_status_revoked(), dotClasses: "bg-negative-default" };
       case "expired":
-        return { label: m.api_keys_status_expired(), dotClasses: "bg-gray-400 dark:bg-gray-500" };
+        return { label: m.api_keys_status_expired(), dotClasses: "bg-tertiary" };
       default:
-        return { label: m.api_keys_unknown(), dotClasses: "bg-gray-400 dark:bg-gray-500" };
+        return { label: m.api_keys_unknown(), dotClasses: "bg-tertiary" };
     }
   }
 
-  function getPermissionStyle(permission: string) {
+  // Permission level display helper — uses semantic eneo tokens via Badge
+  // overrides instead of saturated text-on-color backgrounds (which failed
+  // WCAG AA at 3.4:1 for purple-500/white). The accompanying icon makes the
+  // permission level visually distinguishable without relying on color alone.
+  type PermissionStyle = {
+    label: string;
+    icon: typeof Eye;
+    badgeClass: string;
+  };
+  function getPermissionStyle(permission: string): PermissionStyle {
     switch (permission) {
       case "read":
         return {
           label: m.api_keys_permission_read(),
-          classes: "bg-sky-600 dark:bg-sky-500 text-white"
+          icon: Eye,
+          badgeClass: "border-border text-muted bg-secondary/60"
         };
       case "write":
         return {
           label: m.api_keys_permission_write(),
-          classes: "bg-purple-500 dark:bg-purple-400 text-white"
+          icon: Pencil,
+          badgeClass:
+            "text-warning-stronger border-warning-default/40 bg-warning-dimmer/40 dark:bg-warning-dimmer/20"
         };
       case "admin":
         return {
           label: m.api_keys_permission_admin(),
-          classes: "bg-rose-600 dark:bg-rose-500 text-white"
+          icon: Shield,
+          badgeClass: "text-destructive border-destructive/40 bg-destructive/10"
         };
       default:
-        return { label: permission, classes: "bg-gray-500 dark:bg-gray-400 text-white" };
+        return {
+          label: permission,
+          icon: Eye,
+          badgeClass: "border-border text-muted bg-secondary/60"
+        };
     }
   }
 
   function getKeyTypeStyle(keyType: string) {
-    // Using theme-aware classes that work in both light and dark mode
+    // Route through eneo's `label-*` token scopes instead of raw Tailwind
+    // palette utilities. The raw `amber-*` / `indigo-*` classes resolve to
+    // Tailwind v4 oklch() values combined with `/30` color-mix() opacity,
+    // which Chrome (Skia) and Firefox (WebRender) gamut-map slightly
+    // differently — producing visibly different shades per browser. The
+    // label scope sets `--color-label-stronger/dimmer` to a flat CSS
+    // variable, so `bg-label-dimmer` / `text-label-stronger` render as a
+    // single resolved color in both browsers. Theme-aware via the .label-*
+    // classes defined in packages/ui/src/styles/themes/{light,dark}.css.
     return keyType === "pk_"
       ? {
           label: m.api_keys_public_key(),
-          iconClass: "text-amber-600 dark:text-amber-400",
-          bgClass: "bg-amber-50 dark:bg-amber-900/30"
+          // Amethyst (purple) — distinct from the warning-yellow `write`
+          // permission badge that may appear on the same row.
+          scopeClass: "label-amethyst"
         }
       : {
           label: m.api_keys_secret_key(),
-          iconClass: "text-indigo-600 dark:text-indigo-400",
-          bgClass: "bg-indigo-50 dark:bg-indigo-900/30"
+          // Blue (info) — matches the original indigo intent and aligns
+          // with eneo's brand accent.
+          scopeClass: "label-blue"
         };
   }
 </script>
 
 {#if loading}
-  <!-- Skeleton loader with theme-aware colors -->
-  <div class="space-y-3">
+  <!-- Skeleton loader using shadcn Skeleton -->
+  <div class="space-y-3" aria-busy="true" aria-live="polite">
+    <span class="sr-only">{m.api_keys_admin_usage_loading()}</span>
     {#each Array(3) as _, i (i)}
-      <div
-        class="border-default bg-primary rounded-xl border p-4"
-        style="animation: skeleton-pulse 1.5s ease-in-out infinite; animation-delay: {i * 100}ms;"
-      >
+      <div class="border-default bg-primary rounded-xl border p-4">
         <div class="flex items-center gap-4">
-          <div class="bg-secondary h-11 w-11 rounded-xl"></div>
+          <Skeleton class="h-11 w-11 rounded-xl" />
           <div class="flex-1 space-y-2.5">
-            <div class="bg-secondary h-4 w-36 rounded-md"></div>
+            <Skeleton class="h-4 w-36" />
             <div class="flex gap-2">
-              <div class="bg-secondary h-3 w-24 rounded-md"></div>
-              <div class="bg-secondary h-3 w-16 rounded-md"></div>
+              <Skeleton class="h-3 w-24" />
+              <Skeleton class="h-3 w-16" />
             </div>
           </div>
           <div class="hidden items-center gap-4 sm:flex">
-            <div class="bg-secondary h-8 w-20 rounded-md"></div>
-            <div class="bg-secondary h-8 w-20 rounded-md"></div>
+            <Skeleton class="h-8 w-20" />
+            <Skeleton class="h-8 w-20" />
           </div>
-          <div class="bg-secondary h-8 w-8 rounded-lg"></div>
+          <Skeleton class="h-8 w-8 rounded-lg" />
         </div>
       </div>
     {/each}
@@ -383,211 +412,197 @@
       {@const effectiveState = getEffectiveState(key)}
       {@const state = getStateStyle(effectiveState)}
       {@const permission = getPermissionStyle(key.permission)}
+      {@const PermissionIcon = permission.icon}
       {@const keyTypeStyle = getKeyTypeStyle(key.key_type)}
       {@const KeyIcon = key.key_type === "pk_" ? Globe : Lock}
       {@const daysUntil = getDaysUntilExpiration(key.expires_at)}
+      {@const isInactive = effectiveState === "revoked" || effectiveState === "expired"}
 
-      <div
-        class="group border-default bg-primary hover:border-dimmer overflow-hidden rounded-xl border transition-all
-               duration-200 hover:-translate-y-px hover:shadow-md
-               {isExpanded
-          ? 'ring-accent-default/20 border-accent-default/30 shadow-sm ring-2'
-          : ''}
-               {recentlyExpandedId === key.id ? 'animate-expand-pulse' : ''}"
+      <Collapsible.Root
+        open={isExpanded}
+        onOpenChange={(open) => {
+          if (open !== isExpanded) toggleExpanded(key.id);
+        }}
       >
-        <!-- Main row -->
-        <button
-          type="button"
-          onclick={() => toggleExpanded(key.id)}
-          aria-expanded={isExpanded}
-          aria-controls="details-{key.id}"
-          class="focus-visible:ring-accent-default/50 w-full rounded-t-xl px-5 py-4 text-left focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none
-                 {effectiveState === 'revoked' || effectiveState === 'expired' ? 'opacity-60' : ''}"
+        <Card.Root
+          class="gap-0 py-0 transition-all duration-200 hover:-translate-y-px hover:shadow-md
+                 {isExpanded
+            ? 'ring-accent-default/40 shadow-sm ring-2'
+            : 'hover:ring-foreground/20'}
+                 {recentlyExpandedId === key.id ? 'animate-expand-pulse' : ''}"
         >
-          <div class="flex items-center gap-4">
-            <!-- Key type icon -->
-            <div
-              class="flex h-11 w-11 items-center justify-center rounded-xl {keyTypeStyle.bgClass}"
+          <!-- Header row: Trigger and ApiKeyActions are siblings (no nested buttons) -->
+          <div class="flex items-stretch">
+            <Collapsible.Trigger
+              class="hover:bg-secondary/30 focus-visible:ring-accent-default/50 group/trigger flex flex-1 items-center gap-4 px-5 py-4 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset
+                     {isInactive ? 'opacity-60' : ''}"
             >
-              <KeyIcon class="h-5 w-5 {keyTypeStyle.iconClass}" />
-            </div>
+              <!-- Key type icon avatar -->
+              <div
+                class="bg-label-dimmer flex h-11 w-11 shrink-0 items-center justify-center rounded-xl {keyTypeStyle.scopeClass}"
+              >
+                <KeyIcon class="text-label-stronger h-5 w-5" />
+              </div>
 
-            <!-- Key info -->
-            <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-3">
-                <span class="flex items-center gap-1.5">
-                  <h4 class="text-default truncate font-semibold">{key.name}</h4>
-                  {#if followedKeyIds.has(key.id)}
-                    <Bell class="text-accent-default h-3.5 w-3.5 shrink-0" />
+              <!-- Key info -->
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span class="flex items-center gap-1.5">
+                    <h4 class="text-default truncate font-semibold">{key.name}</h4>
+                    {#if followedKeyIds.has(key.id)}
+                      <Bell class="text-accent-default h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    {/if}
+                  </span>
+
+                  <!-- Status dot + label with accessible tooltip -->
+                  <Tooltip.Provider delayDuration={150}>
+                    <Tooltip.Root>
+                      <Tooltip.Trigger>
+                        {#snippet child({ props })}
+                          <span {...props} class="flex items-center gap-1.5">
+                            <span
+                              class="h-2.5 w-2.5 rounded-full {state.dotClasses}"
+                              aria-hidden="true"
+                            ></span>
+                            <span class="text-muted text-xs">{state.label}</span>
+                            <span class="sr-only">{getStatusTooltip(effectiveState)}</span>
+                          </span>
+                        {/snippet}
+                      </Tooltip.Trigger>
+                      <Tooltip.Content>
+                        {getStatusTooltip(effectiveState)}
+                      </Tooltip.Content>
+                    </Tooltip.Root>
+                  </Tooltip.Provider>
+                </div>
+
+                <!-- Key preview + scope/permission/service badges -->
+                <div class="mt-1.5 flex flex-wrap items-center gap-2 text-sm">
+                  <code
+                    class="text-muted bg-secondary inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-xs"
+                  >
+                    {key.key_type}<span class="opacity-30">····</span>{key.key_suffix}
+                  </code>
+
+                  <!-- Scope badge: outline + icon, no saturated background -->
+                  <Badge variant="outline" class="text-muted h-auto gap-1.5 px-2 py-0.5">
+                    <ScopeIcon class="h-3 w-3" />
+                    {scope.label}
+                    {#if key.scope_id}
+                      <span class="text-muted/70" aria-hidden="true">·</span>
+                      <span class="font-mono">{key.scope_id.slice(0, 8)}</span>
+                    {/if}
+                  </Badge>
+
+                  <!-- Permission badge: semantic color tint per level (read=neutral, write=warning, admin=danger) -->
+                  <Badge
+                    variant="outline"
+                    class="h-auto gap-1.5 px-2 py-0.5 font-semibold {permission.badgeClass}"
+                  >
+                    <PermissionIcon class="h-3 w-3" />
+                    {permission.label}
+                  </Badge>
+
+                  <!-- Service key badge -->
+                  {#if key.ownership === "service"}
+                    <Badge variant="outline" class="text-muted h-auto gap-1.5 px-2 py-0.5">
+                      <Server class="h-3 w-3" />
+                      {m.api_keys_ownership_service_badge()}
+                    </Badge>
                   {/if}
-                </span>
+                </div>
+              </div>
 
-                <!-- Status dot and badge with tooltip -->
-                <div class="group/status relative flex items-center gap-1.5">
-                  <span
-                    class="h-2.5 w-2.5 rounded-full {state.dotClasses}"
-                    title={getStatusTooltip(effectiveState)}
-                  ></span>
-                  <span class="text-muted text-xs">{state.label}</span>
-                  <!-- Tooltip on hover -->
-                  <div class="absolute top-full left-0 z-10 mt-1 hidden group-hover/status:block">
-                    <div
-                      class="bg-primary border-default text-muted rounded-lg border px-3 py-2 text-xs whitespace-nowrap shadow-lg"
-                    >
-                      {getStatusTooltip(effectiveState)}
+              <!-- Right side info (hidden on mobile) -->
+              <div
+                class="hidden items-center gap-6 text-sm sm:flex"
+                style="font-variant-numeric: tabular-nums"
+              >
+                <!-- Expiration -->
+                {#if daysUntil !== null}
+                  {@const expiryLevel = getExpiryLevel(daysUntil)}
+                  <div class="flex items-center gap-1.5 text-right">
+                    {#if expiryLevel === "urgent" || expiryLevel === "expired"}
+                      <span
+                        class="bg-destructive h-1.5 w-1.5 flex-shrink-0 rounded-full"
+                        aria-hidden="true"
+                      ></span>
+                    {:else if expiryLevel === "warning"}
+                      <span
+                        class="bg-warning-default h-1.5 w-1.5 flex-shrink-0 rounded-full"
+                        aria-hidden="true"
+                      ></span>
+                    {/if}
+                    <div>
+                      <p class="text-muted text-xs">{m.api_keys_expires()}</p>
+                      <p
+                        class="font-medium {expiryLevel === 'expired' || expiryLevel === 'urgent'
+                          ? 'text-destructive'
+                          : expiryLevel === 'warning' || expiryLevel === 'notice'
+                            ? 'text-warning-stronger'
+                            : 'text-default'}"
+                      >
+                        {daysUntil < 0
+                          ? m.api_keys_status_expired()
+                          : daysUntil === 0
+                            ? m.api_keys_today()
+                            : daysUntil === 1
+                              ? m.api_keys_tomorrow()
+                              : m.api_keys_days({ count: daysUntil })}
+                      </p>
                     </div>
                   </div>
-                </div>
-              </div>
-
-              <!-- Key preview with copy hint -->
-              <div class="mt-1.5 flex flex-wrap items-center gap-2.5 text-sm">
-                <code
-                  class="text-muted bg-subtle inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-xs"
-                >
-                  {key.key_type}<span class="opacity-30">····</span>{key.key_suffix}
-                </code>
-
-                <!-- Scope badge - theme-aware with Tailwind classes -->
-                <span
-                  class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ring-white/20 ring-inset {scope.classes}"
-                >
-                  <ScopeIcon class="h-3 w-3" />
-                  {scope.label}
-                  {#if key.scope_id}
-                    <span class="opacity-80">· {key.scope_id.slice(0, 8)}</span>
-                  {/if}
-                </span>
-
-                <!-- Permission badge - theme-aware with shadow for depth -->
-                <span
-                  class="rounded-md px-2.5 py-1 text-xs font-bold tracking-wide uppercase {permission.classes}"
-                >
-                  {permission.label}
-                </span>
-
-                <!-- Service key badge -->
-                {#if key.ownership === "service"}
-                  <span
-                    class="inline-flex items-center gap-1 rounded-md bg-cyan-600 px-2.5 py-1 text-xs font-semibold text-white ring-1 ring-white/20 ring-inset dark:bg-cyan-500"
-                  >
-                    <Server class="h-3 w-3" />
-                    {m.api_keys_ownership_service_badge()}
-                  </span>
                 {/if}
-              </div>
-            </div>
 
-            <!-- Right side info -->
-            <div
-              class="hidden items-center gap-6 text-sm sm:flex"
-              style="font-variant-numeric: tabular-nums"
-            >
-              <!-- Expiration -->
-              {#if daysUntil !== null}
-                {@const expiryLevel = getExpiryLevel(daysUntil)}
-                <div class="flex items-center gap-1.5 text-right">
-                  {#if expiryLevel === "urgent" || expiryLevel === "expired"}
-                    <span class="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-red-500"></span>
-                  {:else if expiryLevel === "warning"}
-                    <span class="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-yellow-500"></span>
-                  {/if}
-                  <div>
-                    <p class="text-muted text-xs">{m.api_keys_expires()}</p>
-                    <p
-                      class="font-medium {expiryLevel === 'expired' || expiryLevel === 'urgent'
-                        ? 'text-red-600 dark:text-red-400'
-                        : expiryLevel === 'warning' || expiryLevel === 'notice'
-                          ? 'text-yellow-600 dark:text-yellow-400'
-                          : 'text-default'}"
-                    >
-                      {daysUntil < 0
-                        ? m.api_keys_status_expired()
-                        : daysUntil === 0
-                          ? m.api_keys_today()
-                          : daysUntil === 1
-                            ? m.api_keys_tomorrow()
-                            : m.api_keys_days({ count: daysUntil })}
-                    </p>
-                  </div>
+                <!-- Last used -->
+                <div class="text-right">
+                  <p class="text-muted text-xs">{m.api_keys_last_used()}</p>
+                  <p class="text-default font-medium">{formatRelativeDate(key.last_used_at)}</p>
                 </div>
-              {/if}
-
-              <!-- Last used -->
-              <div class="text-right">
-                <p class="text-muted text-xs">{m.api_keys_last_used()}</p>
-                <p class="text-default font-medium">{formatRelativeDate(key.last_used_at)}</p>
-              </div>
-            </div>
-
-            <!-- Actions and expand -->
-            <div class="flex items-center gap-2">
-              <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div onclick={(e) => e.stopPropagation()}>
-                <ApiKeyActions
-                  apiKey={key}
-                  {onChanged}
-                  {onSecret}
-                  isFollowed={followedKeyIds?.has(key.id) ?? false}
-                  isFollowedViaScope={scopeFollowed && !(followedKeyIds?.has(key.id) ?? false)}
-                  {onFollowChanged}
-                />
               </div>
 
-              <div
-                class="text-muted bg-subtle/40 group-hover:bg-subtle flex h-8 w-8 items-center
-                       justify-center rounded-lg transition-colors"
-              >
-                <ChevronDown
-                  class="h-4 w-4 transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}"
-                />
-              </div>
+              <!-- Chevron rotates with collapsible state -->
+              <ChevronDown
+                class="text-muted size-4 shrink-0 transition-transform duration-200 group-data-[state=open]/trigger:rotate-180"
+              />
+            </Collapsible.Trigger>
+
+            <!-- Action menu sits OUTSIDE the trigger as a sibling — no nested buttons -->
+            <div class="flex items-center pr-3">
+              <ApiKeyActions
+                apiKey={key}
+                {onChanged}
+                {onSecret}
+                isFollowed={followedKeyIds?.has(key.id) ?? false}
+                isFollowedViaScope={scopeFollowed && !(followedKeyIds?.has(key.id) ?? false)}
+                {onFollowChanged}
+              />
             </div>
           </div>
-        </button>
 
-        <!-- Expanded details -->
-        {#if isExpanded}
-          <div
-            id="details-{key.id}"
-            class="border-default from-secondary/40 to-secondary/20 border-t bg-gradient-to-b px-5 py-5"
-            transition:slide={{ duration: 200 }}
-          >
-            <!-- Tab switcher -->
-            <div class="bg-subtle/80 mb-4 inline-flex items-center gap-1 rounded-lg p-1">
-              <button
-                type="button"
-                onclick={() => setActiveTab(key.id, "overview")}
-                class="rounded-md px-3.5 py-1.5 text-sm font-semibold transition-all duration-150 {activeTabByKey[
-                  key.id
-                ] !== 'usage'
-                  ? 'bg-primary text-default shadow-sm'
-                  : 'text-dimmer hover:text-default'}"
+          <!-- Expanded details -->
+          <Collapsible.Content>
+            <div
+              id="details-{key.id}"
+              class="border-border from-secondary/40 to-secondary/20 border-t bg-gradient-to-b px-5 py-5"
+              transition:slide={{ duration: 200 }}
+            >
+              <Tabs.Root
+                value={activeTabByKey[key.id] ?? "overview"}
+                onValueChange={(v) => setActiveTab(key.id, v as "overview" | "usage")}
               >
-                {m.api_keys_admin_tab_overview()}
-              </button>
-              <button
-                type="button"
-                onclick={() => setActiveTab(key.id, "usage")}
-                class="rounded-md px-3.5 py-1.5 text-sm font-semibold transition-all duration-150 {activeTabByKey[
-                  key.id
-                ] === 'usage'
-                  ? 'bg-primary text-default shadow-sm'
-                  : 'text-dimmer hover:text-default'}"
-              >
-                {m.api_keys_admin_tab_usage()}
-              </button>
-            </div>
+                <Tabs.List class="mb-4">
+                  <Tabs.Trigger value="overview">{m.api_keys_admin_tab_overview()}</Tabs.Trigger>
+                  <Tabs.Trigger value="usage">{m.api_keys_admin_tab_usage()}</Tabs.Trigger>
+                </Tabs.List>
 
-            {#key activeTabByKey[key.id]}
-              <div in:fade={{ duration: 150, delay: 50 }}>
-                {#if activeTabByKey[key.id] === "usage"}
+                <Tabs.Content value="usage">
                   {@const usage = usageByKey[key.id]}
                   <div class="space-y-4">
                     {#if usageLoadingByKey[key.id]}
                       <div class="text-muted text-sm">{m.api_keys_admin_usage_loading()}</div>
                     {:else if usageErrorByKey[key.id]}
-                      <div class="text-negative text-sm">{usageErrorByKey[key.id]}</div>
+                      <div class="text-negative-stronger text-sm">{usageErrorByKey[key.id]}</div>
                     {:else}
                       <div class="grid gap-3 md:grid-cols-4">
                         <div class="bg-primary/50 border-default rounded-lg border p-3">
@@ -605,7 +620,7 @@
                           </p>
                           <p
                             class="{(usage?.summary?.used_events ?? 0) > 0
-                              ? 'text-emerald-600 dark:text-emerald-400'
+                              ? 'text-positive-stronger'
                               : 'text-default'} mt-1 text-lg font-semibold tabular-nums"
                             title={fullNumberFormatter.format(usage?.summary?.used_events ?? 0)}
                           >
@@ -616,7 +631,7 @@
                           <p class="text-muted text-xs">{m.api_keys_admin_usage_failed_events()}</p>
                           <p
                             class="{(usage?.summary?.auth_failed_events ?? 0) > 0
-                              ? 'text-red-600 dark:text-red-400'
+                              ? 'text-negative-stronger'
                               : 'text-default'} mt-1 text-lg font-semibold tabular-nums"
                             title={fullNumberFormatter.format(
                               usage?.summary?.auth_failed_events ?? 0
@@ -637,7 +652,7 @@
 
                       {#if usage?.summary?.sampled_used_events}
                         <div
-                          class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800 dark:border-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-300"
+                          class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger dark:bg-warning-dimmer/20 rounded-lg border p-3 text-xs"
                         >
                           <span class="inline-flex items-center gap-1.5">
                             <AlertTriangle class="h-3.5 w-3.5" />
@@ -649,73 +664,68 @@
                       {#if usage?.items?.length}
                         <div class="border-default overflow-hidden rounded-lg border">
                           <div class="max-h-[26rem] overflow-auto">
-                            <table class="w-full min-w-[760px] text-sm">
-                              <thead class="bg-subtle/80 text-muted sticky top-0 z-10">
-                                <tr>
-                                  <th class="px-3 py-2 text-left font-medium"
-                                    >{m.audit_timestamp()}</th
-                                  >
-                                  <th class="px-3 py-2 text-left font-medium">{m.audit_action()}</th
-                                  >
-                                  <th class="px-3 py-2 text-left font-medium"
-                                    >{m.api_keys_admin_usage_request()}</th
-                                  >
-                                  <th class="px-3 py-2 text-left font-medium"
-                                    >{m.api_keys_admin_usage_ip_origin()}</th
-                                  >
-                                </tr>
-                              </thead>
-                              <tbody>
+                            <Table.Root>
+                              <Table.Caption class="sr-only">
+                                {m.api_keys_admin_tab_usage()}
+                              </Table.Caption>
+                              <Table.Header class="bg-subtle/80 sticky top-0 z-10">
+                                <Table.Row>
+                                  <Table.Head>{m.audit_timestamp()}</Table.Head>
+                                  <Table.Head>{m.audit_action()}</Table.Head>
+                                  <Table.Head>{m.api_keys_admin_usage_request()}</Table.Head>
+                                  <Table.Head>{m.api_keys_admin_usage_ip_origin()}</Table.Head>
+                                </Table.Row>
+                              </Table.Header>
+                              <Table.Body>
                                 {#each usage.items as event (event.id)}
-                                  <tr
-                                    class="border-default/60 hover:bg-subtle/40 even:bg-subtle/20 border-t transition-colors"
-                                  >
-                                    <td
-                                      class="text-muted px-3 py-2 text-xs whitespace-nowrap tabular-nums"
+                                  <Table.Row>
+                                    <Table.Cell
+                                      class="text-muted text-xs whitespace-nowrap tabular-nums"
                                     >
                                       {formatter.format(new Date(event.timestamp))}
-                                    </td>
-                                    <td class="px-3 py-2">
-                                      <span
-                                        class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium {event.action ===
-                                        'api_key_auth_failed'
-                                          ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                                          : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'}"
+                                    </Table.Cell>
+                                    <Table.Cell>
+                                      <Badge
+                                        variant={event.action === "api_key_auth_failed"
+                                          ? "destructive"
+                                          : "secondary"}
                                       >
                                         {event.action}
-                                      </span>
-                                    </td>
-                                    <td class="text-muted px-3 py-2 text-xs">
+                                      </Badge>
+                                    </Table.Cell>
+                                    <Table.Cell class="text-muted text-xs">
                                       <div class="flex items-center gap-1.5">
-                                        <span class="shrink-0 font-medium"
-                                          >{event.method ?? "—"}</span
-                                        >
+                                        <span class="shrink-0 font-medium">
+                                          {event.method ?? "—"}
+                                        </span>
                                         {#if event.request_path}
-                                          <span class="text-muted/60">·</span>
+                                          <span class="text-muted/60" aria-hidden="true">·</span>
                                           <span
                                             class="max-w-[24rem] truncate font-mono"
-                                            title={event.request_path}>{event.request_path}</span
+                                            title={event.request_path}
                                           >
+                                            {event.request_path}
+                                          </span>
                                         {/if}
                                       </div>
-                                    </td>
-                                    <td class="text-muted px-3 py-2 text-xs">
+                                    </Table.Cell>
+                                    <Table.Cell class="text-muted text-xs">
                                       <div class="flex items-center gap-1.5">
-                                        <span class="shrink-0 font-mono"
-                                          >{event.ip_address ?? "—"}</span
-                                        >
+                                        <span class="shrink-0 font-mono">
+                                          {event.ip_address ?? "—"}
+                                        </span>
                                         {#if event.origin}
-                                          <span class="text-muted/60">·</span>
-                                          <span class="max-w-[18rem] truncate" title={event.origin}
-                                            >{event.origin}</span
-                                          >
+                                          <span class="text-muted/60" aria-hidden="true">·</span>
+                                          <span class="max-w-[18rem] truncate" title={event.origin}>
+                                            {event.origin}
+                                          </span>
                                         {/if}
                                       </div>
-                                    </td>
-                                  </tr>
+                                    </Table.Cell>
+                                  </Table.Row>
                                 {/each}
-                              </tbody>
-                            </table>
+                              </Table.Body>
+                            </Table.Root>
                           </div>
                         </div>
                       {:else}
@@ -723,17 +733,15 @@
                       {/if}
 
                       {#if usageCursorByKey[key.id]}
-                        <button
-                          type="button"
-                          onclick={() => loadMoreUsage(key.id)}
-                          class="border-default hover:bg-hover text-default rounded-md border px-3 py-1.5 text-xs font-medium transition-colors"
-                        >
+                        <Button variant="outline" size="sm" onclick={() => loadMoreUsage(key.id)}>
                           {m.api_keys_admin_usage_load_more()}
-                        </button>
+                        </Button>
                       {/if}
                     {/if}
                   </div>
-                {:else}
+                </Tabs.Content>
+
+                <Tabs.Content value="overview">
                   <!-- Overview tab (original details) -->
                   <!-- Description section -->
                   {#if key.description}
@@ -905,39 +913,43 @@
                     {@const revokedReasonLabel = getReasonCodeLabel(key.revoked_reason_code)}
                     <div class="border-dimmer mt-5 border-t pt-4">
                       <div
-                        class="border-negative/40 bg-negative/10 dark:border-negative/30 dark:bg-negative/5 rounded-lg
+                        class="border-negative-default/40 bg-negative-default/10 dark:border-negative-default/30 dark:bg-negative-default/5 rounded-lg
                            border p-4"
                       >
                         <div class="flex items-start gap-3">
                           <div
-                            class="bg-negative/20 flex h-8 w-8 items-center justify-center rounded-lg"
+                            class="bg-negative-default/20 flex h-8 w-8 items-center justify-center rounded-lg"
                           >
-                            <Lock class="text-negative h-4 w-4" />
+                            <Lock class="text-negative-stronger h-4 w-4" />
                           </div>
                           <div class="min-w-0 flex-1">
-                            <p class="text-negative text-sm font-semibold">
+                            <p class="text-negative-stronger text-sm font-semibold">
                               {m.api_keys_key_revoked()}
                             </p>
-                            <p class="text-negative/80 mt-1 text-sm">
+                            <p class="text-negative-stronger/80 mt-1 text-sm">
                               {formatter.format(new Date(key.revoked_at))}
                             </p>
                             {#if revokedReasonLabel}
-                              <p class="text-negative/70 mt-2 text-sm">{revokedReasonLabel}</p>
+                              <p class="text-negative-stronger/70 mt-2 text-sm">
+                                {revokedReasonLabel}
+                              </p>
                             {/if}
                             {#if key.revoked_reason_text}
-                              <p class="text-negative/60 mt-1 text-xs">{key.revoked_reason_text}</p>
+                              <p class="text-negative-stronger/60 mt-1 text-xs">
+                                {key.revoked_reason_text}
+                              </p>
                             {/if}
                           </div>
                         </div>
                       </div>
                     </div>
                   {/if}
-                {/if}
-              </div>
-            {/key}
-          </div>
-        {/if}
-      </div>
+                </Tabs.Content>
+              </Tabs.Root>
+            </div>
+          </Collapsible.Content>
+        </Card.Root>
+      </Collapsible.Root>
     {/each}
   </div>
 {/if}

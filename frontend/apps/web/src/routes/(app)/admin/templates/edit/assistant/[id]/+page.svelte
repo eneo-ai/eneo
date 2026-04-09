@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Page, Settings } from "$lib/components/layout";
   import { Button, Input } from "@intric/ui";
   import { goto } from "$app/navigation";
@@ -17,55 +18,67 @@
 
   let { data } = $props();
 
-  const intric = data.intric;
+  const intric = $derived(data.intric);
 
   // Initialize from template data
-  let name = $state(data.template.name || "");
-  let description = $state(data.template.description || "");
-  let category = $state(data.template.category || "");
-  let iconName = $state<string | null>(data.template.icon_name || null);
-  let promptText = $state(data.template.prompt_text || "");
+  let name = $state(untrack(() => data.template.name || ""));
+  let description = $state(untrack(() => data.template.description || ""));
+  let category = $state(untrack(() => data.template.category || ""));
+  let iconName = $state<string | null>(untrack(() => data.template.icon_name || null));
+  let promptText = $state(untrack(() => data.template.prompt_text || ""));
   let completionModel = $state(
-    data.completionModels?.find(
-      (m) =>
-        m.id === data.template.completion_model_id || m.name === data.template.completion_model_name
-    ) ||
-      data.completionModels?.[0] ||
-      null
+    untrack(
+      () =>
+        data.completionModels?.find(
+          (m) =>
+            m.id === data.template.completion_model_id ||
+            m.name === data.template.completion_model_name
+        ) ||
+        data.completionModels?.[0] ||
+        null
+    )
   );
-  let completionModelKwargs = $state(data.template.completion_model_kwargs || {});
+  let completionModelKwargs = $state(untrack(() => data.template.completion_model_kwargs || {}));
   let isSaving = $state(false);
 
   // Parse wizard configuration from template
   // Handle both object format {attachments: {...}, collections: {...}}
   // and array format [{type: "attachments", ...}, {type: "collections", ...}]
-  const templateRecord = data.template as Record<string, unknown>;
-  const wizard = (templateRecord.wizard_config || templateRecord.wizard || {}) as
-    | Record<string, unknown>
-    | Array<Record<string, unknown>>;
+  const initialWizardConfigs = untrack(() => {
+    const templateRecord = data.template as Record<string, unknown>;
+    const wizard = (templateRecord.wizard_config || templateRecord.wizard || {}) as
+      | Record<string, unknown>
+      | Array<Record<string, unknown>>;
 
-  let attachmentsConfig: Record<string, unknown> | undefined;
-  let collectionsConfig: Record<string, unknown> | undefined;
+    let attachments: Record<string, unknown> | undefined;
+    let collections: Record<string, unknown> | undefined;
 
-  if (Array.isArray(wizard)) {
-    // Array format: [{type: "attachments", ...}, {type: "collections", ...}]
-    attachmentsConfig = wizard.find((c) => c.type === "attachments");
-    collectionsConfig = wizard.find((c) => c.type === "collections");
-  } else {
-    // Object format: {attachments: {...}, collections: {...}}
-    attachmentsConfig = wizard.attachments as Record<string, unknown> | undefined;
-    collectionsConfig = wizard.collections as Record<string, unknown> | undefined;
-  }
+    if (Array.isArray(wizard)) {
+      // Array format: [{type: "attachments", ...}, {type: "collections", ...}]
+      attachments = wizard.find((c) => c.type === "attachments");
+      collections = wizard.find((c) => c.type === "collections");
+    } else {
+      // Object format: {attachments: {...}, collections: {...}}
+      attachments = wizard.attachments as Record<string, unknown> | undefined;
+      collections = wizard.collections as Record<string, unknown> | undefined;
+    }
 
-  let wizardAttachmentsEnabled = $state(!!attachmentsConfig);
-  let wizardAttachmentsRequired = $state(Boolean(attachmentsConfig?.required));
-  let wizardAttachmentsTitle = $state(String(attachmentsConfig?.title || ""));
-  let wizardAttachmentsDescription = $state(String(attachmentsConfig?.description || ""));
+    return { attachments, collections };
+  });
 
-  let wizardCollectionsEnabled = $state(!!collectionsConfig);
-  let wizardCollectionsRequired = $state(Boolean(collectionsConfig?.required));
-  let wizardCollectionsTitle = $state(String(collectionsConfig?.title || ""));
-  let wizardCollectionsDescription = $state(String(collectionsConfig?.description || ""));
+  let wizardAttachmentsEnabled = $state(!!initialWizardConfigs.attachments);
+  let wizardAttachmentsRequired = $state(Boolean(initialWizardConfigs.attachments?.required));
+  let wizardAttachmentsTitle = $state(String(initialWizardConfigs.attachments?.title || ""));
+  let wizardAttachmentsDescription = $state(
+    String(initialWizardConfigs.attachments?.description || "")
+  );
+
+  let wizardCollectionsEnabled = $state(!!initialWizardConfigs.collections);
+  let wizardCollectionsRequired = $state(Boolean(initialWizardConfigs.collections?.required));
+  let wizardCollectionsTitle = $state(String(initialWizardConfigs.collections?.title || ""));
+  let wizardCollectionsDescription = $state(
+    String(initialWizardConfigs.collections?.description || "")
+  );
 
   async function handleUpdateTemplate() {
     if (!name || !category) {

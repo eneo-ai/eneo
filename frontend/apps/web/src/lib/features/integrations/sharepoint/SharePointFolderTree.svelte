@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { getIntric } from "$lib/core/Intric";
   import { IconChevronRight } from "@intric/icons/chevron-right";
@@ -45,9 +46,9 @@
   const intric = getIntric();
 
   let currentItems = $state<TreeItem[]>([]);
-  let navigationStack = $state<Array<{ folderId: string | null; path: string; name: string }>>([
-    { folderId: null, path: "/", name: siteName }
-  ]);
+  let navigationStack = $state<Array<{ folderId: string | null; path: string; name: string }>>(
+    untrack(() => [{ folderId: null, path: "/", name: siteName }])
+  );
   let selectedItemKeySet = $derived.by(() => new Set(selectedItemKeys ?? []));
   const siteRootSelectionKey = buildSharePointSelectionKey({
     id: "",

@@ -2,8 +2,11 @@
   import { onMount } from "svelte";
   import { getIntric } from "$lib/core/Intric";
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
-  import { Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import {
     extractFollowedKeyIds,
     getAdminNotificationPolicy,
@@ -15,7 +18,6 @@
   import type { ExpiringKeyDisplayItem } from "$lib/features/api-keys/expirationUtils";
   import { Bell, BellOff, ShieldAlert } from "lucide-svelte";
   import { slide } from "svelte/transition";
-  import { SvelteSet } from "svelte/reactivity";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
 
   let { onExpiringItemsChanged, onError, onFollowedKeysChanged, onNotificationsEnabledChanged } =
@@ -29,14 +31,19 @@
   const intric = getIntric();
   const { forceRefresh: forceRefreshExpiringStore } = getExpiringKeysStore();
 
+  // Constants
+  const DEFAULT_REMINDER_DAYS = 30;
+  const QUICK_PRESETS = [7, 14, 30, 60, 90];
+  const MAX_REMINDER_DAYS = 365;
+
   // Notification state
   let notificationsEnabled = $state(false);
-  let notificationDaysInput = $state("");
+  let reminderDays = $state(DEFAULT_REMINDER_DAYS);
+  let reminderDaysInput = $state(String(DEFAULT_REMINDER_DAYS));
   let autoFollowPublishedAssistants = $state(false);
   let autoFollowPublishedApps = $state(false);
   let notificationSettingsLoading = $state(true);
   let notificationSettingsSaving = $state(false);
-  let showCustomInput = $state(false);
 
   // Policy state
   let notificationPolicyEnabled = $state<boolean | null>(null);
@@ -44,50 +51,40 @@
   let allowAutoFollowAssistants = $state<boolean | null>(null);
   let allowAutoFollowApps = $state<boolean | null>(null);
 
-  // Derived
-  const reminderDayDefaults = [1, 3, 7, 14, 30];
-  const selectedReminderDays = $derived.by(() => parseDayValues(notificationDaysInput));
-  const reminderDayOptions = $derived.by(() => {
-    const combined = Array.from(new Set([...reminderDayDefaults, ...selectedReminderDays]));
-    const limited =
-      notificationPolicyMaxDays != null && notificationPolicyMaxDays > 0
-        ? combined.filter((day) => day <= notificationPolicyMaxDays!)
-        : combined;
-    return limited.sort((a, b) => a - b);
-  });
-
   const isPolicyBlocked = $derived(notificationPolicyEnabled === false);
+  const effectiveMaxDays = $derived(
+    notificationPolicyMaxDays != null && notificationPolicyMaxDays > 0
+      ? Math.min(notificationPolicyMaxDays, MAX_REMINDER_DAYS)
+      : MAX_REMINDER_DAYS
+  );
+  const visiblePresets = $derived(QUICK_PRESETS.filter((day) => day <= effectiveMaxDays));
 
-  function parseDayValues(value: string): number[] {
-    return Array.from(
-      new Set(
-        value
-          .split(/[,\s]+/)
-          .map((item) => Number(item))
-          .filter((item) => Number.isFinite(item) && item > 0)
-          .map((item) => Math.floor(item))
-      )
-    ).sort((a, b) => b - a);
+  function clampDays(value: number): number {
+    if (!Number.isFinite(value) || value <= 0) return DEFAULT_REMINDER_DAYS;
+    return Math.min(Math.max(1, Math.floor(value)), effectiveMaxDays);
+  }
+
+  function pickReminderDays(raw: number[] | undefined): number {
+    if (!raw || raw.length === 0) return DEFAULT_REMINDER_DAYS;
+    return clampDays(Math.max(...raw));
   }
 
   async function loadExpiring({
     enabled = notificationsEnabled,
     hasSubscriptions,
-    days = notificationDaysInput
+    days = reminderDays
   }: {
     enabled?: boolean;
     hasSubscriptions: boolean;
-    days?: string;
+    days?: number;
   }) {
     if (!enabled || !hasSubscriptions) {
       onExpiringItemsChanged([]);
       return;
     }
-    const parsedDays = parseDayValues(days);
-    const windowDays = parsedDays.length > 0 ? Math.max(...parsedDays) : 30;
     try {
       const summary = await intric.apiKeys.expiringSoon({
-        days: windowDays,
+        days,
         mode: "subscribed"
       });
       onExpiringItemsChanged(summaryToDisplayItems(summary.items));
@@ -105,13 +102,14 @@
         getAdminNotificationPolicy(intric).catch(() => null)
       ]);
       notificationsEnabled = preferences.enabled;
-      notificationDaysInput = preferences.days_before_expiry.join(", ");
-      autoFollowPublishedAssistants = preferences.auto_follow_published_assistants;
-      autoFollowPublishedApps = preferences.auto_follow_published_apps;
       notificationPolicyEnabled = policy?.enabled ?? null;
       notificationPolicyMaxDays = policy?.max_days_before_expiry ?? null;
       allowAutoFollowAssistants = policy?.allow_auto_follow_published_assistants ?? null;
       allowAutoFollowApps = policy?.allow_auto_follow_published_apps ?? null;
+      reminderDays = pickReminderDays(preferences.days_before_expiry);
+      reminderDaysInput = String(reminderDays);
+      autoFollowPublishedAssistants = preferences.auto_follow_published_assistants;
+      autoFollowPublishedApps = preferences.auto_follow_published_apps;
       const followedKeyIds = extractFollowedKeyIds(subscriptions);
       const hasSubscriptions = subscriptions.length > 0;
       onFollowedKeysChanged(followedKeyIds, hasSubscriptions);
@@ -119,7 +117,7 @@
       await loadExpiring({
         enabled: preferences.enabled,
         hasSubscriptions,
-        days: preferences.days_before_expiry.join(", ")
+        days: reminderDays
       });
     } catch (error) {
       console.error(error);
@@ -136,7 +134,8 @@
     try {
       const updated = await updateNotificationPreferences(intric, { enabled: next });
       notificationsEnabled = updated.enabled;
-      notificationDaysInput = updated.days_before_expiry.join(", ");
+      reminderDays = pickReminderDays(updated.days_before_expiry);
+      reminderDaysInput = String(reminderDays);
       autoFollowPublishedAssistants = updated.auto_follow_published_assistants;
       autoFollowPublishedApps = updated.auto_follow_published_apps;
       onNotificationsEnabledChanged(updated.enabled);
@@ -157,41 +156,43 @@
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
-  function debouncedSaveDays() {
+  function scheduleSave() {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void saveNotificationDays(), 400);
+    saveTimer = setTimeout(() => void saveReminderDays(), 400);
   }
 
-  function toggleReminderDay(day: number) {
+  function selectPreset(day: number) {
     if (notificationSettingsSaving) return;
-    const next = new SvelteSet(selectedReminderDays);
-    if (next.has(day)) {
-      next.delete(day);
-    } else {
-      next.add(day);
-    }
-    if (next.size === 0) {
-      next.add(day);
-    }
-    notificationDaysInput = Array.from(next)
-      .sort((a, b) => b - a)
-      .join(", ");
-    debouncedSaveDays();
+    const clamped = clampDays(day);
+    if (clamped === reminderDays) return;
+    reminderDays = clamped;
+    reminderDaysInput = String(clamped);
+    scheduleSave();
   }
 
-  async function saveNotificationDays() {
-    const parsed = parseDayValues(notificationDaysInput);
-    if (parsed.length === 0) {
+  function commitReminderInput() {
+    const parsed = Number(reminderDaysInput);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
       onError(m.api_keys_notifications_days_validation());
+      reminderDaysInput = String(reminderDays);
       return;
     }
+    const clamped = clampDays(parsed);
+    reminderDaysInput = String(clamped);
+    if (clamped === reminderDays) return;
+    reminderDays = clamped;
+    scheduleSave();
+  }
+
+  async function saveReminderDays() {
     notificationSettingsSaving = true;
     try {
       const updated = await updateNotificationPreferences(intric, {
-        days_before_expiry: parsed
+        days_before_expiry: [reminderDays]
       });
       notificationsEnabled = updated.enabled;
-      notificationDaysInput = updated.days_before_expiry.join(", ");
+      reminderDays = pickReminderDays(updated.days_before_expiry);
+      reminderDaysInput = String(reminderDays);
       autoFollowPublishedAssistants = updated.auto_follow_published_assistants;
       autoFollowPublishedApps = updated.auto_follow_published_apps;
       if (!updated.enabled) {
@@ -220,7 +221,8 @@
         auto_follow_published_assistants: next
       });
       notificationsEnabled = updated.enabled;
-      notificationDaysInput = updated.days_before_expiry.join(", ");
+      reminderDays = pickReminderDays(updated.days_before_expiry);
+      reminderDaysInput = String(reminderDays);
       autoFollowPublishedAssistants = updated.auto_follow_published_assistants;
       autoFollowPublishedApps = updated.auto_follow_published_apps;
       if (next && !updated.auto_follow_published_assistants) {
@@ -250,7 +252,8 @@
         auto_follow_published_apps: next
       });
       notificationsEnabled = updated.enabled;
-      notificationDaysInput = updated.days_before_expiry.join(", ");
+      reminderDays = pickReminderDays(updated.days_before_expiry);
+      reminderDaysInput = String(reminderDays);
       autoFollowPublishedAssistants = updated.auto_follow_published_assistants;
       autoFollowPublishedApps = updated.auto_follow_published_apps;
       if (next && !updated.auto_follow_published_apps) {
@@ -306,24 +309,24 @@
       </h3>
     </div>
     <div class="shrink-0">
-      <Input.Switch
-        bind:value={notificationsEnabled}
-        sideEffect={handleNotificationsToggle}
+      <Switch
+        checked={notificationsEnabled}
+        onCheckedChange={(next) =>
+          handleNotificationsToggle({ current: notificationsEnabled, next })}
         disabled={notificationSettingsLoading || notificationSettingsSaving || isPolicyBlocked}
+        aria-label={m.api_keys_notifications_settings_title()}
       />
     </div>
   </div>
 
   <!-- Policy-blocked banner -->
   {#if isPolicyBlocked}
-    <div
-      class="border-negative-default/20 bg-negative-dimmer/50 mx-5 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3"
-    >
-      <ShieldAlert class="text-negative-default h-4 w-4 shrink-0" />
-      <p class="text-negative-default text-xs">
+    <Alert.Root variant="destructive" class="mx-5 mb-4">
+      <ShieldAlert />
+      <Alert.Description>
         {m.api_keys_notifications_policy_header_hint()}
-      </p>
-    </div>
+      </Alert.Description>
+    </Alert.Root>
   {/if}
 
   <!-- Disabled hint -->
@@ -340,16 +343,42 @@
         {m.api_keys_notifications_settings_description()}
       </p>
 
-      <!-- Reminder schedule -->
+      <!-- Reminder window -->
       <div
         class="space-y-3"
         class:opacity-50={notificationSettingsSaving}
         class:pointer-events-none={notificationSettingsSaving}
       >
-        <!-- Quick day chips -->
-        <div class="flex flex-wrap gap-1.5">
-          {#each reminderDayOptions as day (day)}
-            {@const isSelected = selectedReminderDays.includes(day)}
+        <Field.Field>
+          <Field.Label for="notification-days-input">
+            {m.api_keys_notifications_days_label()}
+          </Field.Label>
+          <div class="flex items-center gap-2">
+            <Input
+              id="notification-days-input"
+              type="number"
+              min={1}
+              max={effectiveMaxDays}
+              inputmode="numeric"
+              class="max-w-[96px]"
+              bind:value={reminderDaysInput}
+              disabled={notificationSettingsSaving}
+              onblur={commitReminderInput}
+              aria-label={m.api_keys_notifications_days_label()}
+            />
+            <span class="text-secondary text-sm">
+              {m.api_keys_notifications_days_unit()}
+            </span>
+          </div>
+        </Field.Field>
+
+        <div
+          class="flex flex-wrap gap-1.5"
+          role="group"
+          aria-label={m.api_keys_notifications_quick_presets_label()}
+        >
+          {#each visiblePresets as day (day)}
+            {@const isSelected = day === reminderDays}
             <button
               type="button"
               style="font-variant-numeric: tabular-nums"
@@ -359,33 +388,12 @@
               aria-pressed={isSelected}
               aria-label={m.api_keys_notifications_day_chip_aria_label({ day })}
               disabled={notificationSettingsSaving}
-              onclick={() => toggleReminderDay(day)}
+              onclick={() => selectPreset(day)}
             >
               {day}d
             </button>
           {/each}
         </div>
-
-        <!-- Custom days disclosure -->
-        {#if showCustomInput}
-          <div class="max-w-[280px]" transition:slide={{ duration: 150 }}>
-            <Input.Text
-              bind:value={notificationDaysInput}
-              label={m.api_keys_notifications_days_label()}
-              placeholder="30, 14, 7, 3, 1"
-              disabled={notificationSettingsSaving}
-              on:blur={debouncedSaveDays}
-            />
-          </div>
-        {:else}
-          <button
-            type="button"
-            class="text-accent-default text-xs hover:underline"
-            onclick={() => (showCustomInput = true)}
-          >
-            {m.api_keys_notifications_customize_days()}
-          </button>
-        {/if}
 
         <p class="text-muted text-xs leading-relaxed">
           {m.api_keys_notifications_days_help()}
@@ -417,10 +425,15 @@
             {/if}
           </div>
           <div class="shrink-0 pt-0.5">
-            <Input.Switch
-              bind:value={autoFollowPublishedAssistants}
-              sideEffect={handleAutoFollowAssistantsToggle}
+            <Switch
+              checked={autoFollowPublishedAssistants}
+              onCheckedChange={(next) =>
+                handleAutoFollowAssistantsToggle({
+                  current: autoFollowPublishedAssistants,
+                  next
+                })}
               disabled={notificationSettingsSaving || allowAutoFollowAssistants === false}
+              aria-label={m.api_keys_notifications_auto_follow_assistants_title()}
             />
           </div>
         </div>
@@ -441,10 +454,15 @@
             {/if}
           </div>
           <div class="shrink-0 pt-0.5">
-            <Input.Switch
-              bind:value={autoFollowPublishedApps}
-              sideEffect={handleAutoFollowAppsToggle}
+            <Switch
+              checked={autoFollowPublishedApps}
+              onCheckedChange={(next) =>
+                handleAutoFollowAppsToggle({
+                  current: autoFollowPublishedApps,
+                  next
+                })}
               disabled={notificationSettingsSaving || allowAutoFollowApps === false}
+              aria-label={m.api_keys_notifications_auto_follow_apps_title()}
             />
           </div>
         </div>

@@ -1,12 +1,28 @@
 <script lang="ts">
   import type { ApiKeyCreatedResponse, ApiKeyUpdateRequest, ApiKeyV2 } from "@intric/intric-js";
-  import { Button, Dialog, Dropdown, Input, Select } from "@intric/ui";
-  import { Ban, ChevronDown, MoreVertical, Pencil, RefreshCw, RotateCcw } from "lucide-svelte";
+  import {
+    AlertCircle,
+    Ban,
+    ChevronDown,
+    MoreVertical,
+    Pencil,
+    RefreshCw,
+    RotateCcw
+  } from "lucide-svelte";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
-  import { writable } from "svelte/store";
+  import { toast } from "svelte-sonner";
   import TagInput from "../../account/api-keys/TagInput.svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
 
   const intric = getIntric();
 
@@ -16,9 +32,10 @@
     onSecret: (response: ApiKeyCreatedResponse) => void;
   }>();
 
-  const showRevokeDialog = writable(false);
-  const showSuspendDialog = writable(false);
-  const showEditDialog = writable(false);
+  let showRevokeDialog = $state(false);
+  let showSuspendDialog = $state(false);
+  let showEditDialog = $state(false);
+  let actionPending = $state(false);
   let errorMessage = $state<string | null>(null);
   let reasonText = $state("");
   let editName = $state("");
@@ -76,7 +93,8 @@
     showAdvanced = Boolean(
       apiKey.rate_limit || editAllowedOrigins.length > 0 || editAllowedIps.length > 0
     );
-    $showEditDialog = true;
+    errorMessage = null;
+    showEditDialog = true;
   }
 
   async function updateKey() {
@@ -136,25 +154,27 @@
     }
 
     if (Object.keys(updates).length === 0) {
-      $showEditDialog = false;
+      showEditDialog = false;
       return;
     }
 
+    actionPending = true;
     try {
       await intric.apiKeys.admin.update({
         id: apiKey.id,
         update: updates
       });
       onChanged();
-      $showEditDialog = false;
+      showEditDialog = false;
     } catch (error) {
       console.error(error);
       errorMessage = getErrorMessage(error);
+    } finally {
+      actionPending = false;
     }
   }
 
   async function rotateKey() {
-    errorMessage = null;
     try {
       const response = await intric.apiKeys.admin.rotate({ id: apiKey.id });
       if (!response?.secret) {
@@ -163,12 +183,13 @@
       onSecret(response);
     } catch (error) {
       console.error(error);
-      errorMessage = getErrorMessage(error);
+      toast.error(getErrorMessage(error));
     }
   }
 
   async function revokeKey() {
     errorMessage = null;
+    actionPending = true;
     try {
       await intric.apiKeys.admin.revoke({
         id: apiKey.id,
@@ -178,16 +199,20 @@
         }
       });
       onChanged();
-      $showRevokeDialog = false;
+      showRevokeDialog = false;
       reasonText = "";
     } catch (error) {
       console.error(error);
       errorMessage = getErrorMessage(error);
+      toast.error(getErrorMessage(error));
+    } finally {
+      actionPending = false;
     }
   }
 
   async function suspendKey() {
     errorMessage = null;
+    actionPending = true;
     try {
       await intric.apiKeys.admin.suspend({
         id: apiKey.id,
@@ -197,211 +222,282 @@
         }
       });
       onChanged();
-      $showSuspendDialog = false;
+      showSuspendDialog = false;
       reasonText = "";
     } catch (error) {
       console.error(error);
       errorMessage = getErrorMessage(error);
+      toast.error(getErrorMessage(error));
+    } finally {
+      actionPending = false;
     }
   }
 
   async function reactivateKey() {
-    errorMessage = null;
     try {
       await intric.apiKeys.admin.reactivate({ id: apiKey.id });
       onChanged();
     } catch (error) {
       console.error(error);
-      errorMessage = getErrorMessage(error);
+      toast.error(getErrorMessage(error));
     }
   }
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger asFragment let:trigger>
-    <Button is={trigger} padding="icon" aria-label={m.actions()}>
-      <MoreVertical size={16} />
-    </Button>
-  </Dropdown.Trigger>
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+        <MoreVertical />
+      </Button>
+    {/snippet}
+  </DropdownMenu.Trigger>
 
-  <Dropdown.Menu let:item>
-    <Button is={item} padding="icon-leading" on:click={openEditDialog}>
-      <Pencil size={16} />
+  <DropdownMenu.Content align="end">
+    <DropdownMenu.Item onclick={openEditDialog}>
+      <Pencil />
       {m.api_keys_admin_action_edit()}
-    </Button>
+    </DropdownMenu.Item>
 
     {#if canRotate}
-      <Button is={item} padding="icon-leading" on:click={rotateKey}>
-        <RotateCcw size={16} />
+      <DropdownMenu.Item onclick={rotateKey}>
+        <RotateCcw />
         {m.api_keys_admin_action_rotate()}
-      </Button>
+      </DropdownMenu.Item>
     {/if}
 
     {#if isActive}
-      <Button
-        is={item}
-        padding="icon-leading"
-        on:click={() => {
-          $showSuspendDialog = true;
+      <DropdownMenu.Item
+        onclick={() => {
+          showSuspendDialog = true;
         }}
       >
-        <Ban size={16} />
+        <Ban />
         {m.api_keys_admin_action_suspend()}
-      </Button>
+      </DropdownMenu.Item>
     {/if}
 
     {#if isSuspended}
-      <Button is={item} padding="icon-leading" on:click={reactivateKey}>
-        <RefreshCw size={16} />
+      <DropdownMenu.Item onclick={reactivateKey}>
+        <RefreshCw />
         {m.api_keys_admin_action_reactivate()}
-      </Button>
+      </DropdownMenu.Item>
     {/if}
 
     {#if apiKey.state !== "revoked"}
-      <Button
-        is={item}
+      <DropdownMenu.Separator />
+
+      <DropdownMenu.Item
         variant="destructive"
-        padding="icon-leading"
-        on:click={() => {
-          $showRevokeDialog = true;
+        onclick={() => {
+          showRevokeDialog = true;
         }}
       >
-        <Ban size={16} />
+        <Ban />
         {m.api_keys_admin_action_revoke()}
-      </Button>
+      </DropdownMenu.Item>
     {/if}
-  </Dropdown.Menu>
-</Dropdown.Root>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
 
-{#if errorMessage}
-  <div class="text-xs text-red-600">{errorMessage}</div>
-{/if}
+<Dialog.Root bind:open={showEditDialog}>
+  <Dialog.Content class="sm:max-w-lg">
+    <Dialog.Header>
+      <Dialog.Title>{m.api_keys_admin_edit_title()}</Dialog.Title>
+      <Dialog.Description>{m.api_keys_admin_edit_description()}</Dialog.Description>
+    </Dialog.Header>
 
-<Dialog.Root openController={showEditDialog}>
-  <Dialog.Content width="medium">
-    <Dialog.Title>{m.api_keys_admin_edit_title()}</Dialog.Title>
-    <Dialog.Description>
-      {m.api_keys_admin_edit_description()}
-    </Dialog.Description>
-    <div class="mt-3 space-y-3">
-      <Input.Text bind:value={editName} label={m.name()} />
-      <Input.TextArea bind:value={editDescription} label={m.description()} rows={3} />
+    {#if errorMessage}
+      <Alert.Root variant="destructive">
+        <AlertCircle />
+        <Alert.Description>{errorMessage}</Alert.Description>
+      </Alert.Root>
+    {/if}
+
+    <div class="space-y-4">
+      <Field.Field>
+        <Field.Label for="edit-name">{m.name()}</Field.Label>
+        <Input id="edit-name" bind:value={editName} />
+      </Field.Field>
+
+      <Field.Field>
+        <Field.Label for="edit-description">{m.description()}</Field.Label>
+        <Textarea id="edit-description" bind:value={editDescription} rows={3} />
+      </Field.Field>
+
       {#if canEditPermission}
-        <Select.Simple
-          bind:value={editPermission}
-          options={permissionOptions}
-          resourceName="permission"
-        >
-          {m.api_keys_admin_edit_permission_label()}
-        </Select.Simple>
+        <Field.Field>
+          <Field.Label for="edit-permission">
+            {m.api_keys_admin_edit_permission_label()}
+          </Field.Label>
+          <Select.Root type="single" bind:value={editPermission}>
+            <Select.Trigger id="edit-permission">
+              {permissionOptions.find((o) => o.value === editPermission)?.label}
+            </Select.Trigger>
+            <Select.Content>
+              {#each permissionOptions as opt (opt.value)}
+                <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+        </Field.Field>
       {:else}
         <div>
-          <p class="text-muted mb-1 text-xs">{m.api_keys_admin_edit_permission_label()}</p>
+          <p class="text-secondary mb-1 text-xs">{m.api_keys_admin_edit_permission_label()}</p>
           <div class="border-default bg-subtle text-default rounded-md border px-3 py-2 text-sm">
             {editPermission}
           </div>
+          <p class="text-secondary mt-1 text-xs">
+            {m.api_keys_admin_edit_permission_disabled_hint()}
+          </p>
         </div>
-        <p class="text-muted text-xs">{m.api_keys_admin_edit_permission_disabled_hint()}</p>
       {/if}
 
       <div class="grid gap-3 sm:grid-cols-2">
         <div>
-          <p class="text-muted mb-1 text-xs">{m.api_keys_admin_edit_scope_readonly_label()}</p>
+          <p class="text-secondary mb-1 text-xs">{m.api_keys_admin_edit_scope_readonly_label()}</p>
           <div class="border-default bg-subtle text-default rounded-md border px-3 py-2 text-sm">
             {scopeLabel}
           </div>
         </div>
         <div>
-          <p class="text-muted mb-1 text-xs">{m.api_keys_admin_edit_key_type_readonly_label()}</p>
+          <p class="text-secondary mb-1 text-xs">
+            {m.api_keys_admin_edit_key_type_readonly_label()}
+          </p>
           <div class="border-default bg-subtle text-default rounded-md border px-3 py-2 text-sm">
             {keyTypeLabel}
           </div>
         </div>
       </div>
-      <p class="text-muted text-xs">{m.api_keys_admin_edit_immutable_hint()}</p>
+      <p class="text-secondary text-xs">{m.api_keys_admin_edit_immutable_hint()}</p>
 
-      <div class="border-default/70 pt-2">
-        <button
-          type="button"
-          onclick={() => (showAdvanced = !showAdvanced)}
-          class="text-default hover:text-accent-default inline-flex w-full items-center justify-between rounded-md px-1 py-1.5 text-left text-sm font-medium transition-colors"
-          aria-expanded={showAdvanced}
+      <Collapsible.Root bind:open={showAdvanced}>
+        <Collapsible.Trigger
+          class="group/trigger text-default hover:text-accent-default inline-flex w-full items-center justify-between rounded-md px-1 py-1.5 text-left text-sm font-medium transition-colors"
         >
           <span>{m.api_keys_admin_edit_advanced_title()}</span>
-          <ChevronDown class="h-4 w-4 transition-transform {showAdvanced ? 'rotate-180' : ''}" />
-        </button>
-        <p class="text-muted mt-1 text-xs">{m.api_keys_admin_edit_advanced_description()}</p>
-      </div>
-
-      {#if showAdvanced}
-        <div class="border-default bg-subtle/40 space-y-3 rounded-lg border p-3">
-          <Input.Text
-            bind:value={editRateLimit}
-            label={m.api_keys_rate_limit()}
-            placeholder={m.api_keys_rate_limit_placeholder()}
-            disabled={!canEditGuardrails}
+          <ChevronDown
+            class="h-4 w-4 transition-transform duration-200 group-data-[state=open]/trigger:rotate-180"
           />
-          <p class="text-muted -mt-1 text-xs">{m.api_keys_rate_limit_help()}</p>
+        </Collapsible.Trigger>
+        <p class="text-secondary mt-1 mb-2 text-xs">
+          {m.api_keys_admin_edit_advanced_description()}
+        </p>
 
-          {#if apiKey.key_type === "pk_"}
-            <TagInput
-              type="origin"
-              bind:value={editAllowedOrigins}
-              label={m.api_keys_allowed_origins()}
-              description={m.api_keys_allowed_origins_desc()}
-              disabled={!canEditGuardrails}
-            />
-          {/if}
+        <Collapsible.Content>
+          <div class="border-default bg-subtle/40 space-y-3 rounded-lg border p-3">
+            <Field.Field>
+              <Field.Label for="edit-rate-limit">{m.api_keys_rate_limit()}</Field.Label>
+              <Input
+                id="edit-rate-limit"
+                bind:value={editRateLimit}
+                placeholder={m.api_keys_rate_limit_placeholder()}
+                disabled={!canEditGuardrails}
+              />
+              <p class="text-secondary text-xs">{m.api_keys_rate_limit_help()}</p>
+            </Field.Field>
 
-          {#if apiKey.key_type === "sk_"}
-            <TagInput
-              type="ip"
-              bind:value={editAllowedIps}
-              label={m.api_keys_allowed_ips()}
-              description={m.api_keys_allowed_ips_desc()}
-              disabled={!canEditGuardrails}
-            />
-          {/if}
+            {#if apiKey.key_type === "pk_"}
+              <TagInput
+                type="origin"
+                bind:value={editAllowedOrigins}
+                label={m.api_keys_allowed_origins()}
+                description={m.api_keys_allowed_origins_desc()}
+                disabled={!canEditGuardrails}
+              />
+            {/if}
 
-          {#if !canEditGuardrails}
-            <p class="text-muted text-xs">{m.api_keys_admin_edit_guardrails_disabled_hint()}</p>
-          {/if}
-        </div>
-      {/if}
+            {#if apiKey.key_type === "sk_"}
+              <TagInput
+                type="ip"
+                bind:value={editAllowedIps}
+                label={m.api_keys_allowed_ips()}
+                description={m.api_keys_allowed_ips_desc()}
+                disabled={!canEditGuardrails}
+              />
+            {/if}
+
+            {#if !canEditGuardrails}
+              <p class="text-secondary text-xs">
+                {m.api_keys_admin_edit_guardrails_disabled_hint()}
+              </p>
+            {/if}
+          </div>
+        </Collapsible.Content>
+      </Collapsible.Root>
     </div>
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button on:click={updateKey}>{m.save()}</Button>
-    </Dialog.Controls>
+
+    <Dialog.Footer>
+      <Dialog.Close>
+        {#snippet child({ props })}
+          <Button variant="outline" {...props}>{m.cancel()}</Button>
+        {/snippet}
+      </Dialog.Close>
+      <Button onclick={updateKey} disabled={actionPending}>{m.save()}</Button>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root openController={showSuspendDialog} alert>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.api_keys_admin_suspend_title()}</Dialog.Title>
-    <Dialog.Description>
-      {m.api_keys_admin_suspend_description()}
-    </Dialog.Description>
-    <Input.Text bind:value={reasonText} label={m.api_keys_admin_reason_optional()} />
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={suspendKey}
-        >{m.api_keys_admin_action_suspend()}</Button
-      >
-    </Dialog.Controls>
+<Dialog.Root bind:open={showSuspendDialog}>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>{m.api_keys_admin_suspend_title()}</Dialog.Title>
+      <Dialog.Description>{m.api_keys_admin_suspend_description()}</Dialog.Description>
+    </Dialog.Header>
+
+    {#if errorMessage}
+      <Alert.Root variant="destructive">
+        <AlertCircle />
+        <Alert.Description>{errorMessage}</Alert.Description>
+      </Alert.Root>
+    {/if}
+
+    <Field.Field>
+      <Field.Label for="admin-suspend-reason">{m.api_keys_admin_reason_optional()}</Field.Label>
+      <Input id="admin-suspend-reason" bind:value={reasonText} />
+    </Field.Field>
+
+    <Dialog.Footer>
+      <Dialog.Close>
+        {#snippet child({ props })}
+          <Button variant="outline" {...props}>{m.cancel()}</Button>
+        {/snippet}
+      </Dialog.Close>
+      <Button variant="destructive" onclick={suspendKey} disabled={actionPending}>
+        {m.api_keys_admin_action_suspend()}
+      </Button>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root openController={showRevokeDialog} alert>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.api_keys_admin_revoke_title()}</Dialog.Title>
-    <Dialog.Description>
-      {m.api_keys_admin_revoke_description()}
-    </Dialog.Description>
-    <Input.Text bind:value={reasonText} label={m.api_keys_admin_reason_optional()} />
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={revokeKey}>{m.api_keys_admin_action_revoke()}</Button>
-    </Dialog.Controls>
+<Dialog.Root bind:open={showRevokeDialog}>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>{m.api_keys_admin_revoke_title()}</Dialog.Title>
+      <Dialog.Description>{m.api_keys_admin_revoke_description()}</Dialog.Description>
+    </Dialog.Header>
+
+    {#if errorMessage}
+      <Alert.Root variant="destructive">
+        <AlertCircle />
+        <Alert.Description>{errorMessage}</Alert.Description>
+      </Alert.Root>
+    {/if}
+
+    <Field.Field>
+      <Field.Label for="admin-revoke-reason">{m.api_keys_admin_reason_optional()}</Field.Label>
+      <Input id="admin-revoke-reason" bind:value={reasonText} />
+    </Field.Field>
+
+    <Dialog.Footer>
+      <Dialog.Close>
+        {#snippet child({ props })}
+          <Button variant="outline" {...props}>{m.cancel()}</Button>
+        {/snippet}
+      </Dialog.Close>
+      <Button variant="destructive" onclick={revokeKey} disabled={actionPending}>
+        {m.api_keys_admin_action_revoke()}
+      </Button>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

@@ -3,7 +3,12 @@
   import { writable } from "svelte/store";
   import { resolve } from "$app/paths";
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Input, Select } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { IntricError } from "@intric/intric-js";
@@ -55,7 +60,7 @@
   let scopeType = $state("");
   let stateFilter = $state("");
   let keyType = $state("");
-  let scopeId = $state("");
+  let scopeId = $state<string | null>(null);
   let createdByUserId = $state("");
   let expiresWithinDays = $state("");
   let userRelation = $state<"owner" | "creator">("owner");
@@ -87,12 +92,12 @@
   let notificationPolicySaving = $state(false);
   let notificationPolicy = $state<ApiKeyNotificationPolicy>({
     enabled: true,
-    default_days_before_expiry: [30, 14, 7, 3, 1],
+    default_days_before_expiry: [30],
     max_days_before_expiry: 365,
     allow_auto_follow_published_assistants: false,
     allow_auto_follow_published_apps: false
   });
-  let notificationPolicyDaysInput = $state("30, 14, 7, 3, 1");
+  let notificationPolicyDaysInput = $state("30");
   let notificationPolicyMaxDaysInput = $state("365");
 
   // Quick filter chips
@@ -173,7 +178,7 @@
 
   // Active filter count
   const activeFilterCount = $derived.by(() => {
-    let count = [scopeType, stateFilter, keyType, scopeId.trim()].filter(Boolean).length;
+    let count = [scopeType, stateFilter, keyType, scopeId?.trim()].filter(Boolean).length;
     if (expiresWithinDays.trim()) {
       count += 1;
     }
@@ -199,7 +204,7 @@
     if (scopeType) params.scope_type = scopeType;
     if (stateFilter) params.state = stateFilter;
     if (keyType) params.key_type = keyType;
-    if (scopeId.trim()) params.scope_id = scopeId.trim();
+    if (scopeId?.trim()) params.scope_id = scopeId.trim();
     if (expiresWithinDays.trim()) {
       const parsed = Number(expiresWithinDays.trim());
       if (Number.isFinite(parsed) && parsed > 0) {
@@ -476,7 +481,7 @@
     scopeType = "";
     stateFilter = "";
     keyType = "";
-    scopeId = "";
+    scopeId = null;
     expiresWithinDays = "";
     limit = "100";
     userRelation = "owner";
@@ -566,16 +571,16 @@
     }
   }
 
-  function parseDayValues(value: string): number[] {
-    return Array.from(
-      new Set(
-        value
-          .split(/[,\s]+/)
-          .map((item) => Number(item))
-          .filter((item) => Number.isFinite(item) && item > 0)
-          .map((item) => Math.floor(item))
-      )
-    ).sort((a, b) => b - a);
+  function parsePositiveInt(value: string): number | null {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return Math.floor(parsed);
+  }
+
+  function pickPolicyDefaultDay(raw: number[] | undefined): number {
+    if (!raw || raw.length === 0) return 30;
+    const max = Math.max(...raw);
+    return Number.isFinite(max) && max > 0 ? Math.floor(max) : 30;
   }
 
   async function loadNotificationPolicy() {
@@ -583,7 +588,7 @@
     try {
       const policy = await getAdminNotificationPolicy(intric);
       notificationPolicy = policy;
-      notificationPolicyDaysInput = policy.default_days_before_expiry.join(", ");
+      notificationPolicyDaysInput = String(pickPolicyDefaultDay(policy.default_days_before_expiry));
       notificationPolicyMaxDaysInput = policy.max_days_before_expiry
         ? String(policy.max_days_before_expiry)
         : "";
@@ -632,26 +637,27 @@
   }
 
   async function saveNotificationPolicy() {
-    const parsedDefaultDays = parseDayValues(notificationPolicyDaysInput);
-    if (parsedDefaultDays.length === 0) {
+    const defaultDay = parsePositiveInt(notificationPolicyDaysInput);
+    if (defaultDay === null) {
       errorMessage = m.api_keys_notifications_policy_days_validation();
       return;
     }
-    const parsedMax = Number(notificationPolicyMaxDaysInput);
-    const maxDays = Number.isFinite(parsedMax) && parsedMax > 0 ? Math.floor(parsedMax) : null;
+    const maxDays = parsePositiveInt(notificationPolicyMaxDaysInput);
 
     notificationPolicySaving = true;
     try {
       const updated = await updateAdminNotificationPolicy(intric, {
         enabled: notificationPolicy.enabled,
-        default_days_before_expiry: parsedDefaultDays,
+        default_days_before_expiry: [defaultDay],
         max_days_before_expiry: maxDays,
         allow_auto_follow_published_assistants:
           notificationPolicy.allow_auto_follow_published_assistants,
         allow_auto_follow_published_apps: notificationPolicy.allow_auto_follow_published_apps
       });
       notificationPolicy = updated;
-      notificationPolicyDaysInput = updated.default_days_before_expiry.join(", ");
+      notificationPolicyDaysInput = String(
+        pickPolicyDefaultDay(updated.default_days_before_expiry)
+      );
       notificationPolicyMaxDaysInput = updated.max_days_before_expiry
         ? String(updated.max_days_before_expiry)
         : "";
@@ -685,7 +691,7 @@
   <Page.Header>
     <Page.Title title={m.api_keys()}></Page.Title>
     <div class="flex items-center gap-3">
-      <Button variant="simple" on:click={() => loadKeys({ reset: true })} class="gap-2">
+      <Button variant="ghost" onclick={() => loadKeys({ reset: true })}>
         <RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
         {m.api_keys_refresh()}
       </Button>
@@ -977,12 +983,12 @@
                     {:else}
                       <span
                         class="h-2 w-2 rounded-full
-                             {qf.color === 'green' ? 'bg-green-500' : ''}
-                             {qf.color === 'yellow' ? 'bg-yellow-500' : ''}
-                             {qf.color === 'gray' ? 'bg-gray-500' : ''}
-                             {qf.color === 'red' ? 'bg-red-500' : ''}
-                             {qf.color === 'blue' ? 'bg-blue-500' : ''}
-                             {qf.color === 'orange' ? 'bg-orange-500' : ''}"
+                             {qf.color === 'green' ? 'bg-positive-default' : ''}
+                             {qf.color === 'yellow' ? 'bg-warning-default' : ''}
+                             {qf.color === 'gray' ? 'bg-tertiary' : ''}
+                             {qf.color === 'red' ? 'bg-negative-default' : ''}
+                             {qf.color === 'blue' ? 'bg-accent-default' : ''}
+                             {qf.color === 'orange' ? 'bg-warning-default' : ''}"
                       ></span>
                     {/if}
                     {qf.label}
@@ -993,55 +999,116 @@
                 {/each}
               </div>
 
-              <!-- Advanced Filters -->
-              <div class="grid gap-4 md:grid-cols-3">
-                <Select.Simple bind:value={scopeType} options={scopeOptions} resourceName="scope">
-                  {m.api_keys_admin_label_scope_type()}
-                </Select.Simple>
-                <Select.Simple bind:value={stateFilter} options={stateOptions} resourceName="state">
-                  {m.api_keys_admin_label_state()}
-                </Select.Simple>
-                <Select.Simple
-                  bind:value={keyType}
-                  options={keyTypeOptions}
-                  resourceName="key type"
-                >
-                  {m.api_keys_admin_label_key_type()}
-                </Select.Simple>
+              <!--
+                Advanced Filters: a single 2-column stack where each row pairs fields that
+                belong together. Reading top-to-bottom signals "what kind of key am I looking
+                for?" — scope first, then state/type, then ownership/time. Results limit lives
+                in its own row at the bottom because it's a query setting, not a filter.
+              -->
+              <div class="grid gap-4 md:grid-cols-2">
+                <!-- Row 1: scope type + its target -->
+                <Field.Field>
+                  <Field.Label for="filter-scope-type">
+                    {m.api_keys_admin_label_scope_type()}
+                  </Field.Label>
+                  <Select.Root type="single" bind:value={scopeType}>
+                    <Select.Trigger id="filter-scope-type">
+                      {scopeOptions.find((o) => o.value === scopeType)?.label ??
+                        m.api_keys_admin_scope_all()}
+                    </Select.Trigger>
+                    <Select.Content>
+                      {#each scopeOptions as opt (opt.value)}
+                        <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
+                      {/each}
+                    </Select.Content>
+                  </Select.Root>
+                </Field.Field>
+                <ScopeResourceSelector
+                  scopeType={scopeSelectorType}
+                  bind:value={scopeId}
+                  {spaces}
+                  assistants={assistantOptions}
+                  apps={appOptions}
+                  id="filter-scope-target"
+                />
+
+                <!-- Row 2: lifecycle state + key class -->
+                <Field.Field>
+                  <Field.Label for="filter-state">{m.api_keys_admin_label_state()}</Field.Label>
+                  <Select.Root type="single" bind:value={stateFilter}>
+                    <Select.Trigger id="filter-state">
+                      {stateOptions.find((o) => o.value === stateFilter)?.label ??
+                        m.api_keys_admin_state_all()}
+                    </Select.Trigger>
+                    <Select.Content>
+                      {#each stateOptions as opt (opt.value)}
+                        <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
+                      {/each}
+                    </Select.Content>
+                  </Select.Root>
+                </Field.Field>
+                <Field.Field>
+                  <Field.Label for="filter-key-type">
+                    {m.api_keys_admin_label_key_type()}
+                  </Field.Label>
+                  <Select.Root type="single" bind:value={keyType}>
+                    <Select.Trigger id="filter-key-type">
+                      {keyTypeOptions.find((o) => o.value === keyType)?.label ??
+                        m.api_keys_admin_key_type_all()}
+                    </Select.Trigger>
+                    <Select.Content>
+                      {#each keyTypeOptions as opt (opt.value)}
+                        <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
+                      {/each}
+                    </Select.Content>
+                  </Select.Root>
+                </Field.Field>
+
+                <!-- Row 3: ownership + time window -->
+                <Field.Field>
+                  <Field.Label for="filter-created-by">
+                    {userRelation === "owner"
+                      ? m.api_keys_admin_label_owner_user_id()
+                      : m.api_keys_admin_label_created_by()}
+                  </Field.Label>
+                  <Input
+                    id="filter-created-by"
+                    bind:value={createdByUserId}
+                    placeholder={m.api_keys_enter_uuid()}
+                  />
+                </Field.Field>
+                <Field.Field>
+                  <Field.Label for="filter-expires-within">
+                    {m.api_keys_admin_expires_within_label()}
+                  </Field.Label>
+                  <Input
+                    id="filter-expires-within"
+                    bind:value={expiresWithinDays}
+                    placeholder="14"
+                  />
+                </Field.Field>
               </div>
 
-              <div class="grid gap-4 md:grid-cols-4">
-                {#if scopeSelectorType}
-                  <ScopeResourceSelector
-                    scopeType={scopeSelectorType}
-                    bind:value={scopeId}
-                    {spaces}
-                    assistants={assistantOptions}
-                    apps={appOptions}
-                  />
-                {:else}
-                  <div></div>
-                {/if}
-                <Input.Text
-                  bind:value={createdByUserId}
-                  label={userRelation === "owner"
-                    ? m.api_keys_admin_label_owner_user_id()
-                    : m.api_keys_admin_label_created_by()}
-                  placeholder={m.api_keys_enter_uuid()}
-                />
-                <Input.Text
-                  bind:value={expiresWithinDays}
-                  label={m.api_keys_admin_expires_within_label()}
-                  placeholder="14"
-                />
-                <Select.Simple
-                  bind:value={limit}
-                  options={resultLimitOptions}
-                  resourceName="results limit"
-                >
+              <!--
+                Query setting (not a filter): kept on its own row with a constrained width
+                to make the categorical difference obvious. The visual gap above is the
+                same `space-y-5` from the parent, so it reads as "another section".
+              -->
+              <Field.Field class="md:max-w-[calc(50%-0.5rem)]">
+                <Field.Label for="filter-results-limit">
                   {m.api_keys_admin_label_results_limit()}
-                </Select.Simple>
-              </div>
+                </Field.Label>
+                <Select.Root type="single" bind:value={limit}>
+                  <Select.Trigger id="filter-results-limit">
+                    {resultLimitOptions.find((o) => o.value === limit)?.label ?? limit}
+                  </Select.Trigger>
+                  <Select.Content>
+                    {#each resultLimitOptions as opt (opt.value)}
+                      <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
+                    {/each}
+                  </Select.Content>
+                </Select.Root>
+              </Field.Field>
 
               <!-- Filter Actions -->
               <div class="border-default flex items-center justify-between border-t pt-2">
@@ -1054,12 +1121,12 @@
                     : ""}
                 </p>
                 <div class="flex items-center gap-2">
-                  <Button variant="simple" on:click={resetFilters} class="text-sm">
-                    <X class="mr-1.5 h-4 w-4" />
+                  <Button variant="ghost" onclick={resetFilters} class="text-sm">
+                    <X class="h-4 w-4" />
                     {m.api_keys_admin_clear_all()}
                   </Button>
-                  <Button variant="primary" on:click={applyFilters} class="text-sm">
-                    <Filter class="mr-1.5 h-4 w-4" />
+                  <Button onclick={applyFilters} class="text-sm">
+                    <Filter class="h-4 w-4" />
                     {m.api_keys_admin_apply_filters()}
                   </Button>
                 </div>
@@ -1070,12 +1137,11 @@
 
         <!-- Error Message -->
         {#if errorMessage}
-          <div
-            class="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-5 py-4 dark:border-red-900 dark:bg-red-950/50"
-            transition:fly={{ y: -8, duration: 150 }}
-          >
-            <AlertCircle class="h-5 w-5 flex-shrink-0 text-red-600 dark:text-red-400" />
-            <p class="text-sm text-red-700 dark:text-red-300">{errorMessage}</p>
+          <div transition:fly={{ y: -8, duration: 150 }}>
+            <Alert.Root variant="destructive">
+              <AlertCircle />
+              <Alert.Description>{errorMessage}</Alert.Description>
+            </Alert.Root>
           </div>
         {/if}
 
@@ -1117,11 +1183,7 @@
 
             {#if nextCursor}
               <div class="mt-4 flex justify-center">
-                <Button
-                  variant="outlined"
-                  on:click={() => loadKeys({ reset: false })}
-                  class="gap-2"
-                >
+                <Button variant="outline" onclick={() => loadKeys({ reset: false })}>
                   {#if loadingMore}
                     <div
                       class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
@@ -1142,10 +1204,15 @@
             title={m.enable_scope_enforcement()}
             description={m.enable_scope_enforcement_description()}
           >
-            <Input.Switch
-              bind:value={scopeEnforcementEnabled}
-              sideEffect={toggleScopeEnforcement}
+            <Switch
+              checked={scopeEnforcementEnabled}
+              onCheckedChange={(next) => {
+                const current = scopeEnforcementEnabled;
+                scopeEnforcementEnabled = next;
+                void toggleScopeEnforcement({ current, next });
+              }}
               disabled={tenantSettingsLoading}
+              aria-label={m.enable_scope_enforcement()}
             />
           </Settings.Row>
           <Settings.Row
@@ -1154,20 +1221,30 @@
               ? m.enable_strict_mode_description()
               : m.enable_strict_mode_requires_scope_enforcement()}
           >
-            <Input.Switch
-              bind:value={strictModeEnabled}
-              sideEffect={toggleStrictMode}
+            <Switch
+              checked={strictModeEnabled}
+              onCheckedChange={(next) => {
+                const current = strictModeEnabled;
+                strictModeEnabled = next;
+                void toggleStrictMode({ current, next });
+              }}
               disabled={!scopeEnforcementEnabled || tenantSettingsLoading}
+              aria-label={m.enable_strict_mode()}
             />
           </Settings.Row>
           <Settings.Row
             title={m.api_keys_notifications_feature_flag_title()}
             description={m.api_keys_notifications_feature_flag_description()}
           >
-            <Input.Switch
-              bind:value={expiryNotificationsEnabled}
-              sideEffect={toggleExpiryNotifications}
+            <Switch
+              checked={expiryNotificationsEnabled}
+              onCheckedChange={(next) => {
+                const current = expiryNotificationsEnabled;
+                expiryNotificationsEnabled = next;
+                void toggleExpiryNotifications({ current, next });
+              }}
               disabled={tenantSettingsLoading}
+              aria-label={m.api_keys_notifications_feature_flag_title()}
             />
           </Settings.Row>
         </Settings.Group>
@@ -1178,60 +1255,72 @@
             title={m.api_keys_notifications_policy_enabled_title()}
             description={m.api_keys_notifications_policy_enabled_description()}
           >
-            <Input.Switch
-              bind:value={notificationPolicy.enabled}
-              sideEffect={({ next }) => (notificationPolicy.enabled = next)}
+            <Switch
+              checked={notificationPolicy.enabled}
+              onCheckedChange={(next) => (notificationPolicy.enabled = next)}
               disabled={notificationPolicyLoading || notificationPolicySaving}
+              aria-label={m.api_keys_notifications_policy_enabled_title()}
             />
           </Settings.Row>
           <Settings.Row
             title={m.api_keys_notifications_policy_default_days_label()}
             description={m.api_keys_notifications_policy_default_days_description()}
           >
-            <Input.Text
-              bind:value={notificationPolicyDaysInput}
-              placeholder="30, 14, 7, 3, 1"
-              disabled={notificationPolicyLoading || notificationPolicySaving}
-              hiddenLabel
-            />
+            <Field.Field>
+              <Field.Label for="notification-policy-default-days" class="sr-only">
+                {m.api_keys_notifications_policy_default_days_label()}
+              </Field.Label>
+              <Input
+                id="notification-policy-default-days"
+                bind:value={notificationPolicyDaysInput}
+                placeholder="30"
+                disabled={notificationPolicyLoading || notificationPolicySaving}
+              />
+            </Field.Field>
           </Settings.Row>
           <Settings.Row
             title={m.api_keys_notifications_policy_max_days_label()}
             description={m.api_keys_notifications_policy_max_days_description()}
           >
-            <Input.Text
-              bind:value={notificationPolicyMaxDaysInput}
-              placeholder="365"
-              disabled={notificationPolicyLoading || notificationPolicySaving}
-              hiddenLabel
-            />
+            <Field.Field>
+              <Field.Label for="notification-policy-max-days" class="sr-only">
+                {m.api_keys_notifications_policy_max_days_label()}
+              </Field.Label>
+              <Input
+                id="notification-policy-max-days"
+                bind:value={notificationPolicyMaxDaysInput}
+                placeholder="365"
+                disabled={notificationPolicyLoading || notificationPolicySaving}
+              />
+            </Field.Field>
           </Settings.Row>
           <Settings.Row
             title={m.api_keys_notifications_policy_autofollow_assistants_title()}
             description={m.api_keys_notifications_policy_autofollow_assistants_description()}
           >
-            <Input.Switch
-              bind:value={notificationPolicy.allow_auto_follow_published_assistants}
-              sideEffect={({ next }) =>
+            <Switch
+              checked={notificationPolicy.allow_auto_follow_published_assistants}
+              onCheckedChange={(next) =>
                 (notificationPolicy.allow_auto_follow_published_assistants = next)}
               disabled={notificationPolicyLoading || notificationPolicySaving}
+              aria-label={m.api_keys_notifications_policy_autofollow_assistants_title()}
             />
           </Settings.Row>
           <Settings.Row
             title={m.api_keys_notifications_policy_autofollow_apps_title()}
             description={m.api_keys_notifications_policy_autofollow_apps_description()}
           >
-            <Input.Switch
-              bind:value={notificationPolicy.allow_auto_follow_published_apps}
-              sideEffect={({ next }) =>
+            <Switch
+              checked={notificationPolicy.allow_auto_follow_published_apps}
+              onCheckedChange={(next) =>
                 (notificationPolicy.allow_auto_follow_published_apps = next)}
               disabled={notificationPolicyLoading || notificationPolicySaving}
+              aria-label={m.api_keys_notifications_policy_autofollow_apps_title()}
             />
           </Settings.Row>
           <div class="flex justify-end px-4">
             <Button
-              variant="primary"
-              on:click={saveNotificationPolicy}
+              onclick={saveNotificationPolicy}
               disabled={notificationPolicyLoading || notificationPolicySaving}
             >
               {m.save()}
@@ -1245,20 +1334,28 @@
             title={m.api_keys_admin_tracking_used_title()}
             description={m.api_keys_admin_tracking_used_description()}
           >
-            <Input.Switch
-              bind:value={apiKeyUsedTrackingEnabled}
-              sideEffect={({ next }) => updateTrackingAction("api_key_used", next)}
+            <Switch
+              checked={apiKeyUsedTrackingEnabled}
+              onCheckedChange={(next) => {
+                apiKeyUsedTrackingEnabled = next;
+                void updateTrackingAction("api_key_used", next);
+              }}
               disabled={trackingConfigLoading || !trackingConfigLoaded}
+              aria-label={m.api_keys_admin_tracking_used_title()}
             />
           </Settings.Row>
           <Settings.Row
             title={m.api_keys_admin_tracking_failed_title()}
             description={m.api_keys_admin_tracking_failed_description()}
           >
-            <Input.Switch
-              bind:value={apiKeyAuthFailedTrackingEnabled}
-              sideEffect={({ next }) => updateTrackingAction("api_key_auth_failed", next)}
+            <Switch
+              checked={apiKeyAuthFailedTrackingEnabled}
+              onCheckedChange={(next) => {
+                apiKeyAuthFailedTrackingEnabled = next;
+                void updateTrackingAction("api_key_auth_failed", next);
+              }}
               disabled={trackingConfigLoading || !trackingConfigLoaded}
+              aria-label={m.api_keys_admin_tracking_failed_title()}
             />
           </Settings.Row>
           <div class="px-4">
@@ -1273,24 +1370,22 @@
 
         <!-- Policy Section -->
         <Settings.Group title={m.api_keys_admin_tenant_policy()}>
-          <Settings.Row
-            title={m.api_keys_admin_tenant_policy()}
-            description={m.api_keys_admin_policy_description()}
-            fullWidth
-          >
+          <div class="flex flex-col gap-2 px-4 lg:pr-6 lg:pl-2">
+            <p class="text-secondary text-sm whitespace-pre-wrap">
+              {m.api_keys_admin_policy_description()}
+            </p>
             <ApiKeyPolicyPanel />
-          </Settings.Row>
+          </div>
         </Settings.Group>
 
         <!-- Super Key Status Section -->
         <Settings.Group title={m.api_keys_admin_super_key_status()}>
-          <Settings.Row
-            title={m.api_keys_admin_super_key_status()}
-            description={m.api_keys_admin_super_key_description()}
-            fullWidth
-          >
+          <div class="flex flex-col gap-2 px-4 lg:pr-6 lg:pl-2">
+            <p class="text-secondary text-sm whitespace-pre-wrap">
+              {m.api_keys_admin_super_key_description()}
+            </p>
             <SuperKeyStatusPanel />
-          </Settings.Row>
+          </div>
         </Settings.Group>
       </div>
     </Settings.Page>

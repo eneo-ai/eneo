@@ -4,6 +4,7 @@
   import { m } from "$lib/paraglide/messages";
   import type { ExpiringKeyDisplayItem, ExpiryLevel } from "./expirationUtils";
   import { isDismissed, dismiss, isMutedNonCritical, setMutedNonCritical } from "./expirationPrefs";
+  import { Button } from "$lib/components/ui/button/index.js";
 
   let {
     items,
@@ -132,15 +133,17 @@
 {#if showBanner}
   <div
     transition:slide={{ duration: 200 }}
+    role={isUrgent ? "alert" : "status"}
+    aria-live={isUrgent ? "assertive" : "polite"}
     class="rounded-xl border {compact ? 'px-4 py-3' : 'px-5 py-4'} {isUrgent
-      ? 'border-negative/30 bg-negative/5 dark:bg-negative/8'
+      ? 'border-negative-default/30 bg-negative-default/5 dark:bg-negative-default/8'
       : 'border-caution/30 bg-caution/5 dark:bg-caution/8'}"
   >
     <div class="flex items-start gap-3 {compact ? 'items-center' : ''}">
       <!-- Icon -->
-      <div class="mt-0.5 flex-shrink-0 {compact ? 'mt-0' : ''}">
+      <div class="mt-0.5 flex-shrink-0 {compact ? 'mt-0' : ''}" aria-hidden="true">
         {#if isUrgent}
-          <AlertTriangle class="text-negative h-4 w-4" />
+          <AlertTriangle class="text-negative-stronger h-4 w-4" />
         {:else}
           <Clock class="text-caution h-4 w-4" />
         {/if}
@@ -148,11 +151,11 @@
 
       <!-- Content -->
       <div class="min-w-0 flex-1">
-        <p class="text-sm font-medium {isUrgent ? 'text-negative' : 'text-caution'}">
+        <p class="text-sm font-medium {isUrgent ? 'text-negative-stronger' : 'text-caution'}">
           {buildMessage()}
         </p>
         {#if !compact && earliestDays !== null}
-          <p class="mt-1 text-xs {isUrgent ? 'text-negative/70' : 'text-caution/70'}">
+          <p class="mt-1 text-xs {isUrgent ? 'text-negative-stronger/70' : 'text-caution/70'}">
             {formatEarliestExpiry()}
             {#if visibleItems.some((i) => i.suspended)}
               <span class="opacity-70"> &middot; {m.api_keys_expiring_includes_suspended()}</span>
@@ -164,29 +167,31 @@
       <!-- Actions -->
       <div class="flex flex-shrink-0 items-center gap-2">
         {#if !isUrgent && visibleItems.some((i) => i.level === "warning")}
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onclick={handleDismissWarnings}
-            class="hover:bg-caution/10 text-caution/60 hover:text-caution rounded-md p-1 transition-colors"
-            title={m.api_keys_expiring_dismiss()}
+            aria-label={m.api_keys_expiring_dismiss()}
+            class="text-caution/70 hover:bg-caution/10 hover:text-caution"
           >
-            <X class="h-3.5 w-3.5" />
-          </button>
+            <X />
+          </Button>
         {/if}
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onclick={handleToggleMute}
-          class="rounded-md p-1 transition-colors {isUrgent
-            ? 'hover:bg-negative/10 text-negative/50 hover:text-negative'
-            : 'hover:bg-caution/10 text-caution/50 hover:text-caution'}"
-          title={muted ? m.api_keys_expiring_unmute() : m.api_keys_expiring_mute()}
+          aria-label={muted ? m.api_keys_expiring_unmute() : m.api_keys_expiring_mute()}
+          class={isUrgent
+            ? "text-negative-stronger/60 hover:bg-negative-default/10 hover:text-negative-stronger"
+            : "text-caution/60 hover:bg-caution/10 hover:text-caution"}
         >
           {#if muted}
-            <Bell class="h-3.5 w-3.5" />
+            <Bell />
           {:else}
-            <BellOff class="h-3.5 w-3.5" />
+            <BellOff />
           {/if}
-        </button>
+        </Button>
       </div>
     </div>
   </div>

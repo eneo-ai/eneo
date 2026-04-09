@@ -14,13 +14,14 @@
   import { getIntric } from "$lib/core/Intric";
   import { Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { untrack } from "svelte";
 
   type Props = {
     tokenStats: TokenUsageSummary;
   };
 
   const { tokenStats }: Props = $props();
-  let detailedStats = $state(tokenStats);
+  let detailedStats = $state(untrack(() => tokenStats));
 
   const intric = getIntric();
 

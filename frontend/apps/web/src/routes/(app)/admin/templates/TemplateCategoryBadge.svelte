@@ -12,9 +12,10 @@
 
   let { category, type = "assistant" }: Props = $props();
 
-  const predefinedCategories =
-    type === "assistant" ? assistantTemplateCategories : appTemplateCategories;
-  const categoryInfo = getCategoryInfo(category, predefinedCategories);
+  const predefinedCategories = $derived(
+    type === "assistant" ? assistantTemplateCategories : appTemplateCategories
+  );
+  const categoryInfo = $derived(getCategoryInfo(category, predefinedCategories));
 </script>
 
 <span

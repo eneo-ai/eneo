@@ -14,14 +14,15 @@
 
   let { value = $bindable(""), type }: Props = $props();
 
-  const predefinedCategories: Record<string, { title: string; description: string }> =
-    type === "assistant" ? assistantTemplateCategories : appTemplateCategories;
-  const categoryKeys = Object.keys(predefinedCategories);
+  const predefinedCategories: Record<string, { title: string; description: string }> = $derived(
+    type === "assistant" ? assistantTemplateCategories : appTemplateCategories
+  );
+  const categoryKeys = $derived(Object.keys(predefinedCategories));
 
   // Mode: true = predefined, false = custom
   let isPredefined = $state(true);
   let customValue = $state("");
-  let predefinedValue = $state(categoryKeys[0] || "");
+  let predefinedValue = $state(untrack(() => categoryKeys[0] || ""));
 
   // Ensure initial value is set for predefined mode
   $effect(() => {

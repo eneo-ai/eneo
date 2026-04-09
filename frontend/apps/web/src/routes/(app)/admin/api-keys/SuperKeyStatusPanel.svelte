@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Label } from "@intric/ui";
+  import { AlertCircle } from "lucide-svelte";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Skeleton } from "$lib/components/ui/skeleton/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import type { SuperApiKeyStatus } from "@intric/intric-js";
@@ -11,13 +14,6 @@
   let loading = $state(false);
   let errorMessage = $state<string | null>(null);
   let status = $state<SuperApiKeyStatus | null>(null);
-
-  const statusLabel = (configured: boolean) => ({
-    label: configured
-      ? m.api_keys_admin_status_configured()
-      : m.api_keys_admin_status_not_configured(),
-    color: (configured ? "green" : "red") as "green" | "red"
-  });
 
   async function loadStatus() {
     loading = true;
@@ -39,10 +35,16 @@
 
 <div class="flex flex-col gap-4">
   {#if errorMessage}
-    <div class="text-sm text-red-600">{errorMessage}</div>
+    <Alert.Root variant="destructive">
+      <AlertCircle />
+      <Alert.Description>{errorMessage}</Alert.Description>
+    </Alert.Root>
   {/if}
   {#if loading}
-    <div class="text-muted text-sm">{m.loading()}</div>
+    <div class="flex flex-col gap-3">
+      <Skeleton class="h-12 w-full" />
+      <Skeleton class="h-12 w-full" />
+    </div>
   {/if}
 
   {#if status}
@@ -50,7 +52,11 @@
       <div class="flex flex-col gap-1">
         <div class="flex items-center justify-between">
           <div class="text-sm font-medium">ENEO_SUPER_API_KEY</div>
-          <Label.Single item={statusLabel(status.super_api_key_configured)} />
+          <Badge variant={status.super_api_key_configured ? "default" : "destructive"}>
+            {status.super_api_key_configured
+              ? m.api_keys_admin_status_configured()
+              : m.api_keys_admin_status_not_configured()}
+          </Badge>
         </div>
         {#if status.super_api_key_using_legacy}
           <p class="text-muted text-xs italic">
@@ -61,7 +67,11 @@
       <div class="flex flex-col gap-1">
         <div class="flex items-center justify-between">
           <div class="text-sm font-medium">ENEO_SUPER_DUPER_API_KEY</div>
-          <Label.Single item={statusLabel(status.super_duper_api_key_configured)} />
+          <Badge variant={status.super_duper_api_key_configured ? "default" : "destructive"}>
+            {status.super_duper_api_key_configured
+              ? m.api_keys_admin_status_configured()
+              : m.api_keys_admin_status_not_configured()}
+          </Badge>
         </div>
         {#if status.super_duper_api_key_using_legacy}
           <p class="text-muted text-xs italic">

@@ -14,10 +14,11 @@
   import MCPServerDialog from "./MCPServerDialog.svelte";
   import MCPServersTable from "./MCPServersTable.svelte";
   import { writable } from "svelte/store";
+  import { untrack } from "svelte";
 
   const { data } = $props();
 
-  setSecurityContext(data.securityClassifications);
+  setSecurityContext(untrack(() => data.securityClassifications));
 
   let showAddDialog = writable(false);
 

@@ -5,6 +5,7 @@
 -->
 
 <script lang="ts">
+  import { untrack } from "svelte";
   import type { components } from "@intric/intric-js";
   import { Table } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
@@ -17,7 +18,7 @@
 
   let { templates }: { templates: AppTemplate[] } = $props();
 
-  const table = Table.createWithResource(templates);
+  const table = Table.createWithResource(untrack(() => templates));
 
   const viewModel = table.createViewModel([
     table.column({

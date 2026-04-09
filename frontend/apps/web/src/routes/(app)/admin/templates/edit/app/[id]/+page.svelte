@@ -26,36 +26,43 @@
 
   let { data } = $props();
 
-  const intric = data.intric;
+  const intric = $derived(data.intric);
 
   // Initialize from template data
-  let name = $state(data.template.name || "");
-  let description = $state(data.template.description || "");
-  let category = $state(data.template.category || "");
-  let iconName = $state<string | null>(data.template.icon_name || null);
-  let promptText = $state(data.template.prompt_text || "");
+  let name = $state(untrack(() => data.template.name || ""));
+  let description = $state(untrack(() => data.template.description || ""));
+  let category = $state(untrack(() => data.template.category || ""));
+  let iconName = $state<string | null>(untrack(() => data.template.icon_name || null));
+  let promptText = $state(untrack(() => data.template.prompt_text || ""));
   let completionModel = $state(
-    data.completionModels?.find(
-      (m) =>
-        m.id === data.template.completion_model_id || m.name === data.template.completion_model_name
-    ) ||
-      data.completionModels?.[0] ||
-      null
+    untrack(
+      () =>
+        data.completionModels?.find(
+          (m) =>
+            m.id === data.template.completion_model_id ||
+            m.name === data.template.completion_model_name
+        ) ||
+        data.completionModels?.[0] ||
+        null
+    )
   );
-  let completionModelKwargs = $state(data.template.completion_model_kwargs || {});
+  let completionModelKwargs = $state(untrack(() => data.template.completion_model_kwargs || {}));
   let isSaving = $state(false);
 
   // Input field configuration from template
-  let inputDescription = $state(data.template.input_description || "");
+  let inputDescription = $state(untrack(() => data.template.input_description || ""));
   let inputType = $state<
     "text-upload" | "text-field" | "audio-upload" | "audio-recorder" | "image-upload"
   >(
-    (data.template.input_type || "text-field") as
-      | "text-upload"
-      | "text-field"
-      | "audio-upload"
-      | "audio-recorder"
-      | "image-upload"
+    untrack(
+      () =>
+        (data.template.input_type || "text-field") as
+          | "text-upload"
+          | "text-field"
+          | "audio-upload"
+          | "audio-recorder"
+          | "image-upload"
+    )
   );
 
   const inputTypes = {
@@ -99,20 +106,19 @@
     description?: string;
     type?: string;
   };
-  const templateWithLegacy = data.template as typeof data.template & { wizard_config?: unknown };
-  const wizard: unknown = templateWithLegacy.wizard_config ?? data.template.wizard ?? {};
+  const initialAttachmentsConfig: AttachmentsConfig | undefined = untrack(() => {
+    const templateWithLegacy = data.template as typeof data.template & { wizard_config?: unknown };
+    const wizard: unknown = templateWithLegacy.wizard_config ?? data.template.wizard ?? {};
+    if (Array.isArray(wizard)) {
+      return (wizard as AttachmentsConfig[]).find((c) => c.type === "attachments");
+    }
+    return (wizard as { attachments?: AttachmentsConfig }).attachments;
+  });
 
-  let attachmentsConfig: AttachmentsConfig | undefined;
-  if (Array.isArray(wizard)) {
-    attachmentsConfig = (wizard as AttachmentsConfig[]).find((c) => c.type === "attachments");
-  } else {
-    attachmentsConfig = (wizard as { attachments?: AttachmentsConfig }).attachments;
-  }
-
-  let wizardAttachmentsEnabled = $state(!!attachmentsConfig);
-  let wizardAttachmentsRequired = $state(Boolean(attachmentsConfig?.required));
-  let wizardAttachmentsTitle = $state(String(attachmentsConfig?.title || ""));
-  let wizardAttachmentsDescription = $state(String(attachmentsConfig?.description || ""));
+  let wizardAttachmentsEnabled = $state(!!initialAttachmentsConfig);
+  let wizardAttachmentsRequired = $state(Boolean(initialAttachmentsConfig?.required));
+  let wizardAttachmentsTitle = $state(String(initialAttachmentsConfig?.title || ""));
+  let wizardAttachmentsDescription = $state(String(initialAttachmentsConfig?.description || ""));
 
   async function handleUpdateTemplate() {
     if (!name || !category) {

@@ -9,6 +9,7 @@
   import { RefreshCw, AlertTriangle, Trash2, Check, X, ShieldAlert } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { invalidate } from "$app/navigation";
+  import { untrack } from "svelte";
   import type { Intric, components } from "@intric/intric-js";
 
   type MCPTool = components["schemas"]["MCPServerToolPublic"];
@@ -27,7 +28,7 @@
     intricClient
   }: Props = $props();
 
-  let tools: MCPTool[] = $state(initialTools);
+  let tools: MCPTool[] = $state(untrack(() => initialTools));
   let syncing = $state(false);
   let bulkUpdating = $state(false);
   let reviewingToolId = $state<string | null>(null);

@@ -4,6 +4,10 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { SvelteDate } from "svelte/reactivity";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Label } from "$lib/components/ui/label/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
 
   let {
     value = $bindable<string | null>(null),
@@ -138,59 +142,48 @@
   <span id="expiration-label" class="text-default block text-sm font-medium">
     {m.api_keys_expiration()}
     {#if requireExpiration}
-      <span class="text-negative">*</span>
+      <span class="text-negative-stronger">*</span>
     {/if}
   </span>
 
   <!-- Preset buttons -->
   <div role="group" aria-labelledby="expiration-label" class="flex flex-wrap gap-2">
     {#each availablePresets as preset (preset.days)}
-      <button
+      <Button
         type="button"
+        variant={isPresetSelected(preset.days) ? "default" : "outline"}
         onclick={() => selectPreset(preset.days)}
         {disabled}
-        class="rounded-lg border px-4 py-2 text-sm font-medium transition-all duration-150
-               {isPresetSelected(preset.days)
-          ? 'border-accent-default bg-accent-default/10 text-accent-default ring-accent-default/20 ring-2'
-          : 'border-default bg-primary text-default hover:border-dimmer hover:bg-subtle'}
-               disabled:cursor-not-allowed disabled:opacity-50"
+        aria-pressed={isPresetSelected(preset.days)}
       >
         {preset.label}
-      </button>
+      </Button>
     {/each}
 
     <!-- Custom button -->
-    <button
+    <Button
       type="button"
+      variant={showCustom ? "default" : "outline"}
       onclick={showCustomPicker}
       {disabled}
-      class="flex items-center gap-2 rounded-lg border px-4 py-2 text-sm
-             font-medium transition-all duration-150
-             {showCustom
-        ? 'border-accent-default bg-accent-default/10 text-accent-default ring-accent-default/20 ring-2'
-        : 'border-default bg-primary text-default hover:border-dimmer hover:bg-subtle'}
-             disabled:cursor-not-allowed disabled:opacity-50"
+      aria-pressed={showCustom}
     >
-      <Calendar class="h-4 w-4" />
+      <Calendar />
       {m.api_keys_exp_custom()}
-    </button>
+    </Button>
 
     <!-- No expiration button -->
     {#if !requireExpiration}
-      <button
+      <Button
         type="button"
+        variant={isNoExpiration ? "default" : "outline"}
         onclick={selectNoExpiration}
         {disabled}
-        class="flex items-center gap-2 rounded-lg border px-4 py-2 text-sm
-               font-medium transition-all duration-150
-               {isNoExpiration
-          ? 'border-accent-default bg-accent-default/10 text-accent-default ring-accent-default/20 ring-2'
-          : 'border-default bg-primary text-default hover:border-dimmer hover:bg-subtle'}
-               disabled:cursor-not-allowed disabled:opacity-50"
+        aria-pressed={isNoExpiration}
       >
-        <InfinityIcon class="h-4 w-4" />
+        <InfinityIcon />
         {m.api_keys_exp_no_expiration()}
-      </button>
+      </Button>
     {/if}
   </div>
 
@@ -201,38 +194,34 @@
       transition:fly={{ y: -4, duration: 150 }}
     >
       <div class="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label for="expiration-date" class="text-muted mb-1.5 block text-xs font-medium"
-            >{m.api_keys_exp_date()}</label
-          >
-          <input
+        <div class="flex flex-col gap-1.5">
+          <Label for="expiration-date" class="text-muted text-xs">
+            {m.api_keys_exp_date()}
+          </Label>
+          <Input
             id="expiration-date"
             type="date"
             bind:value={customDate}
             min={minDate()}
             max={maxDate()}
             {disabled}
-            class="border-default bg-primary focus:border-accent-default focus:ring-accent-default/20 h-10 w-full rounded-lg border
-                   px-3 text-sm focus:ring-2
-                   disabled:cursor-not-allowed disabled:opacity-50"
           />
         </div>
-        <div>
-          <label for="expiration-time" class="text-muted mb-1.5 block text-xs font-medium"
-            >{m.api_keys_exp_time()}</label
-          >
+        <div class="flex flex-col gap-1.5">
+          <Label for="expiration-time" class="text-muted text-xs">
+            {m.api_keys_exp_time()}
+          </Label>
           <div class="relative">
             <Clock
-              class="text-muted pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2"
+              class="text-muted pointer-events-none absolute top-1/2 left-3 z-10 h-4 w-4 -translate-y-1/2"
+              aria-hidden="true"
             />
-            <input
+            <Input
               id="expiration-time"
               type="time"
               bind:value={customTime}
               {disabled}
-              class="border-default bg-primary focus:border-accent-default focus:ring-accent-default/20 h-10 w-full rounded-lg border pr-3
-                     pl-10 text-sm focus:ring-2
-                     disabled:cursor-not-allowed disabled:opacity-50"
+              class="pl-9"
             />
           </div>
         </div>
@@ -240,7 +229,7 @@
 
       {#if maxDays}
         <p class="text-muted flex items-center gap-1.5 text-xs">
-          <AlertTriangle class="h-3.5 w-3.5" />
+          <AlertTriangle class="h-3.5 w-3.5" aria-hidden="true" />
           {m.api_keys_exp_max_days({ days: maxDays })}
         </p>
       {/if}
@@ -287,11 +276,11 @@
 
   <!-- Warning for no expiration -->
   {#if !value && !requireExpiration}
-    <div
-      class="border-caution/20 bg-caution/5 text-caution flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-xs"
-    >
-      <AlertTriangle class="h-4 w-4 flex-shrink-0" />
-      <span>{m.api_keys_exp_warning()}</span>
-    </div>
+    <Alert.Root class="border-caution/30 bg-caution/5">
+      <AlertTriangle class="text-caution" />
+      <Alert.Description class="text-caution text-xs">
+        {m.api_keys_exp_warning()}
+      </Alert.Description>
+    </Alert.Root>
   {/if}
 </div>

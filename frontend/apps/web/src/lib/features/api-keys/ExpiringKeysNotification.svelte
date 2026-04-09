@@ -34,13 +34,13 @@
     {#if expiredCount > 0 || urgentCount > 0 || warningCount > 0}
       <span class="text-secondary pl-3 text-xs">
         {#if expiredCount > 0}
-          <span class="text-negative"
+          <span class="text-negative-stronger"
             >{m.api_keys_expiring_bell_summary_expired({ count: expiredCount })}</span
           >
         {/if}
         {#if urgentCount > 0}
           {#if expiredCount > 0}<span>, </span>{/if}
-          <span class="text-negative"
+          <span class="text-negative-stronger"
             >{m.api_keys_expiring_bell_summary_urgent({ count: urgentCount })}</span
           >
         {/if}
@@ -55,7 +55,11 @@
 
     <div
       class="border-default ring-default min-h-10 items-center justify-between rounded-lg border px-3 py-2 shadow
-             {$hasUrgent ? 'bg-negative/5' : warningCount > 0 ? 'bg-caution/5' : 'bg-primary'}"
+             {$hasUrgent
+        ? 'bg-negative-default/5'
+        : warningCount > 0
+          ? 'bg-caution/5'
+          : 'bg-primary'}"
     >
       {#each visibleItems as item (item.id)}
         <div
@@ -66,7 +70,7 @@
               aria-hidden="true"
               class="inline-block flex-shrink-0 rounded-full {item.level === 'expired' ||
               item.level === 'urgent'
-                ? 'bg-negative h-2.5 w-2.5'
+                ? 'bg-negative-default h-2.5 w-2.5'
                 : 'bg-caution h-2 w-2'}"
             ></span>
             <span
@@ -83,15 +87,21 @@
           </div>
           <div class="flex-shrink-0 text-right">
             {#if item.level === "expired"}
-              <span class="text-negative text-xs font-medium"
+              <span class="text-negative-stronger text-xs font-medium"
                 >{m.api_keys_expiring_item_expired()}</span
               >
             {:else if item.daysRemaining === 0}
-              <span class="text-negative text-xs">{m.api_keys_expiring_item_today()}</span>
+              <span class="text-negative-stronger text-xs">{m.api_keys_expiring_item_today()}</span>
             {:else if item.daysRemaining === 1}
-              <span class="text-negative text-xs">{m.api_keys_expiring_item_tomorrow()}</span>
+              <span class="text-negative-stronger text-xs"
+                >{m.api_keys_expiring_item_tomorrow()}</span
+              >
             {:else}
-              <span class="{item.level === 'urgent' ? 'text-negative' : 'text-caution'} text-xs">
+              <span
+                class="{item.level === 'urgent'
+                  ? 'text-negative-stronger'
+                  : 'text-caution'} text-xs"
+              >
                 {m.api_keys_expiring_item_days({ days: item.daysRemaining })}
               </span>
             {/if}
