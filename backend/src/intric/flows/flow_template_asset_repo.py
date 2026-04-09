@@ -101,7 +101,7 @@ class FlowTemplateAssetRepository:
 
     @staticmethod
     def _to_domain(row: sa.RowMapping) -> FlowTemplateAsset:
-        asset = row[FlowTemplateAssets]
+        asset = cast(FlowTemplateAssets, row[0])
         return FlowTemplateAsset.model_validate(
             {
                 "id": asset.id,

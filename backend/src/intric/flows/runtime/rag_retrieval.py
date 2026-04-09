@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Awaitable, Callable, cast
 from uuid import UUID
 
 from intric.flows.runtime.models import StepDiagnostic
@@ -89,6 +89,10 @@ async def retrieve_rag_chunks(
         source_metadata_by_id: dict[str, dict[str, Any]] | None = None
         metadata_loader = getattr(deps.references_service, "get_reference_metadata", None)
         if callable(metadata_loader):
+            typed_metadata_loader = cast(
+                Callable[..., Awaitable[dict[object, dict[str, Any]] | None]],
+                metadata_loader,
+            )
             metadata_ids = list(
                 dict.fromkeys(
                     getattr(chunk, "info_blob_id")
@@ -98,7 +102,7 @@ async def retrieve_rag_chunks(
             )
             if metadata_ids:
                 try:
-                    raw_metadata = await metadata_loader(info_blob_ids=metadata_ids)
+                    raw_metadata = await typed_metadata_loader(info_blob_ids=metadata_ids)
                 except Exception as exc:
                     rag_metadata["reference_metadata_status"] = "error"
                     rag_metadata["reference_metadata_error_type"] = exc.__class__.__name__

@@ -43,6 +43,8 @@ class FlowTemplateAssetService:
         can_download: bool,
     ) -> list[FlowTemplateAsset]:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
+        if flow.id is None:
+            raise NotFoundException("Flow template asset parent flow is missing an id.")
         assets = await self.template_asset_repo.list_for_flow(
             flow_id=flow.id,
             tenant_id=self.user.tenant_id,
@@ -63,6 +65,8 @@ class FlowTemplateAssetService:
         upload_file: UploadFile,
     ) -> FlowTemplateAsset:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
+        if flow.id is None:
+            raise NotFoundException("Flow template asset parent flow is missing an id.")
         saved_file = await self.file_service.save_docx_template(upload_file)
         placeholders = inspect_docx_template_bytes(
             saved_file.blob or b"",
@@ -112,6 +116,8 @@ class FlowTemplateAssetService:
         asset_id: UUID,
     ) -> tuple[FlowTemplateAsset, File]:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
+        if flow.id is None:
+            raise NotFoundException("Flow template asset parent flow is missing an id.")
         asset = await self.template_asset_repo.get(asset_id=asset_id, tenant_id=self.user.tenant_id)
         if asset.flow_id != flow.id:
             raise NotFoundException("Flow template asset not found.")
