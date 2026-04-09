@@ -3342,6 +3342,7 @@
   "flow_summary_input_fields": "Inmatningsfält",
   "flow_summary_transcription": "Transkribering",
   "flow_summary_validation": "Validering",
+  "flow_summary_status": "Status",
   "ai_builder_tab": "AI Byggare",
   "ai_builder_welcome_title": "Bygg ditt flöde med AI",
   "ai_builder_welcome_description": "Beskriv vad du vill uppnå så hjälper jag dig bygga ett flöde steg för steg.",

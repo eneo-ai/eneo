@@ -1,5 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { Alert } from "@eneo/ui";
   import FlowAIBuilderMessage from "./FlowAIBuilderMessage.svelte";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
   import FlowAIBuilderPhaseIndicator from "./FlowAIBuilderPhaseIndicator.svelte";
@@ -107,17 +108,28 @@
   });
 </script>
 
-<div class="chat-shell" class:chat-shell-empty={showEmptyState}>
+<div
+  class="flex min-h-0 flex-1 flex-col overflow-hidden"
+  class:items-center={showEmptyState}
+  class:justify-center={showEmptyState}
+  class:px-6={showEmptyState}
+  class:max-sm:px-4={showEmptyState}
+>
   {#if service.messages.length > 0 || canStartOver}
-    <div class="chat-toolbar">
+    <div class="border-border-default flex w-full shrink-0 items-center border-b backdrop-blur-sm">
       {#if service.messages.length > 0}
-        <FlowAIBuilderPhaseIndicator phase={service.phase} answeredCount={answeredQuestionCount} />
+        <div class="min-w-0 flex-1">
+          <FlowAIBuilderPhaseIndicator phase={service.phase} answeredCount={answeredQuestionCount} />
+        </div>
       {:else}
-        <div class="chat-toolbar-spacer" aria-hidden="true"></div>
+        <div class="min-h-0 flex-1" aria-hidden="true"></div>
       {/if}
 
       {#if canStartOver}
-        <button class="chat-toolbar-action" onclick={handleStartOver}>
+        <button
+          class="bg-primary text-secondary border-border-default mr-4 shrink-0 cursor-pointer whitespace-nowrap rounded-full border px-3 py-1.5 text-[0.8125rem] font-medium leading-none transition-all duration-150 ease-out hover:bg-secondary hover:text-primary"
+          onclick={handleStartOver}
+        >
           {m.ai_builder_start_fresh()}
         </button>
       {/if}
@@ -126,8 +138,8 @@
 
   {#if showEmptyState}
     <!-- Empty state: welcome + input centered -->
-    <div class="empty-state-spacer"></div>
-    <div class="empty-welcome">
+    <div class="flex-1"></div>
+    <div class="empty-welcome mb-6 max-w-md text-center">
       <h2 class="text-primary text-3xl font-semibold tracking-tighter">
         {isEditMode ? m.ai_builder_welcome_title_edit() : m.ai_builder_welcome_title()}
       </h2>
@@ -173,7 +185,7 @@
           <div class="mt-4 py-2">
             <div class="generating-badge" role="status" aria-label={generatingText}>
               <span class="generating-orb" aria-hidden="true"></span>
-              <span class="generating-text">{generatingText}</span>
+              <span class="relative z-[1] text-[0.8125rem] font-medium leading-tight">{generatingText}</span>
             </div>
           </div>
         {/if}
@@ -183,108 +195,38 @@
 
   <!-- Error banner -->
   {#if service.error}
-    <div
-      class="bg-negative-dimmer border-negative-default mx-4 mb-2 rounded-lg border px-4 py-2.5 text-sm"
-    >
-      <span class="text-negative-stronger">{service.error}</span>
-      <button class="text-negative-default ml-2 underline" onclick={() => service.clearError()}>
-        {m.ai_builder_dismiss()}
-      </button>
+    <div class="mx-4 mb-2">
+      <Alert.Root variant="destructive" class="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm">
+        <Alert.Description class="flex-1">{service.error}</Alert.Description>
+        <Alert.Action>
+          <button class="text-negative-default ml-2 underline" onclick={() => service.clearError()}>
+            {m.ai_builder_dismiss()}
+          </button>
+        </Alert.Action>
+      </Alert.Root>
     </div>
   {/if}
 
   <!-- Input area -->
-  <div class="input-area" class:input-area-hero={showEmptyState}>
+  <div
+    class="bg-primary border-border-default border-t px-4 pb-4 pt-3 max-sm:px-2 max-sm:pb-3 max-sm:pt-2"
+    class:input-area-hero={showEmptyState}
+  >
     <FlowAIBuilderInput bind:this={inputRef} />
   </div>
   {#if showEmptyState}
-    <div class="empty-state-bottom-spacer"></div>
+    <div class="flex-1"></div>
   {/if}
 </div>
 
 <style lang="postcss">
   @reference "@intric/ui/styles";
 
-  /* --- Shell layout --- */
-
-  .chat-shell {
-    display: flex;
-    min-height: 0;
-    flex: 1;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .chat-shell-empty {
-    justify-content: center;
-    align-items: center;
-    padding: 0 1.5rem;
-  }
-
-  .chat-toolbar {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    border-bottom: 1px solid var(--border-default);
-    flex-shrink: 0;
-  }
-
-  .chat-toolbar > :global(:first-child) {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .chat-toolbar-spacer {
-    flex: 1;
-    min-height: 0;
-  }
-
-  .chat-toolbar-action {
-    border: 1px solid var(--border-default);
-    border-radius: 999px;
-    background: var(--bg-primary);
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    line-height: 1;
-    padding: 0.375rem 0.75rem;
-    margin-right: 1rem;
-    flex-shrink: 0;
-    white-space: nowrap;
-    transition:
-      background-color 120ms ease,
-      border-color 120ms ease,
-      color 120ms ease;
-  }
-
-  .chat-toolbar-action:hover {
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-  }
-
-  .empty-state-spacer {
-    flex: 1;
-  }
-
-  .empty-state-bottom-spacer {
-    flex: 1;
-  }
+  /* --- Welcome + hero input entrance animation --- */
 
   .empty-welcome {
-    text-align: center;
-    margin-bottom: 1.5rem;
-    max-width: 28rem;
     opacity: 0;
     animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
-  }
-
-  /* --- Input area --- */
-
-  .input-area {
-    padding: 0.75rem 1rem 1rem;
-    border-top: 1px solid var(--border-default);
-    background: var(--bg-primary);
   }
 
   .input-area-hero {
@@ -315,12 +257,10 @@
     }
   }
 
+  /* --- Generating indicator --- */
+
   .generating-badge {
-    @apply relative overflow-hidden rounded-full;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.625rem;
-    padding: 0.5rem 1rem;
+    @apply relative inline-flex items-center gap-2.5 overflow-hidden rounded-full px-4 py-2;
     width: fit-content;
     isolation: isolate;
     background: oklch(from var(--accent-default) l c h / 0.1);
@@ -329,9 +269,7 @@
   }
 
   .generating-orb {
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 50%;
+    @apply size-2 shrink-0 rounded-full;
     background: currentColor;
     box-shadow: 0 0 8px 2px currentColor;
     animation: orb-pulse 2s ease-in-out infinite;
@@ -347,14 +285,6 @@
       opacity: 1;
       transform: scale(1.2);
     }
-  }
-
-  .generating-text {
-    position: relative;
-    z-index: 1;
-    font-size: 0.8125rem;
-    line-height: 1.2;
-    font-weight: 500;
   }
 
   /* Flowing gradient underlay */
@@ -426,16 +356,6 @@
     .input-area-hero {
       animation: none;
       opacity: 1;
-    }
-  }
-
-  @media (max-width: 480px) {
-    .input-area {
-      padding: 0.5rem 0.5rem 0.75rem;
-    }
-
-    .chat-shell-empty {
-      padding: 0 1rem;
     }
   }
 </style>

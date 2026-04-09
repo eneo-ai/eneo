@@ -6,6 +6,7 @@
   import type { UploadedFile } from "@intric/intric-js";
   import { createEventDispatcher } from "svelte";
   import { Button } from "@intric/ui";
+  import { Alert } from "@eneo/ui";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconTrash } from "@intric/icons/trash";
   import { IconCancel } from "@intric/icons/cancel";
@@ -44,16 +45,14 @@
     </div>
   {:else if assistant}
     {@const currentAssistant = assistant}
-    <div
-      class="border-accent-default/15 bg-accent-dimmer/50 mb-4 rounded-xl border px-4 py-3"
-    >
-      <p class="text-accent-stronger text-sm font-medium">
+    <Alert.Root class="mb-4 rounded-xl border-accent-default/15 bg-accent-dimmer/50" role="status">
+      <Alert.Title class="text-accent-stronger text-sm font-medium">
         {m.flow_step_context_runtime_files_title()}
-      </p>
-      <p class="text-accent-stronger/90 mt-1 text-xs leading-relaxed">
+      </Alert.Title>
+      <Alert.Description class="text-accent-stronger/90 mt-1 text-xs leading-relaxed">
         {m.flow_step_context_runtime_files_body()}
-      </p>
-    </div>
+      </Alert.Description>
+    </Alert.Root>
     <Settings.Row title={m.knowledge()} description={m.flow_step_knowledge_desc()}>
       <SelectKnowledgeV2
         originMode="personal"

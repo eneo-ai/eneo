@@ -3,6 +3,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@intric/intric-js";
+  import { Badge, Card } from "@eneo/ui";
   import {
     getInputTypeLabel,
     getOutputTypeLabel,
@@ -59,46 +60,37 @@
   }
 </script>
 
-<div
-  class="border-accent-default/18 bg-primary/75 mb-4 rounded-2xl border px-4 py-4 shadow-sm sm:px-5"
+<Card.Root
+  class="border-accent-default/18 bg-primary/75 mb-4 rounded-2xl px-4 py-4 sm:px-5"
 >
   <div class="flex flex-wrap items-center gap-2">
     <span class="text-base font-semibold tracking-tight"
       >{m.flow_step_summary_title()}</span
     >
     {#if summaryModel?.usesInputTemplate}
-      <span
-        class="bg-accent-dimmer text-accent-stronger rounded-full px-2.5 py-1 text-[11px] font-medium"
-      >
+      <Badge class="bg-accent-dimmer text-accent-stronger">
         {m.flow_step_summary_badge_input_template()}
-      </span>
+      </Badge>
     {/if}
     {#if summaryModel?.hasKnowledge}
-      <span
-        class="bg-hover-dimmer text-secondary rounded-full px-2.5 py-1 text-[11px] font-medium"
-      >
+      <Badge class="bg-hover-dimmer text-secondary">
         {m.flow_step_summary_badge_knowledge()}
-      </span>
+      </Badge>
     {/if}
     {#if summaryModel?.hasAttachments}
-      <span
-        class="bg-hover-dimmer text-secondary rounded-full px-2.5 py-1 text-[11px] font-medium"
-      >
+      <Badge class="bg-hover-dimmer text-secondary">
         {m.flow_step_summary_badge_attachments()}
-      </span>
+      </Badge>
     {/if}
     {#if !isAdvancedMode && hasAdvancedSettingsActive(step, hasInputTemplateOverride)}
-      <span
-        class="bg-warning-dimmer text-warning-stronger rounded-full px-2.5 py-1 text-[11px] font-medium"
-      >
+      <Badge class="bg-warning-dimmer text-warning-stronger">
         {m.flow_step_summary_badge_advanced()}
-      </span>
+      </Badge>
     {/if}
   </div>
 
-  <div
-    class="border-default/70 bg-secondary/15 mt-4 grid overflow-hidden rounded-2xl border sm:grid-cols-2 xl:grid-cols-4"
-    class:summary-grid-pulse={gridPulse}
+  <Card.Content
+    class="border-default/70 bg-secondary/15 mt-4 grid overflow-hidden rounded-2xl border p-0 sm:grid-cols-2 xl:grid-cols-4 {gridPulse ? 'summary-grid-pulse' : ''}"
   >
     <div class="border-default/70 min-w-0 border-b px-4 py-3 sm:border-r xl:border-b-0">
       <p class="text-muted text-[10px] font-semibold tracking-[0.07em] uppercase">
@@ -128,11 +120,11 @@
       </p>
       <p class="text-primary mt-1 text-sm">{getSummaryNextChannelText(step, summaryModel)}</p>
     </div>
-  </div>
+  </Card.Content>
   {#if httpSummary}
     <p class="text-muted mt-2 truncate px-1 font-mono text-xs">{httpSummary}</p>
   {/if}
-</div>
+</Card.Root>
 
 <style>
   @media (prefers-reduced-motion: no-preference) {

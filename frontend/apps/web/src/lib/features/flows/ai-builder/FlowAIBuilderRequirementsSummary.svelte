@@ -1,6 +1,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { Button } from "@intric/ui";
+  import { Card, Collapsible, Separator } from "@eneo/ui";
   import type { RequirementsSummary } from "./protocol";
 
   interface Props {
@@ -22,314 +23,112 @@
   });
 </script>
 
-<div class="req-card" class:confirmed={confirmed && !expanded}>
-  <header class="req-header">
-    <span class="req-icon">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
-        <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clip-rule="evenodd" />
-      </svg>
-    </span>
-    <h4 class="req-title">{m.ai_builder_requirements_title()}</h4>
-    {#if confirmed}
-      <button class="req-toggle" onclick={() => { expanded = !expanded; }}>
-        {expanded ? m.ai_builder_requirements_collapse() : m.ai_builder_requirements_expand()}
-      </button>
-    {/if}
-  </header>
-
-  {#if expanded}
-    <p class="req-summary">{summary.summary}</p>
-
-    <!-- Key decisions -->
-    {#if summary.key_decisions.length > 0}
-      <div class="req-decisions">
-        <p class="req-section-label">{m.ai_builder_requirements_decisions()}</p>
-        <dl class="decisions-list">
-          {#each summary.key_decisions as decision (decision.topic)}
-            <div class="decision-entry">
-              <dt class="decision-topic">{decision.topic}</dt>
-              <dd class="decision-value">{decision.decision}</dd>
-            </div>
-          {/each}
-        </dl>
+<Card.Root class="mt-3 overflow-hidden transition-[opacity,border-color] duration-250 ease-out {confirmed && !expanded ? 'pointer-events-none opacity-60' : ''}">
+  <Collapsible.Root bind:open={expanded}>
+    <Card.Header class="px-4 pt-3 pb-0">
+      <div class="flex items-center gap-1.5">
+        <span class="flex shrink-0 items-center justify-center text-accent-default">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clip-rule="evenodd" />
+          </svg>
+        </span>
+        <Card.Title class="text-sm font-[650] tracking-[-0.01em]">{m.ai_builder_requirements_title()}</Card.Title>
+        {#if confirmed}
+          <Collapsible.Trigger class="ml-auto cursor-pointer rounded bg-transparent px-1.5 py-0.5 text-xs font-medium text-accent-default transition-colors duration-150 hover:text-accent-stronger">
+            {expanded ? m.ai_builder_requirements_collapse() : m.ai_builder_requirements_expand()}
+          </Collapsible.Trigger>
+        {/if}
       </div>
+    </Card.Header>
+
+    <Collapsible.Content>
+      <Card.Content class="flex flex-col gap-0 px-4 pt-0 pb-3">
+        <!-- Summary text -->
+        <p class="pt-2 text-[0.8125rem] leading-[1.55] text-secondary">{summary.summary}</p>
+
+        <!-- Key decisions -->
+        {#if summary.key_decisions.length > 0}
+          <div class="mx-[-0.25rem] mt-2.5 rounded-lg bg-secondary px-2.5 py-2">
+            <p class="mb-1.5 text-[0.8125rem] font-[650] tracking-[-0.01em]">{m.ai_builder_requirements_decisions()}</p>
+            <dl class="flex flex-col">
+              {#each summary.key_decisions as decision, i (decision.topic)}
+                <div class="grid grid-cols-[auto_1fr] items-first-baseline gap-x-2.5 gap-y-1 py-1.5 {i > 0 ? 'border-t border-default' : ''}">
+                  <dt class="whitespace-nowrap text-[0.8125rem] font-semibold">{decision.topic}</dt>
+                  <dd class="text-[0.8125rem] leading-normal text-secondary">{decision.decision}</dd>
+                </div>
+              {/each}
+            </dl>
+          </div>
+        {/if}
+
+        <!-- Input / Output -->
+        <Separator class="mt-3" />
+        <div class="grid grid-cols-2 gap-3 pt-3">
+          <div class="flex flex-col gap-[0.1875rem]">
+            <span class="text-[0.6875rem] font-semibold uppercase tracking-[0.04em] text-muted">{m.ai_builder_requirements_input()}</span>
+            <span class="text-[0.8125rem] leading-normal">{summary.input_description}</span>
+          </div>
+          <div class="flex flex-col gap-[0.1875rem]">
+            <span class="text-[0.6875rem] font-semibold uppercase tracking-[0.04em] text-muted">{m.ai_builder_requirements_output()}</span>
+            <span class="text-[0.8125rem] leading-normal">{summary.output_description}</span>
+          </div>
+        </div>
+
+        <!-- Assumptions -->
+        {#if summary.assumptions && summary.assumptions.length > 0}
+          <div class="mx-[-0.25rem] mt-2.5 rounded-lg bg-accent-default/[0.06] px-2.5 py-2">
+            <p class="mb-1 text-[0.6875rem] font-semibold text-accent-stronger">{m.ai_builder_assumptions()}</p>
+            <ul class="flex flex-col gap-[0.1875rem] p-0">
+              {#each summary.assumptions as assumption (assumption)}
+                <li class="relative pl-3 text-xs leading-[1.45] text-accent-default before:absolute before:left-0 before:top-[0.5em] before:size-1 before:rounded-full before:bg-current before:opacity-40">
+                  {assumption}
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
+
+        <!-- Manual setup notes -->
+        {#if summary.manual_setup_notes && summary.manual_setup_notes.length > 0}
+          <div class="mx-[-0.25rem] mt-2.5 rounded-lg bg-accent-default/[0.06] px-2.5 py-2">
+            <p class="mb-1 text-[0.6875rem] font-semibold text-accent-stronger">{m.ai_builder_requirements_manual_notes()}</p>
+            <ul class="flex flex-col gap-[0.1875rem] p-0">
+              {#each summary.manual_setup_notes as note (note)}
+                <li class="relative pl-3 text-xs leading-[1.45] text-accent-default before:absolute before:left-0 before:top-[0.5em] before:size-1 before:rounded-full before:bg-current before:opacity-40">
+                  {note}
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
+
+        <!-- Actions -->
+        {#if !confirmed && active && onconfirm && onchange}
+          <div class="mt-1.5 flex gap-1.5 pt-2.5">
+            <Button variant="primary" size="small" onclick={onconfirm}>
+              {m.ai_builder_requirements_confirm()}
+            </Button>
+            <Button variant="outlined" size="small" onclick={onchange}>
+              {m.ai_builder_requirements_change()}
+            </Button>
+          </div>
+        {:else if !active}
+          <p class="pt-1.5 text-xs font-medium text-muted">
+            {m.ai_builder_requirements_superseded()}
+          </p>
+        {/if}
+      </Card.Content>
+    </Collapsible.Content>
+
+    <!-- Collapsed hint (outside Collapsible.Content so it shows when collapsed) -->
+    {#if !expanded && confirmed}
+      <Card.Content class="px-4 pt-1 pb-3">
+        {#if summary.key_decisions.length > 0}
+          <p class="text-xs leading-[1.4] text-muted">
+            {summary.key_decisions.map(d => d.topic).join(" · ")}
+          </p>
+        {/if}
+      </Card.Content>
     {/if}
-
-    <!-- Input / Output -->
-    <div class="req-io">
-      <div class="io-block">
-        <span class="io-label">{m.ai_builder_requirements_input()}</span>
-        <span class="io-value">{summary.input_description}</span>
-      </div>
-      <div class="io-block">
-        <span class="io-label">{m.ai_builder_requirements_output()}</span>
-        <span class="io-value">{summary.output_description}</span>
-      </div>
-    </div>
-
-    {#if summary.assumptions && summary.assumptions.length > 0}
-      <div class="req-notes">
-        <p class="req-notes-label">{m.ai_builder_assumptions()}</p>
-        <ul class="notes-list">
-          {#each summary.assumptions as assumption (assumption)}
-            <li>{assumption}</li>
-          {/each}
-        </ul>
-      </div>
-    {/if}
-
-    <!-- Manual setup notes -->
-    {#if summary.manual_setup_notes && summary.manual_setup_notes.length > 0}
-      <div class="req-notes">
-        <p class="req-notes-label">{m.ai_builder_requirements_manual_notes()}</p>
-        <ul class="notes-list">
-          {#each summary.manual_setup_notes as note (note)}
-            <li>{note}</li>
-          {/each}
-        </ul>
-      </div>
-    {/if}
-  {:else if confirmed}
-    <!-- Collapsed: show just the first key decision as a one-liner -->
-    {#if summary.key_decisions.length > 0}
-      <p class="req-collapsed-hint">
-        {summary.key_decisions.map(d => d.topic).join(" · ")}
-      </p>
-    {/if}
-  {/if}
-
-  <!-- Actions -->
-  {#if !confirmed && active && onconfirm && onchange}
-    <div class="req-actions">
-      <Button variant="primary" size="small" onclick={onconfirm}>
-        {m.ai_builder_requirements_confirm()}
-      </Button>
-      <Button variant="outlined" size="small" onclick={onchange}>
-        {m.ai_builder_requirements_change()}
-      </Button>
-    </div>
-  {:else if !active}
-    <div class="req-superseded">
-      {m.ai_builder_requirements_superseded()}
-    </div>
-  {/if}
-</div>
-
-<style lang="postcss">
-  @reference "@intric/ui/styles";
-
-  .req-card {
-    margin-top: 0.75rem;
-    padding-bottom: 0.75rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--border-default);
-    background: var(--bg-primary);
-    overflow: hidden;
-    transition: opacity 0.25s ease, border-color 0.25s ease;
-  }
-
-  .req-card.confirmed {
-    opacity: 0.6;
-    pointer-events: none;
-  }
-
-  .req-superseded {
-    padding: 0.375rem 1rem 0;
-    color: var(--text-muted);
-    font-size: 0.75rem;
-    font-weight: 500;
-  }
-
-  /* --- Header --- */
-
-  .req-header {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    padding: 0.75rem 1rem 0;
-  }
-
-  .req-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--accent-default);
-    flex-shrink: 0;
-  }
-
-  .req-title {
-    font-size: 0.875rem;
-    font-weight: 650;
-    color: var(--text-primary);
-    letter-spacing: -0.01em;
-  }
-
-  /* --- Summary --- */
-
-  .req-summary {
-    padding: 0.5rem 1rem 0;
-    font-size: 0.8125rem;
-    line-height: 1.55;
-    color: var(--text-secondary);
-  }
-
-  /* --- Decisions --- */
-
-  .req-decisions {
-    margin: 0.625rem 0.75rem 0;
-    padding: 0.5rem 0.625rem;
-    border-radius: 0.5rem;
-    background: var(--bg-secondary);
-  }
-
-  .req-section-label {
-    font-size: 0.8125rem;
-    font-weight: 650;
-    color: var(--text-primary);
-    margin-bottom: 0.375rem;
-    letter-spacing: -0.01em;
-  }
-
-  .decisions-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-  }
-
-  .decision-entry {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0.25rem 0.625rem;
-    padding: 0.375rem 0;
-    align-items: first baseline;
-  }
-
-  .decision-entry + .decision-entry {
-    border-top: 1px solid var(--border-default);
-  }
-
-  .decision-topic {
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    white-space: nowrap;
-  }
-
-  .decision-value {
-    font-size: 0.8125rem;
-    color: var(--text-secondary);
-    line-height: 1.5;
-  }
-
-  /* --- Input / Output --- */
-
-  .req-io {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem 0;
-    margin-top: 0.25rem;
-    border-top: 1px solid var(--border-default);
-  }
-
-  .io-block {
-    display: flex;
-    flex-direction: column;
-    gap: 0.1875rem;
-  }
-
-  .io-label {
-    font-size: 0.6875rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .io-value {
-    font-size: 0.8125rem;
-    color: var(--text-primary);
-    line-height: 1.5;
-  }
-
-  /* --- Manual notes --- */
-
-  .req-notes {
-    margin: 0.625rem 0.75rem 0;
-    padding: 0.5rem 0.625rem;
-    border-radius: 0.5rem;
-    background: oklch(from var(--accent-default) l c h / 0.06);
-  }
-
-  .req-notes-label {
-    font-size: 0.6875rem;
-    font-weight: 600;
-    color: var(--accent-stronger);
-    margin-bottom: 0.25rem;
-  }
-
-  .notes-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.1875rem;
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-
-  .notes-list li {
-    font-size: 0.75rem;
-    color: var(--accent-default);
-    line-height: 1.45;
-    padding-left: 0.75rem;
-    position: relative;
-  }
-
-  .notes-list li::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 0.5em;
-    width: 0.25rem;
-    height: 0.25rem;
-    border-radius: 9999px;
-    background: currentColor;
-    opacity: 0.4;
-  }
-
-  /* --- Toggle + collapsed --- */
-
-  .req-toggle {
-    margin-left: auto;
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--accent-default);
-    padding: 0.125rem 0.375rem;
-    border-radius: 0.25rem;
-    transition: color 0.15s ease;
-  }
-
-  .req-toggle:hover {
-    color: var(--accent-stronger);
-  }
-
-  .req-collapsed-hint {
-    padding: 0.25rem 1rem 0;
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    line-height: 1.4;
-  }
-
-  /* --- Actions --- */
-
-  .req-actions {
-    display: flex;
-    gap: 0.375rem;
-    padding: 0.625rem 1rem 0;
-    margin-top: 0.375rem;
-  }
-
-</style>
+  </Collapsible.Root>
+</Card.Root>

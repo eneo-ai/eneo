@@ -5,6 +5,7 @@
   import { m } from "$lib/paraglide/messages";
   import { isFlowFormFieldNameUsableAsVariable } from "$lib/features/flows/flowFormSchema";
   import { getChipClasses } from "$lib/features/flows/flowVariableTokens";
+  import { Separator } from "@eneo/ui";
 
   export let steps: FlowStep[];
   export let currentStepOrder: number;
@@ -127,7 +128,7 @@
       {/if}
 
       {#if (transcriptionEnabled && matchesSearch("transkribering")) || (isAdvancedMode && currentStepOrder > 1 && matchesSearch("föregående_steg"))}
-        <div class="border-default mx-2 my-1.5 border-t"></div>
+        <Separator class="mx-2 my-1.5" />
         <div class="px-3 pt-1.5 pb-1">
           <span class="text-secondary text-xs font-semibold"
             >{m.flow_variable_system_section()}</span
@@ -164,7 +165,7 @@
                 matchesSearch("output") ||
                 matchesSearch(`step_${prevStep.step_order}`)))}
           {#if hasStepMatches}
-            <div class="border-default mx-2 my-1.5 border-t"></div>
+            <Separator class="mx-2 my-1.5" />
 
             <!-- Step header -->
             <div class="px-3 pt-1.5 pb-1">

@@ -15,6 +15,14 @@ function initThemeStore() {
 export const availableThemes = ["system", "dark", "light"] as const;
 export type Theme = (typeof availableThemes)[number];
 
+function syncDarkClass(theme: Theme) {
+  if (!browser) return;
+  const isDark =
+    theme === "dark" ||
+    (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.classList.toggle("dark", isDark);
+}
+
 function createThemeStore() {
   const themeKey = "theme";
   let initial: Theme = "system";
@@ -25,6 +33,13 @@ function createThemeStore() {
     } catch (e) {
       console.error("No access to localStorage");
     }
+
+    // Keep .dark class in sync when OS preference changes while using "system" theme
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if (document.documentElement.dataset.theme === "system") {
+        syncDarkClass("system");
+      }
+    });
   }
 
   const theme = writable<Theme>(initial);
@@ -34,6 +49,7 @@ function createThemeStore() {
     set(newTheme: Theme) {
       if (browser) {
         document.documentElement.dataset.theme = newTheme;
+        syncDarkClass(newTheme);
         window.localStorage.setItem(themeKey, newTheme);
       }
       theme.set(newTheme);

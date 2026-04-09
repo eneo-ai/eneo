@@ -12,7 +12,9 @@
   import { createEventDispatcher, onDestroy } from "svelte";
   import { get, writable } from "svelte/store";
   import { IconWorkflow } from "@intric/icons/workflow";
+  import { MousePointerClick } from "lucide-svelte";
   import { Button } from "@intric/ui";
+  import { Separator } from "@eneo/ui";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -963,6 +965,7 @@
     </div>
   {:else}
     <div class="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+      <MousePointerClick class="size-10 text-muted/40 mb-3" />
       <h3 class="text-lg font-semibold">{m.flow_step_select_prompt()}</h3>
       <p class="text-secondary max-w-md text-sm">
         {m.flow_step_select_prompt_desc()}
@@ -987,6 +990,7 @@
             {isAdvancedMode}
             {hasInputTemplateOverride}
           />
+          <Separator class="my-2" />
         {/if}
 
         <Settings.Group title={m.flow_step_section_details()}>

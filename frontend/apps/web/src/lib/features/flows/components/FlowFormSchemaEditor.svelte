@@ -22,6 +22,7 @@
   import { m } from "$lib/paraglide/messages";
   import { getChipClasses } from "$lib/features/flows/flowVariableTokens";
   import { createEventDispatcher } from "svelte";
+  import { Badge, Card } from "@eneo/ui";
 
   export let isPublished: boolean;
 
@@ -176,34 +177,42 @@
   <p class="text-secondary px-4 text-sm">{m.flow_form_schema_description()}</p>
 
   {#if localFields.length === 0}
-    <div class="mx-4 mt-4 rounded-xl border border-default bg-secondary/20 p-4">
-      <div class="mb-3 max-w-2xl">
-        <p class="text-sm font-semibold">{m.flow_form_schema_intro_title()}</p>
-        <p class="mt-1 text-xs leading-relaxed text-secondary">{m.flow_form_schema_intro_desc()}</p>
-      </div>
-      <div class={`grid gap-3 ${$userMode === "power_user" ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
-        <div class="rounded-lg border border-default bg-primary px-3 py-3">
-          <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">
-            {m.flow_form_schema_intro_fill_title()}
-          </p>
-          <p class="mt-1.5 text-sm text-secondary">{m.flow_form_schema_intro_fill_desc()}</p>
+    <Card.Root class="mx-4 mt-4 bg-secondary/20">
+      <Card.Content class="p-4">
+        <div class="mb-3 max-w-2xl">
+          <p class="text-sm font-semibold">{m.flow_form_schema_intro_title()}</p>
+          <p class="mt-1 text-xs leading-relaxed text-secondary">{m.flow_form_schema_intro_desc()}</p>
         </div>
-        <div class="rounded-lg border border-default bg-primary px-3 py-3">
-          <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">
-            {m.flow_form_schema_intro_variable_title()}
-          </p>
-          <p class="mt-1.5 text-sm text-secondary">{m.flow_form_schema_intro_variable_desc()}</p>
+        <div class={`grid gap-3 ${$userMode === "power_user" ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+          <Card.Root>
+            <Card.Content class="px-3 py-3">
+              <p class="text-xs font-semibold uppercase tracking-[0.16em] text-muted">
+                {m.flow_form_schema_intro_fill_title()}
+              </p>
+              <p class="mt-1.5 text-sm text-secondary">{m.flow_form_schema_intro_fill_desc()}</p>
+            </Card.Content>
+          </Card.Root>
+          <Card.Root>
+            <Card.Content class="px-3 py-3">
+              <p class="text-xs font-semibold uppercase tracking-[0.16em] text-muted">
+                {m.flow_form_schema_intro_variable_title()}
+              </p>
+              <p class="mt-1.5 text-sm text-secondary">{m.flow_form_schema_intro_variable_desc()}</p>
+            </Card.Content>
+          </Card.Root>
+          {#if $userMode === "power_user"}
+            <Card.Root>
+              <Card.Content class="px-3 py-3">
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-muted">
+                  {m.flow_form_schema_intro_use_title()}
+                </p>
+                <p class="mt-1.5 text-sm text-secondary">{m.flow_form_schema_intro_use_desc()}</p>
+              </Card.Content>
+            </Card.Root>
+          {/if}
         </div>
-        {#if $userMode === "power_user"}
-          <div class="rounded-lg border border-default bg-primary px-3 py-3">
-            <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">
-              {m.flow_form_schema_intro_use_title()}
-            </p>
-            <p class="mt-1.5 text-sm text-secondary">{m.flow_form_schema_intro_use_desc()}</p>
-          </div>
-        {/if}
-      </div>
-    </div>
+      </Card.Content>
+    </Card.Root>
 
     <div class="mx-auto flex max-w-xl flex-col items-center gap-3 px-4 py-8 text-center">
       <div class="rounded-xl bg-accent-dimmer p-3">
@@ -238,24 +247,26 @@
       {/if}
     </div>
   {:else}
-    <div class="mx-4 mb-4 rounded-lg border border-default bg-primary px-4 py-3">
-      <p class="text-sm font-medium">{m.flow_form_schema_live_hint()}</p>
-      <p class="mt-1 text-xs text-secondary">
-        {m.flow_form_schema_live_form_hint()} {m.flow_form_schema_required_hint()}
-      </p>
-      {#if previewVariableTokens.length > 0}
-        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
-          <span class="font-medium text-secondary">{m.flow_form_schema_example_label()}</span>
-          {#each previewVariableTokens as token (token)}
-            <span class={getChipClasses("field")}>{token}</span>
-          {/each}
-        </div>
-      {/if}
-    </div>
+    <Card.Root class="mx-4 mb-4">
+      <Card.Content class="px-4 py-3">
+        <p class="text-sm font-medium">{m.flow_form_schema_live_hint()}</p>
+        <p class="mt-1 text-xs text-secondary">
+          {m.flow_form_schema_live_form_hint()} {m.flow_form_schema_required_hint()}
+        </p>
+        {#if previewVariableTokens.length > 0}
+          <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
+            <span class="font-medium text-secondary">{m.flow_form_schema_example_label()}</span>
+            {#each previewVariableTokens as token (token)}
+              <span class={getChipClasses("field")}>{token}</span>
+            {/each}
+          </div>
+        {/if}
+      </Card.Content>
+    </Card.Root>
   {/if}
 
   {#each localFields as field, index (field._localId)}
-    <div class="mx-4 mb-3 rounded-lg border border-default border-l-4 border-l-accent-default/40 p-3.5">
+    <Card.Root class="mx-4 mb-3 border-l-4 border-l-accent-default/40 p-3.5">
       <div class="flex items-start justify-between gap-3">
         <div class="flex min-w-0 flex-1 flex-col gap-2.5">
           <div class="flex items-center gap-2">
@@ -296,12 +307,12 @@
               on:change={() => void rewriteVariablesOnCommittedRename(field)}
             />
             {#if field.required}
-              <span class="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">{m.flow_form_field_required()}</span>
+              <Badge class="shrink-0 bg-accent-dimmer text-accent-stronger">{m.flow_form_field_required()}</Badge>
             {/if}
             {#if !isPublished}
               <button
                 type="button"
-                class="shrink-0 text-secondary hover:text-red-600"
+                class="shrink-0 text-secondary hover:text-negative-stronger"
                 on:click={() => removeField(index)}
                 aria-label={m.delete()}
               >
@@ -317,7 +328,7 @@
                 <span>{m.flow_form_field_variable_hint()}</span>
                 <span class={getChipClasses("field")}>{getFlowFormFieldVariableToken(field.name)}</span>
               {:else}
-                <span class="text-amber-700">
+                <span class="text-warning-stronger">
                   {m.flow_form_field_variable_unavailable()}
                 </span>
               {/if}
@@ -353,12 +364,12 @@
           </div>
 
           {#if flowFormFieldHasOptions(normalizeFlowFormFieldType(typeof field.type === "string" ? field.type : "text"))}
-            <div class="border-default rounded-lg border p-2.5">
-              <div class="mb-2 text-xs font-medium text-secondary">{m.flow_form_field_option()}</div>
-              {#if (field.options ?? []).length === 0}
-                <p class="mb-2 text-xs text-secondary">{m.flow_form_field_add_option_hint()}</p>
-              {/if}
-              <div class="flex flex-col gap-2">
+            <Card.Root class="bg-hover-dimmer/30">
+              <Card.Content class="flex flex-col gap-2 p-2.5">
+                <div class="text-xs font-medium text-secondary">{m.flow_form_field_option()}</div>
+                {#if (field.options ?? []).length === 0}
+                  <p class="text-xs text-secondary">{m.flow_form_field_add_option_hint()}</p>
+                {/if}
                 {#each field.options ?? [] as option, optionIndex (`${field._localId}-${optionIndex}`)}
                   <div class="flex items-center gap-2">
                     <input
@@ -371,7 +382,7 @@
                     />
                     <button
                       type="button"
-                      class="inline-flex size-7 items-center justify-center rounded text-secondary hover:bg-hover-dimmer hover:text-red-600"
+                      class="inline-flex size-7 items-center justify-center rounded text-secondary hover:bg-hover-dimmer hover:text-negative-stronger"
                       on:click={() => removeOption(index, optionIndex)}
                       disabled={isPublished}
                       aria-label={m.delete()}
@@ -380,21 +391,21 @@
                     </button>
                   </div>
                 {/each}
-              </div>
-              {#if !isPublished}
-                <button
-                  type="button"
-                  class="mt-2 rounded-md border border-default px-2.5 py-1 text-xs transition-colors hover:bg-hover-dimmer"
-                  on:click={() => addOption(index)}
-                >
-                  {m.flow_form_field_add_option()}
-                </button>
-              {/if}
-            </div>
+                {#if !isPublished}
+                  <button
+                    type="button"
+                    class="mt-1 rounded-md border border-default px-2.5 py-1 text-xs transition-colors hover:bg-hover-dimmer"
+                    on:click={() => addOption(index)}
+                  >
+                    {m.flow_form_field_add_option()}
+                  </button>
+                {/if}
+              </Card.Content>
+            </Card.Root>
           {/if}
         </div>
       </div>
-    </div>
+    </Card.Root>
   {/each}
 
   {#if !isPublished && localFields.length > 0}

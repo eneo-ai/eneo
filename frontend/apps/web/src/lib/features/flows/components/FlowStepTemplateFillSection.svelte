@@ -15,6 +15,7 @@
     getTemplateRowStatusClass,
     getTemplateReadinessPillClass
   } from "./flowStepEditHelpers";
+  import { Alert, Badge, Card } from "@eneo/ui";
 
   const dispatch = createEventDispatcher<{
     outputModeChange: { value: string };
@@ -80,15 +81,15 @@
 
 {#if isAdvancedMode}
   <Settings.Group title={m.flow_template_fill_template_section()}>
-    <div class="border-accent-default/15 bg-accent-default/5 rounded-[1rem] border px-5 py-4">
+    <Alert.Root class="rounded-[1rem] border-accent-default/15 bg-accent-default/5 px-5 py-4" role="status">
       <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div class="space-y-1.5">
-          <p class="text-accent-stronger text-sm font-semibold tracking-tight">
+        <div class="flex flex-col gap-1.5">
+          <Alert.Title class="text-accent-stronger text-sm font-semibold tracking-tight">
             {m.flow_template_fill_title()}
-          </p>
-          <p class="text-accent-stronger/90 text-[0.8125rem] leading-relaxed">
+          </Alert.Title>
+          <Alert.Description class="text-accent-stronger/90 text-[0.8125rem] leading-relaxed">
             {m.flow_template_fill_desc()}
-          </p>
+          </Alert.Description>
         </div>
         <Button
           variant="outlined"
@@ -99,7 +100,7 @@
           {m.flow_template_fill_switch_back()}
         </Button>
       </div>
-    </div>
+    </Alert.Root>
     <div
       class="grid gap-4 px-4 pt-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:px-0.5"
     >
@@ -111,42 +112,38 @@
       </div>
       <div class="flex flex-col gap-3">
         {#if templateHasSelection || templateReadiness.total > 0}
-          <div
-            class="border-default bg-secondary/10 flex items-center justify-between gap-3 rounded-xl border px-3 py-3"
-          >
-            <div class="min-w-0">
-              <p class="text-primary truncate text-sm font-medium">
-                {templateFillConfig.template_name ??
-                  m.flow_template_fill_select_placeholder()}
-              </p>
-              <p class="text-muted mt-1 text-xs leading-relaxed">
-                <span
-                  class={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${readinessPillClass()}`}
-                >
-                  {templateReadiness.matched}/{templateReadiness.total || 0}
-                </span>
-              </p>
-              {#if selectedTemplateAsset}
-                <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                  <span
-                    class={`rounded-full border px-2 py-0.5 font-medium ${getTemplateAssetStatusClass(selectedTemplateAsset.status)}`}
-                  >
-                    {getTemplateAssetStatusLabel(selectedTemplateAsset.status)}
-                  </span>
-                  {#if selectedTemplateAsset.last_updated_by_name}
-                    <span class="text-muted">
-                      Senast uppdaterad av {selectedTemplateAsset.last_updated_by_name}
-                    </span>
-                  {/if}
-                </div>
-              {/if}
-              {#if templateFillConfig.template_checksum}
-                <p class="text-muted mt-2 text-[11px] leading-relaxed">
-                  {templateFillConfig.template_checksum}
+          <Card.Root class="bg-secondary/10">
+            <Card.Content class="flex items-center justify-between gap-3 px-3 py-3">
+              <div class="min-w-0">
+                <p class="text-primary truncate text-sm font-medium">
+                  {templateFillConfig.template_name ??
+                    m.flow_template_fill_select_placeholder()}
                 </p>
-              {/if}
-            </div>
-          </div>
+                <div class="mt-1">
+                  <Badge class={readinessPillClass()}>
+                    {templateReadiness.matched}/{templateReadiness.total || 0}
+                  </Badge>
+                </div>
+                {#if selectedTemplateAsset}
+                  <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <Badge class={getTemplateAssetStatusClass(selectedTemplateAsset.status)}>
+                      {getTemplateAssetStatusLabel(selectedTemplateAsset.status)}
+                    </Badge>
+                    {#if selectedTemplateAsset.last_updated_by_name}
+                      <span class="text-muted">
+                        Senast uppdaterad av {selectedTemplateAsset.last_updated_by_name}
+                      </span>
+                    {/if}
+                  </div>
+                {/if}
+                {#if templateFillConfig.template_checksum}
+                  <p class="text-muted mt-2 text-[11px] leading-relaxed">
+                    {templateFillConfig.template_checksum}
+                  </p>
+                {/if}
+              </div>
+            </Card.Content>
+          </Card.Root>
         {/if}
         <select
           class="border-default bg-primary w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:border-accent-default focus-within:ring-2 focus-within:ring-accent-default/20 hover:border-stronger focus-visible:outline-none disabled:opacity-50"
@@ -241,79 +238,82 @@
       </div>
       <div class="flex flex-col gap-3">
         {#if templateHasSelection && templateReadiness.total > 0}
-          <div
-            class="border-default bg-secondary/10 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3"
-          >
-            <div class="flex items-center gap-3">
-              <span
-                class={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${readinessPillClass()}`}
-              >
-                {templateReadiness.matched}/{templateReadiness.total}
-              </span>
-              <div
-                class="bg-hover-dimmer h-2 w-full max-w-48 overflow-hidden rounded-full"
-              >
+          <Card.Root class="bg-secondary/10">
+            <Card.Content class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div class="flex items-center gap-3">
+                <Badge class={readinessPillClass()}>
+                  {templateReadiness.matched}/{templateReadiness.total}
+                </Badge>
                 <div
-                  class={`h-full transition-all ${templateReadiness.incomplete ? "bg-warning-default" : "bg-positive-default"}`}
-                  style={`width: ${(templateReadiness.matched / templateReadiness.total) * 100}%`}
-                ></div>
+                  class="bg-hover-dimmer h-2 w-full max-w-48 overflow-hidden rounded-full"
+                >
+                  <div
+                    class={`h-full transition-all ${templateReadiness.incomplete ? "bg-warning-default" : "bg-positive-default"}`}
+                    style={`width: ${(templateReadiness.matched / templateReadiness.total) * 100}%`}
+                  ></div>
+                </div>
               </div>
-            </div>
-            {#if templateAutoMatchableCount > 0}
-              <Button
-                variant="outlined"
-                size="small"
-                disabled={isPublished}
-                on:click={() => dispatch("applyAllSuggestions")}
-              >
-                {m.flow_template_fill_apply_all({
-                  count: String(templateAutoMatchableCount)
-                })}
-              </Button>
-            {/if}
-          </div>
+              {#if templateAutoMatchableCount > 0}
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={isPublished}
+                  on:click={() => dispatch("applyAllSuggestions")}
+                >
+                  {m.flow_template_fill_apply_all({
+                    count: String(templateAutoMatchableCount)
+                  })}
+                </Button>
+              {/if}
+            </Card.Content>
+          </Card.Root>
         {/if}
 
         {#if !templateHasSelection}
-          <div class="bg-secondary/10 rounded-xl px-4 py-3">
-            <p class="text-primary text-sm font-medium">
-              {m.flow_template_fill_select_template_first_title()}
-            </p>
-            <p class="text-muted mt-1 text-xs leading-relaxed">
-              {m.flow_template_fill_select_template_first_body()}
-            </p>
-          </div>
+          <Card.Root class="bg-secondary/10">
+            <Card.Content class="px-4 py-3">
+              <p class="text-primary text-sm font-medium">
+                {m.flow_template_fill_select_template_first_title()}
+              </p>
+              <p class="text-muted mt-1 text-xs leading-relaxed">
+                {m.flow_template_fill_select_template_first_body()}
+              </p>
+            </Card.Content>
+          </Card.Root>
         {:else if templatePlaceholders.length === 0}
-          <div class="bg-secondary/10 rounded-xl px-4 py-3">
-            <p class="text-primary text-sm font-medium">
-              {m.flow_template_fill_no_placeholders()}
-            </p>
-            <p class="text-muted mt-1 text-xs leading-relaxed">
-              {m.flow_template_fill_placeholder_guidance_prefix()}
-              <span class="font-mono">{"{{nuläge}}"}</span>,
-              <span class="font-mono">{"{{mål}}"}</span> eller
-              <span class="font-mono">{"{{bedömning}}"}</span>
-              {m.flow_template_fill_placeholder_guidance_suffix()}
-            </p>
-            <p class="text-muted mt-2 text-xs leading-relaxed">
-              {m.flow_template_fill_placeholder_formatting_warning()}
-            </p>
-            {#if templateInspection?.extracted_text_preview}
-              <div class="border-default bg-primary mt-3 rounded-lg border px-3 py-3">
-                <p class="text-primary text-xs font-medium">
-                  {m.flow_template_fill_extracted_preview_title()}
-                </p>
-                <pre
-                  class="text-muted mt-2 overflow-auto text-xs leading-relaxed break-words whitespace-pre-wrap">{templateInspection.extracted_text_preview}</pre>
-              </div>
-            {/if}
-          </div>
+          <Card.Root class="bg-secondary/10">
+            <Card.Content class="flex flex-col gap-2 px-4 py-3">
+              <p class="text-primary text-sm font-medium">
+                {m.flow_template_fill_no_placeholders()}
+              </p>
+              <p class="text-muted text-xs leading-relaxed">
+                {m.flow_template_fill_placeholder_guidance_prefix()}
+                <span class="font-mono">{"{{nuläge}}"}</span>,
+                <span class="font-mono">{"{{mål}}"}</span> eller
+                <span class="font-mono">{"{{bedömning}}"}</span>
+                {m.flow_template_fill_placeholder_guidance_suffix()}
+              </p>
+              <p class="text-muted text-xs leading-relaxed">
+                {m.flow_template_fill_placeholder_formatting_warning()}
+              </p>
+              {#if templateInspection?.extracted_text_preview}
+                <Card.Root class="mt-1">
+                  <Card.Content class="px-3 py-3">
+                    <p class="text-primary text-xs font-medium">
+                      {m.flow_template_fill_extracted_preview_title()}
+                    </p>
+                    <pre
+                      class="text-muted mt-2 overflow-auto text-xs leading-relaxed break-words whitespace-pre-wrap">{templateInspection.extracted_text_preview}</pre>
+                  </Card.Content>
+                </Card.Root>
+              {/if}
+            </Card.Content>
+          </Card.Root>
         {:else}
           <div class="flex flex-col gap-2">
             {#each templateBindingRows as row (row.key)}
-              <div
-                class="rounded-xl border px-3 py-3 transition-colors {row.status ===
-                'matched'
+              <Card.Root
+                class="transition-colors {row.status === 'matched'
                   ? 'border-positive-default/30 bg-positive-dimmer/20 border-l-positive-default/40 border-l-[3px]'
                   : row.status === 'missing'
                     ? 'border-default bg-primary border-l-warning-default/60 border-l-[3px]'
@@ -321,23 +321,19 @@
                       ? 'border-negative-default/30 bg-negative-dimmer/10 border-l-negative-default/40 border-l-[3px]'
                       : 'border-default bg-primary'}"
               >
-                <div class="flex flex-col gap-2">
+                <Card.Content class="flex flex-col gap-2 px-3 py-3">
                   <div class="flex items-center justify-between gap-2">
                     <div class="flex min-w-0 flex-wrap items-center gap-2">
                       <span class="text-primary text-sm font-medium">
                         {`{{${row.placeholderName}}}`}
                       </span>
-                      <span
-                        class={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${getTemplateRowStatusClass(row.status)}`}
-                      >
+                      <Badge class={getTemplateRowStatusClass(row.status)}>
                         {getTemplateRowStatusText(row.status)}
-                      </span>
+                      </Badge>
                       {#if row.autoSuggested}
-                        <span
-                          class="bg-accent-dimmer text-accent-stronger inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
-                        >
+                        <Badge class="bg-accent-dimmer text-accent-stronger">
                           {m.flow_template_fill_auto_badge()}
-                        </span>
+                        </Badge>
                       {/if}
                     </div>
                     <button
@@ -441,8 +437,8 @@
                         })}
                     />
                   {/if}
-                </div>
-              </div>
+                </Card.Content>
+              </Card.Root>
             {/each}
           </div>
         {/if}
@@ -451,14 +447,14 @@
   </Settings.Group>
 {:else}
   <Settings.Group title={m.flow_template_fill_template_section()}>
-    <div class="border-accent-default/15 bg-accent-default/5 rounded-[1rem] border px-5 py-4">
-      <p class="text-accent-stronger text-sm font-semibold tracking-tight">
+    <Alert.Root class="rounded-[1rem] border-accent-default/15 bg-accent-default/5 px-5 py-4" role="status">
+      <Alert.Title class="text-accent-stronger text-sm font-semibold tracking-tight">
         {m.flow_template_fill_title()}
-      </p>
-      <p class="text-accent-stronger/90 mt-1.5 text-[0.8125rem] leading-relaxed">
+      </Alert.Title>
+      <Alert.Description class="mt-1.5 text-accent-stronger/90 text-[0.8125rem] leading-relaxed">
         {m.flow_template_fill_desc()}
-      </p>
-    </div>
+      </Alert.Description>
+    </Alert.Root>
     <div
       class="grid gap-4 px-4 pt-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:px-0.5"
     >
@@ -468,27 +464,25 @@
       </div>
       <div class="flex flex-col gap-3">
         {#if templateHasSelection || templateReadiness.total > 0}
-          <div
-            class="border-default bg-secondary/10 flex items-center justify-between gap-3 rounded-xl border px-3 py-3"
-          >
-            <div class="min-w-0">
-              <p class="text-primary truncate text-sm font-medium">
-                {templateFillConfig.template_name ??
-                  m.flow_template_fill_select_placeholder()}
-              </p>
-              <p class="text-muted mt-1 text-xs leading-relaxed">
-                {m.flow_template_fill_readiness_summary({
-                  matched: String(templateReadiness.matched),
-                  total: String(templateReadiness.total || 0)
-                })}
-              </p>
-            </div>
-            <span
-              class={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${readinessPillClass()}`}
-            >
-              {templateReadiness.matched}/{templateReadiness.total || 0}
-            </span>
-          </div>
+          <Card.Root class="bg-secondary/10">
+            <Card.Content class="flex items-center justify-between gap-3 px-3 py-3">
+              <div class="min-w-0">
+                <p class="text-primary truncate text-sm font-medium">
+                  {templateFillConfig.template_name ??
+                    m.flow_template_fill_select_placeholder()}
+                </p>
+                <p class="text-muted mt-1 text-xs leading-relaxed">
+                  {m.flow_template_fill_readiness_summary({
+                    matched: String(templateReadiness.matched),
+                    total: String(templateReadiness.total || 0)
+                  })}
+                </p>
+              </div>
+              <Badge class={readinessPillClass()}>
+                {templateReadiness.matched}/{templateReadiness.total || 0}
+              </Badge>
+            </Card.Content>
+          </Card.Root>
         {/if}
         {#if templateOrphanedRows.length > 0}
           <p class="text-warning-stronger text-xs leading-relaxed">

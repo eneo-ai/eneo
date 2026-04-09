@@ -2,6 +2,7 @@
   import type { FlowStep } from "@intric/intric-js";
   import { createEventDispatcher } from "svelte";
   import { IconTrash } from "@intric/icons/trash";
+  import { Badge } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
   import {
@@ -64,7 +65,6 @@
     audio: () => m.flow_type_audio(),
     any: () => m.flow_type_any()
   };
-  const BADGE_BASE = "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium";
   const INPUT_BADGE_CLASSES: Record<string, string> = {
     text: "bg-hover-dimmer text-secondary",
     json: "bg-positive-dimmer text-positive-stronger",
@@ -124,7 +124,7 @@
   role="listitem"
   class="group flex w-full items-start gap-2.5 border-b px-3.5 py-3 text-left transition-colors duration-150
     {isActive
-    ? 'border-b-default border-l-accent-default bg-accent-dimmer/65 border-l-[3px]'
+    ? 'border-b-default border-l-accent-default bg-accent-dimmer/30 border-l-[3px]'
     : 'border-default hover:bg-hover-dimmer/40 border-l-[3px] border-l-transparent'}
     active:bg-hover-default"
 >
@@ -167,39 +167,38 @@
       {#if step.output_mode === "template_fill" || step.output_mode === "transcribe_only"}
         <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
           {#if step.output_mode === "template_fill"}
-            <span class={`${BADGE_BASE} bg-accent-dimmer text-accent-stronger`}>
+            <Badge variant="secondary" class="bg-accent-dimmer text-accent-stronger text-[11px]">
               {m.flow_template_fill_card_badge()}
-            </span>
+            </Badge>
             {#if templateReadiness}
-              <span
-                class={`${BADGE_BASE} ${
-                  templateReadiness.incomplete
-                    ? "bg-warning-dimmer text-warning-stronger"
-                    : "bg-positive-dimmer text-positive-stronger"
-                }`}
+              <Badge
+                variant="secondary"
+                class="text-[11px] {templateReadiness.incomplete
+                  ? 'bg-warning-dimmer text-warning-stronger'
+                  : 'bg-positive-dimmer text-positive-stronger'}"
               >
                 {templateReadiness.matched}/{templateReadiness.total || 0}
-              </span>
+              </Badge>
             {/if}
           {:else}
-            <span class={`${BADGE_BASE} bg-accent-dimmer text-accent-stronger`}>
+            <Badge variant="secondary" class="bg-accent-dimmer text-accent-stronger text-[11px]">
               {m.flow_transcribe_only_title()}
-            </span>
+            </Badge>
           {/if}
         </div>
       {/if}
 
       {#if isPowerUser}
         <div class="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
-          <span class={`${BADGE_BASE} ${inputBadgeClass}`}>{inputTypeLabel}</span>
+          <Badge variant="secondary" class="text-[11px] {inputBadgeClass}">{inputTypeLabel}</Badge>
           <span class="text-muted text-[11px]">→</span>
-          <span class={`${BADGE_BASE} ${outputBadgeClass}`}>{railOutputLabel}</span>
+          <Badge variant="secondary" class="text-[11px] {outputBadgeClass}">{railOutputLabel}</Badge>
           <span class="text-muted text-[11px]">·</span>
           <span class="text-accent-stronger text-[11px] font-medium">
             {m.flow_step_card_chain_short()}: {nextChannelLabel}
           </span>
           {#if step.mcp_policy === "restricted"}
-            <span class={`${BADGE_BASE} bg-warning-dimmer text-warning-stronger`}> MCP </span>
+            <Badge variant="secondary" class="bg-warning-dimmer text-warning-stronger text-[11px]">MCP</Badge>
           {/if}
         </div>
       {/if}

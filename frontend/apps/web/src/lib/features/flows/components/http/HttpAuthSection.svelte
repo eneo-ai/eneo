@@ -6,6 +6,7 @@
   import { createEventDispatcher } from "svelte";
   import type { HttpAuth, HttpAuthMode } from "./httpConfigTypes";
   import { isSecretSentinel } from "./httpConfigTypes";
+  import { Badge } from "@eneo/ui";
 
   export let auth: HttpAuth;
   export let isPublished: boolean;
@@ -66,11 +67,9 @@
       <div class="flex flex-col gap-1">
         {#if storedToken}
           <div class="flex items-center gap-2">
-            <span
-              class="bg-accent-dimmer/50 text-accent-stronger rounded-md px-2 py-1 text-xs font-medium"
-            >
+            <Badge variant="outline">
               {m.http_secret_stored()}
-            </span>
+            </Badge>
             <button
               type="button"
               class="text-accent-default text-xs hover:underline"
@@ -105,11 +104,9 @@
         />
         {#if storedKey}
           <div class="flex items-center gap-2">
-            <span
-              class="bg-accent-dimmer/50 text-accent-stronger rounded-md px-2 py-1 text-xs font-medium"
-            >
+            <Badge variant="outline">
               {m.http_secret_stored()}
-            </span>
+            </Badge>
             <button
               type="button"
               class="text-accent-default text-xs hover:underline"
@@ -144,11 +141,9 @@
         />
         {#if storedPassword}
           <div class="flex items-center gap-2">
-            <span
-              class="bg-accent-dimmer/50 text-accent-stronger rounded-md px-2 py-1 text-xs font-medium"
-            >
+            <Badge variant="outline">
               {m.http_secret_stored()}
-            </span>
+            </Badge>
             <button
               type="button"
               class="text-accent-default text-xs hover:underline"

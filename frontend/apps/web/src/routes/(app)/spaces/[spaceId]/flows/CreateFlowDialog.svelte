@@ -6,6 +6,7 @@
   import { IconWorkflow } from "@intric/icons/workflow";
   import { IntricError } from "@intric/intric-js";
   import { Button, Dialog, Input } from "@intric/ui";
+  import { Separator } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
 
@@ -82,10 +83,10 @@
             {#if canUseAIBuilder}
               <button
                 type="button"
-                class="ai-card group relative flex cursor-pointer flex-col rounded-xl p-5 text-left transition-all hover:scale-[1.02]"
+                class="group relative flex cursor-pointer flex-col rounded-xl border border-accent-default/15 bg-accent-default/5 p-5 text-left transition-all duration-200 hover:scale-[1.02] hover:border-accent-default/25 hover:bg-accent-default/10 hover:shadow-md"
                 onclick={goToAIBuilder}
               >
-                <div class="ai-card-icon mb-3">
+                <div class="mb-3 text-accent-default">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="size-7">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
                   </svg>
@@ -99,7 +100,7 @@
             {#if canCreateFlowManually}
               <button
                 type="button"
-                class="manual-card group flex cursor-pointer flex-col rounded-xl border border-transparent p-5 text-left transition-all hover:scale-[1.02]"
+                class="group flex cursor-pointer flex-col rounded-xl border border-default bg-secondary p-5 text-left transition-all duration-200 hover:scale-[1.02] hover:border-stronger hover:bg-hover-dimmer hover:shadow-md"
                 onclick={(e) => {
                   e.preventDefault();
                   mode = "manual";
@@ -115,7 +116,7 @@
           </div>
         {:else}
           <!-- Manual creation form -->
-          <div class="border-dimmer mt-14 mb-4 border-t"></div>
+          <Separator class="mt-14 mb-4" />
           <div class="flex flex-col gap-1 pt-6 pb-4">
             <span class="px-4 pb-1 text-lg font-medium">{m.name()}</span>
             <Input.Text
@@ -153,34 +154,3 @@
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
-
-<style lang="postcss">
-  @reference "@intric/ui/styles";
-
-  .ai-card {
-    background: oklch(from var(--accent-default) l c h / 0.05);
-    border: 1px solid oklch(from var(--accent-default) l c h / 0.15);
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  
-  .ai-card:hover {
-    background: oklch(from var(--accent-default) l c h / 0.1);
-    border-color: oklch(from var(--accent-default) l c h / 0.25);
-    box-shadow: 0 4px 12px -4px oklch(from var(--accent-default) l c h / 0.2);
-  }
-  
-  .ai-card-icon {
-    color: var(--accent-default);
-  }
-
-  .manual-card {
-    background: var(--bg-secondary);
-    border-color: var(--border-default);
-  }
-
-  .manual-card:hover {
-    background: var(--bg-hover-dimmer);
-    border-color: var(--border-stronger);
-    box-shadow: 0 4px 12px -4px oklch(0 0 0 / 0.05);
-  }
-</style>

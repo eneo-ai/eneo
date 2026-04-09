@@ -8,6 +8,7 @@
   import { IconQuestionMark } from "@intric/icons/question-mark";
   import { createEventDispatcher } from "svelte";
   import { slide } from "svelte/transition";
+  import { Alert } from "@eneo/ui";
   import { MCP_POLICIES } from "./flowStepEditHelpers";
   import type { AdvancedJsonDrafts, AdvancedJsonErrors } from "./advancedJsonDrafts";
 
@@ -52,17 +53,17 @@
         </Tooltip>
       </svelte:fragment>
       {#if step.input_type !== "json" && step.input_type !== "text"}
-        <div class="bg-warning-dimmer/50 border-l-warning-default/40 mb-2 rounded-lg border-l-[3px] px-3.5 py-2">
-          <p class="text-warning-stronger text-xs leading-relaxed">
+        <Alert.Root class="mb-2 border-l-[3px] border-l-warning-default/40 bg-warning-dimmer/50 text-warning-stronger" role="status">
+          <Alert.Description class="text-xs leading-relaxed text-warning-stronger">
             {m.flow_step_input_contract_inactive()}
-          </p>
-        </div>
+          </Alert.Description>
+        </Alert.Root>
       {:else}
-        <div class="bg-positive-dimmer/50 border-l-positive-default/40 mb-2 rounded-lg border-l-[3px] px-3.5 py-2">
-          <p class="text-positive-stronger text-xs leading-relaxed">
+        <Alert.Root class="mb-2 border-l-[3px] border-l-positive-default/40 bg-positive-dimmer/50 text-positive-stronger" role="status">
+          <Alert.Description class="text-xs leading-relaxed text-positive-stronger">
             {m.flow_step_input_contract_active()}
-          </p>
-        </div>
+          </Alert.Description>
+        </Alert.Root>
       {/if}
       <textarea
         rows="4"
@@ -89,17 +90,17 @@
         </Tooltip>
       </svelte:fragment>
       {#if step.output_type !== "json"}
-        <div class="bg-warning-dimmer/50 border-l-warning-default/40 mb-2 rounded-lg border-l-[3px] px-3.5 py-2">
-          <p class="text-warning-stronger text-xs leading-relaxed">
+        <Alert.Root class="mb-2 border-l-[3px] border-l-warning-default/40 bg-warning-dimmer/50 text-warning-stronger" role="status">
+          <Alert.Description class="text-xs leading-relaxed text-warning-stronger">
             {m.flow_step_output_contract_inactive()}
-          </p>
-        </div>
+          </Alert.Description>
+        </Alert.Root>
       {:else}
-        <div class="bg-positive-dimmer/50 border-l-positive-default/40 mb-2 rounded-lg border-l-[3px] px-3.5 py-2">
-          <p class="text-positive-stronger text-xs leading-relaxed">
+        <Alert.Root class="mb-2 border-l-[3px] border-l-positive-default/40 bg-positive-dimmer/50 text-positive-stronger" role="status">
+          <Alert.Description class="text-xs leading-relaxed text-positive-stronger">
             {m.flow_step_output_contract_active()}
-          </p>
-        </div>
+          </Alert.Description>
+        </Alert.Root>
       {/if}
       <textarea
         rows="4"

@@ -5,6 +5,7 @@
   import { Button, Dialog } from "@intric/ui";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
+  import { Alert } from "@eneo/ui";
   import FlowRunEvidenceComponent from "./FlowRunEvidence.svelte";
   import { onDestroy } from "svelte";
   import { toast } from "$lib/components/toast";
@@ -206,14 +207,14 @@
       {m.flow_loading()}
     </div>
   {:else if loadError}
-    <div
-      class="border-negative-default/20 bg-negative-dimmer flex items-center gap-3 rounded-lg border px-5 py-4"
-    >
-      <p class="text-negative-default flex-1 text-sm">{loadError}</p>
-      <Button variant="outlined" size="sm" on:click={loadRuns} class="gap-1.5 text-xs">
-        {m.flow_retry()}
-      </Button>
-    </div>
+    <Alert.Root variant="destructive" class="flex items-center gap-3 px-5 py-4">
+      <Alert.Description class="flex-1 text-sm">{loadError}</Alert.Description>
+      <Alert.Action>
+        <Button variant="outlined" size="sm" on:click={loadRuns} class="gap-1.5 text-xs">
+          {m.flow_retry()}
+        </Button>
+      </Alert.Action>
+    </Alert.Root>
   {:else if runs.length === 0}
     <p class="text-secondary py-8 text-center text-sm">{m.flow_no_runs_yet()}</p>
   {:else}
@@ -311,12 +312,10 @@
               {#if run.status === "failed" && run.error_message}
                 <tr>
                   <td colspan="5" class="border-default border-b px-4 py-2">
-                    <div
-                      class="border-l-negative-default bg-hover-dimmer text-negative-stronger flex min-w-0 items-start gap-2 rounded-md border-l-2 px-3 py-2 text-xs"
-                    >
-                      <span class="shrink-0 font-semibold">{m.flow_run_error()}:</span>
-                      <span class="min-w-0 break-words">{run.error_message}</span>
-                    </div>
+                    <Alert.Root variant="destructive" class="flex min-w-0 items-start gap-2 text-xs">
+                      <Alert.Title class="shrink-0 text-xs font-semibold">{m.flow_run_error()}:</Alert.Title>
+                      <Alert.Description class="min-w-0 break-words text-xs">{run.error_message}</Alert.Description>
+                    </Alert.Root>
                   </td>
                 </tr>
               {/if}
@@ -324,7 +323,7 @@
                 <tr>
                   <td colspan="5" class="border-default border-b px-4 py-2">
                     <div
-                      class="border-l-positive-default bg-hover-dimmer flex flex-col gap-1.5 rounded-md border-l-2 px-3 py-2 text-xs"
+                      class="border-l-positive-default/40 bg-hover-dimmer flex flex-col gap-1.5 rounded-md border-l-2 px-3 py-2 text-xs"
                     >
                       {#if run.output_payload_json.structured}
                         {@const structured = run.output_payload_json.structured}

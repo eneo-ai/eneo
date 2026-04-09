@@ -5,6 +5,7 @@
   import { Button } from "@intric/ui";
   import { IconPlay } from "@intric/icons/play";
   import { m } from "$lib/paraglide/messages";
+  import { Alert, Card } from "@eneo/ui";
 
   export let flow: Flow;
 
@@ -98,9 +99,7 @@
   </Button>
 
   {#if hasRun}
-    <div
-      class="border-default divide-default order-1 w-full divide-y overflow-hidden rounded-lg border"
-    >
+    <Card.Root class="divide-default order-1 w-full divide-y overflow-hidden">
       {#each dryRunResults as result (result.stepId ?? result.stepOrder)}
         {@const step = getStepByOrder(result.stepOrder)}
         <div class="flex items-start justify-between gap-3 px-4 py-3">
@@ -136,20 +135,20 @@
           </span>
         </div>
       {/each}
-    </div>
+    </Card.Root>
 
-    <div
-      class="order-2 w-full rounded-lg px-3 py-2 text-xs font-medium"
-      class:bg-positive-dimmer={errorCount === 0}
-      class:text-positive-stronger={errorCount === 0}
-      class:bg-negative-dimmer={errorCount > 0}
-      class:text-negative-stronger={errorCount > 0}
-    >
-      {#if errorCount === 0}
-        &#10003; {m.flow_dry_run_ready()}
-      {:else}
-        &#10007; {m.flow_dry_run_issues({ count: String(errorCount) })}
-      {/if}
-    </div>
+    {#if errorCount === 0}
+      <Alert.Root class="order-2 w-full bg-positive-dimmer text-positive-stronger">
+        <Alert.Description class="text-xs font-medium">
+          &#10003; {m.flow_dry_run_ready()}
+        </Alert.Description>
+      </Alert.Root>
+    {:else}
+      <Alert.Root variant="destructive" class="order-2 w-full bg-negative-dimmer text-negative-stronger">
+        <Alert.Description class="text-xs font-medium">
+          &#10007; {m.flow_dry_run_issues({ count: String(errorCount) })}
+        </Alert.Description>
+      </Alert.Root>
+    {/if}
   {/if}
 </div>

@@ -4,6 +4,7 @@
   import { createEventDispatcher } from "svelte";
   import type { FlowStep } from "@intric/intric-js";
   import { Button, Dialog } from "@intric/ui";
+  import { Separator } from "@eneo/ui";
   import { IconTrash } from "@intric/icons/trash";
   import { m } from "$lib/paraglide/messages";
 
@@ -16,7 +17,8 @@
 </script>
 
 {#if !isPublished}
-  <div class="border-default mt-4 border-t pt-4">
+  <div class="mt-4 pt-4">
+    <Separator class="mb-4" />
     <Button
       variant="destructive"
       class="w-full justify-center rounded-lg"

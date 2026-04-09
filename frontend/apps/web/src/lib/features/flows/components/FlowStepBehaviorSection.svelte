@@ -6,6 +6,7 @@
   import { m } from "$lib/paraglide/messages";
   import { createEventDispatcher } from "svelte";
   import { Button, Tooltip } from "@intric/ui";
+  import { Alert, Card } from "@eneo/ui";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconLockClosed } from "@intric/icons/lock-closed";
   import { IconQuestionMark } from "@intric/icons/question-mark";
@@ -48,22 +49,16 @@
 
 <Settings.Group title={m.flow_step_section_behavior()}>
   {#if step.output_mode === "transcribe_only"}
-    <div
-      class="border-accent-default/15 bg-accent-default/5 mb-4 flex items-start gap-3 rounded-[1rem] border px-5 py-4"
-    >
+    <Alert.Root class="mb-4 rounded-[1rem] border-accent-default/15 bg-accent-default/5 px-5 py-4" role="status">
       <IconLockClosed class="text-accent-default mt-0.5 size-4 shrink-0" />
-      <div class="flex flex-col gap-1.5">
-        <span class="text-accent-stronger text-sm font-semibold tracking-tight"
-          >{m.flow_transcribe_only_title()}</span
-        >
-        <span class="text-accent-stronger/80 text-[0.8125rem] leading-relaxed"
-          >{m.flow_transcribe_only_description()}</span
-        >
-        <span class="text-accent-stronger/75 text-[0.8125rem] leading-relaxed"
-          >{m.flow_transcribe_only_next_step_hint()}</span
-        >
-      </div>
-    </div>
+      <Alert.Title class="text-accent-stronger text-sm font-semibold tracking-tight">
+        {m.flow_transcribe_only_title()}
+      </Alert.Title>
+      <Alert.Description class="flex flex-col gap-1.5 text-accent-stronger/80">
+        <span class="text-[0.8125rem] leading-relaxed">{m.flow_transcribe_only_description()}</span>
+        <span class="text-accent-stronger/75 text-[0.8125rem] leading-relaxed">{m.flow_transcribe_only_next_step_hint()}</span>
+      </Alert.Description>
+    </Alert.Root>
   {/if}
   {#if !isTranscribeOnly && assistantLoading}
     <div class="text-secondary flex items-center gap-2 px-4 py-3 text-sm">
@@ -117,22 +112,26 @@
       </svelte:fragment>
       <div class="flex flex-col gap-2">
         <div class="grid gap-3 md:grid-cols-2">
-          <div class="border-default bg-hover-dimmer rounded-lg border px-3.5 py-3">
-            <p class="text-accent-stronger text-sm font-semibold">
-              {m.flow_step_instructions_compare_title()}
-            </p>
-            <p class="text-secondary mt-1 text-xs leading-relaxed">
-              {m.flow_step_instructions_compare_body()}
-            </p>
-          </div>
-          <div class="border-default bg-hover-dimmer rounded-lg border px-3.5 py-3">
-            <p class="text-accent-stronger text-sm font-semibold">
-              {m.flow_step_input_template_compare_title()}
-            </p>
-            <p class="text-secondary mt-1 text-xs leading-relaxed">
-              {m.flow_step_input_template_compare_body()}
-            </p>
-          </div>
+          <Card.Root class="bg-hover-dimmer">
+            <Card.Content class="px-3.5 py-3">
+              <p class="text-accent-stronger text-sm font-semibold">
+                {m.flow_step_instructions_compare_title()}
+              </p>
+              <p class="text-secondary mt-1 text-xs leading-relaxed">
+                {m.flow_step_instructions_compare_body()}
+              </p>
+            </Card.Content>
+          </Card.Root>
+          <Card.Root class="bg-hover-dimmer">
+            <Card.Content class="px-3.5 py-3">
+              <p class="text-accent-stronger text-sm font-semibold">
+                {m.flow_step_input_template_compare_title()}
+              </p>
+              <p class="text-secondary mt-1 text-xs leading-relaxed">
+                {m.flow_step_input_template_compare_body()}
+              </p>
+            </Card.Content>
+          </Card.Root>
         </div>
         {#if !isAdvancedMode}
           <div class="flex flex-col gap-3 px-0.5 pt-0.5 pb-1.5">

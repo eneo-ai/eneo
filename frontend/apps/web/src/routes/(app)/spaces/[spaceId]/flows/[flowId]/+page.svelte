@@ -15,6 +15,8 @@
   import FlowRunsTable from "$lib/features/flows/components/FlowRunsTable.svelte";
   import FlowRunDialog from "$lib/features/flows/components/FlowRunDialog.svelte";
   import { Button, Input } from "@intric/ui";
+  import { Badge, Card, Tabs } from "@eneo/ui";
+  import { CheckCircle2 } from "lucide-svelte";
   import { IntricError } from "@intric/intric-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
@@ -231,52 +233,20 @@
     ></Page.Title>
 
     <Page.Tabbar>
-      <div role="tablist" class="flex">
-        <button
-          role="tab"
-          aria-selected={activeTab === "builder"}
-          aria-controls="panel-builder"
-          class="border-b-[3px] px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors duration-200"
-          class:border-accent-default={activeTab === "builder"}
-          class:text-primary={activeTab === "builder"}
-          class:border-transparent={activeTab !== "builder"}
-          class:text-secondary={activeTab !== "builder"}
-          on:click={() => (activeTab = "builder")}
-        >
-          {m.flow_builder()}
-        </button>
-        <button
-          role="tab"
-          aria-selected={activeTab === "history"}
-          aria-controls="panel-history"
-          class="border-b-[3px] px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors duration-200"
-          class:border-accent-default={activeTab === "history"}
-          class:text-primary={activeTab === "history"}
-          class:border-transparent={activeTab !== "history"}
-          class:text-secondary={activeTab !== "history"}
-          on:click={() => (activeTab = "history")}
-        >
-          {m.flow_history()}
-        </button>
-        {#if canUseAIBuilder}
-          <button
-            role="tab"
-            aria-selected={activeTab === "ai-builder"}
-            aria-controls="panel-ai-builder"
-            class="border-b-[3px] px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors duration-200"
-            class:border-accent-default={activeTab === "ai-builder"}
-            class:text-primary={activeTab === "ai-builder"}
-            class:border-transparent={activeTab !== "ai-builder"}
-            class:text-secondary={activeTab !== "ai-builder"}
-            on:click={() => {
-              ensureAIBuilder();
-              activeTab = "ai-builder";
-            }}
-          >
-            {m.ai_builder_tab()}
-          </button>
-        {/if}
-      </div>
+      <Tabs.Root
+        bind:value={activeTab}
+        onValueChange={(v) => {
+          if (v === "ai-builder") ensureAIBuilder();
+        }}
+      >
+        <Tabs.List variant="line">
+          <Tabs.Trigger value="builder">{m.flow_builder()}</Tabs.Trigger>
+          <Tabs.Trigger value="history">{m.flow_history()}</Tabs.Trigger>
+          {#if canUseAIBuilder}
+            <Tabs.Trigger value="ai-builder">{m.ai_builder_tab()}</Tabs.Trigger>
+          {/if}
+        </Tabs.List>
+      </Tabs.Root>
     </Page.Tabbar>
 
     <div class="relative z-10 flex shrink-0 items-center gap-2">
@@ -384,29 +354,28 @@
               {@const isActive = builderStage === stage.id}
               {@const isCompleted = isStageCompleted(stage.id)}
               {@const isSkipped = stage.id === 2 && isTranscriptionSkipped}
+              {@const isPreviousCompleted = i > 0 && isStageCompleted(FLOW_BUILDER_STAGES[i - 1].id)}
 
               {#if i > 0}
                 <!-- Connecting line -->
                 <div
-                  class="mx-1.5 h-0.5 flex-1 transition-colors duration-200 md:mx-3"
-                  class:bg-accent-default={isCompleted}
-                  class:bg-hover-default={!isCompleted}
+                  class="mx-1.5 h-0.5 flex-1 transition-colors duration-200 md:mx-3
+                    {isPreviousCompleted ? 'bg-accent-default' : 'bg-border-default'}"
                 ></div>
               {/if}
 
               <li class="flex flex-col items-center gap-1">
                 <button
                   type="button"
-                  class="hover:bg-hover-dimmer flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-all duration-200"
-                  class:text-primary={isActive}
-                  class:font-semibold={isActive}
+                  class="hover:bg-hover-dimmer flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-all duration-200
+                    {isActive ? 'font-semibold text-primary' : ''}"
                   aria-current={isActive ? "step" : undefined}
                   on:click={() => void navigateToStage(stage.id)}
                 >
                   <!-- Number circle -->
                   {#if isCompleted}
                     <span
-                      class="bg-accent-default text-on-fill inline-flex size-8 items-center justify-center rounded-full text-sm font-semibold transition-colors duration-200"
+                      class="bg-accent-default/15 text-accent-default inline-flex size-8 items-center justify-center rounded-full text-sm font-semibold transition-colors duration-200"
                     >
                       <svg class="size-4" viewBox="0 0 16 16" fill="none">
                         <path
@@ -432,7 +401,7 @@
                     </span>
                   {:else}
                     <span
-                      class="border-default text-secondary inline-flex size-8 items-center justify-center rounded-full border-2 text-sm font-medium transition-colors duration-200"
+                      class="border-default text-muted inline-flex size-8 items-center justify-center rounded-full border-2 text-sm font-medium transition-colors duration-200"
                     >
                       {stage.id}
                     </span>
@@ -440,11 +409,14 @@
 
                   <!-- Label (hidden on small screens) -->
                   <span
-                    class="hidden text-sm md:inline"
-                    class:text-primary={isActive}
-                    class:text-muted={isSkipped && !isActive}
-                    class:italic={isSkipped && !isActive}
-                    class:text-secondary={!isActive && !isSkipped}
+                    class="hidden text-sm md:inline
+                      {isActive
+                        ? 'font-semibold text-primary'
+                        : isSkipped
+                          ? 'text-muted italic'
+                          : isCompleted
+                            ? 'text-secondary'
+                            : 'text-muted'}"
                   >
                     {stage.labelKey()}
                   </span>
@@ -561,53 +533,62 @@
                   </div>
                 </div>
                 {#if isFlowConfigured}
-                  <div class="border-default bg-primary rounded-xl border p-6">
-                    <h3 class="text-base font-semibold">{m.flow_summary_title()}</h3>
-                    <p class="text-secondary mt-1.5 text-sm">{m.flow_summary_desc()}</p>
-                    <ul class="mt-5 space-y-4" style="font-variant-numeric: tabular-nums">
-                      <li class="flex items-center justify-between">
-                        <span class="text-secondary text-sm">{m.flow_summary_steps()}</span>
-                        <span class="text-base font-semibold">{stepsCount}</span>
-                      </li>
-                      <li class="flex items-center justify-between">
-                        <span class="text-secondary text-sm">{m.flow_summary_input_fields()}</span>
-                        <span class="text-base font-semibold">{formSchemaFields.length}</span>
-                      </li>
-                      <li class="flex items-center justify-between">
-                        <span class="text-secondary text-sm">{m.flow_summary_transcription()}</span>
-                        <span class="text-sm font-medium"
-                          >{transcriptionEnabled
-                            ? m.flow_transcription_on()
-                            : m.flow_transcription_off()}</span
-                        >
-                      </li>
-                      <li class="flex items-center justify-between">
-                        <span class="text-secondary text-sm">{m.flow_summary_validation()}</span>
-                        {#if checklistHasNoErrors}
-                          <span class="text-positive-stronger flex items-center gap-1.5">
-                            <svg
-                              class="size-4"
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2.5"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" /></svg
-                            >
-                          </span>
-                        {:else}
-                          <span class="text-warning-stronger text-sm font-medium"
-                            >{m.flow_validation_errors_count({
-                              count: $validationErrors.size
-                            })}</span
+                  <Card.Root size="sm">
+                    <Card.Header>
+                      <Card.Title class="font-semibold">{m.flow_summary_title()}</Card.Title>
+                      <Card.Description>{m.flow_summary_desc()}</Card.Description>
+                    </Card.Header>
+                    <Card.Content>
+                      <ul class="space-y-3" style="font-variant-numeric: tabular-nums">
+                        <li class="flex items-center justify-between">
+                          <span class="text-secondary text-sm">{m.flow_summary_steps()}</span>
+                          <span class="text-base font-semibold">{stepsCount}</span>
+                        </li>
+                        <li class="flex items-center justify-between">
+                          <span class="text-secondary text-sm">{m.flow_summary_input_fields()}</span>
+                          <span class="text-base font-semibold">{formSchemaFields.length}</span>
+                        </li>
+                        <li class="flex items-center justify-between">
+                          <span class="text-secondary text-sm">{m.flow_summary_transcription()}</span>
+                          <span class="text-sm font-medium"
+                            >{transcriptionEnabled
+                              ? m.flow_transcription_on()
+                              : m.flow_transcription_off()}</span
                           >
-                        {/if}
-                      </li>
-                    </ul>
-                    <p class="text-secondary mt-5 text-sm">
-                      {$isPublished ? m.flow_status_published_readonly() : m.flow_status_draft()}
-                    </p>
-                  </div>
+                        </li>
+                        <li class="flex items-center justify-between">
+                          <span class="text-secondary text-sm">{m.flow_summary_validation()}</span>
+                          {#if checklistHasNoErrors}
+                            <span class="text-positive-stronger flex items-center gap-1.5">
+                              <svg
+                                class="size-4"
+                                viewBox="0 0 16 16"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2.5"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" /></svg
+                              >
+                            </span>
+                          {:else}
+                            <span class="text-warning-stronger text-sm font-medium"
+                              >{m.flow_validation_errors_count({
+                                count: $validationErrors.size
+                              })}</span
+                            >
+                          {/if}
+                        </li>
+                        <li class="flex items-center justify-between">
+                          <span class="text-secondary text-sm">{m.flow_summary_status()}</span>
+                          {#if $isPublished}
+                            <Badge variant="outline" class="border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger">{m.flow_status_published_readonly()}</Badge>
+                          {:else}
+                            <Badge variant="outline" class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger">{m.flow_status_draft()}</Badge>
+                          {/if}
+                        </li>
+                      </ul>
+                    </Card.Content>
+                  </Card.Root>
                 {:else}
                   <div class="border-default bg-primary rounded-xl border p-6">
                     <h3 class="text-base font-semibold">{m.flow_checklist_title()}</h3>
@@ -694,9 +675,13 @@
                         >
                       </li>
                     </ul>
-                    <p class="text-secondary mt-5 text-sm">
-                      {$isPublished ? m.flow_status_published_readonly() : m.flow_status_draft()}
-                    </p>
+                    <div class="mt-5">
+                      {#if $isPublished}
+                        <Badge variant="outline" class="border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger">{m.flow_status_published_readonly()}</Badge>
+                      {:else}
+                        <Badge variant="outline" class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger">{m.flow_status_draft()}</Badge>
+                      {/if}
+                    </div>
                   </div>
                 {/if}
               </div>
@@ -818,7 +803,7 @@
 
                 {#if hasAudioInputStep}
                   <div
-                    class="border-positive-default/40 bg-positive-dimmer text-positive-stronger rounded-xl border p-4 text-sm"
+                    class="border-positive-default/20 bg-positive-dimmer/50 text-positive-stronger rounded-xl border p-4 text-sm"
                   >
                     {m.flow_transcription_audio_detected()}
                   </div>
@@ -1019,11 +1004,16 @@
                       <Button variant="outlined" on:click={() => (activeTab = "history")}>
                         {m.flow_show_history()}
                       </Button>
-                      <span class="text-muted text-sm">
-                        {$validationErrors.size === 0
-                          ? m.flow_publish_status_ready()
-                          : m.flow_validation_errors_count({ count: $validationErrors.size })}
-                      </span>
+                      {#if $validationErrors.size === 0}
+                        <Badge variant="outline" class="gap-1.5 border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger">
+                          <CheckCircle2 class="size-3.5" />
+                          {m.flow_publish_status_ready()}
+                        </Badge>
+                      {:else}
+                        <span class="text-muted text-sm">
+                          {m.flow_validation_errors_count({ count: $validationErrors.size })}
+                        </span>
+                      {/if}
                     </div>
                   {/if}
                 </div>
@@ -1038,7 +1028,7 @@
       <div
         id="panel-ai-builder"
         role="tabpanel"
-        class="flex flex-1 flex-col overflow-hidden"
+        class="flex min-h-0 flex-1 flex-col overflow-hidden"
         class:hidden={activeTab !== "ai-builder"}
       >
         <FlowAIBuilderEditHost

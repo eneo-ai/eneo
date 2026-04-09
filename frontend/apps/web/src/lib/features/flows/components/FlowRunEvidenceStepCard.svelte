@@ -7,8 +7,8 @@
   import { IconCheck } from "@intric/icons/check";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { Markdown } from "@intric/ui";
-  import { slide } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
+  import { Alert, Badge, Card, Collapsible } from "@eneo/ui";
   import FlowRunKnowledgeTrace from "./FlowRunKnowledgeTrace.svelte";
   import type {
     RuntimeInputSummary,
@@ -58,9 +58,7 @@
   ) => string;
 </script>
 
-<div
-  class="bg-primary border-default overflow-hidden rounded-lg border shadow-sm transition-shadow hover:shadow-md"
->
+<Card.Root class="overflow-hidden transition-shadow hover:shadow-md">
   <button
     class="hover:bg-hover-dimmer flex w-full items-center justify-between px-5 py-3.5 text-left"
     aria-expanded={expanded}
@@ -92,8 +90,8 @@
   </button>
 
   {#if expanded}
-    <div id={panelId} transition:slide={{ duration: 200 }}>
-      <div class="border-default flex min-w-0 flex-col gap-4 border-t px-5 py-4">
+    <div id={panelId}>
+      <Card.Content class="border-default flex min-w-0 flex-col gap-4 border-t px-5 py-4">
         {#if result.effective_prompt}
           <div>
             <div class="flex items-center justify-between">
@@ -144,9 +142,8 @@
 
             {#if result.output_payload_json.structured}
               <div class="mt-1">
-                <span
-                  class="bg-accent-dimmer text-accent-stronger mb-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
-                  >JSON</span
+                <Badge class="bg-accent-dimmer text-accent-stronger mb-1"
+                  >JSON</Badge
                 >
                 <pre
                   class="border-accent-default bg-hover-dimmer max-h-80 overflow-auto rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
@@ -172,10 +169,7 @@
                       <IconArrowDownToLine class="text-muted group-hover:text-secondary size-4" />
                       <span>{artifact.name}</span>
                       {#if ext}
-                        <span
-                          class="bg-accent-dimmer text-accent-stronger rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
-                          >{ext}</span
-                        >
+                        <Badge class="bg-accent-dimmer text-accent-stronger">{ext}</Badge>
                       {/if}
                     </button>
                   {/each}
@@ -199,19 +193,18 @@
         {/if}
 
         {#if result.input_payload_json}
-          <div>
+          <Collapsible.Root open={inputExpanded}>
             <div class="flex items-center justify-between">
-              <button
+              <Collapsible.Trigger
                 class="text-muted hover:text-secondary focus-visible:ring-accent-default -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                on:click={() => onToggleInput(result.step_order)}
-                aria-expanded={inputExpanded}
                 aria-controls="step-{result.step_order}-input-panel"
+                on:click={() => onToggleInput(result.step_order)}
               >
                 <IconChevronDown
                   class="size-3 transition-transform duration-200 {inputExpanded ? '' : '-rotate-90'}"
                 />
                 {m.flow_run_input()}
-              </button>
+              </Collapsible.Trigger>
               <button
                 class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 aria-label={m.copy()}
@@ -229,77 +222,82 @@
                 {/if}
               </button>
             </div>
-            {#if inputExpanded}
-              <pre
-                id="step-{result.step_order}-input-panel"
-                transition:slide={{ duration: 200 }}
-                class="bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
-                  result.input_payload_json,
-                  null,
-                  2
-                )}</pre>
-            {/if}
-          </div>
+            <Collapsible.Content>
+              {#if inputExpanded}
+                <pre
+                  id="step-{result.step_order}-input-panel"
+                  class="bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
+                    result.input_payload_json,
+                    null,
+                    2
+                  )}</pre>
+              {/if}
+            </Collapsible.Content>
+          </Collapsible.Root>
         {/if}
 
         {#if runtimeInput}
-          <div class="border-default bg-hover-dimmer rounded-lg border p-3">
-            <h4 class="text-muted text-xs font-semibold">Körningsindata</h4>
-            <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
-              <span class="border-default bg-primary rounded-md border px-2 py-1">
-                {getRuntimeInputSummaryLabel(runtimeInput.fileCount)}
-              </span>
-              {#if runtimeInput.inputFormat}
-                <span class="border-default bg-primary rounded-md border px-2 py-1">
-                  Format: {runtimeInput.inputFormat}
-                </span>
-              {/if}
-              {#if runtimeInput.extractedTextLength != null}
-                <span class="border-default bg-primary rounded-md border px-2 py-1">
-                  Extraherad text: {runtimeInput.extractedTextLength} tecken
-                </span>
-              {/if}
-            </div>
-          </div>
+          <Card.Root size="sm" class="bg-hover-dimmer">
+            <Card.Content class="p-3">
+              <h4 class="text-muted text-xs font-semibold">Körningsindata</h4>
+              <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
+                <Badge variant="outline">
+                  {getRuntimeInputSummaryLabel(runtimeInput.fileCount)}
+                </Badge>
+                {#if runtimeInput.inputFormat}
+                  <Badge variant="outline">
+                    Format: {runtimeInput.inputFormat}
+                  </Badge>
+                {/if}
+                {#if runtimeInput.extractedTextLength != null}
+                  <Badge variant="outline">
+                    Extraherad text: {runtimeInput.extractedTextLength} tecken
+                  </Badge>
+                {/if}
+              </div>
+            </Card.Content>
+          </Card.Root>
         {/if}
 
         {#if transcription}
-          <div class="border-default bg-hover-dimmer rounded-lg border p-3">
-            <h4 class="text-muted text-xs font-semibold">{m.flow_run_transcription_label()}</h4>
-            <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
-              <span class="border-default bg-primary rounded-md border px-2 py-1">
-                {m.flow_run_transcription_model({ model: transcription.model ?? "—" })}
-              </span>
-              <span class="border-default bg-primary rounded-md border px-2 py-1">
-                {m.flow_run_transcription_language({ language: transcription.language ?? "—" })}
-              </span>
-              <span class="border-default bg-primary rounded-md border px-2 py-1">
-                {m.flow_run_transcription_files({ count: String(transcription.files_count ?? 0) })}
-              </span>
-              <span class="border-default bg-primary rounded-md border px-2 py-1">
-                {m.flow_run_transcription_duration({
-                  duration: formatElapsedMs(transcription.elapsed_ms)
-                })}
-              </span>
-              <span class="border-default bg-primary rounded-md border px-2 py-1">
-                {m.flow_run_transcription_size({ size: formatBytes(transcription.transcript_bytes) })}
-              </span>
-              <span class="border-default bg-primary rounded-md border px-2 py-1">
-                {m.flow_run_transcription_estimated_tokens({
-                  tokens: String(transcription.estimated_tokens ?? 0)
-                })}
-              </span>
-              <span class="border-default bg-primary rounded-md border px-2 py-1">
-                {m.flow_run_transcription_cache({
-                  status: getCacheStatusLabel(
-                    transcription.used_cache,
-                    transcription.cached_files_count,
-                    transcription.files_count
-                  )
-                })}
-              </span>
-            </div>
-          </div>
+          <Card.Root size="sm" class="bg-hover-dimmer">
+            <Card.Content class="p-3">
+              <h4 class="text-muted text-xs font-semibold">{m.flow_run_transcription_label()}</h4>
+              <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
+                <Badge variant="outline">
+                  {m.flow_run_transcription_model({ model: transcription.model ?? "—" })}
+                </Badge>
+                <Badge variant="outline">
+                  {m.flow_run_transcription_language({ language: transcription.language ?? "—" })}
+                </Badge>
+                <Badge variant="outline">
+                  {m.flow_run_transcription_files({ count: String(transcription.files_count ?? 0) })}
+                </Badge>
+                <Badge variant="outline">
+                  {m.flow_run_transcription_duration({
+                    duration: formatElapsedMs(transcription.elapsed_ms)
+                  })}
+                </Badge>
+                <Badge variant="outline">
+                  {m.flow_run_transcription_size({ size: formatBytes(transcription.transcript_bytes) })}
+                </Badge>
+                <Badge variant="outline">
+                  {m.flow_run_transcription_estimated_tokens({
+                    tokens: String(transcription.estimated_tokens ?? 0)
+                  })}
+                </Badge>
+                <Badge variant="outline">
+                  {m.flow_run_transcription_cache({
+                    status: getCacheStatusLabel(
+                      transcription.used_cache,
+                      transcription.cached_files_count,
+                      transcription.files_count
+                    )
+                  })}
+                </Badge>
+              </div>
+            </Card.Content>
+          </Card.Root>
         {/if}
 
         {#if stepRag}
@@ -307,38 +305,40 @@
         {/if}
 
         {#if templateProvenance}
-          <div class="border-default bg-hover-dimmer rounded-lg border p-3">
-            <h4 class="text-muted text-xs font-semibold">Mallproveniens</h4>
-            <div class="text-secondary mt-2 flex flex-col gap-2 text-[11px]">
-              <div class="flex flex-wrap gap-2">
-                <span class="border-default bg-primary rounded-md border px-2 py-1">
-                  {templateProvenance.templateName}
-                </span>
-                {#if templateProvenance.publishedFlowVersion != null}
-                  <span class="border-default bg-primary rounded-md border px-2 py-1">
-                    v{templateProvenance.publishedFlowVersion}
-                  </span>
-                {/if}
+          <Card.Root size="sm" class="bg-hover-dimmer">
+            <Card.Content class="p-3">
+              <h4 class="text-muted text-xs font-semibold">Mallproveniens</h4>
+              <div class="text-secondary mt-2 flex flex-col gap-2 text-[11px]">
+                <div class="flex flex-wrap gap-2">
+                  <Badge variant="outline">
+                    {templateProvenance.templateName}
+                  </Badge>
+                  {#if templateProvenance.publishedFlowVersion != null}
+                    <Badge variant="outline">
+                      v{templateProvenance.publishedFlowVersion}
+                    </Badge>
+                  {/if}
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  {#if templateProvenance.templateAssetId}
+                    <Badge variant="outline">
+                      Asset: {templateProvenance.templateAssetId}
+                    </Badge>
+                  {/if}
+                  {#if templateProvenance.templateFileId}
+                    <Badge variant="outline">
+                      Fil: {templateProvenance.templateFileId}
+                    </Badge>
+                  {/if}
+                  {#if templateProvenance.checksum}
+                    <Badge variant="outline">
+                      {templateProvenance.checksum}
+                    </Badge>
+                  {/if}
+                </div>
               </div>
-              <div class="flex flex-wrap gap-2">
-                {#if templateProvenance.templateAssetId}
-                  <span class="border-default bg-primary rounded-md border px-2 py-1">
-                    Asset: {templateProvenance.templateAssetId}
-                  </span>
-                {/if}
-                {#if templateProvenance.templateFileId}
-                  <span class="border-default bg-primary rounded-md border px-2 py-1">
-                    Fil: {templateProvenance.templateFileId}
-                  </span>
-                {/if}
-                {#if templateProvenance.checksum}
-                  <span class="border-default bg-primary rounded-md border px-2 py-1">
-                    {templateProvenance.checksum}
-                  </span>
-                {/if}
-              </div>
-            </div>
-          </div>
+            </Card.Content>
+          </Card.Root>
         {/if}
 
         {#if isPowerUser && stepAttempts.length > 0}
@@ -363,7 +363,7 @@
               </button>
             </div>
             <pre
-              class="border-accent-default bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
+              class="border-accent-default bg-hover-dimmer mt-1 max-h-[300px] overflow-y-auto rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
                 stepAttempts,
                 null,
                 2
@@ -382,13 +382,15 @@
         {/if}
 
         {#if result.error_message}
-          <div>
-            <h4 class="text-negative-stronger text-xs font-semibold">{m.flow_run_error()}</h4>
-            <pre
-              class="bg-negative-dimmer text-negative-stronger mt-1 max-h-60 overflow-auto rounded-md p-3 font-mono text-xs break-words whitespace-pre-wrap">{result.error_message}</pre>
-          </div>
+          <Alert.Root variant="destructive">
+            <Alert.Title class="text-xs font-semibold">{m.flow_run_error()}</Alert.Title>
+            <Alert.Description>
+              <pre
+                class="mt-1 max-h-60 overflow-auto font-mono text-xs break-words whitespace-pre-wrap">{result.error_message}</pre>
+            </Alert.Description>
+          </Alert.Root>
         {/if}
-      </div>
+      </Card.Content>
     </div>
   {/if}
-</div>
+</Card.Root>

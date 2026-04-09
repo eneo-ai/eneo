@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { FlowStep } from "@intric/intric-js";
   import { Handle, Position } from "@xyflow/svelte";
+  import { Badge, Card } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
 
@@ -81,11 +82,11 @@
 
 {#if isPowerUser}
   <!-- Power User: Technical card -->
-  <div
-    class="{surfaceClass} rounded-lg border-2 shadow-sm transition-colors {borderColor}"
+  <Card.Root
+    class="{surfaceClass} border-2 py-0 shadow-sm transition-colors {borderColor}"
     style="width: 300px;"
   >
-    <div class="{headerClass} flex items-center justify-between px-3 py-1.5">
+    <Card.Header class="{headerClass} flex-row items-center justify-between gap-2 px-3 py-1.5">
       <div class="min-w-0 flex items-center gap-2">
         <span
           class="bg-hover-default flex size-5 shrink-0 items-center justify-center rounded text-xs font-bold"
@@ -94,22 +95,21 @@
         </span>
         <span class="truncate text-sm font-semibold">{data.label}</span>
         {#if isAssembly}
-          <span
-            class="bg-warning-dimmer text-warning-stronger rounded px-1.5 text-[10px] font-bold"
-          >
+          <Badge variant="secondary" class="bg-warning-dimmer text-warning-stronger text-[10px] font-bold">
             DOCX
-          </span>
+          </Badge>
         {/if}
       </div>
       <div class="flex items-center gap-1">
         {#if data.assistantClassLevel != null}
-          <span class="bg-accent-dimmer text-accent-stronger rounded px-1.5 text-[10px] font-bold">
+          <Badge variant="secondary" class="bg-accent-dimmer text-accent-stronger text-[10px] font-bold">
             Model K{data.assistantClassLevel}
-          </span>
+          </Badge>
         {/if}
         {#if data.classLevel != null && data.classLevel !== data.assistantClassLevel}
-          <span
-            class="rounded px-1.5 text-[10px] font-bold
+          <Badge
+            variant="secondary"
+            class="text-[10px] font-bold
             {data.classLevel >= 3
               ? 'bg-negative-dimmer text-negative-stronger'
               : data.classLevel >= 2
@@ -117,28 +117,29 @@
                 : 'bg-positive-dimmer text-positive-stronger'}"
           >
             Output K{data.classLevel}
-          </span>
+          </Badge>
         {/if}
       </div>
-    </div>
-    <div class="space-y-1 px-3 py-2 text-xs">
+    </Card.Header>
+    <Card.Content class="space-y-1 px-3 py-2 text-xs">
       {#if data.modelName}
         <div class="text-secondary">{data.modelName}</div>
       {/if}
       <div class="flex flex-wrap items-center gap-1">
-        <span class="bg-hover-dimmer rounded px-1.5">
+        <Badge variant="secondary" class="bg-hover-dimmer text-primary text-[10px]">
           {m.flow_step_card_input_short()}: {inputTypeLabel}
-        </span>
-        <span class="bg-positive-dimmer text-positive-stronger rounded px-1.5">
+        </Badge>
+        <Badge variant="secondary" class="bg-positive-dimmer text-positive-stronger text-[10px]">
           {m.flow_step_card_output_short()}: {outputTypeLabel}
-        </span>
-        <span
-          class="{isAssembly
+        </Badge>
+        <Badge
+          variant="secondary"
+          class="text-[10px] {isAssembly
             ? 'bg-warning-dimmer text-warning-stronger'
-            : 'bg-accent-dimmer text-accent-stronger'} rounded px-1.5"
+            : 'bg-accent-dimmer text-accent-stronger'}"
         >
           {m.flow_step_card_chain_short()}: {nextChannelLabel}
-        </span>
+        </Badge>
       </div>
       {#if data.step.mcp_policy === "restricted"}
         <div class="text-warning-stronger flex items-center gap-1">
@@ -150,12 +151,12 @@
           {data.numTokensInput ?? 0} / {data.numTokensOutput ?? 0} tokens
         </div>
       {/if}
-    </div>
-  </div>
+    </Card.Content>
+  </Card.Root>
 {:else}
   <!-- User Mode: Compact pill -->
-  <div
-    class="bg-primary flex items-center gap-2 rounded-lg border-2 px-3 py-1.5 shadow-sm transition-colors {borderColor}"
+  <Card.Root
+    class="bg-primary flex-row items-center gap-2 border-2 px-3 py-1.5 shadow-sm transition-colors {borderColor}"
     style="min-width: 120px; max-width: 160px;"
   >
     <span
@@ -164,7 +165,7 @@
       {data.step.step_order}
     </span>
     <span class="truncate text-xs font-medium">{data.label}</span>
-  </div>
+  </Card.Root>
 {/if}
 
 <Handle type="target" position={Position.Left} />

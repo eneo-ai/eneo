@@ -17,6 +17,7 @@
     getRuntimeInputSummary,
     getTemplateProvenanceSummary
   } from "$lib/features/flows/flowEvidenceProvenance";
+  import { Alert } from "@eneo/ui";
   import FlowRunEvidenceToolbar from "./FlowRunEvidenceToolbar.svelte";
   import FlowRunEvidenceSummary from "./FlowRunEvidenceSummary.svelte";
   import FlowRunEvidenceStepCard from "./FlowRunEvidenceStepCard.svelte";
@@ -296,7 +297,9 @@
     {m.flow_run_evidence_loading()}
   </div>
 {:else if loadError || evidence === null}
-  <p class="text-negative-default text-sm">{m.flow_run_evidence_error()}</p>
+  <Alert.Root variant="destructive">
+    <Alert.Description class="text-sm">{m.flow_run_evidence_error()}</Alert.Description>
+  </Alert.Root>
 {:else}
   <div class="flex flex-col gap-3">
     {#if $mode === "power_user"}

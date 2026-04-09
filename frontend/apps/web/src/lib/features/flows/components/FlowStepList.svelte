@@ -5,6 +5,7 @@
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import { IconPlus } from "@intric/icons/plus";
   import { Button, Dialog } from "@intric/ui";
+  import { Separator } from "@eneo/ui";
   import { createEventDispatcher } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { parseValidationError } from "$lib/features/flows/flowStepValidationMessages";
@@ -144,7 +145,8 @@
   </div>
 
   {#if !isPublished}
-    <div class="border-default border-t p-3">
+    <div class="p-3">
+      <Separator class="mb-3" />
       <button
         type="button"
         class="border-default text-secondary hover:border-accent-default hover:bg-accent-dimmer hover:text-accent-default flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed py-2.5 text-sm transition-colors"

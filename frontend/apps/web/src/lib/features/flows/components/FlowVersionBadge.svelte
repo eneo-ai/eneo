@@ -1,5 +1,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { Badge } from "@eneo/ui";
+  import { CheckCircle2, FileEdit } from "lucide-svelte";
 
   export let publishedVersion: number | null | undefined;
 
@@ -8,16 +10,25 @@
   $: if (publishedVersion !== prevVersion) {
     prevVersion = publishedVersion;
     justChanged = true;
-    setTimeout(() => { justChanged = false; }, 500);
+    setTimeout(() => { justChanged = false; }, 600);
   }
 </script>
 
-<span
-  class="inline-flex items-center whitespace-nowrap rounded-md px-2.5 py-1 text-sm font-medium ring-1 ring-inset transition-all duration-200 {publishedVersion != null ? 'bg-accent-dimmer text-accent-stronger ring-accent-default/20' : 'bg-warning-dimmer text-warning-stronger ring-warning-default/20'} {justChanged ? 'ring-2 ring-accent-default/50' : ''}"
->
-  {#if publishedVersion != null}
+{#if publishedVersion != null}
+  <Badge
+    variant="outline"
+    class="gap-1.5 border-positive-default/25 bg-positive-dimmer/60 text-positive-stronger transition-all duration-300
+      {justChanged ? 'scale-105 ring-2 ring-positive-default/40' : ''}"
+  >
+    <CheckCircle2 class="size-3" />
     {m.flow_version_published({ version: String(publishedVersion) })}
-  {:else}
+  </Badge>
+{:else}
+  <Badge
+    variant="outline"
+    class="gap-1.5 border-warning-default/25 bg-warning-dimmer/60 text-warning-stronger"
+  >
+    <FileEdit class="size-3" />
     {m.flow_version_draft()}
-  {/if}
-</span>
+  </Badge>
+{/if}

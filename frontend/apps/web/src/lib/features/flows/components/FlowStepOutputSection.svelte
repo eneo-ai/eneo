@@ -12,6 +12,7 @@
   } from "$lib/features/flows/flowCitationMode";
   import type { FlowStep } from "@intric/intric-js";
   import { Button } from "@intric/ui";
+  import { Alert } from "@eneo/ui";
   import { createEventDispatcher } from "svelte";
   import { getOutputHintText } from "./flowStepEditHelpers";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
@@ -67,15 +68,15 @@
   </Settings.Row>
 
   {#if isAdvancedMode && step.output_type === "docx"}
-    <div class="border-accent-default/20 bg-accent-dimmer/30 mb-4 rounded-xl border px-4 py-3">
+    <Alert.Root class="mb-4 rounded-xl border-accent-default/20 bg-accent-dimmer/30 px-4 py-3" role="status">
       <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div class="space-y-1">
-          <p class="text-accent-stronger text-sm font-medium">
+          <Alert.Title class="text-accent-stronger text-sm font-medium">
             {m.flow_template_fill_title()}
-          </p>
-          <p class="text-accent-stronger/80 text-xs leading-relaxed">
+          </Alert.Title>
+          <Alert.Description class="text-accent-stronger/80 text-xs leading-relaxed">
             {m.flow_template_fill_summary()}
-          </p>
+          </Alert.Description>
         </div>
         <Button
           variant="outlined"
@@ -86,7 +87,7 @@
           {m.flow_output_mode_template_fill()}
         </Button>
       </div>
-    </div>
+    </Alert.Root>
   {/if}
 
   <Settings.Row title={m.flow_step_output_mode()} description="">

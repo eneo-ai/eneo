@@ -3,6 +3,7 @@
   import { Button } from "@intric/ui";
   import { createEventDispatcher } from "svelte";
   import { m } from "$lib/paraglide/messages";
+  import { Card } from "@eneo/ui";
 
   export let flowId: string;
   export let publishedVersion: number | null | undefined;
@@ -54,18 +55,20 @@
     </button>
 
     {#if isExpanded}
-      <div class="bg-hover-dimmer mt-2 rounded-lg p-3">
-        {#if loading}
-          <p class="text-secondary text-xs">{m.flow_loading()}</p>
-        {:else if previousPrompt}
-          <pre class="mb-2 whitespace-pre-wrap text-xs">{previousPrompt}</pre>
-          <Button variant="outlined"  on:click={handleRestore}>
-            {m.flow_prompt_restore()}
-          </Button>
-        {:else}
-          <p class="text-secondary text-xs">{m.flow_prompt_no_previous()}</p>
-        {/if}
-      </div>
+      <Card.Root class="mt-2">
+        <Card.Content class="p-3">
+          {#if loading}
+            <p class="text-secondary text-xs">{m.flow_loading()}</p>
+          {:else if previousPrompt}
+            <pre class="mb-2 whitespace-pre-wrap text-xs">{previousPrompt}</pre>
+            <Button variant="outlined"  on:click={handleRestore}>
+              {m.flow_prompt_restore()}
+            </Button>
+          {:else}
+            <p class="text-secondary text-xs">{m.flow_prompt_no_previous()}</p>
+          {/if}
+        </Card.Content>
+      </Card.Root>
     {/if}
   </div>
 {/if}

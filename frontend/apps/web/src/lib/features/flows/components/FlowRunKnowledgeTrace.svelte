@@ -7,6 +7,7 @@
   import { Tooltip } from "@intric/ui";
   import { IconChevronRight } from "@intric/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
+  import { Badge, Card, Collapsible } from "@eneo/ui";
   import FlowChunkViewer from "./FlowChunkViewer.svelte";
 
   export let rag: FlowRunDebugRag | null | undefined = null;
@@ -100,143 +101,148 @@
 <svelte:options runes={false} />
 
 {#if rag}
-  <div
-    class="rounded-lg border border-default bg-primary"
-    style:border-left={expanded ? "2px solid var(--accent-default)" : undefined}
-  >
-    <button
-      class="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-hover-dimmer"
-      aria-expanded={expanded}
-      aria-controls={`flow-knowledge-trace-${stepOrder}`}
-      on:click={() => (expanded = !expanded)}
+  <Collapsible.Root bind:open={expanded}>
+    <Card.Root
+      style={expanded ? "border-left: 2px solid var(--accent-default)" : undefined}
     >
-      <div class="flex items-center gap-2">
-        <span class="text-xs font-semibold text-muted">{m.flow_run_knowledge_trace()}</span>
-        <span class={["text-xs font-medium", statusClass(rag.status)]}>{statusLabel(rag.status)}</span>
-      </div>
-      <IconChevronRight class={expanded ? "size-4 rotate-90 transition-transform" : "size-4 transition-transform"} />
-    </button>
-
-    {#if expanded}
-      <div id={`flow-knowledge-trace-${stepOrder}`} class="space-y-3 border-t border-default px-3 py-3">
-        <div class="flex flex-wrap gap-2">
-          <span class={["rounded-md border px-2 py-1 text-[11px]", statusClass(rag.status)]}>
-            <span class="mr-1 inline-block size-1.5 rounded-full bg-current opacity-80"></span>
-            {m.flow_run_knowledge_status_label()}: {statusLabel(rag.status)}
-          </span>
-          <span class="rounded-md border border-default bg-hover-dimmer px-2 py-1 text-[11px] text-muted">
-            {m.flow_run_knowledge_sources_label()}: {rag.unique_sources ?? references.length}
-          </span>
-          <span class="rounded-md border border-default bg-hover-dimmer px-2 py-1 text-[11px] text-muted">
-            {m.flow_run_knowledge_chunks_label()}: {rag.chunks_retrieved ?? 0}
-          </span>
-          <span class="rounded-md border border-default bg-hover-dimmer px-2 py-1 text-[11px] text-muted">
-            {m.flow_run_knowledge_latency_label()}: {formatLatency(rag.retrieval_duration_ms)}
-          </span>
-          <span class="rounded-md border border-default bg-hover-dimmer px-2 py-1 text-[11px] text-muted">
-            {m.flow_run_knowledge_version_label()}: v{rag.version ?? 1}
-          </span>
+      <Collapsible.Trigger
+        class="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-hover-dimmer"
+        aria-controls={`flow-knowledge-trace-${stepOrder}`}
+      >
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-semibold text-muted">{m.flow_run_knowledge_trace()}</span>
+          <span class={["text-xs font-medium", statusClass(rag.status)]}>{statusLabel(rag.status)}</span>
         </div>
+        <IconChevronRight class={expanded ? "size-4 rotate-90 transition-transform" : "size-4 transition-transform"} />
+      </Collapsible.Trigger>
 
-        {#if rag.retrieval_error_type}
-          <p class="text-xs text-muted">
-            {m.flow_run_knowledge_error_type()}: <span class="font-mono">{rag.retrieval_error_type}</span>
-          </p>
-        {/if}
+      <Collapsible.Content>
+        <div id={`flow-knowledge-trace-${stepOrder}`} class="space-y-3 border-t border-default px-3 py-3">
+          <div class="flex flex-wrap gap-2">
+            <Badge variant="outline" class={statusClass(rag.status)}>
+              <span class="mr-1 inline-block size-1.5 rounded-full bg-current opacity-80"></span>
+              {m.flow_run_knowledge_status_label()}: {statusLabel(rag.status)}
+            </Badge>
+            <Badge variant="outline">
+              {m.flow_run_knowledge_sources_label()}: {rag.unique_sources ?? references.length}
+            </Badge>
+            <Badge variant="outline">
+              {m.flow_run_knowledge_chunks_label()}: {rag.chunks_retrieved ?? 0}
+            </Badge>
+            <Badge variant="outline">
+              {m.flow_run_knowledge_latency_label()}: {formatLatency(rag.retrieval_duration_ms)}
+            </Badge>
+            <Badge variant="outline">
+              {m.flow_run_knowledge_version_label()}: v{rag.version ?? 1}
+            </Badge>
+          </div>
 
-        {#if references.length === 0}
-          <p class="rounded-md border border-default bg-hover-dimmer p-3 text-sm text-muted">
-            {m.flow_run_knowledge_no_sources()}
-          </p>
-        {:else}
-          <div class="space-y-2">
-            {#each references as reference, index (reference.id)}
-              <FlowChunkViewer
-                {intric}
-                infoBlobId={reference.id}
-                title={reference.title ?? null}
-                sourceIdShort={reference.id_short ?? reference.id.slice(0, 8)}
-                chunks={reference.chunks ?? []}
-                let:showViewer
-              >
-                <button
-                  class="group w-full rounded-md border border-default bg-primary p-3 text-left
-                         transition-all hover:border-accent-default hover:shadow-sm
-                         focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
-                  on:click={showViewer}
+          {#if rag.retrieval_error_type}
+            <p class="text-xs text-muted">
+              {m.flow_run_knowledge_error_type()}: <span class="font-mono">{rag.retrieval_error_type}</span>
+            </p>
+          {/if}
+
+          {#if references.length === 0}
+            <Card.Root size="sm" class="bg-hover-dimmer">
+              <Card.Content class="p-3">
+                <p class="text-sm text-muted">
+                  {m.flow_run_knowledge_no_sources()}
+                </p>
+              </Card.Content>
+            </Card.Root>
+          {:else}
+            <div class="space-y-2">
+              {#each references as reference, index (reference.id)}
+                <FlowChunkViewer
+                  {intric}
+                  infoBlobId={reference.id}
+                  title={reference.title ?? null}
+                  sourceIdShort={reference.id_short ?? reference.id.slice(0, 8)}
+                  chunks={reference.chunks ?? []}
+                  let:showViewer
                 >
-                  <div class="flex items-start justify-between gap-4">
-                    <div class="min-w-0">
-                      <div class="flex items-center gap-2">
-                        <span class="inline-flex size-6 items-center justify-center rounded-full border border-default bg-hover-dimmer text-[11px] font-semibold">
-                          {index + 1}
-                        </span>
-                        <p class="truncate text-sm font-medium group-hover:text-accent-stronger">
-                          {getDisplayTitle(reference) || m.flow_run_knowledge_untitled_source()}
-                        </p>
-                      </div>
-                      <div class="mt-1">
-                        <Tooltip text={reference.id}>
-                          <span class="font-mono text-[10px] text-muted">{reference.id_short ?? reference.id.slice(0, 8)}</span>
-                        </Tooltip>
-                      </div>
-                    </div>
-
-                    <div class="shrink-0 text-right text-xs">
-                      <Tooltip text={Number(reference.best_score ?? 0).toFixed(2)}>
-                        <span class={["inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium", scoreBadgeClass(Number(reference.best_score ?? 0))]}>
-                          {scoreLabel(Number(reference.best_score ?? 0))}
-                        </span>
-                      </Tooltip>
-                      <p class="mt-0.5 text-muted">
-                        {m.flow_run_knowledge_chunks_matched({
-                          count: String(reference.hit_count ?? reference.chunks?.length ?? 0),
-                        })}
-                      </p>
-                    </div>
-                  </div>
-
-                  {#if reference.chunks && reference.chunks.length > 0}
-                    {@const sortedChunks = [...reference.chunks].sort((a, b) => (a.chunk_no ?? 0) - (b.chunk_no ?? 0))}
-                    {@const displayChunks = sortedChunks.slice(0, 4)}
-                    {@const remainingCount = sortedChunks.length - displayChunks.length}
-                    <div class="mt-2 grid gap-2 md:grid-cols-2">
-                      {#each displayChunks as chunk (chunk.chunk_no)}
-                        <div class="rounded-md border border-default bg-hover-dimmer px-2.5 py-2 text-xs">
-                          <div class="flex items-center justify-between text-muted">
-                            <span>{m.flow_run_knowledge_chunk_label({ chunk: String(chunk.chunk_no) })}</span>
-                            <Tooltip text={Number(chunk.score ?? 0).toFixed(2)}>
-                              <span class={["rounded-full px-1.5 py-0.5 text-[10px] font-medium", scoreBadgeClass(Number(chunk.score ?? 0))]}>
-                                {scoreLabel(Number(chunk.score ?? 0))}
-                              </span>
+                  <Card.Root class="group transition-all hover:border-accent-default hover:shadow-sm">
+                    <button
+                      class="w-full p-3 text-left focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
+                      on:click={showViewer}
+                    >
+                      <div class="flex items-start justify-between gap-4">
+                        <div class="min-w-0">
+                          <div class="flex items-center gap-2">
+                            <Badge variant="outline" class="size-6 shrink-0 justify-center rounded-full p-0 text-[11px] font-semibold">
+                              {index + 1}
+                            </Badge>
+                            <p class="truncate text-sm font-medium group-hover:text-accent-stronger">
+                              {getDisplayTitle(reference) || m.flow_run_knowledge_untitled_source()}
+                            </p>
+                          </div>
+                          <div class="mt-1">
+                            <Tooltip text={reference.id}>
+                              <span class="font-mono text-[10px] text-muted">{reference.id_short ?? reference.id.slice(0, 8)}</span>
                             </Tooltip>
                           </div>
-                          <p class="mt-1 line-clamp-2 text-secondary">{chunk.snippet}</p>
                         </div>
-                      {/each}
-                    </div>
-                    {#if remainingCount > 0}
-                      <p class="mt-1.5 text-center text-[11px] text-muted">
-                        {m.flow_run_knowledge_more_segments({ count: String(remainingCount) })}
-                      </p>
-                    {/if}
-                  {/if}
 
-                  <div class="mt-2 flex items-center justify-end gap-1 text-xs text-muted
-                              opacity-40 transition-opacity group-hover:opacity-100">
-                    <span>{m.flow_run_knowledge_open_viewer()}</span>
-                    <IconChevronRight class="size-3" />
-                  </div>
-                </button>
-              </FlowChunkViewer>
-            {/each}
-          </div>
-        {/if}
+                        <div class="shrink-0 text-right text-xs">
+                          <Tooltip text={Number(reference.best_score ?? 0).toFixed(2)}>
+                            <Badge class={["rounded-full text-[11px]", scoreBadgeClass(Number(reference.best_score ?? 0))]}>
+                              {scoreLabel(Number(reference.best_score ?? 0))}
+                            </Badge>
+                          </Tooltip>
+                          <p class="mt-0.5 text-muted">
+                            {m.flow_run_knowledge_chunks_matched({
+                              count: String(reference.hit_count ?? reference.chunks?.length ?? 0),
+                            })}
+                          </p>
+                        </div>
+                      </div>
 
-        {#if rag.references_truncated}
-          <p class="text-xs text-muted">{m.flow_run_knowledge_references_truncated()}</p>
-        {/if}
-      </div>
-    {/if}
-  </div>
+                      {#if reference.chunks && reference.chunks.length > 0}
+                        {@const sortedChunks = [...reference.chunks].sort((a, b) => (a.chunk_no ?? 0) - (b.chunk_no ?? 0))}
+                        {@const displayChunks = sortedChunks.slice(0, 4)}
+                        {@const remainingCount = sortedChunks.length - displayChunks.length}
+                        <div class="mt-2 grid gap-2 md:grid-cols-2">
+                          {#each displayChunks as chunk (chunk.chunk_no)}
+                            <Card.Root size="sm" class="bg-hover-dimmer">
+                              <Card.Content class="px-2.5 py-2 text-xs">
+                                <div class="flex items-center justify-between text-muted">
+                                  <span>{m.flow_run_knowledge_chunk_label({ chunk: String(chunk.chunk_no) })}</span>
+                                  <Tooltip text={Number(chunk.score ?? 0).toFixed(2)}>
+                                    <Badge class={["rounded-full text-[10px]", scoreBadgeClass(Number(chunk.score ?? 0))]}>
+                                      {scoreLabel(Number(chunk.score ?? 0))}
+                                    </Badge>
+                                  </Tooltip>
+                                </div>
+                                <p class="mt-1 line-clamp-2 text-secondary">{chunk.snippet}</p>
+                              </Card.Content>
+                            </Card.Root>
+                          {/each}
+                        </div>
+                        {#if remainingCount > 0}
+                          <p class="mt-1.5 text-center text-[11px] text-muted">
+                            {m.flow_run_knowledge_more_segments({ count: String(remainingCount) })}
+                          </p>
+                        {/if}
+                      {/if}
+
+                      <div class="mt-2 flex items-center justify-end gap-1 text-xs text-muted
+                                  opacity-40 transition-opacity group-hover:opacity-100">
+                        <span>{m.flow_run_knowledge_open_viewer()}</span>
+                        <IconChevronRight class="size-3" />
+                      </div>
+                    </button>
+                  </Card.Root>
+                </FlowChunkViewer>
+              {/each}
+            </div>
+          {/if}
+
+          {#if rag.references_truncated}
+            <p class="text-xs text-muted">{m.flow_run_knowledge_references_truncated()}</p>
+          {/if}
+        </div>
+      </Collapsible.Content>
+    </Card.Root>
+  </Collapsible.Root>
 {/if}

@@ -80,7 +80,7 @@
 
 <div
   class="border-dimmer flex w-full min-w-0 items-center gap-2 border-b px-3 py-1.5 text-left transition-colors last:border-b-0
-    {isSelected ? 'bg-accent-dimmer border-accent' : 'hover:bg-hover-default'}"
+    {isSelected ? 'bg-accent-dimmer border-accent-default' : 'hover:bg-hover-default'}"
 >
   <!-- Chevron for folders -->
   {#if node.type === "folder"}

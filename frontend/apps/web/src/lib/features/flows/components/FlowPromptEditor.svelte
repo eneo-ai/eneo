@@ -12,6 +12,7 @@
     type VariableClassificationContext,
   } from "$lib/features/flows/flowVariableTokens";
   import VariablePicker from "./VariablePicker.svelte";
+  import { Alert, Card } from "@eneo/ui";
 
   export let value: string;
   let currentEditorValue = value;
@@ -403,7 +404,7 @@
   }
 </script>
 
-<div class="flow-prompt-editor border-default rounded-lg border shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-accent-default/30">
+<Card.Root class="flow-prompt-editor transition-shadow focus-within:ring-2 focus-within:ring-accent-default/30">
   <!-- Toolbar -->
   <div class="flex items-center justify-between border-b border-default bg-secondary/30 px-3 py-1.5">
     <span class="text-[11px] text-muted">{label}</span>
@@ -500,22 +501,22 @@
 
   <!-- Unresolved variables warning -->
   {#if unresolvedCount > 0}
-    <div class="flex items-center gap-2 border-t border-warning-default/40 bg-warning-dimmer px-3 py-1.5 text-xs text-warning-stronger">
+    <Alert.Root role="status" class="rounded-none border-x-0 border-b-0 border-warning-default/40 bg-warning-dimmer px-3 py-1.5 text-xs text-warning-stronger">
       <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
         <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
       </svg>
       {unresolvedCount} {m.flow_prompt_unresolved_variables()}
-    </div>
+    </Alert.Root>
   {/if}
 
   {#if invalidStructuredReferences.length > 0}
-    <div class="flex items-center gap-2 border-t border-warning-default/40 bg-warning-dimmer px-3 py-1.5 text-xs text-warning-stronger">
+    <Alert.Root role="status" class="rounded-none border-x-0 border-b-0 border-warning-default/40 bg-warning-dimmer px-3 py-1.5 text-xs text-warning-stronger">
       <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
         <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
       </svg>
       {m.flow_prompt_invalid_structured_reference({
         tokens: invalidStructuredReferences.map((issue) => `{{${issue.token}}}`).join(", "),
       })}
-    </div>
+    </Alert.Root>
   {/if}
-</div>
+</Card.Root>

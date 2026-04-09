@@ -6,6 +6,7 @@
   import type { FlowStep } from "@intric/intric-js";
   import { createEventDispatcher } from "svelte";
   import { Button, Tooltip } from "@intric/ui";
+  import { Alert } from "@eneo/ui";
   import { IconQuestionMark } from "@intric/icons/question-mark";
   import { slide } from "svelte/transition";
   import FlowPromptEditor from "./FlowPromptEditor.svelte";
@@ -37,52 +38,52 @@
 </script>
 
 {#if !isPowerUser && hasInputTemplateOverride}
-  <div
-    class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mb-3 flex items-start gap-3 rounded-lg border px-3 py-2.5 text-xs"
-  >
-    <span class="flex-1">{m.flow_input_template_active_notice()}</span>
-    <div class="flex shrink-0 gap-1.5">
-      {#if !showInputTemplate}
-        <Button
-          variant="outlined"
-          size="small"
-          on:click={() => dispatch("revealInputTemplate")}
-        >
-          {m.show()}
+  <Alert.Root class="mb-3 border-warning-default/40 bg-warning-dimmer text-warning-stronger" role="status">
+    <Alert.Description class="flex items-start gap-3 text-xs text-warning-stronger">
+      <span class="flex-1">{m.flow_input_template_active_notice()}</span>
+      <div class="flex shrink-0 gap-1.5">
+        {#if !showInputTemplate}
+          <Button
+            variant="outlined"
+            size="small"
+            on:click={() => dispatch("revealInputTemplate")}
+          >
+            {m.show()}
+          </Button>
+        {/if}
+        <Button variant="outlined" size="small" on:click={() => dispatch("clearInputTemplate")}>
+          {m.clear()}
         </Button>
-      {/if}
-      <Button variant="outlined" size="small" on:click={() => dispatch("clearInputTemplate")}>
-        {m.clear()}
-      </Button>
-    </div>
-  </div>
+      </div>
+    </Alert.Description>
+  </Alert.Root>
 {/if}
 
 {#if templateSourceConflict && isPowerUser}
-  <div
-    class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mb-3 flex items-start gap-3 rounded-lg border px-3 py-2.5 text-xs"
-  >
-    <span class="flex-1">
-      {m.flow_template_source_conflict_warning({
-        steps: templateSourceConflict.map((n) => `Step ${n}`).join(", "),
-        source:
-          INPUT_SOURCE_LABELS[step.input_source]?.() ?? step.input_source
-      })}
-    </span>
-    <div class="flex shrink-0 gap-1.5">
-      {#if step.input_source === "flow_input" && templateStepRefs.length === 1 && templateStepRefs[0] === step.step_order - 1}
-        <Button
-          variant="outlined"
-          size="small"
-          on:click={() => dispatch("inputSourceChange", { value: "previous_step" })}
-          >{m.flow_template_source_conflict_fix_source()}</Button
+  <Alert.Root class="mb-3 border-warning-default/40 bg-warning-dimmer text-warning-stronger">
+    <Alert.Description class="flex items-start gap-3 text-xs text-warning-stronger">
+      <span class="flex-1">
+        {m.flow_template_source_conflict_warning({
+          steps: templateSourceConflict.map((n) => `Step ${n}`).join(", "),
+          source:
+            INPUT_SOURCE_LABELS[step.input_source]?.() ?? step.input_source
+        })}
+      </span>
+      <div class="flex shrink-0 gap-1.5">
+        {#if step.input_source === "flow_input" && templateStepRefs.length === 1 && templateStepRefs[0] === step.step_order - 1}
+          <Button
+            variant="outlined"
+            size="small"
+            on:click={() => dispatch("inputSourceChange", { value: "previous_step" })}
+            >{m.flow_template_source_conflict_fix_source()}</Button
+          >
+        {/if}
+        <Button variant="outlined" size="small" on:click={() => dispatch("clearInputTemplate")}
+          >{m.flow_template_source_conflict_fix_clear()}</Button
         >
-      {/if}
-      <Button variant="outlined" size="small" on:click={() => dispatch("clearInputTemplate")}
-        >{m.flow_template_source_conflict_fix_clear()}</Button
-      >
-    </div>
-  </div>
+      </div>
+    </Alert.Description>
+  </Alert.Root>
 {/if}
 
 {#if showInputTemplate}
@@ -98,11 +99,11 @@
           </Tooltip>
         </svelte:fragment>
         <div class="flex flex-col gap-2">
-          <div class="bg-secondary/20 border-l-stronger rounded-lg border-l-[3px] px-3.5 py-2.5">
-            <p class="text-secondary text-xs leading-relaxed">
+          <Alert.Root class="border-l-[3px] border-l-stronger bg-secondary/20" role="status">
+            <Alert.Description class="text-xs leading-relaxed text-secondary">
               {stepUxCopy.inputTemplateDefaultHint}
-            </p>
-          </div>
+            </Alert.Description>
+          </Alert.Root>
           <FlowPromptEditor
             value={inputTemplateText}
             disabled={isPublished}

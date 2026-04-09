@@ -486,7 +486,7 @@
           />
 
           {#if selectedItems.length > 0}
-            <div class="bg-accent-dimmer border-accent mx-4 mb-1 rounded-md border px-3 py-2">
+            <div class="bg-accent-dimmer border-accent-default mx-4 mb-1 rounded-md border px-3 py-2">
               <div class="text-sm font-medium">
                 {m.sharepoint_selected_items_count({ count: selectedItems.length })}
               </div>

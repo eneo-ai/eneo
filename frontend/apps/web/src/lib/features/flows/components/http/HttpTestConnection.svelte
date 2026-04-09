@@ -4,6 +4,7 @@
   import { m } from "$lib/paraglide/messages";
   import { Button } from "@intric/ui";
   import type { HttpAuthoredConfig, HttpDirection, HttpMethod } from "./httpConfigTypes";
+  import { Card } from "@eneo/ui";
 
   export let config: HttpAuthoredConfig;
   export let direction: HttpDirection;
@@ -81,8 +82,10 @@
     {/if}
   </div>
   {#if result?.response_preview}
-    <pre
-      class="border-default bg-secondary/20 max-h-[120px] overflow-auto rounded-lg border p-3 font-mono text-xs"
-    >{result.response_preview}</pre>
+    <Card.Root>
+      <Card.Content class="max-h-[120px] overflow-auto p-3">
+        <pre class="font-mono text-xs">{result.response_preview}</pre>
+      </Card.Content>
+    </Card.Root>
   {/if}
 </div>

@@ -52,10 +52,10 @@
   }
 </script>
 
-<div class="question-container" class:answered>
-  <p class="question-text">{question.question}</p>
+<div class="question-container mt-2.5 max-w-xl" class:answered>
+  <p class="text-primary mb-2 text-sm font-semibold leading-snug">{question.question}</p>
 
-  <div class="options-grid" role={question.selection_mode === "single" ? "radiogroup" : "group"} aria-label={question.question}>
+  <div class="flex flex-col gap-2" role={question.selection_mode === "single" ? "radiogroup" : "group"} aria-label={question.question}>
     {#each question.options as option, i (getStructuredQuestionOptionKey(option))}
       {@const optionKey = getStructuredQuestionOptionKey(option)}
       {@const isSelected = selectedOptionKeys.has(optionKey)}
@@ -76,10 +76,10 @@
             </svg>
           {/if}
         </span>
-        <span class="option-content">
-          <span class="option-label">{option.label}</span>
+        <span class="flex min-w-0 flex-col">
+          <span class="text-primary text-[0.8125rem] font-semibold leading-snug">{option.label}</span>
           {#if option.description}
-            <span class="option-desc">{option.description}</span>
+            <span class="text-secondary mt-0.5 text-xs leading-snug">{option.description}</span>
           {/if}
         </span>
       </button>
@@ -96,10 +96,10 @@
 
   {#if question.allow_custom && !answered}
     {#if showCustomInput}
-      <div class="custom-input-row">
+      <div class="mt-1.5 flex items-center gap-1.5">
         <input
           type="text"
-          class="custom-input"
+          class="bg-primary text-primary border-border-default focus:border-accent-default flex-1 rounded-md border px-2.5 py-1.5 text-[0.8125rem] outline-none transition-shadow focus:ring-2 focus:ring-[oklch(from_var(--accent-default)_l_c_h_/_0.08)]"
           placeholder={m.ai_builder_question_custom_placeholder()}
           bind:value={customText}
           onkeydown={(e) => {
@@ -116,7 +116,10 @@
         </Button>
       </div>
     {:else}
-      <button class="custom-card" onclick={() => (showCustomInput = true)}>
+      <button
+        class="border-border-stronger text-secondary hover:border-accent-default hover:text-accent-default mt-2 flex w-full items-center rounded-[0.625rem] border border-dashed px-4 py-3 text-left text-[0.8125rem] font-medium transition-all duration-150 hover:bg-[oklch(from_var(--accent-default)_l_c_h_/_0.02)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-default)]"
+        onclick={() => (showCustomInput = true)}
+      >
         {m.ai_builder_question_custom()}
       </button>
     {/if}
@@ -126,42 +129,22 @@
 <style lang="postcss">
   @reference "@intric/ui/styles";
 
-  .question-text {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 0.5rem;
-    line-height: 1.4;
-  }
+  /* --- Answered state --- */
 
-  .question-container {
-    margin-top: 0.625rem;
-    max-width: 36rem;
-  }
-
-  .question-container.answered {
+  .answered {
     opacity: 0.55;
     pointer-events: none;
   }
 
-  .options-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
+  /* --- Option card --- */
 
   .option-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.625rem;
-    padding: 0.875rem 1rem;
-    border-radius: 0.625rem;
-    border: 1px solid var(--border-stronger);
+    @apply flex items-start gap-2.5 rounded-[0.625rem] border px-4 py-3.5 text-left;
+    border-color: var(--border-stronger);
     background: var(--bg-primary);
     cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
-    text-align: left;
     min-height: 2.75rem;
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
   }
 
   .option-card:not(.answered):hover {
@@ -191,15 +174,11 @@
   /* --- Selection indicator (radio circle / checkbox) --- */
 
   .select-indicator {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @apply flex shrink-0 items-center justify-center rounded;
     width: 1.125rem;
     height: 1.125rem;
     margin-top: 0.0625rem;
-    border-radius: 0.25rem;
     border: 1.5px solid var(--border-strongest);
-    flex-shrink: 0;
     transition: border-color 0.15s ease, background 0.15s ease;
   }
 
@@ -215,76 +194,6 @@
     border-color: var(--accent-default);
     background: var(--accent-default);
     color: var(--text-on-fill);
-  }
-
-  .option-content {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-
-  .option-label {
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    line-height: 1.3;
-  }
-
-  .option-desc {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    line-height: 1.4;
-    margin-top: 0.1875rem;
-  }
-
-  .custom-card {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    padding: 0.75rem 1rem;
-    border-radius: 0.625rem;
-    border: 1px dashed var(--border-stronger);
-    background: transparent;
-    cursor: pointer;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
-    text-align: left;
-  }
-
-  .custom-card:hover {
-    border-color: var(--border-accent-default);
-    color: var(--accent-default);
-    background: oklch(from var(--accent-default) l c h / 0.02);
-  }
-
-  .custom-card:focus-visible {
-    outline: 2px solid var(--accent-default);
-    outline-offset: 2px;
-  }
-
-  .custom-input-row {
-    display: flex;
-    gap: 0.375rem;
-    margin-top: 0.375rem;
-    align-items: center;
-  }
-
-  .custom-input {
-    flex: 1;
-    padding: 0.375rem 0.625rem;
-    font-size: 0.8125rem;
-    border: 1px solid var(--border-default);
-    border-radius: 0.375rem;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    outline: none;
-  }
-
-  .custom-input:focus {
-    border-color: var(--border-accent-default);
-    box-shadow: 0 0 0 2px oklch(from var(--accent-default) l c h / 0.08);
   }
 
   /* --- Entrance animations --- */

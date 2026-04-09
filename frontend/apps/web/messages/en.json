@@ -3434,6 +3434,7 @@
   "flow_summary_input_fields": "Input fields",
   "flow_summary_transcription": "Transcription",
   "flow_summary_validation": "Validation",
+  "flow_summary_status": "Status",
   "compare": "Compare",
   "compare_loading": "Loading comparison data…",
   "compare_new_activity": "new",

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { Button } from "@intric/ui";
+  import { Alert, Badge, Card, Separator } from "@eneo/ui";
   import FlowAIBuilderStepCard from "./FlowAIBuilderStepCard.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import type { EditAdvisory } from "./protocol";
@@ -103,22 +104,22 @@
   }
 </script>
 
-<div class="plan-pane">
+<div class="flex min-h-0 flex-1 flex-col">
   {#if service.currentPlan}
     {@const plan = service.currentPlan}
     {@const spec = plan.envelope.spec}
 
     <!-- Scrollable content area -->
-    <div class="plan-scroll">
+    <div class="flex-1 overflow-y-auto p-4 md:p-6">
       {#if service.isConflict}
         <!-- Conflict recovery banner -->
-        <div class="conflict-banner">
-          <h4 class="text-warning-stronger text-sm font-semibold">
+        <Alert.Root class="mb-4 rounded-xl border-warning-default bg-warning-dimmer">
+          <Alert.Title class="text-warning-stronger text-sm font-semibold">
             {m.ai_builder_conflict_title()}
-          </h4>
-          <p class="text-warning-default mt-1 text-xs leading-relaxed">
+          </Alert.Title>
+          <Alert.Description class="text-warning-default mt-1 text-xs leading-relaxed">
             {m.ai_builder_conflict_description()}
-          </p>
+          </Alert.Description>
           <div class="mt-3 flex gap-2">
             <Button variant="primary" size="small" onclick={handleConflictRegenerate}>
               {m.ai_builder_conflict_regenerate()}
@@ -127,37 +128,37 @@
               {m.ai_builder_conflict_cancel()}
             </Button>
           </div>
-        </div>
+        </Alert.Root>
       {/if}
 
       <!-- Plan card -->
-      <div class="plan-card">
+      <Card.Root class="plan-card-enter mx-auto max-w-3xl shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05),0_1px_3px_rgba(0,0,0,0.02)]">
         <!-- Header -->
-        <div class="plan-header">
-          <h3 class="text-primary text-lg font-semibold tracking-tight">{spec.flow_name}</h3>
+        <Card.Header class="px-6 pb-0 pt-6">
+          <Card.Title class="text-primary text-lg font-semibold tracking-tight">{spec.flow_name}</Card.Title>
           {#if spec.flow_description && !descriptionDiff && !hasDescriptionAdvisory}
-            <p class="plan-header-description">{spec.flow_description}</p>
+            <Card.Description class="mt-1 break-words text-[0.8125rem] leading-relaxed text-secondary">{spec.flow_description}</Card.Description>
           {/if}
-        </div>
+        </Card.Header>
 
-        <!-- Description diff — flat layout, no nested cards -->
+        <!-- Description diff -- flat layout, no nested cards -->
         {#if descriptionDiff || hasDescriptionAdvisory}
-          <div class="description-diff-section" aria-live="polite">
-            <p class="description-diff-title">{m.ai_builder_description_diff_title()}</p>
+          <div class="section-enter border-t border-default px-6 py-4" aria-live="polite">
+            <p class="mb-2 text-[0.8125rem] font-medium text-secondary">{m.ai_builder_description_diff_title()}</p>
             {#if descriptionDiff}
-              <div class="description-diff-flat">
-                <p class="description-diff-old" aria-label={m.ai_builder_description_current()}>
+              <div class="flex flex-col gap-3">
+                <p class="description-diff-old break-words text-[0.8125rem] leading-relaxed text-muted line-through" aria-label={m.ai_builder_description_current()}>
                   {descriptionDiff.previous}
                 </p>
-                <p class="description-diff-new" aria-label={m.ai_builder_description_proposed()}>
+                <p class="break-words border-l-[3px] border-accent-default pl-3 text-[0.8125rem] leading-relaxed text-primary" aria-label={m.ai_builder_description_proposed()}>
                   {descriptionDiff.proposed}
                 </p>
               </div>
             {:else if hasDescriptionAdvisory}
-              <p class="description-diff-advisory-text">
+              <p class="mb-3 text-[0.8125rem] leading-relaxed text-secondary">
                 {advisories.find((a) => a.code === "flow_description_update_required")?.message}
               </p>
-              <div class="description-diff-actions">
+              <div class="flex flex-wrap gap-2">
                 <Button
                   variant="outlined"
                   size="small"
@@ -172,23 +173,27 @@
 
         <!-- Edit advisories (non-description) -->
         {#if advisories.filter((a) => a.code !== "flow_description_update_required").length > 0}
-          <div class="advisories-section" aria-live="polite">
-            <p class="advisories-title">{m.ai_builder_advisory_section_title()}</p>
+          <Alert.Root class="mx-6 mb-3 rounded-lg border-warning-default bg-warning-dimmer px-4 py-3" aria-live="polite">
+            <Alert.Title class="text-[0.8125rem] font-semibold text-warning-stronger">{m.ai_builder_advisory_section_title()}</Alert.Title>
             {#each advisories.filter((a) => a.code !== "flow_description_update_required") as advisory (advisory.code)}
-              <div class="advisory-item advisory-item--{advisory.severity}">
+              <div class="mb-1 rounded-md px-2.5 py-1.5 text-[0.8125rem] leading-relaxed
+                {advisory.severity === 'info' ? 'bg-info-dimmer text-info-default' : ''}
+                {advisory.severity === 'warning' ? 'bg-warning-dimmer text-warning-stronger' : ''}
+                {advisory.severity === 'error' ? 'bg-negative-dimmer text-negative-default' : ''}"
+              >
                 <span>{advisory.message}</span>
               </div>
             {/each}
-          </div>
+          </Alert.Root>
         {/if}
 
         <!-- Assumptions -->
         {#if plan.envelope.assumptions.length > 0}
-          <div class="assumptions-section">
-            <p class="text-primary mb-2 text-[0.8125rem] font-semibold tracking-tight">
+          <div class="mx-6 mb-4 rounded-lg border border-default bg-secondary/30 px-4 py-3">
+            <p class="mb-1.5 text-sm font-semibold text-primary">
               {m.ai_builder_assumptions()}
             </p>
-            <ul class="text-secondary space-y-1.5 text-[0.8125rem] leading-relaxed">
+            <ul class="flex flex-col gap-1.5 text-sm leading-relaxed text-secondary">
               {#each plan.envelope.assumptions as assumption (assumption)}
                 <li class="flex items-start gap-2">
                   <span class="mt-2 block size-1 shrink-0 rounded-full bg-current opacity-40"
@@ -201,29 +206,29 @@
         {/if}
 
         {#if plan.envelope.plan_rationale}
-          <div class="rationale-section">
-            <p class="text-primary mb-1.5 text-[0.8125rem] font-medium">
+          <div class="border-t border-default px-6 py-4">
+            <p class="mb-1 text-sm font-medium text-primary">
               {m.ai_builder_plan_rationale()}
             </p>
-            <p class="text-secondary text-[0.8125rem] leading-relaxed">
+            <p class="text-sm leading-relaxed text-secondary">
               {plan.envelope.plan_rationale}
             </p>
           </div>
         {/if}
 
         {#if spec.form_fields && spec.form_fields.length > 0}
-          <div class="form-fields-section">
-            <p class="text-primary mb-1.5 text-[0.8125rem] font-medium">
+          <div class="border-t border-default px-6 py-4">
+            <p class="mb-1.5 text-[0.8125rem] font-medium text-primary">
               {m.ai_builder_form_fields_title()}
             </p>
-            <div class="form-fields-list">
+            <div class="grid gap-3 sm:grid-cols-2">
               {#each spec.form_fields as field (`${field.name}-${field.type}`)}
-                <div class="form-field-card">
-                  <div class="form-field-header">
-                    <span class="form-field-label">{field.label}</span>
-                    <span class="form-field-type">{field.type}</span>
+                <div class="rounded-[0.625rem] border border-default bg-secondary p-3">
+                  <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+                    <span class="text-[0.8125rem] font-semibold text-primary">{field.label}</span>
+                    <span class="rounded-full border border-default bg-primary px-2 py-0.5 text-xs text-secondary">{field.type}</span>
                   </div>
-                  <div class="form-field-meta">
+                  <div class="flex flex-wrap items-center gap-2 text-xs text-secondary">
                     <span>{field.name}</span>
                     <span
                       >{field.required
@@ -232,9 +237,9 @@
                     >
                   </div>
                   {#if field.options && field.options.length > 0}
-                    <div class="form-field-options">
+                    <div class="mt-2 flex flex-wrap items-center gap-2">
                       {#each field.options as option (option)}
-                        <span class="form-field-option">{option}</span>
+                        <span class="rounded-full border border-default bg-primary px-2 py-0.5 text-xs text-secondary">{option}</span>
                       {/each}
                     </div>
                   {/if}
@@ -246,13 +251,13 @@
 
         <!-- Lint warnings -->
         {#if plan.envelope.lint_warnings.length > 0}
-          <div class="lint-section">
-            <div class="lint-header">
+          <Alert.Root class="mx-6 mb-6 rounded-lg border-warning-default bg-warning-dimmer px-5 py-4">
+            <div class="mb-2 flex items-center gap-1.5">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 16 16"
                 fill="currentColor"
-                class="lint-icon"
+                class="size-3.5 shrink-0 text-warning-stronger"
               >
                 <path
                   fill-rule="evenodd"
@@ -260,23 +265,23 @@
                   clip-rule="evenodd"
                 />
               </svg>
-              <span class="lint-title">{m.ai_builder_quality_warnings()}</span>
+              <span class="text-[0.8125rem] font-semibold text-warning-stronger">{m.ai_builder_quality_warnings()}</span>
             </div>
-            <ul class="lint-list">
+            <ul class="flex flex-col gap-1.5">
               {#each plan.envelope.lint_warnings as warning (`${warning.step_ref ?? "flow"}-${warning.code}-${warning.message}`)}
-                <li class="lint-item">
+                <li class="lint-item relative pl-5 text-[0.8125rem] leading-relaxed text-warning-stronger">
                   {#if warning.step_ref}
-                    <span class="lint-ref">{warning.step_ref}:</span>
+                    <span class="mr-1 font-semibold">{warning.step_ref}:</span>
                   {/if}
                   <span>{warning.message}</span>
                 </li>
               {/each}
             </ul>
-          </div>
+          </Alert.Root>
         {/if}
 
         <!-- Steps -->
-        <div class="steps-container">
+        <Card.Content class="px-6 pb-6">
           {#each spec.steps as step, i (step.plan_step_ref)}
             <FlowAIBuilderStepCard
               {step}
@@ -289,37 +294,38 @@
               onsuggestchange={(prefill) => onsuggestchange?.(prefill)}
             />
           {/each}
-        </div>
+        </Card.Content>
 
         {#if removedStepChanges.length > 0}
-          <div class="removed-steps-section">
-            <p class="removed-steps-title">{m.ai_builder_removed_steps_title()}</p>
-            <ul class="removed-steps-list">
+          <div class="mx-6 mb-6">
+            <Separator class="mb-4" />
+            <p class="mb-2 text-[0.8125rem] font-semibold tracking-tight text-primary">{m.ai_builder_removed_steps_title()}</p>
+            <ul class="flex flex-col gap-2">
               {#each removedStepChanges as change (`${change.step_ref ?? change.step_name}-${change.kind}`)}
-                <li class="removed-step-item">
-                  <span class="removed-step-badge">{m.ai_builder_badge_removed()}</span>
-                  <span class="removed-step-name">{change.step_name}</span>
+                <li class="flex items-center gap-2.5 rounded-xl border border-dashed border-default bg-secondary px-3.5 py-3">
+                  <Badge variant="outline" class="border-warning-default/20 bg-warning-dimmer text-[0.6875rem] font-bold uppercase tracking-wide text-warning-stronger">{m.ai_builder_badge_removed()}</Badge>
+                  <span class="text-sm font-medium text-primary">{change.step_name}</span>
                 </li>
               {/each}
             </ul>
           </div>
         {/if}
-      </div>
+      </Card.Root>
 
       <!-- Applied result -->
       {#if service.applyResult}
-        <div class="applied-result">
-          <p class="text-positive-stronger text-sm font-medium">
+        <Alert.Root class="mt-4 rounded-xl border-positive-default/40 bg-positive-dimmer px-5 py-4">
+          <Alert.Title class="text-sm font-medium text-positive-stronger">
             {m.ai_builder_applied_success()}
-          </p>
-          <p class="text-positive-default mt-1 text-xs">
+          </Alert.Title>
+          <Alert.Description class="mt-1 text-xs text-positive-default">
             {service.applyResult.steps_created}
             {m.ai_builder_created()},
             {service.applyResult.steps_updated}
             {m.ai_builder_updated()},
             {service.applyResult.steps_removed}
             {m.ai_builder_removed()}
-          </p>
+          </Alert.Description>
           {#if service.canContinueEditing}
             <div class="mt-3">
               <Button variant="outlined" size="small" onclick={handleContinueEditing}>
@@ -327,27 +333,27 @@
               </Button>
             </div>
           {/if}
-        </div>
+        </Alert.Root>
       {/if}
     </div>
 
-    <!-- Published flow banner — near actions where the error originated -->
+    <!-- Published flow banner -- near actions where the error originated -->
     {#if isPublishedError}
-      <div class="published-banner" aria-live="polite">
-        <h4 class="published-banner-title">{m.ai_builder_published_flow_title()}</h4>
-        <p class="published-banner-description">
+      <Alert.Root class="shrink-0 rounded-none border-x-0 border-b-0 border-warning-default bg-warning-dimmer px-4 py-3" aria-live="polite">
+        <Alert.Title class="text-[0.8125rem] font-semibold text-warning-stronger">{m.ai_builder_published_flow_title()}</Alert.Title>
+        <Alert.Description class="mt-1 text-[0.8125rem] leading-relaxed text-warning-default">
           {m.ai_builder_published_flow_description({ version: String(publishedVersion ?? "") })}
-        </p>
+        </Alert.Description>
         <div class="mt-2">
           <Button variant="outlined" size="small" onclick={() => service.dismissApplyError()}>
             {m.ai_builder_conflict_cancel()}
           </Button>
         </div>
-      </div>
+      </Alert.Root>
     {/if}
 
-    <!-- Action buttons — pinned at bottom, always visible -->
-    <div class="plan-actions">
+    <!-- Action buttons -- pinned at bottom, always visible -->
+    <div class="plan-actions relative flex shrink-0 flex-col gap-2 border-t border-default bg-primary px-4 pb-4 pt-3 sm:flex-row">
       {#if service.canApprove}
         <Button variant="positive" onclick={handleApprove} disabled={isApproving || isApplying}>
           {isApproving ? m.ai_builder_approving() : m.ai_builder_approve()}
@@ -368,14 +374,14 @@
     </div>
   {:else if service.isConflict}
     <!-- Conflict recovery banner (no plan state) -->
-    <div class="plan-scroll">
-      <div class="conflict-banner">
-        <h4 class="text-warning-stronger text-sm font-semibold">
+    <div class="flex-1 overflow-y-auto p-4 md:p-6">
+      <Alert.Root class="rounded-xl border-warning-default bg-warning-dimmer px-5 py-4">
+        <Alert.Title class="text-warning-stronger text-sm font-semibold">
           {m.ai_builder_conflict_title()}
-        </h4>
-        <p class="text-warning-default mt-1 text-xs leading-relaxed">
+        </Alert.Title>
+        <Alert.Description class="text-warning-default mt-1 text-xs leading-relaxed">
           {m.ai_builder_conflict_description()}
-        </p>
+        </Alert.Description>
         <div class="mt-3 flex gap-2">
           <Button variant="primary" size="small" onclick={handleConflictRegenerate}>
             {m.ai_builder_conflict_regenerate()}
@@ -384,13 +390,13 @@
             {m.ai_builder_conflict_cancel()}
           </Button>
         </div>
-      </div>
+      </Alert.Root>
     </div>
   {:else if service.statusMessage || service.isStreaming}
     <!-- Progress state -->
-    <div class="empty-state">
-      <div class="progress-ring"></div>
-      <p class="text-primary text-sm font-medium">
+    <div class="flex flex-1 flex-col items-center justify-center text-center opacity-65">
+      <div class="progress-ring mb-5 size-12 rounded-full border-[3px]"></div>
+      <p class="text-sm font-medium text-primary">
         {#if service.statusMessage === "validating"}
           {m.ai_builder_status_validating()}
         {:else if service.statusMessage === "repairing"}
@@ -403,12 +409,12 @@
           {m.ai_builder_generating()}
         {/if}
       </p>
-      <p class="text-muted mt-1 text-xs">{m.ai_builder_status_patience()}</p>
+      <p class="mt-1 text-xs text-muted">{m.ai_builder_status_patience()}</p>
     </div>
   {:else}
     <!-- Empty state -->
-    <div class="empty-state">
-      <div class="empty-icon">
+    <div class="flex flex-1 flex-col items-center justify-center text-center opacity-65">
+      <div class="mb-4 flex size-14 items-center justify-center rounded-2xl border border-default bg-primary text-muted">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 24 24"
@@ -424,7 +430,7 @@
           />
         </svg>
       </div>
-      <p class="text-secondary text-sm">{m.ai_builder_plan_empty()}</p>
+      <p class="text-sm text-secondary">{m.ai_builder_plan_empty()}</p>
     </div>
   {/if}
 </div>
@@ -432,43 +438,8 @@
 <style lang="postcss">
   @reference "@intric/ui/styles";
 
-  .plan-pane {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
-    position: relative;
-  }
-
-  .plan-scroll {
-    flex: 1;
-    overflow-y: auto;
-    padding: 1rem;
-  }
-
-  @media (min-width: 768px) {
-    .plan-scroll {
-      padding: 1.5rem;
-    }
-  }
-
-  .conflict-banner {
-    margin-bottom: 1rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--border-warning-default);
-    background: var(--bg-warning-dimmer);
-    padding: 1rem 1.25rem;
-  }
-
-  .plan-card {
-    border-radius: 1rem;
-    border: 1px solid var(--border-default);
-    background: var(--bg-primary);
-    box-shadow:
-      0 20px 40px -15px rgba(0, 0, 0, 0.05),
-      0 1px 3px rgba(0, 0, 0, 0.02);
-    max-width: 48rem;
-    margin: 0 auto;
+  /* Animations that require @keyframes -- cannot be expressed as Tailwind utilities */
+  .plan-card-enter {
     animation: plan-card-enter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
@@ -483,333 +454,8 @@
     }
   }
 
-  .form-fields-section {
-    padding: 1rem 1.5rem;
-    border-top: 1px solid var(--border-default);
-  }
-
-  .form-fields-list {
-    display: grid;
-    gap: 0.75rem;
-  }
-
-  @media (min-width: 640px) {
-    .form-fields-list {
-      grid-template-columns: 1fr 1fr;
-    }
-  }
-
-  .form-field-card {
-    border: 1px solid var(--border-default);
-    border-radius: 0.625rem;
-    padding: 0.75rem;
-    background: var(--bg-secondary);
-  }
-
-  .form-field-header,
-  .form-field-meta,
-  .form-field-options {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    align-items: center;
-  }
-
-  .form-field-header {
-    justify-content: space-between;
-    margin-bottom: 0.25rem;
-  }
-
-  .form-field-label {
-    color: var(--text-primary);
-    font-size: 0.8125rem;
-    font-weight: 600;
-  }
-
-  .form-field-type,
-  .form-field-option {
-    border: 1px solid var(--border-default);
-    border-radius: 999px;
-    padding: 0.125rem 0.5rem;
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    background: var(--bg-primary);
-  }
-
-  .form-field-meta {
-    color: var(--text-secondary);
-    font-size: 0.75rem;
-  }
-
-  .plan-header {
-    padding: 1.5rem 1.5rem 1.25rem;
-  }
-
-  .plan-header-description {
-    margin-top: 0.375rem;
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    color: var(--text-secondary);
-    overflow-wrap: break-word;
-  }
-
-  .assumptions-section {
-    margin: 0 1.5rem 1.5rem;
-    padding: 1rem 1.25rem;
-    border-radius: 0.75rem;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-default);
-  }
-
-  .rationale-section {
-    padding: 1.25rem 1.5rem;
-    border-top: 1px solid var(--border-default);
-  }
-
-  .lint-section {
-    margin: 0 1.5rem 1.5rem;
-    padding: 1rem 1.25rem;
-    border-radius: 0.5rem;
-    border: 1px solid var(--border-warning-default);
-    background: var(--bg-warning-dimmer);
-  }
-
-  .lint-header {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    margin-bottom: 0.5rem;
-  }
-
-  .lint-icon {
-    width: 0.875rem;
-    height: 0.875rem;
-    color: var(--text-warning-stronger);
-    flex-shrink: 0;
-  }
-
-  .lint-title {
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--text-warning-stronger);
-  }
-
-  .lint-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.375rem;
-  }
-
-  .lint-item {
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    color: var(--text-warning-stronger);
-    padding-left: 1.25rem;
-    position: relative;
-  }
-
-  .lint-item::before {
-    content: "";
-    position: absolute;
-    left: 0.375rem;
-    top: 0.55em;
-    width: 0.25rem;
-    height: 0.25rem;
-    border-radius: 9999px;
-    background: currentColor;
-    opacity: 0.5;
-  }
-
-  .lint-ref {
-    font-weight: 600;
-    margin-right: 0.25rem;
-  }
-
-  .steps-container {
-    padding: 0 1.5rem 1.5rem;
-  }
-
-  .plan-actions {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    padding: 0.75rem 1rem 1rem;
-    flex-shrink: 0;
-    border-top: 1px solid var(--border-default);
-    background: var(--bg-primary);
-  }
-
-  .removed-steps-section {
-    margin-top: 1rem;
-    border-top: 1px solid var(--border-default);
-    padding-top: 1rem;
-  }
-
-  .removed-steps-title {
-    color: var(--text-primary);
-    margin-bottom: 0.5rem;
-    font-size: 0.8125rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-  }
-
-  .removed-steps-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .removed-step-item {
-    display: flex;
-    align-items: center;
-    gap: 0.625rem;
-    border: 1px dashed var(--border-default);
-    border-radius: 0.75rem;
-    padding: 0.75rem 0.875rem;
-    background: var(--bg-secondary);
-  }
-
-  .removed-step-badge {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 999px;
-    padding: 0.1875rem 0.5rem;
-    background: var(--bg-warning-dimmer);
-    color: var(--text-warning-stronger);
-    font-size: 0.6875rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-  }
-
-  .removed-step-name {
-    color: var(--text-primary);
-    font-size: 0.875rem;
-    font-weight: 500;
-  }
-
-  .plan-actions::before {
-    content: "";
-    position: absolute;
-    top: -2rem;
-    left: 0;
-    right: 0;
-    height: 2rem;
-    background: linear-gradient(to top, var(--bg-primary), transparent);
-    pointer-events: none;
-  }
-
-  @media (min-width: 640px) {
-    .plan-actions {
-      flex-direction: row;
-    }
-  }
-
-  .applied-result {
-    margin-top: 1rem;
-    padding: 1rem 1.25rem;
-    border-radius: 0.75rem;
-    background: var(--bg-positive-dimmer);
-  }
-
-  .empty-state {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    opacity: 0.65;
-  }
-
-  .empty-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 3.5rem;
-    height: 3.5rem;
-    margin-bottom: 1rem;
-    border-radius: 1rem;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-default);
-    color: var(--text-muted);
-  }
-
-  .progress-ring {
-    width: 3rem;
-    height: 3rem;
-    margin-bottom: 1.25rem;
-    border-radius: 50%;
-    border: 3px solid oklch(from var(--accent-default) l c h / 0.15);
-    border-top-color: var(--accent-default);
-    animation: spin-slow 1s linear infinite;
-  }
-
-  :global(.animate-spin-slow) {
-    animation: spin-slow 2s linear infinite;
-  }
-
-  @keyframes spin-slow {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  /* Description diff — flat layout, no nested cards */
-  .description-diff-section {
-    padding: 1rem 1.5rem;
-    border-top: 1px solid var(--border-default);
+  .section-enter {
     animation: section-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  .description-diff-title {
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin-bottom: 0.5rem;
-  }
-
-  .description-diff-flat {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .description-diff-old {
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    color: var(--text-muted);
-    text-decoration: line-through;
-    text-decoration-color: oklch(from var(--text-muted) l c h / 0.4);
-    overflow-wrap: break-word;
-  }
-
-  .description-diff-new {
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    color: var(--text-primary);
-    padding-left: 0.75rem;
-    border-left: 3px solid var(--accent-default);
-    overflow-wrap: break-word;
-  }
-
-  .description-diff-advisory-text {
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    color: var(--text-secondary);
-    margin-bottom: 0.75rem;
-  }
-
-  .description-diff-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
   }
 
   @keyframes section-enter {
@@ -823,73 +469,59 @@
     }
   }
 
-  /* Advisories section — matches lint-section treatment */
-  .advisories-section {
-    margin: 0 1.5rem 0.75rem;
-    padding: 0.75rem 1rem;
-    border-radius: 0.5rem;
-    border: 1px solid var(--border-warning-default);
-    background: var(--bg-warning-dimmer);
+  /* Description diff strikethrough -- oklch relative color not safe in Tailwind arbitrary values */
+  .description-diff-old {
+    text-decoration-color: oklch(from var(--text-muted) l c h / 0.4);
   }
 
-  .advisories-title {
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--text-warning-stronger);
-    margin-bottom: 0.375rem;
+  /* Lint bullet -- ::before pseudo-element with positioning */
+  .lint-item::before {
+    content: "";
+    position: absolute;
+    left: 0.375rem;
+    top: 0.55em;
+    width: 0.25rem;
+    height: 0.25rem;
+    border-radius: 9999px;
+    background: currentColor;
+    opacity: 0.5;
   }
 
-  .advisory-item {
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    padding: 0.375rem 0.625rem;
-    border-radius: 0.375rem;
-    margin-bottom: 0.25rem;
+  /* Progress spinner -- requires border-color from CSS custom property with oklch */
+  .progress-ring {
+    border-color: oklch(from var(--accent-default) l c h / 0.15);
+    border-top-color: var(--accent-default);
+    animation: spin-slow 1s linear infinite;
   }
 
-  .advisory-item--info {
-    color: var(--text-info-default);
-    background: var(--bg-info-dimmer);
+  @keyframes spin-slow {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
-  .advisory-item--warning {
-    color: var(--text-warning-stronger);
-    background: var(--bg-warning-dimmer);
-  }
-
-  .advisory-item--error {
-    color: var(--text-negative-default);
-    background: var(--bg-negative-dimmer);
-  }
-
-  /* Published flow banner — positioned near action bar */
-  .published-banner {
-    padding: 0.75rem 1rem;
-    flex-shrink: 0;
-    border-top: 1px solid var(--border-warning-default);
-    background: var(--bg-warning-dimmer);
-  }
-
-  .published-banner-title {
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--text-warning-stronger);
-  }
-
-  .published-banner-description {
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    color: var(--text-warning-default);
-    margin-top: 0.25rem;
+  /* Gradient fade above action bar -- ::before with linear-gradient */
+  .plan-actions::before {
+    content: "";
+    position: absolute;
+    top: -2rem;
+    left: 0;
+    right: 0;
+    height: 2rem;
+    background: linear-gradient(to top, var(--bg-primary), transparent);
+    pointer-events: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    :global(.animate-spin-slow) {
+    .plan-card-enter,
+    .section-enter {
       animation: none;
     }
 
-    .plan-card,
-    .description-diff-section {
+    .progress-ring {
       animation: none;
     }
   }

@@ -1062,8 +1062,8 @@
         <div class="mb-8 rounded-xl border border-default bg-subtle p-5 transition-shadow duration-200 hover:shadow-md">
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2.5">
-              <div class="rounded-lg bg-accent/10 p-1.5">
-                <Shield class="h-5 w-5 text-accent" />
+              <div class="rounded-lg bg-accent-default/10 p-1.5">
+                <Shield class="h-5 w-5 text-accent-default" />
               </div>
               <div>
                 <h3 class="text-sm font-semibold text-default">{m.audit_retention_policy()}</h3>
@@ -1081,8 +1081,8 @@
             <!-- Display Mode -->
             <div class="rounded-lg bg-primary p-4 space-y-2" transition:slide={{ duration: 200 }}>
               <div class="flex items-start gap-3">
-                <div class="rounded-md bg-accent/10 p-1.5">
-                  <Calendar class="h-4 w-4 text-accent" />
+                <div class="rounded-md bg-accent-default/10 p-1.5">
+                  <Calendar class="h-4 w-4 text-accent-default" />
                 </div>
                 <div class="flex-1">
                   <div class="flex items-baseline gap-2 mb-1">

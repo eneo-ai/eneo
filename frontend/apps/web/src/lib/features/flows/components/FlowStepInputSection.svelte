@@ -6,6 +6,7 @@
   import type { FlowStep } from "@intric/intric-js";
   import { createEventDispatcher } from "svelte";
   import { slide } from "svelte/transition";
+  import { Alert, Collapsible } from "@eneo/ui";
   import { IconChevronRight } from "@intric/icons/chevron-right";
   import { IconMicrophone } from "@intric/icons/microphone";
   import {
@@ -238,15 +239,9 @@
             </p>
           </div>
 
-          <div
-            class="border-default/70 bg-secondary/10 overflow-hidden rounded-lg border"
-          >
-            <button
-              type="button"
+          <Collapsible.Root bind:open={showRuntimeInputAdvanced} class="border-default/70 bg-secondary/10 overflow-hidden rounded-lg border">
+            <Collapsible.Trigger
               class="hover:bg-secondary/20 flex w-full items-center gap-2 px-3 py-3 text-left text-sm font-medium transition-colors"
-              aria-expanded={showRuntimeInputAdvanced}
-              aria-controls="runtime-input-advanced-panel"
-              on:click={() => (showRuntimeInputAdvanced = !showRuntimeInputAdvanced)}
             >
               <IconChevronRight
                 class="size-3.5 shrink-0 transition-transform duration-200 {showRuntimeInputAdvanced
@@ -254,12 +249,10 @@
                   : ''}"
               />
               {m.flow_runtime_input_more_settings()}
-            </button>
-            {#if showRuntimeInputAdvanced}
+            </Collapsible.Trigger>
+            <Collapsible.Content>
               <div
-                id="runtime-input-advanced-panel"
                 class="border-default/70 border-t px-3 pt-3 pb-3"
-                transition:slide={{ duration: 200 }}
               >
                 <div class="grid gap-3 md:grid-cols-2">
                   <div class="flex flex-col gap-1">
@@ -368,8 +361,8 @@
                   </div>
                 </div>
               </div>
-            {/if}
-          </div>
+            </Collapsible.Content>
+          </Collapsible.Root>
         </div>
       {/if}
     </div>
@@ -388,27 +381,22 @@
 {/if}
 
 {#if step.input_type === "audio"}
-  <div
-    class={`mb-3 flex items-center justify-between rounded-[1rem] border px-5 py-4 ${
-      !transcriptionEnabled || !transcriptionModelConfigured
-        ? "border-warning-default/30 bg-warning-dimmer/50"
-        : "border-accent-default/15 bg-accent-default/5"
-    }`}
+  <Alert.Root
+    class="mb-3 flex items-center justify-between rounded-[1rem] px-5 py-4 {!transcriptionEnabled || !transcriptionModelConfigured
+      ? 'border-warning-default/30 bg-warning-dimmer/50'
+      : 'border-accent-default/15 bg-accent-default/5'}"
+    role="status"
   >
     <div class="flex items-center gap-2.5">
       <IconMicrophone
-        class={`size-4 shrink-0 ${
-          !transcriptionEnabled || !transcriptionModelConfigured
-            ? "text-warning-stronger/70"
-            : "text-accent-default"
-        }`}
+        class="size-4 shrink-0 {!transcriptionEnabled || !transcriptionModelConfigured
+          ? 'text-warning-stronger/70'
+          : 'text-accent-default'}"
       />
       <span
-        class={`text-[0.8125rem] font-medium ${
-          !transcriptionEnabled || !transcriptionModelConfigured
-            ? "text-warning-stronger"
-            : "text-primary"
-        }`}
+        class="text-[0.8125rem] font-medium {!transcriptionEnabled || !transcriptionModelConfigured
+          ? 'text-warning-stronger'
+          : 'text-primary'}"
       >
           {#if !transcriptionEnabled}
             {m.flow_transcription_audio_nudge()}
@@ -422,16 +410,14 @@
         </span>
       </div>
       <button
-        class={`flex items-center gap-1 text-xs font-medium transition-colors ${
-          !transcriptionEnabled || !transcriptionModelConfigured
-            ? "text-warning-stronger/80 hover:text-warning-stronger"
-            : "text-accent-default hover:text-accent-stronger"
-        }`}
+        class="flex items-center gap-1 text-xs font-medium transition-colors {!transcriptionEnabled || !transcriptionModelConfigured
+          ? 'text-warning-stronger/80 hover:text-warning-stronger'
+          : 'text-accent-default hover:text-accent-stronger'}"
         on:click={() => dispatch("openTranscriptionSettings")}
       >
         {m.edit()}
         {m.flow_stage_transcription()}
         <IconChevronRight class="size-3.5" />
       </button>
-    </div>
+    </Alert.Root>
 {/if}

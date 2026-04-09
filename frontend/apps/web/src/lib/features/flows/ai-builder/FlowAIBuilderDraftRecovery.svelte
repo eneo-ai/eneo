@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Button, Dialog } from "@intric/ui";
+  import { Badge, Card, Separator } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import type { AIBuilderDraftSession } from "./protocol";
   import { writable } from "svelte/store";
@@ -71,38 +72,53 @@
   }
 </script>
 
-<section class="draft-shell">
-  <div class="draft-content">
-    <div class="draft-header">
-      <h2 class="draft-title">{m.ai_builder_drafts_title()}</h2>
-      <p class="draft-subtitle">{m.ai_builder_drafts_subtitle()}</p>
+<section class="flex flex-1 min-h-0 items-start justify-center overflow-y-auto px-6 py-12 max-[480px]:px-4 max-[480px]:py-6">
+  <div class="flex w-full max-w-[40rem] flex-col gap-6">
+    <div class="flex flex-col gap-1">
+      <h2 class="text-primary text-xl font-semibold leading-tight -tracking-[0.01em]">{m.ai_builder_drafts_title()}</h2>
+      <p class="text-secondary text-sm leading-relaxed">{m.ai_builder_drafts_subtitle()}</p>
     </div>
 
-    <div class="draft-list">
+    <div class="flex flex-col gap-2.5">
       {#each drafts as draft, i (draft.session_id)}
         {@const badge = stepBadge(draft.status)}
         {@const isFirst = i === 0}
-        <article class="draft-card" class:draft-card-highlighted={isFirst}>
-          <div class="draft-card-main">
-            <div class="draft-card-icon">
+        <Card.Root
+          class="group/draft-card !py-0 !gap-0 transition-[border-color,box-shadow] duration-150 {isFirst
+            ? 'border-accent-default/40 bg-accent-default/[0.03] hover:border-accent-default/60 hover:shadow-[0_2px_8px_oklch(from_var(--accent-default)_l_c_h/0.08)]'
+            : 'hover:border-stronger hover:shadow-sm'}"
+        >
+          <div class="flex items-start gap-3.5 px-5 py-4 max-[480px]:flex-wrap">
+            <div
+              class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg {isFirst
+                ? 'bg-accent-default/10 text-accent-default'
+                : 'bg-secondary text-muted'}"
+            >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
                 <path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 0 0 3 3.5v13A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 11.378 2H4.5Z" clip-rule="evenodd" />
               </svg>
             </div>
-            <div class="draft-card-body">
-              <h3 class="draft-card-title">{draft.draft_title ?? m.ai_builder_draft_untitled()}</h3>
-              <div class="draft-card-meta">
-                <span class="draft-timestamp">{formatRelativeTime(draft.updated_at)}</span>
-                <span class="meta-dot">·</span>
-                <span class="step-badge" class:badge-discovering={badge.variant === "discovering"} class:badge-confirming={badge.variant === "confirming"} class:badge-building={badge.variant === "building"} class:badge-reviewing={badge.variant === "reviewing"}>
+            <div class="flex min-w-0 flex-1 flex-col gap-1.5">
+              <h3 class="text-primary line-clamp-1 text-[0.9375rem] font-semibold leading-snug">{draft.draft_title ?? m.ai_builder_draft_untitled()}</h3>
+              <div class="flex items-center gap-1.5 text-xs">
+                <span class="text-muted">{formatRelativeTime(draft.updated_at)}</span>
+                <span class="text-muted">&middot;</span>
+                <Badge
+                  variant="outline"
+                  class="h-auto rounded-full border-transparent px-2 py-0.5 text-[0.6875rem] font-medium tracking-[0.01em] {badge.variant === 'building'
+                    ? 'bg-warning-dimmer text-warning-stronger'
+                    : badge.variant === 'reviewing'
+                      ? 'bg-positive-dimmer text-positive-stronger'
+                      : 'bg-accent-default/10 text-accent-stronger'}"
+                >
                   {badge.label}
-                </span>
+                </Badge>
               </div>
             </div>
 
-            <div class="draft-card-actions">
+            <div class="flex shrink-0 items-center gap-1.5 self-center max-[480px]:w-full max-[480px]:justify-end">
               <button
-                class="action-discard"
+                class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted opacity-0 transition-all duration-150 hover:bg-negative-dimmer hover:text-negative-stronger group-hover/draft-card:opacity-100 focus-visible:opacity-100 max-[480px]:opacity-100"
                 onclick={() => requestDiscard(draft.session_id)}
                 aria-label={m.ai_builder_discard_draft()}
               >
@@ -121,11 +137,13 @@
               {/if}
             </div>
           </div>
-        </article>
+        </Card.Root>
       {/each}
     </div>
 
-    <div class="new-flow-action">
+    <Separator />
+
+    <div class="flex pt-1">
       <Button variant="outlined" onclick={onstartfresh}>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
           <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
@@ -151,233 +169,3 @@
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
-
-<style lang="postcss">
-  @reference "@intric/ui/styles";
-
-  .draft-shell {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 3rem 1.5rem;
-    overflow-y: auto;
-  }
-
-  .draft-content {
-    display: flex;
-    width: min(40rem, 100%);
-    flex-direction: column;
-    gap: 1.5rem;
-  }
-
-  /* --- Header --- */
-
-  .draft-header {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .draft-title {
-    font-size: 1.25rem;
-    line-height: 1.2;
-    font-weight: 650;
-    color: var(--text-primary);
-    letter-spacing: -0.01em;
-  }
-
-  .draft-subtitle {
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-    line-height: 1.5;
-  }
-
-  /* --- Draft list --- */
-
-  .draft-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.625rem;
-  }
-
-  /* --- Draft card --- */
-
-  .draft-card {
-    border-radius: 0.75rem;
-    border: 1px solid var(--border-default);
-    background: var(--bg-primary);
-    padding: 1rem 1.25rem;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
-  }
-
-  .draft-card:hover {
-    border-color: var(--border-stronger);
-    box-shadow: 0 1px 6px oklch(0 0 0 / 0.04);
-  }
-
-  .draft-card-highlighted {
-    border-color: oklch(from var(--accent-default) l c h / 0.4);
-    background: oklch(from var(--accent-default) l c h / 0.03);
-  }
-
-  .draft-card-highlighted:hover {
-    border-color: oklch(from var(--accent-default) l c h / 0.6);
-    box-shadow: 0 2px 8px oklch(from var(--accent-default) l c h / 0.08);
-  }
-
-  .draft-card-main {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.875rem;
-  }
-
-  .draft-card-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    flex-shrink: 0;
-    border-radius: 0.5rem;
-    background: var(--bg-secondary);
-    color: var(--text-muted);
-    margin-top: 0.125rem;
-  }
-
-  .draft-card-highlighted .draft-card-icon {
-    background: oklch(from var(--accent-default) l c h / 0.1);
-    color: var(--accent-default);
-  }
-
-  .draft-card-body {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.375rem;
-  }
-
-  .draft-card-title {
-    font-size: 0.9375rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    line-height: 1.3;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: -webkit-box;
-    -webkit-line-clamp: 1;
-    -webkit-box-orient: vertical;
-  }
-
-  .draft-card-meta {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    font-size: 0.75rem;
-  }
-
-  .draft-timestamp {
-    color: var(--text-muted);
-  }
-
-  .meta-dot {
-    color: var(--text-muted);
-  }
-
-  /* --- Step badge --- */
-
-  .step-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    border-radius: 999px;
-    padding: 0.125rem 0.5rem;
-    font-weight: 500;
-    font-size: 0.6875rem;
-    letter-spacing: 0.01em;
-  }
-
-  .badge-discovering {
-    background: oklch(from var(--accent-default) l c h / 0.1);
-    color: var(--accent-stronger);
-  }
-
-  .badge-confirming {
-    background: oklch(from var(--accent-default) l c h / 0.1);
-    color: var(--accent-stronger);
-  }
-
-  .badge-building {
-    background: var(--bg-warning-dimmer);
-    color: var(--text-warning-stronger);
-  }
-
-  .badge-reviewing {
-    background: var(--bg-positive-dimmer);
-    color: var(--text-positive-stronger);
-  }
-
-  /* --- Actions --- */
-
-  .draft-card-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    flex-shrink: 0;
-    align-self: center;
-  }
-
-  .action-discard {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.75rem;
-    height: 1.75rem;
-    border-radius: 0.375rem;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: color 0.15s ease, background 0.15s ease;
-    flex-shrink: 0;
-    opacity: 0;
-  }
-
-  .draft-card:hover .action-discard,
-  .action-discard:focus-visible {
-    opacity: 1;
-  }
-
-  .action-discard:hover {
-    color: var(--text-negative-stronger);
-    background: var(--bg-negative-dimmer);
-  }
-
-  .new-flow-action {
-    display: flex;
-    padding-top: 0.25rem;
-  }
-
-  /* --- Responsive --- */
-
-  @media (max-width: 480px) {
-    .draft-shell {
-      padding: 1.5rem 1rem;
-    }
-
-    .draft-card-main {
-      flex-wrap: wrap;
-    }
-
-    .draft-card-actions {
-      width: 100%;
-      justify-content: flex-end;
-    }
-
-    .action-discard {
-      opacity: 1;
-    }
-  }
-</style>

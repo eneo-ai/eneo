@@ -192,7 +192,7 @@
           <div
             class="border-default flex w-full cursor-pointer items-center gap-2 border-b px-3 py-1.5 text-left transition-colors
               {selectedItemKeySet.has(siteRootSelectionKey)
-              ? 'bg-accent-dimmer border-accent'
+              ? 'bg-accent-dimmer border-accent-default'
               : 'hover:bg-hover-default'}"
           >
             <div class="w-3.5"></div>
