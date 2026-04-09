@@ -223,7 +223,9 @@ class Assistant(Entity):
         self._metadata_json = metadata_json
 
     def has_knowledge(self) -> bool:
-        return self.collections or self.websites or self.integration_knowledge_list  # type: ignore[return-value]
+        return bool(
+            self.collections or self.websites or self.integration_knowledge_list
+        )
 
     def has_mcp(self) -> bool:
         return bool(self.mcp_servers)

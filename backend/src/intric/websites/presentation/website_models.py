@@ -49,10 +49,9 @@ class WebsiteCreateRequestDeprecated(BaseModel):
 
 class WebsiteInDBBase(InDB):
     space_id: Optional[UUID] = None
-    embedding_model_id: Optional[UUID] = None  # type: ignore[assignment]
     user_id: UUID
     tenant_id: UUID
-    embedding_model_id: UUID  # type: ignore[assignment]
+    embedding_model_id: UUID
     size: int = 0
 
 
