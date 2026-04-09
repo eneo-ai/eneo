@@ -252,7 +252,7 @@
       </button>
       <button
         type="button"
-        class="text-secondary hover:bg-hover-dimmer inline-flex size-6 items-center justify-center rounded p-0.5 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
+        class="text-secondary hover:bg-hover-dimmer inline-flex size-6 items-center justify-center rounded p-0.5 hover:text-negative-stronger focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
         on:click|stopPropagation={() => dispatch("remove")}
         title={m.flow_step_remove()}
         aria-label={m.flow_step_remove()}
