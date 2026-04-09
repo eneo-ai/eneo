@@ -1,11 +1,12 @@
 <script lang="ts">
   import type { SpaceSparse } from "@intric/intric-js";
-  import { Check, ChevronsUpDown, Building2, MessageSquare, AppWindow, X } from "lucide-svelte";
+  import { Check, ChevronDown, Building2, MessageSquare, AppWindow, X } from "lucide-svelte";
   import { tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import * as Command from "$lib/components/ui/command/index.js";
-  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { selectTriggerClass } from "$lib/components/ui/select/index.js";
 
   type ResourceType = "space" | "assistant" | "app";
   type Resource = {
@@ -23,20 +24,31 @@
     spaces = [],
     assistants = [],
     apps = [],
-    disabled = false
+    disabled = false,
+    id = "scope-resource-trigger",
+    label,
+    placeholder
   } = $props<{
-    scopeType: ResourceType;
+    /** When `null`, the picker renders disabled with the placeholder text. */
+    scopeType: ResourceType | null;
     value?: string | null;
     spaces?: SpaceSparse[];
     assistants?: ResourceOption[];
     apps?: ResourceOption[];
     disabled?: boolean;
+    /** Trigger element id, used for label association. Override if rendering more than one. */
+    id?: string;
+    /** Override the field label. Defaults to `m.api_keys_select_resource({ scopeType })`. */
+    label?: string;
+    /** Override the trigger placeholder when nothing is selected. Defaults to the same. */
+    placeholder?: string;
   }>();
 
   let open = $state(false);
   let triggerRef = $state<HTMLButtonElement | null>(null);
 
-  // Build resource list based on scope type
+  // Build resource list based on scope type. When `scopeType` is null the list is empty
+  // (and the trigger is rendered disabled — see `isDisabled` below).
   const resources = $derived.by((): Resource[] => {
     switch (scopeType) {
       case "space":
@@ -79,61 +91,83 @@
     value = null;
   }
 
-  function getIcon(type: ResourceType) {
+  function getIcon(type: ResourceType | null) {
     switch (type) {
-      case "space":
-        return Building2;
       case "assistant":
         return MessageSquare;
       case "app":
         return AppWindow;
+      // `space` and the null/disabled state both fall back to the building icon.
+      case "space":
+      default:
+        return Building2;
     }
   }
 
-  // Reset when scope type changes
+  // Reset the bound value whenever the scope type changes (including when it becomes null) so a
+  // stale id from a previous type can never leak through to the parent's filter params.
   $effect(() => {
-    if (scopeType) {
-      value = null;
-    }
+    void scopeType;
+    value = null;
   });
 
+  const isDisabled = $derived(disabled || scopeType === null);
   const Icon = $derived(getIcon(scopeType));
-  const triggerLabel = $derived(
-    selectedResource?.name ?? m.api_keys_search_resource({ scopeType })
+
+  // Default-on-the-fly translation lookups: only run when scopeType is non-null. The disabled
+  // state uses the explicit `placeholder` prop if provided, otherwise falls back to the new
+  // admin-flavored "choose a scope type first" message.
+  const defaultLabel = $derived(
+    scopeType === null
+      ? m.api_keys_admin_label_scope_target()
+      : m.api_keys_select_resource({ scopeType })
+  );
+  const defaultPlaceholder = $derived(
+    scopeType === null
+      ? m.api_keys_admin_scope_target_placeholder()
+      : m.api_keys_select_resource({ scopeType })
+  );
+  const fieldLabel = $derived(label ?? defaultLabel);
+  const triggerPlaceholder = $derived(placeholder ?? defaultPlaceholder);
+  const triggerText = $derived(selectedResource?.name ?? triggerPlaceholder);
+  const searchPlaceholder = $derived(
+    scopeType === null ? triggerPlaceholder : m.api_keys_search_resource({ scopeType })
+  );
+  const emptyText = $derived(
+    scopeType === null ? triggerPlaceholder : m.api_keys_no_resource_found({ scopeType })
   );
 </script>
 
-<div class="w-full">
-  <span id="scope-resource-label" class="text-default mb-1.5 block text-sm font-medium">
-    {m.api_keys_select_resource({ scopeType })}
-  </span>
+<Field.Field>
+  <Field.Label for={id}>{fieldLabel}</Field.Label>
 
   <Popover.Root bind:open>
     <Popover.Trigger>
       {#snippet child({ props })}
-        <Button
+        <button
           {...props}
-          bind:ref={triggerRef}
-          variant="outline"
+          {id}
+          bind:this={triggerRef}
+          type="button"
           role="combobox"
           aria-expanded={open}
-          aria-labelledby="scope-resource-label"
-          {disabled}
-          class="h-11 w-full justify-between"
+          disabled={isDisabled}
+          data-slot="select-trigger"
+          data-size="default"
+          data-placeholder={selectedResource ? undefined : ""}
+          class={selectTriggerClass}
         >
-          <span class="flex min-w-0 items-center gap-2">
-            <Icon class="text-muted h-4 w-4 shrink-0" />
-            <span class="truncate {selectedResource ? 'text-default' : 'text-muted'}">
-              {triggerLabel}
-            </span>
+          <span class="flex min-w-0 items-center gap-1.5">
+            <Icon class="text-muted-foreground size-4 shrink-0" />
+            <span class="truncate">{triggerText}</span>
           </span>
           <span class="flex shrink-0 items-center gap-1">
-            {#if value}
+            {#if value && !isDisabled}
               <span
                 role="button"
                 tabindex="0"
                 aria-label="Clear selection"
-                class="hover:bg-hover-default text-muted hover:text-default rounded p-1 transition-colors"
+                class="hover:bg-muted text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors"
                 onclick={clearSelection}
                 onkeydown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
@@ -143,19 +177,19 @@
                   }
                 }}
               >
-                <X class="h-3.5 w-3.5" />
+                <X class="size-3" />
               </span>
             {/if}
-            <ChevronsUpDown class="text-muted h-4 w-4 opacity-60" />
+            <ChevronDown class="text-muted-foreground size-4" />
           </span>
-        </Button>
+        </button>
       {/snippet}
     </Popover.Trigger>
     <Popover.Content class="w-(--bits-popover-anchor-width) min-w-[280px] p-0" align="start">
       <Command.Root>
-        <Command.Input placeholder={m.api_keys_search_resource({ scopeType })} />
+        <Command.Input placeholder={searchPlaceholder} />
         <Command.List>
-          <Command.Empty>{m.api_keys_no_resource_found({ scopeType })}</Command.Empty>
+          <Command.Empty>{emptyText}</Command.Empty>
           <Command.Group>
             {#each resources as resource (resource.id)}
               {@const selected = resource.id === value}
@@ -163,7 +197,7 @@
                 value={`${resource.name} ${resource.id} ${resource.spaceName ?? ""}`}
                 onSelect={() => handleSelect(resource)}
               >
-                <Icon class="text-muted h-4 w-4 shrink-0" />
+                <Icon class="text-muted-foreground size-4 shrink-0" />
                 <div class="min-w-0 flex-1">
                   <p class="text-default truncate text-sm font-medium">{resource.name}</p>
                   {#if resource.spaceName}
@@ -177,7 +211,7 @@
                   {/if}
                 </div>
                 {#if selected}
-                  <Check class="text-accent-default h-4 w-4 shrink-0" />
+                  <Check class="text-accent-default size-4 shrink-0" />
                 {/if}
               </Command.Item>
             {/each}
@@ -186,4 +220,4 @@
       </Command.Root>
     </Popover.Content>
   </Popover.Root>
-</div>
+</Field.Field>

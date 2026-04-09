@@ -999,8 +999,14 @@
                 {/each}
               </div>
 
-              <!-- Advanced Filters -->
-              <div class="grid gap-4 md:grid-cols-3">
+              <!--
+                Advanced Filters: a single 2-column stack where each row pairs fields that
+                belong together. Reading top-to-bottom signals "what kind of key am I looking
+                for?" — scope first, then state/type, then ownership/time. Results limit lives
+                in its own row at the bottom because it's a query setting, not a filter.
+              -->
+              <div class="grid gap-4 md:grid-cols-2">
+                <!-- Row 1: scope type + its target -->
                 <Field.Field>
                   <Field.Label for="filter-scope-type">
                     {m.api_keys_admin_label_scope_type()}
@@ -1017,6 +1023,16 @@
                     </Select.Content>
                   </Select.Root>
                 </Field.Field>
+                <ScopeResourceSelector
+                  scopeType={scopeSelectorType}
+                  bind:value={scopeId}
+                  {spaces}
+                  assistants={assistantOptions}
+                  apps={appOptions}
+                  id="filter-scope-target"
+                />
+
+                <!-- Row 2: lifecycle state + key class -->
                 <Field.Field>
                   <Field.Label for="filter-state">{m.api_keys_admin_label_state()}</Field.Label>
                   <Select.Root type="single" bind:value={stateFilter}>
@@ -1047,20 +1063,8 @@
                     </Select.Content>
                   </Select.Root>
                 </Field.Field>
-              </div>
 
-              <div class="grid gap-4 md:grid-cols-4">
-                {#if scopeSelectorType}
-                  <ScopeResourceSelector
-                    scopeType={scopeSelectorType}
-                    bind:value={scopeId}
-                    {spaces}
-                    assistants={assistantOptions}
-                    apps={appOptions}
-                  />
-                {:else}
-                  <div></div>
-                {/if}
+                <!-- Row 3: ownership + time window -->
                 <Field.Field>
                   <Field.Label for="filter-created-by">
                     {userRelation === "owner"
@@ -1083,22 +1087,28 @@
                     placeholder="14"
                   />
                 </Field.Field>
-                <Field.Field>
-                  <Field.Label for="filter-results-limit">
-                    {m.api_keys_admin_label_results_limit()}
-                  </Field.Label>
-                  <Select.Root type="single" bind:value={limit}>
-                    <Select.Trigger id="filter-results-limit">
-                      {resultLimitOptions.find((o) => o.value === limit)?.label ?? limit}
-                    </Select.Trigger>
-                    <Select.Content>
-                      {#each resultLimitOptions as opt (opt.value)}
-                        <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
-                      {/each}
-                    </Select.Content>
-                  </Select.Root>
-                </Field.Field>
               </div>
+
+              <!--
+                Query setting (not a filter): kept on its own row with a constrained width
+                to make the categorical difference obvious. The visual gap above is the
+                same `space-y-5` from the parent, so it reads as "another section".
+              -->
+              <Field.Field class="md:max-w-[calc(50%-0.5rem)]">
+                <Field.Label for="filter-results-limit">
+                  {m.api_keys_admin_label_results_limit()}
+                </Field.Label>
+                <Select.Root type="single" bind:value={limit}>
+                  <Select.Trigger id="filter-results-limit">
+                    {resultLimitOptions.find((o) => o.value === limit)?.label ?? limit}
+                  </Select.Trigger>
+                  <Select.Content>
+                    {#each resultLimitOptions as opt (opt.value)}
+                      <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
+                    {/each}
+                  </Select.Content>
+                </Select.Root>
+              </Field.Field>
 
               <!-- Filter Actions -->
               <div class="border-default flex items-center justify-between border-t pt-2">

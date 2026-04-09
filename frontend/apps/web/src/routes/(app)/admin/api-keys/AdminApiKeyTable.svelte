@@ -121,6 +121,22 @@
     return `${fallbackId.slice(0, 8)}…`;
   }
 
+  // The scope_id field is meaningful only for non-tenant scopes; we relabel it per type so a
+  // reader sees "Assistant ID" / "App ID" / "Space ID" instead of the abstract "Scope ID".
+  // Falls back to the generic label if the backend ever sends an unknown scope_type.
+  function getScopeIdLabel(scopeType: string | null | undefined): string {
+    switch (scopeType) {
+      case "space":
+        return m.api_keys_admin_scope_id_label_space();
+      case "assistant":
+        return m.api_keys_admin_scope_id_label_assistant();
+      case "app":
+        return m.api_keys_admin_scope_id_label_app();
+      default:
+        return m.api_keys_admin_scope_id_label();
+    }
+  }
+
   function getMatchReasonLabel(reason: string): string {
     switch (reason) {
       case "exact_secret":
@@ -867,18 +883,24 @@
                     </div>
 
                     {#if key.scope_id}
-                      <div class="sm:col-span-2">
-                        <p class="text-muted mb-2 text-xs">{m.api_keys_admin_scope_id_label()}</p>
-                        {#if scopeNames[key.scope_id]}
-                          <p class="text-default mb-2 text-sm font-medium">
-                            {scopeNames[key.scope_id]}
-                          </p>
-                        {/if}
-                        <code
-                          class="bg-primary border-default text-default inline-block rounded-md border px-3 py-1.5 font-mono text-xs"
-                        >
-                          {key.scope_id}
-                        </code>
+                      {@const ScopeIdIcon = scopeConfig[key.scope_type]?.icon ?? Building2}
+                      <div class="flex items-start gap-3 sm:col-span-2">
+                        <div class="bg-primary flex h-9 w-9 items-center justify-center rounded-lg">
+                          <ScopeIdIcon class="text-muted h-4 w-4" />
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <p class="text-muted text-xs">{getScopeIdLabel(key.scope_type)}</p>
+                          {#if scopeNames[key.scope_id]}
+                            <p class="text-default text-sm font-medium">
+                              {scopeNames[key.scope_id]}
+                            </p>
+                          {/if}
+                          <code
+                            class="bg-primary border-default text-default mt-1.5 inline-block rounded-md border px-3 py-1.5 font-mono text-xs"
+                          >
+                            {key.scope_id}
+                          </code>
+                        </div>
                       </div>
                     {/if}
 
