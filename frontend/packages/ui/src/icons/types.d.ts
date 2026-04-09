@@ -99,6 +99,9 @@ declare module "@intric/icons/key" {
 declare module "@intric/icons/stop-circle" {
   export { Icon as IconStopCircle } from "@intric/icons/*";
 }
+declare module "@intric/icons/group" {
+  export { Icon as IconGroup } from "@intric/icons/*";
+}
 declare module "@intric/icons/sort-desc" {
   export { Icon as IconSortDesc } from "@intric/icons/*";
 }

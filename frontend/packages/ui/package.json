@@ -21,11 +21,15 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "svelte": "./dist/index.js"
+      "svelte": "./dist/index.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./components/markdown": {
       "types": "./dist/Markdown/index.d.ts",
-      "svelte": "./dist/Markdown/index.js"
+      "svelte": "./dist/Markdown/index.js",
+      "import": "./dist/Markdown/index.js",
+      "default": "./dist/Markdown/index.js"
     },
     "./styles": "./src/styles/main.css",
     "./styles/prose": "./src/styles/prose.css",
