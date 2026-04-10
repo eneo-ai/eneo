@@ -115,16 +115,15 @@ import contextlib
 from typing import AsyncGenerator, Generator
 
 import psycopg2
-from alembic import command
-from alembic.config import Config
+from cryptography.fernet import Fernet
 from dependency_injector import providers
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 
-from cryptography.fernet import Fernet
-
+from alembic import command
+from alembic.config import Config
 from init_db import add_tenant_user
 from intric.database.database import sessionmanager
 from intric.main.config import Settings, reset_settings, set_settings
@@ -507,25 +506,6 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
         ON CONFLICT (name) DO NOTHING
     """)
     # Add API key scope enforcement feature flags.
-    # These rows are NOT needed for normal scope enforcement (which fail-closed defaults
-    # to True when the row is missing). They ARE needed because the settings API
-    # (PATCH /settings/scope-enforcement, /settings/strict-mode) calls
-    # _require_feature_flag() which raises ValueError if the global row doesn't exist.
-    # The access matrix tests toggle these flags via the settings API.
-    cursor.execute("""
-        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
-        VALUES (gen_random_uuid(), 'api_key_scope_enforcement',
-            'Enforce API key scope restrictions',
-            true, now(), now())
-        ON CONFLICT (name) DO NOTHING
-    """)
-    cursor.execute("""
-        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
-        VALUES (gen_random_uuid(), 'api_key_strict_mode',
-            'Enable strict scope mode for API keys',
-            false, now(), now())
-        ON CONFLICT (name) DO NOTHING
-    """)
     conn.commit()
     cursor.close()
     conn.close()
@@ -761,10 +741,11 @@ def legacy_credentials_mode(test_settings):
             # Test runs with strict mode disabled
             pass
     """
-    from intric.main.config import set_settings, get_settings
+    from dependency_injector import providers
+
+    from intric.main.config import get_settings, set_settings
     from intric.main.container.container import Container
     from intric.settings.encryption_service import EncryptionService
-    from dependency_injector import providers
 
     # Save original settings
     original_settings = get_settings()
@@ -1012,8 +993,9 @@ async def tenant_user_token(test_tenant, test_settings):
     Creates the JWT directly using jwt.encode() with test_settings values,
     matching the pattern used in patch_auth_service_jwt fixture.
     """
-    import jwt
     from datetime import datetime, timedelta, timezone
+
+    import jwt
 
     now = datetime.now(timezone.utc)
 
@@ -1051,13 +1033,14 @@ async def seed_default_models(setup_database, monkeypatch):
 
     This fixture runs automatically for all integration tests after database setup.
     """
+    import sqlalchemy as sa
+
+    from intric.database.database import sessionmanager
     from intric.database.tables.ai_models_table import CompletionModels, EmbeddingModels
     from intric.database.tables.model_providers_table import ModelProviders
-    from intric.database.database import sessionmanager
-    from intric.tenants.tenant_service import TenantService
-    from intric.tenants.tenant import TenantBase, TenantInDB
     from intric.database.tables.tenant_table import Tenants
-    import sqlalchemy as sa
+    from intric.tenants.tenant import TenantBase, TenantInDB
+    from intric.tenants.tenant_service import TenantService
 
     # Store IDs of created models for the patch function
     completion_model_ids = {}

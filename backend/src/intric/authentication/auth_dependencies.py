@@ -307,13 +307,9 @@ class ScopeFilter:
 def get_scope_filter(request: Request) -> ScopeFilter:
     """Extract scope filter from request state for scoped API keys.
 
-    Returns an empty ScopeFilter for tenant-scoped keys, bearer auth, or when
-    scope enforcement is disabled via env/tenant kill-switch.
+    Returns an empty ScopeFilter for tenant-scoped keys or bearer auth.
     Called at the router boundary; the result is passed to service methods.
     """
-    if getattr(request.state, "scope_enforcement_enabled", True) is False:
-        return ScopeFilter()
-
     scope_type = getattr(request.state, "api_key_scope_type", None)
     scope_id = getattr(request.state, "api_key_scope_id", None)
 

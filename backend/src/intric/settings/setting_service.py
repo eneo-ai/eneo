@@ -7,7 +7,6 @@ from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.main.config import get_settings as get_app_settings
-from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permissions
 from intric.settings.settings import SettingsInDB, SettingsPublic, SettingsUpsert
@@ -96,23 +95,6 @@ class SettingService:
             )
         )
 
-        api_key_scope_enforcement = (
-            overrides["api_key_scope_enforcement"]
-            if "api_key_scope_enforcement" in overrides
-            else await self.feature_flag_service.check_is_feature_enabled_fail_closed(
-                feature_name="api_key_scope_enforcement",
-                tenant_id=self.user.tenant_id,
-            )
-        )
-
-        api_key_strict_mode = (
-            overrides["api_key_strict_mode"]
-            if "api_key_strict_mode" in overrides
-            else await self.feature_flag_service.check_is_feature_enabled(
-                feature_name="api_key_strict_mode",
-                tenant_id=self.user.tenant_id,
-            )
-        )
         api_key_expiry_notifications = (
             overrides["api_key_expiry_notifications"]
             if "api_key_expiry_notifications" in overrides
@@ -140,8 +122,6 @@ class SettingService:
             audit_logging_enabled=audit_logging_enabled,
             tenant_credentials_enabled=app_settings.tenant_credentials_enabled,
             provisioning=provisioning,
-            api_key_scope_enforcement=api_key_scope_enforcement,
-            api_key_strict_mode=api_key_strict_mode,
             api_key_expiry_notifications=api_key_expiry_notifications,
         )
 
@@ -299,129 +279,6 @@ class SettingService:
         return await self._build_settings_public(
             settings_in_db=settings,
             overrides={"provisioning": enabled},
-        )
-
-    @validate_permissions(Permission.ADMIN)
-    async def update_scope_enforcement_setting(self, enabled: bool) -> SettingsPublic:
-        """Toggle the api_key_scope_enforcement feature flag for tenant.
-
-        **Admin Only:** Only users with admin permissions can toggle this setting.
-        """
-        logger.info(
-            "Admin user %s toggling scope enforcement to %s for tenant %s",
-            self.user.username,
-            enabled,
-            self.user.tenant_id,
-        )
-
-        old_enabled = (
-            await self.feature_flag_service.check_is_feature_enabled_fail_closed(
-                feature_name="api_key_scope_enforcement",
-                tenant_id=self.user.tenant_id,
-            )
-        )
-
-        strict_was_enabled = False
-        if not enabled:
-            strict_was_enabled = (
-                await self.feature_flag_service.check_is_feature_enabled(
-                    feature_name="api_key_strict_mode",
-                    tenant_id=self.user.tenant_id,
-                )
-            )
-
-        await self._set_feature_flag_for_tenant(
-            name="api_key_scope_enforcement",
-            enabled=enabled,
-        )
-        if not enabled and strict_was_enabled:
-            await self._set_feature_flag_for_tenant(
-                name="api_key_strict_mode",
-                enabled=False,
-            )
-
-        settings = await self.repo.get(self.user.id)
-
-        logger.info(
-            "Scope enforcement successfully toggled to %s for tenant %s",
-            enabled,
-            self.user.tenant_id,
-        )
-
-        await self.audit_service.log_async(
-            tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
-            action=ActionType.TENANT_SETTINGS_UPDATED,
-            entity_type=EntityType.TENANT_SETTINGS,
-            entity_id=self.user.tenant_id,
-            description=f"Toggled api_key_scope_enforcement to {enabled}",
-            metadata={
-                "setting": "api_key_scope_enforcement",
-                "changes": {
-                    "api_key_scope_enforcement": {"old": old_enabled, "new": enabled}
-                },
-            },
-        )
-
-        overrides: dict[str, bool] = {"api_key_scope_enforcement": enabled}
-        if not enabled and strict_was_enabled:
-            overrides["api_key_strict_mode"] = False
-
-        return await self._build_settings_public(
-            settings_in_db=settings,
-            overrides=overrides,
-        )
-
-    @validate_permissions(Permission.ADMIN)
-    async def update_strict_mode_setting(self, enabled: bool) -> SettingsPublic:
-        """Toggle the api_key_strict_mode feature flag for tenant."""
-        logger.info(
-            "Admin user %s toggling strict mode to %s for tenant %s",
-            self.user.username,
-            enabled,
-            self.user.tenant_id,
-        )
-
-        if enabled:
-            scope_enforcement_enabled = (
-                await self.feature_flag_service.check_is_feature_enabled_fail_closed(
-                    feature_name="api_key_scope_enforcement",
-                    tenant_id=self.user.tenant_id,
-                )
-            )
-            if not scope_enforcement_enabled:
-                raise BadRequestException(
-                    "Strict mode requires scope enforcement to be enabled."
-                )
-
-        old_enabled = await self.feature_flag_service.check_is_feature_enabled(
-            feature_name="api_key_strict_mode",
-            tenant_id=self.user.tenant_id,
-        )
-        await self._set_feature_flag_for_tenant(
-            name="api_key_strict_mode", enabled=enabled
-        )
-
-        settings = await self.repo.get(self.user.id)
-
-        await self.audit_service.log_async(
-            tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
-            action=ActionType.TENANT_SETTINGS_UPDATED,
-            entity_type=EntityType.TENANT_SETTINGS,
-            entity_id=self.user.tenant_id,
-            description=f"Toggled api_key_strict_mode to {enabled}",
-            metadata={
-                "setting": "api_key_strict_mode",
-                "changes": {
-                    "api_key_strict_mode": {"old": old_enabled, "new": enabled}
-                },
-            },
-        )
-
-        return await self._build_settings_public(
-            settings_in_db=settings,
-            overrides={"api_key_strict_mode": enabled},
         )
 
     @validate_permissions(Permission.ADMIN)
