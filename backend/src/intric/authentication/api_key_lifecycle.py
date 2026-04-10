@@ -30,6 +30,7 @@ from intric.authentication.auth_models import (
     ApiKeyV2InDB,
     ResourcePermissions,
     compute_effective_state,
+    derive_permission_from_resource_permissions,
 )
 from intric.main.config import get_settings
 
@@ -73,6 +74,17 @@ class ApiKeyLifecycleService:
             else None
         )
 
+        # For sk_ keys with fine-grained permissions, derive the effective
+        # permission ceiling automatically. pk_ keys always use read.
+        effective_permission = request.permission
+        if (
+            request.key_type == ApiKeyType.SK
+            and request.resource_permissions is not None
+        ):
+            effective_permission = derive_permission_from_resource_permissions(
+                request.resource_permissions
+            )
+
         owner_user_id = (
             None if request.ownership == ApiKeyOwnership.SERVICE else user.id
         )
@@ -84,7 +96,7 @@ class ApiKeyLifecycleService:
             created_by_user_id=user.id,
             scope_type=request.scope_type.value,
             scope_id=request.scope_id,
-            permission=request.permission.value,
+            permission=effective_permission.value,
             key_type=request.key_type.value,
             key_hash=key_hash,
             hash_version=ApiKeyHashVersion.HMAC_SHA256.value,
@@ -337,6 +349,18 @@ class ApiKeyLifecycleService:
                 user_agent=user_agent,
             )
             raise
+
+        # For sk_ keys: if resource_permissions are being updated, derive
+        # the effective permission ceiling automatically.
+        if (
+            key.key_type == ApiKeyType.SK.value
+            and "resource_permissions" in updates
+            and updates["resource_permissions"] is not None
+        ):
+            rp = ResourcePermissions.model_validate(updates["resource_permissions"])
+            updates["permission"] = derive_permission_from_resource_permissions(
+                rp
+            ).value
 
         updated = await self.api_key_repo.update(
             key_id=key.id,

@@ -101,7 +101,13 @@ class ResourcePermissionLevel(str, Enum):
 
 
 class ResourcePermissions(BaseModel):
-    """Per-resource-type permission overrides. Each level must not exceed the key's simple permission."""
+    """Per-resource-type permission overrides for sk_ keys.
+
+    For sk_ keys, the top-level ``permission`` field is derived automatically
+    as ``max(assistants, apps, spaces, knowledge)`` by
+    :func:`derive_permission_from_resource_permissions`.  pk_ keys do not
+    support fine-grained permissions.
+    """
 
     assistants: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     apps: ResourcePermissionLevel = ResourcePermissionLevel.NONE
@@ -109,6 +115,31 @@ class ResourcePermissions(BaseModel):
     knowledge: ResourcePermissionLevel = ResourcePermissionLevel.NONE
 
     model_config = ConfigDict(extra="forbid")
+
+
+_LEVEL_TO_PERMISSION: dict[int, ApiKeyPermission] = {
+    0: ApiKeyPermission.READ,
+    1: ApiKeyPermission.READ,
+    2: ApiKeyPermission.WRITE,
+    3: ApiKeyPermission.ADMIN,
+}
+
+
+def derive_permission_from_resource_permissions(
+    rp: ResourcePermissions,
+) -> ApiKeyPermission:
+    """Compute the effective permission ceiling from fine-grained resource permissions.
+
+    Returns the highest permission level found across all resource types.
+    If all resource types are ``none``, defaults to ``read``.
+    """
+    max_level = max(
+        PERMISSION_LEVEL_ORDER.get(rp.assistants.value, 0),
+        PERMISSION_LEVEL_ORDER.get(rp.apps.value, 0),
+        PERMISSION_LEVEL_ORDER.get(rp.spaces.value, 0),
+        PERMISSION_LEVEL_ORDER.get(rp.knowledge.value, 0),
+    )
+    return _LEVEL_TO_PERMISSION.get(max_level, ApiKeyPermission.READ)
 
 
 class ApiKeyScopeType(str, Enum):

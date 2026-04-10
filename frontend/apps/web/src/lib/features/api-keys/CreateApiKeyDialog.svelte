@@ -462,28 +462,14 @@
     errorMessage = null;
     isSubmitting = true;
 
-    // When fine-grained mode is active, the effective permission ceiling
-    // must be at least as high as the highest resource-level permission
-    // (backend enforces this). Compute it automatically so the user
-    // doesn't have to think about it.
-    const permissionRank: Record<string, number> = { none: 0, read: 1, write: 2, admin: 3 };
-    const rankToPermission: ApiKeyPermission[] = ["read", "read", "write", "admin"];
-    let effectivePermission: ApiKeyPermission = permission;
-    if (permissionMode === "fine-grained") {
-      const maxRank = Math.max(
-        permissionRank[assistantsPermission] ?? 0,
-        permissionRank[appsPermission] ?? 0,
-        permissionRank[spacesPermission] ?? 0,
-        permissionRank[knowledgePermission] ?? 0
-      );
-      effectivePermission = rankToPermission[maxRank] ?? permission;
-    }
-
+    // For sk_ keys, always send resource_permissions — backend derives
+    // the effective `permission` ceiling from them automatically.
+    // For pk_ keys, resource_permissions must be null.
     const request: ApiKeyCreateRequest = {
       name: name.trim(),
       description: description.trim() || null,
       key_type: keyType,
-      permission: effectivePermission,
+      permission,
       scope_type: scopeType,
       scope_id: scopeType === "tenant" ? null : scopeId || manualScopeId.trim() || null,
       ownership: ownership,
@@ -492,7 +478,7 @@
       expires_at: expiresAt,
       rate_limit: rateLimit ? Number(rateLimit) : null,
       resource_permissions:
-        permissionMode === "fine-grained"
+        keyType === "sk_"
           ? {
               assistants: assistantsPermission as ResourcePermissionLevel,
               apps: appsPermission as ResourcePermissionLevel,
@@ -521,10 +507,10 @@
 
     errorMessage = null;
 
-    const permissionRank: Record<string, number> = { none: 0, read: 1, write: 2, admin: 3 };
-    const rankToPermission: ApiKeyPermission[] = ["read", "read", "write", "admin"];
+    // For sk_ keys, always send resource_permissions — backend derives
+    // the effective permission ceiling automatically.
     const nextResourcePermissions =
-      permissionMode === "fine-grained"
+      apiKey.key_type === "sk_"
         ? {
             assistants: assistantsPermission as ResourcePermissionLevel,
             apps: appsPermission as ResourcePermissionLevel,
@@ -532,23 +518,12 @@
             knowledge: knowledgePermission as ResourcePermissionLevel
           }
         : null;
-    const effectivePermission =
-      nextResourcePermissions == null
-        ? permission
-        : (rankToPermission[
-            Math.max(
-              permissionRank[assistantsPermission] ?? 0,
-              permissionRank[appsPermission] ?? 0,
-              permissionRank[spacesPermission] ?? 0,
-              permissionRank[knowledgePermission] ?? 0
-            )
-          ] ?? permission);
 
     const updates: ApiKeyUpdateRequest = {};
     if (name.trim() !== apiKey.name) updates.name = name.trim();
     const desc = description.trim();
     if (desc !== (apiKey.description ?? "")) updates.description = desc || null;
-    if (effectivePermission !== apiKey.permission) updates.permission = effectivePermission;
+    if (permission !== apiKey.permission) updates.permission = permission;
     const parsedRate = rateLimit ? Number(rateLimit) : null;
     if (parsedRate !== (apiKey.rate_limit ?? null)) updates.rate_limit = parsedRate;
     if (

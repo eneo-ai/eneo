@@ -12,7 +12,6 @@ from intric.allowed_origins.origin_matching import origin_matches_pattern
 from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import (
-    PERMISSION_LEVEL_ORDER,
     ApiKeyCreateRequest,
     ApiKeyOwnership,
     ApiKeyPermission,
@@ -20,8 +19,8 @@ from intric.authentication.auth_models import (
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
-    ResourcePermissions,
     compute_effective_state,
+    derive_permission_from_resource_permissions,
 )
 from intric.main.config import get_settings
 from intric.main.exceptions import NotFoundException, UnauthorizedException
@@ -88,6 +87,15 @@ class ApiKeyPolicyService:
                 message="scope_id must be null for tenant-scoped keys.",
             )
 
+        effective_permission = request.permission
+        if (
+            request.key_type == ApiKeyType.SK
+            and request.resource_permissions is not None
+        ):
+            effective_permission = derive_permission_from_resource_permissions(
+                request.resource_permissions
+            )
+
         # Service key guardrails
         if request.ownership == ApiKeyOwnership.SERVICE:
             user = self._require_user()
@@ -98,7 +106,7 @@ class ApiKeyPolicyService:
                     message="Only tenant admins can create service keys.",
                 )
             # Extra guardrail: service write/admin keys need IP allowlist or expiration
-            if request.permission in (ApiKeyPermission.WRITE, ApiKeyPermission.ADMIN):
+            if effective_permission in (ApiKeyPermission.WRITE, ApiKeyPermission.ADMIN):
                 has_ip = (
                     request.allowed_ips is not None and len(request.allowed_ips) > 0
                 )
@@ -171,10 +179,6 @@ class ApiKeyPolicyService:
                     code="invalid_request",
                     message="Public keys (pk_) do not support fine-grained resource permissions.",
                 )
-            self._validate_resource_permissions_ceiling(
-                resource_permissions=request.resource_permissions,
-                permission=request.permission,
-            )
 
         return await self.ensure_creator_authorized(
             scope_type=request.scope_type, scope_id=request.scope_id
@@ -369,47 +373,6 @@ class ApiKeyPolicyService:
                         code="invalid_request",
                         message="Public keys (pk_) do not support fine-grained resource permissions.",
                     )
-                rp = (
-                    raw_rp
-                    if isinstance(raw_rp, ResourcePermissions)
-                    else ResourcePermissions.model_validate(raw_rp)
-                )
-                # Use incoming permission if both are changing, else key's existing
-                ceiling = new_permission or ApiKeyPermission(key.permission)
-                self._validate_resource_permissions_ceiling(
-                    resource_permissions=rp,
-                    permission=ceiling,
-                )
-        elif new_permission is not None:
-            # Permission is being lowered — check existing resource_permissions still fit
-            if key.resource_permissions is not None:
-                existing_rp = ResourcePermissions.model_validate(
-                    key.resource_permissions
-                )
-                self._validate_resource_permissions_ceiling(
-                    resource_permissions=existing_rp,
-                    permission=new_permission,
-                )
-
-    def _validate_resource_permissions_ceiling(
-        self,
-        *,
-        resource_permissions: ResourcePermissions,
-        permission: ApiKeyPermission,
-    ) -> None:
-        ceiling = PERMISSION_LEVEL_ORDER.get(permission.value, 0)
-        for resource_type in ("assistants", "apps", "spaces", "knowledge"):
-            level: str = getattr(resource_permissions, resource_type).value
-            level_order = PERMISSION_LEVEL_ORDER.get(level, 0)
-            if level_order > ceiling:
-                raise ApiKeyValidationError(
-                    status_code=400,
-                    code="invalid_request",
-                    message=(
-                        f"Resource permission '{resource_type}={level}' exceeds "
-                        f"the key permission ceiling '{permission.value}'."
-                    ),
-                )
 
     async def ensure_manage_authorized(self, *, key: ApiKeyV2InDB):
         return await self.ensure_creator_authorized(
