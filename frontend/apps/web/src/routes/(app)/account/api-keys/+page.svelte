@@ -1,14 +1,14 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { writable } from "svelte/store";
   import { Page, Settings } from "$lib/components/layout";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getIntric } from "$lib/core/Intric";
-  import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@intric/intric-js";
+  import type { ApiKeyCreatedResponse, ApiKeyV2, SpaceSparse } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
+  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import ApiKeyTable from "./ApiKeyTable.svelte";
-  import CreateApiKeyDialog from "./CreateApiKeyDialog.svelte";
-  import ApiKeySecretDialog from "./ApiKeySecretDialog.svelte";
+  import CreateApiKeyDialog from "$lib/features/api-keys/CreateApiKeyDialog.svelte";
+  import ApiKeySecretDialog from "$lib/features/api-keys/ApiKeySecretDialog.svelte";
   import { Key, AlertCircle, RefreshCw, Search, X, ShieldAlert } from "lucide-svelte";
   import ExpiringKeysBanner from "$lib/features/api-keys/ExpiringKeysBanner.svelte";
   import NotificationPreferences from "$lib/features/api-keys/NotificationPreferences.svelte";
@@ -31,7 +31,7 @@
   let loading = $state(true);
   let errorMessage = $state<string | null>(null);
   let searchQuery = $state("");
-  const secretDialogOpen = writable(false);
+  let secretDialogOpen = $state(false);
   let latestSecret = $state<string | null>(null);
   let secretSource = $state<"created" | "rotated">("created");
   let expiringItems = $state<ExpiringKeyDisplayItem[]>([]);
@@ -42,9 +42,21 @@
   let nextCursor = $state<string | null>(null);
   let loadingMore = $state(false);
 
+  // Scope name resolution
+  type ResourceOption = { id: string; name: string };
+  let scopeResources = $state<ResourceOption[]>([]);
+
+  const scopeNamesById = $derived.by(() => {
+    const mapping: Record<string, string> = {};
+    for (const resource of scopeResources) {
+      mapping[resource.id] = resource.name;
+    }
+    return mapping;
+  });
+
   // Legacy key revoke
   let legacySuffix = $state(user.legacy_api_key_suffix);
-  const showRevokeDialog = writable(false);
+  let showRevokeDialog = $state(false);
   let revoking = $state(false);
 
   async function loadKeys() {
@@ -56,9 +68,7 @@
       nextCursor = response.next_cursor ?? null;
     } catch (error: unknown) {
       console.error(error);
-      errorMessage =
-        (error as { getReadableMessage?: () => string })?.getReadableMessage?.() ??
-        m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     } finally {
       loading = false;
     }
@@ -72,9 +82,7 @@
       keys = [...keys, ...(response.items ?? [])];
       nextCursor = response.next_cursor ?? null;
     } catch (error: unknown) {
-      errorMessage =
-        (error as { getReadableMessage?: () => string })?.getReadableMessage?.() ??
-        m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     } finally {
       loadingMore = false;
     }
@@ -84,12 +92,12 @@
     if (source !== "rotated") return;
     latestSecret = response.secret;
     secretSource = source;
-    secretDialogOpen.set(true);
+    secretDialogOpen = true;
     void loadKeys();
   }
 
   function handleCreated() {
-    secretDialogOpen.set(false);
+    secretDialogOpen = false;
     latestSecret = null;
     void loadKeys();
   }
@@ -104,13 +112,51 @@
     try {
       await intric.users.revokeLegacyApiKey();
       legacySuffix = null;
-      showRevokeDialog.set(false);
+      showRevokeDialog = false;
     } catch (error: unknown) {
-      errorMessage =
-        (error as { getReadableMessage?: () => string })?.getReadableMessage?.() ??
-        m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     } finally {
       revoking = false;
+    }
+  }
+
+  async function loadScopeResources() {
+    try {
+      let listedSpaces: SpaceSparse[] = [];
+      try {
+        listedSpaces = await intric.spaces.list({
+          include_personal: true,
+          include_applications: true
+        });
+      } catch {
+        listedSpaces = await intric.spaces.list();
+      }
+
+      const resources: ResourceOption[] = listedSpaces.map((s) => ({ id: s.id, name: s.name }));
+
+      const applicationsBySpace = await Promise.all(
+        listedSpaces.map(async (space) => {
+          try {
+            const applications = await intric.spaces.listApplications({ id: space.id });
+            return { space, applications };
+          } catch {
+            return { space, applications: space.applications ?? null };
+          }
+        })
+      );
+
+      for (const { applications } of applicationsBySpace) {
+        for (const assistant of applications?.assistants?.items ?? []) {
+          resources.push({ id: assistant.id, name: assistant.name });
+        }
+        for (const app of applications?.apps?.items ?? []) {
+          resources.push({ id: app.id, name: app.name });
+        }
+      }
+
+      scopeResources = resources;
+    } catch (error) {
+      console.error("Failed to load scope resources:", error);
     }
   }
 
@@ -127,6 +173,7 @@
 
   onMount(() => {
     void loadKeys();
+    void loadScopeResources();
   });
 </script>
 
@@ -190,7 +237,7 @@
               >.
               {m.api_keys_legacy_recommend()}
               <div class="mt-3 flex flex-wrap items-center gap-2">
-                <Button variant="destructive" size="sm" onclick={() => showRevokeDialog.set(true)}>
+                <Button variant="destructive" size="sm" onclick={() => (showRevokeDialog = true)}>
                   {m.api_keys_legacy_revoke()}
                 </Button>
                 <CreateApiKeyDialog onCreated={handleCreated} />
@@ -272,6 +319,7 @@
               onSecret={(r) => handleSecret(r, "rotated")}
               {followedKeyIds}
               onFollowChanged={handleFollowChanged}
+              scopeNames={scopeNamesById}
             />
           </div>
 
@@ -293,7 +341,7 @@
   </Page.Main>
 </Page.Root>
 
-<AlertDialog.Root bind:open={$showRevokeDialog}>
+<AlertDialog.Root bind:open={showRevokeDialog}>
   <AlertDialog.Content>
     <AlertDialog.Header>
       <AlertDialog.Title>{m.api_keys_legacy_revoke_title()}</AlertDialog.Title>
@@ -310,4 +358,4 @@
   </AlertDialog.Content>
 </AlertDialog.Root>
 
-<ApiKeySecretDialog openController={secretDialogOpen} secret={latestSecret} source={secretSource} />
+<ApiKeySecretDialog bind:open={secretDialogOpen} secret={latestSecret} source={secretSource} />

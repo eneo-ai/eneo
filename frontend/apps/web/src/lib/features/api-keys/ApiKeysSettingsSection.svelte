@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { writable } from "svelte/store";
   import type { ApiKeyCreatedResponse, ApiKeyScopeType, ApiKeyV2 } from "@intric/intric-js";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
@@ -16,8 +15,8 @@
   } from "lucide-svelte";
   import { slide } from "svelte/transition";
   import ApiKeyTable from "../../../routes/(app)/account/api-keys/ApiKeyTable.svelte";
-  import CreateApiKeyDialog from "../../../routes/(app)/account/api-keys/CreateApiKeyDialog.svelte";
-  import ApiKeySecretDialog from "../../../routes/(app)/account/api-keys/ApiKeySecretDialog.svelte";
+  import CreateApiKeyDialog from "$lib/features/api-keys/CreateApiKeyDialog.svelte";
+  import ApiKeySecretDialog from "$lib/features/api-keys/ApiKeySecretDialog.svelte";
   import ExpiringKeysBanner from "./ExpiringKeysBanner.svelte";
   import { getExpiringKeys, toDisplayItems } from "./expirationUtils";
   import { getAppContext } from "$lib/core/AppContext";
@@ -50,7 +49,7 @@
   let expanded = $state(false);
 
   // Secret dialog state
-  const secretDialogOpen = writable(false);
+  let secretDialogOpen = $state(false);
   let latestSecret = $state<string | null>(null);
   let secretSource = $state<"created" | "rotated">("created");
   let isScopeFollowed = $state(false);
@@ -121,12 +120,12 @@
   function handleSecret(response: ApiKeyCreatedResponse) {
     latestSecret = response.secret;
     secretSource = "rotated";
-    secretDialogOpen.set(true);
+    secretDialogOpen = true;
     void loadKeys();
   }
 
   function handleCreated() {
-    secretDialogOpen.set(false);
+    secretDialogOpen = false;
     latestSecret = null;
     void loadKeys();
   }
@@ -259,6 +258,7 @@
                 await loadScopeFollowState();
                 await forceRefreshExpiringStore();
               }}
+              scopeNames={{ [scopeId]: scopeName }}
             />
           </div>
         </div>
@@ -287,4 +287,4 @@
   {/if}
 </div>
 
-<ApiKeySecretDialog openController={secretDialogOpen} secret={latestSecret} source={secretSource} />
+<ApiKeySecretDialog bind:open={secretDialogOpen} secret={latestSecret} source={secretSource} />

@@ -3,71 +3,49 @@
   import { SvelteSet } from "svelte/reactivity";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import { getReasonCodeLabel } from "$lib/features/api-keys/reasonCodeLabel";
+  import {
+    getScopeStyle,
+    getScopeIcon,
+    getPermissionStyle,
+    getKeyTypeStyle,
+    createDateFormatter,
+    createRelativeFormatter,
+    createFullNumberFormatter,
+    createCompactNumberFormatter,
+    formatUsageMetric,
+    formatRelativeDate
+  } from "$lib/features/api-keys/apiKeyTableUtils";
   import {
     ChevronDown,
     Key,
     Globe,
     Server,
-    Building2,
-    MessageSquare,
-    AppWindow,
+    Lock,
+    Shield,
     Clock,
     Calendar,
     Activity,
-    Shield,
-    Lock,
     Bell,
-    AlertTriangle,
-    Eye,
-    Pencil
+    AlertTriangle
   } from "lucide-svelte";
   import { slide } from "svelte/transition";
   import ApiKeyActions from "./ApiKeyActions.svelte";
-  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import {
     getDaysUntilExpiration,
     getExpiryLevel,
     getEffectiveState
   } from "$lib/features/api-keys/expirationUtils";
+  import { useApiKeyUsage } from "$lib/features/api-keys/useApiKeyUsage.svelte";
+  import ApiKeyStateBadge from "$lib/features/api-keys/ApiKeyStateBadge.svelte";
+  import RotationGraceBadge from "$lib/features/api-keys/RotationGraceBadge.svelte";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
-  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-
-  type ApiKeyUsageEvent = {
-    id: string;
-    timestamp: string;
-    action: string;
-    outcome: string;
-    ip_address?: string | null;
-    user_agent?: string | null;
-    request_id?: string | null;
-    request_path?: string | null;
-    method?: string | null;
-    origin?: string | null;
-    error_message?: string | null;
-  };
-
-  type ApiKeyUsageResponse = {
-    summary?: {
-      total_events: number;
-      used_events: number;
-      auth_failed_events: number;
-      last_seen_at?: string | null;
-      last_success_at?: string | null;
-      last_failure_at?: string | null;
-      sampled_used_events?: boolean;
-    };
-    items?: ApiKeyUsageEvent[];
-    limit?: number;
-    next_cursor?: string | null;
-  };
 
   const intric = getIntric();
 
@@ -78,7 +56,8 @@
     onSecret,
     followedKeyIds = new Set<string>(),
     scopeFollowed = false,
-    onFollowChanged
+    onFollowChanged,
+    scopeNames = {}
   } = $props<{
     keys: ApiKeyV2[];
     loading: boolean;
@@ -87,16 +66,18 @@
     followedKeyIds?: Set<string>;
     scopeFollowed?: boolean;
     onFollowChanged?: () => void | Promise<void>;
+    scopeNames?: Record<string, string>;
   }>();
 
   // Track expanded rows (SvelteSet is already reactive — no $state wrapper needed)
   let expandedIds = new SvelteSet<string>();
-  let activeTabByKey = $state<Record<string, "overview" | "usage">>({});
-  let usageByKey = $state<Record<string, ApiKeyUsageResponse>>({});
-  let usageErrorByKey = $state<Record<string, string | null>>({});
-  let usageLoadingByKey = $state<Record<string, boolean>>({});
-  let usageCursorByKey = $state<Record<string, string | null>>({});
 
+  const usage = useApiKeyUsage(
+    (params) =>
+      intric.apiKeys.getUsage(params) as Promise<
+        import("$lib/features/api-keys/apiKeyTableUtils").ApiKeyUsageResponse
+      >
+  );
   // Track recently expanded rows for pulse animation
   let recentlyExpandedId = $state<string | null>(null);
 
@@ -114,250 +95,23 @@
         }
       }, 600);
     }
-    if (expandedIds.has(id) && !activeTabByKey[id]) {
-      activeTabByKey = { ...activeTabByKey, [id]: "overview" };
+    if (expandedIds.has(id) && !usage.activeTabByKey[id]) {
+      usage.setActiveTab(id, "overview");
     }
   }
 
-  function setActiveTab(id: string, tab: "overview" | "usage") {
-    activeTabByKey = { ...activeTabByKey, [id]: tab };
-    if (tab === "usage") {
-      void loadUsage(id, { reset: false });
-    }
+  // Locale-aware formatters (delegated to shared utils)
+  const formatter = createDateFormatter();
+  const relativeFormatter = createRelativeFormatter();
+  const fullNumberFormatter = createFullNumberFormatter();
+  const compactNumberFormatter = createCompactNumberFormatter();
+
+  function fmtUsage(value: number | null | undefined): string {
+    return formatUsageMetric(compactNumberFormatter, value);
   }
 
-  async function loadUsage(id: string, { reset }: { reset: boolean }) {
-    if (usageLoadingByKey[id]) return;
-    if (!reset && usageByKey[id]) return;
-
-    usageLoadingByKey = { ...usageLoadingByKey, [id]: true };
-    usageErrorByKey = { ...usageErrorByKey, [id]: null };
-    try {
-      const response = (await intric.apiKeys.getUsage({
-        id,
-        limit: 25
-      })) as ApiKeyUsageResponse;
-      usageByKey = { ...usageByKey, [id]: response };
-      usageCursorByKey = { ...usageCursorByKey, [id]: response?.next_cursor ?? null };
-    } catch (error) {
-      console.error(error);
-      usageErrorByKey = {
-        ...usageErrorByKey,
-        [id]: getErrorMessage(error)
-      };
-    } finally {
-      usageLoadingByKey = { ...usageLoadingByKey, [id]: false };
-    }
-  }
-
-  async function loadMoreUsage(id: string) {
-    const cursor = usageCursorByKey[id];
-    if (!cursor || usageLoadingByKey[id]) return;
-    usageLoadingByKey = { ...usageLoadingByKey, [id]: true };
-    usageErrorByKey = { ...usageErrorByKey, [id]: null };
-    try {
-      const response = (await intric.apiKeys.getUsage({
-        id,
-        limit: 25,
-        cursor
-      })) as ApiKeyUsageResponse;
-      const existing = usageByKey[id];
-      usageByKey = {
-        ...usageByKey,
-        [id]: {
-          ...response,
-          summary: existing?.summary ?? response.summary,
-          items: [...(existing?.items ?? []), ...(response?.items ?? [])]
-        }
-      };
-      usageCursorByKey = { ...usageCursorByKey, [id]: response?.next_cursor ?? null };
-    } catch (error) {
-      console.error(error);
-      usageErrorByKey = {
-        ...usageErrorByKey,
-        [id]: getErrorMessage(error)
-      };
-    } finally {
-      usageLoadingByKey = { ...usageLoadingByKey, [id]: false };
-    }
-  }
-
-  // Status tooltip descriptions
-  function getStatusTooltip(state: string): string {
-    switch (state) {
-      case "active":
-        return m.api_keys_status_active_tooltip();
-      case "suspended":
-        return m.api_keys_status_suspended_tooltip();
-      case "revoked":
-        return m.api_keys_status_revoked_tooltip();
-      case "expired":
-        return m.api_keys_status_expired_tooltip();
-      default:
-        return m.api_keys_unknown_status();
-    }
-  }
-
-  const currentLocale = $derived.by(() => getLocale());
-  const formatter = $derived.by(
-    () =>
-      new Intl.DateTimeFormat(currentLocale === "sv" ? "sv-SE" : "en-US", {
-        dateStyle: "medium",
-        timeStyle: "short"
-      })
-  );
-  const relativeFormatter = $derived.by(
-    () => new Intl.RelativeTimeFormat(currentLocale === "sv" ? "sv" : "en", { numeric: "auto" })
-  );
-  const fullNumberFormatter = $derived.by(
-    () => new Intl.NumberFormat(currentLocale === "sv" ? "sv-SE" : "en-US")
-  );
-  const compactNumberFormatter = $derived.by(
-    () =>
-      new Intl.NumberFormat(currentLocale === "sv" ? "sv-SE" : "en-US", {
-        notation: "compact",
-        compactDisplay: "short",
-        maximumFractionDigits: 1
-      })
-  );
-
-  function formatUsageMetric(value: number | null | undefined): string {
-    return compactNumberFormatter.format(value ?? 0);
-  }
-
-  function formatRelativeDate(date: string | null | undefined): string {
-    if (!date) return m.api_keys_never();
-    const d = new Date(date);
-    const now = new Date();
-    const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) return m.api_keys_today();
-    if (diffDays === 1) return m.api_keys_yesterday();
-    if (diffDays < 7) return relativeFormatter.format(-diffDays, "day");
-    if (diffDays < 30) return relativeFormatter.format(-Math.floor(diffDays / 7), "week");
-    return formatter.format(d);
-  }
-
-  // Scope display helper — returns just a label. Visual identity comes from
-  // the scope icon (getScopeIcon) inside an outline Badge, no saturated background.
-  function getScopeStyle(scopeType: string): { label: string } {
-    switch (scopeType) {
-      case "tenant":
-        return { label: m.api_keys_scope_tenant() };
-      case "space":
-        return { label: m.api_keys_scope_space() };
-      case "assistant":
-        return { label: m.api_keys_scope_assistant() };
-      case "app":
-        return { label: m.api_keys_scope_app() };
-      default:
-        return { label: m.api_keys_unknown() };
-    }
-  }
-
-  function getScopeIcon(scopeType: string) {
-    switch (scopeType) {
-      case "tenant":
-        return Building2;
-      case "space":
-        return Building2;
-      case "assistant":
-        return MessageSquare;
-      case "app":
-        return AppWindow;
-      default:
-        return Building2;
-    }
-  }
-
-  function getStateStyle(state: string) {
-    // Use eneo's semantic state tokens. The raw `emerald/amber/red/gray-*`
-    // utilities resolve to Tailwind v4 oklch() values that Chrome and
-    // Firefox gamut-map differently; the `*-default` tokens below are
-    // single CSS variable lookups that render identically across browsers
-    // and switch automatically between light and dark themes.
-    switch (state) {
-      case "active":
-        return {
-          label: m.api_keys_status_active(),
-          dotClasses: "bg-positive-default"
-        };
-      case "suspended":
-        return {
-          label: m.api_keys_status_suspended(),
-          dotClasses: "bg-warning-default"
-        };
-      case "revoked":
-        return { label: m.api_keys_status_revoked(), dotClasses: "bg-negative-default" };
-      case "expired":
-        return { label: m.api_keys_status_expired(), dotClasses: "bg-tertiary" };
-      default:
-        return { label: m.api_keys_unknown(), dotClasses: "bg-tertiary" };
-    }
-  }
-
-  // Permission level display helper — uses semantic eneo tokens via Badge
-  // overrides instead of saturated text-on-color backgrounds (which failed
-  // WCAG AA at 3.4:1 for purple-500/white). The accompanying icon makes the
-  // permission level visually distinguishable without relying on color alone.
-  type PermissionStyle = {
-    label: string;
-    icon: typeof Eye;
-    badgeClass: string;
-  };
-  function getPermissionStyle(permission: string): PermissionStyle {
-    switch (permission) {
-      case "read":
-        return {
-          label: m.api_keys_permission_read(),
-          icon: Eye,
-          badgeClass: "border-border text-muted bg-secondary/60"
-        };
-      case "write":
-        return {
-          label: m.api_keys_permission_write(),
-          icon: Pencil,
-          badgeClass:
-            "text-warning-stronger border-warning-default/40 bg-warning-dimmer/40 dark:bg-warning-dimmer/20"
-        };
-      case "admin":
-        return {
-          label: m.api_keys_permission_admin(),
-          icon: Shield,
-          badgeClass: "text-destructive border-destructive/40 bg-destructive/10"
-        };
-      default:
-        return {
-          label: permission,
-          icon: Eye,
-          badgeClass: "border-border text-muted bg-secondary/60"
-        };
-    }
-  }
-
-  function getKeyTypeStyle(keyType: string) {
-    // Route through eneo's `label-*` token scopes instead of raw Tailwind
-    // palette utilities. The raw `amber-*` / `indigo-*` classes resolve to
-    // Tailwind v4 oklch() values combined with `/30` color-mix() opacity,
-    // which Chrome (Skia) and Firefox (WebRender) gamut-map slightly
-    // differently — producing visibly different shades per browser. The
-    // label scope sets `--color-label-stronger/dimmer` to a flat CSS
-    // variable, so `bg-label-dimmer` / `text-label-stronger` render as a
-    // single resolved color in both browsers. Theme-aware via the .label-*
-    // classes defined in packages/ui/src/styles/themes/{light,dark}.css.
-    return keyType === "pk_"
-      ? {
-          label: m.api_keys_public_key(),
-          // Amethyst (purple) — distinct from the warning-yellow `write`
-          // permission badge that may appear on the same row.
-          scopeClass: "label-amethyst"
-        }
-      : {
-          label: m.api_keys_secret_key(),
-          // Blue (info) — matches the original indigo intent and aligns
-          // with eneo's brand accent.
-          scopeClass: "label-blue"
-        };
+  function fmtRelDate(date: string | null | undefined): string {
+    return formatRelativeDate(formatter, relativeFormatter, date);
   }
 </script>
 
@@ -410,7 +164,6 @@
       {@const scope = getScopeStyle(key.scope_type)}
       {@const ScopeIcon = getScopeIcon(key.scope_type)}
       {@const effectiveState = getEffectiveState(key)}
-      {@const state = getStateStyle(effectiveState)}
       {@const permission = getPermissionStyle(key.permission)}
       {@const PermissionIcon = permission.icon}
       {@const keyTypeStyle = getKeyTypeStyle(key.key_type)}
@@ -454,26 +207,7 @@
                     {/if}
                   </span>
 
-                  <!-- Status dot + label with accessible tooltip -->
-                  <Tooltip.Provider delayDuration={150}>
-                    <Tooltip.Root>
-                      <Tooltip.Trigger>
-                        {#snippet child({ props })}
-                          <span {...props} class="flex items-center gap-1.5">
-                            <span
-                              class="h-2.5 w-2.5 rounded-full {state.dotClasses}"
-                              aria-hidden="true"
-                            ></span>
-                            <span class="text-muted text-xs">{state.label}</span>
-                            <span class="sr-only">{getStatusTooltip(effectiveState)}</span>
-                          </span>
-                        {/snippet}
-                      </Tooltip.Trigger>
-                      <Tooltip.Content>
-                        {getStatusTooltip(effectiveState)}
-                      </Tooltip.Content>
-                    </Tooltip.Root>
-                  </Tooltip.Provider>
+                  <ApiKeyStateBadge state={effectiveState} />
                 </div>
 
                 <!-- Key preview + scope/permission/service badges -->
@@ -490,7 +224,9 @@
                     {scope.label}
                     {#if key.scope_id}
                       <span class="text-muted/70" aria-hidden="true">·</span>
-                      <span class="font-mono">{key.scope_id.slice(0, 8)}</span>
+                      <span class="font-mono"
+                        >{scopeNames[key.scope_id] ?? key.scope_id.slice(0, 8)}</span
+                      >
                     {/if}
                   </Badge>
 
@@ -509,6 +245,11 @@
                       <Server class="h-3 w-3" />
                       {m.api_keys_ownership_service_badge()}
                     </Badge>
+                  {/if}
+
+                  <!-- Rotation grace period indicator -->
+                  {#if key.rotation_grace_until}
+                    <RotationGraceBadge graceUntil={key.rotation_grace_until} />
                   {/if}
                 </div>
               </div>
@@ -557,7 +298,7 @@
                 <!-- Last used -->
                 <div class="text-right">
                   <p class="text-muted text-xs">{m.api_keys_last_used()}</p>
-                  <p class="text-default font-medium">{formatRelativeDate(key.last_used_at)}</p>
+                  <p class="text-default font-medium">{fmtRelDate(key.last_used_at)}</p>
                 </div>
               </div>
 
@@ -588,8 +329,8 @@
               transition:slide={{ duration: 200 }}
             >
               <Tabs.Root
-                value={activeTabByKey[key.id] ?? "overview"}
-                onValueChange={(v) => setActiveTab(key.id, v as "overview" | "usage")}
+                value={usage.activeTabByKey[key.id] ?? "overview"}
+                onValueChange={(v) => usage.setActiveTab(key.id, v as "overview" | "usage")}
               >
                 <Tabs.List class="mb-4">
                   <Tabs.Trigger value="overview">{m.api_keys_admin_tab_overview()}</Tabs.Trigger>
@@ -597,21 +338,25 @@
                 </Tabs.List>
 
                 <Tabs.Content value="usage">
-                  {@const usage = usageByKey[key.id]}
+                  {@const usageData = usage.usageByKey[key.id]}
                   <div class="space-y-4">
-                    {#if usageLoadingByKey[key.id]}
+                    {#if usage.usageLoadingByKey[key.id]}
                       <div class="text-muted text-sm">{m.api_keys_admin_usage_loading()}</div>
-                    {:else if usageErrorByKey[key.id]}
-                      <div class="text-negative-stronger text-sm">{usageErrorByKey[key.id]}</div>
+                    {:else if usage.usageErrorByKey[key.id]}
+                      <div class="text-negative-stronger text-sm">
+                        {usage.usageErrorByKey[key.id]}
+                      </div>
                     {:else}
                       <div class="grid gap-3 md:grid-cols-4">
                         <div class="bg-primary/50 border-default rounded-lg border p-3">
                           <p class="text-muted text-xs">{m.api_keys_admin_usage_total_events()}</p>
                           <p
                             class="text-default mt-1 text-lg font-semibold tabular-nums"
-                            title={fullNumberFormatter.format(usage?.summary?.total_events ?? 0)}
+                            title={fullNumberFormatter.format(
+                              usageData?.summary?.total_events ?? 0
+                            )}
                           >
-                            {formatUsageMetric(usage?.summary?.total_events)}
+                            {fmtUsage(usageData?.summary?.total_events)}
                           </p>
                         </div>
                         <div class="bg-primary/50 border-default rounded-lg border p-3">
@@ -619,38 +364,38 @@
                             {m.api_keys_admin_usage_success_events()}
                           </p>
                           <p
-                            class="{(usage?.summary?.used_events ?? 0) > 0
+                            class="{(usageData?.summary?.used_events ?? 0) > 0
                               ? 'text-positive-stronger'
                               : 'text-default'} mt-1 text-lg font-semibold tabular-nums"
-                            title={fullNumberFormatter.format(usage?.summary?.used_events ?? 0)}
+                            title={fullNumberFormatter.format(usageData?.summary?.used_events ?? 0)}
                           >
-                            {formatUsageMetric(usage?.summary?.used_events)}
+                            {fmtUsage(usageData?.summary?.used_events)}
                           </p>
                         </div>
                         <div class="bg-primary/50 border-default rounded-lg border p-3">
                           <p class="text-muted text-xs">{m.api_keys_admin_usage_failed_events()}</p>
                           <p
-                            class="{(usage?.summary?.auth_failed_events ?? 0) > 0
+                            class="{(usageData?.summary?.auth_failed_events ?? 0) > 0
                               ? 'text-negative-stronger'
                               : 'text-default'} mt-1 text-lg font-semibold tabular-nums"
                             title={fullNumberFormatter.format(
-                              usage?.summary?.auth_failed_events ?? 0
+                              usageData?.summary?.auth_failed_events ?? 0
                             )}
                           >
-                            {formatUsageMetric(usage?.summary?.auth_failed_events)}
+                            {fmtUsage(usageData?.summary?.auth_failed_events)}
                           </p>
                         </div>
                         <div class="bg-primary/50 border-default rounded-lg border p-3">
                           <p class="text-muted text-xs">{m.api_keys_last_used()}</p>
                           <p class="text-default mt-1 text-sm font-semibold">
-                            {usage?.summary?.last_seen_at
-                              ? formatter.format(new Date(usage.summary.last_seen_at))
+                            {usageData?.summary?.last_seen_at
+                              ? formatter.format(new Date(usageData.summary.last_seen_at))
                               : m.api_keys_never()}
                           </p>
                         </div>
                       </div>
 
-                      {#if usage?.summary?.sampled_used_events}
+                      {#if usageData?.summary?.sampled_used_events}
                         <div
                           class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger dark:bg-warning-dimmer/20 rounded-lg border p-3 text-xs"
                         >
@@ -661,7 +406,7 @@
                         </div>
                       {/if}
 
-                      {#if usage?.items?.length}
+                      {#if usageData?.items?.length}
                         <div class="border-default overflow-hidden rounded-lg border">
                           <div class="max-h-[26rem] overflow-auto">
                             <Table.Root>
@@ -677,7 +422,7 @@
                                 </Table.Row>
                               </Table.Header>
                               <Table.Body>
-                                {#each usage.items as event (event.id)}
+                                {#each usageData.items as event (event.id)}
                                   <Table.Row>
                                     <Table.Cell
                                       class="text-muted text-xs whitespace-nowrap tabular-nums"
@@ -732,8 +477,12 @@
                         <div class="text-muted text-sm">{m.api_keys_admin_usage_empty()}</div>
                       {/if}
 
-                      {#if usageCursorByKey[key.id]}
-                        <Button variant="outline" size="sm" onclick={() => loadMoreUsage(key.id)}>
+                      {#if usage.usageCursorByKey[key.id]}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onclick={() => usage.loadMoreUsage(key.id)}
+                        >
                           {m.api_keys_admin_usage_load_more()}
                         </Button>
                       {/if}
@@ -969,13 +718,13 @@
   /* Subtle pulse animation for newly expanded rows */
   @keyframes expand-pulse {
     0% {
-      box-shadow: 0 0 0 0 rgba(var(--color-accent-default-rgb, 99, 102, 241), 0.4);
+      box-shadow: 0 0 0 0 oklch(from var(--color-accent-default) l c h / 0.4);
     }
     70% {
-      box-shadow: 0 0 0 8px rgba(var(--color-accent-default-rgb, 99, 102, 241), 0);
+      box-shadow: 0 0 0 8px oklch(from var(--color-accent-default) l c h / 0);
     }
     100% {
-      box-shadow: 0 0 0 0 rgba(var(--color-accent-default-rgb, 99, 102, 241), 0);
+      box-shadow: 0 0 0 0 oklch(from var(--color-accent-default) l c h / 0);
     }
   }
 

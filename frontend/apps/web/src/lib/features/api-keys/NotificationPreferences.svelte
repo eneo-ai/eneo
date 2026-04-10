@@ -304,7 +304,7 @@
           <BellOff class="text-muted h-4 w-4" />
         {/if}
       </div>
-      <h3 class="text-primary text-sm font-semibold">
+      <h3 class="text-default text-sm font-semibold">
         {m.api_keys_notifications_settings_title()}
       </h3>
     </div>
@@ -412,7 +412,7 @@
         <!-- Assistants -->
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
-            <p class="text-primary text-sm font-medium">
+            <p class="text-default text-sm font-medium">
               {m.api_keys_notifications_auto_follow_assistants_title()}
             </p>
             <p class="text-secondary mt-0.5 text-xs">
@@ -441,7 +441,7 @@
         <!-- Apps -->
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
-            <p class="text-primary text-sm font-medium">
+            <p class="text-default text-sm font-medium">
               {m.api_keys_notifications_auto_follow_apps_title()}
             </p>
             <p class="text-secondary mt-0.5 text-xs">
