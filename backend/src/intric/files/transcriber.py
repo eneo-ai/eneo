@@ -49,7 +49,13 @@ class Transcriber:
         self.encryption_service = encryption_service
         self.session = session
 
-    async def transcribe(self, file: File, transcription_model: "TranscriptionModel"):
+    async def transcribe(
+        self,
+        file: File,
+        transcription_model: "TranscriptionModel",
+        *,
+        language: str | None = None,
+    ) -> str:
         mimetype: str = file.mimetype or ""
         if file.blob is None or not AudioMimeTypes.has_value(mimetype):
             raise ValueError("File needs to be an audio file")

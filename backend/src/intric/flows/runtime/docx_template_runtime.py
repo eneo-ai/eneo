@@ -5,7 +5,7 @@ import logging
 import re
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator, cast
 
 from docx import Document
 from docx.oxml.ns import qn
@@ -17,8 +17,12 @@ from intric.main.exceptions import TypedIOValidationException
 logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([^{}]+)\s*\}\}")
-_SAFE_TEMPLATE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
-_DOCX_MIMETYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_SAFE_TEMPLATE_NAME_PATTERN = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$"
+)
+_DOCX_MIMETYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
 
 # OOXML header/footer reference types → python-docx section properties
 _HEADER_TYPE_TO_ATTR = {
@@ -40,7 +44,7 @@ def _iter_section_headers(section: Any) -> list[Any]:
     (default/first/even) to avoid triggering implicit header creation
     which requires template files that may not be installed.
     """
-    headers = []
+    headers: list[Any] = []
     for ref in section._sectPr.findall(qn("w:headerReference")):
         hdr_type = ref.get(qn("w:type"), "default")
         attr = _HEADER_TYPE_TO_ATTR.get(hdr_type)
@@ -59,7 +63,7 @@ def _iter_section_footers(section: Any) -> list[Any]:
     (default/first/even) to avoid triggering implicit footer creation
     which requires template files that may not be installed.
     """
-    footers = []
+    footers: list[Any] = []
     for ref in section._sectPr.findall(qn("w:footerReference")):
         ftr_type = ref.get(qn("w:type"), "default")
         attr = _FOOTER_TYPE_TO_ATTR.get(ftr_type)
@@ -123,7 +127,9 @@ def render_docx_template(
     context: dict[str, Any],
     step_order: int,
 ) -> tuple[bytes, str, str]:
-    placeholders = inspect_docx_template_bytes(template_bytes, filename=f"step_{step_order}.docx")
+    placeholders = inspect_docx_template_bytes(
+        template_bytes, filename=f"step_{step_order}.docx"
+    )
     required_names = {str(item["name"]) for item in placeholders}
     missing = sorted(name for name in required_names if name not in context)
     if missing:
@@ -133,7 +139,7 @@ def render_docx_template(
         )
 
     try:
-        from docxtpl import DocxTemplate
+        from docxtpl import DocxTemplate  # pyright: ignore[reportMissingTypeStubs]
     except Exception as exc:  # pragma: no cover - environment guard
         raise TypedIOValidationException(
             f"DOCX template rendering dependency is unavailable: {exc}",
@@ -154,8 +160,10 @@ def render_docx_template(
         template_path.write_bytes(normalized_template_bytes)
         try:
             template = DocxTemplate(str(template_path))
-            template.render(render_context, jinja_env=SandboxedEnvironment(autoescape=False))
-            template.save(str(output_path))
+            template.render(
+                render_context, jinja_env=SandboxedEnvironment(autoescape=False)
+            )
+            template.save(str(output_path))  # pyright: ignore[reportUnknownMemberType]
             blob = output_path.read_bytes()
         except TypedIOValidationException:
             raise
@@ -217,16 +225,16 @@ def _build_docxtpl_context(context: dict[str, Any]) -> dict[str, Any]:
                 current = next_level
                 continue
             if not isinstance(existing, dict):
-                current = {}
+                current = cast(dict[str, Any], {})
                 break
-            current = existing
+            current = cast(dict[str, Any], existing)
         else:
             current[path[-1]] = value
 
     return render_context
 
 
-def _iter_story_paragraphs(container: Any):
+def _iter_story_paragraphs(container: Any) -> Iterator[Any]:
     for paragraph in getattr(container, "paragraphs", []):
         yield paragraph
     for table in getattr(container, "tables", []):
@@ -249,7 +257,9 @@ def _replace_placeholder_aliases_in_paragraph(
         return
 
     replaced_text = _PLACEHOLDER_PATTERN.sub(
-        lambda match: "{{" + alias_by_name.get(match.group(1).strip(), match.group(1).strip()) + "}}",
+        lambda match: "{{"
+        + alias_by_name.get(match.group(1).strip(), match.group(1).strip())
+        + "}}",
         original_text,
     )
     if replaced_text == original_text:

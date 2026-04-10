@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, computed_field, model_validator
 
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
@@ -20,6 +20,32 @@ if TYPE_CHECKING:
         CompletionModel as CompletionModelDomain,
     )
     from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+
+
+_COMPLETION_MODEL_FIELDS = (
+    "id",
+    "created_at",
+    "updated_at",
+    "name",
+    "nickname",
+    "family",
+    "max_input_tokens",
+    "max_output_tokens",
+    "is_deprecated",
+    "nr_billion_parameters",
+    "hf_link",
+    "stability",
+    "hosting",
+    "open_source",
+    "description",
+    "deployment_name",
+    "org",
+    "vision",
+    "reasoning",
+    "supports_tool_calling",
+    "base_url",
+    "litellm_model_name",
+)
 
 
 class TokenUsage(BaseModel):
@@ -88,6 +114,37 @@ class Completion:
     usage: Optional[TokenUsage] = None
 
 
+def _normalize_token_fields(value: Any) -> Any:
+    data: dict[str, Any]
+
+    if isinstance(value, dict):
+        data = dict(cast(dict[str, Any], value))
+        token_limit = data.get("token_limit")
+    else:
+        missing = object()
+        data = {}
+        for field in _COMPLETION_MODEL_FIELDS:
+            attr = getattr(value, field, missing)
+            if attr is not missing:
+                data[field] = attr
+        token_limit = getattr(value, "token_limit", None)
+
+    if data.get("max_input_tokens") is None and token_limit is not None:
+        data["max_input_tokens"] = token_limit
+
+    if data.get("max_output_tokens") is None:
+        defaults = lookup_model_defaults(
+            data.get("litellm_model_name"),
+            data.get("name"),
+        )
+        if defaults is not None and defaults.max_output_tokens is not None:
+            data["max_output_tokens"] = defaults.max_output_tokens
+        elif token_limit is not None:
+            data["max_output_tokens"] = token_limit
+
+    return data
+
+
 class CompletionModelBase(BaseModel):
     name: str
     nickname: Optional[str] = None
@@ -109,6 +166,11 @@ class CompletionModelBase(BaseModel):
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_fields(cls, value: Any) -> Any:
+        return _normalize_token_fields(value)
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def token_limit(self) -> int:
@@ -120,7 +182,7 @@ class CompletionModelCreate(CompletionModelBase):
     @model_validator(mode="before")
     @classmethod
     def _apply_litellm_defaults(cls, value: Any) -> Any:
-        data = cls._normalize_token_fields(value)
+        data = _normalize_token_fields(value)
         defaults = lookup_model_defaults(
             data.get("litellm_model_name"),
             data.get("name"),
@@ -229,6 +291,7 @@ class CompletionModelResponse(BaseModel):
     model: CompletionModel
     extended_logging: Optional[LoggingDetails] = None
     total_token_count: int
+    knowledge_trace: Optional["KnowledgeTrace"] = None
     usage: Optional[TokenUsage] = None
 
 

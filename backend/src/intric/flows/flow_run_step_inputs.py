@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import UUID
 
 from intric.files.file_models import File
 from intric.flows.flow_input_limits import FlowInputLimits, effective_max_files_per_run
 from intric.flows.runtime.models import RuntimeStep
-from intric.flows.runtime_input import build_runtime_input_config, runtime_input_accept_mimetypes
+from intric.flows.runtime_input import (
+    build_runtime_input_config,
+    runtime_input_accept_mimetypes,
+)
 from intric.main.exceptions import BadRequestException
 
 
@@ -50,7 +54,7 @@ def build_runtime_step_input_specs(
 
 
 def normalize_step_inputs_payload(
-    raw_step_inputs: dict[UUID, dict[str, list[UUID]]] | None,
+    raw_step_inputs: Mapping[UUID, object] | None,
 ) -> dict[UUID, list[UUID]]:
     normalized: dict[UUID, list[UUID]] = {}
     if raw_step_inputs is None:
@@ -62,7 +66,8 @@ def normalize_step_inputs_payload(
                 "Each step_inputs entry must be an object.",
                 code="flow_run_invalid_step_inputs",
             )
-        file_ids = payload.get("file_ids")
+        payload_dict = cast(dict[str, object], payload)
+        file_ids = payload_dict.get("file_ids")
         if file_ids is None:
             normalized[step_id] = []
             continue
@@ -72,7 +77,7 @@ def normalize_step_inputs_payload(
                 code="flow_run_invalid_step_inputs",
             )
         normalized_ids: list[UUID] = []
-        for file_id in file_ids:
+        for file_id in cast(list[object], file_ids):
             try:
                 normalized_ids.append(UUID(str(file_id)))
             except (TypeError, ValueError) as exc:
@@ -162,7 +167,11 @@ async def validate_submitted_step_inputs(
             include_transcription=False,
         )
         resolved_ids = {file.id for file in files}
-        missing_ids = [str(file_id) for file_id in requested_file_ids if file_id not in resolved_ids]
+        missing_ids = [
+            str(file_id)
+            for file_id in requested_file_ids
+            if file_id not in resolved_ids
+        ]
         if missing_ids:
             raise BadRequestException(
                 "One or more submitted runtime files are missing or not accessible.",
@@ -211,7 +220,9 @@ async def validate_submitted_step_inputs(
         )
 
 
-def serialize_step_inputs_payload(step_inputs: dict[UUID, list[UUID]]) -> dict[str, dict[str, list[str]]]:
+def serialize_step_inputs_payload(
+    step_inputs: dict[UUID, list[UUID]],
+) -> dict[str, dict[str, list[str]]]:
     return {
         str(step_id): {
             "file_ids": [str(file_id) for file_id in file_ids],
@@ -220,7 +231,9 @@ def serialize_step_inputs_payload(step_inputs: dict[UUID, list[UUID]]) -> dict[s
     }
 
 
-def aggregate_runtime_file_limit(*, specs: dict[UUID, RuntimeStepInputSpec]) -> int | None:
+def aggregate_runtime_file_limit(
+    *, specs: dict[UUID, RuntimeStepInputSpec]
+) -> int | None:
     aggregate = 0
     for spec in specs.values():
         if spec.max_files is None:

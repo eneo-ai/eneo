@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
+from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -9,8 +9,8 @@ from uuid import UUID, uuid4
 import pytest
 
 from intric.files.file_models import FileType
-from intric.main.exceptions import TypedIOValidationException
 from intric.flows.runtime.output_runtime import OutputRuntimeDeps, process_typed_output
+from intric.main.exceptions import TypedIOValidationException
 
 
 @dataclass
@@ -51,12 +51,16 @@ async def test_process_typed_output_json_with_contract_validation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_typed_output_json_without_compiled_validator_skips_contract_validation() -> None:
+async def test_process_typed_output_json_without_compiled_validator_skips_contract_validation() -> (
+    None
+):
     step = _Step(step_order=2, output_type="json", output_contract={"type": "object"})
     run = _Run(tenant_id=uuid4())
 
     def _unexpected_validate(*args, **kwargs) -> None:
-        raise AssertionError("validate_against_contract should not run without compiled validator")
+        raise AssertionError(
+            "validate_against_contract should not run without compiled validator"
+        )
 
     deps = OutputRuntimeDeps(
         file_repo=SimpleNamespace(add=AsyncMock()),
@@ -95,7 +99,11 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
-        render_document=lambda text, output_type, step_order: (blob, mimetype, filename),
+        render_document=lambda text, output_type, step_order: (
+            blob,
+            mimetype,
+            filename,
+        ),
     )
 
     structured, artifacts = await process_typed_output(
@@ -125,6 +133,41 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
 
 
 @pytest.mark.asyncio
+async def test_process_typed_output_pdf_preserves_pdf_bytes_from_model() -> None:
+    step = _Step(step_order=8, output_type="pdf", output_contract=None)
+    run = _Run(tenant_id=uuid4())
+    file_id = uuid4()
+    file_repo = SimpleNamespace(add=AsyncMock(return_value=SimpleNamespace(id=file_id)))
+    raw_pdf = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF"
+
+    def _render_not_expected(*args, **kwargs):
+        raise AssertionError("raw PDF bytes should be persisted directly")
+
+    deps = OutputRuntimeDeps(
+        file_repo=file_repo,
+        user_id=uuid4(),
+        compile_validators=lambda steps: {},
+        parse_json_output=lambda text: {"unused": True},
+        validate_against_contract=lambda data, schema, label: None,
+        render_document=_render_not_expected,
+    )
+
+    structured, artifacts = await process_typed_output(
+        full_text=f"\n{raw_pdf}",
+        step=step,
+        run=run,
+        deps=deps,
+    )
+
+    assert structured is None
+    assert artifacts is not None
+    assert artifacts[0]["mimetype"] == "application/pdf"
+    assert artifacts[0]["name"] == "step_8_output.pdf"
+    file_create = file_repo.add.await_args.args[0]
+    assert file_create.blob == raw_pdf.encode("latin-1")
+
+
+@pytest.mark.asyncio
 async def test_process_typed_output_docx_validates_pre_render_contract() -> None:
     step = _Step(step_order=4, output_type="docx", output_contract={"type": "object"})
     run = _Run(tenant_id=uuid4())
@@ -140,7 +183,11 @@ async def test_process_typed_output_docx_validates_pre_render_contract() -> None
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"structured": 1},
         validate_against_contract=_validate,
-        render_document=lambda text, output_type, step_order: (b"pdf", "application/pdf", "x.pdf"),
+        render_document=lambda text, output_type, step_order: (
+            b"pdf",
+            "application/pdf",
+            "x.pdf",
+        ),
     )
 
     await process_typed_output(
@@ -174,7 +221,11 @@ async def test_process_typed_output_docx_without_contract_does_not_parse_json() 
         compile_validators=lambda steps: {},
         parse_json_output=_parse_not_expected,
         validate_against_contract=lambda data, schema, label: None,
-        render_document=lambda text, output_type, step_order: (b"docx", "application/docx", "x.docx"),
+        render_document=lambda text, output_type, step_order: (
+            b"docx",
+            "application/docx",
+            "x.docx",
+        ),
     )
 
     structured, artifacts = await process_typed_output(
@@ -223,7 +274,9 @@ async def test_process_typed_output_json_contract_violation_propagates() -> None
     file_repo = SimpleNamespace(add=AsyncMock())
 
     def _raise_contract(*args, **kwargs):
-        raise TypedIOValidationException("bad schema", code="typed_io_contract_violation")
+        raise TypedIOValidationException(
+            "bad schema", code="typed_io_contract_violation"
+        )
 
     deps = OutputRuntimeDeps(
         file_repo=file_repo,
@@ -286,7 +339,11 @@ async def test_process_typed_output_file_repo_failure_propagates() -> None:
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
-        render_document=lambda text, output_type, step_order: (b"pdf", "application/pdf", "x.pdf"),
+        render_document=lambda text, output_type, step_order: (
+            b"pdf",
+            "application/pdf",
+            "x.pdf",
+        ),
     )
 
     with pytest.raises(RuntimeError, match="db down"):

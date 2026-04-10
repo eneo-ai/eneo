@@ -1,35 +1,40 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Callable
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from fastapi import HTTPException, Request, status
 
 from intric.authentication.auth_dependencies import ScopeFilter, get_scope_filter
-from intric.main.container.container import Container
-from intric.main.exceptions import ErrorCodes, UnauthorizedException
-from intric.main.models import GeneralError
 from intric.flows.flow_permissions import (
     ensure_can_manage_flows,
     ensure_can_run_flows,
     ensure_can_view_flows,
 )
+from intric.main.container.container import Container
+from intric.main.exceptions import ErrorCodes, UnauthorizedException
+from intric.main.models import GeneralError
+
+if TYPE_CHECKING:
+    from intric.actors.actors.space_actor import SpaceActor
+    from intric.flows.domain.flow import Flow
+    from intric.spaces.space import Space
 
 
 @dataclass(frozen=True)
 class FlowAccessContext:
-    flow: Any
+    flow: "Flow"
     scope_filter: ScopeFilter
-    space: Any | None = None
-    actor: Any | None = None
+    space: "Space | None" = None
+    actor: "SpaceActor | None" = None
 
 
 @dataclass(frozen=True)
 class FlowSpaceAccessContext:
-    space: Any
-    actor: Any
+    space: "Space"
+    actor: "SpaceActor"
     scope_filter: ScopeFilter
 
 
@@ -87,7 +92,8 @@ async def enforce_flow_scope(
         required_access=required_access,
         scope_filter=scope_filter,
         scope_filter_getter=getter,
-        load_actor_context=scope_filter.space_id is None and scope_filter.scope_type is None,
+        load_actor_context=scope_filter.space_id is None
+        and scope_filter.scope_type is None,
     )
 
     if access_context.actor is not None and not access_context.actor.can_read_flows():
@@ -123,7 +129,8 @@ async def resolve_flow_access_context(
     getter = scope_filter_getter or get_scope_filter
     resolved_scope_filter = scope_filter or getter(request)
 
-    flow = await container.flow_service().get_flow(flow_id)
+    flow_service = container.flow_service()
+    flow = await flow_service.get_flow(flow_id)
     if (
         resolved_scope_filter.space_id is not None
         and resolved_scope_filter.space_id != flow.space_id
@@ -141,8 +148,10 @@ async def resolve_flow_access_context(
             scope_filter=resolved_scope_filter,
         )
 
-    space = await container.space_service().get_space(flow.space_id)
-    actor = container.actor_manager().get_space_actor_from_space(space)
+    space_service = container.space_service()  # pyright: ignore[reportUnknownMemberType]
+    actor_manager = container.actor_manager()  # pyright: ignore[reportUnknownMemberType]
+    space = await space_service.get_space(flow.space_id)
+    actor = actor_manager.get_space_actor_from_space(space)
     return FlowAccessContext(
         flow=flow,
         scope_filter=resolved_scope_filter,
@@ -174,8 +183,10 @@ async def resolve_space_access_context(
         container.user(),
         required_access=required_access,
     )
-    space = await container.space_service().get_space(space_id)
-    actor = container.actor_manager().get_space_actor_from_space(space)
+    space_service = container.space_service()  # pyright: ignore[reportUnknownMemberType]
+    actor_manager = container.actor_manager()  # pyright: ignore[reportUnknownMemberType]
+    space = await space_service.get_space(space_id)
+    actor = actor_manager.get_space_actor_from_space(space)
     return FlowSpaceAccessContext(
         space=space,
         actor=actor,

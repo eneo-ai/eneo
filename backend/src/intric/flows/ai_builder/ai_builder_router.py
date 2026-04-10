@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Awaitable
 import logging
+from collections.abc import AsyncGenerator, Awaitable
 from types import SimpleNamespace
-from typing import Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request, status
@@ -19,14 +19,14 @@ from intric.flows.ai_builder.ai_builder_api_models import (
     ApplyPlanRequest,
     ApplyResultResponse,
     CreateSessionRequest,
-    PlanResponse,
     PlanApprovalResponse,
+    PlanResponse,
     RevisePlanRequest,
-    SessionModelOption,
+    SendMessageRequest,
     SessionListResponse,
+    SessionModelOption,
     SessionModelsResponse,
     SessionPlansResponse,
-    SendMessageRequest,
     SessionResponse,
 )
 from intric.flows.ai_builder.ai_builder_context import (
@@ -35,11 +35,33 @@ from intric.flows.ai_builder.ai_builder_context import (
     serialize_space_models,
 )
 from intric.flows.ai_builder.ai_builder_events import SSE_EVENT_DONE, build_error_event
+from intric.flows.ai_builder.ai_builder_models import (
+    ApplyResultResponse as ApplyResult,
+)
+from intric.flows.ai_builder.ai_builder_models import (
+    BuilderPlan,
+    BuilderSession,
+    SessionListItemResponse,
+)
+from intric.flows.ai_builder.ai_builder_service import (
+    AIBuilderService,
+    PreparedMessageContext,
+)
 from intric.flows.flow_permissions import ensure_can_use_flow_ai_builder
 from intric.main.container.container import Container
-from intric.main.exceptions import BadRequestException, ErrorCodes, NotFoundException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    ErrorCodes,
+    NotFoundException,
+    UnauthorizedException,
+)
 from intric.main.models import GeneralError
 from intric.server.dependencies.container import get_container
+
+if TYPE_CHECKING:
+    from intric.audit.application.audit_service import AuditService
+    from intric.spaces.space import Space
+    from intric.tenants.tenant_repo import TenantRepository
 
 router = APIRouter(prefix="/ai-builder", tags=["ai-builder"])
 logger = logging.getLogger(__name__)
@@ -65,7 +87,9 @@ async def _coerce_event_stream(
     return await cast(Awaitable[EventStream], stream)
 
 
-async def _resolve_litellm_params(service: Any, model: Any) -> tuple[str, dict[str, object]]:
+async def _resolve_litellm_params(
+    service: Any, model: Any
+) -> tuple[str, dict[str, object]]:
     """Compatibility seam for tests and thin router-level planner resolution."""
     return await service.resolve_planner_params(model)
 
@@ -75,7 +99,7 @@ async def _resolve_litellm_params(service: Any, model: Any) -> tuple[str, dict[s
 # ---------------------------------------------------------------------------
 
 
-def _ensure_flow_edit_permission(container: Container, space) -> None:
+def _ensure_flow_edit_permission(container: Container, space: "Space") -> None:
     ensure_can_use_flow_ai_builder(container.user())
     actor = container.actor_manager().get_space_actor_from_space(space)
     if not actor.can_edit_flows():
@@ -90,8 +114,8 @@ async def _require_flow_edit_permission(
     container: Container,
     space_id: UUID,
     *,
-    space=None,
-):
+    space: "Space | None" = None,
+) -> "Space":
     """Check that the current user can edit flows in the given space."""
     resolved_space = space
     if resolved_space is None:
@@ -148,25 +172,46 @@ def _get_ai_builder_scoped_space_id(request: Request) -> UUID | None:
     return scope_id
 
 
-async def _get_space_models(container: Container, space_id: UUID) -> list[dict]:
+def _get_ai_builder_service(container: Container) -> AIBuilderService:
+    return container.ai_builder_service()
+
+
+async def _get_space_models(
+    container: Container, space_id: UUID
+) -> list[dict[str, str]]:
     """Get available completion models for a space."""
     space = await container.space_service().get_space(space_id)
     return serialize_space_models(space)
 
 
-async def _get_space_kbs(container: Container, space_id: UUID) -> list[dict]:
+async def _get_space_kbs(container: Container, space_id: UUID) -> list[dict[str, str]]:
     """Get available knowledge bases for a space."""
     space = await container.space_service().get_space(space_id)
     return serialize_space_kbs(space)
 
 
-async def _get_planner_model(container: Container, space_id: UUID):
+async def _get_planner_model(container: Container, space_id: UUID) -> object:
     """Get a completion model to use for the AI builder planner."""
     space = await container.space_service().get_space(space_id)
     return resolve_planner_model(space)
 
 
-def _to_plan_response(plan) -> PlanResponse:
+_ROUTER_TEST_COMPAT_HELPERS = (
+    _get_space_models,
+    _get_space_kbs,
+    _get_planner_model,
+)
+
+
+def _get_audit_service(container: Container) -> "AuditService":
+    return container.audit_service()
+
+
+def _get_tenant_repo(container: Container) -> "TenantRepository":
+    return container.tenant_repo()
+
+
+def _to_plan_response(plan: BuilderPlan) -> PlanResponse:
     public_envelope = plan.envelope.model_copy(update={"reasoning": None}, deep=True)
     return PlanResponse(
         plan_id=plan.id,
@@ -241,8 +286,8 @@ async def create_session(
     space = await _require_flow_edit_permission(container, body.space_id)
     resolve_planner_model(space)
 
-    service = container.ai_builder_service()
-    session = await service.create_session(
+    service = _get_ai_builder_service(container)
+    session: BuilderSession = await service.create_session(
         space_id=body.space_id,
         target_kind=body.target_kind,
         flow_id=body.flow_id,
@@ -251,7 +296,7 @@ async def create_session(
 
     # Audit
     user = container.user()
-    audit_service = container.audit_service()
+    audit_service = _get_audit_service(container)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -303,11 +348,11 @@ async def list_sessions(
     container: Container = Depends(get_container(with_user=True)),
 ):
     ensure_can_use_flow_ai_builder(container.user())
-    service = container.ai_builder_service()
-    sessions = await service.list_sessions()
+    service = _get_ai_builder_service(container)
+    sessions: list[SessionListItemResponse] = await service.list_sessions()
     scoped_space_id = _get_ai_builder_scoped_space_id(request)
 
-    visible_sessions = []
+    visible_sessions: list[SessionListItemResponse] = []
     for session in sessions:
         if scoped_space_id is not None and session.space_id != scoped_space_id:
             continue
@@ -324,11 +369,10 @@ async def list_sessions(
             )
             continue
 
-        if space is not None:
-            try:
-                _ensure_flow_edit_permission(container, space)
-            except UnauthorizedException:
-                continue
+        try:
+            _ensure_flow_edit_permission(container, space)
+        except UnauthorizedException:
+            continue
         visible_sessions.append(session)
 
     return SessionListResponse(sessions=visible_sessions)
@@ -350,9 +394,9 @@ async def list_sessions(
                     "schema": {"type": "string"},
                     "example": (
                         "event: status\n"
-                        "data: {\"status\":\"thinking\"}\n\n"
+                        'data: {"status":"thinking"}\n\n'
                         "event: text\n"
-                        "data: {\"text\":\"I need one more detail.\"}\n\n"
+                        'data: {"text":"I need one more detail."}\n\n'
                         "event: done\n"
                         "data: \n\n"
                     ),
@@ -384,17 +428,19 @@ async def send_message(
     request: Request,
     session_id: Annotated[
         UUID,
-        Path(description="Identifier of the AI Builder session that will receive the message."),
+        Path(
+            description="Identifier of the AI Builder session that will receive the message."
+        ),
     ],
     body: SendMessageRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.ai_builder_service()
-    session = await service.get_session(session_id)
+    service = _get_ai_builder_service(container)
+    session: BuilderSession = await service.get_session(session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     space = await _require_flow_edit_permission(container, session.space_id)
-    tenant = await container.tenant_repo().get(container.user().tenant_id)
-    prepared_context = await service.prepare_message_context(
+    tenant = await _get_tenant_repo(container).get(container.user().tenant_id)
+    prepared_context: PreparedMessageContext = await service.prepare_message_context(
         session=session,
         space=space,
         model_id=body.model_id,
@@ -402,7 +448,7 @@ async def send_message(
         planner_params_resolver=lambda model: _resolve_litellm_params(service, model),
     )
 
-    async def event_stream():
+    async def event_stream() -> AsyncGenerator[ServerSentEvent, None]:
         try:
             stream = await _coerce_event_stream(
                 service.send_message(
@@ -479,8 +525,8 @@ async def get_session(
     ],
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.ai_builder_service()
-    session = await service.get_session(session_id)
+    service = _get_ai_builder_service(container)
+    session: BuilderSession = await service.get_session(session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     await _require_flow_edit_permission(container, session.space_id)
 
@@ -523,13 +569,15 @@ async def get_session_models(
     request: Request,
     session_id: Annotated[
         UUID,
-        Path(description="Identifier of the AI Builder session whose planner models should be listed."),
+        Path(
+            description="Identifier of the AI Builder session whose planner models should be listed."
+        ),
     ],
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Return the completion models available in the session's space."""
-    service = container.ai_builder_service()
-    session = await service.get_session(session_id)
+    service = _get_ai_builder_service(container)
+    session: BuilderSession = await service.get_session(session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     space = await _require_flow_edit_permission(container, session.space_id)
     models = serialize_space_models(space)
@@ -573,9 +621,9 @@ async def get_plan(
     ],
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.ai_builder_service()
-    plan = await service.get_plan(plan_id)
-    session = await service.get_session(plan.session_id)
+    service = _get_ai_builder_service(container)
+    plan: BuilderPlan = await service.get_plan(plan_id)
+    session: BuilderSession = await service.get_session(plan.session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     await _require_flow_edit_permission(container, session.space_id)
     return _to_plan_response(plan)
@@ -608,15 +656,17 @@ async def list_session_plans(
     request: Request,
     session_id: Annotated[
         UUID,
-        Path(description="Identifier of the AI Builder session whose stored plans should be listed."),
+        Path(
+            description="Identifier of the AI Builder session whose stored plans should be listed."
+        ),
     ],
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.ai_builder_service()
-    session = await service.get_session(session_id)
+    service = _get_ai_builder_service(container)
+    session: BuilderSession = await service.get_session(session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     await _require_flow_edit_permission(container, session.space_id)
-    plans = await service.list_session_plans(session_id)
+    plans: list[BuilderPlan] = await service.list_session_plans(session_id)
     return SessionPlansResponse(plans=[_to_plan_response(plan) for plan in plans])
 
 
@@ -651,14 +701,14 @@ async def cancel_session(
     ],
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.ai_builder_service()
-    session = await service.get_session(session_id)
+    service = _get_ai_builder_service(container)
+    session: BuilderSession = await service.get_session(session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     await _require_flow_edit_permission(container, session.space_id)
     session = await service.cancel_session(session_id)
 
     user = container.user()
-    audit_service = container.audit_service()
+    audit_service = _get_audit_service(container)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -716,16 +766,16 @@ async def approve_plan(
     ],
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.ai_builder_service()
-    plan = await service.get_plan(plan_id)
-    session = await service.get_session(plan.session_id)
+    service = _get_ai_builder_service(container)
+    plan: BuilderPlan = await service.get_plan(plan_id)
+    session: BuilderSession = await service.get_session(plan.session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     await _require_flow_edit_permission(container, session.space_id)
     plan = await service.approve_plan(plan_id=plan_id)
 
     # Audit
     user = container.user()
-    audit_service = container.audit_service()
+    audit_service = _get_audit_service(container)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -789,21 +839,23 @@ async def apply_plan(
     request: Request,
     plan_id: Annotated[
         UUID,
-        Path(description="Identifier of the approved AI Builder plan revision to apply to the target flow."),
+        Path(
+            description="Identifier of the approved AI Builder plan revision to apply to the target flow."
+        ),
     ],
     body: ApplyPlanRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.ai_builder_service()
+    service = _get_ai_builder_service(container)
 
     # Verify plan exists and get session for permission check
-    plan = await service.get_plan(plan_id)
-    session = await service.get_session(plan.session_id)
+    plan: BuilderPlan = await service.get_plan(plan_id)
+    session: BuilderSession = await service.get_session(plan.session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     await _require_flow_edit_permission(container, session.space_id)
 
     try:
-        result = await service.apply_plan(
+        result: ApplyResult = await service.apply_plan(
             plan_id=plan_id,
             expected_revision=body.expected_revision,
         )
@@ -823,7 +875,7 @@ async def apply_plan(
 
     # Audit
     user = container.user()
-    audit_service = container.audit_service()
+    audit_service = _get_audit_service(container)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -881,15 +933,15 @@ async def revise_plan(
     body: RevisePlanRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    service = container.ai_builder_service()
+    service = _get_ai_builder_service(container)
 
     # Verify plan exists and get session for permission check
-    plan = await service.get_plan(plan_id)
-    session = await service.get_session(plan.session_id)
+    plan: BuilderPlan = await service.get_plan(plan_id)
+    session: BuilderSession = await service.get_session(plan.session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     await _require_flow_edit_permission(container, session.space_id)
 
-    new_plan = await service.revise_plan(
+    new_plan: BuilderPlan = await service.revise_plan(
         plan_id=plan_id,
         revision_type=body.type,
     )

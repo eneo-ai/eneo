@@ -10,6 +10,13 @@ from intric.flows.ai_builder.ai_builder_reference_rewriter import (
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.domain.flow import FlowStep
+from intric.flows.enums import (
+    FlowInputSource,
+    FlowInputType,
+    FlowMcpPolicy,
+    FlowOutputMode,
+    FlowOutputType,
+)
 from intric.flows.flow_validators import (
     validate_form_schema,
     validate_steps,
@@ -18,7 +25,9 @@ from intric.flows.flow_validators import (
 from intric.main.exceptions import BadRequestException
 
 
-def validate_flow_service_parity(spec: FlowDraftSpecCore, result: SpecValidationResult) -> None:
+def validate_flow_service_parity(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
     """Run the same production validators used by FlowService where possible."""
     flow_steps = _spec_to_flow_steps(spec)
     metadata_json = _metadata_json_from_form_fields(spec.form_fields)
@@ -33,7 +42,9 @@ def validate_flow_service_parity(spec: FlowDraftSpecCore, result: SpecValidation
         )
 
     try:
-        validate_variable_alias_collisions(steps=flow_steps, metadata_json=metadata_json)
+        validate_variable_alias_collisions(
+            steps=flow_steps, metadata_json=metadata_json
+        )
     except BadRequestException as exc:
         result.add_error(
             step_ref=None,
@@ -48,10 +59,9 @@ def validate_flow_service_parity(spec: FlowDraftSpecCore, result: SpecValidation
             require_complete_template_fill_config=False,
         )
     except BadRequestException as exc:
-        if (
-            _is_builder_unsupported_audio_transcription_error(str(exc))
-            or _is_builder_citation_capability_false_negative(str(exc))
-        ):
+        if _is_builder_unsupported_audio_transcription_error(
+            str(exc)
+        ) or _is_builder_citation_capability_false_negative(str(exc)):
             return
         result.add_error(
             step_ref=_infer_step_ref_from_message(spec, str(exc)),
@@ -70,11 +80,11 @@ def _spec_to_flow_steps(spec: FlowDraftSpecCore) -> list[FlowStep]:
             assistant_id=uuid4(),
             step_order=index + 1,
             user_description=rewritten_step.name,
-            input_source=rewritten_step.input_source.value,
-            input_type=rewritten_step.input_type.value,
-            output_mode=rewritten_step.output_mode.value,
-            output_type=rewritten_step.output_type.value,
-            mcp_policy=rewritten_step.mcp_policy.value,
+            input_source=FlowInputSource(rewritten_step.input_source.value),
+            input_type=FlowInputType(rewritten_step.input_type.value),
+            output_mode=FlowOutputMode(rewritten_step.output_mode.value),
+            output_type=FlowOutputType(rewritten_step.output_type.value),
+            mcp_policy=FlowMcpPolicy(rewritten_step.mcp_policy.value),
             input_bindings=rewritten_step.input_bindings,
             input_contract=rewritten_step.input_contract,
             output_contract=rewritten_step.output_contract,
@@ -118,9 +128,13 @@ def _infer_step_ref_from_message(spec: FlowDraftSpecCore, message: str) -> str |
 def _is_builder_unsupported_audio_transcription_error(message: str) -> bool:
     return (
         "Transcription must be enabled when using audio input steps." in message
-        or "A transcription model must be selected when using audio input steps." in message
+        or "A transcription model must be selected when using audio input steps."
+        in message
     )
 
 
 def _is_builder_citation_capability_false_negative(message: str) -> bool:
-    return "citation_mode 'inline_inref_sidecar' requires an LLM-backed text step." in message
+    return (
+        "citation_mode 'inline_inref_sidecar' requires an LLM-backed text step."
+        in message
+    )

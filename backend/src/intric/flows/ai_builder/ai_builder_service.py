@@ -6,10 +6,10 @@ conversation loop and plan lifecycle live in focused collaborators.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 import inspect
 import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Protocol, cast
 from uuid import UUID
 
@@ -21,13 +21,22 @@ from intric.flows.ai_builder.ai_builder_context import (
 )
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE as _SSE_EVENT_DONE,
+)
+from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_ERROR as _SSE_EVENT_ERROR,
+)
+from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_PLAN as _SSE_EVENT_PLAN,
+)
+from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_QUESTION as _SSE_EVENT_QUESTION,
+)
+from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_STATUS as _SSE_EVENT_STATUS,
+)
+from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_TEXT as _SSE_EVENT_TEXT,
 )
-from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
     BuilderPlan,
@@ -39,6 +48,11 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from intric.flows.ai_builder.ai_builder_validation_common import (
+    LintWarning,
+    SpecValidationError,
+)
 from intric.main.exceptions import BadRequestException
 
 if TYPE_CHECKING:
@@ -47,6 +61,7 @@ if TYPE_CHECKING:
     )
     from intric.flows.application.flow_service import FlowService
     from intric.flows.domain.flow import Flow
+    from intric.spaces.space import Space
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
 
@@ -164,7 +179,9 @@ class AIBuilderService:
         if not isinstance(cancelled_session_ids, list | tuple | set):
             return
 
-        for session_id in cancelled_session_ids:
+        for session_id in cast(
+            list[object] | tuple[object, ...] | set[object], cancelled_session_ids
+        ):
             if isinstance(session_id, UUID):
                 await self.repo.supersede_existing_plans(
                     session_id=session_id,
@@ -241,22 +258,29 @@ class AIBuilderService:
 
     async def resolve_planner_params(self, model: Any) -> tuple[str, dict[str, object]]:
         """Resolve LiteLLM model name and provider kwargs for the planner model."""
-        resolve_params = getattr(self.completion_service, "resolve_litellm_params", None)
+        resolve_params = getattr(
+            self.completion_service, "resolve_litellm_params", None
+        )
         if callable(resolve_params):
             resolved_candidate = resolve_params(model)
             if inspect.isawaitable(resolved_candidate):
                 resolved_candidate = await resolved_candidate
+            resolved_tuple = (
+                cast(tuple[object, ...], resolved_candidate)
+                if isinstance(resolved_candidate, tuple)
+                else None
+            )
             if (
-                isinstance(resolved_candidate, tuple)
-                and len(resolved_candidate) == 2
-                and isinstance(resolved_candidate[0], str)
-                and isinstance(resolved_candidate[1], dict)
+                resolved_tuple is not None
+                and len(resolved_tuple) == 2
+                and isinstance(resolved_tuple[0], str)
+                and isinstance(resolved_tuple[1], dict)
             ):
-                return resolved_candidate
+                return cast(tuple[str, dict[str, object]], resolved_tuple)
 
         adapter = cast(
             _CompletionModelAdapterProtocol,
-            await self.completion_service._get_adapter(model),
+            await self.completion_service._get_adapter(model),  # pyright: ignore[reportPrivateUsage]
         )
         litellm_kwargs: dict[str, object] = {}
         api_key = adapter.credential_resolver.get_api_key()
@@ -281,10 +305,12 @@ class AIBuilderService:
         self,
         *,
         session: BuilderSession,
-        space,
+        space: "Space",
         model_id: UUID | None,
         tenant_flow_settings: dict[str, Any] | None,
-        planner_params_resolver: Callable[[Any], Awaitable[tuple[str, dict[str, object]]]]
+        planner_params_resolver: Callable[
+            [Any], Awaitable[tuple[str, dict[str, object]]]
+        ]
         | None = None,
     ) -> PreparedMessageContext:
         """Pre-fetch planner, provider, and flow-edit context before SSE streaming."""
@@ -294,7 +320,9 @@ class AIBuilderService:
             tenant_flow_settings=tenant_flow_settings,
         )
         resolve_planner_params = planner_params_resolver or self.resolve_planner_params
-        litellm_model, litellm_kwargs = await resolve_planner_params(planner_context.model)
+        litellm_model, litellm_kwargs = await resolve_planner_params(
+            planner_context.model
+        )
 
         flow = None
         assistant_snapshots = None
@@ -380,8 +408,10 @@ class AIBuilderService:
 
         - keep_current_description: copies spec with description_override_manual=True
         """
-        from intric.flows.ai_builder.ai_builder_plan_store import persist_plan
-        from intric.flows.ai_builder.ai_builder_plan_store import build_plan_envelope
+        from intric.flows.ai_builder.ai_builder_plan_store import (
+            build_plan_envelope,
+            persist_plan,
+        )
 
         plan = await self.repo.get_plan(
             plan_id=plan_id,
@@ -399,6 +429,7 @@ class AIBuilderService:
         )
         if session.actor_user_id != self.user.id:
             from intric.main.exceptions import UnauthorizedException
+
             raise UnauthorizedException(
                 "Only the session creator can revise plans.",
                 code="session_creator_required",
@@ -455,8 +486,9 @@ class AIBuilderService:
 
 class _EmptyValidation:
     """Stub validation result with no warnings/errors for plan revisions."""
-    warnings: list = []
-    errors: list = []
+
+    warnings: list[LintWarning] = []
+    errors: list[SpecValidationError] = []
 
 
 def _empty_validation() -> _EmptyValidation:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from intric.flows.http_transport.authored_config import (
     CustomHeader,
@@ -33,11 +33,10 @@ def normalize_legacy_config(raw: dict[str, Any]) -> HttpAuthoredConfig:
         timeout = 30
 
     headers_raw = raw.get("headers", {})
-    if not isinstance(headers_raw, dict):
-        headers_raw = {}
+    headers = cast(dict[str, Any], headers_raw) if isinstance(headers_raw, dict) else {}
 
-    auth = _infer_auth_from_headers(headers_raw)
-    custom_headers = _extract_non_auth_headers(headers_raw)
+    auth = _infer_auth_from_headers(headers)
+    custom_headers = _extract_non_auth_headers(headers)
     body = _infer_body_from_legacy(raw)
 
     response_format = raw.get("response_format")
@@ -78,7 +77,7 @@ def _infer_auth_from_headers(headers: dict[str, Any]) -> HttpAuth:
 
 def _extract_non_auth_headers(headers: dict[str, Any]) -> list[CustomHeader]:
     """Extract headers that are NOT auth-related."""
-    result = []
+    result: list[CustomHeader] = []
     for key, value in headers.items():
         if key.lower() in _AUTH_HEADER_NAMES:
             continue

@@ -16,9 +16,10 @@ _EXPORTS = {
         "intric.flows.runtime.celery_app",
         "create_flow_celery_app",
     ),
+    "rag_retrieval": ("intric.flows.runtime.rag_retrieval", None),
+    "step_execution_runtime": ("intric.flows.runtime.step_execution_runtime", None),
+    "transcription_runtime": ("intric.flows.runtime.transcription_runtime", None),
 }
-
-__all__ = sorted(_EXPORTS)
 
 
 def __getattr__(name: str):
@@ -28,6 +29,6 @@ def __getattr__(name: str):
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
 
     module = import_module(module_name)
-    value = getattr(module, attr_name)
+    value = module if attr_name is None else getattr(module, attr_name)
     globals()[name] = value
     return value

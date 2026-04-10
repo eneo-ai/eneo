@@ -7,20 +7,21 @@ from uuid import UUID
 
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.files.audio import AudioMimeTypes
-from intric.main.exceptions import TypedIOValidationException
-
 from intric.flows.transcription_config import (
     FlowTranscriptionConfig,
     FlowTranscriptionConfigError,
     parse_transcription_config,
     to_provider_language,
 )
+from intric.main.exceptions import TypedIOValidationException
 
 if TYPE_CHECKING:
     from intric.files.file_models import File
     from intric.files.transcriber import Transcriber
     from intric.spaces.space_repo import SpaceRepository
-    from intric.transcription_models.domain.transcription_model import TranscriptionModel
+    from intric.transcription_models.domain.transcription_model import (
+        TranscriptionModel,
+    )
 
 
 @dataclass(frozen=True)
@@ -89,7 +90,9 @@ async def resolve_transcription_model_for_step(
         )
 
     for model in available_models:
-        if getattr(model, "id", None) == config.model_id and bool(getattr(model, "can_access", True)):
+        if getattr(model, "id", None) == config.model_id and bool(
+            getattr(model, "can_access", True)
+        ):
             return model
 
     raise TypedIOValidationException(
@@ -143,8 +146,7 @@ async def transcribe_audio_input(
     for file in files:
         has_cached_transcription = bool(
             cache_eligible
-            and
-            isinstance(getattr(file, "transcription", None), str)
+            and isinstance(getattr(file, "transcription", None), str)
             and str(getattr(file, "transcription", "")).strip()
         )
         if has_cached_transcription:
@@ -167,7 +169,7 @@ async def transcribe_audio_input(
                 code="typed_io_transcription_failed",
             ) from exc
 
-        if isinstance(block_text, str) and block_text.strip():
+        if block_text.strip():
             text_blocks.append(block_text.strip())
 
     combined = "\n\n".join(text_blocks).strip()

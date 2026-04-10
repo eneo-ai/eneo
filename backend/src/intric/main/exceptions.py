@@ -144,6 +144,20 @@ class BadRequestException(Exception):
         self.context = context
 
 
+class TypedIOValidationException(BadRequestException):
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message, code=code, context=context)
+        self.input_payload_json: dict[str, Any] | None = None
+        self.effective_prompt: str | None = None
+        self.contract_validation: dict[str, Any] | None = None
+
+
 class QuotaExceededException(Exception):
     pass
 
@@ -195,11 +209,15 @@ class FileTooLargeException(Exception):
         self,
         message: str | None = None,
         *,
+        code: str = "file_too_large",
+        context: dict[str, object] | None = None,
         file_size: int | None = None,
         max_size: int | None = None,
         setting_name: str | None = None,
         docs_hint: str | None = None,
     ):
+        self.code = code
+        self.context = context
         self.file_size = file_size
         self.max_size = max_size
         self.setting_name = setting_name

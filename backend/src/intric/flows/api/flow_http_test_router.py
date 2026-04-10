@@ -10,6 +10,7 @@ from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.flows.api.flow_api_common import error_response
+from intric.flows.api.flow_definition_access import require_flow_edit_access
 from intric.flows.api.flow_models import HttpTestRequest, HttpTestResponse
 from intric.flows.http_transport import HttpAuthoredConfig, is_authored_config
 from intric.flows.http_transport.test_action import execute_http_test
@@ -18,8 +19,6 @@ from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
-
-from intric.flows.api.flow_definition_access import require_flow_edit_access
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -64,9 +63,11 @@ async def test_flow_http(
 
     flow_service = container.flow_service()
     flow = await flow_service.get_flow(id)
-    stored_config = _find_stored_http_config(flow, body.direction)
+    stored_config = find_stored_http_config(flow, body.direction)
     encryption_service = (
-        container.encryption_service() if hasattr(container, "encryption_service") else None
+        container.encryption_service()
+        if hasattr(container, "encryption_service")
+        else None
     )
     http_runtime = FlowHttpRuntimeHelper(
         variable_resolver=cast(Any, None),
@@ -138,7 +139,7 @@ async def test_flow_http(
     )
 
 
-def _find_stored_http_config(flow: Any, direction: str) -> HttpAuthoredConfig | None:
+def find_stored_http_config(flow: Any, direction: str) -> HttpAuthoredConfig | None:
     for step in flow.steps:
         raw_config = step.output_config if direction == "output" else step.input_config
         if isinstance(raw_config, dict):
@@ -168,10 +169,14 @@ def _find_stored_http_config(flow: Any, direction: str) -> HttpAuthoredConfig | 
     return None
 
 
+_find_stored_http_config = find_stored_http_config
+
+
 __all__ = [
     "HttpTestRequest",
     "HttpTestResponse",
     "_find_stored_http_config",
+    "find_stored_http_config",
     "execute_http_test",
     "router",
     "test_flow_http",

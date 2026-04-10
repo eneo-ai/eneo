@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 import re
-from typing import Any
+from collections.abc import Iterable
+from typing import Any, cast
 
-from intric.assistants.reference_tags import INLINE_REFERENCE_PATTERN, extract_inline_reference_ids
+from intric.assistants.reference_tags import (
+    INLINE_REFERENCE_PATTERN,
+    extract_inline_reference_ids,
+)
+from intric.flows.domain.flow import JsonObject
 
 CITATION_MODE_OFF = "off"
 CITATION_MODE_INLINE_INREF_SIDECAR = "inline_inref_sidecar"
@@ -21,7 +25,7 @@ _EXTRA_INLINE_REFERENCE_SPACE_PATTERN = re.compile(r"[ \t]{2,}")
 def resolve_citation_mode(output_config: Any) -> str:
     if not isinstance(output_config, dict):
         return CITATION_MODE_OFF
-    raw_mode = output_config.get("citation_mode")
+    raw_mode = cast(JsonObject, output_config).get("citation_mode")
     if not isinstance(raw_mode, str):
         return CITATION_MODE_OFF
     normalized = raw_mode.strip()
@@ -55,7 +59,9 @@ def build_citation_sidecar(
     )
     direct_included_source_ids = _dedupe_nonempty_strings(included_source_ids)
     inherited_available_source_ids = _dedupe_nonempty_strings(inherited_source_ids)
-    direct_known_sources = _build_known_sources_map(references or [], direct_included_source_ids)
+    direct_known_sources = _build_known_sources_map(
+        references or [], direct_included_source_ids
+    )
     inherited_known_sources = _build_known_sources_map(
         inherited_references or [],
         inherited_available_source_ids,
@@ -93,7 +99,9 @@ def build_citation_sidecar(
         if source_id not in deduped_inherited_cited_source_ids
     ]
 
-    citation_applicable = bool(direct_available_source_ids or inherited_available_source_ids)
+    citation_applicable = bool(
+        direct_available_source_ids or inherited_available_source_ids
+    )
     if citation_mode_requested:
         citation_expected = citation_applicable
     citation_observed = bool(deduped_cited_source_ids or unknown_citation_ids)
@@ -131,20 +139,20 @@ def build_citation_sidecar(
         "direct_cited_source_ids": deduped_direct_cited_source_ids,
         "inherited_cited_source_ids": deduped_inherited_cited_source_ids,
         "upstream_grounded_step_orders": sorted(
-            {
-                int(step_order)
-                for step_order in upstream_grounded_step_orders or []
-                if isinstance(step_order, int)
-            }
+            {int(step_order) for step_order in upstream_grounded_step_orders or []}
         ),
-        "upstream_grounded_step_labels": _dedupe_nonempty_strings(upstream_grounded_step_labels),
+        "upstream_grounded_step_labels": _dedupe_nonempty_strings(
+            upstream_grounded_step_labels
+        ),
     }
     if raw_completion_text is not None:
         sidecar["raw_completion_text"] = raw_completion_text
     return sidecar
 
 
-def summarize_step_citations(step_citations: Iterable[dict[str, Any]]) -> dict[str, int]:
+def summarize_step_citations(
+    step_citations: Iterable[dict[str, Any]],
+) -> dict[str, int]:
     requested = 0
     applicable = 0
     direct_context = 0
@@ -154,8 +162,6 @@ def summarize_step_citations(step_citations: Iterable[dict[str, Any]]) -> dict[s
     missing_required = 0
     unknown_ids = 0
     for citation in step_citations:
-        if not isinstance(citation, dict):
-            continue
         if bool(citation.get("citation_mode_requested")):
             requested += 1
         if bool(citation.get("citation_applicable")):
@@ -206,10 +212,18 @@ def normalize_citation_sidecar_payload(sidecar: dict[str, Any]) -> dict[str, Any
         for source_id in sidecar.get("uncited_inherited_source_ids", [])
         if isinstance(source_id, str) and source_id.strip()
     ]
-    direct_available_source_ids = _dedupe_nonempty_strings(sidecar.get("direct_available_source_ids"))
-    inherited_available_source_ids = _dedupe_nonempty_strings(sidecar.get("inherited_available_source_ids"))
-    direct_cited_source_ids = _dedupe_nonempty_strings(sidecar.get("direct_cited_source_ids"))
-    inherited_cited_source_ids = _dedupe_nonempty_strings(sidecar.get("inherited_cited_source_ids"))
+    direct_available_source_ids = _dedupe_nonempty_strings(
+        sidecar.get("direct_available_source_ids")
+    )
+    inherited_available_source_ids = _dedupe_nonempty_strings(
+        sidecar.get("inherited_available_source_ids")
+    )
+    direct_cited_source_ids = _dedupe_nonempty_strings(
+        sidecar.get("direct_cited_source_ids")
+    )
+    inherited_cited_source_ids = _dedupe_nonempty_strings(
+        sidecar.get("inherited_cited_source_ids")
+    )
     citation_mode_requested = bool(
         sidecar.get(
             "citation_mode_requested",
@@ -223,7 +237,9 @@ def normalize_citation_sidecar_payload(sidecar: dict[str, Any]) -> dict[str, Any
         )
     )
     citation_expected = bool(sidecar.get("citation_expected"))
-    citation_observed = bool(sidecar.get("citation_observed", bool(cited_source_ids or unknown_citation_ids)))
+    citation_observed = bool(
+        sidecar.get("citation_observed", bool(cited_source_ids or unknown_citation_ids))
+    )
     citation_compliance = sidecar.get("citation_compliance")
     if not isinstance(citation_compliance, str) or not citation_compliance.strip():
         citation_compliance = _resolve_citation_compliance(
@@ -256,7 +272,9 @@ def normalize_citation_sidecar_payload(sidecar: dict[str, Any]) -> dict[str, Any
         "cited_source_count": len(list(dict.fromkeys(cited_source_ids))),
         "unknown_citation_ids": list(dict.fromkeys(unknown_citation_ids)),
         "uncited_inserted_source_ids": list(dict.fromkeys(uncited_inserted_source_ids)),
-        "uncited_inherited_source_ids": list(dict.fromkeys(uncited_inherited_source_ids)),
+        "uncited_inherited_source_ids": list(
+            dict.fromkeys(uncited_inherited_source_ids)
+        ),
         "direct_available_source_ids": direct_available_source_ids,
         "inherited_available_source_ids": inherited_available_source_ids,
         "direct_cited_source_ids": direct_cited_source_ids,
@@ -313,8 +331,6 @@ def _build_known_sources_map(
 ) -> dict[str, str]:
     mapping: dict[str, str] = {}
     for reference in references:
-        if not isinstance(reference, dict):
-            continue
         raw_id = reference.get("id")
         if isinstance(raw_id, str) and raw_id.strip():
             mapping[raw_id.strip()] = raw_id.strip()
@@ -345,11 +361,11 @@ def _iter_strings(value: Any) -> Iterable[str]:
         yield value
         return
     if isinstance(value, dict):
-        for nested in value.values():
+        for nested in cast(JsonObject, value).values():
             yield from _iter_strings(nested)
         return
     if isinstance(value, list):
-        for nested in value:
+        for nested in cast(list[Any], value):
             yield from _iter_strings(nested)
 
 
@@ -359,7 +375,7 @@ def _dedupe_nonempty_strings(values: Any) -> list[str]:
     return list(
         dict.fromkeys(
             value.strip()
-            for value in values
+            for value in cast(list[object], values)
             if isinstance(value, str) and value.strip()
         )
     )

@@ -118,15 +118,13 @@ async def resolve_http_input_source_text(
             f"Step {step.step_order}: HTTP input source requires input_config object.",
             code="typed_io_http_invalid_config",
         )
-    resolved_config = decrypt_step_headers_for_runtime(
-        config=step.input_config,
-        encryption_service=deps.encryption_service,
-    ) or {}
-    if not isinstance(resolved_config, dict):
-        raise TypedIOValidationException(
-            f"Step {step.step_order}: HTTP input config must be an object.",
-            code="typed_io_http_invalid_config",
+    resolved_config = (
+        decrypt_step_headers_for_runtime(
+            config=step.input_config,
+            encryption_service=deps.encryption_service,
         )
+        or {}
+    )
 
     url_raw = resolved_config.get("url")
     if not isinstance(url_raw, str) or not url_raw.strip():
@@ -296,16 +294,15 @@ async def deliver_webhook(
     context: dict[str, Any],
     deps: FlowHttpOrchestrationDeps,
 ) -> None:
-    if not step.output_config:
+    if step.output_config is None:
         return
-    if not isinstance(step.output_config, dict):
-        raise BadRequestException("Webhook output_config must be an object.")
-    resolved_config = decrypt_step_headers_for_runtime(
-        config=step.output_config,
-        encryption_service=deps.encryption_service,
-    ) or {}
-    if not isinstance(resolved_config, dict):
-        raise BadRequestException("Webhook output_config must be an object.")
+    resolved_config = (
+        decrypt_step_headers_for_runtime(
+            config=step.output_config,
+            encryption_service=deps.encryption_service,
+        )
+        or {}
+    )
     url_raw = resolved_config.get("url")
     if not isinstance(url_raw, str) or not url_raw.strip():
         raise BadRequestException("Webhook output mode requires output_config.url.")

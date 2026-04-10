@@ -464,145 +464,6 @@ export interface paths {
     patch: operations["update_user_api_v1_users_admin__id___patch"];
     trace?: never;
   };
-  "/api/v1/api-keys/creation-constraints": {
-    /**
-     * Get API key creation constraints
-     * @description Returns tenant policy limits relevant to key creation UX (expiration, rate limit).
-     */
-    get: operations["get_creation_constraints_api_v1_api_keys_creation_constraints_get"];
-  };
-  "/api/v1/api-keys/notification-preferences": {
-    /**
-     * Get API key notification preferences
-     * @description Get the caller's API key expiry notification preferences.
-     */
-    get: operations["get_notification_preferences_api_v1_api_keys_notification_preferences_get"];
-    /**
-     * Update API key notification preferences
-     * @description Update the caller's API key expiry notification preferences.
-     */
-    put: operations["update_notification_preferences_api_v1_api_keys_notification_preferences_put"];
-  };
-  "/api/v1/api-keys/notification-subscriptions": {
-    /**
-     * List API key notification subscriptions
-     * @description List followed targets used for subscribed expiry notification mode.
-     */
-    get: operations["list_notification_subscriptions_api_v1_api_keys_notification_subscriptions_get"];
-  };
-  "/api/v1/api-keys/notification-subscriptions/{target_type}/{target_id}": {
-    /**
-     * Follow target for API key expiry notifications
-     * @description Follow an API key, assistant, app, or space for subscribed expiry notifications.
-     */
-    put: operations["upsert_notification_subscription_api_v1_api_keys_notification_subscriptions__target_type___target_id__put"];
-    /**
-     * Unfollow target for API key expiry notifications
-     * @description Remove a followed API key/assistant/app/space target from subscribed notifications.
-     */
-    delete: operations["delete_notification_subscription_api_v1_api_keys_notification_subscriptions__target_type___target_id__delete"];
-  };
-  "/api/v1/api-keys/expiring-soon": {
-    /**
-     * Get expiring API key summary
-     * @description Returns keys expiring within the specified window, filtered by user visibility.
-     */
-    get: operations["get_expiring_keys_api_v1_api_keys_expiring_soon_get"];
-  };
-  "/api/v1/api-keys/{id}/usage": {
-    /**
-     * Get API key usage
-     * @description Returns usage and auth-failure audit events for a single API key you manage.
-     */
-    get: operations["get_api_key_usage_api_v1_api_keys__id__usage_get"];
-  };
-  "/api/v1/api-keys": {
-    /**
-     * List API keys
-     * @description List manageable API keys in the current tenant with cursor pagination and filters.
-     */
-    get: operations["list_api_keys_api_v1_api_keys_get"];
-    /**
-     * Create API key
-     * @description Create a v2 API key with scoped permission, guardrails, and optional rate limits.
-     */
-    post: operations["create_api_key_api_v1_api_keys_post"];
-  };
-  "/api/v1/api-keys/{id}": {
-    /**
-     * Get API key
-     * @description Get a single API key by ID if the current user is authorized to manage it.
-     */
-    get: operations["get_api_key_api_v1_api_keys__id__get"];
-    /**
-     * Revoke API key (deprecated alias)
-     * @deprecated
-     * @description Deprecated. Use POST /api/v1/api-keys/{id}/revoke with reason body.
-     */
-    delete: operations["revoke_api_key_deprecated_api_v1_api_keys__id__delete"];
-    /**
-     * Update API key
-     * @description Update API key metadata and guardrail fields supported by policy.
-     */
-    patch: operations["update_api_key_api_v1_api_keys__id__patch"];
-  };
-  "/api/v1/api-keys/{id}/revoke": {
-    /**
-     * Revoke API key
-     * @description Revoke an API key and optionally include reason metadata for audit logs.
-     */
-    post: operations["revoke_api_key_api_v1_api_keys__id__revoke_post"];
-  };
-  "/api/v1/api-keys/{id}/rotate": {
-    /**
-     * Rotate API key
-     * @description Rotate an API key, issuing a new secret and starting the grace overlap window.
-     */
-    post: operations["rotate_api_key_api_v1_api_keys__id__rotate_post"];
-  };
-  "/api/v1/api-keys/{id}/suspend": {
-    /**
-     * Suspend API key
-     * @description Suspend an API key temporarily. Suspended keys cannot authenticate.
-     */
-    post: operations["suspend_api_key_api_v1_api_keys__id__suspend_post"];
-  };
-  "/api/v1/api-keys/{id}/reactivate": {
-    /**
-     * Reactivate API key
-     * @description Reactivate a previously suspended API key.
-     */
-    post: operations["reactivate_api_key_api_v1_api_keys__id__reactivate_post"];
-  };
-  "/api/v1/users/": {
-    /** Get Tenant Users */
-    get: operations["get_tenant_users_api_v1_users__get"];
-  };
-  "/api/v1/users/api-keys/": {
-    /**
-     * Generate legacy user API key
-     * @deprecated
-     * @description Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
-     */
-    post: operations["generate_api_key_api_v1_users_api_keys__post"];
-  };
-  "/api/v1/users/api-keys/legacy": {
-    /**
-     * Revoke legacy user API key
-     * @description Permanently revokes the caller's legacy (v1) API key.
-     */
-    delete: operations["revoke_legacy_api_key_api_v1_users_api_keys_legacy_delete"];
-  };
-  "/api/v1/users/admin/invite/": {
-    /** Invite User */
-    post: operations["invite_user_api_v1_users_admin_invite__post"];
-  };
-  "/api/v1/users/admin/{id}/": {
-    /** Delete User */
-    delete: operations["delete_user_api_v1_users_admin__id___delete"];
-    /** Update User */
-    patch: operations["update_user_api_v1_users_admin__id___patch"];
-  };
   "/api/v1/users/login/token/": {
     parameters: {
       query?: never;
@@ -942,6 +803,54 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/settings/flow-input-limits": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow input limits
+     * @description Return the tenant's effective upload limits for flow runtime inputs.
+     */
+    get: operations["get_flow_input_limits_api_v1_settings_flow_input_limits_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update flow input limits
+     * @description Update tenant-level upload limits used by flow runtime input endpoints.
+     */
+    patch: operations["update_flow_input_limits_api_v1_settings_flow_input_limits_patch"];
+    trace?: never;
+  };
+  "/api/v1/settings/ai-builder-budget": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get AI Builder budget settings
+     * @description Return token budget settings used by the Flow AI Builder planner.
+     */
+    get: operations["get_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update AI Builder budget settings
+     * @description Update token budget settings used by the Flow AI Builder planner.
+     */
+    patch: operations["update_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_patch"];
+    trace?: never;
+  };
   "/api/v1/settings/templates": {
     parameters: {
       query?: never;
@@ -1161,92 +1070,6 @@ export interface paths {
     patch: operations["update_api_key_expiry_notifications_setting_api_v1_settings_api_key_expiry_notifications_patch"];
     trace?: never;
   };
-  "/api/v1/settings/scope-enforcement": {
-    /**
-     * Toggle API key scope enforcement
-     * @description Toggle API key scope enforcement for your tenant.
-     *
-     * **Admin Only:** Requires admin permissions.
-     *
-     * **Behavior:**
-     * - Updates the `api_key_scope_enforcement` feature flag for your tenant
-     * - When enabled: API keys are restricted to resources within their configured scope
-     * - When disabled: All API keys can access resources beyond their configured scope
-     * - Disabling scope enforcement also disables strict mode for consistency
-     * - Change takes effect immediately for all API key requests
-     */
-    patch: operations["update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch"];
-  };
-  "/api/v1/settings/strict-mode": {
-    /**
-     * Toggle API key strict mode
-     * @description Toggle API key strict mode for your tenant.
-     *
-     * **Admin Only:** Requires admin permissions.
-     *
-     * **Behavior:**
-     * - Updates the `api_key_strict_mode` feature flag for your tenant
-     * - When enabled: scoped API keys are enforced with strict fail-closed semantics
-     * - When disabled: default scope enforcement behavior applies
-     * - Enabling strict mode requires `api_key_scope_enforcement` to be enabled
-     * - Change takes effect immediately for API key requests
-     */
-    patch: operations["update_strict_mode_setting_api_v1_settings_strict_mode_patch"];
-  };
-  "/api/v1/settings/flow-input-limits": {
-    /**
-     * Get effective Flow input size limits
-     * @description Returns effective tenant-level Flow input size limits, including defaults when no override exists.
-     */
-    get: operations["get_flow_input_limits_api_v1_settings_flow_input_limits_get"];
-    /**
-     * Update Flow input size limits
-     * @description Update tenant-level Flow input file size limits.
-     *
-     * **Admin Only:** Requires admin permissions.
-     *
-     * Values are persisted under tenant `flow_settings` and take effect immediately.
-     *
-     * Example:
-     * ```json
-     * {
-     *   "audio_max_size_bytes": 104857600
-     * }
-     * ```
-     */
-    patch: operations["update_flow_input_limits_api_v1_settings_flow_input_limits_patch"];
-  };
-  "/api/v1/settings/ai-builder-budget": {
-    /**
-     * Get effective AI Builder conversation budget settings
-     * @description Returns effective tenant-level AI Builder conversation budgeting settings, including defaults when no override exists.
-     */
-    get: operations["get_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_get"];
-    /**
-     * Update AI Builder conversation budget settings
-     * @description Update tenant-level AI Builder conversation budgeting settings.
-     *
-     * **Admin Only:** Requires admin permissions.
-     *
-     * Values are persisted under tenant `flow_settings.ai_builder` and take effect immediately.
-     */
-    patch: operations["update_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_patch"];
-  };
-  "/api/v1/settings/api-key-expiry-notifications": {
-    /**
-     * Toggle API key expiry notifications
-     * @description Toggle API key expiry notifications for your tenant.
-     *
-     * **Admin Only:** Requires admin permissions.
-     *
-     * **Behavior:**
-     * - Updates the `api_key_expiry_notifications` feature flag for your tenant
-     * - When enabled: API key expiry notification surfaces are active
-     * - When disabled: API key expiry notifications are suppressed
-     * - Change takes effect immediately
-     */
-    patch: operations["update_api_key_expiry_notifications_setting_api_v1_settings_api_key_expiry_notifications_patch"];
-  };
   "/api/v1/assistants/": {
     parameters: {
       query?: never;
@@ -1449,25 +1272,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/assistants/{id}/mcp-servers/": {
-    /**
-     * Get Assistant Mcp Servers
-     * @description Get all MCP servers associated with an assistant.
-     */
-    get: operations["get_assistant_mcp_servers_api_v1_assistants__id__mcp_servers__get"];
-  };
-  "/api/v1/assistants/{id}/mcp-servers/{mcp_server_id}/": {
-    /**
-     * Add Mcp To Assistant
-     * @description Add an MCP server to an assistant.
-     */
-    post: operations["add_mcp_to_assistant_api_v1_assistants__id__mcp_servers__mcp_server_id___post"];
-    /**
-     * Remove Mcp From Assistant
-     * @description Remove an MCP server from an assistant.
-     */
-    delete: operations["remove_mcp_from_assistant_api_v1_assistants__id__mcp_servers__mcp_server_id___delete"];
-  };
   "/api/v1/group-chats/{id}/": {
     parameters: {
       query?: never;
@@ -1654,20 +1458,6 @@ export interface paths {
     head?: never;
     patch?: never;
     trace?: never;
-  };
-  "/api/v1/conversations/approve-tools/": {
-    /**
-     * Approve Tools
-     * @description Submit approval decisions for pending tool calls.
-     *
-     * When a chat request is made with require_tool_approval=true, the stream will emit
-     * a tool_approval_required event with an approval_id and list of pending tools.
-     * Use this endpoint to approve or reject each tool call.
-     *
-     * The decisions list should contain one entry per tool_call_id from the event.
-     * If a tool_call_id is omitted, it will be treated as rejected.
-     */
-    post: operations["approve_tools_api_v1_conversations_approve_tools__post"];
   };
   "/api/v1/services/": {
     parameters: {
@@ -1936,15 +1726,6 @@ export interface paths {
     head?: never;
     patch?: never;
     trace?: never;
-  };
-  "/api/v1/analysis/assistants/{assistant_id}/questions/": {
-    /**
-     * Get Most Recent Questions Paginated
-     * @description Get paginated question history for an assistant.
-     *
-     * Optimized for admin insights history view and large datasets.
-     */
-    get: operations["get_most_recent_questions_paginated_api_v1_analysis_assistants__assistant_id__questions__get"];
   };
   "/api/v1/analysis/conversation-insights/": {
     parameters: {
@@ -2590,111 +2371,6 @@ export interface paths {
     head?: never;
     patch?: never;
     trace?: never;
-  };
-  "/api/v1/admin/api-key-policy": {
-    /**
-     * Get tenant API key policy
-     * @description Get API key policy settings for the current tenant.
-     */
-    get: operations["get_api_key_policy_api_v1_admin_api_key_policy_get"];
-    /**
-     * Update tenant API key policy
-     * @description Update tenant policy guardrails used for API key creation and validation.
-     */
-    patch: operations["update_api_key_policy_api_v1_admin_api_key_policy_patch"];
-  };
-  "/api/v1/admin/api-keys/notification-policy": {
-    /**
-     * Get API key notification policy
-     * @description Get tenant API key notification policy settings.
-     */
-    get: operations["get_api_key_notification_policy_api_v1_admin_api_keys_notification_policy_get"];
-    /**
-     * Update API key notification policy
-     * @description Update tenant API key notification policy under api_key_policy.notification_policy.
-     */
-    put: operations["update_api_key_notification_policy_api_v1_admin_api_keys_notification_policy_put"];
-  };
-  "/api/v1/admin/super-api-key-status": {
-    /**
-     * Get super API key status
-     * @description Return whether super and super-duper API keys are configured in environment settings.
-     */
-    get: operations["get_super_api_key_status_api_v1_admin_super_api_key_status_get"];
-  };
-  "/api/v1/admin/api-keys": {
-    /**
-     * List tenant API keys
-     * @description List API keys across the tenant with filters and cursor pagination.
-     */
-    get: operations["list_api_keys_admin_api_v1_admin_api_keys_get"];
-  };
-  "/api/v1/admin/api-keys/expiring-soon": {
-    /**
-     * Get expiring API key summary (tenant-wide)
-     * @description Returns all expiring keys in the tenant within the specified window.
-     */
-    get: operations["get_expiring_keys_admin_api_v1_admin_api_keys_expiring_soon_get"];
-  };
-  "/api/v1/admin/api-keys/lookup": {
-    /**
-     * Find API key by exact secret
-     * @description Resolve a full API key secret within the current tenant and return the matching key metadata.
-     */
-    post: operations["lookup_api_key_admin_api_v1_admin_api_keys_lookup_post"];
-  };
-  "/api/v1/admin/api-keys/{id}/usage": {
-    /**
-     * Get API key usage timeline
-     * @description Returns key-centric usage and auth-failure audit events for a single API key.
-     */
-    get: operations["get_api_key_usage_admin_api_v1_admin_api_keys__id__usage_get"];
-  };
-  "/api/v1/admin/api-keys/{id}": {
-    /**
-     * Get tenant API key
-     * @description Get a single API key by ID within the tenant.
-     */
-    get: operations["get_api_key_admin_api_v1_admin_api_keys__id__get"];
-    /**
-     * Revoke API key (deprecated alias)
-     * @deprecated
-     * @description Deprecated. Use POST /api/v1/admin/api-keys/{id}/revoke with reason body.
-     */
-    delete: operations["revoke_api_key_admin_deprecated_api_v1_admin_api_keys__id__delete"];
-    /**
-     * Update tenant API key
-     * @description Update API key metadata and guardrails as tenant admin.
-     */
-    patch: operations["update_api_key_admin_api_v1_admin_api_keys__id__patch"];
-  };
-  "/api/v1/admin/api-keys/{id}/revoke": {
-    /**
-     * Revoke tenant API key
-     * @description Revoke an API key as tenant admin with optional reason metadata.
-     */
-    post: operations["revoke_api_key_admin_api_v1_admin_api_keys__id__revoke_post"];
-  };
-  "/api/v1/admin/api-keys/{id}/suspend": {
-    /**
-     * Suspend tenant API key
-     * @description Suspend an API key so it cannot authenticate until reactivated.
-     */
-    post: operations["suspend_api_key_admin_api_v1_admin_api_keys__id__suspend_post"];
-  };
-  "/api/v1/admin/api-keys/{id}/reactivate": {
-    /**
-     * Reactivate tenant API key
-     * @description Reactivate a suspended API key.
-     */
-    post: operations["reactivate_api_key_admin_api_v1_admin_api_keys__id__reactivate_post"];
-  };
-  "/api/v1/admin/api-keys/{id}/rotate": {
-    /**
-     * Rotate tenant API key
-     * @description Rotate an API key and return the new one-time secret.
-     */
-    post: operations["rotate_api_key_admin_api_v1_admin_api_keys__id__rotate_post"];
   };
   "/api/v1/admin/credentials/{provider}": {
     parameters: {
@@ -3582,10 +3258,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /**
-     * Get Model Defaults
-     * @description Look up recommended default values for a model from LiteLLM's model_cost database.
-     */
+    /** Get Model Defaults */
     get: operations["get_model_defaults_api_v1_admin_model_providers_model_defaults__get"];
     put?: never;
     post?: never;
@@ -3594,17 +3267,6 @@ export interface paths {
     head?: never;
     patch?: never;
     trace?: never;
-  };
-  "/api/v1/admin/model-providers/capabilities/": {
-    /**
-     * Get Provider Capabilities
-     * @description Get supported model types and top models per provider type from LiteLLM.
-     */
-    get: operations["get_provider_capabilities_api_v1_admin_model_providers_capabilities__get"];
-  };
-  "/api/v1/admin/model-providers/model-defaults/": {
-    /** Get Model Defaults */
-    get: operations["get_model_defaults_api_v1_admin_model_providers_model_defaults__get"];
   };
   "/api/v1/admin/model-providers/{provider_id}/": {
     parameters: {
@@ -3695,27 +3357,6 @@ export interface paths {
     head?: never;
     patch?: never;
     trace?: never;
-  };
-  "/api/v1/admin/model-providers/{provider_id}/models/": {
-    /**
-     * List Provider Models
-     * @description List available models/deployments from the provider's API using its credentials.
-     */
-    get: operations["list_provider_models_api_v1_admin_model_providers__provider_id__models__get"];
-  };
-  "/api/v1/admin/model-providers/{provider_id}/test/": {
-    /**
-     * Test Provider
-     * @description Test connectivity to a model provider.
-     */
-    post: operations["test_provider_api_v1_admin_model_providers__provider_id__test__post"];
-  };
-  "/api/v1/admin/model-providers/{provider_id}/validate-model/": {
-    /**
-     * Validate Model
-     * @description Validate that a model works with this provider by making a minimal API call.
-     */
-    post: operations["validate_model_api_v1_admin_model_providers__provider_id__validate_model__post"];
   };
   "/api/v1/admin/tenant-models/completion/": {
     parameters: {
@@ -3923,6 +3564,758 @@ export interface paths {
     get: operations["download_file_signed_api_v1_files__id__download__get"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Flows
+     * @description List flow definitions in a space with pagination-friendly sparse metadata. The `count` field in the paginated response reports the number of items returned in the current page, not the total number of matching flows across all pages.
+     */
+    get: operations["list_flows"];
+    put?: never;
+    /**
+     * Create Flow
+     * @description Create a new draft flow definition, including its initial ordered steps, inside a space.
+     */
+    post: operations["create_flow"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Flow
+     * @description Return the full draft representation of a flow, including all configured steps and metadata.
+     */
+    get: operations["get_flow"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Flow
+     * @description Soft-delete a flow definition so it is no longer available for editing or execution.
+     */
+    delete: operations["delete_flow"];
+    options?: never;
+    head?: never;
+    /**
+     * Update Flow
+     * @description Update a draft flow definition, including steps, metadata, and retention settings.
+     */
+    patch: operations["update_flow"];
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/publish/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Publish Flow
+     * @description Publish the current draft revision so new runs use a version-pinned definition.
+     */
+    post: operations["publish_flow"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/unpublish/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Unpublish Flow
+     * @description Remove the active published revision while keeping the draft definition available for editing.
+     */
+    post: operations["unpublish_flow"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/template-files/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Flow Templates
+     * @description List template assets attached to a flow draft for template-fill steps.
+     */
+    get: operations["list_flow_template_files"];
+    put?: never;
+    /**
+     * Upload a DOCX template asset for a flow
+     * @description Upload a reusable DOCX template for Flow document assembly. This preserves the original DOCX file for placeholder inspection and deterministic template_fill steps. It is separate from flow input uploads and does not use the flow run input policy.
+     */
+    post: operations["upload_flow_template_file"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/template-inspect/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Inspect DOCX template placeholders for a flow
+     * @description Scan an uploaded DOCX template and return placeholders discovered in the document body, tables, headers, and footers.
+     */
+    get: operations["inspect_flow_template"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/template-files/{file_id}/signed-url/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Generate Template Download URL
+     * @description Generate a temporary signed download URL for a stored flow template asset.
+     */
+    post: operations["generate_flow_template_signed_url"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/http-test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Test HTTP Connection
+     * @description Send a test HTTP request using the provided config snapshot. Does not persist anything.
+     */
+    post: operations["test_flow_http"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/assistants/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Flow Assistant
+     * @description Create a flow-managed assistant that can be attached to steps in the specified flow.
+     */
+    post: operations["create_flow_assistant"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/assistants/{assistant_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Flow Assistant
+     * @description Return a single flow-managed assistant and its effective permissions for the caller.
+     */
+    get: operations["get_flow_assistant"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Flow Assistant
+     * @description Delete a flow-managed assistant from the specified flow.
+     */
+    delete: operations["delete_flow_assistant"];
+    options?: never;
+    head?: never;
+    /**
+     * Update Flow Assistant
+     * @description Update a flow-managed assistant that belongs to the specified flow.
+     */
+    patch: operations["update_flow_assistant"];
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/run-contract/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow run contract
+     * @description Return the canonical run-time contract for a published flow.
+     *
+     *     Use this endpoint before rendering a run form to discover:
+     *     - published flow version for stale-submit protection
+     *     - structured form fields
+     *     - step-specific runtime input requirements
+     *     - aggregate file limits
+     *     - published template readiness and capability state
+     */
+    get: operations["get_flow_run_contract"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/input-policy/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow input policy
+     * @description Return effective runtime input policy for a flow's first `flow_input` step.
+     *
+     *     Use this endpoint before upload/run to discover:
+     *     - whether file upload is accepted
+     *     - which mimetypes are allowed
+     *     - the effective max file size limit in bytes
+     *     - max files per run (when constrained)
+     *     - recommended run payload shape for API consumers
+     */
+    get: operations["get_flow_input_policy"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/files/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload flow input file
+     * @description Upload a file using flow-specific policy checks.
+     *
+     *     This endpoint is flow-first and intended for external API consumers that should not call
+     *     generic file routes directly. Validation is based on the first `flow_input` step:
+     *     - accepted input types: audio/document/image/file
+     *     - allowed mimetypes
+     *     - effective tenant flow size limits
+     *     - multipart form field name: `upload_file`
+     */
+    post: operations["upload_flow_file"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/steps/{step_id}/runtime-files/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload step runtime file
+     * @description Upload a file for a specific published runtime-input step.
+     *
+     *     The backend validates the step id, runtime-input enablement, MIME policy, and
+     *     effective size limits for the published flow version before storing the file.
+     */
+    post: operations["upload_flow_runtime_file"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List flow runs (flow-first)
+     * @description List runs for a specific flow.
+     *
+     *         This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
+     *         The `count` field in the paginated response reports the number of items returned in the
+     *         current page, not the total number of matching runs across all pages.
+     */
+    get: operations["list_flow_runs_alias"];
+    put?: never;
+    /**
+     * Create flow run
+     * @description Create a new run for a published flow.
+     *
+     *         Generic consumer sequence:
+     *         1. Inspect `GET /api/v1/flows/{id}/run-contract/` to understand the published form fields,
+     *            required runtime step inputs, and version pinning requirements.
+     *         2. Upload any required files via `POST /api/v1/flows/{id}/files/` or the relevant
+     *            `.../steps/{step_id}/runtime-files/` endpoint.
+     *         3. Submit the returned uploaded files as `file_ids`, together with any optional `step_inputs`
+     *            and structured
+     *            `input_payload_json` fields in this run request.
+     *         4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs.
+     */
+    post: operations["create_flow_run"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow run (flow-first)
+     * @description Get one run for a flow using flow-first routing.
+     *
+     *         Use this endpoint for run status and top-level output payload when building consumer apps.
+     */
+    get: operations["get_flow_run_alias"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/cancel/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel flow run (flow-first)
+     * @description Cancel a flow run if it is not already terminal.
+     *
+     *     This is the canonical run control endpoint for flow consumers.
+     */
+    post: operations["cancel_flow_run_alias"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/redispatch/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Redispatch stale queued run (flow-first)
+     * @description Attempt to redispatch a stale queued run.
+     *
+     *         Returns the refreshed run payload together with `redispatched_count`, which indicates
+     *         whether dispatch was re-triggered for this request.
+     */
+    post: operations["redispatch_flow_run_alias"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/evidence/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow run evidence trace
+     * @description Get the redacted rich evidence trace for one flow run.
+     *
+     *     Use `/steps/` for baseline consumer step inspection and `/evidence/` for rich traceability,
+     *     attempt history, and debug-export provenance.
+     */
+    get: operations["get_flow_run_evidence_alias"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/evidence/export": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Export flow run evidence bundle
+     * @description Export the redacted rich evidence bundle for one flow run as a JSON attachment.
+     */
+    get: operations["export_flow_run_evidence_alias"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/steps/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List flow run step outputs (flow-first)
+     * @description Return ordered step-level execution results for one flow run.
+     *
+     *     Designed for consumer UIs that need to inspect intermediate outputs, diagnostics, and token usage
+     *     without relying on debug-export internals.
+     */
+    get: operations["list_flow_run_steps"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/graph/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow graph
+     * @description Return the graph representation for a flow definition or one version-pinned run snapshot.
+     *
+     *     When `run_id` is provided, the graph is built from the run's published version snapshot and
+     *     annotated with run execution results. Otherwise the current live flow definition is used.
+     */
+    get: operations["get_flow_graph"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Generate signed URL for a flow run artifact
+     * @description Generate a time-limited signed download URL for a file produced by a flow run.
+     *
+     *     This endpoint uses tenant-scoped access so that any user with access to the flow
+     *     can download artifacts from any run, regardless of who created the run.
+     *
+     *     The file_id must reference an artifact that was actually produced by a step in the
+     *     specified run.
+     */
+    post: operations["generate_flow_run_artifact_signed_url"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/ai-builder/sessions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List AI Builder Sessions
+     * @description List AI Builder sessions visible to the caller within their permitted spaces.
+     */
+    get: operations["list_ai_builder_sessions"];
+    put?: never;
+    /**
+     * Create AI Builder Session
+     * @description Start or resume an AI Builder session for a space-scoped flow drafting workflow.
+     */
+    post: operations["create_ai_builder_session"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/ai-builder/sessions/{session_id}/messages": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Send AI Builder Message
+     * @description Send a user message to an AI Builder session and receive planner events as a server-sent event stream.
+     */
+    post: operations["send_ai_builder_message"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/ai-builder/sessions/{session_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get AI Builder Session
+     * @description Return the current state and conversation for a single AI Builder session.
+     */
+    get: operations["get_ai_builder_session"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/ai-builder/sessions/{session_id}/models": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Session Models
+     * @description Return the completion models available to the AI Builder in the session's space.
+     */
+    get: operations["get_ai_builder_models"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/ai-builder/plans/{plan_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get AI Builder Plan
+     * @description Fetch a stored AI Builder plan proposal for review or approval.
+     */
+    get: operations["get_ai_builder_plan"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/ai-builder/sessions/{session_id}/plans": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Session Plans
+     * @description List all plan revisions generated within a specific AI Builder session.
+     */
+    get: operations["list_ai_builder_session_plans"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/ai-builder/sessions/{session_id}/cancel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel AI Builder Session
+     * @description Cancel an active AI Builder session and stop further planning work in that session.
+     */
+    post: operations["cancel_ai_builder_session"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/ai-builder/plans/{plan_id}/approve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Approve AI Builder Plan
+     * @description Mark a plan revision as approved so it can be applied to a flow.
+     */
+    post: operations["approve_ai_builder_plan"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/ai-builder/plans/{plan_id}/apply": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Apply AI Builder Plan
+     * @description Materialize an approved AI Builder plan into the target flow definition.
+     */
+    post: operations["apply_ai_builder_plan"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/ai-builder/plans/{plan_id}/revise": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Revise AI Builder Plan
+     * @description Create a new plan revision with a structured change. Supports 'keep_current_description' (marks description as manually owned).
+     */
+    post: operations["revise_ai_builder_plan"];
     delete?: never;
     options?: never;
     head?: never;
@@ -4277,12 +4670,6 @@ export interface paths {
     patch: operations["update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch"];
     trace?: never;
   };
-  "/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/": {
-    /** Delete Integration Knowledge Wrapper */
-    delete: operations["delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete"];
-    /** Update Integration Knowledge Wrapper */
-    patch: operations["update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch"];
-  };
   "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/": {
     parameters: {
       query?: never;
@@ -4316,10 +4703,6 @@ export interface paths {
     head?: never;
     patch?: never;
     trace?: never;
-  };
-  "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/sync/": {
-    /** Trigger Integration Full Sync */
-    post: operations["trigger_integration_full_sync_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__sync__post"];
   };
   "/api/v1/spaces/{id}/members/": {
     parameters: {
@@ -4517,25 +4900,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/websites/check-url/": {
-    /**
-     * Check if URL exists on Organization space
-     * @description Check if a website URL already exists on the user's Organization space.
-     *
-     *     **Use case:**
-     *     When creating a new website on a Personal or Shared space, call this endpoint
-     *     to check if the URL is already being crawled on the Organization space.
-     *     This helps avoid duplicate crawls and informs users that the knowledge
-     *     might already be available for import.
-     *
-     *     **Returns:**
-     *     - Website info if URL exists on Organization space
-     *     - `null` if URL not found or user has no Organization space
-     *
-     *     **Note:** This does not block website creation - it's informational only.
-     */
-    get: operations["check_existing_website_url_api_v1_websites_check_url__get"];
-  };
   "/api/v1/websites/bulk/run/": {
     parameters: {
       query?: never;
@@ -4692,337 +5056,6 @@ export interface paths {
     head?: never;
     patch?: never;
     trace?: never;
-  };
-  "/api/v1/flows/": {
-    /**
-     * List Flows
-     * @description List flow definitions in a space with pagination-friendly sparse metadata. The `count` field in the paginated response reports the number of items returned in the current page, not the total number of matching flows across all pages.
-     */
-    get: operations["list_flows"];
-    /**
-     * Create Flow
-     * @description Create a new draft flow definition, including its initial ordered steps, inside a space.
-     */
-    post: operations["create_flow"];
-  };
-  "/api/v1/flows/{id}/": {
-    /**
-     * Get Flow
-     * @description Return the full draft representation of a flow, including all configured steps and metadata.
-     */
-    get: operations["get_flow"];
-    /**
-     * Delete Flow
-     * @description Soft-delete a flow definition so it is no longer available for editing or execution.
-     */
-    delete: operations["delete_flow"];
-    /**
-     * Update Flow
-     * @description Update a draft flow definition, including steps, metadata, and retention settings.
-     */
-    patch: operations["update_flow"];
-  };
-  "/api/v1/flows/{id}/publish/": {
-    /**
-     * Publish Flow
-     * @description Publish the current draft revision so new runs use a version-pinned definition.
-     */
-    post: operations["publish_flow"];
-  };
-  "/api/v1/flows/{id}/unpublish/": {
-    /**
-     * Unpublish Flow
-     * @description Remove the active published revision while keeping the draft definition available for editing.
-     */
-    post: operations["unpublish_flow"];
-  };
-  "/api/v1/flows/{id}/template-files/": {
-    /**
-     * List Flow Templates
-     * @description List template assets attached to a flow draft for template-fill steps.
-     */
-    get: operations["list_flow_template_files"];
-    /**
-     * Upload a DOCX template asset for a flow
-     * @description Upload a reusable DOCX template for Flow document assembly. This preserves the original DOCX file for placeholder inspection and deterministic template_fill steps. It is separate from flow input uploads and does not use the flow run input policy.
-     */
-    post: operations["upload_flow_template_file"];
-  };
-  "/api/v1/flows/{id}/template-inspect/": {
-    /**
-     * Inspect DOCX template placeholders for a flow
-     * @description Scan an uploaded DOCX template and return placeholders discovered in the document body, tables, headers, and footers.
-     */
-    get: operations["inspect_flow_template"];
-  };
-  "/api/v1/flows/{id}/template-files/{file_id}/signed-url/": {
-    /**
-     * Generate Template Download URL
-     * @description Generate a temporary signed download URL for a stored flow template asset.
-     */
-    post: operations["generate_flow_template_signed_url"];
-  };
-  "/api/v1/flows/{id}/http-test": {
-    /**
-     * Test HTTP Connection
-     * @description Send a test HTTP request using the provided config snapshot. Does not persist anything.
-     */
-    post: operations["test_flow_http"];
-  };
-  "/api/v1/flows/{id}/assistants/": {
-    /**
-     * Create Flow Assistant
-     * @description Create a flow-managed assistant that can be attached to steps in the specified flow.
-     */
-    post: operations["create_flow_assistant"];
-  };
-  "/api/v1/flows/{id}/assistants/{assistant_id}/": {
-    /**
-     * Get Flow Assistant
-     * @description Return a single flow-managed assistant and its effective permissions for the caller.
-     */
-    get: operations["get_flow_assistant"];
-    /**
-     * Delete Flow Assistant
-     * @description Delete a flow-managed assistant from the specified flow.
-     */
-    delete: operations["delete_flow_assistant"];
-    /**
-     * Update Flow Assistant
-     * @description Update a flow-managed assistant that belongs to the specified flow.
-     */
-    patch: operations["update_flow_assistant"];
-  };
-  "/api/v1/flows/{id}/run-contract/": {
-    /**
-     * Get flow run contract
-     * @description Return the canonical run-time contract for a published flow.
-     *
-     * Use this endpoint before rendering a run form to discover:
-     * - published flow version for stale-submit protection
-     * - structured form fields
-     * - step-specific runtime input requirements
-     * - aggregate file limits
-     * - published template readiness and capability state
-     */
-    get: operations["get_flow_run_contract"];
-  };
-  "/api/v1/flows/{id}/input-policy/": {
-    /**
-     * Get flow input policy
-     * @description Return effective runtime input policy for a flow's first `flow_input` step.
-     *
-     * Use this endpoint before upload/run to discover:
-     * - whether file upload is accepted
-     * - which mimetypes are allowed
-     * - the effective max file size limit in bytes
-     * - max files per run (when constrained)
-     * - recommended run payload shape for API consumers
-     */
-    get: operations["get_flow_input_policy"];
-  };
-  "/api/v1/flows/{id}/files/": {
-    /**
-     * Upload flow input file
-     * @description Upload a file using flow-specific policy checks.
-     *
-     * This endpoint is flow-first and intended for external API consumers that should not call
-     * generic file routes directly. Validation is based on the first `flow_input` step:
-     * - accepted input types: audio/document/image/file
-     * - allowed mimetypes
-     * - effective tenant flow size limits
-     * - multipart form field name: `upload_file`
-     */
-    post: operations["upload_flow_file"];
-  };
-  "/api/v1/flows/{id}/steps/{step_id}/runtime-files/": {
-    /**
-     * Upload step runtime file
-     * @description Upload a file for a specific published runtime-input step.
-     *
-     * The backend validates the step id, runtime-input enablement, MIME policy, and
-     * effective size limits for the published flow version before storing the file.
-     */
-    post: operations["upload_flow_runtime_file"];
-  };
-  "/api/v1/flows/{id}/runs/": {
-    /**
-     * List flow runs (flow-first)
-     * @description List runs for a specific flow.
-     *
-     *     This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
-     *     The `count` field in the paginated response reports the number of items returned in the
-     *     current page, not the total number of matching runs across all pages.
-     */
-    get: operations["list_flow_runs_alias"];
-    /**
-     * Create flow run
-     * @description Create a new run for a published flow.
-     *
-     *     Generic consumer sequence:
-     *     1. Inspect `GET /api/v1/flows/{id}/run-contract/` to understand the published form fields,
-     *        required runtime step inputs, and version pinning requirements.
-     *     2. Upload any required files via `POST /api/v1/flows/{id}/files/` or the relevant
-     *        `.../steps/{step_id}/runtime-files/` endpoint.
-     *     3. Submit the returned uploaded files as `file_ids`, together with any optional `step_inputs`
-     *        and structured
-     *        `input_payload_json` fields in this run request.
-     *     4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs.
-     */
-    post: operations["create_flow_run"];
-  };
-  "/api/v1/flows/{id}/runs/{run_id}/": {
-    /**
-     * Get flow run (flow-first)
-     * @description Get one run for a flow using flow-first routing.
-     *
-     *     Use this endpoint for run status and top-level output payload when building consumer apps.
-     */
-    get: operations["get_flow_run_alias"];
-  };
-  "/api/v1/flows/{id}/runs/{run_id}/cancel/": {
-    /**
-     * Cancel flow run (flow-first)
-     * @description Cancel a flow run if it is not already terminal.
-     *
-     * This is the canonical run control endpoint for flow consumers.
-     */
-    post: operations["cancel_flow_run_alias"];
-  };
-  "/api/v1/flows/{id}/runs/{run_id}/redispatch/": {
-    /**
-     * Redispatch stale queued run (flow-first)
-     * @description Attempt to redispatch a stale queued run.
-     *
-     *     Returns the refreshed run payload together with `redispatched_count`, which indicates
-     *     whether dispatch was re-triggered for this request.
-     */
-    post: operations["redispatch_flow_run_alias"];
-  };
-  "/api/v1/flows/{id}/runs/{run_id}/evidence/": {
-    /**
-     * Get flow run evidence trace
-     * @description Get the redacted rich evidence trace for one flow run.
-     *
-     * Use `/steps/` for baseline consumer step inspection and `/evidence/` for rich traceability,
-     * attempt history, and debug-export provenance.
-     */
-    get: operations["get_flow_run_evidence_alias"];
-  };
-  "/api/v1/flows/{id}/runs/{run_id}/evidence/export": {
-    /**
-     * Export flow run evidence bundle
-     * @description Export the redacted rich evidence bundle for one flow run as a JSON attachment.
-     */
-    get: operations["export_flow_run_evidence_alias"];
-  };
-  "/api/v1/flows/{id}/runs/{run_id}/steps/": {
-    /**
-     * List flow run step outputs (flow-first)
-     * @description Return ordered step-level execution results for one flow run.
-     *
-     * Designed for consumer UIs that need to inspect intermediate outputs, diagnostics, and token usage
-     * without relying on debug-export internals.
-     */
-    get: operations["list_flow_run_steps"];
-  };
-  "/api/v1/flows/{id}/graph/": {
-    /**
-     * Get flow graph
-     * @description Return the graph representation for a flow definition or one version-pinned run snapshot.
-     *
-     * When `run_id` is provided, the graph is built from the run's published version snapshot and
-     * annotated with run execution results. Otherwise the current live flow definition is used.
-     */
-    get: operations["get_flow_graph"];
-  };
-  "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/": {
-    /**
-     * Generate signed URL for a flow run artifact
-     * @description Generate a time-limited signed download URL for a file produced by a flow run.
-     *
-     * This endpoint uses tenant-scoped access so that any user with access to the flow
-     * can download artifacts from any run, regardless of who created the run.
-     *
-     * The file_id must reference an artifact that was actually produced by a step in the
-     * specified run.
-     */
-    post: operations["generate_flow_run_artifact_signed_url"];
-  };
-  "/api/v1/flows/ai-builder/sessions": {
-    /**
-     * List AI Builder Sessions
-     * @description List AI Builder sessions visible to the caller within their permitted spaces.
-     */
-    get: operations["list_ai_builder_sessions"];
-    /**
-     * Create AI Builder Session
-     * @description Start or resume an AI Builder session for a space-scoped flow drafting workflow.
-     */
-    post: operations["create_ai_builder_session"];
-  };
-  "/api/v1/flows/ai-builder/sessions/{session_id}/messages": {
-    /**
-     * Send AI Builder Message
-     * @description Send a user message to an AI Builder session and receive planner events as a server-sent event stream.
-     */
-    post: operations["send_ai_builder_message"];
-  };
-  "/api/v1/flows/ai-builder/sessions/{session_id}": {
-    /**
-     * Get AI Builder Session
-     * @description Return the current state and conversation for a single AI Builder session.
-     */
-    get: operations["get_ai_builder_session"];
-  };
-  "/api/v1/flows/ai-builder/sessions/{session_id}/models": {
-    /**
-     * List Session Models
-     * @description Return the completion models available to the AI Builder in the session's space.
-     */
-    get: operations["get_ai_builder_models"];
-  };
-  "/api/v1/flows/ai-builder/plans/{plan_id}": {
-    /**
-     * Get AI Builder Plan
-     * @description Fetch a stored AI Builder plan proposal for review or approval.
-     */
-    get: operations["get_ai_builder_plan"];
-  };
-  "/api/v1/flows/ai-builder/sessions/{session_id}/plans": {
-    /**
-     * List Session Plans
-     * @description List all plan revisions generated within a specific AI Builder session.
-     */
-    get: operations["list_ai_builder_session_plans"];
-  };
-  "/api/v1/flows/ai-builder/sessions/{session_id}/cancel": {
-    /**
-     * Cancel AI Builder Session
-     * @description Cancel an active AI Builder session and stop further planning work in that session.
-     */
-    post: operations["cancel_ai_builder_session"];
-  };
-  "/api/v1/flows/ai-builder/plans/{plan_id}/approve": {
-    /**
-     * Approve AI Builder Plan
-     * @description Mark a plan revision as approved so it can be applied to a flow.
-     */
-    post: operations["approve_ai_builder_plan"];
-  };
-  "/api/v1/flows/ai-builder/plans/{plan_id}/apply": {
-    /**
-     * Apply AI Builder Plan
-     * @description Materialize an approved AI Builder plan into the target flow definition.
-     */
-    post: operations["apply_ai_builder_plan"];
-  };
-  "/api/v1/flows/ai-builder/plans/{plan_id}/revise": {
-    /**
-     * Revise AI Builder Plan
-     * @description Create a new plan revision with a structured change. Supports 'keep_current_description' (marks description as manually owned).
-     */
-    post: operations["revise_ai_builder_plan"];
   };
   "/api/v1/prompts/{id}/": {
     parameters: {
@@ -6208,91 +6241,6 @@ export interface paths {
     head?: never;
     patch?: never;
     trace?: never;
-  };
-  "/api/v1/mcp-servers/": {
-    /**
-     * Get Mcp Servers
-     * @description Get all MCP servers from global catalog with optional tag filtering.
-     */
-    get: operations["get_mcp_servers_api_v1_mcp_servers__get"];
-    /**
-     * Create Mcp Server
-     * @description Create a new MCP server in global catalog (admin only).
-     *
-     * Validates connection before saving. Returns 400 if connection fails.
-     */
-    post: operations["create_mcp_server_api_v1_mcp_servers__post"];
-  };
-  "/api/v1/mcp-servers/settings/": {
-    /**
-     * Get Tenant Mcp Settings
-     * @description Get all available MCP servers with tenant enablement status.
-     */
-    get: operations["get_tenant_mcp_settings_api_v1_mcp_servers_settings__get"];
-  };
-  "/api/v1/mcp-servers/settings/{mcp_server_id}/": {
-    /**
-     * Update Mcp Settings
-     * @description Update MCP server settings for the current tenant.
-     */
-    put: operations["update_mcp_settings_api_v1_mcp_servers_settings__mcp_server_id___put"];
-    /**
-     * Enable Mcp For Tenant
-     * @description Enable an MCP server for the current tenant with optional credentials.
-     */
-    post: operations["enable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___post"];
-    /**
-     * Disable Mcp For Tenant
-     * @description Disable an MCP server for the current tenant.
-     */
-    delete: operations["disable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___delete"];
-  };
-  "/api/v1/mcp-servers/settings/tools/{tool_id}/": {
-    /**
-     * Update Tenant Tool Enabled
-     * @description Update tenant-level enablement for a tool (admin only).
-     */
-    put: operations["update_tenant_tool_enabled_api_v1_mcp_servers_settings_tools__tool_id___put"];
-  };
-  "/api/v1/mcp-servers/{id}/": {
-    /**
-     * Get Mcp Server
-     * @description Get a single MCP server by ID.
-     */
-    get: operations["get_mcp_server_api_v1_mcp_servers__id___get"];
-    /**
-     * Update Mcp Server
-     * @description Update an MCP server in global catalog (admin only).
-     */
-    post: operations["update_mcp_server_api_v1_mcp_servers__id___post"];
-    /**
-     * Delete Mcp Server
-     * @description Delete an MCP server from global catalog (admin only).
-     */
-    delete: operations["delete_mcp_server_api_v1_mcp_servers__id___delete"];
-  };
-  "/api/v1/mcp-servers/{id}/tools/": {
-    /**
-     * Get Mcp Server Tools
-     * @description Get all tools for an MCP server with tenant-level settings applied.
-     */
-    get: operations["get_mcp_server_tools_api_v1_mcp_servers__id__tools__get"];
-  };
-  "/api/v1/mcp-servers/{id}/tools/sync/": {
-    /**
-     * Sync Mcp Server Tools
-     * @description Manually refresh/sync tools for an MCP server (admin only).
-     *
-     * Returns 400 if connection to the MCP server fails.
-     */
-    post: operations["sync_mcp_server_tools_api_v1_mcp_servers__id__tools_sync__post"];
-  };
-  "/api/v1/mcp-servers/{id}/tools/{tool_id}/": {
-    /**
-     * Update Tool Default Enabled
-     * @description Update global default enabled status for a tool (admin only).
-     */
-    put: operations["update_tool_default_enabled_api_v1_mcp_servers__id__tools__tool_id___put"];
   };
   "/api/v1/integrations/sharepoint/webhook/": {
     parameters: {
@@ -7521,6 +7469,11 @@ export interface components {
       /** Token Type */
       token_type: string;
     };
+    /** AccessTokenResponse */
+    AccessTokenResponse: {
+      /** Access Token */
+      access_token: string;
+    };
     /**
      * ActionConfig
      * @description Configuration for a single action type with metadata for UI display.
@@ -7925,17 +7878,6 @@ export interface components {
       api_key: components["schemas"]["ApiKeyV2"];
       /** @default exact_secret */
       match_reason?: components["schemas"]["ApiKeySearchMatchReason"];
-    };
-    /** ApiKeyInDB */
-    ApiKeyInDB: {
-      /** Truncated Key */
-      truncated_key: string;
-      /** Key */
-      key: string;
-      /** User Id */
-      user_id: string | null;
-      /** Assistant Id */
-      assistant_id: string | null;
     };
     /**
      * ApiKeyListResponse
@@ -8727,8 +8669,8 @@ export interface components {
     /**
      * ApplyPlanRequest
      * @example {
-     *   "expected_revision": 12
-     * }
+     *       "expected_revision": 12
+     *     }
      */
     ApplyPlanRequest: {
       /** Expected Revision */
@@ -8737,12 +8679,12 @@ export interface components {
     /**
      * ApplyResultResponse
      * @example {
-     *   "flow_id": "00000000-0000-0000-0000-000000000001",
-     *   "flow_name": "Employee Review Summary",
-     *   "steps_created": 2,
-     *   "steps_removed": 0,
-     *   "steps_updated": 0
-     * }
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "flow_name": "Employee Review Summary",
+     *       "steps_created": 2,
+     *       "steps_removed": 0,
+     *       "steps_updated": 0
+     *     }
      */
     ApplyResultResponse: {
       /**
@@ -8777,11 +8719,8 @@ export interface components {
       question: string;
       /** Session Id */
       session_id?: string | null;
-      /**
-       * Files
-       * @default []
-       */
-      files?: components["schemas"]["ModelId"][];
+      /** Files */
+      files?: string[];
       /**
        * Stream
        * @default false
@@ -8859,28 +8798,24 @@ export interface components {
        * Groups
        * @deprecated
        * @description This field is deprecated and will be ignored
-       * @default []
        */
       groups?: components["schemas"]["ModelId"][];
       /**
        * Websites
        * @deprecated
        * @description This field is deprecated and will be ignored
-       * @default []
        */
       websites?: components["schemas"]["ModelId"][];
       /**
        * Integration Knowledge List
        * @deprecated
        * @description This field is deprecated and will be ignored
-       * @default []
        */
       integration_knowledge_list?: components["schemas"]["ModelId"][];
       /**
        * Mcp Servers
        * @deprecated
        * @description This field is deprecated and will be ignored
-       * @default []
        */
       mcp_servers?: components["schemas"]["ModelId"][];
       /**
@@ -8982,7 +8917,7 @@ export interface components {
       space_id: string;
       completion_model_kwargs: components["schemas"]["ModelKwargs"];
       /** Logging Enabled */
-      logging_enabled: boolean;
+      logging_enabled: boolean | null;
       /** Attachments */
       attachments: components["schemas"]["FilePublic"][];
       allowed_attachments: components["schemas"]["FileRestrictions"];
@@ -8993,9 +8928,7 @@ export interface components {
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
       /** Mcp Servers */
-      mcp_servers: {
-        [key: string]: unknown;
-      }[];
+      mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
       /** Mcp Tools */
       mcp_tools?: components["schemas"]["MCPToolSetting"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
@@ -9050,12 +8983,12 @@ export interface components {
       id: string;
       /** Name */
       name: string;
-      completion_model_kwargs?: components["schemas"]["ModelKwargs"];
+      completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
       /**
        * Logging Enabled
        * @default false
        */
-      logging_enabled?: boolean;
+      logging_enabled?: boolean | null;
       /**
        * Permissions
        * @default []
@@ -9680,7 +9613,7 @@ export interface components {
       /** Name */
       name: string;
       /** Nickname */
-      nickname: string;
+      nickname?: string | null;
       /** Family */
       family?: string | null;
       /** Max Input Tokens */
@@ -9743,7 +9676,7 @@ export interface components {
       /** Name */
       name: string;
       /** Nickname */
-      nickname: string;
+      nickname?: string | null;
       /** Family */
       family?: string | null;
       /** Max Input Tokens */
@@ -9796,7 +9729,7 @@ export interface components {
       /** Name */
       name: string;
       /** Nickname */
-      nickname: string;
+      nickname?: string | null;
       /** Family */
       family?: string | null;
       /** Max Input Tokens */
@@ -9903,7 +9836,7 @@ export interface components {
       /** Name */
       name: string;
       /** Nickname */
-      nickname: string;
+      nickname?: string | null;
       /** Family */
       family?: string | null;
       /** Max Input Tokens */
@@ -9996,7 +9929,7 @@ export interface components {
       /** Name */
       name: string;
       /** Nickname */
-      nickname: string;
+      nickname?: string | null;
       /** Family */
       family?: string | null;
       /** Max Input Tokens */
@@ -10172,10 +10105,7 @@ export interface components {
     CrawlerHealthResponse: {
       /** Status */
       status: string;
-      /**
-       * Status Flags
-       * @default []
-       */
+      /** Status Flags */
       status_flags?: string[];
       /**
        * Status Reason
@@ -10184,55 +10114,12 @@ export interface components {
       status_reason?: string;
       /** Response Timestamp Utc */
       response_timestamp_utc: string;
-      /**
-       * @default {
-       *       "db_query_ok": true,
-       *       "arq_ongoing": 0
-       *     }
-       */
       crawler_activity?: components["schemas"]["CrawlerActivity"];
-      /**
-       * @default {
-       *       "j_complete": 0,
-       *       "j_failed": 0,
-       *       "j_retried": 0,
-       *       "j_ongoing": 0,
-       *       "queued": 0
-       *     }
-       */
       arq?: components["schemas"]["ARQHealth"];
-      /**
-       * @default {
-       *       "zombies_reconciled": 0,
-       *       "expired_killed": 0,
-       *       "rescued": 0,
-       *       "early_zombies_failed": 0,
-       *       "long_running_failed": 0,
-       *       "slots_released": 0
-       *     }
-       */
       watchdog?: components["schemas"]["WatchdogMetrics"];
-      /**
-       * @default {
-       *       "status": "UNKNOWN"
-       *     }
-       */
       feeder?: components["schemas"]["FeederLeader"];
-      /**
-       * @default {
-       *       "total": 0,
-       *       "tenant_count": 0,
-       *       "top_tenants": {}
-       *     }
-       */
       pending?: components["schemas"]["PendingQueueSummary"];
       thresholds: components["schemas"]["HealthThresholds"];
-      /**
-       * @default {
-       *       "arq_raw": "",
-       *       "queue_name": "arq:queue"
-       *     }
-       */
       debug?: components["schemas"]["DebugInfo"];
     };
     /**
@@ -10447,10 +10334,10 @@ export interface components {
     /**
      * CreateSessionRequest
      * @example {
-     *   "force_new": false,
-     *   "space_id": "00000000-0000-0000-0000-000000000001",
-     *   "target_kind": "create"
-     * }
+     *       "force_new": false,
+     *       "space_id": "00000000-0000-0000-0000-000000000001",
+     *       "target_kind": "create"
+     *     }
      */
     CreateSessionRequest: {
       target_kind: components["schemas"]["TargetKind"];
@@ -10748,7 +10635,7 @@ export interface components {
       space_id: string;
       completion_model_kwargs: components["schemas"]["ModelKwargs"];
       /** Logging Enabled */
-      logging_enabled: boolean;
+      logging_enabled: boolean | null;
       /** Attachments */
       attachments: components["schemas"]["FilePublic"][];
       allowed_attachments: components["schemas"]["FileRestrictions"];
@@ -10759,9 +10646,7 @@ export interface components {
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
       /** Mcp Servers */
-      mcp_servers: {
-        [key: string]: unknown;
-      }[];
+      mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
       /** Mcp Tools */
       mcp_tools?: components["schemas"]["MCPToolSetting"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
@@ -11217,7 +11102,10 @@ export interface components {
       | "audit_log"
       | "session"
       | "mcp_server"
-      | "mcp_server_tool";
+      | "mcp_server_tool"
+      | "flow"
+      | "flow_run"
+      | "ai_builder_session";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -11544,8 +11432,8 @@ export interface components {
     /**
      * FlowAssistantCreateRequest
      * @example {
-     *   "name": "Flow Step Assistant"
-     * }
+     *       "name": "Flow Step Assistant"
+     *     }
      */
     FlowAssistantCreateRequest: {
       /** Name */
@@ -11554,21 +11442,21 @@ export interface components {
     /**
      * FlowCreateRequest
      * @example {
-     *   "description": "Transcribe and summarize citizen audio",
-     *   "name": "Municipality Intake Transcription",
-     *   "space_id": "00000000-0000-0000-0000-000000000001",
-     *   "steps": [
-     *     {
-     *       "assistant_id": "00000000-0000-0000-0000-000000000002",
-     *       "input_source": "flow_input",
-     *       "input_type": "audio",
-     *       "mcp_policy": "inherit",
-     *       "output_mode": "transcribe_only",
-     *       "output_type": "text",
-     *       "step_order": 1
+     *       "description": "Transcribe and summarize citizen audio",
+     *       "name": "Municipality Intake Transcription",
+     *       "space_id": "00000000-0000-0000-0000-000000000001",
+     *       "steps": [
+     *         {
+     *           "assistant_id": "00000000-0000-0000-0000-000000000002",
+     *           "input_source": "flow_input",
+     *           "input_type": "audio",
+     *           "mcp_policy": "inherit",
+     *           "output_mode": "transcribe_only",
+     *           "output_type": "text",
+     *           "step_order": 1
+     *         }
+     *       ]
      *     }
-     *   ]
-     * }
      */
     FlowCreateRequest: {
       /**
@@ -11631,22 +11519,22 @@ export interface components {
     /**
      * FlowInputPolicyPublic
      * @example {
-     *   "accepted_mimetypes": [
-     *     "audio/wav",
-     *     "audio/mpeg"
-     *   ],
-     *   "accepts_file_upload": true,
-     *   "flow_id": "00000000-0000-0000-0000-000000000001",
-     *   "input_source": "flow_input",
-     *   "input_type": "audio",
-     *   "max_file_size_bytes": 52428800,
-     *   "max_files_per_run": 10,
-     *   "recommended_run_payload": {
-     *     "file_ids": [
-     *       "00000000-0000-0000-0000-000000000002"
-     *     ]
-     *   }
-     * }
+     *       "accepted_mimetypes": [
+     *         "audio/wav",
+     *         "audio/mpeg"
+     *       ],
+     *       "accepts_file_upload": true,
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "input_source": "flow_input",
+     *       "input_type": "audio",
+     *       "max_file_size_bytes": 52428800,
+     *       "max_files_per_run": 10,
+     *       "recommended_run_payload": {
+     *         "file_ids": [
+     *           "00000000-0000-0000-0000-000000000002"
+     *         ]
+     *       }
+     *     }
      */
     FlowInputPolicyPublic: {
       /**
@@ -11704,49 +11592,49 @@ export interface components {
     /**
      * FlowPublic
      * @example {
-     *   "created_at": "2026-03-17T09:30:00Z",
-     *   "created_by_user_id": "00000000-0000-0000-0000-000000000030",
-     *   "data_retention_days": 30,
-     *   "description": "Transcribe a review conversation and return a PDF summary.",
-     *   "id": "00000000-0000-0000-0000-000000000001",
-     *   "metadata_json": {
-     *     "category": "hr"
-     *   },
-     *   "name": "Employee Review Summary",
-     *   "owner_user_id": "00000000-0000-0000-0000-000000000030",
-     *   "published_version": 3,
-     *   "space_id": "00000000-0000-0000-0000-000000000020",
-     *   "steps": [
-     *     {
-     *       "assistant_id": "00000000-0000-0000-0000-000000000201",
      *       "created_at": "2026-03-17T09:30:00Z",
-     *       "id": "00000000-0000-0000-0000-000000000101",
-     *       "input_source": "flow_input",
-     *       "input_type": "audio",
-     *       "mcp_policy": "inherit",
-     *       "output_mode": "transcribe_only",
-     *       "output_type": "text",
-     *       "step_order": 1,
-     *       "updated_at": "2026-03-17T09:30:00Z",
-     *       "user_description": "Transcribe uploaded audio into Swedish text."
-     *     },
-     *     {
-     *       "assistant_id": "00000000-0000-0000-0000-000000000202",
-     *       "created_at": "2026-03-17T09:30:00Z",
-     *       "id": "00000000-0000-0000-0000-000000000102",
-     *       "input_source": "previous_step",
-     *       "input_type": "text",
-     *       "mcp_policy": "inherit",
-     *       "output_mode": "pass_through",
-     *       "output_type": "pdf",
-     *       "step_order": 2,
-     *       "updated_at": "2026-03-17T09:30:00Z",
-     *       "user_description": "Summarize the transcription into a PDF for HR follow-up."
+     *       "created_by_user_id": "00000000-0000-0000-0000-000000000030",
+     *       "data_retention_days": 30,
+     *       "description": "Transcribe a review conversation and return a PDF summary.",
+     *       "id": "00000000-0000-0000-0000-000000000001",
+     *       "metadata_json": {
+     *         "category": "hr"
+     *       },
+     *       "name": "Employee Review Summary",
+     *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
+     *       "published_version": 3,
+     *       "space_id": "00000000-0000-0000-0000-000000000020",
+     *       "steps": [
+     *         {
+     *           "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *           "created_at": "2026-03-17T09:30:00Z",
+     *           "id": "00000000-0000-0000-0000-000000000101",
+     *           "input_source": "flow_input",
+     *           "input_type": "audio",
+     *           "mcp_policy": "inherit",
+     *           "output_mode": "transcribe_only",
+     *           "output_type": "text",
+     *           "step_order": 1,
+     *           "updated_at": "2026-03-17T09:30:00Z",
+     *           "user_description": "Transcribe uploaded audio into Swedish text."
+     *         },
+     *         {
+     *           "assistant_id": "00000000-0000-0000-0000-000000000202",
+     *           "created_at": "2026-03-17T09:30:00Z",
+     *           "id": "00000000-0000-0000-0000-000000000102",
+     *           "input_source": "previous_step",
+     *           "input_type": "text",
+     *           "mcp_policy": "inherit",
+     *           "output_mode": "pass_through",
+     *           "output_type": "pdf",
+     *           "step_order": 2,
+     *           "updated_at": "2026-03-17T09:30:00Z",
+     *           "user_description": "Summarize the transcription into a PDF for HR follow-up."
+     *         }
+     *       ],
+     *       "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *       "updated_at": "2026-03-17T10:00:00Z"
      *     }
-     *   ],
-     *   "tenant_id": "00000000-0000-0000-0000-000000000010",
-     *   "updated_at": "2026-03-17T10:00:00Z"
-     * }
      */
     FlowPublic: {
       /**
@@ -11790,43 +11678,43 @@ export interface components {
     /**
      * FlowRunContractPublic
      * @example {
-     *   "aggregate_max_files": 1,
-     *   "flow_id": "00000000-0000-0000-0000-000000000001",
-     *   "form_fields": [
-     *     {
-     *       "label": "Employee name",
-     *       "name": "employee_name",
-     *       "required": true,
-     *       "type": "text"
-     *     }
-     *   ],
-     *   "published_flow_version": 3,
-     *   "steps_requiring_input": [
-     *     {
-     *       "accepted_mimetypes": [
-     *         "audio/wav",
-     *         "audio/mpeg"
+     *       "aggregate_max_files": 1,
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "form_fields": [
+     *         {
+     *           "label": "Employee name",
+     *           "name": "employee_name",
+     *           "required": true,
+     *           "type": "text"
+     *         }
      *       ],
-     *       "description": "Provide the recorded review conversation.",
-     *       "input_format": "audio",
-     *       "label": "Upload audio",
-     *       "max_file_size_bytes": 52428800,
-     *       "max_files": 1,
-     *       "required": true,
-     *       "step_id": "00000000-0000-0000-0000-000000000101",
-     *       "step_order": 1
-     *     }
-     *   ],
-     *   "template_readiness": [
-     *     {
-     *       "can_download": false,
-     *       "can_edit": false,
      *       "published_flow_version": 3,
-     *       "status": "unavailable",
-     *       "step_id": "00000000-0000-0000-0000-000000000102"
+     *       "steps_requiring_input": [
+     *         {
+     *           "accepted_mimetypes": [
+     *             "audio/wav",
+     *             "audio/mpeg"
+     *           ],
+     *           "description": "Provide the recorded review conversation.",
+     *           "input_format": "audio",
+     *           "label": "Upload audio",
+     *           "max_file_size_bytes": 52428800,
+     *           "max_files": 1,
+     *           "required": true,
+     *           "step_id": "00000000-0000-0000-0000-000000000101",
+     *           "step_order": 1
+     *         }
+     *       ],
+     *       "template_readiness": [
+     *         {
+     *           "can_download": false,
+     *           "can_edit": false,
+     *           "published_flow_version": 3,
+     *           "status": "unavailable",
+     *           "step_id": "00000000-0000-0000-0000-000000000102"
+     *         }
+     *       ]
      *     }
-     *   ]
-     * }
      */
     FlowRunContractPublic: {
       /**
@@ -11848,18 +11736,18 @@ export interface components {
     /**
      * FlowRunCreateRequest
      * @example {
-     *   "expected_flow_version": 7,
-     *   "input_payload_json": {
-     *     "text": "optional context for downstream prompt steps"
-     *   },
-     *   "step_inputs": {
-     *     "00000000-0000-0000-0000-000000000003": {
-     *       "file_ids": [
-     *         "00000000-0000-0000-0000-000000000004"
-     *       ]
+     *       "expected_flow_version": 7,
+     *       "input_payload_json": {
+     *         "text": "optional context for downstream prompt steps"
+     *       },
+     *       "step_inputs": {
+     *         "00000000-0000-0000-0000-000000000003": {
+     *           "file_ids": [
+     *             "00000000-0000-0000-0000-000000000004"
+     *           ]
+     *         }
+     *       }
      *     }
-     *   }
-     * }
      */
     FlowRunCreateRequest: {
       /** Expected Flow Version */
@@ -11878,39 +11766,39 @@ export interface components {
     /**
      * FlowRunDebugAttempt
      * @example {
-     *   "attempt_no": 1,
-     *   "duration_ms": 5240,
-     *   "finish_reason": "stop",
-     *   "num_tokens_input": 321,
-     *   "num_tokens_output": 118,
-     *   "provenance_json": {
-     *     "llm": {
-     *       "model_parameters": {
-     *         "model_name": "gpt-4.1-mini",
-     *         "parameter_semantics": {
-     *           "reasoning_effort": {
-     *             "mode": "model_default"
-     *           },
-     *           "temperature": {
-     *             "mode": "model_default"
-     *           },
-     *           "top_p": {
-     *             "mode": "model_default"
-     *           },
-     *           "verbosity": {
-     *             "mode": "model_default"
+     *       "attempt_no": 1,
+     *       "duration_ms": 5240,
+     *       "finish_reason": "stop",
+     *       "num_tokens_input": 321,
+     *       "num_tokens_output": 118,
+     *       "provenance_json": {
+     *         "llm": {
+     *           "model_parameters": {
+     *             "model_name": "gpt-4.1-mini",
+     *             "parameter_semantics": {
+     *               "reasoning_effort": {
+     *                 "mode": "model_default"
+     *               },
+     *               "temperature": {
+     *                 "mode": "model_default"
+     *               },
+     *               "top_p": {
+     *                 "mode": "model_default"
+     *               },
+     *               "verbosity": {
+     *                 "mode": "model_default"
+     *               }
+     *             },
+     *             "provider": "openai"
      *           }
-     *         },
-     *         "provider": "openai"
-     *       }
+     *         }
+     *       },
+     *       "provider": "openai",
+     *       "provider_response_id": "resp_123",
+     *       "requested_model": "gpt-4.1",
+     *       "response_model": "gpt-4.1-mini",
+     *       "status": "completed"
      *     }
-     *   },
-     *   "provider": "openai",
-     *   "provider_response_id": "resp_123",
-     *   "requested_model": "gpt-4.1",
-     *   "response_model": "gpt-4.1-mini",
-     *   "status": "completed"
-     * }
      */
     FlowRunDebugAttempt: {
       /** Attempt No */
@@ -11954,43 +11842,43 @@ export interface components {
     /**
      * FlowRunDebugExport
      * @example {
-     *   "definition": {
-     *     "checksum": "sha256:example",
-     *     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
-     *     "steps_count": 1,
-     *     "version": 3
-     *   },
-     *   "definition_snapshot": {
-     *     "steps": []
-     *   },
-     *   "generated_at": "2026-03-31T12:00:00Z",
-     *   "run": {
-     *     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
-     *     "flow_version": 3,
-     *     "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *     "status": "completed",
-     *     "summary": {
-     *       "artifacts_count": 0,
-     *       "attempts_count": 1,
-     *       "completed_steps": 1,
-     *       "duration_ms": 5240,
-     *       "failed_steps": 0,
-     *       "models_used": [
-     *         "gpt-4.1-mini"
-     *       ],
-     *       "steps_count": 1
-     *     },
-     *     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
-     *   },
-     *   "schema_version": "eneo.flow.debug-export.v2",
-     *   "security": {
-     *     "classification_field": "output_classification_override",
-     *     "masked_fields_count": 2,
-     *     "mcp_policy_field": "mcp_policy",
-     *     "redaction_applied": true
-     *   },
-     *   "steps": []
-     * }
+     *       "definition": {
+     *         "checksum": "sha256:example",
+     *         "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *         "steps_count": 1,
+     *         "version": 3
+     *       },
+     *       "definition_snapshot": {
+     *         "steps": []
+     *       },
+     *       "generated_at": "2026-03-31T12:00:00Z",
+     *       "run": {
+     *         "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *         "flow_version": 3,
+     *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *         "status": "completed",
+     *         "summary": {
+     *           "artifacts_count": 0,
+     *           "attempts_count": 1,
+     *           "completed_steps": 1,
+     *           "duration_ms": 5240,
+     *           "failed_steps": 0,
+     *           "models_used": [
+     *             "gpt-4.1-mini"
+     *           ],
+     *           "steps_count": 1
+     *         },
+     *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
+     *       },
+     *       "schema_version": "eneo.flow.debug-export.v2",
+     *       "security": {
+     *         "classification_field": "output_classification_override",
+     *         "masked_fields_count": 2,
+     *         "mcp_policy_field": "mcp_policy",
+     *         "redaction_applied": true
+     *       },
+     *       "steps": []
+     *     }
      */
     FlowRunDebugExport: {
       /** Schema Version */
@@ -12321,203 +12209,125 @@ export interface components {
     /**
      * FlowRunEvidenceExportResponse
      * @example {
-     *   "bundle": {
-     *     "debug_export": {
-     *       "definition": {
-     *         "checksum": "sha256:example",
-     *         "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
-     *         "steps_count": 1,
-     *         "version": 3
+     *       "bundle": {
+     *         "debug_export": {
+     *           "definition": {
+     *             "checksum": "sha256:example",
+     *             "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *             "steps_count": 1,
+     *             "version": 3
+     *           },
+     *           "definition_snapshot": {
+     *             "steps": []
+     *           },
+     *           "generated_at": "2026-03-31T12:00:00Z",
+     *           "run": {
+     *             "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *             "flow_version": 3,
+     *             "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *             "status": "completed",
+     *             "summary": {
+     *               "artifacts_count": 0,
+     *               "attempts_count": 1,
+     *               "completed_steps": 1,
+     *               "duration_ms": 5240,
+     *               "failed_steps": 0,
+     *               "models_used": [
+     *                 "gpt-4.1-mini"
+     *               ],
+     *               "steps_count": 1
+     *             },
+     *             "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
+     *           },
+     *           "schema_version": "eneo.flow.debug-export.v2",
+     *           "security": {
+     *             "classification_field": "output_classification_override",
+     *             "masked_fields_count": 2,
+     *             "mcp_policy_field": "mcp_policy",
+     *             "redaction_applied": true
+     *           },
+     *           "steps": []
+     *         },
+     *         "definition_snapshot": {
+     *           "steps": []
+     *         },
+     *         "run": {
+     *           "created_at": "2026-03-17T10:05:00Z",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "flow_version": 3,
+     *           "id": "00000000-0000-0000-0000-000000000301",
+     *           "input_payload_json": {
+     *             "employee_name": "Alex Example"
+     *           },
+     *           "job_id": "00000000-0000-0000-0000-000000000401",
+     *           "status": "queued",
+     *           "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *           "trace_id": "00000000-0000-0000-0000-000000000302",
+     *           "updated_at": "2026-03-17T10:05:00Z",
+     *           "user_id": "00000000-0000-0000-0000-000000000030"
+     *         },
+     *         "step_attempts": [],
+     *         "step_results": [
+     *           {
+     *             "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *             "created_at": "2026-03-17T10:05:05Z",
+     *             "diagnostics": [
+     *               {
+     *                 "code": "runtime_input_consumed",
+     *                 "message": "Uploaded audio file was used."
+     *               }
+     *             ],
+     *             "id": "00000000-0000-0000-0000-000000000501",
+     *             "input_payload_json": {
+     *               "diagnostics": [
+     *                 {
+     *                   "code": "runtime_input_consumed",
+     *                   "message": "Uploaded audio file was used."
+     *                 }
+     *               ]
+     *             },
+     *             "num_tokens_input": 0,
+     *             "num_tokens_output": 0,
+     *             "output_payload_json": {
+     *               "text": "Hello and welcome to the annual review..."
+     *             },
+     *             "status": "completed",
+     *             "step_id": "00000000-0000-0000-0000-000000000101",
+     *             "step_order": 1,
+     *             "updated_at": "2026-03-17T10:05:30Z"
+     *           }
+     *         ]
      *       },
-     *       "definition_snapshot": {
-     *         "steps": []
-     *       },
+     *       "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
      *       "generated_at": "2026-03-31T12:00:00Z",
-     *       "run": {
+     *       "manifest": {
+     *         "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
      *         "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
      *         "flow_version": 3,
+     *         "masked_fields_count": 2,
+     *         "redaction_applied": true,
+     *         "redaction_policy_version": "flow-evidence-redaction.v3",
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "status": "completed",
-     *         "summary": {
-     *           "artifacts_count": 0,
-     *           "attempts_count": 1,
-     *           "completed_steps": 1,
-     *           "duration_ms": 5240,
-     *           "failed_steps": 0,
-     *           "models_used": [
-     *             "gpt-4.1-mini"
-     *           ],
-     *           "steps_count": 1
-     *         },
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
-     *       "schema_version": "eneo.flow.debug-export.v2",
-     *       "security": {
-     *         "classification_field": "output_classification_override",
-     *         "masked_fields_count": 2,
-     *         "mcp_policy_field": "mcp_policy",
-     *         "redaction_applied": true
-     *       },
-     *       "steps": []
-     *     },
-     *     "definition_snapshot": {
-     *       "steps": []
-     *     },
-     *     "run": {
-     *       "created_at": "2026-03-17T10:05:00Z",
-     *       "flow_id": "00000000-0000-0000-0000-000000000001",
-     *       "flow_version": 3,
-     *       "id": "00000000-0000-0000-0000-000000000301",
-     *       "input_payload_json": {
-     *         "employee_name": "Alex Example"
-     *       },
-     *       "job_id": "00000000-0000-0000-0000-000000000401",
-     *       "status": "queued",
-     *       "tenant_id": "00000000-0000-0000-0000-000000000010",
-     *       "trace_id": "00000000-0000-0000-0000-000000000302",
-     *       "updated_at": "2026-03-17T10:05:00Z",
-     *       "user_id": "00000000-0000-0000-0000-000000000030"
-     *     },
-     *     "step_attempts": [],
-     *     "step_results": [
-     *       {
-     *         "assistant_id": "00000000-0000-0000-0000-000000000201",
-     *         "created_at": "2026-03-17T10:05:05Z",
-     *         "diagnostics": [
+     *       "redaction": {
+     *         "applied": true,
+     *         "masked_fields": [
      *           {
-     *             "code": "runtime_input_consumed",
-     *             "message": "Uploaded audio file was used."
+     *             "key": "api_key",
+     *             "path": "bundle.run.input_payload_json.api_key",
+     *             "reason": "sensitive_key"
      *           }
      *         ],
-     *         "id": "00000000-0000-0000-0000-000000000501",
-     *         "input_payload_json": {
-     *           "diagnostics": [
-     *             {
-     *               "code": "runtime_input_consumed",
-     *               "message": "Uploaded audio file was used."
-     *             }
-     *           ]
-     *         },
-     *         "num_tokens_input": 0,
-     *         "num_tokens_output": 0,
-     *         "output_payload_json": {
-     *           "text": "Hello and welcome to the annual review..."
-     *         },
-     *         "status": "completed",
-     *         "step_id": "00000000-0000-0000-0000-000000000101",
-     *         "step_order": 1,
-     *         "updated_at": "2026-03-17T10:05:30Z"
-     *       }
-     *     ]
-     *   },
-     *   "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
-     *   "generated_at": "2026-03-31T12:00:00Z",
-     *   "manifest": {
-     *     "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
-     *     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
-     *     "flow_version": 3,
-     *     "masked_fields_count": 2,
-     *     "redaction_applied": true,
-     *     "redaction_policy_version": "flow-evidence-redaction.v3",
-     *     "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
-     *   },
-     *   "redaction": {
-     *     "applied": true,
-     *     "masked_fields": [
-     *       {
-     *         "key": "api_key",
-     *         "path": "bundle.run.input_payload_json.api_key",
-     *         "reason": "sensitive_key"
-     *       }
-     *     ],
-     *     "masked_fields_count": 2,
-     *     "masked_paths": [
-     *       "bundle.run.input_payload_json.api_key",
-     *       "bundle.debug_export.definition_snapshot.steps[0].output_config.headers.Authorization"
-     *     ],
-     *     "policy_version": "flow-evidence-redaction.v3"
-     *   },
-     *   "schema_version": "flow-evidence-export.v2",
-     *   "summary": {
-     *     "artifact_details": [
-     *       {
-     *         "checksum": "artifact-checksum",
-     *         "file_id": "artifact-1",
-     *         "file_type": "document",
-     *         "mimetype": "application/pdf",
-     *         "name": "case-summary.pdf",
-     *         "size": 14012
-     *       }
-     *     ],
-     *     "artifact_names": [
-     *       "case-summary.pdf"
-     *     ],
-     *     "artifacts_count": 0,
-     *     "attempts_count": 1,
-     *     "citations": {
-     *       "citation_tracked": true,
-     *       "cited_source_count": 1,
-     *       "cited_source_ids": [
-     *         "source-1"
-     *       ],
-     *       "tracking_mode": "inline_inref_sidecar",
-     *       "uncited_inserted_source_ids": [],
-     *       "unknown_citation_ids": []
-     *     },
-     *     "completed_steps": 1,
-     *     "duration_ms": 5240,
-     *     "failed_steps": 0,
-     *     "final_output": {
-     *       "artifact_count": 1,
-     *       "artifact_names": [
-     *         "case-summary.pdf"
-     *       ],
-     *       "kind": "mixed",
-     *       "structured_present": false,
-     *       "text_present": true,
-     *       "text_preview": {
-     *         "byte_size": 27,
-     *         "preview": "Decision support generated.",
-     *         "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
-     *         "truncated": false
-     *       }
-     *     },
-     *     "models_used": [
-     *       "gpt-4.1-mini"
-     *     ],
-     *     "rag_source_display_names": [
-     *       "Municipality policy guide"
-     *     ],
-     *     "rag_source_names": [
-     *       "Municipality policy guide"
-     *     ],
-     *     "rag_sources": [
-     *       {
-     *         "display_name": "Municipality policy guide",
-     *         "id": "source-1",
-     *         "name": "Municipality policy guide",
-     *         "source_container_display_name": "Municipality knowledge base",
-     *         "source_container_id": "website-1",
-     *         "source_container_kind": "website",
-     *         "source_container_name": "Municipality knowledge base",
-     *         "source_kind": "website",
-     *         "source_url": "https://example.se/policy-guide",
-     *         "usage_state": "inserted_into_prompt"
-     *       }
-     *     ],
-     *     "rag_sources_count": 1,
-     *     "rag_usage_tracking": {
-     *       "citation_tracked": false,
-     *       "material_influence_tracked": false,
-     *       "note": "References record retrieved candidates and exact prompt inclusion. Citations and material influence are not currently tracked.",
-     *       "prompt_context_inclusion_tracked": true,
-     *       "retrieval_tracked": true,
-     *       "selection_basis": "semantic_search_ranked_chunks_grouped_by_source"
-     *     },
-     *     "status": "completed",
-     *     "step_overview": [
-     *       {
+     *         "masked_fields_count": 2,
+     *         "masked_paths": [
+     *           "bundle.run.input_payload_json.api_key",
+     *           "bundle.debug_export.definition_snapshot.steps[0].output_config.headers.Authorization"
+     *         ],
+     *         "policy_version": "flow-evidence-redaction.v3"
+     *       },
+     *       "schema_version": "flow-evidence-export.v2",
+     *       "summary": {
      *         "artifact_details": [
      *           {
      *             "checksum": "artifact-checksum",
@@ -12531,6 +12341,7 @@ export interface components {
      *         "artifact_names": [
      *           "case-summary.pdf"
      *         ],
+     *         "artifacts_count": 0,
      *         "attempts_count": 1,
      *         "citations": {
      *           "citation_tracked": true,
@@ -12542,120 +12353,197 @@ export interface components {
      *           "uncited_inserted_source_ids": [],
      *           "unknown_citation_ids": []
      *         },
-     *         "configured_input_type": "text",
-     *         "configured_output_type": "pdf",
+     *         "completed_steps": 1,
      *         "duration_ms": 5240,
-     *         "input_lineage": {
-     *           "input_source": "previous_step",
-     *           "legacy_prompt_binding_used": false,
-     *           "question_binding_expressions": [
-     *             "step_1.output.text",
-     *             "step_input.text"
+     *         "failed_steps": 0,
+     *         "final_output": {
+     *           "artifact_count": 1,
+     *           "artifact_names": [
+     *             "case-summary.pdf"
      *           ],
-     *           "question_binding_references_runtime_input": true,
-     *           "runtime_file_checksums": [
-     *             "input-checksum"
-     *           ],
-     *           "runtime_file_count": 1,
-     *           "runtime_file_ids": [
-     *             "file-1"
-     *           ],
-     *           "runtime_file_names": [
-     *             "underlag.pdf"
-     *           ],
-     *           "runtime_files": [
-     *             {
-     *               "checksum": "input-checksum",
-     *               "file_type": "document",
-     *               "has_text": true,
-     *               "has_transcription": false,
-     *               "id": "file-1",
-     *               "mimetype": "application/pdf",
-     *               "name": "underlag.pdf",
-     *               "size": 2048,
-     *               "text_length": 1024
-     *             }
-     *           ],
-     *           "runtime_input_format": "document",
-     *           "upstream_step_labels": [
-     *             "Collect the source document"
-     *           ],
-     *           "upstream_step_orders": [
-     *             1
-     *           ],
-     *           "used_question_binding": true,
-     *           "uses_runtime_input": true
+     *           "kind": "mixed",
+     *           "structured_present": false,
+     *           "text_present": true,
+     *           "text_preview": {
+     *             "byte_size": 27,
+     *             "preview": "Decision support generated.",
+     *             "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
+     *             "truncated": false
+     *           }
      *         },
-     *         "knowledge_retrieval": {
-     *           "attempted": true,
-     *           "prompt_context": {
-     *             "included_chunk_count": 2,
-     *             "included_source_count": 1,
-     *             "included_source_display_names": [
-     *               "Municipality policy guide"
-     *             ],
-     *             "included_source_ids": [
-     *               "source-1"
-     *             ],
-     *             "included_source_titles": [
-     *               "Municipality policy guide"
-     *             ],
-     *             "knowledge_tokens": 248,
-     *             "not_included_source_count": 0,
-     *             "summary": {
-     *               "top_ranked_sources": [
-     *                 {
-     *                   "best_score": 0.91,
-     *                   "display_name": "Municipality policy guide",
-     *                   "included_chunk_count": 2,
-     *                   "included_group_count": 1,
-     *                   "rank": 1,
-     *                   "source_id": "source-1",
-     *                   "source_kind": "website"
-     *                 }
-     *               ],
-     *               "total_chunks": 2,
-     *               "total_sources": 1,
-     *               "truncated_by_token_budget": false
-     *             },
-     *             "tracked": true,
-     *             "truncated_by_token_budget": false
-     *           },
-     *           "reference_metadata_status": "success",
-     *           "references_truncated": false,
-     *           "retrieval_duration_ms": 182,
-     *           "source_display_names": [
-     *             "Municipality policy guide"
-     *           ],
-     *           "source_names": [
-     *             "Municipality policy guide"
-     *           ],
-     *           "status": "success",
-     *           "unique_sources": 1
-     *         },
-     *         "knowledge_sources_count": 1,
-     *         "knowledge_usage_state": "inserted_into_prompt",
      *         "models_used": [
      *           "gpt-4.1-mini"
      *         ],
-     *         "output_summary": {
-     *           "byte_size": 27,
-     *           "preview": "Decision support generated.",
-     *           "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
-     *           "truncated": false
+     *         "rag_source_display_names": [
+     *           "Municipality policy guide"
+     *         ],
+     *         "rag_source_names": [
+     *           "Municipality policy guide"
+     *         ],
+     *         "rag_sources": [
+     *           {
+     *             "display_name": "Municipality policy guide",
+     *             "id": "source-1",
+     *             "name": "Municipality policy guide",
+     *             "source_container_display_name": "Municipality knowledge base",
+     *             "source_container_id": "website-1",
+     *             "source_container_kind": "website",
+     *             "source_container_name": "Municipality knowledge base",
+     *             "source_kind": "website",
+     *             "source_url": "https://example.se/policy-guide",
+     *             "usage_state": "inserted_into_prompt"
+     *           }
+     *         ],
+     *         "rag_sources_count": 1,
+     *         "rag_usage_tracking": {
+     *           "citation_tracked": false,
+     *           "material_influence_tracked": false,
+     *           "note": "References record retrieved candidates and exact prompt inclusion. Citations and material influence are not currently tracked.",
+     *           "prompt_context_inclusion_tracked": true,
+     *           "retrieval_tracked": true,
+     *           "selection_basis": "semantic_search_ranked_chunks_grouped_by_source"
      *         },
-     *         "result_output_kind": "mixed",
-     *         "retries": 0,
      *         "status": "completed",
-     *         "step_id": "step-1",
-     *         "step_order": 1,
-     *         "user_description": "Draft the decision support summary"
+     *         "step_overview": [
+     *           {
+     *             "artifact_details": [
+     *               {
+     *                 "checksum": "artifact-checksum",
+     *                 "file_id": "artifact-1",
+     *                 "file_type": "document",
+     *                 "mimetype": "application/pdf",
+     *                 "name": "case-summary.pdf",
+     *                 "size": 14012
+     *               }
+     *             ],
+     *             "artifact_names": [
+     *               "case-summary.pdf"
+     *             ],
+     *             "attempts_count": 1,
+     *             "citations": {
+     *               "citation_tracked": true,
+     *               "cited_source_count": 1,
+     *               "cited_source_ids": [
+     *                 "source-1"
+     *               ],
+     *               "tracking_mode": "inline_inref_sidecar",
+     *               "uncited_inserted_source_ids": [],
+     *               "unknown_citation_ids": []
+     *             },
+     *             "configured_input_type": "text",
+     *             "configured_output_type": "pdf",
+     *             "duration_ms": 5240,
+     *             "input_lineage": {
+     *               "input_source": "previous_step",
+     *               "legacy_prompt_binding_used": false,
+     *               "question_binding_expressions": [
+     *                 "step_1.output.text",
+     *                 "step_input.text"
+     *               ],
+     *               "question_binding_references_runtime_input": true,
+     *               "runtime_file_checksums": [
+     *                 "input-checksum"
+     *               ],
+     *               "runtime_file_count": 1,
+     *               "runtime_file_ids": [
+     *                 "file-1"
+     *               ],
+     *               "runtime_file_names": [
+     *                 "underlag.pdf"
+     *               ],
+     *               "runtime_files": [
+     *                 {
+     *                   "checksum": "input-checksum",
+     *                   "file_type": "document",
+     *                   "has_text": true,
+     *                   "has_transcription": false,
+     *                   "id": "file-1",
+     *                   "mimetype": "application/pdf",
+     *                   "name": "underlag.pdf",
+     *                   "size": 2048,
+     *                   "text_length": 1024
+     *                 }
+     *               ],
+     *               "runtime_input_format": "document",
+     *               "upstream_step_labels": [
+     *                 "Collect the source document"
+     *               ],
+     *               "upstream_step_orders": [
+     *                 1
+     *               ],
+     *               "used_question_binding": true,
+     *               "uses_runtime_input": true
+     *             },
+     *             "knowledge_retrieval": {
+     *               "attempted": true,
+     *               "prompt_context": {
+     *                 "included_chunk_count": 2,
+     *                 "included_source_count": 1,
+     *                 "included_source_display_names": [
+     *                   "Municipality policy guide"
+     *                 ],
+     *                 "included_source_ids": [
+     *                   "source-1"
+     *                 ],
+     *                 "included_source_titles": [
+     *                   "Municipality policy guide"
+     *                 ],
+     *                 "knowledge_tokens": 248,
+     *                 "not_included_source_count": 0,
+     *                 "summary": {
+     *                   "top_ranked_sources": [
+     *                     {
+     *                       "best_score": 0.91,
+     *                       "display_name": "Municipality policy guide",
+     *                       "included_chunk_count": 2,
+     *                       "included_group_count": 1,
+     *                       "rank": 1,
+     *                       "source_id": "source-1",
+     *                       "source_kind": "website"
+     *                     }
+     *                   ],
+     *                   "total_chunks": 2,
+     *                   "total_sources": 1,
+     *                   "truncated_by_token_budget": false
+     *                 },
+     *                 "tracked": true,
+     *                 "truncated_by_token_budget": false
+     *               },
+     *               "reference_metadata_status": "success",
+     *               "references_truncated": false,
+     *               "retrieval_duration_ms": 182,
+     *               "source_display_names": [
+     *                 "Municipality policy guide"
+     *               ],
+     *               "source_names": [
+     *                 "Municipality policy guide"
+     *               ],
+     *               "status": "success",
+     *               "unique_sources": 1
+     *             },
+     *             "knowledge_sources_count": 1,
+     *             "knowledge_usage_state": "inserted_into_prompt",
+     *             "models_used": [
+     *               "gpt-4.1-mini"
+     *             ],
+     *             "output_summary": {
+     *               "byte_size": 27,
+     *               "preview": "Decision support generated.",
+     *               "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
+     *               "truncated": false
+     *             },
+     *             "result_output_kind": "mixed",
+     *             "retries": 0,
+     *             "status": "completed",
+     *             "step_id": "step-1",
+     *             "step_order": 1,
+     *             "user_description": "Draft the decision support summary"
+     *           }
+     *         ],
+     *         "steps_count": 1,
+     *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       }
-     *     ],
-     *     "steps_count": 1,
-     *     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
-     *   }
-     * }
+     *     }
      */
     FlowRunEvidenceExportResponse: {
       /** Schema Version */
@@ -12684,94 +12572,94 @@ export interface components {
     /**
      * FlowRunEvidenceResponse
      * @example {
-     *   "debug_export": {
-     *     "definition": {
-     *       "checksum": "sha256:example",
-     *       "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
-     *       "steps_count": 1,
-     *       "version": 3
-     *     },
-     *     "definition_snapshot": {
-     *       "steps": []
-     *     },
-     *     "generated_at": "2026-03-31T12:00:00Z",
-     *     "run": {
-     *       "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
-     *       "flow_version": 3,
-     *       "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *       "status": "completed",
-     *       "summary": {
-     *         "artifacts_count": 0,
-     *         "attempts_count": 1,
-     *         "completed_steps": 1,
-     *         "duration_ms": 5240,
-     *         "failed_steps": 0,
-     *         "models_used": [
-     *           "gpt-4.1-mini"
-     *         ],
-     *         "steps_count": 1
+     *       "debug_export": {
+     *         "definition": {
+     *           "checksum": "sha256:example",
+     *           "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *           "steps_count": 1,
+     *           "version": 3
+     *         },
+     *         "definition_snapshot": {
+     *           "steps": []
+     *         },
+     *         "generated_at": "2026-03-31T12:00:00Z",
+     *         "run": {
+     *           "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *           "flow_version": 3,
+     *           "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *           "status": "completed",
+     *           "summary": {
+     *             "artifacts_count": 0,
+     *             "attempts_count": 1,
+     *             "completed_steps": 1,
+     *             "duration_ms": 5240,
+     *             "failed_steps": 0,
+     *             "models_used": [
+     *               "gpt-4.1-mini"
+     *             ],
+     *             "steps_count": 1
+     *           },
+     *           "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
+     *         },
+     *         "schema_version": "eneo.flow.debug-export.v2",
+     *         "security": {
+     *           "classification_field": "output_classification_override",
+     *           "masked_fields_count": 2,
+     *           "mcp_policy_field": "mcp_policy",
+     *           "redaction_applied": true
+     *         },
+     *         "steps": []
      *       },
-     *       "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
-     *     },
-     *     "schema_version": "eneo.flow.debug-export.v2",
-     *     "security": {
-     *       "classification_field": "output_classification_override",
-     *       "masked_fields_count": 2,
-     *       "mcp_policy_field": "mcp_policy",
-     *       "redaction_applied": true
-     *     },
-     *     "steps": []
-     *   },
-     *   "definition_snapshot": {
-     *     "steps": []
-     *   },
-     *   "run": {
-     *     "created_at": "2026-03-17T10:05:00Z",
-     *     "flow_id": "00000000-0000-0000-0000-000000000001",
-     *     "flow_version": 3,
-     *     "id": "00000000-0000-0000-0000-000000000301",
-     *     "input_payload_json": {
-     *       "employee_name": "Alex Example"
-     *     },
-     *     "job_id": "00000000-0000-0000-0000-000000000401",
-     *     "status": "queued",
-     *     "tenant_id": "00000000-0000-0000-0000-000000000010",
-     *     "trace_id": "00000000-0000-0000-0000-000000000302",
-     *     "updated_at": "2026-03-17T10:05:00Z",
-     *     "user_id": "00000000-0000-0000-0000-000000000030"
-     *   },
-     *   "step_attempts": [],
-     *   "step_results": [
-     *     {
-     *       "assistant_id": "00000000-0000-0000-0000-000000000201",
-     *       "created_at": "2026-03-17T10:05:05Z",
-     *       "diagnostics": [
+     *       "definition_snapshot": {
+     *         "steps": []
+     *       },
+     *       "run": {
+     *         "created_at": "2026-03-17T10:05:00Z",
+     *         "flow_id": "00000000-0000-0000-0000-000000000001",
+     *         "flow_version": 3,
+     *         "id": "00000000-0000-0000-0000-000000000301",
+     *         "input_payload_json": {
+     *           "employee_name": "Alex Example"
+     *         },
+     *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "status": "queued",
+     *         "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *         "trace_id": "00000000-0000-0000-0000-000000000302",
+     *         "updated_at": "2026-03-17T10:05:00Z",
+     *         "user_id": "00000000-0000-0000-0000-000000000030"
+     *       },
+     *       "step_attempts": [],
+     *       "step_results": [
      *         {
-     *           "code": "runtime_input_consumed",
-     *           "message": "Uploaded audio file was used."
+     *           "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *           "created_at": "2026-03-17T10:05:05Z",
+     *           "diagnostics": [
+     *             {
+     *               "code": "runtime_input_consumed",
+     *               "message": "Uploaded audio file was used."
+     *             }
+     *           ],
+     *           "id": "00000000-0000-0000-0000-000000000501",
+     *           "input_payload_json": {
+     *             "diagnostics": [
+     *               {
+     *                 "code": "runtime_input_consumed",
+     *                 "message": "Uploaded audio file was used."
+     *               }
+     *             ]
+     *           },
+     *           "num_tokens_input": 0,
+     *           "num_tokens_output": 0,
+     *           "output_payload_json": {
+     *             "text": "Hello and welcome to the annual review..."
+     *           },
+     *           "status": "completed",
+     *           "step_id": "00000000-0000-0000-0000-000000000101",
+     *           "step_order": 1,
+     *           "updated_at": "2026-03-17T10:05:30Z"
      *         }
-     *       ],
-     *       "id": "00000000-0000-0000-0000-000000000501",
-     *       "input_payload_json": {
-     *         "diagnostics": [
-     *           {
-     *             "code": "runtime_input_consumed",
-     *             "message": "Uploaded audio file was used."
-     *           }
-     *         ]
-     *       },
-     *       "num_tokens_input": 0,
-     *       "num_tokens_output": 0,
-     *       "output_payload_json": {
-     *         "text": "Hello and welcome to the annual review..."
-     *       },
-     *       "status": "completed",
-     *       "step_id": "00000000-0000-0000-0000-000000000101",
-     *       "step_order": 1,
-     *       "updated_at": "2026-03-17T10:05:30Z"
+     *       ]
      *     }
-     *   ]
-     * }
      */
     FlowRunEvidenceResponse: {
       run: components["schemas"]["FlowRunPublic"];
@@ -12788,20 +12676,20 @@ export interface components {
     /**
      * FlowRunPublic
      * @example {
-     *   "created_at": "2026-03-17T10:05:00Z",
-     *   "flow_id": "00000000-0000-0000-0000-000000000001",
-     *   "flow_version": 3,
-     *   "id": "00000000-0000-0000-0000-000000000301",
-     *   "input_payload_json": {
-     *     "employee_name": "Alex Example"
-     *   },
-     *   "job_id": "00000000-0000-0000-0000-000000000401",
-     *   "status": "queued",
-     *   "tenant_id": "00000000-0000-0000-0000-000000000010",
-     *   "trace_id": "00000000-0000-0000-0000-000000000302",
-     *   "updated_at": "2026-03-17T10:05:00Z",
-     *   "user_id": "00000000-0000-0000-0000-000000000030"
-     * }
+     *       "created_at": "2026-03-17T10:05:00Z",
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "flow_version": 3,
+     *       "id": "00000000-0000-0000-0000-000000000301",
+     *       "input_payload_json": {
+     *         "employee_name": "Alex Example"
+     *       },
+     *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "status": "queued",
+     *       "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *       "trace_id": "00000000-0000-0000-0000-000000000302",
+     *       "updated_at": "2026-03-17T10:05:00Z",
+     *       "user_id": "00000000-0000-0000-0000-000000000030"
+     *     }
      */
     FlowRunPublic: {
       /**
@@ -12857,23 +12745,23 @@ export interface components {
     /**
      * FlowRunRedispatchResponse
      * @example {
-     *   "redispatched_count": 1,
-     *   "run": {
-     *     "created_at": "2026-03-17T10:05:00Z",
-     *     "flow_id": "00000000-0000-0000-0000-000000000001",
-     *     "flow_version": 3,
-     *     "id": "00000000-0000-0000-0000-000000000301",
-     *     "input_payload_json": {
-     *       "employee_name": "Alex Example"
-     *     },
-     *     "job_id": "00000000-0000-0000-0000-000000000401",
-     *     "status": "queued",
-     *     "tenant_id": "00000000-0000-0000-0000-000000000010",
-     *     "trace_id": "00000000-0000-0000-0000-000000000302",
-     *     "updated_at": "2026-03-17T10:05:00Z",
-     *     "user_id": "00000000-0000-0000-0000-000000000030"
-     *   }
-     * }
+     *       "redispatched_count": 1,
+     *       "run": {
+     *         "created_at": "2026-03-17T10:05:00Z",
+     *         "flow_id": "00000000-0000-0000-0000-000000000001",
+     *         "flow_version": 3,
+     *         "id": "00000000-0000-0000-0000-000000000301",
+     *         "input_payload_json": {
+     *           "employee_name": "Alex Example"
+     *         },
+     *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "status": "queued",
+     *         "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *         "trace_id": "00000000-0000-0000-0000-000000000302",
+     *         "updated_at": "2026-03-17T10:05:00Z",
+     *         "user_id": "00000000-0000-0000-0000-000000000030"
+     *       }
+     *     }
      */
     FlowRunRedispatchResponse: {
       run: components["schemas"]["FlowRunPublic"];
@@ -12888,33 +12776,33 @@ export interface components {
     /**
      * FlowRunStepPublic
      * @example {
-     *   "assistant_id": "00000000-0000-0000-0000-000000000201",
-     *   "created_at": "2026-03-17T10:05:05Z",
-     *   "diagnostics": [
-     *     {
-     *       "code": "runtime_input_consumed",
-     *       "message": "Uploaded audio file was used."
+     *       "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *       "created_at": "2026-03-17T10:05:05Z",
+     *       "diagnostics": [
+     *         {
+     *           "code": "runtime_input_consumed",
+     *           "message": "Uploaded audio file was used."
+     *         }
+     *       ],
+     *       "id": "00000000-0000-0000-0000-000000000501",
+     *       "input_payload_json": {
+     *         "diagnostics": [
+     *           {
+     *             "code": "runtime_input_consumed",
+     *             "message": "Uploaded audio file was used."
+     *           }
+     *         ]
+     *       },
+     *       "num_tokens_input": 0,
+     *       "num_tokens_output": 0,
+     *       "output_payload_json": {
+     *         "text": "Hello and welcome to the annual review..."
+     *       },
+     *       "status": "completed",
+     *       "step_id": "00000000-0000-0000-0000-000000000101",
+     *       "step_order": 1,
+     *       "updated_at": "2026-03-17T10:05:30Z"
      *     }
-     *   ],
-     *   "id": "00000000-0000-0000-0000-000000000501",
-     *   "input_payload_json": {
-     *     "diagnostics": [
-     *       {
-     *         "code": "runtime_input_consumed",
-     *         "message": "Uploaded audio file was used."
-     *       }
-     *     ]
-     *   },
-     *   "num_tokens_input": 0,
-     *   "num_tokens_output": 0,
-     *   "output_payload_json": {
-     *     "text": "Hello and welcome to the annual review..."
-     *   },
-     *   "status": "completed",
-     *   "step_id": "00000000-0000-0000-0000-000000000101",
-     *   "step_order": 1,
-     *   "updated_at": "2026-03-17T10:05:30Z"
-     * }
      */
     FlowRunStepPublic: {
       /** Id */
@@ -13009,21 +12897,21 @@ export interface components {
     /**
      * FlowSparsePublic
      * @example {
-     *   "created_at": "2026-03-17T09:30:00Z",
-     *   "created_by_user_id": "00000000-0000-0000-0000-000000000030",
-     *   "data_retention_days": 30,
-     *   "description": "Transcribe a review conversation and return a PDF summary.",
-     *   "id": "00000000-0000-0000-0000-000000000001",
-     *   "metadata_json": {
-     *     "category": "hr"
-     *   },
-     *   "name": "Employee Review Summary",
-     *   "owner_user_id": "00000000-0000-0000-0000-000000000030",
-     *   "published_version": 3,
-     *   "space_id": "00000000-0000-0000-0000-000000000020",
-     *   "tenant_id": "00000000-0000-0000-0000-000000000010",
-     *   "updated_at": "2026-03-17T10:00:00Z"
-     * }
+     *       "created_at": "2026-03-17T09:30:00Z",
+     *       "created_by_user_id": "00000000-0000-0000-0000-000000000030",
+     *       "data_retention_days": 30,
+     *       "description": "Transcribe a review conversation and return a PDF summary.",
+     *       "id": "00000000-0000-0000-0000-000000000001",
+     *       "metadata_json": {
+     *         "category": "hr"
+     *       },
+     *       "name": "Employee Review Summary",
+     *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
+     *       "published_version": 3,
+     *       "space_id": "00000000-0000-0000-0000-000000000020",
+     *       "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *       "updated_at": "2026-03-17T10:00:00Z"
+     *     }
      */
     FlowSparsePublic: {
       /**
@@ -13141,15 +13029,15 @@ export interface components {
     /**
      * FlowStepCreateRequest
      * @example {
-     *   "assistant_id": "00000000-0000-0000-0000-000000000001",
-     *   "input_source": "flow_input",
-     *   "input_type": "audio",
-     *   "mcp_policy": "inherit",
-     *   "output_mode": "transcribe_only",
-     *   "output_type": "text",
-     *   "step_order": 1,
-     *   "user_description": "Transcribe incoming audio"
-     * }
+     *       "assistant_id": "00000000-0000-0000-0000-000000000001",
+     *       "input_source": "flow_input",
+     *       "input_type": "audio",
+     *       "mcp_policy": "inherit",
+     *       "output_mode": "transcribe_only",
+     *       "output_type": "text",
+     *       "step_order": 1,
+     *       "user_description": "Transcribe incoming audio"
+     *     }
      */
     FlowStepCreateRequest: {
       /**
@@ -13192,18 +13080,18 @@ export interface components {
     /**
      * FlowStepPublic
      * @example {
-     *   "assistant_id": "00000000-0000-0000-0000-000000000201",
-     *   "created_at": "2026-03-17T09:30:00Z",
-     *   "id": "00000000-0000-0000-0000-000000000101",
-     *   "input_source": "flow_input",
-     *   "input_type": "audio",
-     *   "mcp_policy": "inherit",
-     *   "output_mode": "transcribe_only",
-     *   "output_type": "text",
-     *   "step_order": 1,
-     *   "updated_at": "2026-03-17T09:30:00Z",
-     *   "user_description": "Transcribe uploaded audio into Swedish text."
-     * }
+     *       "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *       "created_at": "2026-03-17T09:30:00Z",
+     *       "id": "00000000-0000-0000-0000-000000000101",
+     *       "input_source": "flow_input",
+     *       "input_type": "audio",
+     *       "mcp_policy": "inherit",
+     *       "output_mode": "transcribe_only",
+     *       "output_type": "text",
+     *       "step_order": 1,
+     *       "updated_at": "2026-03-17T09:30:00Z",
+     *       "user_description": "Transcribe uploaded audio into Swedish text."
+     *     }
      */
     FlowStepPublic: {
       /** Id */
@@ -13257,25 +13145,25 @@ export interface components {
     /**
      * FlowTemplateAssetPublic
      * @example {
-     *   "can_download": true,
-     *   "can_edit": true,
-     *   "can_inspect": true,
-     *   "can_select": true,
-     *   "checksum": "sha256:abc123",
-     *   "created_at": "2026-03-17T09:40:00Z",
-     *   "file_id": "00000000-0000-0000-0000-000000000602",
-     *   "flow_id": "00000000-0000-0000-0000-000000000001",
-     *   "id": "00000000-0000-0000-0000-000000000601",
-     *   "last_updated_by_name": "Case Worker Admin",
-     *   "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-     *   "name": "ibic-template.docx",
-     *   "placeholders": [
-     *     "brukare_namn",
-     *     "handlaggare"
-     *   ],
-     *   "status": "ready",
-     *   "updated_at": "2026-03-17T09:45:00Z"
-     * }
+     *       "can_download": true,
+     *       "can_edit": true,
+     *       "can_inspect": true,
+     *       "can_select": true,
+     *       "checksum": "sha256:abc123",
+     *       "created_at": "2026-03-17T09:40:00Z",
+     *       "file_id": "00000000-0000-0000-0000-000000000602",
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "id": "00000000-0000-0000-0000-000000000601",
+     *       "last_updated_by_name": "Case Worker Admin",
+     *       "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+     *       "name": "ibic-template.docx",
+     *       "placeholders": [
+     *         "brukare_namn",
+     *         "handlaggare"
+     *       ],
+     *       "status": "ready",
+     *       "updated_at": "2026-03-17T09:45:00Z"
+     *     }
      */
     FlowTemplateAssetPublic: {
       /**
@@ -13337,24 +13225,24 @@ export interface components {
     /**
      * FlowTemplateInspectionPublic
      * @example {
-     *   "asset_id": "00000000-0000-0000-0000-000000000601",
-     *   "extracted_text_preview": "IBIC plan template with placeholders.",
-     *   "file_id": "00000000-0000-0000-0000-000000000602",
-     *   "file_name": "ibic-template.docx",
-     *   "placeholders": [
-     *     {
-     *       "location": "body",
-     *       "name": "brukare_namn",
-     *       "preview": "{{ brukare_namn }}"
-     *     },
-     *     {
-     *       "location": "header",
-     *       "name": "handlaggare",
-     *       "preview": "{{ handlaggare }}"
+     *       "asset_id": "00000000-0000-0000-0000-000000000601",
+     *       "extracted_text_preview": "IBIC plan template with placeholders.",
+     *       "file_id": "00000000-0000-0000-0000-000000000602",
+     *       "file_name": "ibic-template.docx",
+     *       "placeholders": [
+     *         {
+     *           "location": "body",
+     *           "name": "brukare_namn",
+     *           "preview": "{{ brukare_namn }}"
+     *         },
+     *         {
+     *           "location": "header",
+     *           "name": "handlaggare",
+     *           "preview": "{{ handlaggare }}"
+     *         }
+     *       ],
+     *       "status": "ready"
      *     }
-     *   ],
-     *   "status": "ready"
-     * }
      */
     FlowTemplateInspectionPublic: {
       /** Asset Id */
@@ -13429,6 +13317,7 @@ export interface components {
       options?: string[] | null;
       /** Order */
       order?: number | null;
+    } & {
       [key: string]: unknown;
     };
     /**
@@ -13537,25 +13426,25 @@ export interface components {
     /**
      * GraphResponse
      * @example {
-     *   "edges": [
-     *     {
-     *       "source": "step-1",
-     *       "target": "step-2"
+     *       "edges": [
+     *         {
+     *           "source": "step-1",
+     *           "target": "step-2"
+     *         }
+     *       ],
+     *       "nodes": [
+     *         {
+     *           "id": "step-1",
+     *           "label": "Transcribe uploaded audio",
+     *           "type": "step"
+     *         },
+     *         {
+     *           "id": "step-2",
+     *           "label": "Create PDF summary",
+     *           "type": "step"
+     *         }
+     *       ]
      *     }
-     *   ],
-     *   "nodes": [
-     *     {
-     *       "id": "step-1",
-     *       "label": "Transcribe uploaded audio",
-     *       "type": "step"
-     *     },
-     *     {
-     *       "id": "step-2",
-     *       "label": "Create PDF summary",
-     *       "type": "step"
-     *     }
-     *   ]
-     * }
      */
     GraphResponse: {
       /** Nodes */
@@ -14093,10 +13982,7 @@ export interface components {
       wrapper_id?: string | null;
       /** Wrapper Name */
       wrapper_name?: string | null;
-      /**
-       * Permissions
-       * @default []
-       */
+      /** Permissions */
       permissions?: components["schemas"]["ResourcePermission"][];
       metadata: components["schemas"]["IntegrationKnowledgeMetaData"];
       /**
@@ -14328,6 +14214,31 @@ export interface components {
       documentation_url: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
     };
+    /** MCPServerPublicDict */
+    MCPServerPublicDict: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Http Url */
+      http_url: string | null;
+      /** Http Auth Type */
+      http_auth_type: string | null;
+      /** Tags */
+      tags: string[] | null;
+      /** Icon Url */
+      icon_url: string | null;
+      /** Security Classification */
+      security_classification: {
+        [key: string]: unknown;
+      } | null;
+      /** Tools */
+      tools: {
+        [key: string]: unknown;
+      }[];
+    };
     /**
      * MCPServerSettingsCreate
      * @description DTO for enabling an MCP server for tenant.
@@ -14374,6 +14285,12 @@ export interface components {
       mcp_server_id: string;
       /** Is Org Enabled */
       is_org_enabled: boolean;
+      /**
+       * Credential Status
+       * @default missing
+       * @enum {string}
+       */
+      credential_status?: "ok" | "missing" | "decryption_failed";
       /**
        * Tools
        * @default []
@@ -15403,7 +15320,7 @@ export interface components {
        * Count
        * @description Number of items returned in the response
        */
-      count: number;
+      readonly count: number;
     };
     /** PaginatedResponse[FlowSparsePublic] */
     PaginatedResponse_FlowSparsePublic_: {
@@ -15416,7 +15333,7 @@ export interface components {
        * Count
        * @description Number of items returned in the response
        */
-      count: number;
+      readonly count: number;
     };
     /** PaginatedResponse[GroupPublicWithMetadata] */
     PaginatedResponse_GroupPublicWithMetadata_: {
@@ -15495,32 +15412,6 @@ export interface components {
        * @description Number of items returned in the response
        */
       readonly count: number;
-    };
-    /** PaginatedResponse[MCPServerPublic] */
-    PaginatedResponse_MCPServerPublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["MCPServerPublic"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      count: number;
-    };
-    /** PaginatedResponse[MCPServerSettingsPublic] */
-    PaginatedResponse_MCPServerSettingsPublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["MCPServerSettingsPublic"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      count: number;
     };
     /** PaginatedResponse[Message] */
     PaginatedResponse_Message_: {
@@ -15849,13 +15740,13 @@ export interface components {
     /**
      * PartialAssistantUpdatePublic
      * @example {
-     *   "description": "Summarizes extracted contract fields into a reviewer-ready note.",
-     *   "icon_id": "00000000-0000-0000-0000-000000000099",
-     *   "metadata_json": {
-     *     "origin": "flow_managed"
-     *   },
-     *   "name": "Flow Step Assistant"
-     * }
+     *       "description": "Summarizes extracted contract fields into a reviewer-ready note.",
+     *       "icon_id": "00000000-0000-0000-0000-000000000099",
+     *       "metadata_json": {
+     *         "origin": "flow_managed"
+     *       },
+     *       "name": "Flow Step Assistant"
+     *     }
      */
     PartialAssistantUpdatePublic: {
       /** Name */
@@ -15876,29 +15767,13 @@ export interface components {
       /** Hidden */
       hidden?: boolean | null;
       prompt?: components["schemas"]["PromptCreate"] | null;
-      /**
-       * Groups
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
+      /** Groups */
       groups?: components["schemas"]["ModelId"][] | null;
-      /**
-       * Websites
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
+      /** Websites */
       websites?: components["schemas"]["ModelId"][] | null;
-      /**
-       * Integration Knowledge List
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
+      /** Integration Knowledge List */
       integration_knowledge_list?: components["schemas"]["ModelId"][] | null;
-      /**
-       * Mcp Servers
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
+      /** Mcp Servers */
       mcp_servers?: components["schemas"]["ModelId"][] | null;
       /**
        * @deprecated
@@ -16017,25 +15892,25 @@ export interface components {
     /**
      * PartialFlowUpdateRequest
      * @example {
-     *   "data_retention_days": 30,
-     *   "description": "Transcribe, redact, and summarize citizen audio submissions.",
-     *   "metadata_json": {
-     *     "category": "municipality-intake"
-     *   },
-     *   "name": "Municipality Intake Transcription v2",
-     *   "steps": [
-     *     {
-     *       "assistant_id": "00000000-0000-0000-0000-000000000002",
-     *       "input_source": "flow_input",
-     *       "input_type": "audio",
-     *       "mcp_policy": "inherit",
-     *       "output_mode": "transcribe_only",
-     *       "output_type": "text",
-     *       "step_order": 1,
-     *       "user_description": "Transcribe incoming audio"
+     *       "data_retention_days": 30,
+     *       "description": "Transcribe, redact, and summarize citizen audio submissions.",
+     *       "metadata_json": {
+     *         "category": "municipality-intake"
+     *       },
+     *       "name": "Municipality Intake Transcription v2",
+     *       "steps": [
+     *         {
+     *           "assistant_id": "00000000-0000-0000-0000-000000000002",
+     *           "input_source": "flow_input",
+     *           "input_type": "audio",
+     *           "mcp_policy": "inherit",
+     *           "output_mode": "transcribe_only",
+     *           "output_type": "text",
+     *           "step_order": 1,
+     *           "user_description": "Transcribe incoming audio"
+     *         }
+     *       ]
      *     }
-     *   ]
-     * }
      */
     PartialFlowUpdateRequest: {
       /** Name */
@@ -16176,10 +16051,7 @@ export interface components {
        * @default 0
        */
       tenant_count?: number;
-      /**
-       * Top Tenants
-       * @default {}
-       */
+      /** Top Tenants */
       top_tenants?: {
         [key: string]: number;
       };
@@ -16199,7 +16071,13 @@ export interface components {
       | "editor"
       | "admin"
       | "websites"
-      | "integrations";
+      | "integrations"
+      | "flows"
+      | "flows_view"
+      | "flows_run"
+      | "flows_manage"
+      | "flows_ai_builder"
+      | "flows_trace";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -16209,9 +16087,9 @@ export interface components {
     /**
      * PlanApprovalResponse
      * @example {
-     *   "plan_id": "00000000-0000-0000-0000-000000000702",
-     *   "status": "approved"
-     * }
+     *       "plan_id": "00000000-0000-0000-0000-000000000702",
+     *       "status": "approved"
+     *     }
      */
     PlanApprovalResponse: {
       /**
@@ -16224,66 +16102,66 @@ export interface components {
     /**
      * PlanResponse
      * @example {
-     *   "created_at": "2026-03-17T10:02:00Z",
-     *   "envelope": {
-     *     "assumptions": [
-     *       "Uploaded audio is clear enough to transcribe."
-     *     ],
-     *     "lint_warnings": [],
-     *     "plan_rationale": "A two-step flow keeps the transcription and summary concerns separate.",
-     *     "risk_acknowledgments": [],
-     *     "spec": {
-     *       "flow_description": "Transcribe a review conversation and generate a PDF summary.",
-     *       "flow_name": "Employee Review Summary",
-     *       "form_fields": [
-     *         {
-     *           "label": "Employee name",
-     *           "name": "employee_name",
-     *           "required": true,
-     *           "type": "text"
+     *       "created_at": "2026-03-17T10:02:00Z",
+     *       "envelope": {
+     *         "assumptions": [
+     *           "Uploaded audio is clear enough to transcribe."
+     *         ],
+     *         "lint_warnings": [],
+     *         "plan_rationale": "A two-step flow keeps the transcription and summary concerns separate.",
+     *         "risk_acknowledgments": [],
+     *         "spec": {
+     *           "flow_description": "Transcribe a review conversation and generate a PDF summary.",
+     *           "flow_name": "Employee Review Summary",
+     *           "form_fields": [
+     *             {
+     *               "label": "Employee name",
+     *               "name": "employee_name",
+     *               "required": true,
+     *               "type": "text"
+     *             }
+     *           ],
+     *           "steps": [
+     *             {
+     *               "assistant_spec": {
+     *                 "instructions": "Transcribe the uploaded audio into Swedish text.",
+     *                 "knowledge_refs": [],
+     *                 "model_ref": "model:gpt-5.4"
+     *               },
+     *               "input_source": "flow_input",
+     *               "input_type": "audio",
+     *               "mcp_policy": "inherit",
+     *               "name": "Transcribe uploaded audio",
+     *               "output_mode": "transcribe_only",
+     *               "output_type": "text",
+     *               "plan_step_ref": "step_a"
+     *             },
+     *             {
+     *               "assistant_spec": {
+     *                 "instructions": "Summarize the transcription into a professional PDF.",
+     *                 "knowledge_refs": [],
+     *                 "model_ref": "model:gpt-5.4"
+     *               },
+     *               "input_bindings": {
+     *                 "question": "{{ step_a.output.text }}"
+     *               },
+     *               "input_source": "previous_step",
+     *               "input_type": "text",
+     *               "mcp_policy": "inherit",
+     *               "name": "Create PDF summary",
+     *               "output_mode": "pass_through",
+     *               "output_type": "pdf",
+     *               "plan_step_ref": "step_b"
+     *             }
+     *           ]
      *         }
-     *       ],
-     *       "steps": [
-     *         {
-     *           "assistant_spec": {
-     *             "instructions": "Transcribe the uploaded audio into Swedish text.",
-     *             "knowledge_refs": [],
-     *             "model_ref": "model:gpt-5.4"
-     *           },
-     *           "input_source": "flow_input",
-     *           "input_type": "audio",
-     *           "mcp_policy": "inherit",
-     *           "name": "Transcribe uploaded audio",
-     *           "output_mode": "transcribe_only",
-     *           "output_type": "text",
-     *           "plan_step_ref": "step_a"
-     *         },
-     *         {
-     *           "assistant_spec": {
-     *             "instructions": "Summarize the transcription into a professional PDF.",
-     *             "knowledge_refs": [],
-     *             "model_ref": "model:gpt-5.4"
-     *           },
-     *           "input_bindings": {
-     *             "question": "{{ step_a.output.text }}"
-     *           },
-     *           "input_source": "previous_step",
-     *           "input_type": "text",
-     *           "mcp_policy": "inherit",
-     *           "name": "Create PDF summary",
-     *           "output_mode": "pass_through",
-     *           "output_type": "pdf",
-     *           "plan_step_ref": "step_b"
-     *         }
-     *       ]
+     *       },
+     *       "plan_id": "00000000-0000-0000-0000-000000000702",
+     *       "session_id": "00000000-0000-0000-0000-000000000701",
+     *       "spec_hash": "abc123def456",
+     *       "status": "proposed",
+     *       "updated_at": "2026-03-17T10:02:00Z"
      *     }
-     *   },
-     *   "plan_id": "00000000-0000-0000-0000-000000000702",
-     *   "session_id": "00000000-0000-0000-0000-000000000701",
-     *   "spec_hash": "abc123def456",
-     *   "status": "proposed",
-     *   "updated_at": "2026-03-17T10:02:00Z"
-     * }
      */
     PlanResponse: {
       /**
@@ -16549,8 +16427,8 @@ export interface components {
     /**
      * RevisePlanRequest
      * @example {
-     *   "type": "keep_current_description"
-     * }
+     *       "type": "keep_current_description"
+     *     }
      */
     RevisePlanRequest: {
       /**
@@ -16784,19 +16662,19 @@ export interface components {
     /**
      * SendMessageRequest
      * @example {
-     *   "message": "Build a flow that extracts key dates from uploaded contracts and returns structured JSON.",
-     *   "model_id": "00000000-0000-0000-0000-000000000010",
-     *   "question_answer": {
-     *     "question_id": "final_output_mode",
-     *     "selected_option_ids": [
-     *       "structured_json"
-     *     ],
-     *     "selected_values": [
-     *       "structured_json"
-     *     ]
-     *   },
-     *   "ui_language": "en"
-     * }
+     *       "message": "Build a flow that extracts key dates from uploaded contracts and returns structured JSON.",
+     *       "model_id": "00000000-0000-0000-0000-000000000010",
+     *       "question_answer": {
+     *         "question_id": "final_output_mode",
+     *         "selected_option_ids": [
+     *           "structured_json"
+     *         ],
+     *         "selected_values": [
+     *           "structured_json"
+     *         ]
+     *       },
+     *       "ui_language": "en"
+     *     }
      */
     SendMessageRequest: {
       /** Message */
@@ -17021,19 +16899,19 @@ export interface components {
     /**
      * SessionListResponse
      * @example {
-     *   "sessions": [
-     *     {
-     *       "created_at": "2026-03-17T10:00:00Z",
-     *       "draft_title": "Employee Review Summary",
-     *       "latest_plan_id": "00000000-0000-0000-0000-000000000702",
-     *       "session_id": "00000000-0000-0000-0000-000000000701",
-     *       "space_id": "00000000-0000-0000-0000-000000000020",
-     *       "status": "awaiting_approval",
-     *       "target_kind": "create",
-     *       "updated_at": "2026-03-17T10:02:00Z"
+     *       "sessions": [
+     *         {
+     *           "created_at": "2026-03-17T10:00:00Z",
+     *           "draft_title": "Employee Review Summary",
+     *           "latest_plan_id": "00000000-0000-0000-0000-000000000702",
+     *           "session_id": "00000000-0000-0000-0000-000000000701",
+     *           "space_id": "00000000-0000-0000-0000-000000000020",
+     *           "status": "awaiting_approval",
+     *           "target_kind": "create",
+     *           "updated_at": "2026-03-17T10:02:00Z"
+     *         }
+     *       ]
      *     }
-     *   ]
-     * }
      */
     SessionListResponse: {
       /** Sessions */
@@ -17085,15 +16963,15 @@ export interface components {
     /**
      * SessionModelsResponse
      * @example {
-     *   "default_model_id": "00000000-0000-0000-0000-000000000710",
-     *   "models": [
-     *     {
-     *       "id": "00000000-0000-0000-0000-000000000710",
-     *       "name": "gpt-5.4",
-     *       "provider": "openai"
+     *       "default_model_id": "00000000-0000-0000-0000-000000000710",
+     *       "models": [
+     *         {
+     *           "id": "00000000-0000-0000-0000-000000000710",
+     *           "name": "gpt-5.4",
+     *           "provider": "openai"
+     *         }
+     *       ]
      *     }
-     *   ]
-     * }
      */
     SessionModelsResponse: {
       /** Models */
@@ -17104,70 +16982,70 @@ export interface components {
     /**
      * SessionPlansResponse
      * @example {
-     *   "plans": [
-     *     {
-     *       "created_at": "2026-03-17T10:02:00Z",
-     *       "envelope": {
-     *         "assumptions": [
-     *           "Uploaded audio is clear enough to transcribe."
-     *         ],
-     *         "lint_warnings": [],
-     *         "plan_rationale": "A two-step flow keeps the transcription and summary concerns separate.",
-     *         "risk_acknowledgments": [],
-     *         "spec": {
-     *           "flow_description": "Transcribe a review conversation and generate a PDF summary.",
-     *           "flow_name": "Employee Review Summary",
-     *           "form_fields": [
-     *             {
-     *               "label": "Employee name",
-     *               "name": "employee_name",
-     *               "required": true,
-     *               "type": "text"
+     *       "plans": [
+     *         {
+     *           "created_at": "2026-03-17T10:02:00Z",
+     *           "envelope": {
+     *             "assumptions": [
+     *               "Uploaded audio is clear enough to transcribe."
+     *             ],
+     *             "lint_warnings": [],
+     *             "plan_rationale": "A two-step flow keeps the transcription and summary concerns separate.",
+     *             "risk_acknowledgments": [],
+     *             "spec": {
+     *               "flow_description": "Transcribe a review conversation and generate a PDF summary.",
+     *               "flow_name": "Employee Review Summary",
+     *               "form_fields": [
+     *                 {
+     *                   "label": "Employee name",
+     *                   "name": "employee_name",
+     *                   "required": true,
+     *                   "type": "text"
+     *                 }
+     *               ],
+     *               "steps": [
+     *                 {
+     *                   "assistant_spec": {
+     *                     "instructions": "Transcribe the uploaded audio into Swedish text.",
+     *                     "knowledge_refs": [],
+     *                     "model_ref": "model:gpt-5.4"
+     *                   },
+     *                   "input_source": "flow_input",
+     *                   "input_type": "audio",
+     *                   "mcp_policy": "inherit",
+     *                   "name": "Transcribe uploaded audio",
+     *                   "output_mode": "transcribe_only",
+     *                   "output_type": "text",
+     *                   "plan_step_ref": "step_a"
+     *                 },
+     *                 {
+     *                   "assistant_spec": {
+     *                     "instructions": "Summarize the transcription into a professional PDF.",
+     *                     "knowledge_refs": [],
+     *                     "model_ref": "model:gpt-5.4"
+     *                   },
+     *                   "input_bindings": {
+     *                     "question": "{{ step_a.output.text }}"
+     *                   },
+     *                   "input_source": "previous_step",
+     *                   "input_type": "text",
+     *                   "mcp_policy": "inherit",
+     *                   "name": "Create PDF summary",
+     *                   "output_mode": "pass_through",
+     *                   "output_type": "pdf",
+     *                   "plan_step_ref": "step_b"
+     *                 }
+     *               ]
      *             }
-     *           ],
-     *           "steps": [
-     *             {
-     *               "assistant_spec": {
-     *                 "instructions": "Transcribe the uploaded audio into Swedish text.",
-     *                 "knowledge_refs": [],
-     *                 "model_ref": "model:gpt-5.4"
-     *               },
-     *               "input_source": "flow_input",
-     *               "input_type": "audio",
-     *               "mcp_policy": "inherit",
-     *               "name": "Transcribe uploaded audio",
-     *               "output_mode": "transcribe_only",
-     *               "output_type": "text",
-     *               "plan_step_ref": "step_a"
-     *             },
-     *             {
-     *               "assistant_spec": {
-     *                 "instructions": "Summarize the transcription into a professional PDF.",
-     *                 "knowledge_refs": [],
-     *                 "model_ref": "model:gpt-5.4"
-     *               },
-     *               "input_bindings": {
-     *                 "question": "{{ step_a.output.text }}"
-     *               },
-     *               "input_source": "previous_step",
-     *               "input_type": "text",
-     *               "mcp_policy": "inherit",
-     *               "name": "Create PDF summary",
-     *               "output_mode": "pass_through",
-     *               "output_type": "pdf",
-     *               "plan_step_ref": "step_b"
-     *             }
-     *           ]
+     *           },
+     *           "plan_id": "00000000-0000-0000-0000-000000000702",
+     *           "session_id": "00000000-0000-0000-0000-000000000701",
+     *           "spec_hash": "abc123def456",
+     *           "status": "proposed",
+     *           "updated_at": "2026-03-17T10:02:00Z"
      *         }
-     *       },
-     *       "plan_id": "00000000-0000-0000-0000-000000000702",
-     *       "session_id": "00000000-0000-0000-0000-000000000701",
-     *       "spec_hash": "abc123def456",
-     *       "status": "proposed",
-     *       "updated_at": "2026-03-17T10:02:00Z"
+     *       ]
      *     }
-     *   ]
-     * }
      */
     SessionPlansResponse: {
       /** Plans */
@@ -17193,25 +17071,25 @@ export interface components {
     /**
      * SessionResponse
      * @example {
-     *   "conversation": [
-     *     {
-     *       "content": "Build a flow that transcribes uploaded audio and returns a PDF summary.",
-     *       "role": "user",
-     *       "timestamp": "2026-03-17T10:00:00Z"
-     *     },
-     *     {
-     *       "content": "I need one more detail about the final PDF format.",
-     *       "role": "assistant",
-     *       "timestamp": "2026-03-17T10:00:03Z"
+     *       "conversation": [
+     *         {
+     *           "content": "Build a flow that transcribes uploaded audio and returns a PDF summary.",
+     *           "role": "user",
+     *           "timestamp": "2026-03-17T10:00:00Z"
+     *         },
+     *         {
+     *           "content": "I need one more detail about the final PDF format.",
+     *           "role": "assistant",
+     *           "timestamp": "2026-03-17T10:00:03Z"
+     *         }
+     *       ],
+     *       "created_at": "2026-03-17T10:00:00Z",
+     *       "latest_plan_id": "00000000-0000-0000-0000-000000000702",
+     *       "session_id": "00000000-0000-0000-0000-000000000701",
+     *       "status": "chatting",
+     *       "target_kind": "create",
+     *       "updated_at": "2026-03-17T10:00:03Z"
      *     }
-     *   ],
-     *   "created_at": "2026-03-17T10:00:00Z",
-     *   "latest_plan_id": "00000000-0000-0000-0000-000000000702",
-     *   "session_id": "00000000-0000-0000-0000-000000000701",
-     *   "status": "chatting",
-     *   "target_kind": "create",
-     *   "updated_at": "2026-03-17T10:00:03Z"
-     * }
      */
     SessionResponse: {
       /**
@@ -17312,10 +17190,7 @@ export interface components {
     };
     /** SettingsPublic */
     SettingsPublic: {
-      /**
-       * Chatbot Widget
-       * @default {}
-       */
+      /** Chatbot Widget */
       chatbot_widget?: {
         [key: string]: unknown;
       };
@@ -17442,9 +17317,9 @@ export interface components {
     /**
      * SignedURLRequest
      * @example {
-     *   "content_disposition": "attachment",
-     *   "expires_in": 900
-     * }
+     *       "content_disposition": "attachment",
+     *       "expires_in": 900
+     *     }
      */
     SignedURLRequest: {
       /**
@@ -17461,6 +17336,13 @@ export interface components {
       url: string;
       /** Expires At */
       expires_at: number;
+    };
+    /** SkippedDetail */
+    SkippedDetail: {
+      /** File */
+      file: string;
+      /** Reason */
+      reason: string;
     };
     /**
      * SortField
@@ -17503,7 +17385,7 @@ export interface components {
        * @description Icon ID referencing an uploaded icon
        */
       icon_id?: string | null;
-      applications: components["schemas"]["Applications"];
+      applications?: components["schemas"]["Applications"] | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
@@ -17580,8 +17462,8 @@ export interface components {
        * @description Icon ID referencing an uploaded icon
        */
       icon_id?: string | null;
-      applications: components["schemas"]["Applications"];
-      default_assistant: components["schemas"]["DefaultAssistant"];
+      applications?: components["schemas"]["Applications"] | null;
+      default_assistant?: components["schemas"]["DefaultAssistant"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /** Embedding Models */
@@ -17591,9 +17473,7 @@ export interface components {
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
       /** Mcp Servers */
-      mcp_servers: {
-        [key: string]: unknown;
-      }[];
+      mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
       knowledge: components["schemas"]["Knowledge"];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];
       group_members: components["schemas"]["PaginatedPermissions_SpaceGroupMember_"];
@@ -17757,16 +17637,10 @@ export interface components {
     };
     /** StorageSpaceMemberModel */
     StorageSpaceMemberModel: {
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string;
-      /**
-       * Updated At
-       * Format: date-time
-       */
-      updated_at: string;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
       /**
        * Id
        * Format: uuid
@@ -17846,10 +17720,7 @@ export interface components {
       sync_type: string;
       /** Status */
       status: string;
-      /** Metadata */
-      metadata?: {
-        [key: string]: unknown;
-      } | null;
+      metadata?: components["schemas"]["SyncMetadata"] | null;
       /** Error Message */
       error_message?: string | null;
       /**
@@ -17893,16 +17764,7 @@ export interface components {
        * Skipped Details
        * @description Get skipped file details from metadata.
        */
-      readonly skipped_details: {
-        [key: string]: unknown;
-      }[];
-      /**
-       * Skipped Details
-       * @description Get skipped file details from metadata.
-       */
-      skipped_details: readonly {
-        [key: string]: unknown;
-      }[];
+      readonly skipped_details: components["schemas"]["SkippedDetail"][];
       /**
        * Duration Seconds
        * @description Calculate sync duration in seconds.
@@ -17913,6 +17775,21 @@ export interface components {
        * @description Total items processed in this sync.
        */
       readonly total_items_processed: number;
+    };
+    /** SyncMetadata */
+    SyncMetadata: {
+      /** Files Processed */
+      files_processed?: number;
+      /** Files Deleted */
+      files_deleted?: number;
+      /** Pages Processed */
+      pages_processed?: number;
+      /** Folders Processed */
+      folders_processed?: number;
+      /** Skipped Items */
+      skipped_items?: number;
+      /** Skipped Details */
+      skipped_details?: components["schemas"]["SkippedDetail"][];
     };
     /**
      * TargetKind
@@ -18017,128 +17894,75 @@ export interface components {
       /**
        * Provider Id
        * Format: uuid
-       * @description Model provider ID
        */
       provider_id: string;
-      /**
-       * Name
-       * @description Model identifier (e.g., 'gpt-4o', 'meta-llama/Meta-Llama-3-70B-Instruct')
-       */
+      /** Name */
       name: string;
-      /**
-       * Display Name
-       * @description User-friendly display name
-       */
+      /** Display Name */
       display_name: string;
-      /**
-       * Max Input Tokens
-       * @description Maximum input context tokens
-       */
-      max_input_tokens: number;
-      /**
-       * Max Output Tokens
-       * @description Maximum output tokens
-       */
-      max_output_tokens: number;
+      /** Max Input Tokens */
+      max_input_tokens?: number | null;
+      /** Max Output Tokens */
+      max_output_tokens?: number | null;
       /**
        * Vision
-       * @description Supports vision/image inputs
        * @default false
        */
       vision?: boolean;
       /**
        * Reasoning
-       * @description Supports extended reasoning
        * @default false
        */
       reasoning?: boolean;
       /**
        * Supports Tool Calling
-       * @description Supports function/tool calling
        * @default false
        */
       supports_tool_calling?: boolean;
       /**
        * Hosting
-       * @description Hosting location (swe, eu, usa)
        * @default swe
        */
       hosting?: string;
       /**
        * Family
-       * @description Model family (e.g., 'openai', 'anthropic', 'deepseek')
        * @default openai
        */
       family?: string;
       /**
        * Is Active
-       * @description Enable in organization
        * @default true
        */
       is_active?: boolean;
       /**
        * Is Default
-       * @description Set as default model
        * @default false
        */
       is_default?: boolean;
     };
     /** TenantCompletionModelUpdate */
     TenantCompletionModelUpdate: {
-      /**
-       * Name
-       * @description Model identifier (e.g., 'gpt-4o', 'claude-3-sonnet')
-       */
+      /** Name */
       name?: string | null;
-      /**
-       * Display Name
-       * @description User-friendly display name
-       */
+      /** Display Name */
       display_name?: string | null;
-      /**
-       * Description
-       * @description Model description
-       */
+      /** Description */
       description?: string | null;
-      /**
-       * Max Input Tokens
-       * @description Maximum input context tokens
-       */
+      /** Max Input Tokens */
       max_input_tokens?: number | null;
-      /**
-       * Max Output Tokens
-       * @description Maximum output tokens
-       */
+      /** Max Output Tokens */
       max_output_tokens?: number | null;
-      /**
-       * Vision
-       * @description Supports vision/image inputs
-       */
+      /** Vision */
       vision?: boolean | null;
-      /**
-       * Reasoning
-       * @description Supports extended reasoning
-       */
+      /** Reasoning */
       reasoning?: boolean | null;
-      /**
-       * Supports Tool Calling
-       * @description Supports function/tool calling
-       */
+      /** Supports Tool Calling */
       supports_tool_calling?: boolean | null;
-      /**
-       * Hosting
-       * @description Hosting location (swe, eu, usa)
-       */
+      /** Hosting */
       hosting?: string | null;
-      /**
-       * Open Source
-       * @description Is the model open source
-       */
+      /** Open Source */
       open_source?: boolean | null;
-      /**
-       * Stability
-       * @description Model stability (stable, experimental)
-       */
+      /** Stability */
       stability?: string | null;
     };
     /** TenantEmbeddingModelCreate */
@@ -18295,6 +18119,10 @@ export interface components {
       api_key_policy?: {
         [key: string]: unknown;
       };
+      /** Flow Settings */
+      flow_settings?: {
+        [key: string]: unknown;
+      };
       /** Favorite Providers */
       favorite_providers?: string[];
     };
@@ -18317,8 +18145,11 @@ export interface components {
     };
     /** TenantIntegration */
     TenantIntegration: {
-      /** Id */
-      id?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id?: string;
       /** Name */
       name: string;
       /** Description */
@@ -18571,6 +18402,10 @@ export interface components {
       state?: components["schemas"]["TenantState"] | null;
       /** Security Enabled */
       security_enabled?: boolean | null;
+      /** Flow Settings */
+      flow_settings?: {
+        [key: string]: unknown;
+      } | null;
     };
     /**
      * TenantWithMaskedCredentials
@@ -18639,6 +18474,10 @@ export interface components {
       };
       /** Api Key Policy */
       api_key_policy?: {
+        [key: string]: unknown;
+      };
+      /** Flow Settings */
+      flow_settings?: {
         [key: string]: unknown;
       };
       /** Favorite Providers */
@@ -18975,13 +18814,8 @@ export interface components {
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
-      /**
-       * Mcp Servers
-       * @default []
-       */
-      mcp_servers?: {
-        [key: string]: unknown;
-      }[];
+      /** Mcp Servers */
+      mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
     };
     /** UpdateSpaceGroupMemberRequest */
     UpdateSpaceGroupMemberRequest: {
@@ -19145,11 +18979,20 @@ export interface components {
        * @example john.doe
        */
       username?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
       /**
        * Id
        * Format: uuid
        */
       id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
       /** Password */
       password?: string | null;
       /** Salt */
@@ -19170,13 +19013,16 @@ export interface components {
        */
       is_active?: boolean;
       state: components["schemas"]["UserState"];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
       /** Quota Limit */
       quota_limit?: number | null;
+      /**
+       * User Groups
+       * @default []
+       */
+      user_groups?: components["schemas"]["UserGroupInDBRead"][];
+      tenant: components["schemas"]["TenantInDB"];
+      api_key?: components["schemas"]["ApiKey"] | null;
+      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
       /**
        * Roles
        * @default []
@@ -19187,18 +19033,6 @@ export interface components {
        * @default []
        */
       predefined_roles?: components["schemas"]["PredefinedRoleInDB"][];
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * User Groups
-       * @default []
-       */
-      user_groups?: components["schemas"]["UserGroupInDBRead"][];
-      tenant: components["schemas"]["TenantInDB"];
-      api_key: components["schemas"]["ApiKey"] | null;
-      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
       /**
        * Quota Used
        * @default 0
@@ -19209,7 +19043,7 @@ export interface components {
        * @description Timestamp when user was soft-deleted (null for active users)
        */
       deleted_at?: string | null;
-      access_token: components["schemas"]["AccessToken"] | null;
+      access_token?: components["schemas"]["AccessToken"] | null;
       /** Modules */
       readonly modules: string[];
       /** User Groups Ids */
@@ -19288,11 +19122,10 @@ export interface components {
       state: string;
       /**
        * Deleted At
-       * Format: date-time
        * @description When the user was deleted (for external tracking)
        * @example 2025-08-15T14:20:00Z
        */
-      deleted_at: string;
+      deleted_at: string | null;
     };
     /** UserGroupCreateRequest */
     UserGroupCreateRequest: {
@@ -19371,11 +19204,20 @@ export interface components {
        * @example john.doe
        */
       username?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
       /**
        * Id
        * Format: uuid
        */
       id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
       /** Password */
       password?: string | null;
       /** Salt */
@@ -19396,13 +19238,16 @@ export interface components {
        */
       is_active?: boolean;
       state: components["schemas"]["UserState"];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
       /** Quota Limit */
       quota_limit?: number | null;
+      /**
+       * User Groups
+       * @default []
+       */
+      user_groups?: components["schemas"]["UserGroupInDBRead"][];
+      tenant: components["schemas"]["TenantInDB"];
+      api_key?: components["schemas"]["ApiKey"] | null;
+      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
       /**
        * Roles
        * @default []
@@ -19413,18 +19258,6 @@ export interface components {
        * @default []
        */
       predefined_roles?: components["schemas"]["PredefinedRoleInDB"][];
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * User Groups
-       * @default []
-       */
-      user_groups?: components["schemas"]["UserGroupInDBRead"][];
-      tenant: components["schemas"]["TenantInDB"];
-      api_key?: components["schemas"]["ApiKeyInDB"] | null;
-      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
       /**
        * Quota Used
        * @default 0
@@ -19444,8 +19277,11 @@ export interface components {
     };
     /** UserIntegration */
     UserIntegration: {
-      /** Id */
-      id?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id?: string;
       /** Name */
       name: string;
       /** Description */
@@ -19610,11 +19446,10 @@ export interface components {
       state: string;
       /**
        * State Changed At
-       * Format: date-time
        * @description When the user state was last changed
        * @example 2025-09-10T08:30:00Z
        */
-      state_changed_at: string;
+      state_changed_at: string | null;
     };
     /** UserTokenUsage */
     UserTokenUsage: {
@@ -22234,7 +22069,7 @@ export interface operations {
         /** @description Email of user */
         email?: string | null;
         /** @description Users per page */
-        limit?: number;
+        limit?: number | null;
         /** @description Current cursor */
         cursor?: string | null;
         /** @description Show previous page */
@@ -22356,34 +22191,6 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
-      };
-      /** @description Legacy endpoint disabled. Migrate to v2 endpoint. */
-      410: {
-        content: {
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  /**
-   * Revoke legacy user API key
-   * @description Permanently revokes the caller's legacy (v1) API key.
-   */
-  revoke_legacy_api_key_api_v1_users_api_keys_legacy_delete: {
-    responses: {
-      /** @description Successful Response */
-      204: {
-        content: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
-        };
-      };
-      /** @description No legacy API key found. */
-      404: {
-        content: never;
       };
     };
   };
@@ -23345,6 +23152,126 @@ export interface operations {
       };
     };
   };
+  get_flow_input_limits_api_v1_settings_flow_input_limits_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowInputLimitsPublic"];
+        };
+      };
+    };
+  };
+  update_flow_input_limits_api_v1_settings_flow_input_limits_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowInputLimitsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowInputLimitsPublic"];
+        };
+      };
+      /** @description Invalid flow input limit payload. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Caller lacks permission to update tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AIBuilderBudgetSettingsPublic"];
+        };
+      };
+    };
+  };
+  update_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AIBuilderBudgetSettingsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AIBuilderBudgetSettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   update_template_setting_api_v1_settings_templates_patch: {
     parameters: {
       query?: never;
@@ -23546,7 +23473,7 @@ export interface operations {
   get_assistants_api_v1_assistants__get: {
     parameters: {
       query?: {
-        name?: string;
+        name?: string | null;
         for_tenant?: boolean;
       };
       header?: never;
@@ -23769,8 +23696,8 @@ export interface operations {
   get_assistant_sessions_api_v1_assistants__id__sessions__get: {
     parameters: {
       query?: {
-        limit?: number;
-        cursor?: string;
+        limit?: number | null;
+        cursor?: string | null;
         previous?: boolean;
       };
       header?: never;
@@ -23878,7 +23805,7 @@ export interface operations {
                 /** Name */
                 name: string;
                 /** Nickname */
-                nickname: string;
+                nickname?: string | null;
                 /** Family */
                 family?: string | null;
                 /** Max Input Tokens */
@@ -24198,7 +24125,7 @@ export interface operations {
                 /** Name */
                 name: string;
                 /** Nickname */
-                nickname: string;
+                nickname?: string | null;
                 /** Family */
                 family?: string | null;
                 /** Max Input Tokens */
@@ -25002,8 +24929,8 @@ export interface operations {
         assistant_id?: string | null;
         /** @description The UUID of the group chat */
         group_chat_id?: string | null;
-        limit?: number;
-        cursor?: string;
+        limit?: number | null;
+        cursor?: string | null;
         previous?: boolean;
       };
       header?: never;
@@ -25736,7 +25663,7 @@ export interface operations {
   get_services_api_v1_services__get: {
     parameters: {
       query?: {
-        name?: string;
+        name?: string | null;
       };
       header?: never;
       path?: never;
@@ -26533,19 +26460,12 @@ export interface operations {
   get_users_api_v1_admin_users__get: {
     parameters: {
       query?: {
-        /** @description Page number (1-100) */
         page?: number;
-        /** @description Users per page (1-100) */
         page_size?: number;
-        /** @description Search by email (case-insensitive, partial match) */
         search_email?: string | null;
-        /** @description Search by username (case-insensitive, partial match) */
         search_name?: string | null;
-        /** @description Sort field (default: alphabetical by email) */
         sort_by?: components["schemas"]["SortField"];
-        /** @description Sort order (default: ascending A-Z) */
         sort_order?: components["schemas"]["SortOrder"];
-        /** @description Filter by user state (active includes invited, inactive for temporary leave) */
         state_filter?: components["schemas"]["StateFilter"] | null;
       };
       header?: never;
@@ -27476,29 +27396,17 @@ export interface operations {
   list_api_keys_admin_api_v1_admin_api_keys_get: {
     parameters: {
       query?: {
-        /** @description Keys per page */
-        limit?: number | null;
-        /** @description Current cursor */
+        limit?: number;
         cursor?: string | null;
-        /** @description Show previous page */
         previous?: boolean;
-        /** @description Scope type filter */
         scope_type?: components["schemas"]["ApiKeyScopeType"] | null;
-        /** @description Scope id filter */
         scope_id?: string | null;
-        /** @description State filter */
         state?: components["schemas"]["ApiKeyState"] | null;
-        /** @description Key type filter */
         key_type?: components["schemas"]["ApiKeyType"] | null;
-        /** @description Owner user id filter */
         owner_user_id?: string | null;
-        /** @description Creator user id filter */
         created_by_user_id?: string | null;
-        /** @description How UI user filter should be interpreted when a single user filter is provided. */
         user_relation?: components["schemas"]["ApiKeyUserRelation"];
-        /** @description Case-insensitive search over key name, suffix, description, owner, and creator identity. */
         search?: string | null;
-        /** @description Filter to keys with expires_at within this many days. */
         expires_within_days?: number | null;
       };
       header?: never;
@@ -27586,7 +27494,6 @@ export interface operations {
   get_expiring_keys_admin_api_v1_admin_api_keys_expiring_soon_get: {
     parameters: {
       query?: {
-        /** @description Look-ahead window in days */
         days?: number;
       };
       header?: never;
@@ -27748,9 +27655,7 @@ export interface operations {
   get_api_key_usage_admin_api_v1_admin_api_keys__id__usage_get: {
     parameters: {
       query?: {
-        /** @description Usage events per page. */
         limit?: number;
-        /** @description Usage pagination cursor. */
         cursor?: string | null;
       };
       header?: never;
@@ -30105,14 +30010,7 @@ export interface operations {
   };
   get_model_usage_details_api_v1_completion_models__model_id__usage_details_get: {
     parameters: {
-      query?: {
-        /** @description Filter by entity type */
-        entity_type?: string | null;
-        /** @description Cursor for pagination */
-        cursor?: string | null;
-        /** @description Number of results per page */
-        limit?: number;
-      };
+      query?: never;
       header?: never;
       path: {
         model_id: string;
@@ -30234,12 +30132,7 @@ export interface operations {
   };
   get_model_migration_history_api_v1_completion_models__model_id__migration_history_get: {
     parameters: {
-      query?: {
-        /** @description Number of results per page */
-        limit?: number;
-        /** @description Offset for pagination */
-        offset?: number;
-      };
+      query?: never;
       header?: never;
       path: {
         model_id: string;
@@ -30279,12 +30172,7 @@ export interface operations {
   };
   get_all_migration_history_api_v1_completion_models_migration_history_get: {
     parameters: {
-      query?: {
-        /** @description Number of results per page */
-        limit?: number;
-        /** @description Offset for pagination */
-        offset?: number;
-      };
+      query?: never;
       header?: never;
       path?: never;
       cookie?: never;
@@ -30298,15 +30186,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModelMigrationHistory"][];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -30596,7 +30475,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
     };
@@ -30616,7 +30497,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: string[];
+          };
         };
       };
     };
@@ -30640,7 +30523,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: string[];
+          };
         };
       };
       /** @description Validation Error */
@@ -30795,7 +30680,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: string;
+          };
         };
       };
       /** @description Not Found */
@@ -30835,7 +30722,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          }[];
         };
       };
       /** @description Not Found */
@@ -30875,7 +30764,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Not Found */
@@ -30919,7 +30810,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Not Found */
@@ -31574,7 +31467,7 @@ export interface operations {
         token: string;
       };
       header?: {
-        range?: string;
+        range?: string | null;
       };
       path: {
         id: string;
@@ -31631,6 +31524,3142 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_flows: {
+    parameters: {
+      query: {
+        /** @description Only return flows that belong to this space. */
+        space_id: string;
+        /** @description Maximum number of flows to return. */
+        limit?: number;
+        /** @description Number of flows to skip before returning results. */
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_FlowSparsePublic_"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to list flows in this space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_flow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description The submitted draft flow definition is invalid. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow definition is invalid.",
+           *       "intric_error_code": 9007,
+           *       "code": "bad_request"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to create flows in this space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_flow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow definition to return. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to view this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_flow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow definition to delete. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Caller lacks permission or API key scope to delete this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_flow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow definition to update. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialFlowUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description The submitted draft flow update is invalid or the flow cannot be updated in its current state. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow update is invalid.",
+           *       "intric_error_code": 9007,
+           *       "code": "bad_request"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to update this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  publish_flow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow definition to publish. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description The flow cannot be published because its draft definition is incomplete or invalid. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow cannot be published in its current state.",
+           *       "intric_error_code": 9007,
+           *       "code": "bad_request"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to publish this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unpublish_flow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the published flow definition to unpublish. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description The flow cannot be unpublished in its current state. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow cannot be unpublished in its current state.",
+           *       "intric_error_code": 9007,
+           *       "code": "bad_request"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to unpublish this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_flow_template_files: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow whose template assets should be listed. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowTemplateAssetPublic"][];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to list template assets for this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  upload_flow_template_file: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow that will own the uploaded template asset. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_flow_template_file"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowTemplateAssetPublic"];
+        };
+      };
+      /** @description The uploaded file is not a valid DOCX template for Flow assembly. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Only .docx files can be uploaded as Flow templates.",
+           *       "intric_error_code": 9007,
+           *       "code": "bad_request"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The uploaded template exceeds the allowed file size. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Uploaded file is too large.",
+           *       "intric_error_code": 9015,
+           *       "code": "file_too_large"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The uploaded file is not a supported DOCX template. */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Only .docx files can be uploaded as Flow templates.",
+           *       "intric_error_code": 9014,
+           *       "code": "unsupported_media_type"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  inspect_flow_template: {
+    parameters: {
+      query: {
+        /** @description Identifier of the stored template asset to inspect. */
+        file_id: string;
+      };
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow that owns the template asset. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowTemplateInspectionPublic"];
+        };
+      };
+      /** @description The selected file is not a valid DOCX template or is not safe to inspect. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Invalid DOCX template.",
+           *       "intric_error_code": 9007,
+           *       "code": "bad_request"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or template file not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  generate_flow_template_signed_url: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow that owns the template asset. */
+        id: string;
+        /** @description Identifier of the stored template asset to download. */
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SignedURLRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignedURLResponse"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to access this flow template asset. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or template asset not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  test_flow_http: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Flow ID */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["HttpTestRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HttpTestResponse"];
+        };
+      };
+      /** @description Caller lacks permission to edit this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_flow_assistant: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that will own the new flow-managed assistant. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowAssistantCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AssistantPublic"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to manage assistants for this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_flow_assistant: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the requested assistant. */
+        id: string;
+        /** @description Identifier of the flow-managed assistant to return. */
+        assistant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AssistantPublic"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to access assistants for this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or flow-managed assistant not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow assistant not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_flow_assistant: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the assistant to delete. */
+        id: string;
+        /** @description Identifier of the flow-managed assistant to delete. */
+        assistant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Caller lacks permission or API key scope to delete assistants for this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or flow-managed assistant not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow assistant not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_flow_assistant: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the assistant to update. */
+        id: string;
+        /** @description Identifier of the flow-managed assistant to update. */
+        assistant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialAssistantUpdatePublic"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AssistantPublic"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to update assistants for this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or flow-managed assistant not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow assistant not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_flow_run_contract: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the published flow whose run contract should be returned. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunContractPublic"];
+        };
+      };
+      /** @description Flow is not published or runtime contract could not be resolved. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow must be published before a run contract can be created.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_not_published"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_flow_input_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow whose effective input policy should be returned. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowInputPolicyPublic"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  upload_flow_file: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the published flow that should receive the uploaded run input file. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_flow_file"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FilePublic"];
+        };
+      };
+      /** @description Upload request is invalid for this flow input policy. Representative machine-readable codes include: flow_input_upload_not_supported, flow_input_file_empty, flow_input_policy_missing_limit. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow input policy does not allow file upload.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_input_upload_not_supported"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Uploaded file exceeds effective flow max size limit. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Uploaded file exceeds effective flow max size limit.",
+           *       "intric_error_code": 9015,
+           *       "code": "file_too_large"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unsupported media type for this flow input policy. */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Unsupported media type for this flow input policy.",
+           *       "intric_error_code": 9014,
+           *       "code": "unsupported_media_type"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  upload_flow_runtime_file: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the published flow that owns the runtime-input step. */
+        id: string;
+        /** @description Identifier of the published step that should receive the uploaded runtime file. */
+        step_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_flow_runtime_file"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FilePublic"];
+        };
+      };
+      /** @description Runtime step input is unknown, disabled, or invalid for upload. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Runtime input is not available for this step.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_run_runtime_input_disabled"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Uploaded file exceeds the effective runtime-input limit. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Uploaded file exceeds effective flow max size limit.",
+           *       "intric_error_code": 9015,
+           *       "code": "file_too_large"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unsupported media type for the selected runtime step. */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Unsupported media type for this flow input policy.",
+           *       "intric_error_code": 9014,
+           *       "code": "unsupported_media_type"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_flow_runs_alias: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of runs to return. */
+        limit?: number;
+        /** @description Number of runs to skip before returning results. */
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Identifier of the flow whose runs should be listed. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_FlowRunPublic_"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_flow_run: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the published flow that should be executed. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Flow cannot be run in its current state or request payload is invalid. Representative machine-readable codes include: flow_not_published, flow_run_input_payload_too_large, flow_run_concurrency_limit_reached, flow_input_required_field_missing, flow_input_invalid_number. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow must be published before creating runs.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_not_published"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_flow_run_alias: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the requested run. */
+        id: string;
+        /** @description Identifier of the run to return. */
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow run not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  cancel_flow_run_alias: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the run to cancel. */
+        id: string;
+        /** @description Identifier of the run to cancel. */
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow run not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  redispatch_flow_run_alias: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the stale queued run. */
+        id: string;
+        /** @description Identifier of the run to redispatch if it is still queued. */
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRedispatchResponse"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow run not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_flow_run_evidence_alias: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the run evidence export. */
+        id: string;
+        /** @description Identifier of the run whose evidence export should be returned. */
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunEvidenceResponse"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow run not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Evidence audit logging is unavailable for this request. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Evidence audit logging is unavailable.",
+           *       "intric_error_code": 9024,
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  export_flow_run_evidence_alias: {
+    parameters: {
+      query?: {
+        /** @description Export format. */
+        format?: "json";
+      };
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the run evidence export. */
+        id: string;
+        /** @description Identifier of the run whose evidence export should be downloaded. */
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunEvidenceExportResponse"];
+        };
+      };
+      /** @description Requested evidence export format is not supported. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Evidence export format is not supported.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_evidence_export_format_not_supported",
+           *       "context": {
+           *         "supported_formats": [
+           *           "json"
+           *         ]
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow run not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Evidence audit logging is unavailable for this request. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Evidence audit logging is unavailable.",
+           *       "intric_error_code": 9024,
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_flow_run_steps: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the run step outputs. */
+        id: string;
+        /** @description Identifier of the run whose step outputs should be listed. */
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunStepPublic"][];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow run not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_flow_graph: {
+    parameters: {
+      query?: {
+        /** @description Optional run identifier. When provided, the graph is resolved from that run's version-pinned snapshot and annotated with run results. */
+        run_id?: string | null;
+      };
+      header?: never;
+      path: {
+        /** @description Identifier of the flow whose graph should be returned. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GraphResponse"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or run not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  generate_flow_run_artifact_signed_url: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the requested run artifact. */
+        id: string;
+        /** @description Identifier of the run that produced the artifact. */
+        run_id: string;
+        /** @description Identifier of the run artifact file to download. */
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SignedURLRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignedURLResponse"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow, run, or artifact not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Artifact not found for this run.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_ai_builder_sessions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Visible AI Builder sessions. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionListResponse"];
+        };
+      };
+      /** @description Caller lacks permission to use the AI Builder. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "You do not have permission to use the AI builder in this space.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_space_permission",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_ai_builder_session: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateSessionRequest"];
+      };
+    };
+    responses: {
+      /** @description AI Builder session created. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionResponse"];
+        };
+      };
+      /** @description The request payload is valid JSON but cannot start a builder session in its current state. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "A planner model is required to start an AI Builder session.",
+           *       "intric_error_code": 9007,
+           *       "code": "bad_request"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  send_ai_builder_message: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the AI Builder session that will receive the message. */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SendMessageRequest"];
+      };
+    };
+    responses: {
+      /** @description Server-sent event stream with planner status, text, question, plan, error, and done events. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+          /**
+           * @example event: status
+           *     data: {"status":"thinking"}
+           *
+           *     event: text
+           *     data: {"text":"I need one more detail."}
+           *
+           *     event: done
+           *     data:
+           */
+          "text/event-stream": string;
+        };
+      };
+      /** @description The AI Builder session cannot accept a new message in its current state. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Cannot send messages in this AI Builder session right now.",
+           *       "intric_error_code": 9007,
+           *       "code": "bad_request"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder session or referenced flow context was not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "AI Builder session not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_ai_builder_session: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the AI Builder session to return. */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description AI Builder session details. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder session not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "AI Builder session not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_ai_builder_models: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the AI Builder session whose planner models should be listed. */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Available completion models and default planner model. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionModelsResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder session not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "AI Builder session not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_ai_builder_plan: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the stored AI Builder plan revision to fetch. */
+        plan_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stored AI Builder plan. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlanResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for the plan's session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder plan not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "AI Builder plan not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_ai_builder_session_plans: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the AI Builder session whose stored plans should be listed. */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stored plan revisions for the session. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionPlansResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder session not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "AI Builder session not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  cancel_ai_builder_session: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the active AI Builder session to cancel. */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description AI Builder session cancelled. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder session not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "AI Builder session not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  approve_ai_builder_plan: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the AI Builder plan revision to approve. */
+        plan_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Plan approved. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlanApprovalResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for the plan's session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder plan not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "AI Builder plan not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  apply_ai_builder_plan: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the approved AI Builder plan revision to apply to the target flow. */
+        plan_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApplyPlanRequest"];
+      };
+    };
+    responses: {
+      /** @description Plan applied to the target flow. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApplyResultResponse"];
+        };
+      };
+      /** @description The approved plan cannot be materialized in the current space configuration. Representative machine-readable codes include: transcription_model_required, invalid_existing_step_ref. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "A transcription model must be selected when using audio input steps.",
+           *       "intric_error_code": 9007,
+           *       "code": "transcription_model_required"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for the plan's session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder plan not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "AI Builder plan not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The target flow revision changed before apply completed. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow revision changed while applying the plan.",
+           *       "intric_error_code": 9007,
+           *       "code": "stale_revision"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  revise_ai_builder_plan: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the proposed AI Builder plan to revise. */
+        plan_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RevisePlanRequest"];
+      };
+    };
+    responses: {
+      /** @description New plan revision created. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlanResponse"];
+        };
+      };
+      /** @description Invalid revision request. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Can only revise proposed plans.",
+           *       "intric_error_code": 9007,
+           *       "code": "plan_not_proposed"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks permission. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Only the session creator can revise plans.",
+           *       "intric_error_code": 9001,
+           *       "code": "session_creator_required"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -37301,7 +40330,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: string | boolean;
+          };
         };
       };
       /** @description Not Found */
@@ -37339,7 +40370,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: string | boolean;
+          };
         };
       };
       /** @description Internal Server Error */
@@ -38391,7 +41424,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["AccessTokenResponse"];
         };
       };
       /** @description Invalid or expired state */

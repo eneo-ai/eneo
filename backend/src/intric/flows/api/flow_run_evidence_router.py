@@ -10,17 +10,25 @@ from fastapi.responses import JSONResponse
 from intric.audit.domain.action_types import ActionType
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import error_response
-from intric.flows.api.flow_models import FlowRunEvidenceExportResponse, FlowRunEvidenceResponse
+from intric.flows.api.flow_models import (
+    FlowRunEvidenceExportResponse,
+    FlowRunEvidenceResponse,
+)
 from intric.flows.api.flow_trace_audit import (
     build_flow_trace_error_payload,
     log_flow_trace_audit_or_deny,
 )
+from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.flow_permissions import ensure_can_view_flow_trace
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
+
+
+def _get_flow_run_service(container: Container) -> FlowRunService:
+    return container.flow_run_service()
 
 
 @router.get(
@@ -59,8 +67,16 @@ attempt history, and debug-export provenance.
     },
 )
 async def get_flow_run_evidence_alias(
-    id: Annotated[UUID, Path(description="Identifier of the flow that owns the run evidence export.")],
-    run_id: Annotated[UUID, Path(description="Identifier of the run whose evidence export should be returned.")],
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the flow that owns the run evidence export."),
+    ],
+    run_id: Annotated[
+        UUID,
+        Path(
+            description="Identifier of the run whose evidence export should be returned."
+        ),
+    ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
@@ -72,7 +88,7 @@ async def get_flow_run_evidence_alias(
     )
     user = container.user()
     ensure_can_view_flow_trace(user)
-    run_service = container.flow_run_service()
+    run_service = _get_flow_run_service(container)
     run = await run_service.get_run(run_id=run_id, flow_id=id)
     evidence = await run_service.get_evidence(run_id=run_id)
     audit_failure = await log_flow_trace_audit_or_deny(
@@ -84,7 +100,7 @@ async def get_flow_run_evidence_alias(
     )
     if audit_failure is not None:
         return audit_failure
-    return FlowRunEvidenceResponse(**evidence)
+    return FlowRunEvidenceResponse.model_validate(evidence)
 
 
 @router.get(
@@ -127,8 +143,16 @@ Export the redacted rich evidence bundle for one flow run as a JSON attachment.
     },
 )
 async def export_flow_run_evidence_alias(
-    id: Annotated[UUID, Path(description="Identifier of the flow that owns the run evidence export.")],
-    run_id: Annotated[UUID, Path(description="Identifier of the run whose evidence export should be downloaded.")],
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the flow that owns the run evidence export."),
+    ],
+    run_id: Annotated[
+        UUID,
+        Path(
+            description="Identifier of the run whose evidence export should be downloaded."
+        ),
+    ],
     request: Request,
     format: Annotated[Literal["json"], Query(description="Export format.")] = "json",
     container: Container = Depends(get_container(with_user=True)),
@@ -141,7 +165,7 @@ async def export_flow_run_evidence_alias(
     )
     user = container.user()
     ensure_can_view_flow_trace(user)
-    run_service = container.flow_run_service()
+    run_service = _get_flow_run_service(container)
     run = await run_service.get_run(run_id=run_id, flow_id=id)
     if format != "json":
         return JSONResponse(

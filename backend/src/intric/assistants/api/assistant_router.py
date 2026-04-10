@@ -13,6 +13,7 @@ from intric.assistants.api.assistant_models import (
     AssistantPublic,
     AssistantUpdatePublic,
 )
+from intric.assistants.assistant import AssistantOrigin
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -63,7 +64,7 @@ _LEGACY_ASSISTANT_API_KEY_EXAMPLE = {
 def _flow_managed_mutation_error(
     *, assistant_id: UUID, flow_id: UUID | None
 ) -> HTTPException:
-    return HTTPException(
+    error = HTTPException(
         status_code=400,
         detail={
             "code": "flow_managed_assistant",
@@ -79,6 +80,7 @@ def _flow_managed_mutation_error(
             },
         },
     )
+    return error
 
 
 @router.post(

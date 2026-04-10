@@ -6,13 +6,14 @@
     buildStructuredQuestionCustomAnswer,
     buildStructuredQuestionSelection,
     getStructuredQuestionOptionKey,
-    type StructuredQuestion
+    type StructuredQuestion,
+    type StructuredQuestionAnswerPayload
   } from "./structuredQuestionAnswer";
 
   interface Props {
     question: StructuredQuestion;
     answered?: boolean;
-    onanswer?: (payload: { text: string; questionAnswer: Record<string, unknown> }) => void;
+    onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
   }
 
   let { question, answered = false, onanswer }: Props = $props();
@@ -53,9 +54,13 @@
 </script>
 
 <div class="question-container mt-2.5 max-w-xl" class:answered>
-  <p class="text-primary mb-2 text-sm font-semibold leading-snug">{question.question}</p>
+  <p class="text-primary mb-2 text-sm leading-snug font-semibold">{question.question}</p>
 
-  <div class="flex flex-col gap-2" role={question.selection_mode === "single" ? "radiogroup" : "group"} aria-label={question.question}>
+  <div
+    class="flex flex-col gap-2"
+    role={question.selection_mode === "single" ? "radiogroup" : "group"}
+    aria-label={question.question}
+  >
     {#each question.options as option, i (getStructuredQuestionOptionKey(option))}
       {@const optionKey = getStructuredQuestionOptionKey(option)}
       {@const isSelected = selectedOptionKeys.has(optionKey)}
@@ -69,15 +74,30 @@
         aria-checked={isSelected}
         aria-label={option.label}
       >
-        <span class="select-indicator" class:checked={isSelected} class:is-radio={question.selection_mode === "single"}>
+        <span
+          class="select-indicator"
+          class:checked={isSelected}
+          class:is-radio={question.selection_mode === "single"}
+        >
           {#if isSelected}
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3">
-              <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              class="size-3"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
+                clip-rule="evenodd"
+              />
             </svg>
           {/if}
         </span>
         <span class="flex min-w-0 flex-col">
-          <span class="text-primary text-[0.8125rem] font-semibold leading-snug">{option.label}</span>
+          <span class="text-primary text-[0.8125rem] leading-snug font-semibold"
+            >{option.label}</span
+          >
           {#if option.description}
             <span class="text-secondary mt-0.5 text-xs leading-snug">{option.description}</span>
           {/if}
@@ -99,7 +119,7 @@
       <div class="mt-1.5 flex items-center gap-1.5">
         <input
           type="text"
-          class="bg-primary text-primary border-border-default focus:border-accent-default flex-1 rounded-md border px-2.5 py-1.5 text-[0.8125rem] outline-none transition-shadow focus:ring-2 focus:ring-[oklch(from_var(--accent-default)_l_c_h_/_0.08)]"
+          class="bg-primary text-primary border-border-default focus:border-accent-default flex-1 rounded-md border px-2.5 py-1.5 text-[0.8125rem] transition-shadow outline-none focus:ring-2 focus:ring-[oklch(from_var(--accent-default)_l_c_h_/_0.08)]"
           placeholder={m.ai_builder_question_custom_placeholder()}
           bind:value={customText}
           onkeydown={(e) => {
@@ -144,7 +164,10 @@
     background: var(--bg-primary);
     cursor: pointer;
     min-height: 2.75rem;
-    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+    transition:
+      border-color 0.15s ease,
+      background 0.15s ease,
+      box-shadow 0.15s ease;
   }
 
   .option-card:not(.answered):hover {
@@ -179,7 +202,9 @@
     height: 1.125rem;
     margin-top: 0.0625rem;
     border: 1.5px solid var(--border-strongest);
-    transition: border-color 0.15s ease, background 0.15s ease;
+    transition:
+      border-color 0.15s ease,
+      background 0.15s ease;
   }
 
   .select-indicator.is-radio {
@@ -206,19 +231,39 @@
     animation: optionSlideIn 200ms ease-out both;
   }
 
-  .option-card:nth-child(1) { animation-delay: 80ms; }
-  .option-card:nth-child(2) { animation-delay: 140ms; }
-  .option-card:nth-child(3) { animation-delay: 200ms; }
-  .option-card:nth-child(4) { animation-delay: 260ms; }
+  .option-card:nth-child(1) {
+    animation-delay: 80ms;
+  }
+  .option-card:nth-child(2) {
+    animation-delay: 140ms;
+  }
+  .option-card:nth-child(3) {
+    animation-delay: 200ms;
+  }
+  .option-card:nth-child(4) {
+    animation-delay: 260ms;
+  }
 
   @keyframes questionReveal {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   @keyframes optionSlideIn {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {

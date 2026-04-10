@@ -1,4 +1,5 @@
 """PDF and DOCX generation for flow step outputs."""
+
 from __future__ import annotations
 
 import os
@@ -51,7 +52,7 @@ def _render_pdf(text: str, *, step_order: int) -> tuple[bytes, str, str]:
         pdf.set_font("DejaVu", size=11)
     else:
         pdf.set_font("Helvetica", size=11)
-    pdf.multi_cell(0, 6, text)
+    pdf.multi_cell(0, 6, text)  # pyright: ignore[reportUnknownMemberType]
     return bytes(pdf.output()), "application/pdf", f"step_{step_order}_output.pdf"
 
 
@@ -62,7 +63,11 @@ def _render_docx(text: str, *, step_order: int) -> tuple[bytes, str, str]:
 
     # Use a repo-owned template so DOCX rendering does not depend on how
     # python-docx packaged its default template in the active environment.
-    doc = Document(str(_DOCX_TEMPLATE_PATH)) if _DOCX_TEMPLATE_PATH.exists() else Document()
+    doc = (
+        Document(str(_DOCX_TEMPLATE_PATH))
+        if _DOCX_TEMPLATE_PATH.exists()
+        else Document()
+    )
     lines = text.splitlines()
     if not lines:
         doc.add_paragraph("")
@@ -197,7 +202,9 @@ def _is_markdown_table_start(*, lines: list[str], start_index: int) -> bool:
         return False
     header = lines[start_index]
     separator = lines[start_index + 1]
-    return "|" in header and _MARKDOWN_TABLE_SEPARATOR.match(separator.strip()) is not None
+    return (
+        "|" in header and _MARKDOWN_TABLE_SEPARATOR.match(separator.strip()) is not None
+    )
 
 
 def _parse_markdown_table_row(line: str) -> list[str]:

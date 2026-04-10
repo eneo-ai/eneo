@@ -312,9 +312,16 @@
               {#if run.status === "failed" && run.error_message}
                 <tr>
                   <td colspan="5" class="border-default border-b px-4 py-2">
-                    <Alert.Root variant="destructive" class="flex min-w-0 items-start gap-2 text-xs">
-                      <Alert.Title class="shrink-0 text-xs font-semibold">{m.flow_run_error()}:</Alert.Title>
-                      <Alert.Description class="min-w-0 break-words text-xs">{run.error_message}</Alert.Description>
+                    <Alert.Root
+                      variant="destructive"
+                      class="flex min-w-0 items-start gap-2 text-xs"
+                    >
+                      <Alert.Title class="shrink-0 text-xs font-semibold"
+                        >{m.flow_run_error()}:</Alert.Title
+                      >
+                      <Alert.Description class="min-w-0 text-xs break-words"
+                        >{run.error_message}</Alert.Description
+                      >
                     </Alert.Root>
                   </td>
                 </tr>
@@ -367,7 +374,7 @@
                             {/if}
                           </div>
                         {/if}
-                      {:else if run.output_payload_json.text}
+                      {:else if run.output_payload_json.text && !run.output_payload_json.artifacts?.length}
                         <div class="text-secondary truncate">
                           <span class="text-positive-stronger font-semibold"
                             >{m.flow_run_output()}:</span

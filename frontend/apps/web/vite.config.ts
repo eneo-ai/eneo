@@ -12,8 +12,22 @@ const file = fileURLToPath(new URL("package.json", import.meta.url));
 const json = readFileSync(file, "utf8");
 const pkg = JSON.parse(json);
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   cacheDir: process.env.VITEST ? "node_modules/.vitest" : "node_modules/.vite-web",
+  build: {
+    target: "es2022"
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      target: "es2022"
+    }
+  },
+  resolve:
+    mode === "test" || process.env.VITEST
+      ? {
+          conditions: ["browser"]
+        }
+      : undefined,
   plugins: [
     paraglideVitePlugin({
       project: "./project.inlang",
@@ -53,4 +67,4 @@ export default defineConfig({
       ? `"${process.env.CF_PAGES_COMMIT_SHA}"`
       : `"${process.env.VERCEL_GIT_COMMIT_SHA}"`
   }
-});
+}));

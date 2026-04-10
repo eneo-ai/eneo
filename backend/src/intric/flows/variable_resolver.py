@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import json
 import re
-from difflib import get_close_matches
 from datetime import datetime
-from typing import Any
+from difflib import get_close_matches
+from typing import Any, cast
 
-from intric.flows.domain.flow import FlowStepResult
+from intric.flows.domain.flow import FlowStepResult, JsonObject
 from intric.flows.flow_variable_definitions import RESERVED_RUNTIME_VARIABLES_NORMALIZED
 from intric.main.exceptions import BadRequestException
-
 
 _TEMPLATE_VAR_PATTERN = re.compile(r"\{\{\s*([^{}]+)\s*\}\}")
 _STEP_ALIAS_PATTERN = re.compile(r"^step_\d+($|[._])")
@@ -17,7 +16,9 @@ _STEP_ALIAS_PATTERN = re.compile(r"^step_\d+($|[._])")
 
 def iter_template_expressions(template: str) -> list[str]:
     """Extract templated variable expressions from a template string."""
-    return [match.group(1).strip() for match in _TEMPLATE_VAR_PATTERN.finditer(template)]
+    return [
+        match.group(1).strip() for match in _TEMPLATE_VAR_PATTERN.finditer(template)
+    ]
 
 
 class FlowVariableResolver:
@@ -41,8 +42,6 @@ class FlowVariableResolver:
 
         # Friendly input field aliases (for example {{Namn på brukare}})
         for key, value in normalized_flow_input.items():
-            if not isinstance(key, str):
-                continue
             normalized_key = key.strip()
             if not normalized_key:
                 continue
@@ -89,7 +88,11 @@ class FlowVariableResolver:
 
         if current_step_order is not None and current_step_order > 1:
             previous_result = next(
-                (item for item in prior_results if item.step_order == current_step_order - 1),
+                (
+                    item
+                    for item in prior_results
+                    if item.step_order == current_step_order - 1
+                ),
                 None,
             )
             if previous_result is not None:
@@ -133,28 +136,32 @@ class FlowVariableResolver:
                     f"Unknown variable reference: '{path}'. Empty path segment is not allowed."
                 )
             if isinstance(current, dict):
-                if token not in current:
-                    available_keys = [str(key) for key in current.keys()]
-                    suggestion = _format_missing_key_suggestion(token=token, available_keys=available_keys)
+                current_dict = cast(JsonObject, current)
+                if token not in current_dict:
+                    available_keys = [str(key) for key in current_dict.keys()]
+                    suggestion = _format_missing_key_suggestion(
+                        token=token, available_keys=available_keys
+                    )
                     raise BadRequestException(
                         f"Unknown variable reference: '{path}'. Missing key '{token}'.{suggestion}"
                     )
-                current = current[token]
+                current = current_dict[token]
                 continue
 
             if isinstance(current, list):
+                current_list = cast(list[Any], current)
                 if not token.isdigit():
                     raise BadRequestException(
                         f"Unknown variable reference: '{path}'. "
                         f"Expected numeric index for list access, got '{token}'."
                     )
                 index = int(token)
-                if index >= len(current):
+                if index >= len(current_list):
                     raise BadRequestException(
                         f"Unknown variable reference: '{path}'. "
                         f"List index '{index}' is out of range."
                     )
-                current = current[index]
+                current = current_list[index]
                 continue
 
             raise BadRequestException(
@@ -169,13 +176,21 @@ class FlowVariableResolver:
             return ""
         if isinstance(value, str):
             return value
-        if isinstance(value, list) and len(value) <= 10 and all(_is_prompt_scalar(item) for item in value):
-            return ", ".join(_scalar_to_prompt_string(item) for item in value)
-        if isinstance(value, dict) and value and all(_is_prompt_scalar(item) for item in value.values()):
-            return "\n".join(
-                f"{key}: {_scalar_to_prompt_string(item)}"
-                for key, item in value.items()
-            )
+        if isinstance(value, list):
+            value_list = cast(list[Any], value)
+            if len(value_list) <= 10 and all(
+                _is_prompt_scalar(item) for item in value_list
+            ):
+                return ", ".join(_scalar_to_prompt_string(item) for item in value_list)
+        if isinstance(value, dict):
+            value_dict = cast(JsonObject, value)
+            if value_dict and all(
+                _is_prompt_scalar(item) for item in value_dict.values()
+            ):
+                return "\n".join(
+                    f"{key}: {_scalar_to_prompt_string(item)}"
+                    for key, item in value_dict.items()
+                )
         if isinstance(value, (dict, list)):
             return json.dumps(value, ensure_ascii=False, indent=2)
         return str(value)
@@ -199,7 +214,12 @@ class FlowVariableResolver:
 
     @staticmethod
     def _extract_transcript_value(flow_input: dict[str, Any]) -> str | None:
-        for key in ("transkribering", "transcription", "transcript", "transcribed_text"):
+        for key in (
+            "transkribering",
+            "transcription",
+            "transcript",
+            "transcribed_text",
+        ):
             value = flow_input.get(key)
             if isinstance(value, str) and value.strip():
                 return value
@@ -210,7 +230,7 @@ class FlowVariableResolver:
         payload = result.input_payload_json or {}
         runtime_input = payload.get("runtime_input")
         if isinstance(runtime_input, dict):
-            return dict(runtime_input)
+            return dict(cast(JsonObject, runtime_input))
         return {}
 
 

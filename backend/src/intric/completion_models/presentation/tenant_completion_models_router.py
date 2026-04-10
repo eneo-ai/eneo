@@ -1,15 +1,16 @@
 # MIT License
 
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.completion_models.presentation import CompletionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.container.container import Container
+from intric.model_providers.domain.model_defaults import lookup_model_defaults
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
@@ -18,12 +19,16 @@ from intric.users.user import UserInDB
 router = APIRouter()
 
 
+def _coerce_payload(value: object) -> dict[str, object]:
+    return dict(cast(dict[str, object], value)) if isinstance(value, dict) else {}
+
+
 class TenantCompletionModelCreate(BaseModel):
     provider_id: UUID
     name: str
     display_name: str
-    max_input_tokens: int
-    max_output_tokens: int
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
     vision: bool = False
     reasoning: bool = False
     supports_tool_calling: bool = False
@@ -34,11 +39,14 @@ class TenantCompletionModelCreate(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _normalize_token_fields(cls, value):
-        data = dict(value)
+    def _normalize_token_fields(cls, value: object) -> dict[str, object]:
+        data = _coerce_payload(value)
         if data.get("max_input_tokens") is None and data.get("token_limit") is not None:
             data["max_input_tokens"] = data["token_limit"]
-        defaults = lookup_model_defaults(data.get("name"))
+        raw_name = data.get("name")
+        defaults = lookup_model_defaults(
+            raw_name if isinstance(raw_name, str) else None
+        )
         if (
             data.get("max_input_tokens") is None
             and defaults
@@ -53,7 +61,7 @@ class TenantCompletionModelCreate(BaseModel):
             max_input_tokens = data.get("max_input_tokens")
             data["max_output_tokens"] = (
                 min(int(max_input_tokens), defaults.max_output_tokens)
-                if max_input_tokens is not None
+                if isinstance(max_input_tokens, int)
                 else defaults.max_output_tokens
             )
         return data
@@ -74,8 +82,8 @@ class TenantCompletionModelUpdate(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _normalize_token_fields(cls, value):
-        data = dict(value)
+    def _normalize_token_fields(cls, value: object) -> dict[str, object]:
+        data = _coerce_payload(value)
         if data.get("max_input_tokens") is None and data.get("token_limit") is not None:
             data["max_input_tokens"] = data["token_limit"]
         return data
@@ -121,6 +129,10 @@ async def create_tenant_completion_model(
     if model_create.max_output_tokens is None:
         raise BadRequestException(
             "max_output_tokens is required when LiteLLM has no defaults for this model"
+        )
+    if model_create.max_input_tokens is None:
+        raise BadRequestException(
+            "max_input_tokens is required when LiteLLM has no defaults for this model"
         )
 
     # If setting as default, unset all other defaults first

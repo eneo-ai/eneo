@@ -43,7 +43,11 @@
   export let intric: Intric;
   export let onToggle: (stepOrder: number) => void;
   export let onToggleInput: (stepOrder: number) => void;
-  export let onCopyPayload: (key: string, payload: unknown, failureMessage: string) => Promise<void>;
+  export let onCopyPayload: (
+    key: string,
+    payload: unknown,
+    failureMessage: string
+  ) => Promise<void>;
   export let onDownloadArtifact: (fileId: string) => Promise<void>;
   export let getStatusColor: (status: string) => string;
   export let getStatusDotColor: (status: string) => string;
@@ -72,10 +76,13 @@
         {result.step_order}
       </span>
       <span class="text-sm font-medium">
-        {stepDef?.user_description ?? m.flow_step_fallback_label({ order: String(result.step_order) })}
+        {stepDef?.user_description ??
+          m.flow_step_fallback_label({ order: String(result.step_order) })}
       </span>
       <span
-        class="{getStatusColor(result.status)} inline-flex items-center gap-1.5 text-[11px] font-medium"
+        class="{getStatusColor(
+          result.status
+        )} inline-flex items-center gap-1.5 text-[11px] font-medium"
       >
         <span class="{getStatusDotColor(result.status)} size-1.5 shrink-0 rounded-full"></span>
         {getStatusLabel(result.status)}
@@ -142,9 +149,7 @@
 
             {#if result.output_payload_json.structured}
               <div class="mt-1">
-                <Badge class="bg-accent-dimmer text-accent-stronger mb-1"
-                  >JSON</Badge
-                >
+                <Badge class="bg-accent-dimmer text-accent-stronger mb-1">JSON</Badge>
                 <pre
                   class="border-accent-default bg-hover-dimmer max-h-80 overflow-auto rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
                     result.output_payload_json.structured,
@@ -177,7 +182,7 @@
               </div>
             {/if}
 
-            {#if result.output_payload_json.text && !result.output_payload_json.structured}
+            {#if result.output_payload_json.text && !result.output_payload_json.structured && !result.output_payload_json.artifacts?.length}
               <div class="bg-hover-dimmer mt-1 max-h-96 overflow-auto rounded-lg p-4">
                 <Markdown source={result.output_payload_json.text} class="text-sm" />
               </div>
@@ -198,10 +203,12 @@
               <Collapsible.Trigger
                 class="text-muted hover:text-secondary focus-visible:ring-accent-default -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 aria-controls="step-{result.step_order}-input-panel"
-                on:click={() => onToggleInput(result.step_order)}
+                onclick={() => onToggleInput(result.step_order)}
               >
                 <IconChevronDown
-                  class="size-3 transition-transform duration-200 {inputExpanded ? '' : '-rotate-90'}"
+                  class="size-3 transition-transform duration-200 {inputExpanded
+                    ? ''
+                    : '-rotate-90'}"
                 />
                 {m.flow_run_input()}
               </Collapsible.Trigger>
@@ -271,7 +278,9 @@
                   {m.flow_run_transcription_language({ language: transcription.language ?? "—" })}
                 </Badge>
                 <Badge variant="outline">
-                  {m.flow_run_transcription_files({ count: String(transcription.files_count ?? 0) })}
+                  {m.flow_run_transcription_files({
+                    count: String(transcription.files_count ?? 0)
+                  })}
                 </Badge>
                 <Badge variant="outline">
                   {m.flow_run_transcription_duration({
@@ -279,7 +288,9 @@
                   })}
                 </Badge>
                 <Badge variant="outline">
-                  {m.flow_run_transcription_size({ size: formatBytes(transcription.transcript_bytes) })}
+                  {m.flow_run_transcription_size({
+                    size: formatBytes(transcription.transcript_bytes)
+                  })}
                 </Badge>
                 <Badge variant="outline">
                   {m.flow_run_transcription_estimated_tokens({

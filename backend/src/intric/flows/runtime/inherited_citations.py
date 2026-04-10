@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from intric.flows.flow_run_provenance import normalize_rag_payload
+from intric.flows.runtime.models import RunExecutionState, RuntimeStep
 from intric.flows.source_display import (
     format_source_container_display_name,
     format_source_container_label,
@@ -11,7 +12,9 @@ from intric.flows.source_display import (
 )
 from intric.flows.step_lineage import resolve_upstream_step_orders
 from intric.flows.template_reference_analyzer import analyze_template
-from intric.flows.runtime.models import RunExecutionState, RuntimeStep
+
+ReferencePayload = dict[str, Any]
+SourceEntry = dict[str, Any]
 
 
 def collect_inherited_citation_context(
@@ -37,7 +40,9 @@ def collect_inherited_citation_context(
         input_source=step.input_source,
         step_order=step.step_order,
         references=references,
-        max_prior_step_order=max((order for order in state.completed_by_order), default=0),
+        max_prior_step_order=max(
+            (order for order in state.completed_by_order), default=0
+        ),
     )
     sources_by_id: dict[str, dict[str, Any]] = {}
     grounded_orders: list[int] = []
@@ -53,31 +58,40 @@ def collect_inherited_citation_context(
             continue
         prompt_context = normalized_rag.get("prompt_context")
         references_payload = normalized_rag.get("references")
-        if not isinstance(prompt_context, dict) or not isinstance(references_payload, list):
+        if not isinstance(prompt_context, dict) or not isinstance(
+            references_payload, list
+        ):
             continue
+        prompt_context_dict = cast(ReferencePayload, prompt_context)
+        references_list = cast(list[Any], references_payload)
         included_source_ids = [
             source_id
-            for source_id in prompt_context.get("included_source_ids", [])
+            for source_id in cast(
+                list[Any], prompt_context_dict.get("included_source_ids", [])
+            )
             if isinstance(source_id, str) and source_id.strip()
         ]
         if not included_source_ids:
             continue
-        grouped_reference_map = {
-            reference.get("id"): reference
-            for reference in references_payload
-            if isinstance(reference, dict) and isinstance(reference.get("id"), str)
-        }
+        grouped_reference_map: dict[str, ReferencePayload] = {}
+        for reference in references_list:
+            if not isinstance(reference, dict):
+                continue
+            reference_dict = cast(ReferencePayload, reference)
+            reference_id = reference_dict.get("id")
+            if isinstance(reference_id, str) and reference_id.strip():
+                grouped_reference_map[reference_id] = reference_dict
         grounded_orders.append(upstream_order)
         label = state.step_names_by_order.get(upstream_order)
         if isinstance(label, str) and label.strip():
             grounded_labels.append(label.strip())
         for source_id in included_source_ids:
             reference = grouped_reference_map.get(source_id)
-            if not isinstance(reference, dict):
+            if reference is None:
                 continue
             raw_id_short = reference.get("id_short")
             existing = sources_by_id.get(source_id)
-            source_entry = existing or {
+            source_entry: SourceEntry = existing or {
                 "id": source_id,
                 "id_short": (
                     raw_id_short
@@ -109,16 +123,22 @@ def collect_inherited_citation_context(
             title = source_entry.get("title")
             if isinstance(title, str) and title.strip():
                 source_entry["display_title"] = format_source_display_name(title)
-            if upstream_order not in source_entry["source_step_orders"]:
-                source_entry["source_step_orders"].append(upstream_order)
-            if isinstance(label, str) and label.strip() and label.strip() not in source_entry["source_step_labels"]:
-                source_entry["source_step_labels"].append(label.strip())
+            source_step_orders = cast(list[int], source_entry["source_step_orders"])
+            if upstream_order not in source_step_orders:
+                source_step_orders.append(upstream_order)
+            source_step_labels = cast(list[str], source_entry["source_step_labels"])
+            if (
+                isinstance(label, str)
+                and label.strip()
+                and label.strip() not in source_step_labels
+            ):
+                source_step_labels.append(label.strip())
             sources_by_id[source_id] = source_entry
 
-    ordered_sources = sorted(
+    ordered_sources: list[SourceEntry] = sorted(
         sources_by_id.values(),
         key=lambda item: (
-            min(item.get("source_step_orders", [9999])),
+            min(cast(list[int], item.get("source_step_orders", [9999]))),
             str(item.get("id")),
         ),
     )
@@ -137,23 +157,32 @@ def build_inherited_citation_prompt_appendix(context: dict[str, Any]) -> str | N
     lines = [
         "Inherited source grounding:",
         "You are synthesizing grounded outputs from earlier flow steps.",
-        "When a statement in your answer depends on grounded information from those earlier steps, cite the original source id immediately after the statement using <inref id=\"<source_id>\"/>.",
+        'When a statement in your answer depends on grounded information from those earlier steps, cite the original source id immediately after the statement using <inref id="<source_id>"/>.',
         "Only cite source ids from the inherited source catalog below.",
         "Inherited source catalog (source_id | title | url | grounded_in_step):",
     ]
-    for source in sources:
+    for source in cast(list[Any], sources):
         if not isinstance(source, dict):
             continue
-        source_id = source.get("id_short") or source.get("id")
+        source_dict = cast(SourceEntry, source)
+        source_id = source_dict.get("id_short") or source_dict.get("id")
         if not isinstance(source_id, str) or not source_id.strip():
             continue
-        title = source.get("display_title") or source.get("title") or source.get("source_display_name")
-        url = source.get("source_url")
-        grounded_orders_raw = source.get("source_step_orders")
-        grounded_orders: list[Any] = (
-            grounded_orders_raw if isinstance(grounded_orders_raw, list) else []
+        title = (
+            source_dict.get("display_title")
+            or source_dict.get("title")
+            or source_dict.get("source_display_name")
         )
-        grounded_label = ",".join(str(order) for order in grounded_orders if isinstance(order, int))
+        url = source_dict.get("source_url")
+        grounded_orders_raw = source_dict.get("source_step_orders")
+        grounded_orders = (
+            cast(list[Any], grounded_orders_raw)
+            if isinstance(grounded_orders_raw, list)
+            else []
+        )
+        grounded_label = ",".join(
+            str(order) for order in grounded_orders if isinstance(order, int)
+        )
         line = f"- {source_id}"
         if isinstance(title, str) and title.strip():
             line += f" | {title.strip()}"

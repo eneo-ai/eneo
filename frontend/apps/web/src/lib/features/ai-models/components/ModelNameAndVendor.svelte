@@ -30,15 +30,18 @@
 </script>
 
 <script lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
   import { Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
 
-  export let model:
-    | CompletionModel
-    | EmbeddingModel
-    | TranscriptionModel
-    | { org: string; nickname: string; name: string; description: string };
+  type DisplayModel = {
+    name: string;
+    nickname?: string | null;
+    description?: string | null;
+    token_limit?: number;
+    org?: string | null;
+  };
+
+  export let model: DisplayModel;
   export let size: "card" | "table" = "table";
   export let showTokenLimit: boolean = true;
 

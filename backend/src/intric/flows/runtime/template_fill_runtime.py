@@ -12,7 +12,10 @@ from uuid import UUID
 from intric.files.file_models import FileCreate, FileType
 from intric.files.file_repo import FileRepository
 from intric.flows.domain.flow import FlowRun, FlowStepResultStatus
-from intric.flows.runtime.docx_template_runtime import extract_docx_text, render_docx_template
+from intric.flows.runtime.docx_template_runtime import (
+    extract_docx_text,
+    render_docx_template,
+)
 from intric.flows.runtime.models import (
     RunExecutionState,
     RuntimeStep,
@@ -22,12 +25,13 @@ from intric.flows.runtime.models import (
 from intric.flows.variable_resolver import FlowVariableResolver
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 
-
 _STEP_REFERENCE_PATTERN = re.compile(r"step_(\d+)")
 _FULL_TEMPLATE_EXPRESSION_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
 
 
-ApplyOutputCap = Callable[[str, FlowRun, RuntimeStep], Awaitable[tuple[str, list[UUID]]]]
+ApplyOutputCap = Callable[
+    [str, FlowRun, RuntimeStep], Awaitable[tuple[str, list[UUID]]]
+]
 
 
 @dataclass(frozen=True)
@@ -76,7 +80,9 @@ async def execute_template_fill_step(
             template_checksum=template_checksum,
         )
         template_blob = template_file.blob
-        if template_blob is None:  # defensive narrowing; _load_template_file already rejects this
+        if (
+            template_blob is None
+        ):  # defensive narrowing; _load_template_file already rejects this
             raise TypedIOValidationException(
                 "The published DOCX template could not be read because the saved file content is missing. Re-upload the template and publish the flow again.",
                 code="typed_io_template_render_failed",
@@ -164,7 +170,9 @@ async def execute_template_fill_step(
             step.step_order,
             template_file_id,
         )
-        raise _template_fill_runtime_error(stage="saving the generated DOCX", exc=exc) from exc
+        raise _template_fill_runtime_error(
+            stage="saving the generated DOCX", exc=exc
+        ) from exc
 
     try:
         rendered_text = extract_docx_text(blob)
@@ -176,7 +184,9 @@ async def execute_template_fill_step(
             template_file_id,
             stored_file.id,
         )
-        raise _template_fill_runtime_error(stage="reading the generated DOCX", exc=exc) from exc
+        raise _template_fill_runtime_error(
+            stage="reading the generated DOCX", exc=exc
+        ) from exc
 
     bindings_text = json.dumps(resolved_bindings, ensure_ascii=False, sort_keys=True)
 
@@ -190,7 +200,7 @@ async def execute_template_fill_step(
     )
 
     template_name_value = template_name or getattr(template_file, "name", None)
-    output_payload_extensions = {
+    output_payload_extensions: dict[str, Any] = {
         "template_fill_debug": {
             "rendered_docx_text_raw": rendered_text,
             "summary_mode": "resolved_bindings",
@@ -200,7 +210,9 @@ async def execute_template_fill_step(
     if template_name_value is not None or template_asset_id is not None:
         output_payload_extensions["template_provenance"] = {
             "template_name": template_name_value,
-            "template_asset_id": str(template_asset_id) if template_asset_id is not None else None,
+            "template_asset_id": str(template_asset_id)
+            if template_asset_id is not None
+            else None,
             "template_file_id": str(template_file_id),
             "template_checksum": template_checksum,
             "published_flow_version": run.flow_version,
@@ -222,7 +234,9 @@ async def execute_template_fill_step(
         model_parameters_json={
             "mode": "template_fill",
             "template_file_id": str(template_file_id),
-            "template_asset_id": str(template_asset_id) if template_asset_id is not None else None,
+            "template_asset_id": str(template_asset_id)
+            if template_asset_id is not None
+            else None,
             "template_checksum": template_checksum,
         },
         structured_output=None,
@@ -333,7 +347,10 @@ async def _load_template_file(
                 code="flow_template_not_accessible",
             )
         try:
-            asset, template_file = await template_asset_service.get_published_template_file(
+            (
+                asset,
+                template_file,
+            ) = await template_asset_service.get_published_template_file(
                 tenant_id=tenant_id,
                 asset_id=template_asset_id,
                 expected_checksum=template_checksum,
@@ -396,10 +413,14 @@ def _resolve_template_bindings(
         try:
             match = _FULL_TEMPLATE_EXPRESSION_PATTERN.fullmatch(expression)
             if match is not None:
-                raw_value = variable_resolver._resolve_path(context, match.group(1).strip())
+                raw_value = variable_resolver._resolve_path(
+                    context, match.group(1).strip()
+                )  # pyright: ignore[reportPrivateUsage]
                 resolved[placeholder] = _stringify_template_binding_value(raw_value)
             else:
-                resolved[placeholder] = variable_resolver.interpolate(expression, context)
+                resolved[placeholder] = variable_resolver.interpolate(
+                    expression, context
+                )
         except BadRequestException as exc:
             failed_step_order = _failed_step_order_for_expression(
                 expression=expression,
@@ -449,7 +470,9 @@ def _strip_leading_placeholder_heading(*, placeholder: str, body: str) -> str:
         return stripped
 
     normalized_heading = first_line.lstrip("#").strip().rstrip(":").strip()
-    if _normalize_placeholder_token(normalized_heading) != _normalize_placeholder_token(placeholder):
+    if _normalize_placeholder_token(normalized_heading) != _normalize_placeholder_token(
+        placeholder
+    ):
         return body
 
     remainder = "\n".join(lines[1:]).lstrip()
@@ -493,7 +516,9 @@ def _failed_step_order_for_expression(
     return None
 
 
-def _template_fill_runtime_error(*, stage: str, exc: Exception) -> TypedIOValidationException:
+def _template_fill_runtime_error(
+    *, stage: str, exc: Exception
+) -> TypedIOValidationException:
     return TypedIOValidationException(
         f"DOCX template assembly failed while {stage}. Check the published template asset and try again.",
         code="typed_io_template_render_failed",

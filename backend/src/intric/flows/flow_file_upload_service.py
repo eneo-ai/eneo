@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from enum import Enum
-import logging
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import UUID
 
-from fastapi import UploadFile
 import magic
+from fastapi import UploadFile
 
 from intric.files.audio import AudioMimeTypes
 from intric.files.file_models import File
@@ -16,10 +16,21 @@ from intric.files.file_service import FileService
 from intric.files.image import ImageMimeTypes
 from intric.files.text import TextMimeTypes
 from intric.flows.domain.flow import Flow, FlowStep, FlowTemplateAsset, FlowVersion
-from intric.flows.flow_input_limits import FlowInputLimits, effective_flow_input_limit, effective_max_files_per_run
+from intric.flows.flow_input_limits import (
+    FlowInputLimits,
+    effective_flow_input_limit,
+    effective_max_files_per_run,
+)
 from intric.flows.runtime.step_definition_parser import parse_runtime_steps
-from intric.flows.runtime_input import build_runtime_input_config, runtime_input_accept_mimetypes
-from intric.main.exceptions import BadRequestException, FileNotSupportedException, FileTooLargeException
+from intric.flows.runtime_input import (
+    build_runtime_input_config,
+    runtime_input_accept_mimetypes,
+)
+from intric.main.exceptions import (
+    BadRequestException,
+    FileNotSupportedException,
+    FileTooLargeException,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +79,9 @@ def _sniff_mimetype(upload_file: UploadFile) -> str | None:
             try:
                 file_obj.seek(start_position)
             except Exception:
-                logger.debug("Failed to reset file pointer after MIME sniffing.", exc_info=True)
+                logger.debug(
+                    "Failed to reset file pointer after MIME sniffing.", exc_info=True
+                )
 
     if not chunk:
         return None
@@ -103,7 +116,10 @@ def _is_empty_upload_file(upload_file: UploadFile) -> bool:
             try:
                 file_obj.seek(start_position)
             except Exception:
-                logger.debug("Failed to reset file pointer after empty-file check.", exc_info=True)
+                logger.debug(
+                    "Failed to reset file pointer after empty-file check.",
+                    exc_info=True,
+                )
 
     if isinstance(chunk, str):
         chunk = chunk.encode("utf-8", errors="ignore")
@@ -127,7 +143,9 @@ class _SettingsServiceProtocol(Protocol):
 
 
 class _FlowVersionRepositoryProtocol(Protocol):
-    async def get(self, flow_id: UUID, version: int, tenant_id: UUID) -> FlowVersion: ...
+    async def get(
+        self, flow_id: UUID, version: int, tenant_id: UUID
+    ) -> FlowVersion: ...
 
 
 class _FlowTemplateAssetRepositoryProtocol(Protocol):
@@ -155,7 +173,9 @@ class FlowFileInputPolicy:
 
 
 def _first_flow_input_step(flow: Flow) -> FlowStep | None:
-    flow_input_steps = [step for step in flow.steps if step.input_source == "flow_input"]
+    flow_input_steps = [
+        step for step in flow.steps if step.input_source == "flow_input"
+    ]
     if not flow_input_steps:
         return None
 
@@ -273,7 +293,9 @@ class FlowFileUploadService:
         limits = await self.settings_service.get_flow_input_limits_resolved()
         return _build_policy(flow, limits)
 
-    async def upload_file_for_flow(self, *, flow_id: UUID, upload_file: UploadFile) -> File:
+    async def upload_file_for_flow(
+        self, *, flow_id: UUID, upload_file: UploadFile
+    ) -> File:
         policy = await self.get_input_policy(flow_id=flow_id)
         return await self._upload_with_policy(
             flow_id=flow_id,
@@ -334,9 +356,11 @@ class FlowFileUploadService:
                 }
             )
 
-        template_readiness = []
+        template_readiness: list[dict[str, object]] = []
         for step in steps:
-            if step.output_mode != "template_fill" or not isinstance(step.output_config, dict):
+            if step.output_mode != "template_fill" or not isinstance(
+                step.output_config, dict
+            ):
                 continue
             asset_id_raw = step.output_config.get("template_asset_id")
             asset_status = "unavailable"
@@ -401,14 +425,29 @@ class FlowFileUploadService:
                     "status": asset_status,
                     "can_edit": False,
                     "can_download": asset_id is not None,
-                    "message_code": None if asset_status == "ready" else "flow_template_not_accessible",
+                    "message_code": None
+                    if asset_status == "ready"
+                    else "flow_template_not_accessible",
                 }
             )
 
-        form_fields = []
-        form_schema = (flow.metadata_json or {}).get("form_schema") if isinstance(flow.metadata_json, dict) else None
-        if isinstance(form_schema, dict) and isinstance(form_schema.get("fields"), list):
-            form_fields = list(form_schema["fields"])
+        form_fields: list[dict[str, object]] = []
+        form_schema = (
+            (flow.metadata_json or {}).get("form_schema")
+            if isinstance(flow.metadata_json, dict)
+            else None
+        )
+        if isinstance(form_schema, dict):
+            form_schema_dict = cast(dict[str, object], form_schema)
+            fields_value = form_schema_dict.get("fields")
+        else:
+            fields_value = None
+        if isinstance(fields_value, list):
+            form_fields = [
+                cast(dict[str, object], field)
+                for field in cast(list[object], fields_value)
+                if isinstance(field, dict)
+            ]
 
         return {
             "flow_id": persisted_flow_id,
@@ -446,7 +485,9 @@ class FlowFileUploadService:
         steps = parse_runtime_steps(version.definition_json)
         runtime_step = next((step for step in steps if step.step_id == step_id), None)
         if runtime_step is None:
-            raise BadRequestException("Unknown runtime step id.", code="flow_run_unknown_step_input")
+            raise BadRequestException(
+                "Unknown runtime step id.", code="flow_run_unknown_step_input"
+            )
 
         runtime_input = build_runtime_input_config(runtime_step.input_config)
         if not runtime_input.enabled:
@@ -503,6 +544,7 @@ class FlowFileUploadService:
                     "flow_id": str(flow_id),
                     "max_file_size_bytes": max_size,
                 },
+                max_size=max_size,
             ) from exc
 
     async def _validate_upload_with_policy(

@@ -11,27 +11,28 @@ in a single logical transaction.
 
 from __future__ import annotations
 
-from datetime import datetime
 import logging
 import re
+from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 from intric.flows.ai_builder.ai_builder_description_semantics import (
     DescriptionProvenance,
     FlowSemanticSignature,
-    _description_hash,
+    description_hash,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     FlowInputSource,
     FlowInputType,
+    FlowOutputMode,
     InputSource,
     InputType,
     MCPPolicy,
     OutputMode,
     OutputType,
-    FlowOutputMode,
 )
+from intric.flows.ai_builder.ai_builder_flow_name import normalize_flow_name
 from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
     AssistantSpec,
@@ -44,13 +45,12 @@ from intric.flows.ai_builder.ai_builder_models import (
     StepChangeKind,
     StepSpec,
 )
-from intric.flows.ai_builder.ai_builder_flow_name import normalize_flow_name
-from intric.flows.ai_builder.ai_builder_runtime_input_defaults import (
-    resolve_runtime_input_config,
-)
 from intric.flows.ai_builder.ai_builder_reference_rewriter import (
     build_ref_to_order,
     rewrite_step_spec_variables,
+)
+from intric.flows.ai_builder.ai_builder_runtime_input_defaults import (
+    resolve_runtime_input_config,
 )
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
@@ -259,7 +259,9 @@ async def execute_changeset(
                 metadata_json=changeset.metadata_json,
             )
         if flow_id is None:
-            raise BadRequestException("Flow id missing while executing AI builder changeset.")
+            raise BadRequestException(
+                "Flow id missing while executing AI builder changeset."
+            )
 
         for assistant_to_create in changeset.assistants_to_create:
             assistant, _ = await flow_service.create_flow_assistant(
@@ -344,7 +346,9 @@ async def execute_changeset(
             1 for s in changeset.compiled_steps if s.change_kind == StepChangeKind.ADDED
         )
         steps_updated = sum(
-            1 for s in changeset.compiled_steps if s.change_kind == StepChangeKind.MODIFIED
+            1
+            for s in changeset.compiled_steps
+            if s.change_kind == StepChangeKind.MODIFIED
         )
         steps_removed = len(changeset.assistants_to_delete)
 
@@ -466,13 +470,18 @@ def _resolve_output_config(
     config only if output_mode hasn't changed — a mode change invalidates the old config.
     """
     preserved_output_config = step_spec.output_config
-    if preserved_output_config is None and step_spec.output_mode.value == existing_step.output_mode:
+    if (
+        preserved_output_config is None
+        and step_spec.output_mode.value == existing_step.output_mode
+    ):
         preserved_output_config = existing_step.output_config
 
     effective_step, _ = normalize_ai_builder_spec(
         FlowDraftSpecCore(
             flow_name="normalized-output-config",
-            steps=[step_spec.model_copy(update={"output_config": preserved_output_config})],
+            steps=[
+                step_spec.model_copy(update={"output_config": preserved_output_config})
+            ],
         )
     )
     return effective_step.steps[0].output_config
@@ -494,7 +503,7 @@ def _build_metadata_json(
 
     # If spec has form_fields, build form_schema
     if spec.form_fields is not None:
-        fields = []
+        fields: list[dict[str, Any]] = []
         for field in spec.form_fields:
             field_dict: dict[str, Any] = {
                 "name": field.name,
@@ -507,11 +516,14 @@ def _build_metadata_json(
             fields.append(field_dict)
         metadata["form_schema"] = {"fields": fields}
 
-    metadata = apply_audio_transcription_defaults(
-        metadata=metadata if metadata else None,
-        spec=spec,
-        default_transcription_model_id=default_transcription_model_id,
-    ) or {}
+    metadata = (
+        apply_audio_transcription_defaults(
+            metadata=metadata if metadata else None,
+            spec=spec,
+            default_transcription_model_id=default_transcription_model_id,
+        )
+        or {}
+    )
 
     # Stamp description provenance
     metadata = _stamp_description_provenance(
@@ -544,7 +556,7 @@ def _stamp_description_provenance(
         provenance = DescriptionProvenance(
             mode="builder_managed",
             semantic_signature=sig,
-            last_generated_hash=_description_hash(spec.flow_description),
+            last_generated_hash=description_hash(spec.flow_description),
         )
 
     ai_builder["description"] = provenance.model_dump(mode="json")
@@ -598,7 +610,9 @@ def _resolve_changeset_flow_description(
         return spec.flow_description
 
     try:
-        old_sig = FlowSemanticSignature.from_steps(_flow_steps_to_step_specs(current_flow.steps))
+        old_sig = FlowSemanticSignature.from_steps(
+            _flow_steps_to_step_specs(current_flow.steps)
+        )
     except ValueError:
         # Existing flows may contain supported runtime enums outside the AI Builder
         # subset. Keep the current description rather than failing apply-time

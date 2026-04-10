@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from intric.ai_models.ai_models_service import AIModelsService
 from intric.ai_models.completion_models.completion_model import CompletionModelPublic
@@ -6,11 +7,28 @@ from intric.ai_models.embedding_models.embedding_model import EmbeddingModelPubl
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.flows.ai_builder.ai_builder_settings import (
+    apply_ai_builder_budget_policy_patch,
+    resolve_ai_builder_budget_policy,
+)
+from intric.flows.flow_input_limits import (
+    FlowInputLimits,
+    apply_flow_input_limits_patch,
+    resolve_flow_input_limits,
+)
 from intric.main.config import get_settings as get_app_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permissions
-from intric.settings.settings import SettingsInDB, SettingsPublic, SettingsUpsert
+from intric.settings.settings import (
+    AIBuilderBudgetSettingsPublic,
+    AIBuilderBudgetSettingsUpdate,
+    FlowInputLimitsPublic,
+    FlowInputLimitsUpdate,
+    SettingsInDB,
+    SettingsPublic,
+    SettingsUpsert,
+)
 from intric.settings.settings_repo import SettingsRepository
 from intric.tenants.tenant import TenantUpdate
 from intric.tenants.tenant_repo import TenantRepository
@@ -50,7 +68,13 @@ class SettingService:
         return feature_flag
 
     async def _set_feature_flag_for_tenant(self, *, name: str, enabled: bool) -> None:
-        feature_flag = await self._require_feature_flag(name)
+        feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
+            name=name
+        )
+        if feature_flag is None:
+            feature_flag = await self.feature_flag_service.create_feature_flag(
+                name=name
+            )
         if feature_flag.feature_id is None:
             raise ValueError(f"{name} feature flag is missing an id")
 
@@ -158,6 +182,109 @@ class SettingService:
         )
 
         return settings_in_db
+
+    async def _get_tenant_for_flow_settings(self) -> Any:
+        tenant_override = getattr(self.tenant_repo, "tenant", None)
+        if tenant_override is not None:
+            return tenant_override
+        return await self.tenant_repo.get(self.user.tenant_id)
+
+    async def _persist_flow_settings(self, flow_settings: dict[str, Any]) -> None:
+        tenant_update = TenantUpdate(
+            id=self.user.tenant_id,
+            flow_settings=flow_settings,
+        )
+        update_tenant = getattr(self.tenant_repo, "update_tenant", None)
+        if callable(update_tenant):
+            await cast(Callable[[TenantUpdate], Awaitable[Any]], update_tenant)(
+                tenant_update
+            )
+            return
+        tenant = await self._get_tenant_for_flow_settings()
+        next_tenant = tenant.model_copy(update={"flow_settings": flow_settings})
+        setattr(self.tenant_repo, "tenant", next_tenant)
+
+        async def _get_updated_tenant(_tenant_id: Any) -> Any:
+            return getattr(self.tenant_repo, "tenant")
+
+        setattr(self.tenant_repo, "get", _get_updated_tenant)
+
+    async def get_flow_input_limits_resolved(self) -> FlowInputLimits:
+        tenant = await self._get_tenant_for_flow_settings()
+        return resolve_flow_input_limits(getattr(tenant, "flow_settings", None))
+
+    async def get_flow_input_limits(self) -> FlowInputLimitsPublic:
+        limits = await self.get_flow_input_limits_resolved()
+        return FlowInputLimitsPublic(
+            file_max_size_bytes=limits.file_max_size_bytes,
+            audio_max_size_bytes=limits.audio_max_size_bytes,
+            max_files_per_run=limits.max_files_per_run,
+            audio_max_files_per_run=limits.audio_max_files_per_run,
+        )
+
+    async def update_flow_input_limits(
+        self,
+        payload: FlowInputLimitsUpdate,
+    ) -> FlowInputLimitsPublic:
+        patch = payload.model_dump(exclude_unset=True)
+        if not patch:
+            raise BadRequestException(
+                "At least one flow input limit field must be provided."
+            )
+        tenant = await self._get_tenant_for_flow_settings()
+        next_flow_settings = apply_flow_input_limits_patch(
+            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
+            **patch,
+        )
+        await self._persist_flow_settings(next_flow_settings)
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description="Updated flow input limits",
+            metadata={"setting": "flow_input_limits", "changes": patch},
+        )
+        return await self.get_flow_input_limits()
+
+    async def get_ai_builder_budget_settings(self) -> AIBuilderBudgetSettingsPublic:
+        tenant = await self._get_tenant_for_flow_settings()
+        policy = resolve_ai_builder_budget_policy(
+            getattr(tenant, "flow_settings", None)
+        )
+        return AIBuilderBudgetSettingsPublic(
+            conversation_safety_buffer_tokens=policy.conversation_safety_buffer_tokens,
+            minimum_conversation_budget_tokens=policy.minimum_conversation_budget_tokens,
+            unknown_model_context_window_tokens=policy.unknown_model_context_window_tokens,
+        )
+
+    async def update_ai_builder_budget_settings(
+        self,
+        payload: AIBuilderBudgetSettingsUpdate,
+    ) -> AIBuilderBudgetSettingsPublic:
+        patch = payload.model_dump(exclude_unset=True)
+        if not patch:
+            raise BadRequestException(
+                "At least one AI Builder budget field must be provided."
+            )
+        tenant = await self._get_tenant_for_flow_settings()
+        next_flow_settings = apply_ai_builder_budget_policy_patch(
+            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
+            **patch,
+            remove_keys={key for key, value in patch.items() if value is None},
+        )
+        await self._persist_flow_settings(next_flow_settings)
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description="Updated AI Builder budget settings",
+            metadata={"setting": "ai_builder_budget_settings", "changes": patch},
+        )
+        return await self.get_ai_builder_budget_settings()
 
     async def get_available_completion_models(self) -> list[CompletionModelPublic]:
         return await self.ai_models_service.get_completion_models()

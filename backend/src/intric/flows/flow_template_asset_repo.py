@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -50,10 +49,14 @@ class FlowTemplateAssetRepository:
         )
         if row is None:
             raise NotFoundException("Could not create flow template asset.")
-        return await self.get(asset_id=cast(UUID, row.id), tenant_id=tenant_id)
+        return await self.get(asset_id=row.id, tenant_id=tenant_id)
 
     async def get(self, *, asset_id: UUID, tenant_id: UUID) -> FlowTemplateAsset:
-        row = await self.session.execute(self._base_query().where(FlowTemplateAssets.id == asset_id).where(FlowTemplateAssets.tenant_id == tenant_id))
+        row = await self.session.execute(
+            self._base_query()
+            .where(FlowTemplateAssets.id == asset_id)
+            .where(FlowTemplateAssets.tenant_id == tenant_id)
+        )
         item = row.mappings().one_or_none()
         if item is None:
             raise NotFoundException("Flow template asset not found.")
@@ -69,7 +72,10 @@ class FlowTemplateAssetRepository:
             self._base_query()
             .where(FlowTemplateAssets.flow_id == flow_id)
             .where(FlowTemplateAssets.tenant_id == tenant_id)
-            .order_by(FlowTemplateAssets.updated_at.desc(), FlowTemplateAssets.created_at.desc())
+            .order_by(
+                FlowTemplateAssets.updated_at.desc(),
+                FlowTemplateAssets.created_at.desc(),
+            )
         )
         return [self._to_domain(item) for item in rows.mappings().all()]
 
@@ -92,7 +98,9 @@ class FlowTemplateAssetRepository:
         return self._to_domain(item)
 
     def _base_query(self):
-        updated_by_name = sa.func.coalesce(Users.username, Users.email).label("last_updated_by_name")
+        updated_by_name = sa.func.coalesce(Users.username, Users.email).label(
+            "last_updated_by_name"
+        )
         return (
             sa.select(FlowTemplateAssets, updated_by_name)
             .outerjoin(Users, Users.id == FlowTemplateAssets.updated_by_user_id)
@@ -101,7 +109,17 @@ class FlowTemplateAssetRepository:
 
     @staticmethod
     def _to_domain(row: sa.RowMapping) -> FlowTemplateAsset:
-        asset = cast(FlowTemplateAssets, row[0])
+        row_dict = dict(row)
+        asset = next(
+            (
+                value
+                for value in row_dict.values()
+                if isinstance(value, FlowTemplateAssets)
+            ),
+            None,
+        )
+        if asset is None:
+            raise NotFoundException("Flow template asset row was malformed.")
         return FlowTemplateAsset.model_validate(
             {
                 "id": asset.id,
@@ -115,7 +133,7 @@ class FlowTemplateAssetRepository:
                 "placeholders": list(asset.placeholders or []),
                 "created_by_user_id": asset.created_by_user_id,
                 "updated_by_user_id": asset.updated_by_user_id,
-                "last_updated_by_name": row["last_updated_by_name"],
+                "last_updated_by_name": row_dict.get("last_updated_by_name"),
                 "status": asset.status,
                 "created_at": asset.created_at,
                 "updated_at": asset.updated_at,

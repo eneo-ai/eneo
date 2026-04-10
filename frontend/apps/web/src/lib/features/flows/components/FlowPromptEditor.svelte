@@ -9,7 +9,7 @@
     collectUnresolvedTemplateTokens,
     collectInvalidStructuredOutputReferences,
     type VariableCategory,
-    type VariableClassificationContext,
+    type VariableClassificationContext
   } from "$lib/features/flows/flowVariableTokens";
   import VariablePicker from "./VariablePicker.svelte";
   import { Alert, Card } from "@eneo/ui";
@@ -35,7 +35,17 @@
   export let minHeight: number = 160;
   export let steps: FlowStep[];
   export let currentStepOrder: number;
-  export let formSchema: { fields: { name: string; type: string; required?: boolean; options?: string[]; order?: number }[] } | undefined;
+  export let formSchema:
+    | {
+        fields: {
+          name: string;
+          type: string;
+          required?: boolean;
+          options?: string[];
+          order?: number;
+        }[];
+      }
+    | undefined;
   export let transcriptionEnabled: boolean;
   export let isAdvancedMode: boolean = false;
 
@@ -67,13 +77,28 @@
   }
 
   // Build classification context
-  $: classificationContext = buildContext(steps, formSchema, transcriptionEnabled, currentStepOrder);
+  $: classificationContext = buildContext(
+    steps,
+    formSchema,
+    transcriptionEnabled,
+    currentStepOrder
+  );
 
   function buildContext(
     steps: FlowStep[],
-    formSchema: { fields: { name: string; type: string; required?: boolean; options?: string[]; order?: number }[] } | undefined,
+    formSchema:
+      | {
+          fields: {
+            name: string;
+            type: string;
+            required?: boolean;
+            options?: string[];
+            order?: number;
+          }[];
+        }
+      | undefined,
     transcriptionEnabled: boolean,
-    currentStepOrder: number,
+    currentStepOrder: number
   ): VariableClassificationContext {
     const knownFieldNames = new Set<string>();
     for (const field of formSchema?.fields ?? []) {
@@ -87,7 +112,13 @@
       if (name) knownStepNames.set(step.step_order, name);
       stepOutputTypes.set(step.step_order, step.output_type);
     }
-    return { knownFieldNames, knownStepNames, stepOutputTypes, transcriptionEnabled, currentStepOrder };
+    return {
+      knownFieldNames,
+      knownStepNames,
+      stepOutputTypes,
+      transcriptionEnabled,
+      currentStepOrder
+    };
   }
 
   // Parse segments for mirror rendering
@@ -95,7 +126,11 @@
 
   // Build mirror segments with an optional marker at the autocomplete anchor position.
   // The marker is a zero-width span used for accurate dropdown positioning.
-  type MirrorSegment = { type: "text" | "variable" | "marker"; value: string; category?: VariableCategory };
+  type MirrorSegment = {
+    type: "text" | "variable" | "marker";
+    value: string;
+    category?: VariableCategory;
+  };
   $: mirrorSegments = buildMirrorSegments(segments, autocompleteAnchorIndex, autocompleteOpen);
 
   function toMirror(seg: (typeof segments)[number]): MirrorSegment {
@@ -107,7 +142,7 @@
   function buildMirrorSegments(
     segs: typeof segments,
     anchorIdx: number,
-    isOpen: boolean,
+    isOpen: boolean
   ): MirrorSegment[] {
     if (!isOpen || anchorIdx < 0) return segs.map(toMirror);
     const result: MirrorSegment[] = [];
@@ -152,27 +187,47 @@
   function buildAvailableVariables(
     ctx: VariableClassificationContext,
     steps: FlowStep[],
-    showTechnical: boolean,
+    showTechnical: boolean
   ): VariableSuggestion[] {
     const suggestions: VariableSuggestion[] = [];
 
     // Form fields
     for (const name of ctx.knownFieldNames) {
-      suggestions.push({ token: name, label: name, description: m.flow_variable_form_field(), category: "field" });
+      suggestions.push({
+        token: name,
+        label: name,
+        description: m.flow_variable_form_field(),
+        category: "field"
+      });
     }
 
     // System
     if (ctx.transcriptionEnabled) {
-      suggestions.push({ token: "transkribering", label: "transkribering", description: m.flow_variable_transcription(), category: "system" });
+      suggestions.push({
+        token: "transkribering",
+        label: "transkribering",
+        description: m.flow_variable_transcription(),
+        category: "system"
+      });
     }
     if (showTechnical && ctx.currentStepOrder > 1) {
-      suggestions.push({ token: "föregående_steg", label: "föregående_steg", description: m.flow_variable_previous_step(), category: "system" });
+      suggestions.push({
+        token: "föregående_steg",
+        label: "föregående_steg",
+        description: m.flow_variable_previous_step(),
+        category: "system"
+      });
     }
 
     // Previous step name aliases
     for (const [order, name] of ctx.knownStepNames) {
       if (order < ctx.currentStepOrder && name) {
-        suggestions.push({ token: name, label: name, description: m.flow_variable_step_alias({ order: String(order) }), category: "step" });
+        suggestions.push({
+          token: name,
+          label: name,
+          description: m.flow_variable_step_alias({ order: String(order) }),
+          category: "step"
+        });
       }
     }
 
@@ -184,7 +239,7 @@
           token: `step_${step.step_order}.output.text`,
           label: `step_${step.step_order}.output.text`,
           description: m.flow_variable_text_output(),
-          category: "step",
+          category: "step"
         });
       }
     }
@@ -193,23 +248,25 @@
   }
 
   // Chip bar variables (filtered in user mode)
-  $: chipBarVariables = isAdvancedMode ? availableVariables : availableVariables.filter(v => v.category === "field" || v.category === "step");
+  $: chipBarVariables = isAdvancedMode
+    ? availableVariables
+    : availableVariables.filter((v) => v.category === "field" || v.category === "step");
 
   // Unresolved count
   $: unresolvedCount = collectUnresolvedTemplateTokens(
     currentEditorValue,
-    new Set(availableVariables.map((v) => v.token)),
+    new Set(availableVariables.map((v) => v.token))
   ).length;
   $: invalidStructuredReferences = collectInvalidStructuredOutputReferences(
     currentEditorValue,
     steps,
-    currentStepOrder,
+    currentStepOrder
   );
 
   // Filtered suggestions for autocomplete
   $: filteredSuggestions = autocompleteQuery
     ? availableVariables.filter((v) =>
-        v.label.toLowerCase().includes(autocompleteQuery.trim().toLowerCase()),
+        v.label.toLowerCase().includes(autocompleteQuery.trim().toLowerCase())
       )
     : availableVariables;
 
@@ -261,8 +318,14 @@
   }
 
   function updateAutocompleteState() {
-    if (!textareaEl) { resetAutocomplete(); return; }
-    if (lastInputType.startsWith("delete")) { resetAutocomplete(); return; }
+    if (!textareaEl) {
+      resetAutocomplete();
+      return;
+    }
+    if (lastInputType.startsWith("delete")) {
+      resetAutocomplete();
+      return;
+    }
 
     const cursor = textareaEl.selectionStart ?? currentEditorValue.length;
 
@@ -308,7 +371,8 @@
       selectedSuggestionIndex = (selectedSuggestionIndex + 1) % filteredSuggestions.length;
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      selectedSuggestionIndex = (selectedSuggestionIndex - 1 + filteredSuggestions.length) % filteredSuggestions.length;
+      selectedSuggestionIndex =
+        (selectedSuggestionIndex - 1 + filteredSuggestions.length) % filteredSuggestions.length;
     } else if (e.key === "Enter" || e.key === "Tab") {
       if (autocompleteOpen && filteredSuggestions.length > 0) {
         e.preventDefault();
@@ -333,7 +397,8 @@
     }
 
     if (replaceFrom !== null) {
-      const nextText = currentEditorValue.slice(0, replaceFrom) + token + currentEditorValue.slice(cursor);
+      const nextText =
+        currentEditorValue.slice(0, replaceFrom) + token + currentEditorValue.slice(cursor);
       currentEditorValue = nextText;
       commitNow(nextText);
       await tick();
@@ -404,10 +469,14 @@
   }
 </script>
 
-<Card.Root class="flow-prompt-editor transition-shadow focus-within:ring-2 focus-within:ring-accent-default/30">
+<Card.Root
+  class="flow-prompt-editor focus-within:ring-accent-default/30 transition-shadow focus-within:ring-2"
+>
   <!-- Toolbar -->
-  <div class="flex items-center justify-between border-b border-default bg-secondary/30 px-3 py-1.5">
-    <span class="text-[11px] text-muted">{label}</span>
+  <div
+    class="border-default bg-secondary/30 flex items-center justify-between border-b px-3 py-1.5"
+  >
+    <span class="text-muted text-[11px]">{label}</span>
     <div class="flex items-center gap-1">
       <slot name="toolbar" />
       {#if !disabled}
@@ -432,11 +501,19 @@
     <!-- Mirror layer (behind, shows colored chips) -->
     <div
       aria-hidden="true"
-      class="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-4 py-3 font-mono text-sm leading-relaxed"
+      class="pointer-events-none absolute inset-0 overflow-hidden px-4 py-3 font-mono text-sm leading-relaxed break-words whitespace-pre-wrap"
       bind:this={mirrorEl}
     >
       {#each mirrorSegments as seg, index (`${seg.type}:${seg.value}:${index}`)}
-        {#if seg.type === "marker"}<span bind:this={markerEl} aria-hidden="true" class="inline" style="width:0;overflow:hidden">&#8203;</span>{:else if seg.type === "text"}<span class="text-primary">{seg.value}</span>{:else}<span class="{getChipClasses(seg.category)} inline !px-0 !py-0 !text-sm">{seg.value}</span>{/if}
+        {#if seg.type === "marker"}<span
+            bind:this={markerEl}
+            aria-hidden="true"
+            class="inline"
+            style="width:0;overflow:hidden">&#8203;</span
+          >{:else if seg.type === "text"}<span class="text-primary">{seg.value}</span>{:else}<span
+            class="{getChipClasses(seg.category ?? 'unknown')} inline !px-0 !py-0 !text-sm"
+            >{seg.value}</span
+          >{/if}
       {/each}
       <span>&nbsp;</span>
     </div>
@@ -444,12 +521,15 @@
     <!-- Textarea layer (on top, transparent text, visible caret) -->
     <textarea
       bind:this={textareaEl}
-      class="relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-mono text-sm leading-relaxed text-transparent caret-gray-900 dark:caret-gray-100 selection:bg-accent-dimmer selection:text-primary focus:outline-none"
+      class="selection:bg-accent-dimmer selection:text-primary relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-mono text-sm leading-relaxed text-transparent caret-gray-900 focus:outline-none dark:caret-gray-100"
       style={`min-height: ${minHeight}px`}
       on:input={handleInput}
       on:keydown={handleKeydown}
       on:scroll={syncScroll}
-      on:click={() => { lastInputType = ""; updateAutocompleteState(); }}
+      on:click={() => {
+        lastInputType = "";
+        updateAutocompleteState();
+      }}
       on:keyup={(e) => {
         // Only recheck on cursor movement keys (character keys already handled by on:input)
         if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
@@ -466,18 +546,18 @@
     <!-- Autocomplete dropdown -->
     {#if autocompleteOpen && filteredSuggestions.length > 0 && !disabled}
       <div
-        class="absolute z-20 mt-1 max-h-48 w-72 overflow-y-auto rounded-lg border border-default bg-primary shadow-lg"
+        class="border-default bg-primary absolute z-20 mt-1 max-h-48 w-72 overflow-y-auto rounded-lg border shadow-lg"
         style="top: {autocompletePosition.top}px; left: {autocompletePosition.left}px"
       >
         {#each filteredSuggestions as suggestion, i (suggestion.token)}
           <button
             type="button"
-            class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-hover-dimmer"
+            class="hover:bg-hover-dimmer flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm"
             class:bg-hover-dimmer={i === selectedSuggestionIndex}
             on:click={() => void applySuggestion(suggestion)}
           >
-            <span class="{getChipClasses(suggestion.category)}">{suggestion.label}</span>
-            <span class="text-[10px] text-muted">{suggestion.description}</span>
+            <span class={getChipClasses(suggestion.category)}>{suggestion.label}</span>
+            <span class="text-muted text-[10px]">{suggestion.description}</span>
           </button>
         {/each}
       </div>
@@ -486,11 +566,13 @@
 
   <!-- Quick-insert chip bar -->
   {#if chipBarVariables.length > 0 && !disabled}
-    <div class="flex flex-wrap gap-1.5 border-t border-default bg-secondary/20 px-3 py-2">
+    <div class="border-default bg-secondary/20 flex flex-wrap gap-1.5 border-t px-3 py-2">
       {#each chipBarVariables as v (v.token)}
         <button
           type="button"
-          class="{getChipClasses(v.category)} cursor-pointer transition-all hover:scale-105 hover:shadow-sm active:scale-95"
+          class="{getChipClasses(
+            v.category
+          )} cursor-pointer transition-all hover:scale-105 hover:shadow-sm active:scale-95"
           on:click={() => void insertAtCursor(v.token)}
         >
           {`{{${v.label}}}`}
@@ -501,21 +583,32 @@
 
   <!-- Unresolved variables warning -->
   {#if unresolvedCount > 0}
-    <Alert.Root role="status" class="rounded-none border-x-0 border-b-0 border-warning-default/40 bg-warning-dimmer px-3 py-1.5 text-xs text-warning-stronger">
+    <Alert.Root
+      role="status"
+      class="border-warning-default/40 bg-warning-dimmer text-warning-stronger rounded-none border-x-0 border-b-0 px-3 py-1.5 text-xs"
+    >
       <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+        <path
+          d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"
+        />
       </svg>
-      {unresolvedCount} {m.flow_prompt_unresolved_variables()}
+      {unresolvedCount}
+      {m.flow_prompt_unresolved_variables()}
     </Alert.Root>
   {/if}
 
   {#if invalidStructuredReferences.length > 0}
-    <Alert.Root role="status" class="rounded-none border-x-0 border-b-0 border-warning-default/40 bg-warning-dimmer px-3 py-1.5 text-xs text-warning-stronger">
+    <Alert.Root
+      role="status"
+      class="border-warning-default/40 bg-warning-dimmer text-warning-stronger rounded-none border-x-0 border-b-0 px-3 py-1.5 text-xs"
+    >
       <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+        <path
+          d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"
+        />
       </svg>
       {m.flow_prompt_invalid_structured_reference({
-        tokens: invalidStructuredReferences.map((issue) => `{{${issue.token}}}`).join(", "),
+        tokens: invalidStructuredReferences.map((issue) => `{{${issue.token}}}`).join(", ")
       })}
     </Alert.Root>
   {/if}

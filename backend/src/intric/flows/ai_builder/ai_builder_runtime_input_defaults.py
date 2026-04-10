@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
-from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore, InputSource, InputType, StepSpec
+from intric.flows.ai_builder.ai_builder_models import (
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    StepSpec,
+)
 
 JsonObject = dict[str, Any]
 
@@ -12,7 +17,9 @@ _FILE_BASED_INPUT_TYPES = {
     InputType.FILE,
 }
 
-_FORMAT_TO_INPUT_TYPE: dict[str, InputType] = {t.value: t for t in _FILE_BASED_INPUT_TYPES}
+_FORMAT_TO_INPUT_TYPE: dict[str, InputType] = {
+    t.value: t for t in _FILE_BASED_INPUT_TYPES
+}
 
 _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS: dict[InputType, str] = {
     InputType.AUDIO: "Ladda upp ljudfiler som detta steg ska transkribera eller analysera.",
@@ -21,7 +28,9 @@ _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS: dict[InputType, str] = {
 }
 
 
-def normalize_builder_draft_runtime_inputs(spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
+def normalize_builder_draft_runtime_inputs(
+    spec: FlowDraftSpecCore,
+) -> FlowDraftSpecCore:
     """Normalize runtime-upload defaults for newly proposed builder draft steps.
 
     Only new steps are normalized here. Existing-step edits are left untouched at the
@@ -30,9 +39,11 @@ def normalize_builder_draft_runtime_inputs(spec: FlowDraftSpecCore) -> FlowDraft
     """
 
     updated_steps = [
-        step if step.existing_step_ref is not None else step.model_copy(update={
-            "input_config": resolve_runtime_input_config(step_spec=step)
-        })
+        step
+        if step.existing_step_ref is not None
+        else step.model_copy(
+            update={"input_config": resolve_runtime_input_config(step_spec=step)}
+        )
         for step in spec.steps
     ]
     return spec.model_copy(update={"steps": updated_steps})
@@ -53,10 +64,8 @@ def resolve_runtime_input_config(
 
     effective_config = dict(base_config or {})
     runtime_input = effective_config.get("runtime_input")
-    runtime_input_config = (
-        dict(runtime_input)
-        if isinstance(runtime_input, dict)
-        else {}
+    runtime_input_config: JsonObject = (
+        dict(cast(JsonObject, runtime_input)) if isinstance(runtime_input, dict) else {}
     )
     runtime_input_config["enabled"] = True
 
@@ -108,7 +117,9 @@ def _sync_description_after_type_change(
     )
 
     if current_description is None or current_description == old_default:
-        runtime_input_config["description"] = _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS[new_input_type]
+        runtime_input_config["description"] = _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS[
+            new_input_type
+        ]
 
 
 def _remove_runtime_input_config(value: JsonObject | None) -> JsonObject | None:

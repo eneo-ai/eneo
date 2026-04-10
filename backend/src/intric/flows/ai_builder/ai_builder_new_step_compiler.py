@@ -62,7 +62,10 @@ def make_plan_step_ref(index: int) -> str:
 
 
 def derive_new_step_output_mode(step_draft: NewStepDraft) -> OutputMode:
-    if step_draft.input_type.value == "audio" and step_draft.output_type.value == "text":
+    if (
+        step_draft.input_type.value == "audio"
+        and step_draft.output_type.value == "text"
+    ):
         return OutputMode.TRANSCRIBE_ONLY
     if (
         step_draft.output_type == OutputType.DOCX
@@ -103,7 +106,8 @@ def compile_input_bindings(
     sections: list[str] = [source_reference]
     if step_draft.uses_form_fields:
         form_field_lines = [
-            f"{field_name}: {{{{ {field_name} }}}}" for field_name in step_draft.uses_form_fields
+            f"{field_name}: {{{{ {field_name} }}}}"
+            for field_name in step_draft.uses_form_fields
         ]
         sections.append("\n".join(form_field_lines))
     return {"question": "\n\n".join(sections)}
@@ -127,7 +131,7 @@ def compile_assistant_instructions(
         )
 
     return _append_output_field_guidance(
-        instructions=instructions,
+        instructions=instructions or "",
         output_fields=step_draft.output_fields,
     )
 
@@ -231,8 +235,4 @@ def _append_output_field_guidance(
         return instructions
 
     field_lines = [f"- {field.name}: {field.description}" for field in top_level_fields]
-    return (
-        f"{instructions}\n\n"
-        "Required JSON fields:\n"
-        f"{chr(10).join(field_lines)}"
-    )
+    return f"{instructions}\n\nRequired JSON fields:\n{chr(10).join(field_lines)}"

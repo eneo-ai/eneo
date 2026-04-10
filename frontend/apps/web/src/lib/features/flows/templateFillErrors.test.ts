@@ -15,7 +15,7 @@ describe("templateFillErrors", () => {
     );
 
     expect(getTemplateFillErrorMessage(error, "fallback")).toBe(
-      "Den uppladdade filen ar inte en giltig Word-mall (.docx)."
+      "Den uppladdade filen är inte en giltig Word-mall (.docx). Välj en .docx-fil och försök igen."
     );
   });
 
@@ -30,7 +30,7 @@ describe("templateFillErrors", () => {
     );
 
     expect(getTemplateFillErrorMessage(error, "fallback")).toBe(
-      "Den valda DOCX-mallen kunde inte lasas eftersom filinnehallet saknas."
+      "Den valda DOCX-mallen kunde inte läsas eftersom filinnehållet saknas."
     );
   });
 

@@ -53,8 +53,16 @@ export type UserGroup = components["schemas"]["UserGroupPublic"];
 export type User = components["schemas"]["UserAdminView"];
 export type UserSparse = components["schemas"]["UserSparse"];
 export type CurrentUser = components["schemas"]["UserPublic"];
-export type Role = components["schemas"]["RolePublic"];
-export type Permission = components["schemas"]["Permission"];
+export type Permission =
+  | components["schemas"]["Permission"]
+  | "flows"
+  | "flows_view"
+  | "flows_run"
+  | "flows_manage"
+  | "flows_ai_builder";
+export type Role = Omit<components["schemas"]["RolePublic"], "permissions"> & {
+  permissions: Permission[];
+};
 export type ResourcePermission = components["schemas"]["ResourcePermission"];
 export type CrawlRun = components["schemas"]["CrawlRunPublic"];
 export type Limits = components["schemas"]["Limits"];

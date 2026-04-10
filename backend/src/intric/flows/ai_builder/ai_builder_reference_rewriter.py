@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_models import AssistantSpec, StepSpec
 
@@ -12,8 +12,7 @@ _PLAN_REF_PATTERN = re.compile(
 
 def build_ref_to_order(step_specs: list[StepSpec]) -> dict[str, int]:
     return {
-        step_spec.plan_step_ref: index + 1
-        for index, step_spec in enumerate(step_specs)
+        step_spec.plan_step_ref: index + 1 for index, step_spec in enumerate(step_specs)
     }
 
 
@@ -36,7 +35,9 @@ def rewrite_step_spec_variables(
         )
 
     if step_spec.input_bindings:
-        rewritten_bindings = rewrite_variable_value(step_spec.input_bindings, ref_to_order)
+        rewritten_bindings = rewrite_variable_value(
+            step_spec.input_bindings, ref_to_order
+        )
         if rewritten_bindings != step_spec.input_bindings:
             updates["input_bindings"] = rewritten_bindings
 
@@ -76,8 +77,11 @@ def rewrite_variable_value(
     if isinstance(value, dict):
         return {
             key: rewrite_variable_value(inner_value, ref_to_order)
-            for key, inner_value in value.items()
+            for key, inner_value in cast(dict[str, Any], value).items()
         }
     if isinstance(value, list):
-        return [rewrite_variable_value(item, ref_to_order) for item in value]
+        return [
+            rewrite_variable_value(item, ref_to_order)
+            for item in cast(list[Any], value)
+        ]
     return value

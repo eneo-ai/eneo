@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict
+
+from intric.flows.domain.flow import JsonObject
 from intric.flows.source_display import (
     format_source_container_display_name,
     format_source_container_label,
@@ -109,7 +111,9 @@ def default_rag_tracking() -> dict[str, Any]:
     }
 
 
-def normalize_text_preview(text: str, *, max_bytes: int = TEXT_PREVIEW_MAX_BYTES) -> PayloadPreview:
+def normalize_text_preview(
+    text: str, *, max_bytes: int = TEXT_PREVIEW_MAX_BYTES
+) -> PayloadPreview:
     encoded = text.encode("utf-8")
     byte_size = len(encoded)
     truncated = byte_size > max_bytes
@@ -122,7 +126,9 @@ def normalize_text_preview(text: str, *, max_bytes: int = TEXT_PREVIEW_MAX_BYTES
     )
 
 
-def normalize_json_preview(value: Any, *, max_bytes: int = JSON_PREVIEW_MAX_BYTES) -> PayloadPreview:
+def normalize_json_preview(
+    value: Any, *, max_bytes: int = JSON_PREVIEW_MAX_BYTES
+) -> PayloadPreview:
     serialized = json.dumps(
         value,
         ensure_ascii=False,
@@ -144,14 +150,16 @@ def normalize_json_preview(value: Any, *, max_bytes: int = JSON_PREVIEW_MAX_BYTE
     )
 
 
-def normalize_attempt_provenance(raw: dict[str, Any] | None) -> FlowAttemptProvenance | None:
+def normalize_attempt_provenance(
+    raw: dict[str, Any] | None,
+) -> FlowAttemptProvenance | None:
     if not isinstance(raw, dict):
         return None
 
     llm_raw = raw.get("llm")
     llm: LlmProvenance | None = None
     if isinstance(llm_raw, dict):
-        llm_payload = dict(llm_raw)
+        llm_payload: JsonObject = dict(cast(JsonObject, llm_raw))
         effective_prompt = llm_payload.get("effective_prompt")
         if isinstance(effective_prompt, str):
             llm_payload["effective_prompt"] = normalize_text_preview(effective_prompt)
@@ -160,11 +168,13 @@ def normalize_attempt_provenance(raw: dict[str, Any] | None) -> FlowAttemptProve
             llm_payload["tool_calls"] = normalize_json_preview(tool_calls)
         raw_completion_text = llm_payload.get("raw_completion_text")
         if isinstance(raw_completion_text, str):
-            llm_payload["raw_completion_text"] = normalize_text_preview(raw_completion_text)
+            llm_payload["raw_completion_text"] = normalize_text_preview(
+                raw_completion_text
+            )
         model_parameters = llm_payload.get("model_parameters")
         if isinstance(model_parameters, dict):
             llm_payload["model_parameters"] = normalize_model_parameters_payload(
-                model_parameters
+                cast(JsonObject, model_parameters)
             )
         llm = LlmProvenance.model_validate(llm_payload)
 
@@ -173,8 +183,12 @@ def normalize_attempt_provenance(raw: dict[str, Any] | None) -> FlowAttemptProve
         rag=_normalize_rag_provenance(raw.get("rag")),
         http=_validate_extra_model(HttpProvenance, raw.get("http")),
         template=_validate_extra_model(TemplateProvenance, raw.get("template")),
-        runtime_input=_validate_extra_model(RuntimeInputProvenance, raw.get("runtime_input")),
-        transcription=_validate_extra_model(TranscriptionProvenance, raw.get("transcription")),
+        runtime_input=_validate_extra_model(
+            RuntimeInputProvenance, raw.get("runtime_input")
+        ),
+        transcription=_validate_extra_model(
+            TranscriptionProvenance, raw.get("transcription")
+        ),
         artifacts=_validate_extra_model(ArtifactProvenance, raw.get("artifacts")),
         agentic=_validate_extra_model(AgenticProvenance, raw.get("agentic")),
         guards=_validate_extra_model(GuardsProvenance, raw.get("guards")),
@@ -199,16 +213,18 @@ def _normalize_rag_provenance(value: Any) -> RagProvenance | None:
 def normalize_rag_payload(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    payload = dict(value)
+    payload: JsonObject = dict(cast(JsonObject, value))
     payload["tracking"] = _normalize_rag_tracking(payload.get("tracking"))
     prompt_context = _normalize_rag_prompt_context(payload.get("prompt_context"))
     if prompt_context is not None:
         payload["prompt_context"] = prompt_context
-    included_source_ids = set()
+    included_source_ids: set[str] = set()
     if isinstance(prompt_context, dict):
         included_source_ids = {
             source_id
-            for source_id in prompt_context.get("included_source_ids", [])
+            for source_id in cast(
+                list[object], prompt_context.get("included_source_ids", [])
+            )
             if isinstance(source_id, str) and source_id.strip()
         }
     references = payload.get("references")
@@ -216,12 +232,12 @@ def normalize_rag_payload(value: Any) -> dict[str, Any] | None:
         normalized_references: list[dict[str, Any]] = []
         source_names: list[str] = []
         source_display_names: list[str] = []
-        for reference in references:
+        for reference in cast(list[object], references):
             if not isinstance(reference, dict):
                 continue
-            normalized_reference = dict(reference)
+            normalized_reference: JsonObject = dict(cast(JsonObject, reference))
             normalized_reference["usage_state"] = _normalize_usage_state(
-                reference.get("usage_state")
+                normalized_reference.get("usage_state")
             )
             _normalize_reference_display_fields(normalized_reference)
             if (
@@ -251,16 +267,16 @@ def normalize_rag_payload(value: Any) -> dict[str, Any] | None:
 def _normalize_rag_prompt_context(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    payload = dict(value)
+    payload: JsonObject = dict(cast(JsonObject, value))
 
     included_source_ids = [
         str(source_id).strip()
-        for source_id in payload.get("included_source_ids", [])
+        for source_id in cast(list[object], payload.get("included_source_ids", []))
         if str(source_id).strip()
     ]
     not_included_source_ids = [
         str(source_id).strip()
-        for source_id in payload.get("not_included_source_ids", [])
+        for source_id in cast(list[object], payload.get("not_included_source_ids", []))
         if str(source_id).strip()
     ]
 
@@ -268,14 +284,14 @@ def _normalize_rag_prompt_context(value: Any) -> dict[str, Any] | None:
     derived_titles: list[str] = []
     raw_groups = payload.get("included_groups")
     if isinstance(raw_groups, list):
-        for group in raw_groups:
+        for group in cast(list[object], raw_groups):
             if not isinstance(group, dict):
                 continue
-            normalized_group = dict(group)
-            source_id = group.get("source_id")
+            normalized_group: JsonObject = dict(cast(JsonObject, group))
+            source_id = normalized_group.get("source_id")
             if source_id is not None:
                 normalized_group["source_id"] = str(source_id)
-            source_title = group.get("source_title")
+            source_title = normalized_group.get("source_title")
             if isinstance(source_title, str) and source_title.strip():
                 stripped_title = source_title.strip()
                 normalized_group["source_title"] = stripped_title
@@ -286,7 +302,9 @@ def _normalize_rag_prompt_context(value: Any) -> dict[str, Any] | None:
         dict.fromkeys(
             [
                 title.strip()
-                for title in payload.get("included_source_titles", [])
+                for title in cast(
+                    list[object], payload.get("included_source_titles", [])
+                )
                 if isinstance(title, str) and title.strip()
             ]
             + derived_titles
@@ -303,10 +321,10 @@ def _normalize_rag_prompt_context(value: Any) -> dict[str, Any] | None:
     payload["included_source_titles"] = included_source_titles
     payload["included_source_display_names"] = included_source_display_names
     payload["summary"] = {
-        "total_sources": payload.get("included_source_count") or len(included_source_ids),
-        "total_chunks": payload.get("included_chunk_count") or sum(
-            int(group.get("chunk_count", 0) or 0) for group in normalized_groups
-        ),
+        "total_sources": payload.get("included_source_count")
+        or len(included_source_ids),
+        "total_chunks": payload.get("included_chunk_count")
+        or sum(int(group.get("chunk_count", 0) or 0) for group in normalized_groups),
         "truncated_by_token_budget": bool(payload.get("truncated_by_token_budget")),
     }
     return payload
@@ -320,12 +338,14 @@ def _truncate_utf8(text: str, max_bytes: int) -> str:
     return truncated.decode("utf-8", errors="ignore")
 
 
-def normalize_model_parameters_payload(model_parameters: dict[str, Any]) -> dict[str, Any]:
+def normalize_model_parameters_payload(
+    model_parameters: dict[str, Any],
+) -> dict[str, Any]:
     payload = dict(model_parameters)
     semantics = payload.get("parameter_semantics")
     payload["parameter_semantics"] = _normalize_parameter_semantics(
         payload,
-        semantics if isinstance(semantics, dict) else None,
+        cast(JsonObject, semantics) if isinstance(semantics, dict) else None,
     )
     for key in ("temperature", "top_p", "reasoning_effort", "verbosity"):
         payload.setdefault(key, None)
@@ -338,32 +358,22 @@ def _normalize_rag_tracking(value: Any) -> dict[str, Any]:
         return defaults
 
     normalized = dict(defaults)
+    value_dict = cast(JsonObject, value)
     for key in (
         "retrieval_tracked",
         "prompt_context_inclusion_tracked",
         "citation_tracked",
         "material_influence_tracked",
     ):
-        if isinstance(value.get(key), bool):
-            normalized[key] = value[key]
-    selection_basis = value.get("selection_basis")
+        if isinstance(value_dict.get(key), bool):
+            normalized[key] = value_dict[key]
+    selection_basis = value_dict.get("selection_basis")
     if isinstance(selection_basis, str) and selection_basis.strip():
         normalized["selection_basis"] = selection_basis.strip()
-    note = value.get("note")
+    note = value_dict.get("note")
     if isinstance(note, str) and note.strip():
         normalized["note"] = note.strip()
     return normalized
-
-
-def _resolve_reference_url(reference: dict[str, Any]) -> str | None:
-    for key in ("source_url", "source_title", "title"):
-        raw_value = reference.get(key)
-        if not isinstance(raw_value, str):
-            continue
-        stripped = raw_value.strip()
-        if stripped.startswith(("http://", "https://")):
-            return stripped
-    return None
 
 
 def _normalize_usage_state(value: Any) -> str:
@@ -376,7 +386,9 @@ def _normalize_reference_display_fields(reference: dict[str, Any]) -> None:
     raw_title = resolve_reference_title(reference)
     if raw_title is not None:
         reference.setdefault("source_title_raw", raw_title)
-        reference.setdefault("source_display_name", format_source_display_name(raw_title))
+        reference.setdefault(
+            "source_display_name", format_source_display_name(raw_title)
+        )
     raw_container_name = reference.get("source_container_name")
     if isinstance(raw_container_name, str) and raw_container_name.strip():
         reference.setdefault("source_container_name_raw", raw_container_name.strip())
@@ -393,11 +405,21 @@ def _normalize_parameter_semantics(
     semantics: dict[str, Any] | None,
 ) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
+    semantics_dict = semantics or {}
     for key in ("temperature", "top_p", "reasoning_effort", "verbosity"):
-        existing = semantics.get(key) if isinstance(semantics, dict) else None
-        if isinstance(existing, dict) and isinstance(existing.get("mode"), str):
-            mode = existing["mode"]
+        existing = semantics_dict.get(key)
+        if isinstance(existing, dict):
+            existing_dict = cast(JsonObject, existing)
+            existing_mode = existing_dict.get("mode")
         else:
-            mode = "configured" if model_parameters.get(key) is not None else "model_default"
+            existing_mode = None
+        if isinstance(existing_mode, str):
+            mode = existing_mode
+        else:
+            mode = (
+                "configured"
+                if model_parameters.get(key) is not None
+                else "model_default"
+            )
         normalized[key] = {"mode": mode}
     return normalized

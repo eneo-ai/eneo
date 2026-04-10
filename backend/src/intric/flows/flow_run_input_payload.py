@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
 import math
+from datetime import date
 from typing import Any, cast
 
 from intric.main.exceptions import BadRequestException
@@ -11,6 +11,8 @@ _RUN_FIELD_TYPE_LEGACY_NORMALIZATION = {
     "email": "text",
     "textarea": "text",
 }
+
+_OrderedField = tuple[int, int, dict[str, Any]]
 
 
 def _flow_payload_error(
@@ -33,26 +35,34 @@ def normalize_and_validate_flow_run_payload(
     metadata_json: dict[str, Any] | None,
     payload: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    form_schema = metadata_json.get("form_schema") if isinstance(metadata_json, dict) else None
-    fields = form_schema.get("fields") if isinstance(form_schema, dict) else None
-    if not isinstance(fields, list) or len(fields) == 0:
+    form_schema = (
+        metadata_json.get("form_schema") if metadata_json is not None else None
+    )
+    if not isinstance(form_schema, dict):
         return payload
 
+    form_schema_dict = cast(dict[str, Any], form_schema)
+    fields_raw = form_schema_dict.get("fields")
+    if not isinstance(fields_raw, list):
+        return payload
+
+    fields_list = cast(list[Any], fields_raw)
+    if len(fields_list) == 0:
+        return payload
     normalized_payload = dict(payload or {})
 
-    ordered_fields: list[dict[str, Any]] = []
-    for index, raw in enumerate(fields):
+    ordered_fields: list[_OrderedField] = []
+    for index, raw in enumerate(fields_list):
         if not isinstance(raw, dict):
             continue
         field = cast(dict[str, Any], raw)
         order = field.get("order")
         if not isinstance(order, int):
             order = index + 1
-        ordered_fields.append({"index": index, "order": order, "field": field})
-    ordered_fields.sort(key=lambda item: (item["order"], item["index"]))
+        ordered_fields.append((order, index, field))
+    ordered_fields.sort(key=lambda item: (item[0], item[1]))
 
-    for item in ordered_fields:
-        field = cast(dict[str, Any], item["field"])
+    for _order, _index, field in ordered_fields:
         field_name = field.get("name")
         if not isinstance(field_name, str) or not field_name.strip():
             continue
@@ -67,7 +77,11 @@ def normalize_and_validate_flow_run_payload(
         field_type = _RUN_FIELD_TYPE_LEGACY_NORMALIZATION.get(field_type, field_type)
         options_raw = field.get("options")
         options = (
-            [option.strip() for option in options_raw if isinstance(option, str) and option.strip()]
+            [
+                option.strip()
+                for option in cast(list[Any], options_raw)
+                if isinstance(option, str) and option.strip()
+            ]
             if isinstance(options_raw, list)
             else []
         )
@@ -158,7 +172,9 @@ def coerce_text_field(*, field_name: str, value: Any, required: bool) -> str:
     return text_value
 
 
-def coerce_number_field(*, field_name: str, value: Any, required: bool) -> int | float | None:
+def coerce_number_field(
+    *, field_name: str, value: Any, required: bool
+) -> int | float | None:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         number_value: int | float = value
     elif isinstance(value, str):
@@ -280,8 +296,9 @@ def coerce_multiselect_field(
 ) -> list[str]:
     raw_values: list[str]
     if isinstance(value, list):
+        items = cast(list[Any], value)
         raw_values = []
-        for item in value:
+        for item in items:
             if not isinstance(item, str):
                 raise _flow_payload_error(
                     message=f"Field '{field_name}' must contain only string options.",

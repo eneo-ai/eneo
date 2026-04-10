@@ -5,11 +5,12 @@ import ipaddress
 import json
 import re
 import socket
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from urllib.parse import urlsplit
 
 import httpx
 
+from intric.flows.domain.flow import JsonObject
 from intric.main.config import get_settings
 from intric.main.exceptions import TypedIOValidationException
 
@@ -88,12 +89,7 @@ class FlowHttpRuntimeHelper:
                 code="typed_io_http_invalid_config",
             )
         headers: dict[str, str] = {}
-        for key, value in headers_raw.items():
-            if not isinstance(key, str):
-                raise TypedIOValidationException(
-                    f"Step {step_order}: {config_label}.headers keys must be strings.",
-                    code="typed_io_http_invalid_config",
-                )
+        for key, value in cast(JsonObject, headers_raw).items():
             rendered = self.interpolate_value(value, context=context)
             headers[key] = str(rendered)
         return headers
@@ -133,7 +129,7 @@ class FlowHttpRuntimeHelper:
                     f"Step {step_order}: {config_label}.body_json interpolation must produce object or array.",
                     code="typed_io_http_invalid_config",
                 )
-            return None, interpolated_json
+            return None, cast(dict[str, Any] | list[Any], interpolated_json)
         if body_template is not None:
             rendered = self.variable_resolver.interpolate(body_template, context)
             return rendered.encode("utf-8"), None
@@ -149,11 +145,14 @@ class FlowHttpRuntimeHelper:
                     return rendered
             return self.variable_resolver.interpolate(value, context)
         if isinstance(value, list):
-            return [self.interpolate_value(item, context=context) for item in value]
+            return [
+                self.interpolate_value(item, context=context)
+                for item in cast(list[Any], value)
+            ]
         if isinstance(value, dict):
             return {
                 str(item_key): self.interpolate_value(item_value, context=context)
-                for item_key, item_value in value.items()
+                for item_key, item_value in cast(JsonObject, value).items()
             }
         return value
 
@@ -294,12 +293,7 @@ class FlowHttpRuntimeHelper:
                 code="typed_io_http_connection_error",
             )
 
-        peer_value = server_addr[0]
-        if not isinstance(peer_value, str):
-            raise TypedIOValidationException(
-                "Unable to verify HTTP peer address.",
-                code="typed_io_http_connection_error",
-            )
+        peer_value = cast(str, server_addr[0])
 
         try:
             peer_ip = ipaddress.ip_address(peer_value)

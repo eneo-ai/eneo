@@ -8,9 +8,8 @@ that match the user's flow requirements.
 from __future__ import annotations
 
 from intric.flows.ai_builder.ai_builder_knowledge_pack import (
-    _KNOWLEDGE_PACK_RECIPES,
+    KNOWLEDGE_PACK_RECIPES,
 )
-
 
 # Recipe section markers — these map to section headers in the recipes block
 RECIPE_SECTIONS: dict[str, tuple[str, ...]] = {
@@ -52,7 +51,7 @@ def select_relevant_recipes(
     needed: set[str] = set()
 
     # Map signals to needed recipe sections
-    for signal_key, values in answer_signals.items():
+    for values in answer_signals.values():
         for value in values:
             if value in SIGNAL_TO_RECIPES:
                 needed.update(SIGNAL_TO_RECIPES[value])
@@ -70,13 +69,13 @@ def select_relevant_recipes(
 
     # If no signals detected, return full recipes (safe fallback)
     if not needed:
-        return _KNOWLEDGE_PACK_RECIPES
+        return KNOWLEDGE_PACK_RECIPES
 
     # Always include golden example when we have any signal
     needed.add("golden_example")
 
     # Filter recipe sections
-    return _filter_recipe_sections(_KNOWLEDGE_PACK_RECIPES, needed)
+    return _filter_recipe_sections(KNOWLEDGE_PACK_RECIPES, needed)
 
 
 def _filter_recipe_sections(full_recipes: str, needed: set[str]) -> str:
@@ -112,4 +111,4 @@ def _filter_recipe_sections(full_recipes: str, needed: set[str]) -> str:
             result_lines.append(line)
 
     filtered = "\n".join(result_lines).strip()
-    return filtered if filtered else _KNOWLEDGE_PACK_RECIPES
+    return filtered if filtered else KNOWLEDGE_PACK_RECIPES

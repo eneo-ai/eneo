@@ -30,7 +30,6 @@ class EntityType(str, Enum):
     SESSION = "session"
     MCP_SERVER = "mcp_server"
     MCP_SERVER_TOOL = "mcp_server_tool"
-    SESSION = "session"
     FLOW = "flow"
     FLOW_RUN = "flow_run"
     AI_BUILDER_SESSION = "ai_builder_session"

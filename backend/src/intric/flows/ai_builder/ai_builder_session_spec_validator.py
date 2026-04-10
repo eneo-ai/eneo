@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import re
 
-from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore, TargetKind
+from intric.flows.ai_builder.ai_builder_models import (
+    FlowDraftSpecCore,
+    StepSpec,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 
 _EXISTING_STEP_REF_RE = re.compile(r"^existing_step_[1-9]\d*$")
@@ -16,7 +20,7 @@ def normalize_compiled_spec_for_session(
     if target_kind != TargetKind.CREATE:
         return spec
 
-    normalized_steps = []
+    normalized_steps: list[StepSpec] = []
     changed = False
     for step in spec.steps:
         if step.existing_step_ref is None:
@@ -68,7 +72,10 @@ def validate_compiled_spec_for_session(
             )
             continue
 
-        if valid_existing_step_refs is not None and existing_step_ref not in valid_existing_step_refs:
+        if (
+            valid_existing_step_refs is not None
+            and existing_step_ref not in valid_existing_step_refs
+        ):
             result.add_error(
                 step_ref=step.plan_step_ref,
                 code="invalid_existing_step_ref",

@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { CompletionModel } from "@intric/intric-js";
+  import type { SelectableAIModel } from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
 
-  export let availableModels: CompletionModel[] = [];
+  export let availableModels: SelectableAIModel[] = [];
 
   let currentAssistant = {
     completion_model: availableModels[0] ?? null,

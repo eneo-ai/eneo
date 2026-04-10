@@ -9,6 +9,7 @@ from intric.flows.http_transport.authored_config import (
     HttpAuthApiKey,
     HttpAuthBasicAuth,
     HttpAuthBearer,
+    HttpAuthNone,
     HttpAuthoredConfig,
     HttpBodyMode,
 )
@@ -65,6 +66,8 @@ def compile_http_config(
                 f"{_interpolate(user)}:{_interpolate(pwd)}".encode()
             ).decode()
             headers["Authorization"] = f"Basic {encoded}"
+        case HttpAuthNone():
+            pass
 
     # Custom headers
     for h in authored.custom_headers:

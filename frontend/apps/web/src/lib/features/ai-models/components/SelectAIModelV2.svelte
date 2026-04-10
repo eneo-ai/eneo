@@ -1,6 +1,19 @@
-<script lang="ts" generics="T extends TranscriptionModel | CompletionModel">
+<script context="module" lang="ts">
+  export type SelectableAIModel = {
+    id: string;
+    name: string;
+    nickname?: string | null;
+    description?: string | null;
+    token_limit?: number;
+    org?: string | null;
+    provider_id?: string | null;
+    provider_name?: string | null;
+    provider_type?: string | null;
+  };
+</script>
+
+<script lang="ts" generics="T extends SelectableAIModel">
   import { createEventDispatcher } from "svelte";
-  import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
   import ModelNameAndVendor from "./ModelNameAndVendor.svelte";
   import { sortModels } from "../sortModels";
   import { groupModelsByProvider } from "../groupModels";
@@ -132,7 +145,7 @@
     {#each availableModels as model (model.id)}
       <div
         class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between border-b px-4 hover:cursor-pointer"
-        {...$option({ value: model, label: model.nickname })}
+        {...$option({ value: model, label: model.nickname ?? undefined })}
         use:option
       >
         <ModelNameAndVendor {model}></ModelNameAndVendor>

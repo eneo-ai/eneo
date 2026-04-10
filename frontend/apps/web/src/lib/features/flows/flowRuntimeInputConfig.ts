@@ -13,10 +13,9 @@ export type FlowRuntimeInputConfigValue = {
 };
 
 type RuntimeInputBindings = Record<string, unknown> | null;
-type RuntimeInputStepLike = Pick<
-  FlowStep,
-  "input_bindings" | "input_config" | "input_type" | "output_mode"
->;
+type RuntimeInputConfigStepLike = Pick<FlowStep, "input_config"> &
+  Partial<Pick<FlowStep, "input_type" | "output_mode">>;
+type RuntimeInputStepLike = RuntimeInputConfigStepLike & Pick<FlowStep, "input_bindings">;
 
 const DEFAULT_RUNTIME_INPUT_CONFIG: FlowRuntimeInputConfigValue = {
   enabled: false,
@@ -62,7 +61,7 @@ export function isDefaultRuntimeConfig(config: FlowRuntimeInputConfigValue): boo
 }
 
 export function coerceRuntimeInputConfigForStep(
-  step: Pick<FlowStep, "input_type" | "output_mode">,
+  step: Partial<Pick<FlowStep, "input_type" | "output_mode">>,
   config: FlowRuntimeInputConfigValue
 ): FlowRuntimeInputConfigValue {
   if (step.output_mode === "transcribe_only" || step.input_type === "audio") {
@@ -78,7 +77,7 @@ export function coerceRuntimeInputConfigForStep(
 }
 
 export function getRuntimeInputConfig(
-  step: Pick<FlowStep, "input_config" | "input_type" | "output_mode">
+  step: RuntimeInputConfigStepLike
 ): FlowRuntimeInputConfigValue {
   const inputConfig = asObject(step.input_config);
   const runtimeInputRaw = inputConfig?.runtime_input;
@@ -139,7 +138,7 @@ function serializeRuntimeInputConfig(
 }
 
 export function updateRuntimeInputConfig(
-  step: Pick<FlowStep, "input_config" | "input_type" | "output_mode">,
+  step: RuntimeInputConfigStepLike,
   config: FlowRuntimeInputConfigValue
 ): Record<string, unknown> {
   const nextConfig = coerceRuntimeInputConfigForStep(step, config);
@@ -152,7 +151,12 @@ function sanitizeRuntimeInputBindings(
   bindings: unknown,
   runtimeInputEnabled: boolean
 ): RuntimeInputBindings {
-  if (!runtimeInputEnabled || !bindings || typeof bindings !== "object" || Array.isArray(bindings)) {
+  if (
+    !runtimeInputEnabled ||
+    !bindings ||
+    typeof bindings !== "object" ||
+    Array.isArray(bindings)
+  ) {
     return (bindings as RuntimeInputBindings | undefined) ?? null;
   }
 

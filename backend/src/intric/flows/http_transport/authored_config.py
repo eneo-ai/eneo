@@ -58,6 +58,10 @@ class CustomHeader(BaseModel):
     secret: bool = False
 
 
+def _default_custom_headers() -> list[CustomHeader]:
+    return []
+
+
 class HttpAuthoredConfig(BaseModel):
     """Authored HTTP config — what the user configured.
 
@@ -69,5 +73,5 @@ class HttpAuthoredConfig(BaseModel):
     auth: HttpAuth = Field(default_factory=HttpAuthNone)
     timeout_seconds: int = 30
     body: HttpBody = Field(default_factory=lambda: HttpBody(mode=HttpBodyMode.AUTO))
-    custom_headers: list[CustomHeader] = Field(default_factory=list)
+    custom_headers: list[CustomHeader] = Field(default_factory=_default_custom_headers)
     response_format: str | None = None

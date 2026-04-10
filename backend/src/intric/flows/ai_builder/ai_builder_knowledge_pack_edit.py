@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 _KNOWLEDGE_PACK_EDIT_MODE = """\
 ## Redigeringsläge (Edit Mode)
 
@@ -68,4 +67,6 @@ Användaren: "Jag vill att flödet hanterar både ljudfiler och dokument"
 på första steget. Gissa ALDRIG — fråga vilken som är primär."""
 
 
-__all__ = ["_KNOWLEDGE_PACK_EDIT_MODE"]
+KNOWLEDGE_PACK_EDIT_MODE = _KNOWLEDGE_PACK_EDIT_MODE
+
+__all__ = ["_KNOWLEDGE_PACK_EDIT_MODE", "KNOWLEDGE_PACK_EDIT_MODE"]

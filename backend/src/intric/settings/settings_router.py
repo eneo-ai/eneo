@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Protocol, cast
 
 from fastapi import APIRouter, Depends
 
@@ -15,6 +15,10 @@ from intric.server.protocol import to_paginated_response
 from intric.settings import settings_factory
 from intric.settings.setting_service import SettingService
 from intric.settings.settings import (
+    AIBuilderBudgetSettingsPublic,
+    AIBuilderBudgetSettingsUpdate,
+    FlowInputLimitsPublic,
+    FlowInputLimitsUpdate,
     GetModelsResponse,
     SettingsPublic,
     ToggleSettingUpdate,
@@ -24,6 +28,17 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 settings_admin_router = APIRouter()
+
+
+class _FlowSettingsServiceProtocol(Protocol):
+    async def get_flow_input_limits(self) -> FlowInputLimitsPublic: ...
+    async def update_flow_input_limits(
+        self, payload: FlowInputLimitsUpdate
+    ) -> FlowInputLimitsPublic: ...
+    async def get_ai_builder_budget_settings(self) -> AIBuilderBudgetSettingsPublic: ...
+    async def update_ai_builder_budget_settings(
+        self, payload: AIBuilderBudgetSettingsUpdate
+    ) -> AIBuilderBudgetSettingsPublic: ...
 
 
 @router.get("/", response_model=SettingsPublic)
@@ -76,6 +91,64 @@ def get_formats():
     return to_paginated_response(
         TextMimeTypes.values() + AudioMimeTypes.values() + ImageMimeTypes.values()
     )
+
+
+@settings_admin_router.get(
+    "/flow-input-limits",
+    response_model=FlowInputLimitsPublic,
+    summary="Get flow input limits",
+    description="Return the tenant's effective upload limits for flow runtime inputs.",
+)
+async def get_flow_input_limits(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowInputLimitsPublic:
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.get_flow_input_limits()
+
+
+@settings_admin_router.patch(
+    "/flow-input-limits",
+    response_model=FlowInputLimitsPublic,
+    summary="Update flow input limits",
+    description="Update tenant-level upload limits used by flow runtime input endpoints.",
+    responses={
+        400: {"description": "Invalid flow input limit payload."},
+        403: {"description": "Caller lacks permission to update tenant settings."},
+    },
+)
+async def update_flow_input_limits(
+    payload: FlowInputLimitsUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowInputLimitsPublic:
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.update_flow_input_limits(payload)
+
+
+@settings_admin_router.get(
+    "/ai-builder-budget",
+    response_model=AIBuilderBudgetSettingsPublic,
+    summary="Get AI Builder budget settings",
+    description="Return token budget settings used by the Flow AI Builder planner.",
+)
+async def get_ai_builder_budget_settings(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> AIBuilderBudgetSettingsPublic:
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.get_ai_builder_budget_settings()
+
+
+@settings_admin_router.patch(
+    "/ai-builder-budget",
+    response_model=AIBuilderBudgetSettingsPublic,
+    summary="Update AI Builder budget settings",
+    description="Update token budget settings used by the Flow AI Builder planner.",
+)
+async def update_ai_builder_budget_settings(
+    payload: AIBuilderBudgetSettingsUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> AIBuilderBudgetSettingsPublic:
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.update_ai_builder_budget_settings(payload)
 
 
 @settings_admin_router.patch(

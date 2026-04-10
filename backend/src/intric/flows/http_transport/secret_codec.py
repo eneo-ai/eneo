@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from intric.flows.http_transport.authored_config import (
+    CustomHeader,
     HttpAuthApiKey,
     HttpAuthBasicAuth,
     HttpAuthBearer,
+    HttpAuthNone,
     HttpAuthoredConfig,
 )
 
@@ -20,7 +22,9 @@ class SupportsEncryption(Protocol):
 
 
 def _is_sentinel(value: Any) -> bool:
-    return isinstance(value, dict) and value.get("$secret") == "stored"
+    if not isinstance(value, dict):
+        return False
+    return cast(dict[str, Any], value).get("$secret") == "stored"
 
 
 def encrypt_authored_config(
@@ -46,6 +50,8 @@ def encrypt_authored_config(
             auth = auth.model_copy(update={"key": _encrypt(key)})
         case HttpAuthBasicAuth(password=pwd):
             auth = auth.model_copy(update={"password": _encrypt(pwd)})
+        case HttpAuthNone():
+            pass
 
     custom_headers = [
         h.model_copy(update={"value": _encrypt(h.value)}) if h.secret else h
@@ -80,6 +86,8 @@ def decrypt_authored_config(
             auth = auth.model_copy(update={"key": _decrypt(key)})
         case HttpAuthBasicAuth(password=pwd):
             auth = auth.model_copy(update={"password": _decrypt(pwd)})
+        case HttpAuthNone():
+            pass
 
     custom_headers = [
         h.model_copy(update={"value": _decrypt(h.value)}) if h.secret else h
@@ -99,6 +107,8 @@ def redact_authored_config(config: HttpAuthoredConfig) -> HttpAuthoredConfig:
             auth = auth.model_copy(update={"key": SECRET_SENTINEL})  # type: ignore[arg-type]
         case HttpAuthBasicAuth():
             auth = auth.model_copy(update={"password": SECRET_SENTINEL})  # type: ignore[arg-type]
+        case HttpAuthNone():
+            pass
 
     custom_headers = [
         h.model_copy(update={"value": SECRET_SENTINEL}) if h.secret else h
@@ -136,9 +146,11 @@ def merge_secrets_on_update(
             auth = inc.model_copy(
                 update={"password": _merge_field(inc.password, sto.password)}  # type: ignore[arg-type]
             )
+        case _:
+            pass
 
     stored_headers_by_name = {h.name: h for h in stored.custom_headers}
-    merged_headers = []
+    merged_headers: list[CustomHeader] = []
     for h in incoming.custom_headers:
         if h.secret and _is_sentinel(h.value):
             stored_h = stored_headers_by_name.get(h.name)

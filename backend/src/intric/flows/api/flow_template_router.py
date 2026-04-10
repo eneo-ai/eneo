@@ -13,17 +13,21 @@ from intric.authentication.signed_urls import generate_signed_token
 from intric.files.file_models import SignedURLRequest, SignedURLResponse
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import error_response
+from intric.flows.api.flow_definition_access import require_flow_edit_access
 from intric.flows.api.flow_models import (
     FlowTemplateAssetPublic,
     FlowTemplateInspectionPublic,
 )
+from intric.flows.flow_template_asset_service import FlowTemplateAssetService
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
 
-from intric.flows.api.flow_definition_access import require_flow_edit_access
-
 router = APIRouter()
+
+
+def _get_flow_template_asset_service(container: Container) -> FlowTemplateAssetService:
+    return container.flow_template_asset_service()
 
 
 @router.get(
@@ -52,13 +56,15 @@ router = APIRouter()
 async def list_flow_template_files(
     id: Annotated[
         UUID,
-        Path(description="Identifier of the draft flow whose template assets should be listed."),
+        Path(
+            description="Identifier of the draft flow whose template assets should be listed."
+        ),
     ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
-    assets = await container.flow_template_asset_service().list_assets(
+    assets = await _get_flow_template_asset_service(container).list_assets(
         flow_id=id,
         can_edit=True,
         can_download=True,
@@ -108,7 +114,13 @@ async def inspect_flow_template(
     container: Container = Depends(get_container(with_user=True)),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
-    return await container.flow_template_asset_service().inspect_asset(flow_id=id, asset_id=file_id)
+    inspection = await _get_flow_template_asset_service(container).inspect_asset(
+        flow_id=id,
+        asset_id=file_id,
+    )
+    return FlowTemplateInspectionPublic.model_validate(inspection).model_dump(
+        mode="json"
+    )
 
 
 @router.post(
@@ -155,7 +167,9 @@ async def inspect_flow_template(
 async def upload_flow_template_file(
     id: Annotated[
         UUID,
-        Path(description="Identifier of the draft flow that will own the uploaded template asset."),
+        Path(
+            description="Identifier of the draft flow that will own the uploaded template asset."
+        ),
     ],
     request: Request,
     upload_file: UploadFile = File(
@@ -171,7 +185,7 @@ async def upload_flow_template_file(
         require_flow_lookup_without_scope=True,
     )
 
-    asset = await container.flow_template_asset_service().upload_asset(
+    asset = await _get_flow_template_asset_service(container).upload_asset(
         flow_id=id,
         upload_file=upload_file,
     )
@@ -181,7 +195,9 @@ async def upload_flow_template_file(
         actor_id=user.id,
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
-        entity_id=common.required_uuid(asset.file_id, field="flow_template_asset.file_id"),
+        entity_id=common.required_uuid(
+            asset.file_id, field="flow_template_asset.file_id"
+        ),
         description=f"Uploaded DOCX template '{asset.name}' for flow authoring",
         metadata=AuditMetadata.standard(
             actor=user,
@@ -234,7 +250,7 @@ async def generate_flow_template_signed_url(
     container: Container = Depends(get_container(with_user=True)),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
-    asset, _ = await container.flow_template_asset_service().get_asset_with_file(
+    asset, _ = await _get_flow_template_asset_service(container).get_asset_with_file(
         flow_id=id,
         asset_id=file_id,
     )

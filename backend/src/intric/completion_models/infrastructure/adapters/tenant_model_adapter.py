@@ -523,6 +523,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             if (
                 "max_tokens" not in model_kwargs_dict
                 and "max_completion_tokens" not in model_kwargs_dict
+                and not (
+                    self.provider_type == "anthropic"
+                    and "reasoning_effort" in model_kwargs_dict
+                )
             ):
                 model_kwargs_dict["max_tokens"] = self.model.max_output_tokens
                 logger.debug(f"Added default max_tokens={self.model.max_output_tokens}")
@@ -607,8 +611,9 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                 # DEBUG: Log message details
                 logger.debug(f"[DEBUG] Message: {msg}")
-                if msg.reasoning_content:
-                    logger.debug(f"[DEBUG] reasoning_content: {msg.reasoning_content}")
+                reasoning_content = getattr(msg, "reasoning_content", None)
+                if reasoning_content:
+                    logger.debug(f"[DEBUG] reasoning_content: {reasoning_content}")
 
                 # Check if model wants to call MCP tools
                 if msg.tool_calls and mcp_proxy:
@@ -1448,7 +1453,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         Returns:
             int: Maximum tokens available for input context
         """
-        return self.model.max_input_tokens
+        return max(0, self.model.max_input_tokens - self.model.max_output_tokens)
 
     @override
     def get_logging_details(

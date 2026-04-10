@@ -3,6 +3,7 @@
 These tests exercise the typed pipeline: JSON output, PDF/DOCX rendering,
 input contract validation, file resolution, canary flag, error propagation.
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -16,15 +17,21 @@ import httpx
 import pytest
 
 import intric.flows.runtime.executor as executor_module
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.outcome import Outcome
 from intric.flows.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
 )
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.outcome import Outcome
-from intric.flows.runtime.executor import FlowRunExecutor, RunExecutionState, RuntimeStep, StepInputValue
+from intric.flows.runtime.executor import (
+    FlowRunExecutor,
+    RunExecutionState,
+    RuntimeStep,
+    StepInputValue,
+)
+from intric.flows.runtime.step_execution_runtime import augment_prompt_for_typed_output
 from intric.main.exceptions import TypedIOValidationException
 
 
@@ -146,9 +153,13 @@ def _mock_assistant_for_execute_step(*, response_text: str = "ok") -> MagicMock:
     assistant = MagicMock()
     assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock()
-    assistant.completion_model_kwargs.model_copy.return_value = assistant.completion_model_kwargs
+    assistant.completion_model_kwargs.model_copy.return_value = (
+        assistant.completion_model_kwargs
+    )
     assistant.completion_model_kwargs.model_dump.return_value = {}
-    assistant.completion_model = SimpleNamespace(id=uuid4(), name="test", provider_type="test")
+    assistant.completion_model = SimpleNamespace(
+        id=uuid4(), name="test", provider_type="test"
+    )
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
             completion=response_text,
@@ -253,11 +264,15 @@ async def test_resolve_step_input_json_to_json_prefers_structured(user):
     )
 
     assert resolved.structured == {"full": "data", "not_truncated": True}
-    assert resolved.text == json.dumps({"full": "data", "not_truncated": True}, ensure_ascii=False)
+    assert resolved.text == json.dumps(
+        {"full": "data", "not_truncated": True}, ensure_ascii=False
+    )
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_json_previous_step_parses_text_when_structured_missing(user):
+async def test_resolve_step_input_json_previous_step_parses_text_when_structured_missing(
+    user,
+):
     """json previous_step should parse JSON text when structured is absent."""
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
@@ -461,7 +476,9 @@ async def test_resolve_step_input_null_payload_safe(user):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("input_source", ["previous_step", "all_previous_steps"])
-async def test_resolve_step_input_step_one_rejects_previous_sources(user, input_source: str):
+async def test_resolve_step_input_step_one_rejects_previous_sources(
+    user, input_source: str
+):
     """Legacy snapshots should still reject step 1 chaining-only input sources at runtime."""
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "x"})
@@ -480,7 +497,9 @@ async def test_resolve_step_input_step_one_rejects_previous_sources(user, input_
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_all_previous_steps_json_rejected_with_specific_code(user):
+async def test_resolve_step_input_all_previous_steps_json_rejected_with_specific_code(
+    user,
+):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     prior = [
@@ -492,7 +511,9 @@ async def test_resolve_step_input_all_previous_steps_json_rejected_with_specific
             text="x",
         )
     ]
-    step = _runtime_step(step_order=2, input_source="all_previous_steps", input_type="json")
+    step = _runtime_step(
+        step_order=2, input_source="all_previous_steps", input_type="json"
+    )
     context = executor.variable_resolver.build_context(run.input_payload_json, prior)
 
     with pytest.raises(TypedIOValidationException) as exc:
@@ -541,7 +562,9 @@ async def test_resolve_step_input_all_previous_steps_empty_content_sets_warning(
             text="",
         )
     ]
-    step = _runtime_step(step_order=2, input_source="all_previous_steps", input_type="text")
+    step = _runtime_step(
+        step_order=2, input_source="all_previous_steps", input_type="text"
+    )
     context = executor.variable_resolver.build_context(run.input_payload_json, prior)
 
     resolved = await executor._resolve_step_input(
@@ -605,7 +628,9 @@ async def test_resolve_step_input_all_previous_steps_prefers_state_accumulator(u
         json_mode_supported={},
         file_cache={},
     )
-    step = _runtime_step(step_order=2, input_source="all_previous_steps", input_type="text")
+    step = _runtime_step(
+        step_order=2, input_source="all_previous_steps", input_type="text"
+    )
     context = executor.variable_resolver.build_context(run.input_payload_json, prior)
 
     resolved = await executor._resolve_step_input(
@@ -621,7 +646,9 @@ async def test_resolve_step_input_all_previous_steps_prefers_state_accumulator(u
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_all_previous_steps_excludes_current_and_future_results(user):
+async def test_resolve_step_input_all_previous_steps_excludes_current_and_future_results(
+    user,
+):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     prior = [
@@ -647,7 +674,9 @@ async def test_resolve_step_input_all_previous_steps_excludes_current_and_future
             text="FUTURE",
         ),
     ]
-    step = _runtime_step(step_order=3, input_source="all_previous_steps", input_type="text")
+    step = _runtime_step(
+        step_order=3, input_source="all_previous_steps", input_type="text"
+    )
     context = executor.variable_resolver.build_context(run.input_payload_json, prior)
 
     resolved = await executor._resolve_step_input(
@@ -683,7 +712,9 @@ async def test_resolve_step_input_all_previous_steps_rejects_text_over_inline_ca
             text="och detta steg ar ocksa langt",
         ),
     ]
-    step = _runtime_step(step_order=3, input_source="all_previous_steps", input_type="text")
+    step = _runtime_step(
+        step_order=3, input_source="all_previous_steps", input_type="text"
+    )
     context = executor.variable_resolver.build_context(run.input_payload_json, prior)
 
     with pytest.raises(TypedIOValidationException) as exc:
@@ -715,7 +746,9 @@ async def test_resolve_step_input_http_get_uses_interpolated_url_and_timeout(use
         },
     )
     request = httpx.Request("GET", "https://example.org/items/42?q=budget")
-    executor._send_http_request = AsyncMock(return_value=httpx.Response(200, request=request, text="remote text"))
+    executor._send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, text="remote text")
+    )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     resolved = await executor._resolve_step_input(
@@ -741,7 +774,9 @@ async def test_resolve_step_input_http_get_timeout_maps_typed_error(user):
         input_type="text",
         input_config={"url": "https://example.org"},
     )
-    executor._send_http_request = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+    executor._send_http_request = AsyncMock(
+        side_effect=httpx.TimeoutException("timeout")
+    )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     with pytest.raises(TypedIOValidationException) as exc:
@@ -810,7 +845,9 @@ async def test_resolve_step_input_http_json_malformed_response_maps_typed_error(
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_http_post_uses_body_json_and_interpolated_headers(user):
+async def test_resolve_step_input_http_post_uses_body_json_and_interpolated_headers(
+    user,
+):
     """http_post should interpolate url/headers/body_json and send structured JSON payload."""
     executor, _, _, _ = _build_executor(user)
     executor.encryption_service.is_encrypted = MagicMock(return_value=False)
@@ -875,7 +912,7 @@ async def test_resolve_step_input_http_post_rejects_conflicting_body_config(user
         input_type="text",
         input_config={
             "url": "https://example.org",
-            "body_template": "{\"value\":\"{{flow_input.text}}\"}",
+            "body_template": '{"value":"{{flow_input.text}}"}',
             "body_json": {"value": "{{flow_input.text}}"},
         },
     )
@@ -920,7 +957,9 @@ async def test_resolve_step_input_http_post_rejects_non_string_header_keys(user)
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_rejects_literal_step_input_substring_when_runtime_input_enabled(user):
+async def test_resolve_step_input_rejects_literal_step_input_substring_when_runtime_input_enabled(
+    user,
+):
     executor, _, _, _ = _build_executor(user)
     file = SimpleNamespace(id=uuid4(), text="transkriberat innehåll")
     executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[file])
@@ -940,7 +979,9 @@ async def test_resolve_step_input_rejects_literal_step_input_substring_when_runt
         input_bindings={"question": "Literal step_input.text marker"},
         input_config={"runtime_input": {"enabled": True, "input_format": "document"}},
     )
-    run.input_payload_json["step_inputs"] = {str(step.step_id): {"file_ids": [str(file.id)]}}
+    run.input_payload_json["step_inputs"] = {
+        str(step.step_id): {"file_ids": [str(file.id)]}
+    }
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     with pytest.raises(TypedIOValidationException, match="step_input"):
@@ -971,7 +1012,9 @@ async def test_resolve_step_input_adds_underlag_summary_diagnostic(user):
         input_bindings={"question": "UNDERLAG:\n{{ step_input.text }}"},
         input_config={"runtime_input": {"enabled": True, "input_format": "document"}},
     )
-    run.input_payload_json["step_inputs"] = {str(step.step_id): {"file_ids": [str(file.id)]}}
+    run.input_payload_json["step_inputs"] = {
+        str(step.step_id): {"file_ids": [str(file.id)]}
+    }
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     resolved = await executor._resolve_step_input(
@@ -1020,7 +1063,9 @@ async def test_send_http_request_stream_cap_raises_typed_error(user, monkeypatch
             return False
 
         def build_request(self, method, url, headers=None, content=None, json=None):
-            return httpx.Request(method, url, headers=headers, content=content, json=json)
+            return httpx.Request(
+                method, url, headers=headers, content=content, json=json
+            )
 
         async def send(self, request, stream=True):
             return _FakeStreamResponse()
@@ -1061,7 +1106,9 @@ async def test_send_http_request_webhook_mode_skips_body_read(user, monkeypatch)
             self.extensions = {"network_stream": _FakeNetworkStream()}
 
         async def aiter_bytes(self):
-            raise AssertionError("aiter_bytes should not be called when read_response_body=False")
+            raise AssertionError(
+                "aiter_bytes should not be called when read_response_body=False"
+            )
 
         async def aclose(self) -> None:
             return None
@@ -1077,7 +1124,9 @@ async def test_send_http_request_webhook_mode_skips_body_read(user, monkeypatch)
             return False
 
         def build_request(self, method, url, headers=None, content=None, json=None):
-            return httpx.Request(method, url, headers=headers, content=content, json=json)
+            return httpx.Request(
+                method, url, headers=headers, content=content, json=json
+            )
 
         async def send(self, request, stream=True):
             return _FakeStreamResponse()
@@ -1131,7 +1180,9 @@ async def test_send_http_request_blocks_rebound_private_peer(user, monkeypatch):
             return False
 
         def build_request(self, method, url, headers=None, content=None, json=None):
-            return httpx.Request(method, url, headers=headers, content=content, json=json)
+            return httpx.Request(
+                method, url, headers=headers, content=content, json=json
+            )
 
         async def send(self, request, stream=True):
             return _FakeStreamResponse()
@@ -1150,7 +1201,9 @@ async def test_send_http_request_blocks_rebound_private_peer(user, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_send_http_request_blocks_peer_not_in_preflight_resolution(user, monkeypatch):
+async def test_send_http_request_blocks_peer_not_in_preflight_resolution(
+    user, monkeypatch
+):
     """Connection-time peer must match the preflight DNS set when SSRF guard is enabled."""
     executor, _, _, _ = _build_executor(user)
     executor._assert_http_url_allowed = AsyncMock(
@@ -1186,7 +1239,9 @@ async def test_send_http_request_blocks_peer_not_in_preflight_resolution(user, m
             return False
 
         def build_request(self, method, url, headers=None, content=None, json=None):
-            return httpx.Request(method, url, headers=headers, content=content, json=json)
+            return httpx.Request(
+                method, url, headers=headers, content=content, json=json
+            )
 
         async def send(self, request, stream=True):
             return _FakeStreamResponse()
@@ -1228,7 +1283,9 @@ async def test_audio_input_previous_step_rejected_runtime(user):
         json_mode_supported={},
         file_cache={},
     )
-    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
 
     with pytest.raises(TypedIOValidationException) as exc:
         await executor._execute_step(step=step, run=run, state=run_state)
@@ -1257,9 +1314,13 @@ async def test_empty_document_extraction_fails(user):
     mock_assistant = MagicMock()
     mock_assistant.get_prompt_text.return_value = ""
     mock_assistant.completion_model_kwargs = MagicMock()
-    mock_assistant.completion_model_kwargs.model_copy.return_value = mock_assistant.completion_model_kwargs
+    mock_assistant.completion_model_kwargs.model_copy.return_value = (
+        mock_assistant.completion_model_kwargs
+    )
     mock_assistant.completion_model_kwargs.model_dump.return_value = {}
-    mock_assistant.completion_model = SimpleNamespace(id=uuid4(), name="test", provider_type="test")
+    mock_assistant.completion_model = SimpleNamespace(
+        id=uuid4(), name="test", provider_type="test"
+    )
     executor._load_assistant = AsyncMock(return_value=mock_assistant)
 
     with pytest.raises(TypedIOValidationException, match="empty text"):
@@ -1279,7 +1340,9 @@ async def test_document_extraction_does_not_fallback_to_payload_text(user):
     fake_file = SimpleNamespace(id=file_id, text="")
     executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
     step = _runtime_step(input_type="document")
-    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
 
     with pytest.raises(TypedIOValidationException) as exc:
         await executor._execute_step(step=step, run=run)
@@ -1300,7 +1363,9 @@ async def test_file_input_uses_extracted_file_text(user):
     fake_file = SimpleNamespace(id=file_id, text="Extracted file text")
     executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
     step = _runtime_step(input_type="file")
-    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
 
     output = await executor._execute_step(step=step, run=run)
 
@@ -1313,7 +1378,9 @@ async def test_document_previous_step_rejected_with_specific_code(user):
     """Legacy snapshots using previous_step+document should fail deterministically."""
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
-    step = _runtime_step(step_order=2, input_source="previous_step", input_type="document")
+    step = _runtime_step(
+        step_order=2, input_source="previous_step", input_type="document"
+    )
     # Build state with one completed previous result.
     from intric.flows.runtime.executor import RunExecutionState
 
@@ -1332,7 +1399,9 @@ async def test_document_previous_step_rejected_with_specific_code(user):
         json_mode_supported={},
         file_cache={},
     )
-    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
 
     with pytest.raises(TypedIOValidationException) as exc:
         await executor._execute_step(step=step, run=run, state=run_state)
@@ -1466,7 +1535,9 @@ async def test_text_input_contract_accepts_json_object_string(user):
             "properties": {"title": {"type": "string"}},
         },
     )
-    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
 
     output = await executor._execute_step(step=step, run=run)
 
@@ -1495,7 +1566,9 @@ async def test_text_input_contract_accepts_json_array_string(user):
             "items": {"type": "string"},
         },
     )
-    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
 
     output = await executor._execute_step(step=step, run=run)
 
@@ -1525,7 +1598,9 @@ async def test_text_input_contract_rejects_non_json_for_object_schema(user):
             "properties": {"title": {"type": "string"}},
         },
     )
-    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
 
     with pytest.raises(TypedIOValidationException) as exc:
         await executor._execute_step(step=step, run=run)
@@ -1545,7 +1620,9 @@ async def test_text_input_contract_string_schema_keeps_string_behavior(user):
         input_type="text",
         input_contract={"type": "string"},
     )
-    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
 
     output = await executor._execute_step(step=step, run=run)
 
@@ -1564,7 +1641,11 @@ async def test_text_input_contract_string_schema_keeps_string_behavior(user):
     ("output_type", "expected_mimetype", "expected_ext"),
     [
         ("pdf", "application/pdf", ".pdf"),
-        ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx"),
+        (
+            "docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".docx",
+        ),
     ],
 )
 async def test_document_outputs_generate_downloadable_artifacts(
@@ -1577,7 +1658,9 @@ async def test_document_outputs_generate_downloadable_artifacts(
 
     stored_file = SimpleNamespace(id=uuid4())
     executor.file_repo.add = AsyncMock(return_value=stored_file)
-    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step(response_text="Rapport"))
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step(response_text="Rapport")
+    )
 
     output = await executor._execute_step(step=step, run=run)
 
@@ -1599,13 +1682,18 @@ async def test_docx_output_handles_empty_assistant_response(user):
 
     stored_file = SimpleNamespace(id=uuid4())
     executor.file_repo.add = AsyncMock(return_value=stored_file)
-    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step(response_text=""))
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step(response_text="")
+    )
 
     output = await executor._execute_step(step=step, run=run)
 
     assert output.artifacts is not None
     assert output.artifacts[0]["file_id"] == str(stored_file.id)
-    assert output.artifacts[0]["mimetype"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert (
+        output.artifacts[0]["mimetype"]
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
 
 
 # --- _parse_runtime_steps extended fields ---
@@ -1613,21 +1701,23 @@ async def test_docx_output_handles_empty_assistant_response(user):
 
 def test_parse_runtime_steps_includes_typed_fields():
     """Parsed RuntimeStep should include output_type, output_contract, input_type, input_contract."""
-    steps = FlowRunExecutor._parse_runtime_steps({
-        "steps": [
-            {
-                "step_id": str(uuid4()),
-                "step_order": 1,
-                "assistant_id": str(uuid4()),
-                "input_source": "flow_input",
-                "output_mode": "pass_through",
-                "output_type": "json",
-                "output_contract": {"type": "object"},
-                "input_type": "document",
-                "input_contract": {"type": "string"},
-            }
-        ]
-    })
+    steps = FlowRunExecutor._parse_runtime_steps(
+        {
+            "steps": [
+                {
+                    "step_id": str(uuid4()),
+                    "step_order": 1,
+                    "assistant_id": str(uuid4()),
+                    "input_source": "flow_input",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "output_contract": {"type": "object"},
+                    "input_type": "document",
+                    "input_contract": {"type": "string"},
+                }
+            ]
+        }
+    )
     assert steps[0].output_type == "json"
     assert steps[0].output_contract == {"type": "object"}
     assert steps[0].input_type == "document"
@@ -1636,17 +1726,19 @@ def test_parse_runtime_steps_includes_typed_fields():
 
 def test_parse_runtime_steps_defaults_typed_fields():
     """When typed fields are missing from snapshot, default to text/None."""
-    steps = FlowRunExecutor._parse_runtime_steps({
-        "steps": [
-            {
-                "step_id": str(uuid4()),
-                "step_order": 1,
-                "assistant_id": str(uuid4()),
-                "input_source": "flow_input",
-                "output_mode": "pass_through",
-            }
-        ]
-    })
+    steps = FlowRunExecutor._parse_runtime_steps(
+        {
+            "steps": [
+                {
+                    "step_id": str(uuid4()),
+                    "step_order": 1,
+                    "assistant_id": str(uuid4()),
+                    "input_source": "flow_input",
+                    "output_mode": "pass_through",
+                }
+            ]
+        }
+    )
     assert steps[0].output_type == "text"
     assert steps[0].output_contract is None
     assert steps[0].input_type == "text"
@@ -1675,7 +1767,10 @@ async def test_http_input_audit_logged_on_success(user):
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     await executor._resolve_step_input(
-        step=step, context=context, run=run, prior_results=[],
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
     )
 
     audit_service.log_async.assert_awaited_once()
@@ -1699,7 +1794,7 @@ async def test_resolve_http_input_decrypts_encrypted_headers(user):
         side_effect=lambda v: v.startswith("enc:")
     )
     executor.encryption_service.decrypt = MagicMock(
-        side_effect=lambda v: v[len("enc:"):]
+        side_effect=lambda v: v[len("enc:") :]
     )
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "x"})
     step = _runtime_step(
@@ -1717,7 +1812,10 @@ async def test_resolve_http_input_decrypts_encrypted_headers(user):
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     await executor._resolve_step_input(
-        step=step, context=context, run=run, prior_results=[],
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
     )
 
     executor._send_http_request.assert_awaited_once()
@@ -1725,3 +1823,25 @@ async def test_resolve_http_input_decrypts_encrypted_headers(user):
     assert headers["Authorization"] == "Bearer token456"
     assert headers["X-Plain"] == "visible"
     executor.encryption_service.decrypt.assert_called_once_with("enc:Bearer token456")
+
+
+def test_document_output_prompt_instructs_model_to_return_markdown_not_binary() -> None:
+    prompt = augment_prompt_for_typed_output(
+        output_type="pdf",
+        output_contract=None,
+        prompt="Generera en PDF-rapport",
+    )
+
+    assert "system will render" in prompt
+    assert "Markdown/plain text" in prompt
+    assert "%PDF-" in prompt
+
+
+def test_document_output_prompt_preserves_contract_driven_json_behavior() -> None:
+    prompt = augment_prompt_for_typed_output(
+        output_type="pdf",
+        output_contract={"type": "object"},
+        prompt="Return report data",
+    )
+
+    assert prompt == "Return report data"

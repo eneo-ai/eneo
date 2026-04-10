@@ -11,8 +11,16 @@
 
   let fileMaxSizeBytes = $state(String(data.flowInputLimits.file_max_size_bytes ?? ""));
   let audioMaxSizeBytes = $state(String(data.flowInputLimits.audio_max_size_bytes ?? ""));
-  let maxFilesPerRun = $state(data.flowInputLimits.max_files_per_run != null ? String(data.flowInputLimits.max_files_per_run) : "");
-  let audioMaxFilesPerRun = $state(data.flowInputLimits.audio_max_files_per_run != null ? String(data.flowInputLimits.audio_max_files_per_run) : "");
+  let maxFilesPerRun = $state(
+    data.flowInputLimits.max_files_per_run != null
+      ? String(data.flowInputLimits.max_files_per_run)
+      : ""
+  );
+  let audioMaxFilesPerRun = $state(
+    data.flowInputLimits.audio_max_files_per_run != null
+      ? String(data.flowInputLimits.audio_max_files_per_run)
+      : ""
+  );
   let isSaving = $state(false);
 
   // Track initial values to detect changes
@@ -41,6 +49,18 @@
     return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
   }
 
+  function getReadableErrorMessage(error: unknown): string {
+    if (
+      error &&
+      typeof error === "object" &&
+      "getReadableMessage" in error &&
+      typeof error.getReadableMessage === "function"
+    ) {
+      return error.getReadableMessage();
+    }
+    return String(error);
+  }
+
   async function saveLimits() {
     isSaving = true;
     try {
@@ -54,10 +74,19 @@
         patch.audio_max_size_bytes = toPositiveInteger(audioMaxSizeBytes, "Audio max size");
       }
       if (maxFilesPerRun !== initialMaxFilesPerRun) {
-        patch.max_files_per_run = String(maxFilesPerRun).trim() === "" ? null : toPositiveInteger(String(maxFilesPerRun), m.flow_input_limits_max_files_title());
+        patch.max_files_per_run =
+          String(maxFilesPerRun).trim() === ""
+            ? null
+            : toPositiveInteger(String(maxFilesPerRun), m.flow_input_limits_max_files_title());
       }
       if (audioMaxFilesPerRun !== initialAudioMaxFilesPerRun) {
-        patch.audio_max_files_per_run = String(audioMaxFilesPerRun).trim() === "" ? null : toPositiveInteger(String(audioMaxFilesPerRun), m.flow_input_limits_audio_max_files_title());
+        patch.audio_max_files_per_run =
+          String(audioMaxFilesPerRun).trim() === ""
+            ? null
+            : toPositiveInteger(
+                String(audioMaxFilesPerRun),
+                m.flow_input_limits_audio_max_files_title()
+              );
       }
 
       if (Object.keys(patch).length === 0) {
@@ -69,7 +98,8 @@
       fileMaxSizeBytes = String(updated.file_max_size_bytes);
       audioMaxSizeBytes = String(updated.audio_max_size_bytes);
       maxFilesPerRun = updated.max_files_per_run != null ? String(updated.max_files_per_run) : "";
-      audioMaxFilesPerRun = updated.audio_max_files_per_run != null ? String(updated.audio_max_files_per_run) : "";
+      audioMaxFilesPerRun =
+        updated.audio_max_files_per_run != null ? String(updated.audio_max_files_per_run) : "";
 
       // Update initial values after save
       initialFileMaxSizeBytes = fileMaxSizeBytes;
@@ -79,8 +109,7 @@
 
       toast.success(m.saved_successfully());
     } catch (error) {
-      const message = error?.getReadableMessage?.() ?? String(error);
-      toast.error(message);
+      toast.error(getReadableErrorMessage(error));
     } finally {
       isSaving = false;
     }
@@ -105,7 +134,10 @@
   <Page.Main>
     <Settings.Page>
       <Settings.Group title={m.flow_input_limits_file_group()}>
-        <Settings.Row title={m.flow_input_limits_file_title()} description={m.flow_input_limits_file_description()}>
+        <Settings.Row
+          title={m.flow_input_limits_file_title()}
+          description={m.flow_input_limits_file_description()}
+        >
           <div class="flex w-full max-w-sm flex-col gap-1">
             <input
               class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
@@ -113,10 +145,13 @@
               min="1"
               bind:value={fileMaxSizeBytes}
             />
-            <p class="text-xs text-secondary">{formatBytes(Number(fileMaxSizeBytes))}</p>
+            <p class="text-secondary text-xs">{formatBytes(Number(fileMaxSizeBytes))}</p>
           </div>
         </Settings.Row>
-        <Settings.Row title={m.flow_input_limits_max_files_title()} description={m.flow_input_limits_max_files_description()}>
+        <Settings.Row
+          title={m.flow_input_limits_max_files_title()}
+          description={m.flow_input_limits_max_files_description()}
+        >
           <div class="flex w-full max-w-sm flex-col gap-1">
             <input
               class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
@@ -130,7 +165,10 @@
       </Settings.Group>
 
       <Settings.Group title={m.flow_input_limits_audio_group()}>
-        <Settings.Row title={m.flow_input_limits_audio_title()} description={m.flow_input_limits_audio_description()}>
+        <Settings.Row
+          title={m.flow_input_limits_audio_title()}
+          description={m.flow_input_limits_audio_description()}
+        >
           <div class="flex w-full max-w-sm flex-col gap-1">
             <input
               class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
@@ -138,10 +176,13 @@
               min="1"
               bind:value={audioMaxSizeBytes}
             />
-            <p class="text-xs text-secondary">{formatBytes(Number(audioMaxSizeBytes))}</p>
+            <p class="text-secondary text-xs">{formatBytes(Number(audioMaxSizeBytes))}</p>
           </div>
         </Settings.Row>
-        <Settings.Row title={m.flow_input_limits_audio_max_files_title()} description={m.flow_input_limits_audio_max_files_description()}>
+        <Settings.Row
+          title={m.flow_input_limits_audio_max_files_title()}
+          description={m.flow_input_limits_audio_max_files_description()}
+        >
           <div class="flex w-full max-w-sm flex-col gap-1">
             <input
               class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"

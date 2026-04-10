@@ -1,16 +1,19 @@
+# pyright: reportUnusedFunction=false
+
 """Prompt assembly and conversation trimming for the AI Flow Builder."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
-from intric.flows.domain.flow import Flow
-from intric.flows.ai_builder.ai_builder_models import (
-    ConversationMessage,
-    RequirementsSummaryPayload,
+from intric.flows.ai_builder.ai_builder_discovery import (
+    build_discovery_guidance,
 )
 from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_discovery_defaults,
+)
+from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
+    should_prefer_structured_intermediate,
 )
 from intric.flows.ai_builder.ai_builder_flow_context import (
     build_available_kbs_context,
@@ -19,16 +22,10 @@ from intric.flows.ai_builder.ai_builder_flow_context import (
     build_plan_summary,
     build_step_ref_mapping,
 )
-from intric.flows.ai_builder.ai_builder_discovery import (
-    build_discovery_guidance,
-)
-from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
-    should_prefer_structured_intermediate,
-)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
-    canonical_question_id,
     build_framework_guardrails_block,
+    canonical_question_id,
     extract_answer_signals,
     mentions_output_change,
     mentions_runtime_metadata,
@@ -41,11 +38,16 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
 from intric.flows.ai_builder.ai_builder_knowledge_pack import (
     build_prompt_knowledge_sections,
 )
+from intric.flows.ai_builder.ai_builder_models import (
+    ConversationMessage,
+    RequirementsSummaryPayload,
+)
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_confirmed_requirements_prompt_block,
     build_requirements_version,
     resolve_requirements_state,
 )
+from intric.flows.domain.flow import Flow
 
 __all__ = [
     "build_available_kbs_context",
@@ -174,9 +176,7 @@ def build_clarification_hints(
 
     answered_ids = {
         question_id
-        for question_id in (
-            _extract_question_id(message) for message in conversation
-        )
+        for question_id in (_extract_question_id(message) for message in conversation)
         if question_id is not None
     }
 
@@ -205,7 +205,7 @@ def build_clarification_hints(
         hints.append(
             f"- Frågegate: använd `ask_structured_question` innan `{submission_tool}` för att avgöra "
             "om flödet ska stödja en PDF i taget eller flera dokument i samma körning. "
-            "Använd `question_id=\"document_material_scope\"` med tydliga alternativ för enkel respektive fler-dokument-körning."
+            'Använd `question_id="document_material_scope"` med tydliga alternativ för enkel respektive fler-dokument-körning.'
         )
 
     if _needs_docx_mode_question(
@@ -215,7 +215,7 @@ def build_clarification_hints(
     ):
         hints.append(
             f"- Frågegate: använd `ask_structured_question` innan `{submission_tool}` för att avgöra "
-            "hur DOCX-rapporten ska skapas. Använd `question_id=\"docx_output_mode\"` med alternativ "
+            'hur DOCX-rapporten ska skapas. Använd `question_id="docx_output_mode"` med alternativ '
             "för mallbaserad DOCX respektive genererad DOCX utan mall."
         )
 
@@ -239,11 +239,15 @@ def build_clarification_hints(
         hints.append(
             f"- Frågegate: använd `ask_structured_question` innan `{submission_tool}` för att avgöra "
             "om PDF-resultatet ska vara en vanlig genererad PDF eller om användaren egentligen "
-            "efterfrågar en fast PDF-mall. Använd `question_id=\"pdf_generation_mode\"` och var "
+            'efterfrågar en fast PDF-mall. Använd `question_id="pdf_generation_mode"` och var '
             "tydlig med att inbyggd mallfyllning bara stöds för DOCX/Word."
         )
 
-    if input_intent.primary_runtime_input in {"audio", "documents", "text_and_documents"}:
+    if input_intent.primary_runtime_input in {
+        "audio",
+        "documents",
+        "text_and_documents",
+    }:
         if flow is None:
             hints.append(
                 "- Implementationshint: eftersom användaren laddar upp PDF/dokument/filer vid körning ska "
@@ -261,13 +265,13 @@ def build_clarification_hints(
         if flow is None:
             hints.append(
                 "- Implementationshint: eftersom användaren nämner ljud/transkribering ska "
-                "relevanta steg använda `input_type=\"audio\"` och `output_type=\"text\"`. "
+                'relevanta steg använda `input_type="audio"` och `output_type="text"`. '
                 "Backend härleder sedan rätt transkriberingsläge."
             )
         else:
             hints.append(
                 "- Implementationshint: eftersom användaren nämner ljud/transkribering ska "
-                "nytillagda steg använda `input_type=\"audio\"` och `output_type=\"text\"`. "
+                'nytillagda steg använda `input_type="audio"` och `output_type="text"`. '
                 "Backend härleder då rätt transkriberingsläge för nya steg; patcha bara "
                 "`output_mode` direkt om du uttryckligen behöver ändra ett befintligt steg."
             )
@@ -282,7 +286,7 @@ def build_clarification_hints(
     if _mentions_structured_extraction(text):
         hints.append(
             "- Designhint: om planen innehåller steg som ska extrahera namngivna fält, listor eller "
-            "objekt för senare återanvändning ska dessa steg använda `output_type=\"json\"` och tydliga "
+            'objekt för senare återanvändning ska dessa steg använda `output_type="json"` och tydliga '
             f"`{json_contract_term}`. Presentera inte ett JSON-steg utan strukturerad fältdefinition."
         )
 
@@ -304,15 +308,15 @@ def build_clarification_hints(
         if flow is None:
             hints.append(
                 "- Implementationshint: eftersom användaren nämner mallar/template_fill ska "
-                "relevanta steg använda `document_delivery_mode=\"template_fill\"` och "
-                "`output_type=\"docx\"`. Backend härleder sedan rätt output_mode. "
+                'relevanta steg använda `document_delivery_mode="template_fill"` och '
+                '`output_type="docx"`. Backend härleder sedan rätt output_mode. '
                 "Användaren behöver koppla DOCX-mallen manuellt efter att flödet skapats."
             )
         else:
             hints.append(
                 "- Implementationshint: eftersom användaren nämner mallar/template_fill ska "
-                "nytillagda steg använda `document_delivery_mode=\"template_fill\"` och "
-                "`output_type=\"docx\"`. Backend härleder rätt output_mode för nya steg. "
+                'nytillagda steg använda `document_delivery_mode="template_fill"` och '
+                '`output_type="docx"`. Backend härleder rätt output_mode för nya steg. '
                 "Användaren behöver koppla DOCX-mallen manuellt efter att flödet skapats."
             )
 
@@ -326,14 +330,14 @@ def build_clarification_hints(
         if flow is None:
             hints.append(
                 "- Designhint: om användaren menar en Word-mall ska relevanta steg använda "
-                "`document_delivery_mode=\"template_fill\"` och `output_type=\"docx\"`. "
+                '`document_delivery_mode="template_fill"` och `output_type="docx"`. '
                 "Om användaren i stället menar en PDF-mall ska du först klargöra det via "
                 "`pdf_generation_mode`."
             )
         else:
             hints.append(
                 "- Designhint: om användaren menar en Word-mall ska relevanta steg använda "
-                "`document_delivery_mode=\"template_fill\"` och `output_type=\"docx\"` för nya steg. "
+                '`document_delivery_mode="template_fill"` och `output_type="docx"` för nya steg. '
                 "Om användaren i stället menar en PDF-mall ska du först klargöra det via "
                 "`pdf_generation_mode`."
             )
@@ -390,7 +394,9 @@ def compute_conversation_token_budget(
     if context_window is None:
         raise ValueError("Planner model has no known context window.")
 
-    budget = context_window - system_prompt_tokens - max_output_tokens - safety_buffer_tokens
+    budget = (
+        context_window - system_prompt_tokens - max_output_tokens - safety_buffer_tokens
+    )
     return max(budget, minimum_budget_tokens)
 
 
@@ -414,7 +420,10 @@ def trim_conversation_for_context(
         group = [message]
         if message.get("role") == "assistant" and message.get("tool_calls"):
             tool_index = index + 1
-            while tool_index < len(messages) and messages[tool_index].get("role") == "tool":
+            while (
+                tool_index < len(messages)
+                and messages[tool_index].get("role") == "tool"
+            ):
                 group.append(messages[tool_index])
                 tool_index += 1
             index = tool_index
@@ -450,7 +459,7 @@ def _estimate_message_tokens(message: dict[str, Any]) -> int:
 
     tool_calls = message.get("tool_calls")
     if isinstance(tool_calls, list):
-        for tool_call in tool_calls:
+        for tool_call in cast(list[object], tool_calls):
             chunks.append(str(tool_call))
 
     tool_call_id = message.get("tool_call_id")
@@ -472,7 +481,7 @@ def _extract_question_id(message: ConversationMessage) -> str | None:
     question_answer = metadata.get("question_answer")
     if not isinstance(question_answer, dict):
         return None
-    question_id = question_answer.get("question_id")
+    question_id = cast(dict[str, Any], question_answer).get("question_id")
     return canonical_question_id(question_id) if isinstance(question_id, str) else None
 
 
@@ -482,10 +491,17 @@ def _needs_pdf_scope_question(text: str, answered_ids: set[str]) -> bool:
     mentions_documents = any(token in text for token in ("pdf", "dokument", "dokumen"))
     mentions_plurality = any(
         token in text
-        for token in ("flera", "ett eller flera", "många", "samtidigt", "mellan dokument")
+        for token in (
+            "flera",
+            "ett eller flera",
+            "många",
+            "samtidigt",
+            "mellan dokument",
+        )
     )
     mentions_comparison = any(
-        token in text for token in ("jämför", "jämföra", "jämförelse", "motsägelser", "skillnader")
+        token in text
+        for token in ("jämför", "jämföra", "jämförelse", "motsägelser", "skillnader")
     )
     return mentions_documents and (mentions_plurality or mentions_comparison)
 
@@ -511,7 +527,10 @@ def _needs_pdf_generation_mode_question(
 ) -> bool:
     if "pdf_generation_mode" in answered_ids:
         return False
-    return resolved_output == "pdf_document" and resolved_pdf_mode == "pdf_template_requested"
+    return (
+        resolved_output == "pdf_document"
+        and resolved_pdf_mode == "pdf_template_requested"
+    )
 
 
 def _mentions_form_field_needs(text: str) -> bool:
@@ -557,7 +576,7 @@ def _extract_signals_from_requirements(
     confirmed_requirements: dict[str, Any] | None,
 ) -> dict[str, set[str]]:
     """Extract answer signals from confirmed requirements for recipe selection."""
-    if not confirmed_requirements or not isinstance(confirmed_requirements, dict):
+    if not confirmed_requirements:
         return {}
     signals: dict[str, set[str]] = {}
     input_desc = confirmed_requirements.get("input_description", "").lower()

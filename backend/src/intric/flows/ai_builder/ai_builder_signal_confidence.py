@@ -9,7 +9,7 @@ already implied) while catching genuine ambiguity.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal, cast
 
 from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_answer_signals_from_text,
@@ -43,7 +43,7 @@ def score_conversation_signals(
     # 1. Extract structured answers only (from question_answer metadata)
     structured_ids: set[str] = set()
     for message in conversation:
-        if not isinstance(message, ConversationMessage) or message.role != "user":
+        if message.role != "user":
             continue
         metadata = message.metadata if isinstance(message.metadata, dict) else None
         if metadata is None:
@@ -51,21 +51,24 @@ def score_conversation_signals(
         qa = metadata.get("question_answer")
         if not isinstance(qa, dict):
             continue
-        question_id = qa.get("question_id")
+        qa_dict = cast(dict[str, Any], qa)
+        question_id = qa_dict.get("question_id")
         if not isinstance(question_id, str):
             continue
         structured_ids.add(question_id)
         for key in ("selected_values", "selected_option_ids"):
-            raw = qa.get(key)
+            raw = qa_dict.get(key)
             if isinstance(raw, list):
-                for v in raw:
+                for v in cast(list[object], raw):
                     if isinstance(v, str) and v.strip():
-                        scored.append(ScoredSignal(
-                            question_id=question_id,
-                            value=v,
-                            confidence="high",
-                            source="structured_answer",
-                        ))
+                        scored.append(
+                            ScoredSignal(
+                                question_id=question_id,
+                                value=v,
+                                confidence="high",
+                                source="structured_answer",
+                            )
+                        )
 
     # 2. Freeform text inference — medium/low depending on specificity
     if freeform_text:
@@ -75,14 +78,18 @@ def score_conversation_signals(
                 continue  # Already have a structured answer — skip
             for value in values:
                 confidence = _score_text_signal_confidence(
-                    question_id, value, freeform_text,
+                    question_id,
+                    value,
+                    freeform_text,
                 )
-                scored.append(ScoredSignal(
-                    question_id=question_id,
-                    value=value,
-                    confidence=confidence,
-                    source="freeform_text",
-                ))
+                scored.append(
+                    ScoredSignal(
+                        question_id=question_id,
+                        value=value,
+                        confidence=confidence,
+                        source="freeform_text",
+                    )
+                )
 
     # Sort: high first, then medium, then low
     priority = {"high": 0, "medium": 1, "low": 2}

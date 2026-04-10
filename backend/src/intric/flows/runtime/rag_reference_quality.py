@@ -29,8 +29,6 @@ def choose_display_chunk(
     fallback_chunk: dict[str, Any] | None = None
 
     for chunk in chunks:
-        if not isinstance(chunk, dict):
-            continue
         text = chunk.get("text")
         if not isinstance(text, str) or not text.strip():
             continue

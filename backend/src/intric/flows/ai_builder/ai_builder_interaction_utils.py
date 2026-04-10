@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from intric.flows.ai_builder.ai_builder_discovery import build_discovery_block_message
 
 if TYPE_CHECKING:
-    from intric.flows.domain.flow import Flow
     from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+    from intric.flows.domain.flow import Flow
 
 
 # Minimum number of structured answers before we allow bypassing soft blockers
@@ -36,7 +36,7 @@ def _count_structured_answers(conversation: list["ConversationMessage"]) -> int:
         qa = metadata.get("question_answer")
         if not isinstance(qa, dict):
             continue
-        qid = qa.get("question_id")
+        qid = cast(dict[str, Any], qa).get("question_id")
         if isinstance(qid, str):
             answered_ids.add(qid)
     return len(answered_ids)
@@ -55,9 +55,12 @@ def build_question_fallback_text(arguments: dict[str, Any]) -> str | None:
     options = arguments.get("options")
     if isinstance(options, list):
         labels = [
-            str(option.get("label")).strip()
-            for option in options
-            if isinstance(option, dict) and isinstance(option.get("label"), str)
+            str(option_dict.get("label")).strip()
+            for option in cast(list[object], options)
+            if isinstance(option, dict)
+            and isinstance(
+                (option_dict := cast(dict[str, Any], option)).get("label"), str
+            )
         ]
         if labels:
             if len(labels) == 1:
@@ -76,8 +79,22 @@ def looks_like_information_request(text: str) -> bool:
         return False
     # Action-intent keywords -> user wants to build/change, not ask.
     action_keywords = (
-        "proposal", "förslag", "plan", "steg", "steps", "flow",
-        "bygg", "skapa", "lägg till", "ändra", "ta bort",
-        "build", "create", "add", "remove", "modify", "make",
+        "proposal",
+        "förslag",
+        "plan",
+        "steg",
+        "steps",
+        "flow",
+        "bygg",
+        "skapa",
+        "lägg till",
+        "ändra",
+        "ta bort",
+        "build",
+        "create",
+        "add",
+        "remove",
+        "modify",
+        "make",
     )
     return not any(keyword in lowered for keyword in action_keywords)

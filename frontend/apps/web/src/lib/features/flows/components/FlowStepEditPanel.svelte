@@ -965,7 +965,7 @@
     </div>
   {:else}
     <div class="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
-      <MousePointerClick class="size-10 text-muted/40 mb-3" />
+      <MousePointerClick class="text-muted/40 mb-3 size-10" />
       <h3 class="text-lg font-semibold">{m.flow_step_select_prompt()}</h3>
       <p class="text-secondary max-w-md text-sm">
         {m.flow_step_select_prompt_desc()}
@@ -1035,8 +1035,10 @@
             {transcriptionModelConfigured}
             {transcriptionModelLabel}
             flowId={currentFlowId}
-            on:inputSourceChange={(e) => handleInputSourceChange(e.detail.value)}
-            on:inputTypeChange={(e) => handleInputTypeChange(e.detail.value)}
+            on:inputSourceChange={(e) =>
+              handleInputSourceChange(e.detail.value as FlowStep["input_source"])}
+            on:inputTypeChange={(e) =>
+              handleInputTypeChange(e.detail.value as FlowStep["input_type"])}
             on:runtimeInputChange={(e) => updateRuntimeInputSettings(e.detail.patch)}
             on:httpConfigChange={(e) => updateStep("input_config", e.detail.config)}
             on:openTranscriptionSettings={() => dispatch("openTranscriptionSettings")}
@@ -1103,7 +1105,8 @@
             on:revealInputTemplate={() => (revealInputTemplateInUserMode = true)}
             on:clearInputTemplate={() => updateInputTemplate("")}
             on:inputTemplateChange={(e) => updateInputTemplate(e.detail.value)}
-            on:inputSourceChange={(e) => handleInputSourceChange(e.detail.value)}
+            on:inputSourceChange={(e) =>
+              handleInputSourceChange(e.detail.value as FlowStep["input_source"])}
           />
         {/if}
 
@@ -1129,7 +1132,8 @@
             {templateUnnamedStepWarning}
             {templateAutoMatchableCount}
             {availableTemplateFiles}
-            on:outputModeChange={(e) => handleOutputModeChange(e.detail.value)}
+            on:outputModeChange={(e) =>
+              handleOutputModeChange(e.detail.value as FlowStep["output_mode"])}
             on:templateFileSelect={(e) => void handleTemplateFileSelection(e.detail.assetId)}
             on:templateUpload={(e) => void handleTemplateUpload(e.detail.event)}
             on:templateDownload={() => void downloadCurrentTemplate()}
@@ -1149,8 +1153,10 @@
             {availableOutputModes}
             {outputHintKind}
             flowId={currentFlowId}
-            on:outputTypeChange={(e) => handleOutputTypeChange(e.detail.value)}
-            on:outputModeChange={(e) => handleOutputModeChange(e.detail.value)}
+            on:outputTypeChange={(e) =>
+              handleOutputTypeChange(e.detail.value as FlowStep["output_type"])}
+            on:outputModeChange={(e) =>
+              handleOutputModeChange(e.detail.value as FlowStep["output_mode"])}
             on:webhookUrlChange={(e) =>
               updateStep("output_config", {
                 ...(activeStep?.output_config ?? {}),
@@ -1159,7 +1165,10 @@
             on:httpConfigChange={(e) =>
               updateStep(
                 "output_config",
-                preserveFlowCitationMode(e.detail.config, activeStep?.output_config ?? null)
+                preserveFlowCitationMode(
+                  e.detail.config as unknown as Record<string, unknown>,
+                  activeStep?.output_config ?? null
+                )
               )}
             on:citationModeChange={(e) => handleCitationModeChange(e.detail.value)}
             on:switchToTemplateFill={() => handleOutputModeChange("template_fill")}
@@ -1214,7 +1223,7 @@
             {advancedJsonErrors}
             on:mcpPolicyChange={(e) => updateStep("mcp_policy", e.detail.value)}
             on:jsonFieldUpdate={(e) =>
-              handleAdvancedJsonFieldUpdate(e.detail.field, e.detail.value)}
+              handleAdvancedJsonFieldUpdate(e.detail.field as AdvancedJsonField, e.detail.value)}
           />
         {/if}
 

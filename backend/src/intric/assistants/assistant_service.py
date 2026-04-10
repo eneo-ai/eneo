@@ -14,6 +14,7 @@ from intric.assistants.api.assistant_models import AssistantResponse
 from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.assistants.assistant_factory import AssistantFactory
 from intric.assistants.assistant_repo import AssistantRepository
+from intric.assistants.reference_tags import extract_inline_reference_ids
 from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from intric.authentication.auth_service import AuthService
@@ -22,7 +23,11 @@ from intric.completion_models.infrastructure.web_search import WebSearch
 from intric.files.file_service import FileService
 from intric.icons.icon_repo import IconRepository
 from intric.logging.logging import LoggingDetails
-from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from intric.main.logging import get_logger
 from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from intric.prompts.api.prompt_models import PromptCreate
@@ -43,8 +48,6 @@ from intric.templates.assistant_template.assistant_template_service import (
 )
 from intric.users.user import UserInDB
 from intric.workflows.step_repo import StepRepository
-from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
-from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 
 logger = get_logger(__name__)
 
@@ -81,6 +84,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 AT_TAG_PATTERN = r"<intric-at-tag: @[^>]+>"
+
 
 def clean_intric_tag(input_string: str) -> str:
     return re.sub(AT_TAG_PATTERN, "", input_string)
@@ -199,6 +203,9 @@ class AssistantService:
         name: str,
         space_id: UUID,
         template_data: Optional["TemplateCreate"] = None,
+        hidden: bool = False,
+        origin: AssistantOrigin = AssistantOrigin.USER,
+        managing_flow_id: UUID | None = None,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         space = await self.space_service.get_space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
@@ -362,6 +369,7 @@ class AssistantService:
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        include_hidden: bool = False,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -769,6 +777,7 @@ class AssistantService:
                                         approved=None,
                                         result_status=tc.result_status,
                                     )
+                                )
                         yield chunk
 
                     if chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
@@ -778,13 +787,16 @@ class AssistantService:
                                     (
                                         t
                                         for t in tool_calls
-                                        if t.tool_call_id and t.tool_call_id == tc.tool_call_id
+                                        if t.tool_call_id
+                                        and t.tool_call_id == tc.tool_call_id
                                     ),
                                     None,
                                 )
                                 if existing:
                                     existing.approved = False
-                                    existing.result_status = tc.result_status or "timeout_denied"
+                                    existing.result_status = (
+                                        tc.result_status or "timeout_denied"
+                                    )
                                 else:
                                     tool_calls.append(
                                         ToolCallInfo(
@@ -793,7 +805,8 @@ class AssistantService:
                                             arguments=tc.arguments,
                                             tool_call_id=tc.tool_call_id,
                                             approved=False,
-                                            result_status=tc.result_status or "timeout_denied",
+                                            result_status=tc.result_status
+                                            or "timeout_denied",
                                         )
                                     )
                         yield chunk
@@ -1141,6 +1154,7 @@ class AssistantService:
         )
 
         return assistant, permissions
+
     async def get_assistant_mcp_servers(self, assistant_id: UUID):
         """Get all MCP servers associated with an assistant."""
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)

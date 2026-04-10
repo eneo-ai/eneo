@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
+from intric.flows.domain.flow import JsonObject
 from intric.main.exceptions import BadRequestException
 
 
@@ -31,7 +32,7 @@ def encrypt_step_headers_for_storage(
         return config
 
     encrypted_headers: dict[str, Any] = {}
-    for key, value in headers.items():
+    for key, value in cast(JsonObject, headers).items():
         if not isinstance(value, str):
             encrypted_headers[key] = value
             continue
@@ -59,7 +60,7 @@ def decrypt_step_headers_for_runtime(
         return config
 
     decrypted_headers: dict[str, Any] = {}
-    for key, value in headers.items():
+    for key, value in cast(JsonObject, headers).items():
         if not isinstance(value, str):
             decrypted_headers[key] = value
             continue

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_models import (
@@ -30,14 +30,20 @@ def apply_audio_transcription_defaults(
 
     updated_metadata = dict(metadata or {})
     wizard = updated_metadata.get("wizard")
-    wizard_config = dict(wizard) if isinstance(wizard, dict) else {}
+    wizard_config: JsonObject = (
+        dict(cast(JsonObject, wizard)) if isinstance(wizard, dict) else {}
+    )
 
     wizard_config["transcription_enabled"] = True
 
     raw_model = wizard_config.get("transcription_model")
-    model_config = dict(raw_model) if isinstance(raw_model, dict) else {}
+    model_config: JsonObject = (
+        dict(cast(JsonObject, raw_model)) if isinstance(raw_model, dict) else {}
+    )
     model_id = model_config.get("id")
-    if (model_id is None or str(model_id).strip() == "") and default_transcription_model_id:
+    if (
+        model_id is None or str(model_id).strip() == ""
+    ) and default_transcription_model_id:
         wizard_config["transcription_model"] = {
             "id": str(default_transcription_model_id)
         }
@@ -52,7 +58,8 @@ def apply_audio_transcription_defaults(
 
 def _uses_audio_flow_input(spec: FlowDraftSpecCore) -> bool:
     return any(
-        step.input_source == InputSource.FLOW_INPUT and step.input_type == InputType.AUDIO
+        step.input_source == InputSource.FLOW_INPUT
+        and step.input_type == InputType.AUDIO
         for step in spec.steps
     )
 
@@ -78,7 +85,11 @@ def _cleanup_transcription_metadata(metadata: JsonObject | None) -> JsonObject |
         return metadata
 
     updated_metadata = dict(metadata)
-    updated_wizard = {k: v for k, v in wizard.items() if k not in _TRANSCRIPTION_WIZARD_KEYS}
+    updated_wizard = {
+        key: value
+        for key, value in cast(JsonObject, wizard).items()
+        if key not in _TRANSCRIPTION_WIZARD_KEYS
+    }
 
     if updated_wizard:
         updated_metadata["wizard"] = updated_wizard

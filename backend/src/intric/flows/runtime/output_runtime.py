@@ -33,6 +33,14 @@ class ValidateAgainstContractFn(Protocol):
     ) -> None: ...
 
 
+def _is_pdf_bytes_text(text: str) -> bool:
+    return text.lstrip().startswith("%PDF-")
+
+
+def _pdf_bytes_from_text(text: str) -> bytes:
+    return text.lstrip().encode("latin-1", errors="replace")
+
+
 class RenderDocumentFn(Protocol):
     def __call__(
         self,
@@ -82,11 +90,16 @@ async def process_typed_output(
                 step.output_contract,
                 label=f"Step {step.step_order} output (pre-render)",
             )
-        blob, mimetype, filename = deps.render_document(
-            full_text,
-            step.output_type,
-            step_order=step.step_order,
-        )
+        if step.output_type == "pdf" and _is_pdf_bytes_text(full_text):
+            blob = _pdf_bytes_from_text(full_text)
+            mimetype = "application/pdf"
+            filename = f"step_{step.step_order}_output.pdf"
+        else:
+            blob, mimetype, filename = deps.render_document(
+                full_text,
+                step.output_type,
+                step_order=step.step_order,
+            )
         file_record = await deps.file_repo.add(
             FileCreate(
                 file_type=FileType.DOCUMENT,

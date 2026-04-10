@@ -143,7 +143,7 @@ async def execute_http_test(
 
 def _mask_sensitive_headers(headers: dict[str, str]) -> dict[str, str]:
     sensitive = {"authorization", "x-api-key"}
-    masked = {}
+    masked: dict[str, str] = {}
     for key, value in headers.items():
         if key.lower() in sensitive:
             masked[key] = value[:10] + "..." if len(value) > 10 else value

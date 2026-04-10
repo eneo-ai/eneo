@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from datetime import datetime
+from enum import Enum
 from typing import TYPE_CHECKING, Optional, Union, cast
 from uuid import UUID
 
@@ -322,6 +323,7 @@ class Assistant(Entity):
         extended_logging: bool = False,
         prompt_override: str | None = None,
         prompt: str | None = None,
+        version: int = 1,
     ) -> "CompletionModelResponse":
         if self.completion_model is None:
             raise NoModelSelectedException()

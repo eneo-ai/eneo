@@ -7,10 +7,10 @@ from fastapi import HTTPException, Request, status
 
 from intric.assistants.api.assistant_models import AssistantUpdatePublic
 from intric.authentication.auth_dependencies import get_scope_filter
-from intric.flows.api.flow_api_common import enforce_flow_scope
 from intric.flows.api.flow_api_common import (
     FlowAccessContext,
     FlowSpaceAccessContext,
+    enforce_flow_scope,
     resolve_flow_access_context,
     resolve_space_access_context,
 )
@@ -27,7 +27,9 @@ from intric.main.container.container import Container
 dispatch_flow_run_after_commit = flow_dispatch.dispatch_flow_run_after_commit
 
 
-def find_classification_overrides(flow_data: FlowCreateRequest | FlowUpdateRequest) -> list[int]:
+def find_classification_overrides(
+    flow_data: FlowCreateRequest | FlowUpdateRequest,
+) -> list[int]:
     steps = flow_data.steps
     if not steps:
         return []
@@ -38,12 +40,22 @@ def find_classification_overrides(flow_data: FlowCreateRequest | FlowUpdateReque
     ]
 
 
-def extract_assistant_update_payload(assistant: AssistantUpdatePublic) -> dict[str, Any]:
+def extract_assistant_update_payload(
+    assistant: AssistantUpdatePublic,
+) -> dict[str, Any]:
     payload = assistant.model_dump(exclude_unset=True)
-    groups = [group.id for group in assistant.groups] if "groups" in payload else None
-    websites = [website.id for website in assistant.websites] if "websites" in payload else None
+    groups = (
+        [group.id for group in (assistant.groups or [])]
+        if "groups" in payload
+        else None
+    )
+    websites = (
+        [website.id for website in (assistant.websites or [])]
+        if "websites" in payload
+        else None
+    )
     integration_knowledge_ids = (
-        [knowledge.id for knowledge in assistant.integration_knowledge_list]
+        [knowledge.id for knowledge in (assistant.integration_knowledge_list or [])]
         if "integration_knowledge_list" in payload
         else None
     )
@@ -52,7 +64,7 @@ def extract_assistant_update_payload(assistant: AssistantUpdatePublic) -> dict[s
         attachments = assistant.attachments or []
         attachment_ids = [attachment.id for attachment in attachments]
     mcp_server_ids = (
-        [server.id for server in assistant.mcp_servers]
+        [server.id for server in (assistant.mcp_servers or [])]
         if "mcp_servers" in payload
         else None
     )
@@ -66,7 +78,9 @@ def extract_assistant_update_payload(assistant: AssistantUpdatePublic) -> dict[s
         else None
     )
     completion_model_kwargs = (
-        assistant.completion_model_kwargs if "completion_model_kwargs" in payload else None
+        assistant.completion_model_kwargs
+        if "completion_model_kwargs" in payload
+        else None
     )
 
     description: str | Any = (
@@ -122,11 +136,11 @@ def required_uuid(value: UUID | None, *, field: str) -> UUID:
 
 def flow_upload_service(container: Container) -> FlowFileUploadService:
     return FlowFileUploadService(
-        flow_service=container.flow_service(),
+        flow_service=cast(Any, container.flow_service()),  # pyright: ignore[reportUnknownMemberType]
         file_service=container.file_service(),
-        settings_service=container.settings_service(),
-        flow_version_repo=container.flow_version_repo(),
-        template_asset_repo=container.flow_template_asset_repo(),
+        settings_service=cast(Any, container.settings_service()),  # pyright: ignore[reportUnknownMemberType]
+        flow_version_repo=cast(Any, container.flow_version_repo()),  # pyright: ignore[reportUnknownMemberType]
+        template_asset_repo=cast(Any, container.flow_template_asset_repo()),  # pyright: ignore[reportUnknownMemberType]
     )
 
 

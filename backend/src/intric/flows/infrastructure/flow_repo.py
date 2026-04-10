@@ -3,20 +3,20 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.database.tables.assistant_table import Assistants, AssistantsGroups
 from intric.database.tables.ai_models_table import CompletionModels
+from intric.database.tables.assistant_table import Assistants, AssistantsGroups
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.flow_tables import (
+    Flows,
     FlowStepResults,
     FlowSteps,
-    Flows,
 )
 from intric.database.tables.prompts_table import Prompts, PromptsAssistants
 from intric.database.tables.spaces_table import Spaces
@@ -95,7 +95,7 @@ class FlowRepository:
         flow_in_db = await self.session.scalar(insert_stmt)
         if flow_in_db is None:
             raise NotFoundException("Could not create flow.")
-        flow_id = cast(UUID, flow_in_db.id)
+        flow_id = flow_in_db.id
 
         if flow.steps:
             rows = [
@@ -146,15 +146,19 @@ class FlowRepository:
         if not flow_rows:
             return []
 
-        flow_ids = [cast(UUID, row.id) for row in flow_rows]
+        flow_ids = [row.id for row in flow_rows]
         steps_rows = (
-            await self.session.execute(
-                sa.select(FlowSteps)
-                .where(FlowSteps.flow_id.in_(flow_ids))
-                .where(FlowSteps.tenant_id == tenant_id)
-                .order_by(FlowSteps.flow_id.asc(), FlowSteps.step_order.asc())
+            (
+                await self.session.execute(
+                    sa.select(FlowSteps)
+                    .where(FlowSteps.flow_id.in_(flow_ids))
+                    .where(FlowSteps.tenant_id == tenant_id)
+                    .order_by(FlowSteps.flow_id.asc(), FlowSteps.step_order.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         steps_by_flow: dict[UUID, list[FlowSteps]] = defaultdict(list)
         for row in steps_rows:
             steps_by_flow[row.flow_id].append(row)
@@ -162,7 +166,7 @@ class FlowRepository:
         return [
             self.factory.from_flow_db(
                 flow_row,
-                steps_by_flow.get(cast(UUID, flow_row.id), []),
+                steps_by_flow.get(flow_row.id, []),
             )
             for flow_row in flow_rows
         ]
@@ -207,7 +211,10 @@ class FlowRepository:
                     Prompts.text.label("instructions"),
                 )
                 .join(Users, Users.id == Assistants.user_id)
-                .outerjoin(CompletionModels, CompletionModels.id == Assistants.completion_model_id)
+                .outerjoin(
+                    CompletionModels,
+                    CompletionModels.id == Assistants.completion_model_id,
+                )
                 .outerjoin(
                     PromptsAssistants,
                     sa.and_(
@@ -224,7 +231,9 @@ class FlowRepository:
         snapshots: dict[UUID, dict[str, Any]] = {
             row.id: {
                 "instructions": getattr(row, "instructions", None),
-                "model_ref": str(row.completion_model_id) if row.completion_model_id else None,
+                "model_ref": str(row.completion_model_id)
+                if row.completion_model_id
+                else None,
                 "model_label": getattr(row, "model_name", None),
                 "knowledge_refs": [],
                 "knowledge_labels": [],
@@ -275,7 +284,11 @@ class FlowRepository:
 
         rows = (
             await self.session.execute(
-                sa.select(Assistants.id, Assistants.origin, Assistants.managing_flow_id)
+                sa.select(
+                    Assistants.id,
+                    getattr(Assistants, "origin"),
+                    getattr(Assistants, "managing_flow_id"),
+                )
                 .join(Spaces, Spaces.id == Assistants.space_id)
                 .where(Assistants.id.in_(assistant_ids))
                 .where(Assistants.space_id == space_id)
@@ -284,9 +297,9 @@ class FlowRepository:
         ).all()
         return [
             AssistantScopeRow(
-                id=cast(UUID, row.id),
-                origin=cast(str | None, row.origin),
-                managing_flow_id=cast(UUID | None, row.managing_flow_id),
+                id=row.id,
+                origin=row.origin,
+                managing_flow_id=row.managing_flow_id,
             )
             for row in rows
         ]
@@ -346,7 +359,9 @@ class FlowRepository:
                     )
             raise NotFoundException("Flow not found.")
 
-        await self._sync_flow_steps(flow_id=flow.id, tenant_id=tenant_id, steps=flow.steps)
+        await self._sync_flow_steps(
+            flow_id=flow.id, tenant_id=tenant_id, steps=flow.steps
+        )
 
         return await self.get(flow.id, tenant_id)
 
@@ -369,8 +384,8 @@ class FlowRepository:
         )
         await self.session.execute(
             sa.delete(Assistants)
-            .where(Assistants.origin == "flow_managed")
-            .where(Assistants.managing_flow_id == flow_id)
+            .where(getattr(Assistants, "origin") == "flow_managed")
+            .where(getattr(Assistants, "managing_flow_id") == flow_id)
             .where(self._managed_assistant_belongs_to_tenant(tenant_id=tenant_id))
             .where(self._managed_assistant_has_no_step_references(tenant_id=tenant_id))
         )
@@ -470,18 +485,24 @@ class FlowRepository:
         steps: list[FlowStep],
     ) -> None:
         existing_rows = (
-            await self.session.execute(
-                sa.select(FlowSteps)
-                .where(FlowSteps.flow_id == flow_id)
-                .where(FlowSteps.tenant_id == tenant_id)
+            (
+                await self.session.execute(
+                    sa.select(FlowSteps)
+                    .where(FlowSteps.flow_id == flow_id)
+                    .where(FlowSteps.tenant_id == tenant_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         existing_by_order = {int(row.step_order): row for row in existing_rows}
 
         incoming_orders = {int(step.step_order) for step in steps}
         cleanup_candidates: set[UUID] = set()
         for step in steps:
-            payload = self._step_to_db_row(flow_id=flow_id, tenant_id=tenant_id, step=step)
+            payload = self._step_to_db_row(
+                flow_id=flow_id, tenant_id=tenant_id, step=step
+            )
             existing = existing_by_order.get(int(step.step_order))
             if existing is None:
                 await self.session.execute(sa.insert(FlowSteps).values(payload))
@@ -495,7 +516,9 @@ class FlowRepository:
                 .values(**payload)
             )
 
-        stale_orders = [order for order in existing_by_order if order not in incoming_orders]
+        stale_orders = [
+            order for order in existing_by_order if order not in incoming_orders
+        ]
         if stale_orders:
             cleanup_candidates.update(
                 existing_by_order[order].assistant_id for order in stale_orders
@@ -525,23 +548,27 @@ class FlowRepository:
         await self.session.execute(
             sa.delete(Assistants)
             .where(Assistants.id.in_(assistant_ids))
-            .where(Assistants.origin == "flow_managed")
-            .where(Assistants.managing_flow_id == flow_id)
+            .where(getattr(Assistants, "origin") == "flow_managed")
+            .where(getattr(Assistants, "managing_flow_id") == flow_id)
             .where(self._managed_assistant_belongs_to_tenant(tenant_id=tenant_id))
             .where(self._managed_assistant_has_no_step_references(tenant_id=tenant_id))
         )
 
     @staticmethod
-    def _managed_assistant_belongs_to_tenant(*, tenant_id: UUID) -> sa.ColumnElement[bool]:
+    def _managed_assistant_belongs_to_tenant(
+        *, tenant_id: UUID
+    ) -> sa.ColumnElement[bool]:
         return sa.exists(
             sa.select(1)
             .select_from(Flows)
-            .where(Flows.id == Assistants.managing_flow_id)
+            .where(Flows.id == getattr(Assistants, "managing_flow_id"))
             .where(Flows.tenant_id == tenant_id)
         )
 
     @staticmethod
-    def _managed_assistant_has_no_step_references(*, tenant_id: UUID) -> sa.ColumnElement[bool]:
+    def _managed_assistant_has_no_step_references(
+        *, tenant_id: UUID
+    ) -> sa.ColumnElement[bool]:
         return ~sa.exists(
             sa.select(1)
             .select_from(FlowSteps)

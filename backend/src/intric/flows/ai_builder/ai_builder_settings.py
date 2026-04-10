@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
@@ -45,10 +45,12 @@ def _extract_ai_builder_settings(
     if not isinstance(ai_builder, dict):
         return {}
 
-    return ai_builder
+    return dict(cast(dict[str, Any], ai_builder))
 
 
-def _parse_token_int(value: Any, field_name: str, *, allow_none: bool = False) -> int | None:
+def _parse_token_int(
+    value: Any, field_name: str, *, allow_none: bool = False
+) -> int | None:
     if value is None and allow_none:
         return None
     if not isinstance(value, int) or isinstance(value, bool):
@@ -68,21 +70,25 @@ def validate_ai_builder_budget_settings_object(
     if not isinstance(value, dict):
         raise ValueError("flow_settings.ai_builder must be an object")
 
-    unknown_fields = set(value) - _AI_BUILDER_BUDGET_FIELDS
+    value_dict = cast(dict[str, Any], value)
+    unknown_fields = set(value_dict) - _AI_BUILDER_BUDGET_FIELDS
     if unknown_fields:
         unknown = ", ".join(sorted(unknown_fields))
         raise ValueError(f"flow_settings.ai_builder contains unknown fields: {unknown}")
 
     validated: dict[str, Any] = {}
-    for field_name in ("conversation_safety_buffer_tokens", "minimum_conversation_budget_tokens"):
-        if field_name in value:
+    for field_name in (
+        "conversation_safety_buffer_tokens",
+        "minimum_conversation_budget_tokens",
+    ):
+        if field_name in value_dict:
             validated[field_name] = _parse_token_int(
-                value[field_name],
+                value_dict[field_name],
                 f"flow_settings.ai_builder.{field_name}",
             )
-    if "unknown_model_context_window_tokens" in value:
+    if "unknown_model_context_window_tokens" in value_dict:
         validated["unknown_model_context_window_tokens"] = _parse_token_int(
-            value["unknown_model_context_window_tokens"],
+            value_dict["unknown_model_context_window_tokens"],
             "flow_settings.ai_builder.unknown_model_context_window_tokens",
             allow_none=True,
         )
@@ -99,21 +105,21 @@ def resolve_ai_builder_budget_policy(
 
     safety_buffer = resolved_defaults.conversation_safety_buffer_tokens
     if "conversation_safety_buffer_tokens" in raw:
-        safety_buffer = int(
-            _parse_token_int(
-                raw["conversation_safety_buffer_tokens"],
-                "conversation_safety_buffer_tokens",
-            )
+        parsed_safety_buffer = _parse_token_int(
+            raw["conversation_safety_buffer_tokens"],
+            "conversation_safety_buffer_tokens",
         )
+        if parsed_safety_buffer is not None:
+            safety_buffer = parsed_safety_buffer
 
     minimum_budget = resolved_defaults.minimum_conversation_budget_tokens
     if "minimum_conversation_budget_tokens" in raw:
-        minimum_budget = int(
-            _parse_token_int(
-                raw["minimum_conversation_budget_tokens"],
-                "minimum_conversation_budget_tokens",
-            )
+        parsed_minimum_budget = _parse_token_int(
+            raw["minimum_conversation_budget_tokens"],
+            "minimum_conversation_budget_tokens",
         )
+        if parsed_minimum_budget is not None:
+            minimum_budget = parsed_minimum_budget
 
     unknown_context_window = resolved_defaults.unknown_model_context_window_tokens
     if "unknown_model_context_window_tokens" in raw:
@@ -139,9 +145,7 @@ def apply_ai_builder_budget_policy_patch(
     remove_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     result = (
-        dict(current_flow_settings)
-        if isinstance(current_flow_settings, dict)
-        else {}
+        dict(current_flow_settings) if isinstance(current_flow_settings, dict) else {}
     )
     current = _extract_ai_builder_settings(result)
     next_settings: dict[str, Any] = dict(current)

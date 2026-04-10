@@ -7,15 +7,14 @@ the LLM describes the change, and the backend preserves everything else.
 
 from __future__ import annotations
 
-from copy import deepcopy
 import re
-from typing import Any
+from copy import deepcopy
+from typing import Any, cast
 from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_description_semantics import (
     FlowSemanticSignature,
 )
-from intric.flows.ai_builder.ai_builder_flow_name import normalize_flow_name
 from intric.flows.ai_builder.ai_builder_edit_models import (
     CompiledEditResult,
     EditAdvisory,
@@ -28,6 +27,7 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepEditOperation,
     StepPatch,
 )
+from intric.flows.ai_builder.ai_builder_flow_name import normalize_flow_name
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -105,7 +105,7 @@ def compile_edit_draft(
                     prior_steps=compiled_steps,
                 )
             )
-        elif isinstance(item, FlowStep):
+        else:
             patch = modified_refs.get(ref)  # type: ignore[arg-type]
             compiled_steps.append(
                 _flow_step_to_spec(
@@ -119,7 +119,9 @@ def compile_edit_draft(
     compiled_steps = _canonicalize_existing_runtime_aliases(compiled_steps)
     normalized_spec, normalization_changes = normalize_ai_builder_spec(
         FlowDraftSpecCore(
-            flow_name=normalize_flow_name(edit_draft.flow_name or flow_name or "Unnamed Flow"),
+            flow_name=normalize_flow_name(
+                edit_draft.flow_name or flow_name or "Unnamed Flow"
+            ),
             flow_description=_resolve_flow_description(
                 edit_draft=edit_draft,
                 current_description=flow_description,
@@ -147,13 +149,17 @@ def compile_edit_draft(
     )
 
     # Build advisories from semantic signature comparison
-    advisories: list[EditAdvisory] = _build_normalization_advisories(normalization_changes)
-    advisories.extend(_build_description_advisories(
-        edit_draft=edit_draft,
-        current_steps=current_steps,
-        compiled_steps=compiled_steps,
-        current_description=flow_description,
-    ))
+    advisories: list[EditAdvisory] = _build_normalization_advisories(
+        normalization_changes
+    )
+    advisories.extend(
+        _build_description_advisories(
+            edit_draft=edit_draft,
+            current_steps=current_steps,
+            compiled_steps=compiled_steps,
+            current_description=flow_description,
+        )
+    )
 
     step_changes = _build_step_changes(
         current_steps=current_steps,
@@ -169,7 +175,10 @@ def compile_edit_draft(
         flow_property_changes["flow_name"] = (flow_name, edit_draft.flow_name)
     previous_description = flow_description or ""
     if final_description != previous_description:
-        flow_property_changes["flow_description"] = (flow_description, final_description)
+        flow_property_changes["flow_description"] = (
+            flow_description,
+            final_description,
+        )
 
     net_added = sum(1 for c in step_changes if c.kind == "added")
     net_removed = sum(1 for c in step_changes if c.kind == "removed")
@@ -327,7 +336,7 @@ def _resolve_existing_assistant_spec(
     step: FlowStep,
     assistant_snapshots: dict[UUID, dict[str, Any]] | None,
 ) -> AssistantSpec:
-    if step.assistant_id is None or not assistant_snapshots:
+    if not assistant_snapshots:
         return AssistantSpec(instructions="")
 
     snapshot = assistant_snapshots.get(step.assistant_id)
@@ -337,14 +346,19 @@ def _resolve_existing_assistant_spec(
     instructions_raw = snapshot.get("instructions")
     model_ref_raw = snapshot.get("model_ref")
     knowledge_refs_raw = snapshot.get("knowledge_refs")
+    knowledge_refs = (
+        cast(list[object], knowledge_refs_raw)
+        if isinstance(knowledge_refs_raw, list)
+        else []
+    )
     return AssistantSpec(
-        instructions=instructions_raw.strip() if isinstance(instructions_raw, str) else "",
-        model_ref=model_ref_raw if isinstance(model_ref_raw, str) and model_ref_raw.strip() else None,
-        knowledge_refs=(
-            [str(ref).strip() for ref in knowledge_refs_raw if str(ref).strip()]
-            if isinstance(knowledge_refs_raw, list)
-            else []
-        ),
+        instructions=instructions_raw.strip()
+        if isinstance(instructions_raw, str)
+        else "",
+        model_ref=model_ref_raw
+        if isinstance(model_ref_raw, str) and model_ref_raw.strip()
+        else None,
+        knowledge_refs=[str(ref).strip() for ref in knowledge_refs if str(ref).strip()],
     )
 
 
@@ -585,29 +599,31 @@ def _compile_form_fields(
     edit_draft: FlowEditDraft,
     *,
     current_metadata_json: dict[str, Any] | None,
-) -> tuple[list[FormFieldSpec] | None, list]:
+) -> tuple[list[FormFieldSpec] | None, list[FormFieldChange]]:
     current_fields = _extract_form_fields_from_metadata(current_metadata_json)
     if not edit_draft.form_operations:
         return (deepcopy(current_fields) if current_fields is not None else None, [])
 
     working_fields = deepcopy(current_fields) if current_fields is not None else []
     field_index = {field.name: index for index, field in enumerate(working_fields)}
-    form_changes = []
+    form_changes: list[FormFieldChange] = []
 
     for op in edit_draft.form_operations:
         existing_index = field_index.get(op.field_name)
         existing_field = (
-            working_fields[existing_index]
-            if existing_index is not None
-            else None
+            working_fields[existing_index] if existing_index is not None else None
         )
 
         if op.op == "remove":
             if existing_index is None:
                 continue
             working_fields.pop(existing_index)
-            field_index = {field.name: index for index, field in enumerate(working_fields)}
-            form_changes.append(FormFieldChange(kind="removed", field_name=op.field_name))
+            field_index = {
+                field.name: index for index, field in enumerate(working_fields)
+            }
+            form_changes.append(
+                FormFieldChange(kind="removed", field_name=op.field_name)
+            )
             continue
 
         payload = op.field_payload
@@ -616,22 +632,30 @@ def _compile_form_fields(
             type=(
                 payload.field_type
                 if payload is not None and payload.field_type is not None
-                else existing_field.type if existing_field is not None else "text"
+                else existing_field.type
+                if existing_field is not None
+                else "text"
             ),
             label=(
                 payload.label
                 if payload is not None and payload.label is not None
-                else existing_field.label if existing_field is not None else op.field_name
+                else existing_field.label
+                if existing_field is not None
+                else op.field_name
             ),
             required=(
                 payload.required
                 if payload is not None and payload.required is not None
-                else existing_field.required if existing_field is not None else False
+                else existing_field.required
+                if existing_field is not None
+                else False
             ),
             options=(
                 deepcopy(payload.options)
                 if payload is not None and payload.options is not None
-                else deepcopy(existing_field.options) if existing_field is not None else None
+                else deepcopy(existing_field.options)
+                if existing_field is not None
+                else None
             ),
         )
 
@@ -655,22 +679,28 @@ def _extract_form_fields_from_metadata(
     form_schema = metadata_json.get("form_schema")
     if not isinstance(form_schema, dict):
         return None
-    raw_fields = form_schema.get("fields")
-    if not isinstance(raw_fields, list):
+    form_schema_dict = cast(dict[str, Any], form_schema)
+    raw_fields_value = form_schema_dict.get("fields")
+    if not isinstance(raw_fields_value, list):
         return None
+    raw_fields = cast(list[object], raw_fields_value)
 
     fields: list[FormFieldSpec] = []
     for raw_field in raw_fields:
         if not isinstance(raw_field, dict):
             continue
-        name = str(raw_field.get("name", "")).strip()
+        raw_field_dict = cast(dict[str, Any], raw_field)
+        name = str(raw_field_dict.get("name", "")).strip()
         if not name:
             continue
-        label = str(raw_field.get("label", name)).strip() or name
-        field_type = str(raw_field.get("type", "text")).strip() or "text"
-        options = raw_field.get("options")
+        label = str(raw_field_dict.get("label", name)).strip() or name
+        field_type = str(raw_field_dict.get("type", "text")).strip() or "text"
+        options = raw_field_dict.get("options")
+        normalized_option_values = (
+            cast(list[object], options) if isinstance(options, list) else []
+        )
         normalized_options = (
-            [str(option) for option in options]
+            [str(option) for option in normalized_option_values]
             if isinstance(options, list)
             else None
         )
@@ -679,14 +709,16 @@ def _extract_form_fields_from_metadata(
                 name=name,
                 type=field_type,
                 label=label,
-                required=bool(raw_field.get("required", False)),
+                required=bool(raw_field_dict.get("required", False)),
                 options=normalized_options,
             )
         )
     return fields or None
 
 
-def _canonicalize_existing_runtime_aliases(step_specs: list[StepSpec]) -> list[StepSpec]:
+def _canonicalize_existing_runtime_aliases(
+    step_specs: list[StepSpec],
+) -> list[StepSpec]:
     existing_order_to_plan_ref = {
         existing_order: step.plan_step_ref
         for step in step_specs
@@ -753,12 +785,12 @@ def _rewrite_runtime_alias_value(
     if isinstance(value, dict):
         return {
             key: _rewrite_runtime_alias_value(inner, existing_order_to_plan_ref)
-            for key, inner in value.items()
+            for key, inner in cast(dict[str, Any], value).items()
         }
     if isinstance(value, list):
         return [
             _rewrite_runtime_alias_value(item, existing_order_to_plan_ref)
-            for item in value
+            for item in cast(list[Any], value)
         ]
     return value
 

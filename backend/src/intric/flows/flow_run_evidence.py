@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict
-from intric.flows.domain.flow import FlowRun, FlowStepAttempt, FlowStepResult, FlowVersion
+
+from intric.flows.domain.flow import (
+    FlowRun,
+    FlowStepAttempt,
+    FlowStepResult,
+    FlowVersion,
+    JsonObject,
+)
 from intric.flows.flow_run_provenance import normalize_rag_payload
 
 DEBUG_EXPORT_SCHEMA_VERSION = "eneo.flow.debug-export.v2"
@@ -59,11 +66,7 @@ def build_debug_export(
     step_results: list[FlowStepResult] | None = None,
     step_attempts: list[FlowStepAttempt] | None = None,
 ) -> dict[str, Any]:
-    definition_snapshot = (
-        version.definition_json
-        if isinstance(version.definition_json, dict)
-        else {}
-    )
+    definition_snapshot = version.definition_json
     rag_by_step_order: dict[int, dict[str, Any]] = {}
     for result in step_results or []:
         input_payload = result.input_payload_json
@@ -87,15 +90,18 @@ def build_debug_export(
         )
 
     raw_steps = definition_snapshot.get("steps")
-    normalized_steps = []
+    normalized_steps: list[dict[str, Any]] = []
     if isinstance(raw_steps, list):
-        for raw_step in raw_steps:
+        for raw_step in cast(list[object], raw_steps):
             if isinstance(raw_step, dict):
-                parsed_step_order = parse_step_order(raw_step.get("step_order"), default=0)
+                raw_step_dict = cast(JsonObject, raw_step)
+                parsed_step_order = parse_step_order(
+                    raw_step_dict.get("step_order"), default=0
+                )
                 step_order = parsed_step_order if parsed_step_order is not None else 0
                 normalized_steps.append(
                     normalize_debug_step(
-                        raw_step,
+                        raw_step_dict,
                         rag_metadata=rag_by_step_order.get(step_order),
                         attempts=attempts_by_step_order.get(step_order, []),
                     )
@@ -103,12 +109,18 @@ def build_debug_export(
     summary = DebugRunSummaryProjection(
         steps_count=len(normalized_steps),
         completed_steps=sum(
-            1 for result in step_results or [] if _normalize_status(result.status) == "completed"
+            1
+            for result in step_results or []
+            if _normalize_status(result.status) == "completed"
         ),
         failed_steps=sum(
-            1 for result in step_results or [] if _normalize_status(result.status) == "failed"
+            1
+            for result in step_results or []
+            if _normalize_status(result.status) == "failed"
         ),
-        attempts_count=sum(len(attempts) for attempts in attempts_by_step_order.values()),
+        attempts_count=sum(
+            len(attempts) for attempts in attempts_by_step_order.values()
+        ),
         artifacts_count=_count_artifacts(step_results or [], run.output_payload_json),
         duration_ms=_calculate_duration_ms(run.created_at, run.updated_at),
         models_used=_collect_models_used(step_attempts or []),
@@ -164,7 +176,9 @@ def normalize_debug_step(
     attempts: list[DebugAttemptProjection] | None = None,
 ) -> dict[str, Any]:
     raw_allowlist = step.get("mcp_tool_allowlist")
-    tool_allowlist = raw_allowlist if isinstance(raw_allowlist, list) else []
+    tool_allowlist: list[object] = (
+        cast(list[object], raw_allowlist) if isinstance(raw_allowlist, list) else []
+    )
     input_type = step.get("input_type")
     output_type = step.get("output_type")
     return DebugStepProjection(
@@ -194,7 +208,7 @@ def normalize_debug_step(
             "tool_allowlist": tool_allowlist,
         },
         rag=_normalize_debug_rag(rag_metadata),
-        attempts=attempts or [],
+        attempts=list(attempts or []),
     ).model_dump(mode="json")
 
 
@@ -203,7 +217,7 @@ def normalize_debug_attempt(attempt: FlowStepAttempt) -> DebugAttemptProjection:
     finished_at = attempt.finished_at
     duration_ms = None
     attempt_no = attempt.attempt_no
-    if started_at is not None and finished_at is not None:
+    if finished_at is not None:
         duration_ms = max(
             0,
             int((finished_at - started_at).total_seconds() * 1000),
@@ -212,9 +226,10 @@ def normalize_debug_attempt(attempt: FlowStepAttempt) -> DebugAttemptProjection:
     if isinstance(attempt.provenance_json, dict):
         llm_payload = attempt.provenance_json.get("llm")
         if isinstance(llm_payload, dict):
-            raw_model_parameters = llm_payload.get("model_parameters")
+            llm_payload_dict = cast(JsonObject, llm_payload)
+            raw_model_parameters = llm_payload_dict.get("model_parameters")
             if isinstance(raw_model_parameters, dict):
-                model_parameters = raw_model_parameters
+                model_parameters = cast(JsonObject, raw_model_parameters)
     provider = attempt.provider
     if provider is None and isinstance(model_parameters, dict):
         raw_provider = model_parameters.get("provider")
@@ -252,7 +267,9 @@ def _calculate_duration_ms(started_at: Any, finished_at: Any) -> int | None:
     return max(0, int((finished_at - started_at).total_seconds() * 1000))
 
 
-def _count_artifacts(step_results: list[FlowStepResult], run_output_payload: Any) -> int:
+def _count_artifacts(
+    step_results: list[FlowStepResult], run_output_payload: Any
+) -> int:
     artifact_ids: set[str] = set()
     for result in step_results:
         _collect_artifact_ids(result.output_payload_json, artifact_ids)
@@ -263,17 +280,19 @@ def _count_artifacts(step_results: list[FlowStepResult], run_output_payload: Any
 def _collect_artifact_ids(payload: Any, artifact_ids: set[str]) -> None:
     if not isinstance(payload, dict):
         return
-    artifacts = payload.get("artifacts")
+    payload_dict = cast(JsonObject, payload)
+    artifacts = payload_dict.get("artifacts")
     if isinstance(artifacts, list):
-        for artifact in artifacts:
+        for artifact in cast(list[object], artifacts):
             if isinstance(artifact, dict):
-                file_id = artifact.get("file_id")
+                artifact_dict = cast(JsonObject, artifact)
+                file_id = artifact_dict.get("file_id")
                 if file_id is not None:
                     artifact_ids.add(str(file_id))
     for key in ("generated_file_ids", "file_ids"):
-        file_ids = payload.get(key)
+        file_ids = payload_dict.get(key)
         if isinstance(file_ids, list):
-            for file_id in file_ids:
+            for file_id in cast(list[object], file_ids):
                 artifact_ids.add(str(file_id))
 
 
@@ -284,9 +303,11 @@ def _collect_models_used(step_attempts: list[FlowStepAttempt]) -> list[str]:
         if candidate is None and isinstance(attempt.provenance_json, dict):
             llm_payload = attempt.provenance_json.get("llm")
             if isinstance(llm_payload, dict):
-                model_parameters = llm_payload.get("model_parameters")
+                llm_payload_dict = cast(JsonObject, llm_payload)
+                model_parameters = llm_payload_dict.get("model_parameters")
                 if isinstance(model_parameters, dict):
-                    raw_model_name = model_parameters.get("model_name")
+                    model_parameters_dict = cast(JsonObject, model_parameters)
+                    raw_model_name = model_parameters_dict.get("model_name")
                     if isinstance(raw_model_name, str) and raw_model_name.strip():
                         candidate = raw_model_name.strip()
         if isinstance(candidate, str) and candidate.strip():

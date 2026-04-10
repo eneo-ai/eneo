@@ -14,29 +14,40 @@ from intric.flows.domain.flow import (
     FlowVersion,
 )
 from intric.flows.execution_backend import FlowExecutionBackend
-from intric.flows.variable_resolver import FlowVariableResolver, iter_template_expressions
+from intric.flows.variable_resolver import (
+    FlowVariableResolver,
+    iter_template_expressions,
+)
 
 _LAZY_EXPORTS = {
     "FlowFactory": ("intric.flows.flow_factory", "FlowFactory"),
     "FlowRepository": ("intric.flows.infrastructure.flow_repo", "FlowRepository"),
-    "FlowRunRepository": ("intric.flows.infrastructure.flow_run_repo", "FlowRunRepository"),
+    "FlowRunRepository": (
+        "intric.flows.infrastructure.flow_run_repo",
+        "FlowRunRepository",
+    ),
     "FlowRunService": ("intric.flows.application.flow_run_service", "FlowRunService"),
     "FlowService": ("intric.flows.application.flow_service", "FlowService"),
-    "FlowVersionRepository": ("intric.flows.infrastructure.flow_version_repo", "FlowVersionRepository"),
+    "FlowVersionRepository": (
+        "intric.flows.infrastructure.flow_version_repo",
+        "FlowVersionRepository",
+    ),
+    "ai_builder": ("intric.flows.ai_builder", None),
     "flow_file_upload_service": ("intric.flows.flow_file_upload_service", None),
+    "flow_input_limits": ("intric.flows.flow_input_limits", None),
     "flow_run_service": ("intric.flows.application.flow_run_service", None),
     "flow_service": ("intric.flows.application.flow_service", None),
 }
 
 if TYPE_CHECKING:
+    from intric.flows import ai_builder, flow_file_upload_service, flow_input_limits
+    from intric.flows.application import flow_run_service, flow_service
     from intric.flows.application.flow_run_service import FlowRunService
     from intric.flows.application.flow_service import FlowService
     from intric.flows.flow_factory import FlowFactory
     from intric.flows.infrastructure.flow_repo import FlowRepository
     from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
     from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
-    from intric.flows import flow_file_upload_service
-    from intric.flows.application import flow_run_service, flow_service
 
 __all__ = [
     "Flow",
@@ -57,7 +68,9 @@ __all__ = [
     "FlowVersionRepository",
     "FlowService",
     "FlowVariableResolver",
+    "ai_builder",
     "flow_file_upload_service",
+    "flow_input_limits",
     "flow_run_service",
     "flow_service",
     "iter_template_expressions",

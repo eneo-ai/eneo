@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import json
-from typing import Any, cast
+from datetime import datetime, timedelta, timezone
+from typing import Any, Protocol, cast
 from uuid import UUID
 
 from intric.files.file_repo import FileRepository
@@ -14,7 +14,14 @@ from intric.flows.domain.flow import (
     JsonObject,
 )
 from intric.flows.execution_backend import FlowExecutionBackend
-from intric.flows.flow_input_limits import resolve_flow_input_limits
+from intric.flows.flow_input_limits import FlowInputLimits, resolve_flow_input_limits
+from intric.flows.flow_run_evidence_bundle import (
+    EvidenceBundle,
+    RedactedEvidenceBundle,
+    build_evidence_bundle,
+    redact_evidence_bundle,
+)
+from intric.flows.flow_run_export_json import render_evidence_json_export
 from intric.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
 from intric.flows.flow_run_step_inputs import (
     apply_legacy_step_one_adapter,
@@ -26,21 +33,22 @@ from intric.flows.flow_run_step_inputs import (
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository, PreseedStep
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from intric.flows.flow_run_evidence_bundle import (
-    EvidenceBundle,
-    RedactedEvidenceBundle,
-    build_evidence_bundle,
-    redact_evidence_bundle,
-)
-from intric.flows.flow_run_export_json import render_evidence_json_export
 from intric.flows.runtime.step_definition_parser import parse_runtime_steps
 from intric.main.config import get_settings
-from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from intric.main.logging import get_logger
 from intric.settings.setting_service import SettingService
 from intric.users.user import UserInDB
 
 logger = get_logger(__name__)
+
+
+class _SettingsServiceProtocol(Protocol):
+    async def get_flow_input_limits_resolved(self) -> FlowInputLimits: ...
 
 
 class FlowRunService:
@@ -99,7 +107,10 @@ class FlowRunService:
                 context={"flow_id": str(flow_id)},
             )
 
-        if expected_flow_version is not None and expected_flow_version != flow.published_version:
+        if (
+            expected_flow_version is not None
+            and expected_flow_version != flow.published_version
+        ):
             raise BadRequestException(
                 "The published flow version changed before this run request was submitted.",
                 code="flow_run_stale_version",
@@ -110,7 +121,9 @@ class FlowRunService:
             )
 
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
-            metadata_json=flow.metadata_json if isinstance(flow.metadata_json, dict) else None,
+            metadata_json=flow.metadata_json
+            if isinstance(flow.metadata_json, dict)
+            else None,
             payload=input_payload_json,
         )
         normalized_step_inputs: dict[UUID, list[UUID]] = {}
@@ -123,12 +136,17 @@ class FlowRunService:
                 tenant_id=self.user.tenant_id,
             )
             runtime_steps = parse_runtime_steps(runtime_version.definition_json)
+            settings_service = cast(
+                _SettingsServiceProtocol | None, self.settings_service
+            )
             limits = (
-                await self.settings_service.get_flow_input_limits_resolved()
-                if self.settings_service is not None
+                await settings_service.get_flow_input_limits_resolved()
+                if settings_service is not None
                 else resolve_flow_input_limits(None)
             )
-            runtime_specs = build_runtime_step_input_specs(steps=runtime_steps, limits=limits)
+            runtime_specs = build_runtime_step_input_specs(
+                steps=runtime_steps, limits=limits
+            )
             normalized_step_inputs = apply_legacy_step_one_adapter(
                 steps=runtime_steps,
                 specs=runtime_specs,
@@ -145,7 +163,9 @@ class FlowRunService:
         effective_payload = dict(normalized_inline_payload or {})
         effective_payload["expected_flow_version"] = flow.published_version
         if normalized_step_inputs:
-            effective_payload["step_inputs"] = serialize_step_inputs_payload(normalized_step_inputs)
+            effective_payload["step_inputs"] = serialize_step_inputs_payload(
+                normalized_step_inputs
+            )
         if file_ids:
             effective_payload["file_ids"] = [str(fid) for fid in file_ids]
         input_payload_json = effective_payload or None
@@ -170,8 +190,12 @@ class FlowRunService:
                 )
 
         # Serialize run creation per tenant to prevent concurrency-limit race conditions.
-        await self.flow_run_repo.acquire_tenant_run_creation_lock(tenant_id=self.user.tenant_id)
-        active_runs = await self.flow_run_repo.count_active_runs(tenant_id=self.user.tenant_id)
+        await self.flow_run_repo.acquire_tenant_run_creation_lock(
+            tenant_id=self.user.tenant_id
+        )
+        active_runs = await self.flow_run_repo.count_active_runs(
+            tenant_id=self.user.tenant_id
+        )
         if active_runs >= self.max_concurrent_runs:
             raise BadRequestException(
                 "Concurrent flow run limit reached for this tenant.",
@@ -283,11 +307,13 @@ class FlowRunService:
         )
         redispatched = 0
         for run in stale_runs:
-            claimed_run = await self.flow_run_repo.claim_stale_queued_run_for_redispatch(
-                run_id=run.id,
-                tenant_id=self.user.tenant_id,
-                stale_before=stale_before,
-                flow_id=flow_id,
+            claimed_run = (
+                await self.flow_run_repo.claim_stale_queued_run_for_redispatch(
+                    run_id=run.id,
+                    tenant_id=self.user.tenant_id,
+                    stale_before=stale_before,
+                    flow_id=flow_id,
+                )
             )
             if claimed_run is None or claimed_run.user_id is None:
                 continue
@@ -321,7 +347,9 @@ class FlowRunService:
             tenant_id=self.user.tenant_id,
             error_message="Run cancelled by user.",
         )
-        return await self.flow_run_repo.cancel(run_id=run_id, tenant_id=self.user.tenant_id)
+        return await self.flow_run_repo.cancel(
+            run_id=run_id, tenant_id=self.user.tenant_id
+        )
 
     async def complete_run(
         self,
@@ -371,10 +399,11 @@ class FlowRunService:
             payload = result.output_payload_json
             if not isinstance(payload, dict):
                 continue
-            for artifact in payload.get("artifacts", []):
+            for artifact in cast(list[Any], payload.get("artifacts", [])):
                 if isinstance(artifact, dict) and "file_id" in artifact:
-                    downloadable_file_ids.add(str(artifact["file_id"]))
-            for gfid in payload.get("generated_file_ids", []):
+                    artifact_dict = cast(JsonObject, artifact)
+                    downloadable_file_ids.add(str(artifact_dict["file_id"]))
+            for gfid in cast(list[Any], payload.get("generated_file_ids", [])):
                 downloadable_file_ids.add(str(gfid))
 
         if str(file_id) not in downloadable_file_ids:
@@ -400,7 +429,9 @@ class FlowRunService:
         bundle = await self._get_redacted_evidence_bundle(run_id=run_id)
         return cast(dict[str, Any], render_evidence_json_export(bundle=bundle))
 
-    async def _get_redacted_evidence_bundle(self, *, run_id: UUID) -> RedactedEvidenceBundle:
+    async def _get_redacted_evidence_bundle(
+        self, *, run_id: UUID
+    ) -> RedactedEvidenceBundle:
         bundle = await self._get_evidence_bundle(run_id=run_id)
         return redact_evidence_bundle(bundle)
 
@@ -446,13 +477,14 @@ class FlowRunService:
             by_step_order[int(step.step_order)] = step
 
         preseed: list[PreseedStep] = []
-        for raw_step in raw_steps:
+        for raw_step in cast(list[Any], raw_steps):
             if not isinstance(raw_step, dict):
                 raise BadRequestException(
                     "Invalid flow version step definition.",
                     code="flow_version_invalid_step_definition",
                 )
-            step_order_raw = raw_step.get("step_order", 0)
+            raw_step_dict = cast(dict[str, Any], raw_step)
+            step_order_raw = raw_step_dict.get("step_order", 0)
             if isinstance(step_order_raw, bool):
                 raise BadRequestException(
                     "Invalid flow version step order.",
@@ -474,8 +506,8 @@ class FlowRunService:
                     context={"step_order": step_order},
                 )
 
-            step_id_raw = raw_step.get("step_id")
-            assistant_id_raw = raw_step.get("assistant_id")
+            step_id_raw = raw_step_dict.get("step_id")
+            assistant_id_raw = raw_step_dict.get("assistant_id")
             if step_id_raw is None or assistant_id_raw is None:
                 fallback = by_step_order.get(step_order)
                 if fallback is None:

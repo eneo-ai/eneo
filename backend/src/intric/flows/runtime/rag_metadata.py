@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from intric.flows.runtime.rag_reference_quality import choose_display_chunk
 from intric.flows.source_display import (
     format_source_container_label,
     format_source_display_name,
 )
-from intric.flows.runtime.rag_reference_quality import choose_display_chunk
 
 
 def build_chunk_snippet(text: str, *, max_chars: int = 200) -> str:
@@ -27,7 +27,7 @@ def build_rag_references(
 ) -> tuple[list[dict[str, Any]], bool]:
     references_by_source: dict[str, dict[str, Any]] = {}
 
-    for chunk in info_blob_chunks:
+    for chunk_index, chunk in enumerate(info_blob_chunks):
         info_blob_id = getattr(chunk, "info_blob_id", None)
         if info_blob_id is None:
             continue
@@ -35,9 +35,14 @@ def build_rag_references(
         source_id = str(info_blob_id)
         entry = references_by_source.get(source_id)
         if entry is None:
-            source_metadata = source_metadata_by_id.get(source_id, {}) if source_metadata_by_id else {}
+            source_metadata = (
+                source_metadata_by_id.get(source_id, {})
+                if source_metadata_by_id
+                else {}
+            )
             reference_title = _truncate_title(
-                source_metadata.get("source_title") or getattr(chunk, "info_blob_title", None)
+                source_metadata.get("source_title")
+                or getattr(chunk, "info_blob_title", None)
             )
             entry = {
                 "id": source_id,
@@ -48,6 +53,7 @@ def build_rag_references(
                 "best_score": 0.0,
                 "chunks": [],
                 "_display_candidates": [],
+                "_source_order": chunk_index,
                 "usage_state": "retrieved_candidate",
             }
             _attach_source_metadata(entry, source_metadata)
@@ -85,7 +91,7 @@ def build_rag_references(
         key=lambda reference: (
             -int(reference["hit_count"]),
             -float(reference["best_score"]),
-            str(reference["id"]),
+            int(reference["_source_order"]),
         ),
     )
     references_truncated = len(references) > max_sources
@@ -93,14 +99,19 @@ def build_rag_references(
 
     for reference in references:
         reference["best_score"] = round(float(reference["best_score"]), 4)
+        reference.pop("_source_order", None)
         reference["chunks"].sort(
-            key=lambda chunk: (-float(chunk["score"]), int(chunk["chunk_no"])),
+            key=_chunk_sort_key,
         )
         display_chunk = choose_display_chunk(reference.pop("_display_candidates", []))
         if display_chunk is not None:
             reference.update(display_chunk)
 
     return references, references_truncated
+
+
+def _chunk_sort_key(chunk: dict[str, Any]) -> tuple[float, int]:
+    return (-float(chunk["score"]), int(chunk["chunk_no"]))
 
 
 def _safe_score(score: Any) -> float:

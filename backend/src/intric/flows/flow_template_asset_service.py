@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from fastapi import UploadFile
 
 from intric.files.file_models import File
-from intric.files.file_service import FileService
 from intric.files.file_repo import FileRepository
+from intric.files.file_service import FileService
 from intric.flows.domain.flow import FlowTemplateAsset, FlowTemplateAssetStatus
-from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
+from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.runtime.docx_template_runtime import (
     extract_docx_template_text_preview,
     inspect_docx_template_bytes,
@@ -67,7 +67,8 @@ class FlowTemplateAssetService:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
         if flow.id is None:
             raise NotFoundException("Flow template asset parent flow is missing an id.")
-        saved_file = await self.file_service.save_docx_template(upload_file)
+        file_service = cast(Any, self.file_service)
+        saved_file = cast(File, await file_service.save_docx_template(upload_file))
         placeholders = inspect_docx_template_bytes(
             saved_file.blob or b"",
             filename=saved_file.name,
@@ -118,7 +119,9 @@ class FlowTemplateAssetService:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
         if flow.id is None:
             raise NotFoundException("Flow template asset parent flow is missing an id.")
-        asset = await self.template_asset_repo.get(asset_id=asset_id, tenant_id=self.user.tenant_id)
+        asset = await self.template_asset_repo.get(
+            asset_id=asset_id, tenant_id=self.user.tenant_id
+        )
         if asset.flow_id != flow.id:
             raise NotFoundException("Flow template asset not found.")
         file = await self.file_repo.get_by_id(file_id=asset.file_id)
@@ -133,7 +136,9 @@ class FlowTemplateAssetService:
         asset_id: UUID,
         expected_checksum: str | None,
     ) -> tuple[FlowTemplateAsset, File]:
-        asset = await self.template_asset_repo.get(asset_id=asset_id, tenant_id=tenant_id)
+        asset = await self.template_asset_repo.get(
+            asset_id=asset_id, tenant_id=tenant_id
+        )
         file = await self.file_repo.get_by_id(file_id=asset.file_id)
         if file.tenant_id != tenant_id:
             raise NotFoundException("Flow template asset file not found.")

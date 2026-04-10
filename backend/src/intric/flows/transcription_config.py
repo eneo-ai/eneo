@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
-
 
 _ALLOWED_TRANSCRIPTION_LANGUAGES = {"auto", "sv", "en"}
 
@@ -19,26 +18,33 @@ class FlowTranscriptionConfig:
     language: str
 
 
-def parse_transcription_config(definition_metadata: dict[str, Any] | None) -> FlowTranscriptionConfig:
+def parse_transcription_config(
+    definition_metadata: dict[str, Any] | None,
+) -> FlowTranscriptionConfig:
     wizard: dict[str, Any] = {}
-    if isinstance(definition_metadata, dict):
+    if definition_metadata is not None:
         raw_wizard = definition_metadata.get("wizard")
         if isinstance(raw_wizard, dict):
-            wizard = raw_wizard
+            wizard = cast(dict[str, Any], raw_wizard)
 
     enabled = bool(wizard.get("transcription_enabled", False))
 
     model_id: UUID | None = None
     raw_model = wizard.get("transcription_model")
     if raw_model is not None and not isinstance(raw_model, dict):
-        raise FlowTranscriptionConfigError("wizard.transcription_model must be an object when provided.")
+        raise FlowTranscriptionConfigError(
+            "wizard.transcription_model must be an object when provided."
+        )
     if isinstance(raw_model, dict):
-        raw_model_id = raw_model.get("id")
+        raw_model_dict = cast(dict[str, Any], raw_model)
+        raw_model_id = raw_model_dict.get("id")
         if raw_model_id is not None and str(raw_model_id).strip() != "":
             try:
                 model_id = UUID(str(raw_model_id))
             except (ValueError, TypeError, AttributeError) as exc:
-                raise FlowTranscriptionConfigError("wizard.transcription_model.id must be a valid UUID.") from exc
+                raise FlowTranscriptionConfigError(
+                    "wizard.transcription_model.id must be a valid UUID."
+                ) from exc
 
     raw_language = wizard.get("transcription_language", "sv")
     language = "sv" if raw_language is None else str(raw_language).strip().casefold()

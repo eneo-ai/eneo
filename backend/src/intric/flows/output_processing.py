@@ -1,12 +1,14 @@
 """JSON output processing and contract validation for flow steps."""
+
 from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, cast
 
 import jsonschema
 
+from intric.flows.domain.flow import JsonObject
 from intric.main.exceptions import TypedIOValidationException
 
 _FENCED_JSON_PATTERN = re.compile(
@@ -15,17 +17,17 @@ _FENCED_JSON_PATTERN = re.compile(
 )
 
 
-def _parse_json_candidate(raw_text: str) -> dict[str, Any] | list[Any]:
+def _parse_json_candidate(raw_text: str) -> JsonObject | list[Any]:
     parsed = json.loads(raw_text)
     if not isinstance(parsed, (dict, list)):
         raise TypedIOValidationException(
             f"Expected JSON object or array, got {type(parsed).__name__}",
             code="typed_io_output_parse_failed",
         )
-    return parsed
+    return cast(JsonObject | list[Any], parsed)
 
 
-def _extract_embedded_json(raw_text: str) -> dict[str, Any] | list[Any] | None:
+def _extract_embedded_json(raw_text: str) -> JsonObject | list[Any] | None:
     decoder = json.JSONDecoder()
     for start_index, char in enumerate(raw_text):
         if char not in "{[":
@@ -35,11 +37,11 @@ def _extract_embedded_json(raw_text: str) -> dict[str, Any] | list[Any] | None:
         except json.JSONDecodeError:
             continue
         if isinstance(parsed, (dict, list)):
-            return parsed
+            return cast(JsonObject | list[Any], parsed)
     return None
 
 
-def parse_json_output(raw_text: str) -> dict[str, Any] | list[Any]:
+def parse_json_output(raw_text: str) -> JsonObject | list[Any]:
     """Parse LLM text as JSON. Raises TypedIOValidationException."""
     normalized = raw_text.strip()
     if normalized == "":

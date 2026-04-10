@@ -3,11 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_discovery_models import (
-    DiscoveryLanguage,
     DiscoveryAnalysis,
+    DiscoveryLanguage,
     SemanticAdjudicationResult,
     SemanticAdjudicationSignal,
 )
@@ -25,11 +25,13 @@ logger = get_logger(__name__)
 
 _SEMANTIC_CACHE: dict[str, SemanticAdjudicationResult] = {}
 _MAX_CACHE_ENTRIES = 128
-_NON_ADJUDICABLE_QUESTION_IDS = frozenset({
-    # DOCX generation strategy changes downstream implementation and manual setup.
-    # Keep it as an explicit user choice instead of letting semantic adjudication guess.
-    "docx_output_mode",
-})
+_NON_ADJUDICABLE_QUESTION_IDS = frozenset(
+    {
+        # DOCX generation strategy changes downstream implementation and manual setup.
+        # Keep it as an explicit user choice instead of letting semantic adjudication guess.
+        "docx_output_mode",
+    }
+)
 
 
 def should_run_semantic_adjudication(analysis: DiscoveryAnalysis) -> bool:
@@ -135,14 +137,25 @@ async def adjudicate_pending_question_answer(
     question_id = pending.get("question_id")
     question = pending.get("question")
     options = pending.get("options")
-    if not isinstance(question_id, str) or not isinstance(question, str) or not isinstance(options, list):
+    if (
+        not isinstance(question_id, str)
+        or not isinstance(question, str)
+        or not isinstance(options, list)
+    ):
         return None
 
-    valid_option_ids = {
-        option["id"]: option.get("value", option["id"])
-        for option in options
-        if isinstance(option, dict) and isinstance(option.get("id"), str)
-    }
+    valid_option_ids: dict[str, str] = {}
+    for option in cast(list[object], options):
+        if not isinstance(option, dict):
+            continue
+        option_dict = cast(dict[str, Any], option)
+        option_id = option_dict.get("id")
+        if not isinstance(option_id, str):
+            continue
+        option_value = option_dict.get("value", option_id)
+        valid_option_ids[option_id] = (
+            option_value if isinstance(option_value, str) else option_id
+        )
     if not valid_option_ids:
         return None
 
@@ -155,14 +168,14 @@ async def adjudicate_pending_question_answer(
                     "content": (
                         "Classify a user's freeform answer to a structured question. "
                         "Return JSON only in the format "
-                        "{\"selected_option_id\": string|null, \"reason\": string}."
+                        '{"selected_option_id": string|null, "reason": string}.'
                     ),
                 },
                 {
                     "role": "user",
                     "content": _build_answer_prompt(
                         question=question,
-                        options=options,
+                        options=cast(list[dict[str, Any]], options),
                         user_message=user_message,
                     ),
                 },
@@ -184,13 +197,15 @@ async def adjudicate_pending_question_answer(
         raw = json.loads(content)
     except json.JSONDecodeError:
         return None
-    option_id = raw.get("selected_option_id") if isinstance(raw, dict) else None
+    option_id = (
+        cast(dict[str, Any], raw).get("selected_option_id")
+        if isinstance(raw, dict)
+        else None
+    )
     if not isinstance(option_id, str) or option_id not in valid_option_ids:
         return None
 
     selected_value = valid_option_ids[option_id]
-    if not isinstance(selected_value, str):
-        selected_value = option_id
     return {
         "question_id": question_id,
         "selected_option_ids": [option_id],
@@ -229,9 +244,9 @@ def _build_semantic_prompt(
         f"{chr(10).join(dimension_lines)}\n\n"
         "Return JSON with this shape:\n"
         "{"
-        "\"signals\": [{\"question_id\": str, \"value\": str, \"confidence\": \"high\"|\"medium\"|\"low\", \"reason\": str}], "
-        "\"assumptions\": [str], "
-        "\"contradictions\": [str]"
+        '"signals": [{"question_id": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str}], '
+        '"assumptions": [str], '
+        '"contradictions": [str]'
         "}\n"
         "Use only the listed question_id values and option values."
     )
@@ -247,16 +262,16 @@ def _build_answer_prompt(
     options: list[dict[str, Any]],
     user_message: str,
 ) -> str:
-    option_lines = []
+    option_lines: list[str] = []
     for option in options:
-        if not isinstance(option, dict):
-            continue
         option_id = option.get("id")
         label = option.get("label")
         description = option.get("description")
         if not isinstance(option_id, str) or not isinstance(label, str):
             continue
-        suffix = f" — {description}" if isinstance(description, str) and description else ""
+        suffix = (
+            f" — {description}" if isinstance(description, str) and description else ""
+        )
         option_lines.append(f"- {option_id}: {label}{suffix}")
     return (
         f"Question:\n{question}\n\n"
@@ -278,16 +293,18 @@ def _parse_semantic_response(
 
     if not isinstance(raw, dict):
         return None
+    raw_dict = cast(dict[str, Any], raw)
 
     allowed = set(allowed_question_ids)
     signals: list[SemanticAdjudicationSignal] = []
-    for item in raw.get("signals", []):
+    for item in cast(list[object], raw_dict.get("signals", [])):
         if not isinstance(item, dict):
             continue
-        question_id = item.get("question_id")
-        value = item.get("value")
-        confidence = item.get("confidence")
-        reason = item.get("reason")
+        item_dict = cast(dict[str, Any], item)
+        question_id = item_dict.get("question_id")
+        value = item_dict.get("value")
+        confidence = item_dict.get("confidence")
+        reason = item_dict.get("reason")
         if question_id not in allowed:
             continue
         if not isinstance(value, str) or not value.strip():
@@ -299,18 +316,20 @@ def _parse_semantic_response(
                 question_id=question_id,
                 value=value.strip(),
                 confidence=confidence,
-                reason=reason.strip() if isinstance(reason, str) and reason.strip() else "semantic adjudication",
+                reason=reason.strip()
+                if isinstance(reason, str) and reason.strip()
+                else "semantic adjudication",
             )
         )
 
     assumptions = tuple(
         item.strip()
-        for item in raw.get("assumptions", [])
+        for item in cast(list[object], raw_dict.get("assumptions", []))
         if isinstance(item, str) and item.strip()
     )
     contradictions = tuple(
         item.strip()
-        for item in raw.get("contradictions", [])
+        for item in cast(list[object], raw_dict.get("contradictions", []))
         if isinstance(item, str) and item.strip()
     )
     return SemanticAdjudicationResult(

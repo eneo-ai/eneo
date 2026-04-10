@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import threading
+from typing import Any, cast
 from uuid import UUID
 
 from dependency_injector import providers
@@ -16,8 +17,7 @@ from intric.flows.flow_input_limits import (
 )
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.runtime.celery_app import celery_app
-from intric.flows.runtime.executor import FlowRunExecutor
-from intric.flows.runtime.executor import FlowRunExecutorConfig
+from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import override_user
@@ -37,8 +37,8 @@ def _start_event_loop(loop: asyncio.AbstractEventLoop) -> None:
 
 
 def _get_flow_task_loop() -> asyncio.AbstractEventLoop:
-    global _FLOW_TASK_LOOP
-    global _FLOW_TASK_LOOP_THREAD
+    global _FLOW_TASK_LOOP  # pyright: ignore[reportConstantRedefinition]
+    global _FLOW_TASK_LOOP_THREAD  # pyright: ignore[reportConstantRedefinition]
 
     with _FLOW_TASK_LOOP_LOCK:
         if _FLOW_TASK_LOOP is None or _FLOW_TASK_LOOP.is_closed():
@@ -50,8 +50,8 @@ def _get_flow_task_loop() -> asyncio.AbstractEventLoop:
                 name="flow-celery-async-loop",
             )
             thread.start()
-            _FLOW_TASK_LOOP = loop
-            _FLOW_TASK_LOOP_THREAD = thread
+            _FLOW_TASK_LOOP = loop  # pyright: ignore[reportConstantRedefinition]
+            _FLOW_TASK_LOOP_THREAD = thread  # pyright: ignore[reportConstantRedefinition]
         return _FLOW_TASK_LOOP
 
 
@@ -72,13 +72,19 @@ async def _execute_flow_run_async(
     async with sessionmanager.session() as session:
         _enable_autobegin_for_flow_task_session(session)
         user_repo = UsersRepository(session=session)
-        user = await user_repo.get_user_by_id_and_tenant_id(id=user_id, tenant_id=tenant_id)
+        user = await user_repo.get_user_by_id_and_tenant_id(
+            id=user_id, tenant_id=tenant_id
+        )
+        if user is None:
+            raise RuntimeError("Flow execution task user not found for tenant.")
 
         container = Container(session=providers.Object(session))
         override_user(container=container, user=user)
 
         tenant = await container.tenant_repo().get(tenant_id)
-        flow_limits = resolve_flow_input_limits(tenant.flow_settings if tenant else None)
+        flow_limits = resolve_flow_input_limits(
+            tenant.flow_settings if tenant else None
+        )
 
         executor = FlowRunExecutor(
             user=user,
@@ -89,7 +95,7 @@ async def _execute_flow_run_async(
             space_repo=container.space_repo(),
             completion_service=container.completion_service(),
             file_repo=container.file_repo(),
-            template_asset_service=container.flow_template_asset_service(),
+            template_asset_service=cast(Any, container.flow_template_asset_service()),  # pyright: ignore[reportUnknownMemberType]
             encryption_service=container.encryption_service(),
             audit_service=container.audit_service(),
             references_service=container.references_service(),
@@ -135,9 +141,9 @@ async def _mark_run_failed(
             )
 
 
-@celery_app.task(name="flows.execute", bind=True)
+@celery_app.task(name="flows.execute", bind=True)  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
 def execute_flow_run(
-    self,
+    self: Any,
     *,
     run_id: str,
     flow_id: str,
@@ -196,6 +202,7 @@ def _execute_flow_run_task(
         return {"status": "failed", "reason": "missing_user_id"}
 
     loop = _get_flow_task_loop()
+    future: concurrent.futures.Future[dict[str, str]] | None = None
     try:
         future = asyncio.run_coroutine_threadsafe(
             _execute_flow_run_async(
@@ -210,8 +217,11 @@ def _execute_flow_run_task(
         )
         return future.result(timeout=get_settings().flow_task_timeout_seconds)
     except concurrent.futures.TimeoutError:
-        future.cancel()
-        error_message = "flow_task_timeout: Flow execution timed out before task completion."
+        if future is not None:
+            future.cancel()
+        error_message = (
+            "flow_task_timeout: Flow execution timed out before task completion."
+        )
         logger.exception(
             "Flow execution task timed out",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
@@ -226,7 +236,9 @@ def _execute_flow_run_task(
         ).result(timeout=10)
         return {"status": "failed", "reason": "timeout"}
     except Exception:
-        error_message = "flow_task_failure: Flow execution task failed before run completion."
+        error_message = (
+            "flow_task_failure: Flow execution task failed before run completion."
+        )
         logger.exception(
             "Flow execution task failed",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},

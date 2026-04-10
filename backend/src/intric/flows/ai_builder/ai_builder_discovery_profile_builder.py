@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
-    build_flow_capability_profile,
-)
-from intric.flows.ai_builder.ai_builder_edit_scope import (
-    build_active_request_window,
-    resolve_edit_scope,
-)
 from intric.flows.ai_builder.ai_builder_discovery_decision_engine import (
     implies_single_case,
     implies_single_primary_document,
+)
+from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
+    build_flow_capability_profile,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryLanguage,
@@ -17,13 +13,19 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     SemanticAdjudicationResult,
 )
 from intric.flows.ai_builder.ai_builder_discovery_questions import localized_text
+from intric.flows.ai_builder.ai_builder_edit_scope import (
+    build_active_request_window,
+    resolve_edit_scope,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
+    OutputIntentResolution,
     aggregate_freeform_user_text,
     extract_answer_signals,
     has_explicit_structured_answer,
     resolve_output_intent,
 )
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
+    InputIntentResolution,
     resolve_input_intent,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
@@ -183,7 +185,9 @@ def build_discovery_profile(
         active_answer_signals=active_answers,
         active_explicit_question_ids=active_explicit_question_ids,
         merged_previous_request=(
-            active_window.merged_previous_request if active_window is not None else False
+            active_window.merged_previous_request
+            if active_window is not None
+            else False
         ),
     )
     prefer_structured_intermediate = should_prefer_structured_intermediate(
@@ -284,7 +288,9 @@ def default_discovery_assumptions(
         "processing_scope" not in profile.answers
         and "processing_scope" not in selected_question_ids
         and implies_single_case(profile.text)
-        and not any("ärende åt gången" in assumption for assumption in existing_assumptions)
+        and not any(
+            "ärende åt gången" in assumption for assumption in existing_assumptions
+        )
     ):
         assumptions.append(
             localized_text(
@@ -298,7 +304,9 @@ def default_discovery_assumptions(
         and "document_material_scope" not in selected_question_ids
         and profile.document_like_input
         and implies_single_primary_document(profile.text)
-        and not any("huvuddokument" in assumption for assumption in existing_assumptions)
+        and not any(
+            "huvuddokument" in assumption for assumption in existing_assumptions
+        )
     ):
         assumptions.append(
             localized_text(
@@ -310,7 +318,10 @@ def default_discovery_assumptions(
     if (
         profile.prefer_structured_intermediate
         and "structured_analysis_need" not in selected_question_ids
-        and not any("mellanliggande strukturerad data" in assumption.casefold() for assumption in existing_assumptions)
+        and not any(
+            "mellanliggande strukturerad data" in assumption.casefold()
+            for assumption in existing_assumptions
+        )
     ):
         assumptions.append(
             localized_text(
@@ -327,19 +338,15 @@ def text_has_task_verbs(text: str) -> bool:
 
 
 def count_distinct_task_verbs(text: str) -> int:
-    matches = {
-        verb
-        for verb in (*_TASK_VERBS_SV, *_TASK_VERBS_EN)
-        if verb in text
-    }
+    matches = {verb for verb in (*_TASK_VERBS_SV, *_TASK_VERBS_EN) if verb in text}
     return len(matches)
 
 
 def should_prefer_structured_intermediate(
     *,
     text: str,
-    input_intent,
-    output_intent,
+    input_intent: InputIntentResolution,
+    output_intent: OutputIntentResolution,
     flow_defaults: dict[str, set[str]],
     answers: dict[str, set[str]],
 ) -> bool:
@@ -353,9 +360,13 @@ def should_prefer_structured_intermediate(
     if mentions_any(text, _STRUCTURED_INTERMEDIATE_FORCE_HINTS):
         return True
 
-    document_like_input = input_intent.document_runtime_input_requested or "documents" in flow_defaults.get(
-        "input_material_mode",
-        set(),
+    document_like_input = (
+        input_intent.document_runtime_input_requested
+        or "documents"
+        in flow_defaults.get(
+            "input_material_mode",
+            set(),
+        )
     )
     if not document_like_input:
         return False

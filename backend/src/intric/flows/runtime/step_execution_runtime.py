@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Awaitable, Protocol
+from typing import Any, Awaitable, Callable, Protocol, cast
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import Completion
@@ -16,16 +16,16 @@ from intric.flows.citation_sidecar import (
 )
 from intric.flows.domain.flow import FlowRun, FlowStepResultStatus
 from intric.flows.output_modes import transcribe_only_violation
+from intric.flows.runtime.inherited_citations import (
+    build_inherited_citation_prompt_appendix,
+    collect_inherited_citation_context,
+)
 from intric.flows.runtime.models import (
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
     StepExecutionOutput,
     StepInputValue,
-)
-from intric.flows.runtime.inherited_citations import (
-    build_inherited_citation_prompt_appendix,
-    collect_inherited_citation_context,
 )
 from intric.flows.runtime.step_input_validation import (
     validate_input_contract,
@@ -35,9 +35,25 @@ from intric.flows.runtime.step_result_builder import build_transcribe_only_rag_m
 from intric.main.exceptions import TypedIOValidationException
 
 try:
-    from litellm import get_supported_openai_params as _litellm_get_supported_openai_params  # pyright: ignore[reportPrivateImportUsage]
+    from litellm import (
+        get_supported_openai_params as _litellm_get_supported_openai_params,  # pyright: ignore[reportPrivateImportUsage,reportUnknownVariableType]
+    )
 except Exception:  # pragma: no cover - defensive import guard
     _litellm_get_supported_openai_params = None
+
+_LiteLLMGetSupportedParams = Callable[..., list[str] | None]
+if _litellm_get_supported_openai_params is not None:
+    _litellm_get_supported_openai_params = cast(
+        _LiteLLMGetSupportedParams,
+        _litellm_get_supported_openai_params,
+    )
+
+
+def _string_key_dict(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    raw_dict = cast(dict[object, Any], value)
+    return {str(key): item for key, item in raw_dict.items()}
 
 
 logger = logging.getLogger(__name__)
@@ -91,9 +107,7 @@ class RetrieveRagChunksFn(Protocol):
         question: str,
         run_id: UUID,
         step_order: int,
-    ) -> Awaitable[
-        tuple[list[str], dict[str, Any] | None, list[StepDiagnostic]]
-    ]: ...
+    ) -> Awaitable[tuple[list[str], dict[str, Any] | None, list[StepDiagnostic]]]: ...
 
 
 class ProcessTypedOutputFn(Protocol):
@@ -180,7 +194,12 @@ def _resolve_litellm_model_name(assistant: Any) -> str | None:
 
     provider = getattr(completion_model, "provider_type", None)
     name = getattr(completion_model, "name", None)
-    if isinstance(provider, str) and provider.strip() and isinstance(name, str) and name.strip():
+    if (
+        isinstance(provider, str)
+        and provider.strip()
+        and isinstance(name, str)
+        and name.strip()
+    ):
         return f"{provider.strip()}/{name.strip()}"
     return None
 
@@ -200,7 +219,10 @@ def detect_native_json_output_support(assistant: Any) -> bool | None:
         return None
 
     try:
-        supported = _litellm_get_supported_openai_params(model=litellm_model_name)
+        supported = cast(
+            _LiteLLMGetSupportedParams,
+            _litellm_get_supported_openai_params,
+        )(model=litellm_model_name)
     except Exception:
         logger.warning(
             "Failed to detect native JSON output support for flow step execution.",
@@ -273,7 +295,9 @@ def effective_model_parameters(assistant: Any) -> dict[str, Any]:
         for key in ("temperature", "top_p", "reasoning_effort", "verbosity")
     }
     return {
-        "model_id": str(completion_model.id) if completion_model and completion_model.id else None,
+        "model_id": str(completion_model.id)
+        if completion_model and completion_model.id
+        else None,
         "model_name": completion_model.name if completion_model else None,
         "provider": getattr(completion_model, "provider_type", None),
         **kwargs,
@@ -290,9 +314,9 @@ def apply_prompt_context_trace(
         return rag_metadata
 
     if hasattr(knowledge_trace, "model_dump"):
-        trace_payload = knowledge_trace.model_dump(mode="json")
+        trace_payload = _string_key_dict(knowledge_trace.model_dump(mode="json"))
     elif isinstance(knowledge_trace, dict):
-        trace_payload = dict(knowledge_trace)
+        trace_payload = _string_key_dict(cast(object, knowledge_trace))
     else:
         return rag_metadata
 
@@ -300,7 +324,7 @@ def apply_prompt_context_trace(
     tracking = payload.get("tracking")
     if not isinstance(tracking, dict):
         tracking = {}
-    tracking = dict(tracking)
+    tracking = _string_key_dict(cast(object, tracking))
     tracking["prompt_context_inclusion_tracked"] = True
     tracking_note = tracking.get("note")
     if not isinstance(tracking_note, str) or "citations" not in tracking_note:
@@ -312,15 +336,22 @@ def apply_prompt_context_trace(
 
     included_source_ids = [
         str(source_id)
-        for source_id in trace_payload.get("included_source_ids", [])
+        for source_id in cast(list[Any], trace_payload.get("included_source_ids", []))
         if source_id is not None
     ]
     included_source_titles = list(
         dict.fromkeys(
             source_title.strip()
-            for group in trace_payload.get("included_groups", [])
+            for group in cast(list[Any], trace_payload.get("included_groups", []))
             if isinstance(group, dict)
-            and isinstance((source_title := group.get("source_title")), str)
+            and isinstance(
+                (
+                    source_title := _string_key_dict(cast(object, group)).get(
+                        "source_title"
+                    )
+                ),
+                str,
+            )
             and source_title.strip()
         )
     )
@@ -336,20 +367,22 @@ def apply_prompt_context_trace(
         "knowledge_tokens": trace_payload.get("knowledge_tokens"),
         "truncated_by_token_budget": trace_payload.get("truncated_by_token_budget"),
         "included_source_ids": included_source_ids,
-        "not_included_source_ids": trace_payload.get("not_included_source_ids", []),
+        "not_included_source_ids": cast(
+            list[Any], trace_payload.get("not_included_source_ids", [])
+        ),
         "included_source_titles": included_source_titles,
-        "included_groups": trace_payload.get("included_groups", []),
+        "included_groups": cast(list[Any], trace_payload.get("included_groups", [])),
     }
 
     references = payload.get("references")
     if isinstance(references, list):
-        normalized_references: list[dict[str, Any]] = []
+        normalized_references: list[Any] = []
         included_source_ids_set = set(included_source_ids)
-        for reference in references:
+        for reference in cast(list[Any], references):
             if not isinstance(reference, dict):
                 normalized_references.append(reference)
                 continue
-            normalized_reference = dict(reference)
+            normalized_reference = _string_key_dict(cast(object, reference))
             if str(normalized_reference.get("id")) in included_source_ids_set:
                 normalized_reference["usage_state"] = "inserted_into_prompt"
             normalized_references.append(normalized_reference)
@@ -385,38 +418,55 @@ def build_runtime_citation_sidecar(
 ) -> dict[str, Any] | None:
     if citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR:
         return None
-    references = rag_metadata.get("references") if isinstance(rag_metadata, dict) else None
-    prompt_context = rag_metadata.get("prompt_context") if isinstance(rag_metadata, dict) else None
-    included_source_ids = (
-        prompt_context.get("included_source_ids")
+    references = (
+        rag_metadata.get("references") if isinstance(rag_metadata, dict) else None
+    )
+    prompt_context = (
+        rag_metadata.get("prompt_context") if isinstance(rag_metadata, dict) else None
+    )
+    prompt_context_dict = (
+        _string_key_dict(cast(object, prompt_context))
         if isinstance(prompt_context, dict)
-        else []
+        else None
+    )
+    inherited_context_dict = (
+        inherited_context if isinstance(inherited_context, dict) else None
+    )
+    included_source_ids = (
+        cast(list[str], prompt_context_dict.get("included_source_ids"))
+        if prompt_context_dict is not None
+        and isinstance(prompt_context_dict.get("included_source_ids"), list)
+        else None
     )
     inherited_references = (
-        inherited_context.get("available_sources")
-        if isinstance(inherited_context, dict)
-        else []
+        cast(list[dict[str, Any]], inherited_context_dict.get("available_sources"))
+        if inherited_context_dict is not None
+        and isinstance(inherited_context_dict.get("available_sources"), list)
+        else None
     )
     inherited_source_ids = (
-        inherited_context.get("available_source_ids")
-        if isinstance(inherited_context, dict)
-        else []
+        cast(list[str], inherited_context_dict.get("available_source_ids"))
+        if inherited_context_dict is not None
+        and isinstance(inherited_context_dict.get("available_source_ids"), list)
+        else None
     )
     return build_citation_sidecar(
         raw_completion_text,
-        references=references if isinstance(references, list) else None,
-        included_source_ids=included_source_ids if isinstance(included_source_ids, list) else None,
-        inherited_references=inherited_references if isinstance(inherited_references, list) else None,
-        inherited_source_ids=inherited_source_ids if isinstance(inherited_source_ids, list) else None,
+        references=cast(list[dict[str, Any]], references)
+        if isinstance(references, list)
+        else None,
+        included_source_ids=included_source_ids,
+        inherited_references=inherited_references,
+        inherited_source_ids=inherited_source_ids,
         citation_mode_requested=True,
         upstream_grounded_step_orders=(
-            inherited_context.get("upstream_step_orders")
-            if isinstance(inherited_context, dict)
+            inherited_context_dict.get("upstream_step_orders")
+            if inherited_context_dict is not None
             else None
         ),
         upstream_grounded_step_labels=(
-            inherited_context.get("upstream_step_labels")
-            if isinstance(inherited_context, dict)
+            inherited_context_dict.get("upstream_step_labels")
+            if inherited_context_dict is not None
             else None
         ),
         raw_completion_text=raw_completion_text,
@@ -428,13 +478,15 @@ def apply_citation_tracking(
     *,
     citation_mode: str,
 ) -> dict[str, Any] | None:
-    if citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR or not isinstance(rag_metadata, dict):
+    if citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR or not isinstance(
+        rag_metadata, dict
+    ):
         return rag_metadata
     payload = dict(rag_metadata)
     tracking = payload.get("tracking")
     if not isinstance(tracking, dict):
         tracking = {}
-    tracking = dict(tracking)
+    tracking = _string_key_dict(cast(object, tracking))
     tracking["citation_tracked"] = True
     tracking["note"] = (
         "References record retrieved candidates, exact prompt inclusion, and explicit inline "
@@ -457,28 +509,38 @@ def infer_finish_reason(
     return None
 
 
-def augment_prompt_for_json_output(
+def augment_prompt_for_typed_output(
     *,
     output_type: str,
     output_contract: dict[str, Any] | None,
     prompt: str,
 ) -> str:
-    if output_type != "json":
+    if output_type == "json":
+        instructions = [
+            "Return ONLY valid JSON.",
+            "Do not include markdown code fences, commentary, or any surrounding text.",
+            "The top-level JSON value must be an object or array.",
+        ]
+        if output_contract:
+            schema_json = json.dumps(
+                output_contract, ensure_ascii=False, sort_keys=True
+            )
+            instructions.extend(
+                [
+                    "Follow this JSON Schema exactly:",
+                    schema_json,
+                ]
+            )
+    elif output_type in {"pdf", "docx"} and output_contract is None:
+        artifact_name = "PDF" if output_type == "pdf" else "DOCX"
+        instructions = [
+            f"The system will render your answer into a {artifact_name} file after you respond.",
+            "Return only the document body as Markdown/plain text content.",
+            "Do not output binary file contents, base64, XML/ZIP internals, or PDF object syntax.",
+            "For PDF output specifically, do not start the response with %PDF-.",
+        ]
+    else:
         return prompt
-
-    instructions = [
-        "Return ONLY valid JSON.",
-        "Do not include markdown code fences, commentary, or any surrounding text.",
-        "The top-level JSON value must be an object or array.",
-    ]
-    if output_contract:
-        schema_json = json.dumps(output_contract, ensure_ascii=False, sort_keys=True)
-        instructions.extend(
-            [
-                "Follow this JSON Schema exactly:",
-                schema_json,
-            ]
-        )
 
     suffix = "\n".join(instructions)
     return f"{prompt}\n\n{suffix}" if prompt.strip() else suffix
@@ -513,7 +575,11 @@ async def prepare_step_execution(
     version_metadata: dict[str, Any] | None,
     deps: StepExecutionRuntimeDeps,
 ) -> PreparedStepExecution:
-    context_results = [item for item in state.prior_results if item.status == FlowStepResultStatus.COMPLETED]
+    context_results = [
+        item
+        for item in state.prior_results
+        if item.status == FlowStepResultStatus.COMPLETED
+    ]
     context = deps.variable_resolver.build_context(
         run.input_payload_json,
         context_results,
@@ -523,7 +589,7 @@ async def prepare_step_execution(
     assistant = await deps.load_assistant(step.assistant_id, state)
     prompt_text = assistant.get_prompt_text()
     effective_prompt = ""
-    input_payload_for_result = {
+    input_payload_for_result: dict[str, Any] = {
         "text": "",
         "source_text": "",
         "input_source": step.input_source,
@@ -598,7 +664,7 @@ async def prepare_step_execution(
         if prompt_text
         else ""
     )
-    effective_prompt = augment_prompt_for_json_output(
+    effective_prompt = augment_prompt_for_typed_output(
         output_type=step.output_type,
         output_contract=step.output_contract,
         prompt=effective_prompt,
@@ -615,7 +681,9 @@ async def prepare_step_execution(
     except TypedIOValidationException as exc:
         contract_validation_payload = getattr(exc, "contract_validation", None)
         if isinstance(contract_validation_payload, dict):
-            input_payload_for_result["contract_validation"] = contract_validation_payload
+            input_payload_for_result["contract_validation"] = (
+                contract_validation_payload
+            )
         raise deps.attach_typed_failure_context(
             exc,
             input_payload_for_result=input_payload_for_result,
@@ -738,7 +806,9 @@ async def complete_step_execution(
     if step.output_type == "json":
         cached_json_mode_support = state.json_mode_supported.get(cache_key)
         if cached_json_mode_support is None:
-            detected_json_mode_support = detect_native_json_output_support(prepared.assistant)
+            detected_json_mode_support = detect_native_json_output_support(
+                prepared.assistant
+            )
             if detected_json_mode_support is not None:
                 state.json_mode_supported[cache_key] = detected_json_mode_support
                 cached_json_mode_support = detected_json_mode_support
@@ -760,7 +830,9 @@ async def complete_step_execution(
                 state.json_mode_supported[cache_key] = False
 
     if deps.logger is not None:
-        deps.logger.info("flow_executor.llm_call run_id=%s step_order=%d", run.id, step.step_order)
+        deps.logger.info(
+            "flow_executor.llm_call run_id=%s step_order=%d", run.id, step.step_order
+        )
     prompt_override = prepared.effective_prompt
     if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR:
         inherited_appendix = build_inherited_citation_prompt_appendix(
@@ -813,7 +885,11 @@ async def complete_step_execution(
         tool_calls = None
         reasoning_tokens = 0
     else:
-        completion = completion if isinstance(completion, Completion) else Completion(text=str(completion))
+        completion = (
+            completion
+            if isinstance(completion, Completion)
+            else Completion(text=str(completion))
+        )
         raw_full_text = completion.text or ""
         tool_calls = (
             [tc.__dict__ for tc in completion.tool_calls_metadata]
@@ -903,7 +979,8 @@ async def complete_step_execution(
         citation_sidecar=citation_sidecar,
         raw_completion_text=(
             raw_full_text
-            if citation_sidecar is not None and bool(citation_sidecar.get("citation_observed"))
+            if citation_sidecar is not None
+            and bool(citation_sidecar.get("citation_observed"))
             else None
         ),
     )

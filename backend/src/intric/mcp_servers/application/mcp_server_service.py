@@ -310,9 +310,8 @@ class MCPServerService:
         # Auto-sync tools after URL change
         if url_changed:
             auth_creds = self._decrypt_auth_config(mcp_server.http_auth_config_schema)
-            tools, connection = await self.discover_and_sync_tools(
-                mcp_server, auth_creds
-            )
+            sync_result = await self.discover_and_sync_tools(mcp_server, auth_creds)
+            connection = sync_result.connection
             if not connection.success:
                 logger.warning(
                     "MCP server URL updated but automatic tool sync failed",
@@ -327,7 +326,7 @@ class MCPServerService:
                     "Auto-synced MCP tools after URL update",
                     extra={
                         "mcp_server_id": str(mcp_server.id),
-                        "tools_discovered": len(tools),
+                        "tools_discovered": connection.tools_discovered,
                     },
                 )
 

@@ -16,7 +16,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from intric.flows.ai_builder.ai_builder_flow_name import normalize_optional_flow_name
-from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -26,7 +25,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputMode,
     OutputType,
 )
-
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 
 # ---------------------------------------------------------------------------
 # Step operations
@@ -118,13 +117,35 @@ class FlowMetadataPatch(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _default_form_operations() -> list["FormFieldOperation"]:
+    return []
+
+
+def _default_metadata_changes() -> list["MetadataChange"]:
+    return []
+
+
+def _default_form_changes() -> list["FormFieldChange"]:
+    return []
+
+
+def _default_edit_warnings() -> list[str]:
+    return []
+
+
+def _default_edit_advisories() -> list["EditAdvisory"]:
+    return []
+
+
 class FlowEditDraft(BaseModel):
     """Edit-mode planner output. Compiled by backend into concrete preview."""
 
     flow_name: str | None = None
     flow_description: str | None = None
     operations: list[StepEditOperation]
-    form_operations: list[FormFieldOperation] = Field(default_factory=list)
+    form_operations: list[FormFieldOperation] = Field(
+        default_factory=_default_form_operations
+    )
     metadata_patch: FlowMetadataPatch | None = None
     assumptions: list[str] = Field(default_factory=list)
     plan_rationale: str = ""
@@ -179,8 +200,10 @@ class FlowEditDiff(BaseModel):
     """Complete diff between original flow and proposed changes."""
 
     step_changes: list[StepChange]
-    form_changes: list[FormFieldChange] = Field(default_factory=list)
-    metadata_changes: list[MetadataChange] = Field(default_factory=list)
+    form_changes: list[FormFieldChange] = Field(default_factory=_default_form_changes)
+    metadata_changes: list[MetadataChange] = Field(
+        default_factory=_default_metadata_changes
+    )
     flow_property_changes: dict[str, tuple[Any, Any]] = Field(default_factory=dict)
     net_steps_added: int = 0
     net_steps_removed: int = 0
@@ -209,8 +232,8 @@ class CompiledEditResult(BaseModel):
     diff: FlowEditDiff
     original_draft: FlowEditDraft
     base_flow_revision: int  # Stale-plan protection
-    warnings: list[str] = Field(default_factory=list)
-    advisories: list[EditAdvisory] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=_default_edit_warnings)
+    advisories: list[EditAdvisory] = Field(default_factory=_default_edit_advisories)
     risk_flags: list[str] = Field(default_factory=list)  # "type_downgrade", etc.
     confidence: EditConfidence = "ready"
 

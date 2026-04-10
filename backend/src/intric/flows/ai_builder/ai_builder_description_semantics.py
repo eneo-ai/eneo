@@ -49,7 +49,10 @@ class DescriptionProvenance(BaseModel):
     version: int = 1
 
 
-def _description_hash(text: str | None) -> str:
+def description_hash(text: str | None) -> str:
     normalized = (text or "").strip().replace("\r\n", "\n")
     normalized = unicodedata.normalize("NFC", normalized)
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+_description_hash = description_hash

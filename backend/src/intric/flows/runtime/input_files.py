@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from intric.main.exceptions import TypedIOValidationException
@@ -17,8 +17,9 @@ def parse_requested_file_ids(*, raw_file_ids: Any) -> list[UUID]:
             "file_ids must be a list.",
             code="typed_io_invalid_file_ids",
         )
+    file_ids = cast(list[object], raw_file_ids)
     try:
-        return [UUID(str(file_id)) for file_id in raw_file_ids]
+        return [UUID(str(file_id)) for file_id in file_ids]
     except (TypeError, ValueError, AttributeError) as exc:
         raise TypedIOValidationException(
             f"Invalid file_ids payload: {raw_file_ids}",

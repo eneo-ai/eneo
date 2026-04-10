@@ -7,6 +7,18 @@ from uuid import UUID
 from intric.flows.domain.flow import FlowStepResult
 
 
+def _empty_step_diagnostics() -> list["StepDiagnostic"]:
+    return []
+
+
+def _empty_step_names_by_order() -> dict[int, str]:
+    return {}
+
+
+def _empty_step_ref_mapping() -> dict[str, int]:
+    return {}
+
+
 @dataclass(frozen=True)
 class RuntimeStep:
     step_id: UUID
@@ -55,7 +67,7 @@ class StepExecutionOutput:
     provider_response_id: str | None = None
     contract_validation: dict[str, Any] | None = None
     structured_output: dict[str, Any] | list[Any] | None = None
-    diagnostics: list[StepDiagnostic] = field(default_factory=list)
+    diagnostics: list[StepDiagnostic] = field(default_factory=_empty_step_diagnostics)
     artifacts: list[dict[str, Any]] | None = None
     rag_metadata: dict[str, Any] | None = None
     transcription_metadata: dict[str, Any] | None = None
@@ -75,7 +87,7 @@ class StepInputValue:
     input_source: str = "flow_input"
     used_question_binding: bool = False
     legacy_prompt_binding_used: bool = False
-    diagnostics: list[StepDiagnostic] = field(default_factory=list)
+    diagnostics: list[StepDiagnostic] = field(default_factory=_empty_step_diagnostics)
     transcription_metadata: dict[str, Any] | None = None
     runtime_input_metadata: dict[str, Any] | None = None
 
@@ -97,8 +109,10 @@ class RunExecutionState:
     assistant_cache: dict[UUID, Any]
     json_mode_supported: dict[str, bool]
     file_cache: dict[frozenset[UUID], list[Any]]
-    step_names_by_order: dict[int, str] = field(default_factory=dict)
-    step_ref_mapping: dict[str, int] = field(default_factory=dict)
+    step_names_by_order: dict[int, str] = field(
+        default_factory=_empty_step_names_by_order
+    )
+    step_ref_mapping: dict[str, int] = field(default_factory=_empty_step_ref_mapping)
 
     @property
     def all_previous_text(self) -> str:

@@ -7,10 +7,9 @@ description-only repair and validates that the repair didn't change anything els
 
 from __future__ import annotations
 
-
 from intric.flows.ai_builder.ai_builder_description_semantics import (
     DescriptionProvenance,
-    _description_hash,
+    description_hash,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import EditAdvisory
 from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore
@@ -41,7 +40,7 @@ def should_attempt_description_repair(
     if current_provenance.last_generated_hash is None:
         return False
 
-    current_hash = _description_hash(current_description)
+    current_hash = description_hash(current_description)
     return current_hash == current_provenance.last_generated_hash
 
 

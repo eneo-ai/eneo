@@ -2,9 +2,18 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator, cast
 from uuid import UUID, uuid4
 
+from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
+    build_discovery_profile,
+)
+from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+    build_discovery_block_message_runtime,
+)
+from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
+    build_edit_mode_tool_schemas,
+)
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
@@ -13,34 +22,14 @@ from intric.flows.ai_builder.ai_builder_events import (
     build_text_event,
     error_payload,
 )
-from intric.flows.ai_builder.ai_builder_framework_policy import normalize_question_answer
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     infer_question_answer_from_freeform,
+    normalize_question_answer,
 )
-from intric.flows.ai_builder.ai_builder_discovery_runtime import (
-    build_discovery_block_message_runtime,
-)
-from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
-    build_discovery_profile,
-)
-from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
-    adjudicate_pending_question_answer,
-)
-from intric.flows.ai_builder.ai_builder_settings import (
-    AIBuilderBudgetPolicy,
-    resolve_ai_builder_budget_policy,
-)
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage, SessionStatus
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     looks_like_information_request,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
-    AIBuilderResourceCatalog,
-    build_ai_builder_resource_catalog,
-)
-from intric.flows.ai_builder.ai_builder_proposal_processor import (
-    AIBuilderProposalProcessor,
-)
+from intric.flows.ai_builder.ai_builder_models import ConversationMessage, SessionStatus
 from intric.flows.ai_builder.ai_builder_prompts import (
     build_available_kbs_context,
     build_available_models_context,
@@ -50,21 +39,30 @@ from intric.flows.ai_builder.ai_builder_prompts import (
     compute_conversation_token_budget,
     trim_conversation_for_context,
 )
+from intric.flows.ai_builder.ai_builder_proposal_processor import (
+    AIBuilderProposalProcessor,
+)
+from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     latest_confirmed_requirements,
     resolve_requirements_state,
 )
-from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
-from intric.flows.ai_builder.ai_builder_tools import build_all_tool_schemas
-from intric.flows.ai_builder.ai_builder_tools import (
-    build_discovery_complete_tool_schemas,
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
+    build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_tools import build_free_discovery_tool_schemas
+from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
+    adjudicate_pending_question_answer,
+)
+from intric.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
+    resolve_ai_builder_budget_policy,
+)
 from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
-)
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
-    build_edit_mode_tool_schemas,
+    build_all_tool_schemas,
+    build_discovery_complete_tool_schemas,
+    build_free_discovery_tool_schemas,
 )
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
@@ -136,11 +134,19 @@ class AIBuilderPlanner:
         metadata = msg.metadata if isinstance(msg.metadata, dict) else None
         question_answer = metadata.get("question_answer") if metadata else None
         if msg.role == "user" and isinstance(question_answer, dict):
-            question_answer = normalize_question_answer(question_answer)
+            question_answer = normalize_question_answer(
+                cast(dict[str, Any], question_answer)
+            )
             sanitized_answer = {
                 key: value
                 for key, value in question_answer.items()
-                if key in {"question_id", "selected_option_ids", "selected_values", "custom_value"}
+                if key
+                in {
+                    "question_id",
+                    "selected_option_ids",
+                    "selected_values",
+                    "custom_value",
+                }
             }
             if sanitized_answer:
                 structured_note = json.dumps(
@@ -305,7 +311,10 @@ class AIBuilderPlanner:
         requirements_state = resolve_requirements_state(conversation)
         has_requirements_summary = requirements_state.latest_summary is not None
         ui_language = _resolve_ui_language(conversation)
-        discovery_block_message, discovery_analysis = await build_discovery_block_message_runtime(
+        (
+            discovery_block_message,
+            discovery_analysis,
+        ) = await build_discovery_block_message_runtime(
             conversation,
             flow=flow,
             litellm_client=self.litellm_client,
@@ -381,7 +390,9 @@ class AIBuilderPlanner:
             available_models=available_models,
             available_kbs=available_kbs,
         )
-        available_model_refs = {model["ref"] for model in models_ctx} if models_ctx else None
+        available_model_refs = (
+            {model["ref"] for model in models_ctx} if models_ctx else None
+        )
         available_kb_refs = {kb["ref"] for kb in kbs_ctx} if kbs_ctx else None
 
         if (
@@ -438,9 +449,8 @@ class AIBuilderPlanner:
 
         if max_input_tokens is None:
             max_input_tokens = (
-                (defaults.max_input_tokens if defaults else None)
-                or budget_policy.unknown_model_context_window_tokens
-            )
+                defaults.max_input_tokens if defaults else None
+            ) or budget_policy.unknown_model_context_window_tokens
         if max_output_tokens is None:
             max_output_tokens = defaults.max_output_tokens if defaults else None
 
@@ -511,7 +521,9 @@ class AIBuilderPlanner:
             not prepared_request.llm_messages
             and prepared_request.discovery_block_message is not None
         ):
-            for event in await self.proposal_processor.emit_discovery_followup_if_needed(
+            for (
+                event
+            ) in await self.proposal_processor.emit_discovery_followup_if_needed(
                 session_id=session_id,
                 conversation=conversation,
                 new_messages_start=new_messages_start,
@@ -527,7 +539,9 @@ class AIBuilderPlanner:
         llm_messages = prepared_request.llm_messages
         tool_selection = prepared_request.tool_selection
         if tool_selection.should_emit_forced_followup:
-            for event in await self.proposal_processor.emit_discovery_followup_if_needed(
+            for (
+                event
+            ) in await self.proposal_processor.emit_discovery_followup_if_needed(
                 session_id=session_id,
                 conversation=conversation,
                 new_messages_start=new_messages_start,
@@ -537,7 +551,9 @@ class AIBuilderPlanner:
             yield {"event": SSE_EVENT_DONE, "data": ""}
             return
         tool_schemas = tool_selection.tool_schemas
-        should_force_requirements_summary = tool_selection.should_force_requirements_summary
+        should_force_requirements_summary = (
+            tool_selection.should_force_requirements_summary
+        )
 
         try:
             response = await self.litellm_client.acompletion(
@@ -545,7 +561,10 @@ class AIBuilderPlanner:
                 messages=llm_messages,
                 tools=tool_schemas,
                 tool_choice=(
-                    {"type": "function", "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME}}
+                    {
+                        "type": "function",
+                        "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME},
+                    }
                     if should_force_requirements_summary
                     else None
                 ),
@@ -618,8 +637,8 @@ class AIBuilderPlanner:
             ):
                 yield event
         elif assistant_message.content:
-                # During discovery (before requirements confirmed), don't force proposals —
-                # let the LLM ask questions freely in text form.
+            # During discovery (before requirements confirmed), don't force proposals —
+            # let the LLM ask questions freely in text form.
             requirements_confirmed = requirements_state.confirmed
             should_force_proposal = (
                 requirements_confirmed
@@ -627,21 +646,23 @@ class AIBuilderPlanner:
             )
             if should_force_proposal:
                 yield build_status_event("finalizing_plan")
-                forced_plan = await self.proposal_processor.retry_forced_proposal_after_text(
-                    correction_messages=llm_messages,
-                    assistant_text=assistant_message.content,
-                    tool_schemas=tool_schemas,
-                    litellm_model=litellm_model,
-                    litellm_kwargs=litellm_kwargs,
-                    session_id=session_id,
-                    conversation=conversation,
-                    new_messages_start=new_messages_start,
-                    available_model_refs=prepared_request.available_model_refs,
-                    available_kb_refs=prepared_request.available_kb_refs,
-                    resource_catalog=prepared_request.resource_catalog,
-                    max_output_tokens=max_output_tokens,
-                    flow=flow,
-                    assistant_snapshots=assistant_snapshots,
+                forced_plan = (
+                    await self.proposal_processor.retry_forced_proposal_after_text(
+                        correction_messages=llm_messages,
+                        assistant_text=assistant_message.content,
+                        tool_schemas=tool_schemas,
+                        litellm_model=litellm_model,
+                        litellm_kwargs=litellm_kwargs,
+                        session_id=session_id,
+                        conversation=conversation,
+                        new_messages_start=new_messages_start,
+                        available_model_refs=prepared_request.available_model_refs,
+                        available_kb_refs=prepared_request.available_kb_refs,
+                        resource_catalog=prepared_request.resource_catalog,
+                        max_output_tokens=max_output_tokens,
+                        flow=flow,
+                        assistant_snapshots=assistant_snapshots,
+                    )
                 )
                 if forced_plan is not None:
                     yield build_text_event(assistant_message.content)

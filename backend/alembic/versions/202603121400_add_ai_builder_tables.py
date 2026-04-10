@@ -10,9 +10,10 @@ Create Date: 2026-03-12 14:00:00.000000
 
 """
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "202603121400"
@@ -70,19 +71,25 @@ def _lookup_model_cost_defaults(litellm_module, *model_names: str | None):
 
 def upgrade() -> None:
     # 1. Add completion-model token fields and backfill from LiteLLM metadata.
-    op.add_column(
-        "completion_models",
-        sa.Column("max_input_tokens", sa.Integer(), nullable=True),
-    )
-    op.add_column(
-        "completion_models",
-        sa.Column("max_output_tokens", sa.Integer(), nullable=True),
-    )
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    completion_model_columns = {
+        column["name"] for column in inspector.get_columns("completion_models")
+    }
+    if "max_input_tokens" not in completion_model_columns:
+        op.add_column(
+            "completion_models",
+            sa.Column("max_input_tokens", sa.Integer(), nullable=True),
+        )
+    if "max_output_tokens" not in completion_model_columns:
+        op.add_column(
+            "completion_models",
+            sa.Column("max_output_tokens", sa.Integer(), nullable=True),
+        )
 
     try:
         import litellm
 
-        conn = op.get_bind()
         rows = conn.execute(
             sa.text(
                 "SELECT id, name, litellm_model_name, token_limit "
@@ -120,7 +127,6 @@ def upgrade() -> None:
                 },
             )
     except ImportError:
-        conn = op.get_bind()
         conn.execute(
             sa.text(
                 "UPDATE completion_models "
@@ -349,9 +355,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    completion_model_columns = {
+        column["name"] for column in inspector.get_columns("completion_models")
+    }
     op.drop_constraint("fk_builder_sessions_latest_plan", "builder_sessions", type_="foreignkey")
     op.drop_table("builder_plans")
     op.drop_table("builder_sessions")
     op.drop_column("flows", "draft_revision")
-    op.drop_column("completion_models", "max_output_tokens")
-    op.drop_column("completion_models", "max_input_tokens")
+    if "max_output_tokens" in completion_model_columns:
+        op.drop_column("completion_models", "max_output_tokens")
+    if "max_input_tokens" in completion_model_columns:
+        op.drop_column("completion_models", "max_input_tokens")

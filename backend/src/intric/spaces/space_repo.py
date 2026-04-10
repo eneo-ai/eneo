@@ -919,7 +919,12 @@ class SpaceRepository:
 
         return mcp_servers
 
-    async def _get_assistants(self, space_id: UUID) -> Sequence[Assistants]:
+    async def _get_assistants(
+        self,
+        space_id: UUID,
+        *,
+        include_hidden: bool = False,
+    ) -> Sequence[Assistants]:
         stmt = (
             sa.select(Assistants)
             .where(Assistants.space_id == space_id)
@@ -1236,7 +1241,12 @@ class SpaceRepository:
 
         return apps_db
 
-    async def _get_from_query(self, query: sa.Select[tuple[Spaces]]) -> Space | None:
+    async def _get_from_query(
+        self,
+        query: sa.Select[tuple[Spaces]],
+        *,
+        include_hidden_assistants: bool = False,
+    ) -> Space | None:
         entry_in_db = await self._get_record_with_options(query)
         if not entry_in_db:
             return
@@ -1412,7 +1422,11 @@ class SpaceRepository:
         return space
 
     async def update(
-        self, space: Space, mcp_tool_settings: list[tuple[UUID, bool]] | None = None
+        self,
+        space: Space,
+        mcp_tool_settings: list[tuple[UUID, bool]] | None = None,
+        *,
+        include_hidden_assistants: bool = False,
     ) -> Space:
         query = (
             sa.update(Spaces)

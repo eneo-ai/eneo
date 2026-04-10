@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 _REDACTED_VALUE = "[REDACTED]"
@@ -120,9 +120,11 @@ def redact_url_secrets(value: str) -> str:
     if not parse_qsl(parsed.query, keep_blank_values=True):
         if parsed.username is None and parsed.password is None:
             return value
-        return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+        return urlunsplit(
+            (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
+        )
 
-    redacted_query = []
+    redacted_query: list[tuple[str, str]] = []
     for key, item_value in parse_qsl(parsed.query, keep_blank_values=True):
         if is_sensitive_key(key):
             redacted_query.append((key, _REDACTED_VALUE))
@@ -178,7 +180,9 @@ def redact_payload_with_manifest(
         redacted_dict: dict[str, Any] = {}
         dict_masked_paths: list[str] = []
         dict_masked_fields: list[MaskedField] = []
-        for item_key, item_value in value.items():
+        raw_items = cast(dict[object, Any], value)
+        for raw_item_key, item_value in raw_items.items():
+            item_key = str(raw_item_key)
             child_path = f"{path}.{item_key}" if path else item_key
             child_result = redact_payload_with_manifest(
                 item_value,
@@ -197,7 +201,7 @@ def redact_payload_with_manifest(
         redacted_items: list[Any] = []
         list_masked_paths: list[str] = []
         list_masked_fields: list[MaskedField] = []
-        for index, item in enumerate(value):
+        for index, item in enumerate(cast(list[Any], value)):
             child_path = f"{path}[{index}]" if path else f"[{index}]"
             child_result = redact_payload_with_manifest(
                 item,

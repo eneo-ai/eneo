@@ -16,12 +16,17 @@ from intric.flows.api.flow_models import (
     FlowRunPublic,
     FlowRunRedispatchResponse,
 )
+from intric.flows.application.flow_run_service import FlowRunService
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.main.models import PaginatedResponse
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
+
+
+def _get_flow_run_service(container: Container) -> FlowRunService:
+    return container.flow_run_service()
 
 
 @router.post(
@@ -71,7 +76,10 @@ router = APIRouter()
     },
 )
 async def create_flow_run(
-    id: Annotated[UUID, Path(description="Identifier of the published flow that should be executed.")],
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the published flow that should be executed."),
+    ],
     request: Request,
     run_in: FlowRunCreateRequest,
     background_tasks: BackgroundTasks,
@@ -84,7 +92,7 @@ async def create_flow_run(
         required_access="run",
     )
     assembler = FlowAssembler()
-    run_service = container.flow_run_service()
+    run_service = _get_flow_run_service(container)
     user = container.user()
     run = await run_service.create_run(
         flow_id=id,
@@ -150,10 +158,16 @@ async def create_flow_run(
     },
 )
 async def list_flow_runs_alias(
-    id: Annotated[UUID, Path(description="Identifier of the flow whose runs should be listed.")],
+    id: Annotated[
+        UUID, Path(description="Identifier of the flow whose runs should be listed.")
+    ],
     request: Request,
-    limit: int = Query(default=50, ge=1, le=200, description="Maximum number of runs to return."),
-    offset: int = Query(default=0, ge=0, description="Number of runs to skip before returning results."),
+    limit: int = Query(
+        default=50, ge=1, le=200, description="Maximum number of runs to return."
+    ),
+    offset: int = Query(
+        default=0, ge=0, description="Number of runs to skip before returning results."
+    ),
     container: Container = Depends(get_container(with_user=True)),
 ):
     await common.enforce_flow_scope_for_request(
@@ -163,13 +177,16 @@ async def list_flow_runs_alias(
         required_access="view",
         require_flow_lookup_without_scope=True,
     )
-    runs = await container.flow_run_service().list_runs(
+    runs = await _get_flow_run_service(container).list_runs(
         flow_id=id,
         limit=limit,
         offset=offset,
     )
     assembler = FlowAssembler()
-    return {"count": len(runs), "items": [assembler.to_run_public(item) for item in runs]}
+    return {
+        "count": len(runs),
+        "items": [assembler.to_run_public(item) for item in runs],
+    }
 
 
 @router.get(
@@ -200,7 +217,9 @@ async def list_flow_runs_alias(
     },
 )
 async def get_flow_run_alias(
-    id: Annotated[UUID, Path(description="Identifier of the flow that owns the requested run.")],
+    id: Annotated[
+        UUID, Path(description="Identifier of the flow that owns the requested run.")
+    ],
     run_id: Annotated[UUID, Path(description="Identifier of the run to return.")],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
@@ -211,7 +230,7 @@ async def get_flow_run_alias(
         flow_id=id,
         required_access="view",
     )
-    run = await container.flow_run_service().get_run(run_id=run_id, flow_id=id)
+    run = await _get_flow_run_service(container).get_run(run_id=run_id, flow_id=id)
     return FlowAssembler().to_run_public(run)
 
 
@@ -243,7 +262,9 @@ This is the canonical run control endpoint for flow consumers.
     },
 )
 async def cancel_flow_run_alias(
-    id: Annotated[UUID, Path(description="Identifier of the flow that owns the run to cancel.")],
+    id: Annotated[
+        UUID, Path(description="Identifier of the flow that owns the run to cancel.")
+    ],
     run_id: Annotated[UUID, Path(description="Identifier of the run to cancel.")],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
@@ -255,7 +276,7 @@ async def cancel_flow_run_alias(
         required_access="run",
     )
     user = container.user()
-    run_service = container.flow_run_service()
+    run_service = _get_flow_run_service(container)
     await run_service.get_run(run_id=run_id, flow_id=id)
     run = await run_service.cancel_run(run_id=run_id)
 
@@ -300,8 +321,13 @@ async def cancel_flow_run_alias(
     },
 )
 async def redispatch_flow_run_alias(
-    id: Annotated[UUID, Path(description="Identifier of the flow that owns the stale queued run.")],
-    run_id: Annotated[UUID, Path(description="Identifier of the run to redispatch if it is still queued.")],
+    id: Annotated[
+        UUID, Path(description="Identifier of the flow that owns the stale queued run.")
+    ],
+    run_id: Annotated[
+        UUID,
+        Path(description="Identifier of the run to redispatch if it is still queued."),
+    ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
@@ -312,7 +338,7 @@ async def redispatch_flow_run_alias(
         required_access="run",
     )
     user = container.user()
-    run_service = container.flow_run_service()
+    run_service = _get_flow_run_service(container)
     run = await run_service.get_run(run_id=run_id, flow_id=id)
 
     redispatched = await run_service.redispatch_stale_queued_runs(
@@ -332,7 +358,11 @@ async def redispatch_flow_run_alias(
         description=f"Redispatch requested for flow run {refreshed.id} (dispatch_count={redispatched})",
         metadata=AuditMetadata.standard(actor=user, target=refreshed),
     )
+    response = FlowRunRedispatchResponse(
+        run=FlowAssembler().to_run_public(refreshed),
+        redispatched_count=redispatched,
+    )
     return {
-        "run": FlowAssembler().to_run_public(refreshed),
-        "redispatched_count": redispatched,
+        "run": response.run,
+        "redispatched_count": response.redispatched_count,
     }

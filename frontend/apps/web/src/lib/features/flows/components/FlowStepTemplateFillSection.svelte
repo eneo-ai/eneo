@@ -18,7 +18,7 @@
   import { Alert, Badge, Card } from "@eneo/ui";
 
   const dispatch = createEventDispatcher<{
-    outputModeChange: { value: string };
+    outputModeChange: { value: FlowStep["output_mode"] };
     templateFileSelect: { assetId: string };
     templateUpload: { event: Event };
     templateDownload: void;
@@ -40,10 +40,10 @@
     key: string;
     placeholderName: string;
     status: "matched" | "missing" | "invalid" | "orphaned";
-    binding: string | null;
-    preview?: string;
+    binding?: string | null;
+    preview?: string | null;
     autoSuggested?: boolean;
-    sourceOutputType?: string;
+    sourceOutputType?: string | null;
   }>;
   export let templateBindingSuggestionGroups: Array<{
     key: string;
@@ -58,7 +58,7 @@
   export let selectedTemplateAsset: any | null;
   export let templateUnnamedStepWarning: boolean;
   export let templateAutoMatchableCount: number;
-  export let availableTemplateFiles: Array<{ id: string; name: string; status?: string }>;
+  export let availableTemplateFiles: Array<{ id: string; name: string; status?: string | null }>;
 
   // Local state
   let expandedTemplateExpressions = new Set<string>();
@@ -81,7 +81,10 @@
 
 {#if isAdvancedMode}
   <Settings.Group title={m.flow_template_fill_template_section()}>
-    <Alert.Root class="rounded-[1rem] border-accent-default/15 bg-accent-default/5 px-5 py-4" role="status">
+    <Alert.Root
+      class="border-accent-default/15 bg-accent-default/5 rounded-[1rem] px-5 py-4"
+      role="status"
+    >
       <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div class="flex flex-col gap-1.5">
           <Alert.Title class="text-accent-stronger text-sm font-semibold tracking-tight">
@@ -101,9 +104,7 @@
         </Button>
       </div>
     </Alert.Root>
-    <div
-      class="grid gap-4 px-4 pt-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:px-0.5"
-    >
+    <div class="grid gap-4 px-4 pt-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:px-0.5">
       <div class="space-y-2 pr-4">
         <h3 class="text-lg font-medium">{m.flow_template_fill_template_label()}</h3>
         <p class="text-secondary whitespace-pre-wrap">
@@ -116,8 +117,7 @@
             <Card.Content class="flex items-center justify-between gap-3 px-3 py-3">
               <div class="min-w-0">
                 <p class="text-primary truncate text-sm font-medium">
-                  {templateFillConfig.template_name ??
-                    m.flow_template_fill_select_placeholder()}
+                  {templateFillConfig.template_name ?? m.flow_template_fill_select_placeholder()}
                 </p>
                 <div class="mt-1">
                   <Badge class={readinessPillClass()}>
@@ -146,11 +146,9 @@
           </Card.Root>
         {/if}
         <select
-          class="border-default bg-primary w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:border-accent-default focus-within:ring-2 focus-within:ring-accent-default/20 hover:border-stronger focus-visible:outline-none disabled:opacity-50"
+          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
           value={resolvedTemplateAssetId ?? ""}
-          disabled={isPublished ||
-            templateInspecting ||
-            selectedTemplateAsset?.can_edit === false}
+          disabled={isPublished || templateInspecting || selectedTemplateAsset?.can_edit === false}
           on:change={(e) => dispatch("templateFileSelect", { assetId: e.currentTarget.value })}
         >
           <option value="">{m.flow_template_fill_select_placeholder()}</option>
@@ -166,9 +164,7 @@
           type="file"
           accept=".docx"
           class="hidden"
-          disabled={isPublished ||
-            templateInspecting ||
-            selectedTemplateAsset?.can_edit === false}
+          disabled={isPublished || templateInspecting || selectedTemplateAsset?.can_edit === false}
           on:change={(e) => dispatch("templateUpload", { event: e })}
         />
         <div class="flex flex-wrap items-center gap-3">
@@ -203,9 +199,7 @@
             {m.flow_template_fill_refresh_action()}
           </Button>
           {#if templateFilesLoading}
-            <span class="text-muted text-xs"
-              >{m.flow_template_fill_loading_templates()}</span
-            >
+            <span class="text-muted text-xs">{m.flow_template_fill_loading_templates()}</span>
           {/if}
         </div>
         {#if templateUnnamedStepWarning}
@@ -228,9 +222,7 @@
   </Settings.Group>
 
   <Settings.Group title={m.flow_template_fill_placeholders_title()}>
-    <div
-      class="grid gap-4 px-4 pt-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:px-0.5"
-    >
+    <div class="grid gap-4 px-4 pt-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:px-0.5">
       <div class="space-y-2 pr-4">
         <p class="text-secondary whitespace-pre-wrap">
           {m.flow_template_fill_mapping_description()}
@@ -244,9 +236,7 @@
                 <Badge class={readinessPillClass()}>
                   {templateReadiness.matched}/{templateReadiness.total}
                 </Badge>
-                <div
-                  class="bg-hover-dimmer h-2 w-full max-w-48 overflow-hidden rounded-full"
-                >
+                <div class="bg-hover-dimmer h-2 w-full max-w-48 overflow-hidden rounded-full">
                   <div
                     class={`h-full transition-all ${templateReadiness.incomplete ? "bg-warning-default" : "bg-positive-default"}`}
                     style={`width: ${(templateReadiness.matched / templateReadiness.total) * 100}%`}
@@ -390,9 +380,7 @@
                             value: e.currentTarget.value
                           })}
                       >
-                        <option value="__unset__"
-                          >{m.flow_template_fill_select_source()}</option
-                        >
+                        <option value="__unset__">{m.flow_template_fill_select_source()}</option>
                         <option value="">{m.flow_template_fill_leave_empty()}</option>
                         {#each templateBindingSuggestionGroups as group (group.key)}
                           <optgroup label={group.label}>
@@ -447,17 +435,18 @@
   </Settings.Group>
 {:else}
   <Settings.Group title={m.flow_template_fill_template_section()}>
-    <Alert.Root class="rounded-[1rem] border-accent-default/15 bg-accent-default/5 px-5 py-4" role="status">
+    <Alert.Root
+      class="border-accent-default/15 bg-accent-default/5 rounded-[1rem] px-5 py-4"
+      role="status"
+    >
       <Alert.Title class="text-accent-stronger text-sm font-semibold tracking-tight">
         {m.flow_template_fill_title()}
       </Alert.Title>
-      <Alert.Description class="mt-1.5 text-accent-stronger/90 text-[0.8125rem] leading-relaxed">
+      <Alert.Description class="text-accent-stronger/90 mt-1.5 text-[0.8125rem] leading-relaxed">
         {m.flow_template_fill_desc()}
       </Alert.Description>
     </Alert.Root>
-    <div
-      class="grid gap-4 px-4 pt-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:px-0.5"
-    >
+    <div class="grid gap-4 px-4 pt-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:px-0.5">
       <div class="space-y-2 pr-4">
         <h3 class="text-lg font-medium">{m.flow_template_fill_template_label()}</h3>
         <p class="text-secondary whitespace-pre-wrap">{m.flow_template_fill_summary()}</p>
@@ -468,8 +457,7 @@
             <Card.Content class="flex items-center justify-between gap-3 px-3 py-3">
               <div class="min-w-0">
                 <p class="text-primary truncate text-sm font-medium">
-                  {templateFillConfig.template_name ??
-                    m.flow_template_fill_select_placeholder()}
+                  {templateFillConfig.template_name ?? m.flow_template_fill_select_placeholder()}
                 </p>
                 <p class="text-muted mt-1 text-xs leading-relaxed">
                   {m.flow_template_fill_readiness_summary({

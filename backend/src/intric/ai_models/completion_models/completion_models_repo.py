@@ -48,7 +48,7 @@ class CompletionModelsRepository:
         return await self.delegate.get_by(conditions={CompletionModels.name: name})
 
     async def create_model(self, model: CompletionModelCreate) -> CompletionModel:
-        return await self.delegate.add(model, exclude={"token_limit"})
+        return await self.delegate.add(model)
 
     async def enable_completion_model(
         self,

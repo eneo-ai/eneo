@@ -74,9 +74,10 @@
   let scrollContainer = $state<HTMLDivElement | undefined>();
 
   function scrollToBottom() {
-    if (scrollContainer) {
+    const target = scrollContainer;
+    if (target) {
       requestAnimationFrame(() => {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+        target.scrollTop = target.scrollHeight;
       });
     }
   }
@@ -119,7 +120,10 @@
     <div class="border-border-default flex w-full shrink-0 items-center border-b backdrop-blur-sm">
       {#if service.messages.length > 0}
         <div class="min-w-0 flex-1">
-          <FlowAIBuilderPhaseIndicator phase={service.phase} answeredCount={answeredQuestionCount} />
+          <FlowAIBuilderPhaseIndicator
+            phase={service.phase}
+            answeredCount={answeredQuestionCount}
+          />
         </div>
       {:else}
         <div class="min-h-0 flex-1" aria-hidden="true"></div>
@@ -127,7 +131,7 @@
 
       {#if canStartOver}
         <button
-          class="bg-primary text-secondary border-border-default mr-4 shrink-0 cursor-pointer whitespace-nowrap rounded-full border px-3 py-1.5 text-[0.8125rem] font-medium leading-none transition-all duration-150 ease-out hover:bg-secondary hover:text-primary"
+          class="bg-primary text-secondary border-border-default hover:bg-secondary hover:text-primary mr-4 shrink-0 cursor-pointer rounded-full border px-3 py-1.5 text-[0.8125rem] leading-none font-medium whitespace-nowrap transition-all duration-150 ease-out"
           onclick={handleStartOver}
         >
           {m.ai_builder_start_fresh()}
@@ -185,7 +189,9 @@
           <div class="mt-4 py-2">
             <div class="generating-badge" role="status" aria-label={generatingText}>
               <span class="generating-orb" aria-hidden="true"></span>
-              <span class="relative z-[1] text-[0.8125rem] font-medium leading-tight">{generatingText}</span>
+              <span class="relative z-[1] text-[0.8125rem] leading-tight font-medium"
+                >{generatingText}</span
+              >
             </div>
           </div>
         {/if}
@@ -196,7 +202,10 @@
   <!-- Error banner -->
   {#if service.error}
     <div class="mx-4 mb-2">
-      <Alert.Root variant="destructive" class="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm">
+      <Alert.Root
+        variant="destructive"
+        class="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm"
+      >
         <Alert.Description class="flex-1">{service.error}</Alert.Description>
         <Alert.Action>
           <button class="text-negative-default ml-2 underline" onclick={() => service.clearError()}>
@@ -209,7 +218,7 @@
 
   <!-- Input area -->
   <div
-    class="bg-primary border-border-default border-t px-4 pb-4 pt-3 max-sm:px-2 max-sm:pb-3 max-sm:pt-2"
+    class="bg-primary border-border-default border-t px-4 pt-3 pb-4 max-sm:px-2 max-sm:pt-2 max-sm:pb-3"
     class:input-area-hero={showEmptyState}
   >
     <FlowAIBuilderInput bind:this={inputRef} />

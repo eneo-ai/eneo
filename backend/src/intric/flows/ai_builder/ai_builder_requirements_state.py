@@ -26,7 +26,9 @@ class RequirementsState:
 
 
 def build_requirements_version(payload: RequirementsSummaryPayload) -> str:
-    canonical_payload = payload.model_copy(update={"requirements_version": None}, deep=True)
+    canonical_payload = payload.model_copy(
+        update={"requirements_version": None}, deep=True
+    )
     serialized = json.dumps(
         canonical_payload.model_dump(mode="json"),
         sort_keys=True,
@@ -46,7 +48,7 @@ def resolve_requirements_state(
     for index, message in enumerate(conversation):
         if message.role == "assistant" and isinstance(message.tool_calls, list):
             for tool_call in message.tool_calls:
-                if not isinstance(tool_call, dict) or tool_call.get("name") != "confirm_requirements":
+                if tool_call.get("name") != "confirm_requirements":
                     continue
                 arguments = tool_call.get("arguments")
                 if not isinstance(arguments, dict):

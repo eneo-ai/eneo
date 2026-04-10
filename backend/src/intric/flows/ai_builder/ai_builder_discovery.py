@@ -5,50 +5,85 @@ from intric.flows.ai_builder.ai_builder_discovery_decision_engine import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     comparison_architecture_is_clear as _comparison_architecture_is_clear,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     decision_support_scope_is_vague as _decision_support_scope_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     document_cardinality_is_vague as _document_cardinality_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     document_kind_is_vague as _document_kind_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     final_pdf_type_is_vague as _final_pdf_type_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     has_same_run_comparison_contradiction as _has_same_run_comparison_contradiction,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     latest_pending_question_id as _latest_pending_question_id,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     looks_like_case_scope_is_vague as _looks_like_case_scope_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     looks_like_input_mode_is_vague as _looks_like_input_mode_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     looks_like_output_is_vague as _looks_like_output_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     mixed_input_architecture_is_vague as _mixed_input_architecture_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     needs_docx_mode_choice as _needs_docx_mode_choice,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     needs_pdf_generation_mode_choice as _needs_pdf_generation_mode_choice,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     question_category as _question_category,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     reader_and_style_is_vague as _reader_and_style_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     runtime_metadata_is_vague as _runtime_metadata_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     structured_analysis_need_is_vague as _structured_analysis_need_is_vague,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryAnalysis,
-    DiscoveryLanguage,
+    DiscoveryCandidate,
     DiscoveryIssue,
+    DiscoveryLanguage,
     DiscoveryProfile,
     SemanticAdjudicationResult,
 )
-from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
-    build_discovery_profile as _build_discovery_profile,
-    default_discovery_assumptions as _default_discovery_assumptions,
-    semantic_answers as _semantic_answers,
-    text_has_task_verbs as _text_has_task_verbs,
-)
-from intric.flows.ai_builder.ai_builder_signal_confidence import (
-    has_low_confidence_signals,
-    score_conversation_signals,
-)
 from intric.flows.ai_builder.ai_builder_discovery_priority import (
     sort_discovery_issues,
+)
+from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
+    build_discovery_profile as _build_discovery_profile,
+)
+from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
+    default_discovery_assumptions as _default_discovery_assumptions,
+)
+from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
+    semantic_answers as _semantic_answers,
+)
+from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
+    text_has_task_verbs as _text_has_task_verbs,
 )
 from intric.flows.ai_builder.ai_builder_discovery_questions import (
     comparison_scope_conflict_question,
     comparison_scope_question,
     decision_support_scope_question,
-    docx_output_mode_question,
     document_kind_question,
     document_material_scope_question,
+    docx_output_mode_question,
     final_output_mode_question,
     final_pdf_type_question,
     flow_input_architecture_question,
@@ -57,8 +92,8 @@ from intric.flows.ai_builder.ai_builder_discovery_questions import (
     output_reader_question,
     pdf_generation_mode_question,
     processing_scope_question,
-    question_suggestion_for_id,
     question_exposure_for_id,
+    question_suggestion_for_id,
     runtime_metadata_fields_question,
     structured_analysis_need_question,
 )
@@ -68,6 +103,10 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     question_is_already_resolved,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_signal_confidence import (
+    has_low_confidence_signals,
+    score_conversation_signals,
+)
 from intric.flows.domain.flow import Flow
 
 
@@ -196,7 +235,9 @@ def analyze_discovery(
             )
         )
 
-    if profile.comparison_requested and not _comparison_architecture_is_clear(text, answers):
+    if profile.comparison_requested and not _comparison_architecture_is_clear(
+        text, answers
+    ):
         raw_issues.append(
             DiscoveryIssue(
                 issue_id="comparison_scope",
@@ -247,7 +288,9 @@ def analyze_discovery(
             )
         )
 
-    if _needs_pdf_generation_mode_choice(profile) and not has_explicit_structured_answer(
+    if _needs_pdf_generation_mode_choice(
+        profile
+    ) and not has_explicit_structured_answer(
         conversation,
         "pdf_generation_mode",
     ):
@@ -416,7 +459,9 @@ def _dedupe_issues(issues: list[DiscoveryIssue]) -> list[DiscoveryIssue]:
     for issue in issues:
         if issue.issue_id in seen_issue_ids:
             continue
-        question_id = issue.suggestion.question_id if issue.suggestion is not None else None
+        question_id = (
+            issue.suggestion.question_id if issue.suggestion is not None else None
+        )
         if question_id is not None and question_id in seen_question_ids:
             continue
         deduped.append(issue)
@@ -475,9 +520,13 @@ def build_discovery_followup(
                 "selection_mode": suggestion.selection_mode,
                 "allow_custom": suggestion.allow_custom,
             }
-            return issue, question_data, build_discovery_followup_text(
+            return (
                 issue,
-                profile.language,
+                question_data,
+                build_discovery_followup_text(
+                    issue,
+                    profile.language,
+                ),
             )
 
     issue = analysis.next_issue
@@ -522,7 +571,8 @@ def build_registry_question_followup(
         (
             issue
             for issue in analyze_discovery(conversation, flow=flow).issues
-            if issue.suggestion is not None and issue.suggestion.question_id == canonical_id
+            if issue.suggestion is not None
+            and issue.suggestion.question_id == canonical_id
         ),
         None,
     )
@@ -571,7 +621,7 @@ def build_discovery_guidance(
         "- Discovery protocol: there is still blocking ambiguity or a contradiction.",
         "- Ask exactly ONE structured question now. Do not call `confirm_requirements`, `create_flow`, or `edit_flow` yet.",
         f"- Highest-priority blocker: {next_issue.message}",
-        f"- Use `question_id=\"{suggestion.question_id}\"`.",
+        f'- Use `question_id="{suggestion.question_id}"`.',
         f"- Ask this question: {suggestion.question}",
         "- Use these clickable options with stable ids and values:",
     ]
@@ -582,7 +632,9 @@ def build_discovery_guidance(
 
     remaining = [issue.message for issue in analysis.blocking_issues[1:]]
     if remaining:
-        lines.append("- After the user answers, reevaluate these remaining blockers before summarizing:")
+        lines.append(
+            "- After the user answers, reevaluate these remaining blockers before summarizing:"
+        )
         lines.extend(f"  - {issue}" for issue in remaining)
 
     lines.append(
@@ -669,6 +721,7 @@ def build_discovery_followup_text(
 # MVS gate — Minimum Viable Specification
 # ---------------------------------------------------------------------------
 
+
 def _has_minimum_viable_specification(profile: DiscoveryProfile) -> bool:
     """Require at least 2 of 3 dimensions (input, output, purpose) resolved."""
     has_input = (
@@ -677,8 +730,7 @@ def _has_minimum_viable_specification(profile: DiscoveryProfile) -> bool:
         or "input_material_mode" in profile.answers
     )
     has_output = (
-        profile.final_output_text_or_docx
-        or "final_output_mode" in profile.answers
+        profile.final_output_text_or_docx or "final_output_mode" in profile.answers
     )
     has_purpose = (
         profile.case_like_flow
@@ -698,8 +750,8 @@ def _apply_discovery_decision_engine(
     list[DiscoveryIssue],
     list[str],
     list[str],
-    list,
-    list,
+    list[DiscoveryCandidate],
+    list[DiscoveryCandidate],
 ]:
     return apply_discovery_decision_engine(
         issues=issues,

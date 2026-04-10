@@ -1,37 +1,66 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import hashlib
 import json
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, cast
 
-from intric.flows.citation_sidecar import build_citation_sidecar
 from intric.flows.citation_sidecar import (
     TRACKING_MODE_INLINE_INREF_REQUIRED,
     TRACKING_MODE_PASSIVE_INLINE_SCAN,
+    build_citation_sidecar,
     normalize_citation_sidecar_payload,
     resolve_citation_mode,
     summarize_step_citations,
 )
+from intric.flows.domain.flow import JsonObject
 from intric.flows.flow_run_evidence_bundle import RedactedEvidenceBundle
 from intric.flows.flow_run_provenance import (
     default_rag_tracking,
     normalize_text_preview,
 )
+from intric.flows.flow_run_redaction import REDACTION_POLICY_VERSION
 from intric.flows.source_display import (
     format_source_container_display_name,
     format_source_container_label,
     format_source_display_name,
 )
-from intric.flows.flow_run_redaction import REDACTION_POLICY_VERSION
-from intric.flows.step_lineage import build_step_ref_mapping, resolve_upstream_step_orders
-from intric.flows.template_reference_analyzer import analyze_template, consumes_runtime_input
+from intric.flows.step_lineage import (
+    build_step_ref_mapping,
+    resolve_upstream_step_orders,
+)
+from intric.flows.template_reference_analyzer import (
+    analyze_template,
+    consumes_runtime_input,
+)
 
 EVIDENCE_EXPORT_SCHEMA_VERSION = "flow-evidence-export.v2"
 
 
+def _as_json_object(value: Any) -> JsonObject | None:
+    return cast(JsonObject, value) if isinstance(value, dict) else None
+
+
+def _as_json_object_or_empty(value: Any) -> JsonObject:
+    return cast(JsonObject, value) if isinstance(value, dict) else {}
+
+
+def _as_json_list(value: Any) -> list[object]:
+    return cast(list[object], value) if isinstance(value, list) else []
+
+
+def _as_json_object_list(value: Any) -> list[JsonObject]:
+    return [
+        cast(JsonObject, item)
+        for item in _as_json_list(value)
+        if isinstance(item, dict)
+    ]
+
+
 def render_evidence_json_export(*, bundle: RedactedEvidenceBundle) -> dict[str, object]:
     bundle_payload = bundle.to_dict()
+    debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
+    security = _as_json_object_or_empty(debug_export.get("security"))
     serialized_bundle = json.dumps(
         bundle_payload,
         ensure_ascii=False,
@@ -51,11 +80,7 @@ def render_evidence_json_export(*, bundle: RedactedEvidenceBundle) -> dict[str, 
         "manifest": manifest,
         "summary": _build_summary(bundle_payload),
         "redaction": {
-            "applied": bool(
-                ((bundle_payload.get("debug_export") or {}).get("security") or {}).get(
-                    "redaction_applied"
-                )
-            ),
+            "applied": bool(security.get("redaction_applied")),
             "policy_version": REDACTION_POLICY_VERSION,
             "masked_fields_count": len(bundle.masked_paths),
             "masked_paths": list(bundle.masked_paths),
@@ -78,9 +103,9 @@ def _build_manifest(
     *,
     masked_fields_count: int,
 ) -> dict[str, Any]:
-    run = bundle_payload.get("run", {})
-    debug_export = bundle_payload.get("debug_export", {})
-    security = debug_export.get("security", {}) if isinstance(debug_export, dict) else {}
+    run = _as_json_object_or_empty(bundle_payload.get("run"))
+    debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
+    security = _as_json_object_or_empty(debug_export.get("security"))
     return {
         "run_id": run.get("id"),
         "flow_id": run.get("flow_id"),
@@ -94,17 +119,25 @@ def _build_manifest(
 
 
 def _build_summary(bundle_payload: dict[str, Any]) -> dict[str, Any]:
-    run = bundle_payload.get("run", {})
-    step_results = bundle_payload.get("step_results", [])
-    step_attempts = bundle_payload.get("step_attempts", [])
-    debug_export = bundle_payload.get("debug_export", {})
-    debug_run = debug_export.get("run", {}) if isinstance(debug_export, dict) else {}
-    debug_summary = debug_run.get("summary", {}) if isinstance(debug_run, dict) else {}
+    run = _as_json_object_or_empty(bundle_payload.get("run"))
+    step_results = _as_json_object_list(bundle_payload.get("step_results"))
+    step_attempts = _as_json_object_list(bundle_payload.get("step_attempts"))
+    debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
+    debug_run = _as_json_object_or_empty(debug_export.get("run"))
+    debug_summary = _as_json_object_or_empty(debug_run.get("summary"))
     artifacts_count = _count_artifacts(step_results, run.get("output_payload_json"))
     rag_sources = _collect_rag_sources(bundle_payload)
-    rag_source_names = [source["name"] for source in rag_sources if isinstance(source.get("name"), str)]
-    artifact_names = _collect_artifact_names(step_results, run.get("output_payload_json"))
-    artifact_details = _collect_artifact_details(step_results, run.get("output_payload_json"))
+    rag_source_names = [
+        cast(str, source["name"])
+        for source in rag_sources
+        if isinstance(source.get("name"), str)
+    ]
+    artifact_names = _collect_artifact_names(
+        step_results, run.get("output_payload_json")
+    )
+    artifact_details = _collect_artifact_details(
+        step_results, run.get("output_payload_json")
+    )
     step_overview = _build_step_overview(bundle_payload)
     citations = _build_summary_citations(bundle_payload, step_overview=step_overview)
     return {
@@ -113,29 +146,25 @@ def _build_summary(bundle_payload: dict[str, Any]) -> dict[str, Any]:
         "steps_count": debug_summary.get("steps_count", len(step_results)),
         "completed_steps": debug_summary.get(
             "completed_steps",
-            sum(
-                1
-                for result in step_results
-                if isinstance(result, dict) and result.get("status") == "completed"
-            ),
+            sum(1 for result in step_results if result.get("status") == "completed"),
         ),
         "failed_steps": debug_summary.get(
             "failed_steps",
-            sum(
-                1
-                for result in step_results
-                if isinstance(result, dict) and result.get("status") == "failed"
-            ),
+            sum(1 for result in step_results if result.get("status") == "failed"),
         ),
         "attempts_count": debug_summary.get("attempts_count", len(step_attempts)),
         "artifacts_count": artifacts_count,
         "artifact_names": artifact_names,
         "artifact_details": artifact_details,
         "duration_ms": debug_summary.get("duration_ms"),
-        "models_used": debug_summary.get("models_used", _collect_models_used(step_attempts)),
+        "models_used": debug_summary.get(
+            "models_used", _collect_models_used(step_attempts)
+        ),
         "rag_sources_count": len(rag_source_names),
         "rag_source_names": rag_source_names,
-        "rag_source_display_names": [format_source_display_name(name) for name in rag_source_names],
+        "rag_source_display_names": [
+            format_source_display_name(name) for name in rag_source_names
+        ],
         "rag_sources": rag_sources,
         "rag_usage_tracking": _collect_rag_tracking(bundle_payload),
         "citations": citations,
@@ -149,11 +178,7 @@ def _build_summary(bundle_payload: dict[str, Any]) -> dict[str, Any]:
 
 def _collect_models_used(step_attempts: Any) -> list[str]:
     models: list[str] = []
-    if not isinstance(step_attempts, list):
-        return models
-    for attempt in step_attempts:
-        if not isinstance(attempt, dict):
-            continue
+    for attempt in _as_json_object_list(step_attempts):
         for key in ("response_model", "requested_model"):
             raw_value = attempt.get(key)
             if isinstance(raw_value, str) and raw_value.strip():
@@ -164,77 +189,70 @@ def _collect_models_used(step_attempts: Any) -> list[str]:
 
 def _collect_rag_sources(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]:
     sources_by_key: dict[str, dict[str, Any]] = {}
-    step_attempts = bundle_payload.get("step_attempts", [])
-    if isinstance(step_attempts, list):
-        for attempt in step_attempts:
-            if not isinstance(attempt, dict):
+    step_attempts = _as_json_object_list(bundle_payload.get("step_attempts"))
+    for attempt in step_attempts:
+        provenance = _as_json_object(attempt.get("provenance_json"))
+        if provenance is None:
+            continue
+        rag = _as_json_object(provenance.get("rag"))
+        if rag is None:
+            continue
+        references = _as_json_object_list(rag.get("references"))
+        for reference in references:
+            name = _resolve_rag_source_name(reference)
+            key = _resolve_rag_source_key(reference, name)
+            if key is None:
                 continue
-            provenance = attempt.get("provenance_json")
-            if not isinstance(provenance, dict):
-                continue
-            rag = provenance.get("rag")
-            if not isinstance(rag, dict):
-                continue
-            references = rag.get("references")
-            if not isinstance(references, list):
-                continue
-            for reference in references:
-                if not isinstance(reference, dict):
-                    continue
-                name = _resolve_rag_source_name(reference)
-                key = _resolve_rag_source_key(reference, name)
-                if key is None:
-                    continue
-                sources_by_key.setdefault(
-                    key,
-                    {
-                        "id": reference.get("id"),
-                        "name": name,
-                        "display_name": (
-                            format_source_display_name(name)
-                            if isinstance(name, str) and name.strip()
-                            else None
-                        ),
-                        "source_title_raw": reference.get("source_title_raw"),
-                        "source_display_name": reference.get("source_display_name"),
-                        "source_url": reference.get("source_url"),
-                        "source_kind": reference.get("source_kind"),
-                        "source_container_kind": reference.get("source_container_kind"),
-                        "source_container_name": reference.get("source_container_name"),
-                        "source_container_name_raw": reference.get("source_container_name_raw"),
-                        "source_container_display_name": (
-                            reference.get("source_container_display_name")
-                            or format_source_container_display_name(reference)
-                        ),
-                        "source_container_label": (
-                            reference.get("source_container_label")
-                            or format_source_container_label(reference)
-                        ),
-                        "source_container_id": reference.get("source_container_id"),
-                        "usage_state": reference.get("usage_state") or "retrieved_candidate",
-                    },
-                )
+            sources_by_key.setdefault(
+                key,
+                {
+                    "id": reference.get("id"),
+                    "name": name,
+                    "display_name": (
+                        format_source_display_name(name)
+                        if isinstance(name, str) and name.strip()
+                        else None
+                    ),
+                    "source_title_raw": reference.get("source_title_raw"),
+                    "source_display_name": reference.get("source_display_name"),
+                    "source_url": reference.get("source_url"),
+                    "source_kind": reference.get("source_kind"),
+                    "source_container_kind": reference.get("source_container_kind"),
+                    "source_container_name": reference.get("source_container_name"),
+                    "source_container_name_raw": reference.get(
+                        "source_container_name_raw"
+                    ),
+                    "source_container_display_name": (
+                        reference.get("source_container_display_name")
+                        or format_source_container_display_name(reference)
+                    ),
+                    "source_container_label": (
+                        reference.get("source_container_label")
+                        or format_source_container_label(reference)
+                    ),
+                    "source_container_id": reference.get("source_container_id"),
+                    "usage_state": reference.get("usage_state")
+                    or "retrieved_candidate",
+                },
+            )
     return list(sources_by_key.values())
 
 
 def _collect_rag_tracking(bundle_payload: dict[str, Any]) -> dict[str, Any]:
-    step_attempts = bundle_payload.get("step_attempts", [])
-    if isinstance(step_attempts, list):
-        for attempt in step_attempts:
-            if not isinstance(attempt, dict):
-                continue
-            provenance = attempt.get("provenance_json")
-            if not isinstance(provenance, dict):
-                continue
-            rag = provenance.get("rag")
-            if not isinstance(rag, dict):
-                continue
-            tracking = rag.get("tracking")
-            if isinstance(tracking, dict):
-                merged = dict(default_rag_tracking())
-                for key, value in tracking.items():
-                    merged[key] = value
-                return merged
+    step_attempts = _as_json_object_list(bundle_payload.get("step_attempts"))
+    for attempt in step_attempts:
+        provenance = _as_json_object(attempt.get("provenance_json"))
+        if provenance is None:
+            continue
+        rag = _as_json_object(provenance.get("rag"))
+        if rag is None:
+            continue
+        tracking = _as_json_object(rag.get("tracking"))
+        if tracking is not None:
+            merged = dict(default_rag_tracking())
+            for key, value in tracking.items():
+                merged[key] = value
+            return merged
     return default_rag_tracking()
 
 
@@ -243,7 +261,7 @@ def _build_final_output_summary(
     *,
     step_results: Any = None,
 ) -> dict[str, Any]:
-    payload = run_output_payload if isinstance(run_output_payload, dict) else {}
+    payload = _as_json_object_or_empty(run_output_payload)
     text_value = payload.get("text")
     structured_value = payload.get("structured")
     artifact_names = _collect_artifact_names_from_single_payload(payload)
@@ -260,7 +278,9 @@ def _build_final_output_summary(
                 )
             )
     text_present = isinstance(text_value, str) and text_value.strip() != ""
-    structured_present = structured_value is not None or _has_structured_payload(payload)
+    structured_present = structured_value is not None or _has_structured_payload(
+        payload
+    )
     artifact_count = len(artifact_details)
     kind_flags = [text_present, structured_present, artifact_count > 0]
     if sum(kind_flags) > 1:
@@ -289,52 +309,48 @@ def _build_final_output_summary(
 
 
 def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]:
-    definition_snapshot = bundle_payload.get("definition_snapshot")
-    raw_steps = (
-        definition_snapshot.get("steps")
-        if isinstance(definition_snapshot, dict)
-        else None
+    definition_snapshot = _as_json_object(bundle_payload.get("definition_snapshot"))
+    raw_steps = _as_json_object_list(
+        definition_snapshot.get("steps") if definition_snapshot is not None else None
     )
-    if not isinstance(raw_steps, list):
+    if not raw_steps:
         return []
     step_ref_mapping = build_step_ref_mapping(raw_steps)
     step_labels_by_order: dict[int, str] = {}
     for step in raw_steps:
-        if not isinstance(step, dict):
-            continue
         step_order_value = step.get("step_order")
         user_description = step.get("user_description")
         if isinstance(step_order_value, int) and isinstance(user_description, str):
             step_labels_by_order[step_order_value] = user_description
 
     results_by_order: dict[int, dict[str, Any]] = {}
-    for result in bundle_payload.get("step_results", []):
-        if not isinstance(result, dict):
-            continue
+    for result in _as_json_object_list(bundle_payload.get("step_results")):
         step_order = result.get("step_order")
         if isinstance(step_order, int):
             results_by_order[step_order] = result
 
     attempts_by_order: dict[int, list[dict[str, Any]]] = {}
-    for attempt in bundle_payload.get("step_attempts", []):
-        if not isinstance(attempt, dict):
-            continue
+    for attempt in _as_json_object_list(bundle_payload.get("step_attempts")):
         step_order = attempt.get("step_order")
         if isinstance(step_order, int):
             attempts_by_order.setdefault(step_order, []).append(attempt)
 
     overview: list[dict[str, Any]] = []
     for step in raw_steps:
-        if not isinstance(step, dict):
-            continue
         step_order = step.get("step_order")
         if not isinstance(step_order, int):
             continue
         result = results_by_order.get(step_order, {})
         attempts = attempts_by_order.get(step_order, [])
         rag_sources = _collect_rag_sources({"step_attempts": attempts})
-        artifact_details = _collect_artifact_details_from_single_payload(result.get("output_payload_json"))
-        artifact_names = [detail["name"] for detail in artifact_details if isinstance(detail.get("name"), str)]
+        artifact_details = _collect_artifact_details_from_single_payload(
+            result.get("output_payload_json")
+        )
+        artifact_names = [
+            detail["name"]
+            for detail in artifact_details
+            if isinstance(detail.get("name"), str)
+        ]
         overview.append(
             {
                 "step_order": step_order,
@@ -346,8 +362,12 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
                 "duration_ms": _sum_attempt_durations(attempts),
                 "models_used": _collect_models_used(attempts),
                 "knowledge_sources_count": len(rag_sources),
-                "knowledge_usage_state": _resolve_step_knowledge_usage_state(rag_sources),
-                "knowledge_retrieval": _build_step_knowledge_retrieval_summary(attempts, result),
+                "knowledge_usage_state": _resolve_step_knowledge_usage_state(
+                    rag_sources
+                ),
+                "knowledge_retrieval": _build_step_knowledge_retrieval_summary(
+                    attempts, result
+                ),
                 "citations": _build_output_citations(
                     result.get("output_payload_json"),
                     attempts=attempts,
@@ -355,8 +375,12 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
                 ),
                 "artifact_names": artifact_names,
                 "artifact_details": artifact_details,
-                "result_output_kind": _build_final_output_summary(result.get("output_payload_json")).get("kind"),
-                "output_summary": _build_step_output_summary(result.get("output_payload_json")),
+                "result_output_kind": _build_final_output_summary(
+                    result.get("output_payload_json")
+                ).get("kind"),
+                "output_summary": _build_step_output_summary(
+                    result.get("output_payload_json")
+                ),
                 "input_lineage": _build_input_lineage(
                     step=step,
                     step_order=step_order,
@@ -374,20 +398,16 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
 
 def _count_artifacts(step_results: Any, run_output_payload: Any) -> int:
     artifact_ids: set[str] = set()
-    if isinstance(step_results, list):
-        for result in step_results:
-            if isinstance(result, dict):
-                _collect_artifact_ids(result.get("output_payload_json"), artifact_ids)
+    for result in _as_json_object_list(step_results):
+        _collect_artifact_ids(result.get("output_payload_json"), artifact_ids)
     _collect_artifact_ids(run_output_payload, artifact_ids)
     return len(artifact_ids)
 
 
 def _collect_artifact_names(step_results: Any, run_output_payload: Any) -> list[str]:
     names: list[str] = []
-    if isinstance(step_results, list):
-        for result in step_results:
-            if isinstance(result, dict):
-                _collect_artifact_names_from_payload(result.get("output_payload_json"), names)
+    for result in _as_json_object_list(step_results):
+        _collect_artifact_names_from_payload(result.get("output_payload_json"), names)
     _collect_artifact_names_from_payload(run_output_payload, names)
     return list(dict.fromkeys(name for name in names if name))
 
@@ -398,12 +418,14 @@ def _collect_artifact_names_from_single_payload(payload: Any) -> list[str]:
     return list(dict.fromkeys(name for name in names if name))
 
 
-def _collect_artifact_details(step_results: Any, run_output_payload: Any) -> list[dict[str, Any]]:
+def _collect_artifact_details(
+    step_results: Any, run_output_payload: Any
+) -> list[dict[str, Any]]:
     details: list[dict[str, Any]] = []
-    if isinstance(step_results, list):
-        for result in step_results:
-            if isinstance(result, dict):
-                _collect_artifact_details_from_payload(result.get("output_payload_json"), details)
+    for result in _as_json_object_list(step_results):
+        _collect_artifact_details_from_payload(
+            result.get("output_payload_json"), details
+        )
     _collect_artifact_details_from_payload(run_output_payload, details)
     return _dedupe_artifact_details(details)
 
@@ -415,52 +437,51 @@ def _collect_artifact_details_from_single_payload(payload: Any) -> list[dict[str
 
 
 def _collect_artifact_ids(payload: Any, artifact_ids: set[str]) -> None:
-    if not isinstance(payload, dict):
+    payload_dict = _as_json_object(payload)
+    if payload_dict is None:
         return
-    artifacts = payload.get("artifacts")
-    if isinstance(artifacts, list):
-        for artifact in artifacts:
-            if isinstance(artifact, dict):
-                file_id = artifact.get("file_id")
-                if file_id is not None:
-                    artifact_ids.add(str(file_id))
+    for artifact in _as_json_object_list(payload_dict.get("artifacts")):
+        file_id = artifact.get("file_id")
+        if file_id is not None:
+            artifact_ids.add(str(file_id))
     for key in ("generated_file_ids", "file_ids"):
-        values = payload.get(key)
-        if isinstance(values, list):
-            for file_id in values:
-                artifact_ids.add(str(file_id))
+        for file_id in _as_json_list(payload_dict.get(key)):
+            artifact_ids.add(str(file_id))
 
 
-def _collect_artifact_names_from_payload(payload: Any, artifact_names: list[str]) -> None:
-    if not isinstance(payload, dict):
+def _collect_artifact_names_from_payload(
+    payload: Any, artifact_names: list[str]
+) -> None:
+    payload_dict = _as_json_object(payload)
+    if payload_dict is None:
         return
-    artifacts = payload.get("artifacts")
-    if isinstance(artifacts, list):
-        for artifact in artifacts:
-            if isinstance(artifact, dict):
-                raw_name = artifact.get("file_name") or artifact.get("name") or artifact.get("title")
-                if isinstance(raw_name, str) and raw_name.strip():
-                    artifact_names.append(raw_name.strip())
+    for artifact in _as_json_object_list(payload_dict.get("artifacts")):
+        raw_name = (
+            artifact.get("file_name") or artifact.get("name") or artifact.get("title")
+        )
+        if isinstance(raw_name, str) and raw_name.strip():
+            artifact_names.append(raw_name.strip())
 
 
-def _collect_artifact_details_from_payload(payload: Any, artifact_details: list[dict[str, Any]]) -> None:
-    if not isinstance(payload, dict):
+def _collect_artifact_details_from_payload(
+    payload: Any, artifact_details: list[dict[str, Any]]
+) -> None:
+    payload_dict = _as_json_object(payload)
+    if payload_dict is None:
         return
-    artifacts = payload.get("artifacts")
-    if isinstance(artifacts, list):
-        for artifact in artifacts:
-            if not isinstance(artifact, dict):
-                continue
-            artifact_details.append(
-                {
-                    "file_id": artifact.get("file_id"),
-                    "name": artifact.get("file_name") or artifact.get("name") or artifact.get("title"),
-                    "mimetype": artifact.get("mimetype"),
-                    "size": artifact.get("size"),
-                    "checksum": artifact.get("checksum"),
-                    "file_type": artifact.get("file_type"),
-                }
-            )
+    for artifact in _as_json_object_list(payload_dict.get("artifacts")):
+        artifact_details.append(
+            {
+                "file_id": artifact.get("file_id"),
+                "name": artifact.get("file_name")
+                or artifact.get("name")
+                or artifact.get("title"),
+                "mimetype": artifact.get("mimetype"),
+                "size": artifact.get("size"),
+                "checksum": artifact.get("checksum"),
+                "file_type": artifact.get("file_type"),
+            }
+        )
 
 
 def _dedupe_artifact_details(details: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -482,29 +503,34 @@ def _dedupe_artifact_details(details: list[dict[str, Any]]) -> list[dict[str, An
 
 
 def _build_step_output_summary(payload: Any) -> dict[str, Any] | None:
-    if not isinstance(payload, dict):
+    payload_dict = _as_json_object(payload)
+    if payload_dict is None:
         return None
-    text_value = payload.get("text")
+    text_value = payload_dict.get("text")
     if isinstance(text_value, str) and text_value.strip():
         return normalize_text_preview(text_value, max_bytes=512).model_dump(mode="json")
-    structured_value = payload.get("structured")
+    structured_value = payload_dict.get("structured")
     if structured_value is not None:
         try:
             serialized = json.dumps(structured_value, ensure_ascii=False)
         except TypeError:
             serialized = str(structured_value)
         return normalize_text_preview(serialized, max_bytes=512).model_dump(mode="json")
-    meaningful_payload = _strip_artifact_wrapper_keys(payload)
+    meaningful_payload = _strip_artifact_wrapper_keys(payload_dict)
     if not meaningful_payload:
         return None
     preferred_summary = _resolve_preferred_summary_value(meaningful_payload)
     if preferred_summary is not None:
-        return normalize_text_preview(preferred_summary, max_bytes=512).model_dump(mode="json")
+        return normalize_text_preview(preferred_summary, max_bytes=512).model_dump(
+            mode="json"
+        )
     if len(meaningful_payload) == 1:
         only_value = next(iter(meaningful_payload.values()))
         scalar_preview = _stringify_scalar_preview(only_value)
         if scalar_preview is not None:
-            return normalize_text_preview(scalar_preview, max_bytes=512).model_dump(mode="json")
+            return normalize_text_preview(scalar_preview, max_bytes=512).model_dump(
+                mode="json"
+            )
     try:
         serialized = json.dumps(meaningful_payload, ensure_ascii=False)
     except TypeError:
@@ -516,7 +542,15 @@ def _strip_artifact_wrapper_keys(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in payload.items()
-        if key not in {"text", "structured", "artifacts", "generated_file_ids", "file_ids", "webhook_delivered"}
+        if key
+        not in {
+            "text",
+            "structured",
+            "artifacts",
+            "generated_file_ids",
+            "file_ids",
+            "webhook_delivered",
+        }
     }
 
 
@@ -548,20 +582,19 @@ def _build_input_lineage(
     result: dict[str, Any],
     max_prior_step_order: int,
 ) -> dict[str, Any]:
-    input_payload = result.get("input_payload_json") if isinstance(result, dict) else {}
-    input_payload = input_payload if isinstance(input_payload, dict) else {}
-    runtime_input = input_payload.get("runtime_input")
-    runtime_input = runtime_input if isinstance(runtime_input, dict) else {}
-    runtime_files = runtime_input.get("files")
-    runtime_files = runtime_files if isinstance(runtime_files, list) else []
+    input_payload = _as_json_object_or_empty(result.get("input_payload_json"))
+    runtime_input = _as_json_object_or_empty(input_payload.get("runtime_input"))
+    runtime_files = _as_json_object_list(runtime_input.get("files"))
     question_template = None
-    bindings = step.get("input_bindings")
-    if isinstance(bindings, dict):
+    bindings = _as_json_object(step.get("input_bindings"))
+    if bindings is not None:
         raw_question = bindings.get("question")
         if isinstance(raw_question, str) and raw_question.strip():
             question_template = raw_question
     references = (
-        analyze_template(question_template, step_refs=step_ref_mapping, form_field_names=set())
+        analyze_template(
+            question_template, step_refs=step_ref_mapping, form_field_names=set()
+        )
         if question_template is not None
         else []
     )
@@ -582,16 +615,18 @@ def _build_input_lineage(
         "runtime_file_names": [
             file_item.get("name")
             for file_item in runtime_files
-            if isinstance(file_item, dict) and isinstance(file_item.get("name"), str)
+            if isinstance(file_item.get("name"), str)
         ],
         "runtime_file_checksums": [
             file_item.get("checksum")
             for file_item in runtime_files
-            if isinstance(file_item, dict) and isinstance(file_item.get("checksum"), str)
+            if isinstance(file_item.get("checksum"), str)
         ],
         "runtime_files": runtime_files,
         "question_binding_references_runtime_input": consumes_runtime_input(references),
-        "question_binding_expressions": [reference.expression for reference in references],
+        "question_binding_expressions": [
+            reference.expression for reference in references
+        ],
         "upstream_step_orders": upstream_orders,
         "upstream_step_labels": [
             str(step_labels_by_order[order])
@@ -607,23 +642,22 @@ def _build_step_knowledge_retrieval_summary(
 ) -> dict[str, Any] | None:
     rag_payload: dict[str, Any] | None = None
     for attempt in reversed(attempts):
-        provenance = attempt.get("provenance_json")
-        if not isinstance(provenance, dict):
+        provenance = _as_json_object(attempt.get("provenance_json"))
+        if provenance is None:
             continue
-        rag = provenance.get("rag")
-        if isinstance(rag, dict):
+        rag = _as_json_object(provenance.get("rag"))
+        if rag is not None:
             rag_payload = rag
             break
     if rag_payload is None:
-        input_payload = result.get("input_payload_json") if isinstance(result, dict) else None
-        if isinstance(input_payload, dict):
-            raw_rag = input_payload.get("rag")
-            if isinstance(raw_rag, dict):
+        input_payload = _as_json_object(result.get("input_payload_json"))
+        if input_payload is not None:
+            raw_rag = _as_json_object(input_payload.get("rag"))
+            if raw_rag is not None:
                 rag_payload = raw_rag
     if rag_payload is None:
         return None
-    prompt_context = rag_payload.get("prompt_context")
-    prompt_context = prompt_context if isinstance(prompt_context, dict) else None
+    prompt_context = _as_json_object(rag_payload.get("prompt_context"))
     return {
         "status": rag_payload.get("status"),
         "attempted": rag_payload.get("attempted"),
@@ -639,15 +673,21 @@ def _build_step_knowledge_retrieval_summary(
             {
                 "tracked": prompt_context.get("tracked"),
                 "included_source_count": prompt_context.get("included_source_count"),
-                "not_included_source_count": prompt_context.get("not_included_source_count"),
+                "not_included_source_count": prompt_context.get(
+                    "not_included_source_count"
+                ),
                 "included_chunk_count": prompt_context.get("included_chunk_count"),
                 "knowledge_tokens": prompt_context.get("knowledge_tokens"),
-                "truncated_by_token_budget": prompt_context.get("truncated_by_token_budget"),
+                "truncated_by_token_budget": prompt_context.get(
+                    "truncated_by_token_budget"
+                ),
                 "included_source_ids": prompt_context.get("included_source_ids"),
                 "included_source_titles": prompt_context.get("included_source_titles"),
                 "included_source_display_names": [
                     format_source_display_name(title)
-                    for title in prompt_context.get("included_source_titles", [])
+                    for title in _as_json_list(
+                        prompt_context.get("included_source_titles")
+                    )
                     if isinstance(title, str) and title.strip()
                 ],
                 "summary": _build_inserted_sources_summary(
@@ -700,7 +740,9 @@ def _sum_attempt_durations(attempts: list[dict[str, Any]]) -> int | None:
     return duration_ms if found else None
 
 
-def _resolve_step_knowledge_usage_state(rag_sources: list[dict[str, Any]]) -> str | None:
+def _resolve_step_knowledge_usage_state(
+    rag_sources: list[dict[str, Any]],
+) -> str | None:
     if not rag_sources:
         return None
     usage_states = list(
@@ -731,21 +773,18 @@ def _build_summary_citations(
     *,
     step_overview: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    run = bundle_payload.get("run", {})
+    run = _as_json_object_or_empty(bundle_payload.get("run"))
     summary = _build_output_citations(
         run.get("output_payload_json"),
         attempts=bundle_payload.get("step_attempts", []),
         step=_resolve_last_definition_step(bundle_payload),
     )
     step_citations = [
-        citations
+        cast(JsonObject, citations)
         for item in step_overview
-        if isinstance(item, dict)
-        and isinstance((citations := item.get("citations")), dict)
+        if isinstance((citations := item.get("citations")), dict)
     ]
-    summary.update(
-        summarize_step_citations(step_citations)
-    )
+    summary.update(summarize_step_citations(step_citations))
     return summary
 
 
@@ -756,21 +795,31 @@ def _build_output_citations(
     step: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     rag_payload = _resolve_latest_rag_payload(attempts)
-    prompt_context = rag_payload.get("prompt_context") if isinstance(rag_payload, dict) else None
-    included_source_ids = (
-        prompt_context.get("included_source_ids")
-        if isinstance(prompt_context, dict)
-        else []
+    prompt_context = (
+        _as_json_object(rag_payload.get("prompt_context"))
+        if rag_payload is not None
+        else None
     )
-    references = rag_payload.get("references") if isinstance(rag_payload, dict) else None
+    included_source_ids = _as_json_list(
+        prompt_context.get("included_source_ids")
+        if prompt_context is not None
+        else None
+    )
+    references = _as_json_object_list(
+        rag_payload.get("references") if rag_payload is not None else None
+    )
     stored_sidecar = _resolve_latest_citation_payload(attempts)
     if isinstance(stored_sidecar, dict):
         return normalize_citation_sidecar_payload(stored_sidecar)
-    citation_mode = resolve_citation_mode(step.get("output_config")) if isinstance(step, dict) else "off"
+    citation_mode = (
+        resolve_citation_mode(step.get("output_config"))
+        if isinstance(step, dict)
+        else "off"
+    )
     return build_citation_sidecar(
         output_payload,
-        references=references if isinstance(references, list) else None,
-        included_source_ids=included_source_ids if isinstance(included_source_ids, list) else None,
+        references=references or None,
+        included_source_ids=cast(list[str] | None, included_source_ids or None),
         tracking_mode=(
             TRACKING_MODE_INLINE_INREF_REQUIRED
             if citation_mode == "inline_inref_sidecar"
@@ -781,10 +830,8 @@ def _build_output_citations(
 
 
 def _resolve_latest_rag_payload(attempts: Any) -> dict[str, Any] | None:
-    if not isinstance(attempts, list):
-        return None
     sorted_attempts = sorted(
-        [attempt for attempt in attempts if isinstance(attempt, dict)],
+        _as_json_object_list(attempts),
         key=lambda attempt: (
             int(attempt.get("step_order", 0) or 0),
             int(attempt.get("attempt_no", 0) or 0),
@@ -792,22 +839,18 @@ def _resolve_latest_rag_payload(attempts: Any) -> dict[str, Any] | None:
         reverse=True,
     )
     for attempt in sorted_attempts:
-        if not isinstance(attempt, dict):
+        provenance = _as_json_object(attempt.get("provenance_json"))
+        if provenance is None:
             continue
-        provenance = attempt.get("provenance_json")
-        if not isinstance(provenance, dict):
-            continue
-        rag_payload = provenance.get("rag")
-        if isinstance(rag_payload, dict):
+        rag_payload = _as_json_object(provenance.get("rag"))
+        if rag_payload is not None:
             return rag_payload
     return None
 
 
 def _resolve_latest_citation_payload(attempts: Any) -> dict[str, Any] | None:
-    if not isinstance(attempts, list):
-        return None
     sorted_attempts = sorted(
-        [attempt for attempt in attempts if isinstance(attempt, dict)],
+        _as_json_object_list(attempts),
         key=lambda attempt: (
             int(attempt.get("step_order", 0) or 0),
             int(attempt.get("attempt_no", 0) or 0),
@@ -815,25 +858,26 @@ def _resolve_latest_citation_payload(attempts: Any) -> dict[str, Any] | None:
         reverse=True,
     )
     for attempt in sorted_attempts:
-        provenance = attempt.get("provenance_json")
-        if not isinstance(provenance, dict):
+        provenance = _as_json_object(attempt.get("provenance_json"))
+        if provenance is None:
             continue
-        citations = provenance.get("citations")
-        if isinstance(citations, dict):
+        citations = _as_json_object(provenance.get("citations"))
+        if citations is not None:
             return citations
     return None
 
 
-def _resolve_last_definition_step(bundle_payload: dict[str, Any]) -> dict[str, Any] | None:
-    definition_snapshot = bundle_payload.get("definition_snapshot")
-    raw_steps = definition_snapshot.get("steps") if isinstance(definition_snapshot, dict) else None
-    if not isinstance(raw_steps, list):
-        return None
-    typed_steps = [step for step in raw_steps if isinstance(step, dict)]
-    if not typed_steps:
+def _resolve_last_definition_step(
+    bundle_payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    definition_snapshot = _as_json_object(bundle_payload.get("definition_snapshot"))
+    raw_steps = _as_json_object_list(
+        definition_snapshot.get("steps") if definition_snapshot is not None else None
+    )
+    if not raw_steps:
         return None
     return max(
-        typed_steps,
+        raw_steps,
         key=lambda step: int(step.get("step_order", 0) or 0),
     )
 
@@ -844,14 +888,10 @@ def _build_inserted_sources_summary(
     references: Any,
     max_ranked_sources: int = 5,
 ) -> dict[str, Any]:
-    groups = [
-        group
-        for group in prompt_context.get("included_groups", [])
-        if isinstance(group, dict)
-    ]
+    groups = _as_json_object_list(prompt_context.get("included_groups"))
     included_source_ids = [
         source_id
-        for source_id in prompt_context.get("included_source_ids", [])
+        for source_id in _as_json_list(prompt_context.get("included_source_ids"))
         if isinstance(source_id, str) and source_id.strip()
     ]
     grouped_chunks: dict[str, int] = {}
@@ -874,13 +914,10 @@ def _build_inserted_sources_summary(
         )
 
     references_by_id: dict[str, dict[str, Any]] = {}
-    if isinstance(references, list):
-        for reference in references:
-            if not isinstance(reference, dict):
-                continue
-            source_id = reference.get("id")
-            if isinstance(source_id, str) and source_id.strip():
-                references_by_id[source_id] = reference
+    for reference in _as_json_object_list(references):
+        source_id = reference.get("id")
+        if isinstance(source_id, str) and source_id.strip():
+            references_by_id[source_id] = reference
 
     ranked_sources: list[dict[str, Any]] = []
     for source_id in included_source_ids:
@@ -914,9 +951,12 @@ def _build_inserted_sources_summary(
     for index, item in enumerate(ranked_sources, start=1):
         item["rank"] = index
     return {
-        "total_sources": prompt_context.get("included_source_count") or len(included_source_ids),
+        "total_sources": prompt_context.get("included_source_count")
+        or len(included_source_ids),
         "total_chunks": prompt_context.get("included_chunk_count")
         or sum(grouped_chunks.values()),
-        "truncated_by_token_budget": bool(prompt_context.get("truncated_by_token_budget")),
+        "truncated_by_token_budget": bool(
+            prompt_context.get("truncated_by_token_budget")
+        ),
         "top_ranked_sources": ranked_sources[:max_ranked_sources],
     }

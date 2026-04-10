@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
@@ -13,13 +13,31 @@ from intric.authentication.signed_urls import generate_signed_token
 from intric.files.file_models import SignedURLRequest, SignedURLResponse
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import error_response
-from intric.flows.api.flow_graph import build_graph_from_steps, enrich_nodes_with_run_results
+from intric.flows.api.flow_graph import (
+    build_graph_from_steps,
+    enrich_nodes_with_run_results,
+)
 from intric.flows.api.flow_models import FlowRunStepPublic, GraphResponse
+from intric.flows.application.flow_run_service import FlowRunService
+from intric.flows.application.flow_service import FlowService
+from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
+
+
+def _get_flow_run_service(container: Container) -> FlowRunService:
+    return container.flow_run_service()
+
+
+def _get_flow_service(container: Container) -> FlowService:
+    return container.flow_service()
+
+
+def _get_flow_version_repo(container: Container) -> FlowVersionRepository:
+    return container.flow_version_repo()  # pyright: ignore[reportUnknownMemberType]
 
 
 @router.get(
@@ -51,8 +69,13 @@ without relying on debug-export internals.
     },
 )
 async def list_flow_run_steps(
-    id: Annotated[UUID, Path(description="Identifier of the flow that owns the run step outputs.")],
-    run_id: Annotated[UUID, Path(description="Identifier of the run whose step outputs should be listed.")],
+    id: Annotated[
+        UUID, Path(description="Identifier of the flow that owns the run step outputs.")
+    ],
+    run_id: Annotated[
+        UUID,
+        Path(description="Identifier of the run whose step outputs should be listed."),
+    ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
@@ -62,7 +85,7 @@ async def list_flow_run_steps(
         flow_id=id,
         required_access="view",
     )
-    step_results = await container.flow_run_service().list_step_results(
+    step_results = await _get_flow_run_service(container).list_step_results(
         run_id=run_id,
         flow_id=id,
     )
@@ -73,7 +96,11 @@ async def list_flow_run_steps(
         if isinstance(input_payload, dict):
             raw_diagnostics = input_payload.get("diagnostics")
             if isinstance(raw_diagnostics, list):
-                diagnostics = [item for item in raw_diagnostics if isinstance(item, dict)]
+                diagnostics = [
+                    item
+                    for item in cast(list[object], raw_diagnostics)
+                    if isinstance(item, dict)
+                ]
         items.append(
             FlowRunStepPublic.model_validate(result).model_copy(
                 update={"diagnostics": diagnostics}
@@ -111,7 +138,9 @@ annotated with run execution results. Otherwise the current live flow definition
     },
 )
 async def get_flow_graph(
-    id: Annotated[UUID, Path(description="Identifier of the flow whose graph should be returned.")],
+    id: Annotated[
+        UUID, Path(description="Identifier of the flow whose graph should be returned.")
+    ],
     request: Request,
     run_id: UUID | None = Query(
         default=None,
@@ -125,9 +154,9 @@ async def get_flow_graph(
         flow_id=id,
         required_access="view",
     )
-    flow_service = container.flow_service()
-    flow_run_service = container.flow_run_service()
-    flow_version_repo = container.flow_version_repo()
+    flow_service = _get_flow_service(container)
+    flow_run_service = _get_flow_run_service(container)
+    flow_version_repo = _get_flow_version_repo(container)
 
     if run_id is not None:
         run = await flow_run_service.get_run(run_id=run_id, flow_id=id)
@@ -180,9 +209,18 @@ specified run.
     },
 )
 async def generate_flow_run_artifact_signed_url(
-    id: Annotated[UUID, Path(description="Identifier of the flow that owns the requested run artifact.")],
-    run_id: Annotated[UUID, Path(description="Identifier of the run that produced the artifact.")],
-    file_id: Annotated[UUID, Path(description="Identifier of the run artifact file to download.")],
+    id: Annotated[
+        UUID,
+        Path(
+            description="Identifier of the flow that owns the requested run artifact."
+        ),
+    ],
+    run_id: Annotated[
+        UUID, Path(description="Identifier of the run that produced the artifact.")
+    ],
+    file_id: Annotated[
+        UUID, Path(description="Identifier of the run artifact file to download.")
+    ],
     request: Request,
     signed_url_req: SignedURLRequest,
     container: Container = Depends(get_container(with_user=True)),
@@ -193,11 +231,13 @@ async def generate_flow_run_artifact_signed_url(
         flow_id=id,
         required_access="view",
     )
-    run_service = container.flow_run_service()
+    run_service = _get_flow_run_service(container)
     user = container.user()
 
     file = await run_service.get_run_artifact_file(
-        run_id=run_id, flow_id=id, file_id=file_id,
+        run_id=run_id,
+        flow_id=id,
+        file_id=file_id,
     )
 
     expires_at = int(time.time()) + signed_url_req.expires_in

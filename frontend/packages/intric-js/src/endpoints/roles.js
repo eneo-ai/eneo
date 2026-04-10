@@ -45,7 +45,7 @@ export function initRoles(client) {
         requestBody: {
           "application/json": {
             name,
-            permissions
+            permissions: /** @type {any} */ (permissions)
           }
         }
       });
@@ -95,7 +95,7 @@ export function initRoles(client) {
       const res = await client.fetch("/api/v1/roles/{role_id}/", {
         method: "post",
         params: { path: { role_id } },
-        requestBody: { "application/json": update }
+        requestBody: { "application/json": /** @type {any} */ (update) }
       });
       return res;
     }

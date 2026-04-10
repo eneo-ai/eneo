@@ -10,6 +10,7 @@ from typing_extensions import TypedDict
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.config import get_settings
+from intric.model_providers.domain.model_defaults import lookup_model_defaults
 from intric.model_providers.domain.model_provider_service import ModelProviderService
 from intric.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
@@ -271,47 +272,6 @@ async def set_favorite_providers(
     repo = TenantRepository(session)
     await repo.update_favorite_providers(user.tenant_id, body.providers)
     return {"providers": body.providers}
-
-
-@router.get(
-    "/model-defaults/",
-)
-async def get_model_defaults(
-    model_name: str,
-    _user: CurrentUser,
-) -> dict[str, object]:
-    """Look up recommended default values for a model from LiteLLM's model_cost database."""
-    import litellm
-
-    model_cost = cast(dict[str, ModelCostInfo], getattr(litellm, "model_cost"))
-
-    # Try exact match first
-    info = model_cost.get(model_name)
-
-    # If no exact match, try common prefixed variants
-    if info is None:
-        prefixes: set[str] = set()
-        for key in model_cost:
-            if "/" in key:
-                prefix = key.split("/")[0]
-                prefixes.add(prefix)
-        for prefix in sorted(prefixes):
-            candidate = f"{prefix}/{model_name}"
-            info = model_cost.get(candidate)
-            if info is not None:
-                break
-
-    if info is None:
-        return {"found": False}
-
-    return {
-        "found": True,
-        "max_input_tokens": info.get("max_input_tokens"),
-        "max_output_tokens": info.get("max_output_tokens"),
-        "supports_vision": info.get("supports_vision", False),
-        "supports_function_calling": info.get("supports_function_calling", False),
-        "supports_reasoning": info.get("supports_reasoning", False),
-    }
 
 
 @router.get(

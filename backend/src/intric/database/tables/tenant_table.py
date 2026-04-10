@@ -33,6 +33,9 @@ class Tenants(BasePublic):
     crawler_settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )
+    flow_settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
     api_key_policy: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,

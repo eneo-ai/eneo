@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, cast
 from uuid import UUID
 
+from intric.flows.flow_run_provenance import default_rag_tracking
 from intric.flows.runtime.models import StepDiagnostic
 from intric.flows.runtime.rag_metadata import build_rag_references
-from intric.flows.flow_run_provenance import default_rag_tracking
 
 
 @dataclass(frozen=True)
@@ -87,7 +87,9 @@ async def retrieve_rag_chunks(
             )
         )
         source_metadata_by_id: dict[str, dict[str, Any]] | None = None
-        metadata_loader = getattr(deps.references_service, "get_reference_metadata", None)
+        metadata_loader = getattr(
+            deps.references_service, "get_reference_metadata", None
+        )
         if callable(metadata_loader):
             typed_metadata_loader = cast(
                 Callable[..., Awaitable[dict[object, dict[str, Any]] | None]],
@@ -102,10 +104,14 @@ async def retrieve_rag_chunks(
             )
             if metadata_ids:
                 try:
-                    raw_metadata = await typed_metadata_loader(info_blob_ids=metadata_ids)
+                    raw_metadata = await typed_metadata_loader(
+                        info_blob_ids=metadata_ids
+                    )
                 except Exception as exc:
                     rag_metadata["reference_metadata_status"] = "error"
-                    rag_metadata["reference_metadata_error_type"] = exc.__class__.__name__
+                    rag_metadata["reference_metadata_error_type"] = (
+                        exc.__class__.__name__
+                    )
                     deps.logger.warning(
                         "flow_executor.rag_reference_metadata_failed run_id=%s step_order=%d",
                         run_id,
@@ -116,7 +122,9 @@ async def retrieve_rag_chunks(
                     if isinstance(raw_metadata, dict):
                         source_metadata_by_id = {
                             str(key): value
-                            for key, value in raw_metadata.items()
+                            for key, value in cast(
+                                dict[object, Any], raw_metadata
+                            ).items()
                             if isinstance(value, dict)
                         }
                     rag_metadata["reference_metadata_status"] = "success"
@@ -128,7 +136,9 @@ async def retrieve_rag_chunks(
             snippet_chars=200,
         )
         rag_metadata["status"] = "success"
-        rag_metadata["retrieval_duration_ms"] = int((time.monotonic() - retrieval_started) * 1000)
+        rag_metadata["retrieval_duration_ms"] = int(
+            (time.monotonic() - retrieval_started) * 1000
+        )
         rag_metadata["chunks_retrieved"] = len(info_blob_chunks)
         rag_metadata["raw_chunks_count"] = len(info_blob_chunks)
         rag_metadata["deduped_chunks_count"] = len(no_duplicate_chunks)
@@ -141,7 +151,9 @@ async def retrieve_rag_chunks(
         rag_metadata["status"] = "timeout"
         rag_metadata["error_code"] = "rag_retrieval_timeout"
         rag_metadata["retrieval_error_type"] = "TimeoutError"
-        rag_metadata["retrieval_duration_ms"] = int((time.monotonic() - retrieval_started) * 1000)
+        rag_metadata["retrieval_duration_ms"] = int(
+            (time.monotonic() - retrieval_started) * 1000
+        )
         rag_diagnostics.append(
             StepDiagnostic(
                 code="rag_retrieval_timeout",
@@ -158,7 +170,9 @@ async def retrieve_rag_chunks(
         rag_metadata["status"] = "error"
         rag_metadata["error_code"] = "rag_retrieval_failed"
         rag_metadata["retrieval_error_type"] = exc.__class__.__name__
-        rag_metadata["retrieval_duration_ms"] = int((time.monotonic() - retrieval_started) * 1000)
+        rag_metadata["retrieval_duration_ms"] = int(
+            (time.monotonic() - retrieval_started) * 1000
+        )
         rag_diagnostics.append(
             StepDiagnostic(
                 code="rag_retrieval_failed",

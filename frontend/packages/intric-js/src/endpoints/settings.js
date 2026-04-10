@@ -99,6 +99,32 @@ export function initSettings(client) {
         requestBody: { "application/json": { enabled } }
       });
       return res;
+    },
+
+    /**
+     * Get flow input limit settings for the current tenant.
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').FlowInputLimits>}
+     */
+    getFlowInputLimits: async () => {
+      const res = await client.fetch("/api/v1/settings/flow-input-limits", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Update flow input limit settings for the current tenant.
+     * @param {Partial<import('../types/resources').FlowInputLimits>} patch
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').FlowInputLimits>}
+     */
+    updateFlowInputLimits: async (patch) => {
+      const res = await client.fetch("/api/v1/settings/flow-input-limits", {
+        method: "patch",
+        requestBody: { "application/json": patch }
+      });
+      return res;
     }
   };
 }

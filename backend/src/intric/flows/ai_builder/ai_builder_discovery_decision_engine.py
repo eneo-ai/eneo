@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_discovery_families import (
+    family_for_issue,
+)
 from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryCandidate,
     DiscoveryConfidence,
@@ -9,17 +12,19 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryResolvedBy,
     SemanticAdjudicationResult,
 )
-from intric.flows.ai_builder.ai_builder_discovery_families import (
-    family_for_issue,
-)
+from intric.flows.ai_builder.ai_builder_discovery_priority import sort_discovery_issues
 from intric.flows.ai_builder.ai_builder_discovery_questions import (
+    localized_text,
     question_exposure_for_id,
 )
-from intric.flows.ai_builder.ai_builder_discovery_priority import sort_discovery_issues
-from intric.flows.ai_builder.ai_builder_discovery_questions import localized_text
-from intric.flows.ai_builder.ai_builder_framework_policy import mentions_runtime_metadata
-from intric.flows.ai_builder.ai_builder_signal_confidence import score_conversation_signals
+from intric.flows.ai_builder.ai_builder_framework_policy import (
+    mentions_runtime_metadata,
+)
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_signal_confidence import (
+    ScoredSignal,
+    score_conversation_signals,
+)
 
 _QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
     "comparison_scope_conflict": "architecture",
@@ -39,6 +44,7 @@ _QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
     "runtime_metadata_fields": "quality",
 }
 
+
 def apply_discovery_decision_engine(
     *,
     issues: list[DiscoveryIssue],
@@ -53,10 +59,16 @@ def apply_discovery_decision_engine(
     list[DiscoveryCandidate],
     list[DiscoveryCandidate],
 ]:
-    scored_signals = score_conversation_signals(conversation, freeform_text=profile.text)
+    scored_signals = score_conversation_signals(
+        conversation, freeform_text=profile.text
+    )
     rich_prompt = is_rich_prompt(profile, text_has_task_verbs=text_has_task_verbs)
-    max_questions = 1 if has_explicit_step_plan(profile.text) else 2 if rich_prompt else 3
-    assumptions: list[str] = list(semantic_result.assumptions if semantic_result else ())
+    max_questions = (
+        1 if has_explicit_step_plan(profile.text) else 2 if rich_prompt else 3
+    )
+    assumptions: list[str] = list(
+        semantic_result.assumptions if semantic_result else ()
+    )
     selected: list[DiscoveryIssue] = []
     selected_question_ids: list[str] = []
     suppressed: list[DiscoveryCandidate] = []
@@ -72,13 +84,19 @@ def apply_discovery_decision_engine(
         )
         question_id = candidate.question_id
 
-        if question_id is not None and question_exposure_for_id(question_id) != "user_requirement":
+        if (
+            question_id is not None
+            and question_exposure_for_id(question_id) != "user_requirement"
+        ):
             suppressed.append(
                 suppressed_candidate(candidate, reason="planner_internal_question")
             )
             continue
 
-        if profile.edit_mode and candidate.family not in profile.edit_scope.active_families:
+        if (
+            profile.edit_mode
+            and candidate.family not in profile.edit_scope.active_families
+        ):
             suppressed.append(
                 suppressed_candidate(candidate, reason="inactive_edit_scope")
             )
@@ -115,7 +133,10 @@ def apply_discovery_decision_engine(
             family_used.add(candidate.family)
             continue
 
-        if len(selected_question_ids) >= max_questions and candidate.impact != "architecture":
+        if (
+            len(selected_question_ids) >= max_questions
+            and candidate.impact != "architecture"
+        ):
             suppressed.append(
                 suppressed_candidate(candidate, reason="question_budget_exhausted")
             )
@@ -139,7 +160,7 @@ def build_candidate(
     *,
     issue: DiscoveryIssue,
     profile: DiscoveryProfile,
-    scored_signals,
+    scored_signals: list[ScoredSignal],
     semantic_result: SemanticAdjudicationResult | None,
 ) -> DiscoveryCandidate:
     question_id = issue.suggestion.question_id if issue.suggestion is not None else None
@@ -167,7 +188,7 @@ def candidate_confidence(
     issue_id: str,
     question_id: str | None,
     profile: DiscoveryProfile,
-    scored_signals,
+    scored_signals: list[ScoredSignal],
     semantic_result: SemanticAdjudicationResult | None,
 ) -> tuple[DiscoveryConfidence, DiscoveryResolvedBy, tuple[str, ...]]:
     if semantic_result is not None and question_id is not None:
@@ -179,8 +200,10 @@ def candidate_confidence(
     if question_id is not None:
         for signal in scored_signals:
             if signal.question_id == question_id:
-                return signal.confidence, "deterministic_inference", (
-                    f"text signal: {signal.value}",
+                return (
+                    signal.confidence,
+                    "deterministic_inference",
+                    (f"text signal: {signal.value}",),
                 )
 
     heuristic_reason = heuristic_confidence(issue_id, profile)
@@ -193,7 +216,9 @@ def candidate_confidence(
 def heuristic_confidence(issue_id: str, profile: DiscoveryProfile) -> str | None:
     if issue_id == "case_scope" and implies_single_case(profile.text):
         return "singular case phrasing suggests one case per run"
-    if issue_id == "document_material_scope" and implies_single_primary_document(profile.text):
+    if issue_id == "document_material_scope" and implies_single_primary_document(
+        profile.text
+    ):
         return "singular document phrasing suggests one primary document per run"
     if (
         issue_id == "final_pdf_type"
@@ -245,7 +270,10 @@ def assumption_for_candidate(
             "Antar ett ärende åt gången per körning tills du säger att flera ärenden ska hanteras tillsammans.",
             "Assuming one case per run unless you later say multiple cases should be handled together.",
         )
-    if candidate.issue_id == "document_material_scope" and implies_single_primary_document(profile.text):
+    if (
+        candidate.issue_id == "document_material_scope"
+        and implies_single_primary_document(profile.text)
+    ):
         return localized_text(
             language,
             "Antar ett huvuddokument per körning tills du säger att ett dokumentpaket ska stödjas.",
@@ -261,13 +289,18 @@ def assumption_for_candidate(
             "Antar att slut-PDF:n ska vara en strukturerad rapport snarare än en kort punktlista.",
             "Assuming the final PDF should be a structured report rather than a short bullet list.",
         )
-    if candidate.issue_id == "document_kind" and looks_like_case_document_family(profile.text):
+    if candidate.issue_id == "document_kind" and looks_like_case_document_family(
+        profile.text
+    ):
         return localized_text(
             language,
             "Antar att flödet främst ska arbeta med ärendeunderlag och andra kommunala handlingar.",
             "Assuming the flow primarily handles case material and related municipal documents.",
         )
-    if candidate.issue_id == "structured_analysis_need" and explicit_structured_reuse_preference(profile.text):
+    if (
+        candidate.issue_id == "structured_analysis_need"
+        and explicit_structured_reuse_preference(profile.text)
+    ):
         return localized_text(
             language,
             "Antar att strukturerad data ska användas i mellanliggande steg där det förbättrar kvalitet och återanvändning.",
@@ -331,7 +364,9 @@ def has_explicit_step_plan(text: str) -> bool:
 
 
 def implies_single_case(text: str) -> bool:
-    if mentions_any(text, ("flera ärenden", "multiple cases", "several cases", "compare")):
+    if mentions_any(
+        text, ("flera ärenden", "multiple cases", "several cases", "compare")
+    ):
         return False
     return mentions_any(
         text,

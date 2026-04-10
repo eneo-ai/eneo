@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from difflib import get_close_matches
 import json
-from typing import Any
+from difflib import get_close_matches
+from typing import Any, cast
 
-from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore, OutputType, StepSpec
+from intric.flows.ai_builder.ai_builder_domain_models import JsonObject
+from intric.flows.ai_builder.ai_builder_models import (
+    FlowDraftSpecCore,
+    OutputType,
+    StepSpec,
+)
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.flow_variable_definitions import RESERVED_RUNTIME_VARIABLES
 from intric.flows.template_reference_analyzer import (
@@ -15,9 +20,13 @@ from intric.flows.template_reference_analyzer import (
 from intric.flows.variable_resolver import iter_template_expressions
 
 
-def validate_variable_references(spec: FlowDraftSpecCore, result: SpecValidationResult) -> None:
+def validate_variable_references(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
     steps_by_order = {index + 1: step for index, step in enumerate(spec.steps)}
-    steps_by_plan_ref = {step.plan_step_ref: (index + 1, step) for index, step in enumerate(spec.steps)}
+    steps_by_plan_ref = {
+        step.plan_step_ref: (index + 1, step) for index, step in enumerate(spec.steps)
+    }
     allowed_roots = {
         *RESERVED_RUNTIME_VARIABLES,
         *(
@@ -60,7 +69,10 @@ def validate_variable_references(spec: FlowDraftSpecCore, result: SpecValidation
                 continue
             if reference.kind is TemplateReferenceKind.RUNTIME:
                 continue
-            if reference.kind is TemplateReferenceKind.STEP and reference.step_order is None:
+            if (
+                reference.kind is TemplateReferenceKind.STEP
+                and reference.step_order is None
+            ):
                 result.add_error(
                     step_ref=step.plan_step_ref,
                     code="invalid_step_reference",
@@ -117,7 +129,9 @@ def validate_variable_references(spec: FlowDraftSpecCore, result: SpecValidation
             )
             if missing_path is not None:
                 properties = _schema_property_names(referenced_step.output_contract)
-                suggestion = _suggest_similar(missing_path.rsplit(".", maxsplit=1)[-1], properties)
+                suggestion = _suggest_similar(
+                    missing_path.rsplit(".", maxsplit=1)[-1], properties
+                )
                 result.add_error(
                     step_ref=step.plan_step_ref,
                     code="unknown_output_contract_field",
@@ -136,7 +150,9 @@ def _iter_step_template_expressions(step: StepSpec) -> list[str]:
     for payload in (step.input_bindings, step.output_config):
         if payload is None:
             continue
-        expressions.extend(iter_template_expressions(_stringify_template_payload(payload)))
+        expressions.extend(
+            iter_template_expressions(_stringify_template_payload(payload))
+        )
 
     return expressions
 
@@ -156,8 +172,7 @@ def _parse_reference_expression(
     allowed_roots: set[str],
 ) -> TemplateReference:
     form_field_names = {
-        root for root in allowed_roots
-        if root not in RESERVED_RUNTIME_VARIABLES
+        root for root in allowed_roots if root not in RESERVED_RUNTIME_VARIABLES
     }
     return analyze_template(
         f"{{{{ {expression} }}}}",
@@ -174,14 +189,15 @@ def _missing_contract_path(contract: dict[str, Any], path: list[str]) -> str | N
         if not isinstance(current, dict):
             return ".".join(traversed)
 
-        schema_type = current.get("type")
+        current_schema = cast(JsonObject, current)
+        schema_type = current_schema.get("type")
         if schema_type == "array":
-            current = current.get("items")
+            current = current_schema.get("items")
             if not isinstance(current, dict):
                 return ".".join(traversed)
 
-        properties = _resolve_schema_properties(current)
-        if not isinstance(properties, dict) or part not in properties:
+        properties = _resolve_schema_properties(cast(dict[str, Any], current))
+        if part not in properties:
             return ".".join(traversed)
         current = properties[part]
 
@@ -192,29 +208,29 @@ def _resolve_schema_properties(schema: dict[str, Any]) -> dict[str, Any]:
     properties: dict[str, Any] = {}
     direct = schema.get("properties")
     if isinstance(direct, dict):
-        properties.update(direct)
+        properties.update(cast(dict[str, Any], direct))
     for keyword in ("allOf", "anyOf", "oneOf"):
         subschemas = schema.get(keyword)
         if not isinstance(subschemas, list):
             continue
-        for subschema in subschemas:
+        for subschema in cast(list[object], subschemas):
             if not isinstance(subschema, dict):
                 continue
-            nested = subschema.get("properties")
+            nested = cast(dict[str, Any], subschema).get("properties")
             if isinstance(nested, dict):
-                properties.update(nested)
+                properties.update(cast(dict[str, Any], nested))
     return properties
 
 
 def _schema_property_names(schema: dict[str, Any]) -> set[str]:
     names: set[str] = set()
     properties = _resolve_schema_properties(schema)
-    names.update(key for key in properties if isinstance(key, str))
+    names.update(properties.keys())
     for value in properties.values():
         if not isinstance(value, dict):
             continue
-        child_properties = _resolve_schema_properties(value)
-        names.update(key for key in child_properties if isinstance(key, str))
+        child_properties = _resolve_schema_properties(cast(dict[str, Any], value))
+        names.update(child_properties.keys())
     return names
 
 
@@ -234,7 +250,8 @@ def _runtime_path_error_message(reference: TemplateReference) -> str:
         if reference.path_error_context is not None:
             raw_known_keys = reference.path_error_context.get("known_keys", ())
             if isinstance(raw_known_keys, (list, tuple, set, frozenset)):
-                known_keys = tuple(str(key) for key in raw_known_keys)
+                known_key_items: list[object] = [*raw_known_keys]
+                known_keys = tuple(str(key) for key in known_key_items)
         suggestion = _suggest_similar(
             reference.tail.split(".", maxsplit=1)[0],
             set(known_keys),
@@ -254,7 +271,8 @@ def _runtime_path_error_message(reference: TemplateReference) -> str:
 
 
 def _suggest_similar(target: str, candidates: set[str]) -> str:
-    matches = get_close_matches(target, sorted(candidates), n=3, cutoff=0.6)
+    candidate_names = sorted(candidates)
+    matches = get_close_matches(target, candidate_names, n=3, cutoff=0.6)
     if not matches:
         return ""
     return f" Did you mean: {', '.join(matches)}?"

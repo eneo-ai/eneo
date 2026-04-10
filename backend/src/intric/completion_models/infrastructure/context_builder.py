@@ -81,6 +81,7 @@ class _Prompt:
         self.web_search_result: str | None = None
         self.attachments: str | None = None
         self._knowledge_tokens: int = 0
+        self._knowledge_trace: KnowledgeTrace | None = None
         self.version: int = version
         self.model_name: str = model_name
 
@@ -110,6 +111,14 @@ class _Prompt:
             components.append(self.attachments)
 
         return "\n\n".join(components)
+
+    @staticmethod
+    def _safe_title(value: object) -> str:
+        return value if isinstance(value, str) else ""
+
+    @staticmethod
+    def _safe_chunk_no(value: object) -> int:
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
     @staticmethod
     def _common_overlap(text1: str, text2: str) -> int:
@@ -163,6 +172,9 @@ class _Prompt:
         chunks: list[_InfoBlobChunkLike],
         max_tokens: int,
     ) -> str:
+        raw_source_ids = list(
+            dict.fromkeys(str(chunk.info_blob_id) for chunk in chunks)
+        )
         # Create a dictionary to store chunk indices
         chunk_indices = {id(chunk): i for i, chunk in enumerate(chunks)}
 
@@ -225,9 +237,9 @@ class _Prompt:
 
                 chunk_grouping = ChunkGrouping(
                     id=doc_id,
-                    title=group[0].info_blob_title or "",
-                    start_chunk=group[0].chunk_no,
-                    end_chunk=group[-1].chunk_no,
+                    title=self._safe_title(group[0].info_blob_title),
+                    start_chunk=self._safe_chunk_no(group[0].chunk_no),
+                    end_chunk=self._safe_chunk_no(group[-1].chunk_no),
                     content=full_text,
                     chunk_count=len(group),
                 )

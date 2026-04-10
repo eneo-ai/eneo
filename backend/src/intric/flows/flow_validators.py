@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from enum import Enum
 import json
 import re
+from enum import Enum
 from typing import Any, cast
 
 from intric.database.tables.flow_tables import (
@@ -12,19 +12,19 @@ from intric.database.tables.flow_tables import (
     FLOW_STEP_OUTPUT_MODE_VALUES,
     FLOW_STEP_OUTPUT_TYPE_VALUES,
 )
-from intric.flows.domain.flow import FlowStep, JsonObject
-from intric.flows.flow_validators_form import (
-    normalize_legacy_form_schema,
-    validate_form_schema,
-    validate_variable_alias_collisions,
+from intric.flows.ai_builder.ai_builder_step_capabilities import (
+    is_citation_capable_step,
 )
 from intric.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
     CITATION_MODE_OFF,
     resolve_citation_mode,
 )
-from intric.flows.ai_builder.ai_builder_step_capabilities import (
-    is_citation_capable_step,
+from intric.flows.domain.flow import FlowStep, JsonObject
+from intric.flows.flow_validators_form import (
+    normalize_legacy_form_schema,
+    validate_form_schema,
+    validate_variable_alias_collisions,
 )
 from intric.flows.flow_validators_http import (
     validate_http_input_config,
@@ -37,7 +37,10 @@ from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.output_processing import validate_schema_syntax
 from intric.flows.runtime_input import build_runtime_input_config
 from intric.flows.step_chain_rules import find_first_step_chain_violation
-from intric.flows.template_reference_analyzer import analyze_template, consumes_runtime_input
+from intric.flows.template_reference_analyzer import (
+    analyze_template,
+    consumes_runtime_input,
+)
 from intric.flows.transcription_config import (
     FlowTranscriptionConfigError,
     parse_transcription_config,
@@ -230,7 +233,9 @@ def _schema_type_hint(schema: dict[str, Any]) -> str:
     if isinstance(raw_type, str):
         return raw_type
     if isinstance(raw_type, list):
-        declared = [item for item in raw_type if isinstance(item, str)]
+        declared: list[str] = [
+            item for item in cast(list[object], raw_type) if isinstance(item, str)
+        ]
         if "object" in declared:
             return "object"
         if "array" in declared:
@@ -257,7 +262,7 @@ def _validate_audio_transcription_settings(
         return
 
     try:
-        config = parse_transcription_config(cast(dict[str, Any] | None, metadata_json))
+        config = parse_transcription_config(metadata_json)
     except FlowTranscriptionConfigError as exc:
         raise BadRequestException(str(exc)) from exc
 

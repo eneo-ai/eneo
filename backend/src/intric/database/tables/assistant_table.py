@@ -29,6 +29,14 @@ class Assistants(BasePublic):
     insight_enabled: Mapped[bool] = mapped_column(default=False)
     data_retention_days: Mapped[Optional[int]] = mapped_column()
     metadata_json: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
+    hidden: Mapped[bool] = mapped_column(default=False, nullable=False)
+    origin: Mapped[str] = mapped_column(
+        default="user", nullable=False, server_default="user"
+    )
+    managing_flow_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("flows.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # TODO: refactor since this is a somewhat weird solution having a
     # type column. The reason is bc front-end wants a non-nullable
     # "type" field in a bunch of models. Thus a field with a default
@@ -100,7 +108,6 @@ class Assistants(BasePublic):
             name="ck_assistants_flow_managed_hidden",
         ),
         Index("ix_assistants_origin_managing_flow", "origin", "managing_flow_id"),
-        {"extend_existing": True},
     )
 
 

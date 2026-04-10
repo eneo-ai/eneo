@@ -45,6 +45,7 @@ from intric.completion_models.presentation.completion_model_models import (
     ModelMigrationRequest,
 )
 from intric.database.database import AsyncSession
+from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.integration_table import IntegrationKnowledge
 from intric.database.tables.websites_table import Websites
@@ -1267,6 +1268,8 @@ async def update_completion_model_metadata(
             existing_model = await repo.delegate.get_by(
                 conditions={CompletionModels.id: id}
             )
+            if existing_model is None:
+                raise NotFoundException(f"Completion model with id {id} not found")
             update_payload["max_output_tokens"] = existing_model.max_output_tokens
         update_with_id = CompletionModelUpdate(
             id=id,

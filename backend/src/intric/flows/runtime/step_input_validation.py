@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from intric.flows.output_processing import validate_against_contract
 from intric.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
@@ -137,7 +137,9 @@ def _schema_type_hint(schema: dict[str, Any]) -> str:
     if isinstance(raw_type, str):
         return raw_type
     if isinstance(raw_type, list):
-        type_entries = sorted(str(item) for item in raw_type if isinstance(item, str))
+        type_entries = sorted(
+            str(item) for item in cast(list[object], raw_type) if isinstance(item, str)
+        )
         if type_entries:
             return "|".join(type_entries)
     if isinstance(schema.get("properties"), dict):
@@ -152,7 +154,11 @@ def _schema_expects_structured(schema: dict[str, Any]) -> bool:
     if isinstance(raw_type, str):
         return raw_type in {"object", "array"}
     if isinstance(raw_type, list):
-        return any(item in {"object", "array"} for item in raw_type if isinstance(item, str))
+        return any(
+            item in {"object", "array"}
+            for item in cast(list[object], raw_type)
+            if isinstance(item, str)
+        )
     return isinstance(schema.get("properties"), dict) or "items" in schema
 
 

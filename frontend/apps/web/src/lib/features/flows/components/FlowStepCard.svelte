@@ -123,14 +123,12 @@
 <div
   role="listitem"
   class="group flex w-full items-start gap-2.5 border-b px-3.5 py-3 text-left transition-colors duration-150
-    {isActive
-    ? 'border-b-default border-l-accent-default bg-accent-dimmer/30 border-l-[3px]'
-    : 'border-default hover:bg-hover-dimmer/40 border-l-[3px] border-l-transparent'}
+    {isActive ? 'border-b-default bg-accent-dimmer/40' : 'border-default hover:bg-hover-dimmer/40'}
     active:bg-hover-default"
 >
   <button
     type="button"
-    class="flex min-w-0 flex-1 items-start gap-2.5 rounded text-left focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
+    class="focus-visible:ring-accent-default flex min-w-0 flex-1 items-start gap-2.5 rounded text-left focus-visible:ring-2 focus-visible:outline-none"
     aria-current={isActive ? "true" : undefined}
     on:click={() => dispatch("click")}
     on:keydown={handleKeydown}
@@ -192,13 +190,16 @@
         <div class="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <Badge variant="secondary" class="text-[11px] {inputBadgeClass}">{inputTypeLabel}</Badge>
           <span class="text-muted text-[11px]">→</span>
-          <Badge variant="secondary" class="text-[11px] {outputBadgeClass}">{railOutputLabel}</Badge>
+          <Badge variant="secondary" class="text-[11px] {outputBadgeClass}">{railOutputLabel}</Badge
+          >
           <span class="text-muted text-[11px]">·</span>
           <span class="text-accent-stronger text-[11px] font-medium">
             {m.flow_step_card_chain_short()}: {nextChannelLabel}
           </span>
           {#if step.mcp_policy === "restricted"}
-            <Badge variant="secondary" class="bg-warning-dimmer text-warning-stronger text-[11px]">MCP</Badge>
+            <Badge variant="secondary" class="bg-warning-dimmer text-warning-stronger text-[11px]"
+              >MCP</Badge
+            >
           {/if}
         </div>
       {/if}
@@ -212,7 +213,7 @@
     >
       <button
         type="button"
-        class="text-secondary hover:bg-hover-dimmer inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+        class="text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
         on:click|stopPropagation={() => dispatch("moveUp")}
         disabled={!canMoveUp}
         title={m.flow_step_move_up()}
@@ -232,7 +233,7 @@
       </button>
       <button
         type="button"
-        class="text-secondary hover:bg-hover-dimmer inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+        class="text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
         on:click|stopPropagation={() => dispatch("moveDown")}
         disabled={!canMoveDown}
         title={m.flow_step_move_down()}
@@ -252,7 +253,7 @@
       </button>
       <button
         type="button"
-        class="text-secondary hover:bg-hover-dimmer inline-flex size-6 items-center justify-center rounded p-0.5 hover:text-negative-stronger focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
+        class="text-secondary hover:bg-hover-dimmer hover:text-negative-stronger focus-visible:ring-accent-default inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none"
         on:click|stopPropagation={() => dispatch("remove")}
         title={m.flow_step_remove()}
         aria-label={m.flow_step_remove()}

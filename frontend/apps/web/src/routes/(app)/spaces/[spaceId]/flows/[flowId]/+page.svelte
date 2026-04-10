@@ -17,7 +17,7 @@
   import { Button, Input } from "@intric/ui";
   import { Badge, Card, Tabs } from "@eneo/ui";
   import { CheckCircle2 } from "lucide-svelte";
-  import { IntricError } from "@intric/intric-js";
+  import { IntricError, type TranscriptionModel } from "@intric/intric-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { onDestroy } from "svelte";
@@ -150,8 +150,7 @@
     typeof (wizardMetadata as FlowWizardMetadata).transcription_model?.id === "string"
       ? (wizardMetadata as FlowWizardMetadata).transcription_model?.id
       : null;
-  let transcriptionModel: { id?: string; name?: string | null; nickname?: string | null } | null =
-    null;
+  let transcriptionModel: TranscriptionModel | null = null;
   $: resolvedTranscriptionModel =
     ($currentSpace.transcription_models ?? []).find((model) => model.id === transcriptionModelId) ??
     null;
@@ -354,7 +353,8 @@
               {@const isActive = builderStage === stage.id}
               {@const isCompleted = isStageCompleted(stage.id)}
               {@const isSkipped = stage.id === 2 && isTranscriptionSkipped}
-              {@const isPreviousCompleted = i > 0 && isStageCompleted(FLOW_BUILDER_STAGES[i - 1].id)}
+              {@const isPreviousCompleted =
+                i > 0 && isStageCompleted(FLOW_BUILDER_STAGES[i - 1].id)}
 
               {#if i > 0}
                 <!-- Connecting line -->
@@ -368,7 +368,7 @@
                 <button
                   type="button"
                   class="hover:bg-hover-dimmer flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-all duration-200
-                    {isActive ? 'font-semibold text-primary' : ''}"
+                    {isActive ? 'text-primary font-semibold' : ''}"
                   aria-current={isActive ? "step" : undefined}
                   on:click={() => void navigateToStage(stage.id)}
                 >
@@ -411,12 +411,12 @@
                   <span
                     class="hidden text-sm md:inline
                       {isActive
-                        ? 'font-semibold text-primary'
-                        : isSkipped
-                          ? 'text-muted italic'
-                          : isCompleted
-                            ? 'text-secondary'
-                            : 'text-muted'}"
+                      ? 'text-primary font-semibold'
+                      : isSkipped
+                        ? 'text-muted italic'
+                        : isCompleted
+                          ? 'text-secondary'
+                          : 'text-muted'}"
                   >
                     {stage.labelKey()}
                   </span>
@@ -460,7 +460,7 @@
 
       <div class="flex flex-1 flex-col overflow-hidden p-4 pt-3">
         {#if builderStage === 1}
-          <div class="border-default flex-1 overflow-y-auto rounded-xl border p-5 md:p-8">
+          <div class="flex-1 overflow-y-auto p-5 md:p-8">
             <div class="mx-auto w-full max-w-5xl space-y-6">
               <div class="grid gap-6 lg:grid-cols-2">
                 <div class="border-default bg-primary rounded-xl border p-6">
@@ -545,11 +545,14 @@
                           <span class="text-base font-semibold">{stepsCount}</span>
                         </li>
                         <li class="flex items-center justify-between">
-                          <span class="text-secondary text-sm">{m.flow_summary_input_fields()}</span>
+                          <span class="text-secondary text-sm">{m.flow_summary_input_fields()}</span
+                          >
                           <span class="text-base font-semibold">{formSchemaFields.length}</span>
                         </li>
                         <li class="flex items-center justify-between">
-                          <span class="text-secondary text-sm">{m.flow_summary_transcription()}</span>
+                          <span class="text-secondary text-sm"
+                            >{m.flow_summary_transcription()}</span
+                          >
                           <span class="text-sm font-medium"
                             >{transcriptionEnabled
                               ? m.flow_transcription_on()
@@ -581,9 +584,17 @@
                         <li class="flex items-center justify-between">
                           <span class="text-secondary text-sm">{m.flow_summary_status()}</span>
                           {#if $isPublished}
-                            <Badge variant="outline" class="border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger">{m.flow_status_published_readonly()}</Badge>
+                            <Badge
+                              variant="outline"
+                              class="border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger"
+                              >{m.flow_status_published_readonly()}</Badge
+                            >
                           {:else}
-                            <Badge variant="outline" class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger">{m.flow_status_draft()}</Badge>
+                            <Badge
+                              variant="outline"
+                              class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger"
+                              >{m.flow_status_draft()}</Badge
+                            >
                           {/if}
                         </li>
                       </ul>
@@ -677,9 +688,17 @@
                     </ul>
                     <div class="mt-5">
                       {#if $isPublished}
-                        <Badge variant="outline" class="border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger">{m.flow_status_published_readonly()}</Badge>
+                        <Badge
+                          variant="outline"
+                          class="border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger"
+                          >{m.flow_status_published_readonly()}</Badge
+                        >
                       {:else}
-                        <Badge variant="outline" class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger">{m.flow_status_draft()}</Badge>
+                        <Badge
+                          variant="outline"
+                          class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger"
+                          >{m.flow_status_draft()}</Badge
+                        >
                       {/if}
                     </div>
                   </div>
@@ -688,7 +707,7 @@
             </div>
           </div>
         {:else if builderStage === 2}
-          <div class="border-default flex-1 overflow-y-auto rounded-xl border p-4 md:p-6">
+          <div class="flex-1 overflow-y-auto p-4 md:p-6">
             <div class="mx-auto w-full max-w-3xl space-y-4 pt-4">
               {#if isTranscriptionSkipped}
                 <div class="border-default bg-secondary/30 rounded-xl border p-6 text-center">
@@ -719,7 +738,7 @@
                       {m.flow_transcription_enable()}
                     </Input.Switch>
                   </div>
-                  <p class="text-muted mt-3 text-xs">{m.flow_transcription_skip_hint()}</p>
+                  <p class="text-muted mt-3 text-sm">{m.flow_transcription_skip_hint()}</p>
                 </div>
                 {#if hasAudioInputStep}
                   <div
@@ -733,7 +752,7 @@
                   <div class="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h3 class="text-sm font-semibold">{m.flow_transcription_optional_title()}</h3>
-                      <p class="text-secondary mt-1 text-xs">
+                      <p class="text-secondary mt-1 text-sm">
                         {m.flow_transcription_optional_desc({ variable: "{{transkribering}}" })}
                       </p>
                     </div>
@@ -751,7 +770,7 @@
                   <h3 class="text-sm font-semibold">{m.flow_transcription_model_settings()}</h3>
                   <div class="mt-4 grid gap-4 sm:grid-cols-2">
                     <div class="flex flex-col gap-1.5">
-                      <span class="text-secondary text-xs font-medium"
+                      <span class="text-secondary text-sm font-medium"
                         >{m.flow_transcription_model_label()}</span
                       >
                       <SelectAIModelV2
@@ -768,7 +787,7 @@
                     <div class="flex flex-col gap-1.5">
                       <label
                         for="flow-transcription-language"
-                        class="text-secondary text-xs font-medium"
+                        class="text-secondary text-sm font-medium"
                         >{m.flow_transcription_language_label()}</label
                       >
                       <select
@@ -788,13 +807,13 @@
                   <div class="pointer-events-none mt-4 flex items-center gap-3 opacity-60">
                     <Input.Switch value={false} disabled />
                     <span class="text-secondary text-sm">{m.flow_transcription_diarization()}</span>
-                    <span class="bg-secondary/40 text-muted rounded-full px-2 py-0.5 text-[10px]"
+                    <span class="bg-secondary/40 text-muted rounded-full px-2 py-0.5 text-xs"
                       >{m.flow_coming_soon()}</span
                     >
                   </div>
                   {#if transcriptionModelMissingInSpace}
                     <div
-                      class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mt-4 rounded-lg border px-3 py-2 text-xs"
+                      class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mt-4 rounded-lg border px-3 py-2 text-sm"
                     >
                       {m.flow_transcription_model_unavailable_warning()}
                     </div>
@@ -818,7 +837,7 @@
             </div>
           </div>
         {:else if builderStage === 3}
-          <div class="border-default flex-1 overflow-y-auto rounded-xl border p-4 md:p-6">
+          <div class="flex-1 overflow-y-auto p-4 md:p-6">
             <div
               class="border-default bg-primary text-secondary mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
             >
@@ -937,7 +956,7 @@
             on:nodeClick={(e) => activeStepId.set(e.detail)}
           />
         {:else}
-          <div class="border-default flex-1 overflow-y-auto rounded-xl border p-5 md:p-8">
+          <div class="flex-1 overflow-y-auto p-5 md:p-8">
             <div class="mx-auto w-full max-w-5xl space-y-6">
               <!-- Pipeline summary -->
               <div class="border-default bg-primary rounded-xl border p-6">
@@ -1005,7 +1024,10 @@
                         {m.flow_show_history()}
                       </Button>
                       {#if $validationErrors.size === 0}
-                        <Badge variant="outline" class="gap-1.5 border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger">
+                        <Badge
+                          variant="outline"
+                          class="border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger gap-1.5"
+                        >
                           <CheckCircle2 class="size-3.5" />
                           {m.flow_publish_status_ready()}
                         </Badge>
@@ -1083,9 +1105,9 @@
   flow={$resource}
   intric={data.intric}
   lastInputPayload={latestHistoryPayload}
-  on:runCreated={(e) => {
+  onRunCreated={(detail) => {
     activeTab = "history";
-    pendingRunHighlight = e.detail.runId;
+    pendingRunHighlight = detail.runId;
     runsReloadTrigger++;
   }}
 />

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
@@ -15,10 +15,14 @@ from intric.flows.ai_builder.ai_builder_settings import (
 from intric.main.exceptions import BadRequestException
 from intric.model_providers.domain.model_defaults import lookup_model_defaults
 
+if TYPE_CHECKING:
+    from intric.completion_models.domain.completion_model import CompletionModel
+    from intric.spaces.space import Space
+
 
 @dataclass(frozen=True)
 class AIBuilderPlannerContext:
-    model: Any
+    model: "CompletionModel"
     available_models: list[dict[str, str]]
     available_kbs: list[dict[str, str]]
     resource_catalog: AIBuilderResourceCatalog
@@ -27,7 +31,7 @@ class AIBuilderPlannerContext:
     budget_policy: AIBuilderBudgetPolicy
 
 
-def serialize_space_models(space) -> list[dict[str, str]]:
+def serialize_space_models(space: "Space") -> list[dict[str, str]]:
     return [
         {
             "id": str(model.id),
@@ -39,7 +43,7 @@ def serialize_space_models(space) -> list[dict[str, str]]:
     ]
 
 
-def serialize_space_kbs(space) -> list[dict[str, str]]:
+def serialize_space_kbs(space: "Space") -> list[dict[str, str]]:
     return [
         {
             "id": str(collection.id),
@@ -51,7 +55,7 @@ def serialize_space_kbs(space) -> list[dict[str, str]]:
     ]
 
 
-def resolve_planner_model(space):
+def resolve_planner_model(space: "Space") -> "CompletionModel":
     model = space.get_default_completion_model()
     if model:
         return model
@@ -63,12 +67,18 @@ def resolve_planner_model(space):
     )
 
 
-def resolve_requested_model(space, *, model_id: UUID | None):
+def resolve_requested_model(
+    space: "Space", *, model_id: UUID | None
+) -> "CompletionModel":
     if model_id is None:
         return resolve_planner_model(space)
 
     model = next(
-        (candidate for candidate in getattr(space, "completion_models", []) if candidate.id == model_id),
+        (
+            candidate
+            for candidate in getattr(space, "completion_models", [])
+            if candidate.id == model_id
+        ),
         None,
     )
     if model is None:
@@ -77,7 +87,7 @@ def resolve_requested_model(space, *, model_id: UUID | None):
 
 
 def build_planner_context(
-    space,
+    space: "Space",
     *,
     model_id: UUID | None = None,
     tenant_flow_settings: dict[str, Any] | None = None,
@@ -99,9 +109,8 @@ def build_planner_context(
             code="planner_model_missing_context_window",
         )
 
-    max_output_tokens = (
-        getattr(model, "max_output_tokens", None)
-        or (defaults.max_output_tokens if defaults else None)
+    max_output_tokens = getattr(model, "max_output_tokens", None) or (
+        defaults.max_output_tokens if defaults else None
     )
     if max_output_tokens is None:
         raise BadRequestException(

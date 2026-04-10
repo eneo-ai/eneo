@@ -1,9 +1,8 @@
 <script lang="ts">
-  import type { CompletionModel } from "@intric/intric-js";
-  import SelectAIModelV2 from "../SelectAIModelV2.svelte";
+  import SelectAIModelV2, { type SelectableAIModel } from "../SelectAIModelV2.svelte";
 
-  export let availableModels: CompletionModel[] = [];
-  export let selectedModel: CompletionModel | null | undefined = null;
+  export let availableModels: SelectableAIModel[] = [];
+  export let selectedModel: SelectableAIModel | null | undefined = null;
 
   let changeCount = 0;
 

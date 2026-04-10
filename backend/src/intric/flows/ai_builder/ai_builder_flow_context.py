@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
@@ -9,7 +8,7 @@ from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_capability_profile,
 )
 from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore
-from intric.flows.domain.flow import Flow
+from intric.flows.domain.flow import Flow, FlowStep, JsonObject
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_edit_scope import EditScopeResolution
@@ -62,22 +61,28 @@ def _build_detailed_flow_context(
                 f"({step.input_source} → {step.input_type} → {step.output_mode} → {step.output_type})"
             )
 
-            if step.input_bindings and isinstance(step.input_bindings.get("question"), str):
+            if step.input_bindings and isinstance(
+                step.input_bindings.get("question"), str
+            ):
                 question = step.input_bindings["question"]
                 truncated = question[:150] + "..." if len(question) > 150 else question
-                lines.append(f"     Underlag: \"{truncated}\"")
+                lines.append(f'     Underlag: "{truncated}"')
 
-            if step.output_contract and isinstance(step.output_contract.get("properties"), dict):
+            if step.output_contract and isinstance(
+                step.output_contract.get("properties"), dict
+            ):
                 fields = list(step.output_contract["properties"].keys())
                 lines.append(f"     Utdatakontrakt: {', '.join(fields)}")
 
-            if step.input_contract and isinstance(step.input_contract.get("properties"), dict):
+            if step.input_contract and isinstance(
+                step.input_contract.get("properties"), dict
+            ):
                 fields = list(step.input_contract["properties"].keys())
                 lines.append(f"     Indatakontrakt: {', '.join(fields)}")
 
             snapshot = (
                 assistant_snapshots.get(step.assistant_id)
-                if assistant_snapshots and step.assistant_id is not None
+                if assistant_snapshots
                 else None
             )
             if isinstance(snapshot, dict):
@@ -100,9 +105,14 @@ def _build_detailed_flow_context(
                 knowledge_refs = snapshot.get("knowledge_refs")
                 knowledge_labels = snapshot.get("knowledge_labels")
                 if isinstance(knowledge_refs, list):
-                    refs = [str(ref).strip() for ref in knowledge_refs if str(ref).strip()]
+                    refs_raw = cast(list[object], knowledge_refs)
+                    refs = [str(ref).strip() for ref in refs_raw if str(ref).strip()]
                     labels = (
-                        [str(label).strip() for label in knowledge_labels if str(label).strip()]
+                        [
+                            str(label).strip()
+                            for label in cast(list[object], knowledge_labels)
+                            if str(label).strip()
+                        ]
                         if isinstance(knowledge_labels, list)
                         else []
                     )
@@ -125,12 +135,15 @@ def _build_detailed_flow_context(
     if flow.metadata_json:
         form_schema = flow.metadata_json.get("form_schema")
         if isinstance(form_schema, dict):
-            fields = form_schema.get("fields")
+            fields = cast(JsonObject, form_schema).get("fields")
             if isinstance(fields, list) and fields:
                 lines.append("\nFormulärfält:")
-                for field in fields:
+                for field in cast(list[object], fields):
                     if isinstance(field, dict):
-                        lines.append(f"  - {field.get('name', '?')} ({field.get('type', '?')})")
+                        field_dict = cast(JsonObject, field)
+                        lines.append(
+                            f"  - {field_dict.get('name', '?')} ({field_dict.get('type', '?')})"
+                        )
 
     if is_edit_mode and flow.steps:
         lines.append("\nEdit-referenstabell:")
@@ -275,11 +288,15 @@ def build_plan_summary(
 
     for index, step in enumerate(spec.steps, 1):
         ref_part = f" [ref={step.plan_step_ref}]" if step.plan_step_ref else ""
-        existing = f" (modifierar {step.existing_step_ref})" if step.existing_step_ref else ""
+        existing = (
+            f" (modifierar {step.existing_step_ref})" if step.existing_step_ref else ""
+        )
         io = f"{step.input_source} → {step.input_type} → {step.output_mode} → {step.output_type}"
         lines.append(f"  {index}. {step.name}{ref_part}{existing} ({io})")
 
-        if step.output_contract and isinstance(step.output_contract.get("properties"), dict):
+        if step.output_contract and isinstance(
+            step.output_contract.get("properties"), dict
+        ):
             fields = list(step.output_contract["properties"].keys())
             lines.append(f"     Utdatakontrakt: {', '.join(fields)}")
 
@@ -319,16 +336,20 @@ def _describe_input_profile(capabilities: FlowCapabilityProfile) -> str:
 
 def _describe_output_profile(
     capabilities: FlowCapabilityProfile,
-    steps: list[Any],
+    steps: list[FlowStep],
 ) -> str:
     if capabilities.final_output_type is None:
         return "inte definierad ännu"
     final_step_order = steps[-1].step_order if steps else "?"
     generation_mode = capabilities.final_output_generation_mode
-    generation_label = {
-        "template_fill": "mall",
-        "generated": "genererad",
-    }.get(generation_mode)
+    generation_label = (
+        {
+            "template_fill": "mall",
+            "generated": "genererad",
+        }.get(generation_mode)
+        if generation_mode is not None
+        else None
+    )
     base = f"{_format_output_label(capabilities.final_output_mode)} via steg {final_step_order}"
     return f"{base} ({generation_label})" if generation_label else base
 
@@ -340,18 +361,19 @@ def _form_field_names(flow: Flow) -> list[str]:
     form_schema = metadata_json.get("form_schema")
     if not isinstance(form_schema, dict):
         return []
-    fields = form_schema.get("fields")
+    fields = cast(JsonObject, form_schema).get("fields")
     if not isinstance(fields, list):
         return []
     return [
-        str(field.get("name")).strip()
-        for field in fields
-        if isinstance(field, dict) and str(field.get("name", "")).strip()
+        str(cast(JsonObject, field).get("name")).strip()
+        for field in cast(list[object], fields)
+        if isinstance(field, dict)
+        and str(cast(JsonObject, field).get("name", "")).strip()
     ]
 
 
 def _knowledge_base_summary(
-    steps: list[Any],
+    steps: list[FlowStep],
     assistant_snapshots: dict[UUID, dict[str, Any]] | None,
 ) -> str | None:
     if not assistant_snapshots:
@@ -363,15 +385,19 @@ def _knowledge_base_summary(
             continue
         labels = snapshot.get("knowledge_labels")
         refs = snapshot.get("knowledge_refs")
-        display_values = [
-            str(label).strip()
-            for label in labels
-            if isinstance(label, str) and label.strip()
-        ] if isinstance(labels, list) else []
+        display_values = (
+            [
+                str(label).strip()
+                for label in cast(list[object], labels)
+                if isinstance(label, str) and label.strip()
+            ]
+            if isinstance(labels, list)
+            else []
+        )
         if not display_values and isinstance(refs, list):
             display_values = [
                 str(ref).strip()
-                for ref in refs
+                for ref in cast(list[object], refs)
                 if isinstance(ref, str) and ref.strip()
             ]
         if display_values:
@@ -423,9 +449,15 @@ def _format_requested_output_change(
 def _format_unresolved_output_decision(
     edit_scope: "EditScopeResolution",
 ) -> str | None:
-    if edit_scope.requested_output_artifact == "docx_document" and edit_scope.requested_output_generation_mode is None:
+    if (
+        edit_scope.requested_output_artifact == "docx_document"
+        and edit_scope.requested_output_generation_mode is None
+    ):
         return "DOCX-generering (genererad eller mall)"
-    if edit_scope.requested_output_artifact == "pdf_document" and edit_scope.requested_output_generation_mode == "pdf_template_requested":
+    if (
+        edit_scope.requested_output_artifact == "pdf_document"
+        and edit_scope.requested_output_generation_mode == "pdf_template_requested"
+    ):
         return "PDF-generering (genererad PDF eller mallförväntan)"
     return None
 

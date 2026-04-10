@@ -65,6 +65,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     federation_config: dict[str, Any] = Field(default_factory=dict)
     crawler_settings: dict[str, Any] = Field(default_factory=dict)
     api_key_policy: dict[str, Any] = Field(default_factory=dict)
+    flow_settings: dict[str, Any] = Field(default_factory=dict)
     favorite_providers: list[str] = Field(default_factory=list)
 
     @field_validator("favorite_providers")
@@ -261,18 +262,16 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         if not v:
             return {}
 
-        if not isinstance(v, dict):
-            raise ValueError("flow_settings must be an object")
-
         input_limits = v.get("input_limits")
         if input_limits is not None:
             if not isinstance(input_limits, dict):
                 raise ValueError("flow_settings.input_limits must be an object")
+            input_limits_dict = cast(dict[str, Any], input_limits)
 
             for key in ("file_max_size_bytes", "audio_max_size_bytes"):
-                if key not in input_limits:
+                if key not in input_limits_dict:
                     continue
-                value = input_limits[key]
+                value = input_limits_dict[key]
                 if not isinstance(value, int) or isinstance(value, bool):
                     raise ValueError(
                         f"flow_settings.input_limits.{key} must be an integer"
@@ -283,9 +282,9 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
                     )
 
             for key in ("max_files_per_run", "audio_max_files_per_run"):
-                if key not in input_limits:
+                if key not in input_limits_dict:
                     continue
-                value = input_limits[key]
+                value = input_limits_dict[key]
                 if value is None:
                     continue  # None = use default
                 if not isinstance(value, int) or isinstance(value, bool):
@@ -319,6 +318,7 @@ class TenantUpdatePublic(BaseModel):
     provisioning: Optional[bool] = None
     state: Optional[TenantState] = None
     security_enabled: Optional[bool] = None
+    flow_settings: Optional[dict[str, Any]] = None
 
 
 class TenantUpdate(TenantUpdatePublic):

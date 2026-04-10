@@ -2,12 +2,40 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, cast
 from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
+from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
+from intric.flows.ai_builder.ai_builder_create_feedback import (
+    format_create_argument_error,
+    format_create_quality_feedback,
+    format_create_validation_feedback,
+)
+from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
+from intric.flows.ai_builder.ai_builder_description_semantics import (
+    DescriptionProvenance,
+)
+from intric.flows.ai_builder.ai_builder_discovery import (
+    build_registry_question_followup,
+)
+from intric.flows.ai_builder.ai_builder_discovery_followup import (
+    emit_discovery_followup_if_needed,
+    persist_backend_question,
+)
+from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+    build_discovery_block_message_runtime,
+)
+from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
+from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
+from intric.flows.ai_builder.ai_builder_edit_repair import (
+    should_attempt_description_repair,
+    validate_repair_invariance,
+)
+from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_ERROR,
     build_error_event,
@@ -17,39 +45,33 @@ from intric.flows.ai_builder.ai_builder_events import (
     build_text_event,
     error_payload,
 )
-from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
-from intric.flows.ai_builder.ai_builder_create_feedback import (
-    format_create_argument_error,
-    format_create_quality_feedback,
-    format_create_validation_feedback,
-)
-from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
-from intric.flows.ai_builder.ai_builder_discovery import build_registry_question_followup
-from intric.flows.ai_builder.ai_builder_discovery_runtime import (
-    build_discovery_block_message_runtime,
-)
-from intric.flows.ai_builder.ai_builder_discovery_followup import (
-    emit_discovery_followup_if_needed,
-    persist_backend_question,
+from intric.flows.ai_builder.ai_builder_framework_policy import (
+    is_supported_structured_question_id,
+    normalize_structured_question_payload,
 )
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     analyze_discovery_ready,
     build_question_fallback_text,
 )
-from intric.flows.ai_builder.ai_builder_framework_policy import (
-    is_supported_structured_question_id,
-    normalize_structured_question_payload,
-)
 from intric.flows.ai_builder.ai_builder_models import (
     ConversationMessage,
     FlowDraftSpecCore,
     RequirementsSummaryPayload,
+    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
 )
+from intric.flows.ai_builder.ai_builder_plan_store import (
+    format_revision_feedback,
+    format_validation_feedback,
+    store_plan_and_update_conversation,
+    warnings_for_quality_retry,
+)
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     request_self_correction as run_request_self_correction,
+)
+from intric.flows.ai_builder.ai_builder_proposal_repair import (
     retry_forced_tool_after_text as run_retry_forced_tool_after_text,
 )
 from intric.flows.ai_builder.ai_builder_repair_transport import (
@@ -58,23 +80,17 @@ from intric.flows.ai_builder.ai_builder_repair_transport import (
     build_tool_retry_messages,
     persist_tool_turn,
 )
+from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.ai_builder_requirements_state import (
+    build_requirements_version,
+    resolve_requirements_state,
+)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     canonicalize_create_draft_resources,
     canonicalize_edit_draft_resources,
     format_resource_resolution_feedback,
 )
-from intric.flows.ai_builder.ai_builder_plan_store import (
-    format_revision_feedback,
-    format_validation_feedback,
-    store_plan_and_update_conversation,
-    warnings_for_quality_retry,
-)
-from intric.flows.ai_builder.ai_builder_requirements_state import (
-    build_requirements_version,
-    resolve_requirements_state,
-)
-from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
@@ -85,18 +101,7 @@ from intric.flows.ai_builder.ai_builder_tools import (
     parse_create_flow_arguments,
     parse_structured_question,
 )
-from intric.flows.ai_builder.ai_builder_description_semantics import (
-    DescriptionProvenance,
-)
-from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
-from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
-from intric.flows.ai_builder.ai_builder_edit_repair import (
-    should_attempt_description_repair,
-    validate_repair_invariance,
-)
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
-from intric.flows.ai_builder.ai_builder_models import TargetKind
+from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -170,7 +175,7 @@ class AIBuilderProposalProcessor:
         self.forced_proposal_temperature = forced_proposal_temperature
         self.quality_retry_warning_codes = quality_retry_warning_codes
 
-    def _format_quality_feedback(self, validation) -> str | None:
+    def _format_quality_feedback(self, validation: SpecValidationResult) -> str | None:
         quality_warnings = warnings_for_quality_retry(
             validation,
             retry_warning_codes=self.quality_retry_warning_codes,
@@ -186,8 +191,8 @@ class AIBuilderProposalProcessor:
         self,
         *,
         conversation: list[ConversationMessage],
-        spec,
-        flow=None,
+        spec: FlowDraftSpecCore,
+        flow: "Flow | None" = None,
     ) -> str | None:
         return build_conversation_aware_quality_feedback(
             conversation,
@@ -207,7 +212,7 @@ class AIBuilderProposalProcessor:
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
-        flow=None,
+        flow: "Flow | None" = None,
     ) -> ToolProcessingResult:
         try:
             draft = parse_create_flow_arguments(arguments)
@@ -294,11 +299,14 @@ class AIBuilderProposalProcessor:
             spec=spec,
             flow=None,
         )
-        combined_quality_feedback = "\n\n".join(
-            feedback
-            for feedback in (quality_feedback, contextual_quality_feedback)
-            if feedback is not None
-        ) or None
+        combined_quality_feedback = (
+            "\n\n".join(
+                feedback
+                for feedback in (quality_feedback, contextual_quality_feedback)
+                if feedback is not None
+            )
+            or None
+        )
         combined_quality_feedback = format_create_quality_feedback(
             combined_quality_feedback
         )
@@ -371,7 +379,7 @@ class AIBuilderProposalProcessor:
         max_output_tokens: int,
         request_id: str,
         resource_catalog: AIBuilderResourceCatalog | None = None,
-        flow=None,
+        flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         ctx = ProposalContext(
@@ -468,7 +476,10 @@ class AIBuilderProposalProcessor:
         tool_call: Any,
         config: SubmissionToolHandlerConfig,
     ) -> AsyncGenerator[dict[str, str], None]:
-        blocked, prerequisite_events = await self._resolve_submission_prerequisite_events(
+        (
+            blocked,
+            prerequisite_events,
+        ) = await self._resolve_submission_prerequisite_events(
             ctx=ctx,
             requirements_not_confirmed_message=config.requirements_not_confirmed_message,
         )
@@ -523,7 +534,8 @@ class AIBuilderProposalProcessor:
         if submission_result.event is None:
             async for event in self._request_tool_self_correction(
                 ctx=ctx,
-                error_message=submission_result.feedback or config.invalid_result_message,
+                error_message=submission_result.feedback
+                or config.invalid_result_message,
                 tool_call=tool_call,
                 retry_config=ToolRetryConfig(
                     target_tool_name=config.target_tool_name,
@@ -630,7 +642,7 @@ class AIBuilderProposalProcessor:
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
         resource_catalog: AIBuilderResourceCatalog | None = None,
-        flow=None,
+        flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         ctx = ProposalContext(
@@ -718,7 +730,7 @@ class AIBuilderProposalProcessor:
         forced_tool_prompt: str,
         process_tool_arguments: Any,
         process_tool_kwargs: dict[str, Any] | None = None,
-        flow=None,
+        flow: "Flow | None" = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
     ) -> dict[str, str] | None:
         merged_process_kwargs = dict(process_tool_kwargs or {})
@@ -760,7 +772,7 @@ class AIBuilderProposalProcessor:
         available_kb_refs: set[str] | None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         max_output_tokens: int,
-        flow=None,
+        flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     ) -> dict[str, str] | None:
         retry_config = self._submission_retry_config(
@@ -806,7 +818,7 @@ class AIBuilderProposalProcessor:
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
         resource_catalog: AIBuilderResourceCatalog | None = None,
-        flow=None,
+        flow: "Flow | None" = None,
         original_question_id: str | None = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
@@ -814,7 +826,8 @@ class AIBuilderProposalProcessor:
         filtered_tool_schemas = [
             schema
             for schema in tool_schemas
-            if schema.get("function", {}).get("name") != ASK_STRUCTURED_QUESTION_TOOL_NAME
+            if schema.get("function", {}).get("name")
+            != ASK_STRUCTURED_QUESTION_TOOL_NAME
         ]
         discovery_ready = analyze_discovery_ready(conversation, flow=flow)
         if not filtered_tool_schemas:
@@ -1012,11 +1025,11 @@ class AIBuilderProposalProcessor:
         question_data = normalize_structured_question_payload(question_data)
         question_id = question_data["question_id"]
         registry_followup = (
-                build_registry_question_followup(
-                    question_id,
-                    ctx.conversation,
-                    flow=ctx.flow,
-                )
+            build_registry_question_followup(
+                question_id,
+                ctx.conversation,
+                flow=ctx.flow,
+            )
             if is_supported_structured_question_id(question_id)
             else None
         )
@@ -1067,7 +1080,7 @@ class AIBuilderProposalProcessor:
         tool_call_id: str,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
-        flow=None,
+        flow: "Flow | None" = None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
     ) -> ToolProcessingResult:
@@ -1081,7 +1094,10 @@ class AIBuilderProposalProcessor:
                 failure_kind="parse",
             )
 
-        discovery_block_message, discovery_analysis = await build_discovery_block_message_runtime(
+        (
+            discovery_block_message,
+            discovery_analysis,
+        ) = await build_discovery_block_message_runtime(
             conversation,
             flow=flow,
             litellm_client=self.litellm_client,
@@ -1094,10 +1110,14 @@ class AIBuilderProposalProcessor:
                 failure_kind="validation",
             )
 
-        merged_assumptions = list(dict.fromkeys([
-            *discovery_analysis.assumptions,
-            *requirements_data.get("assumptions", []),
-        ]))
+        merged_assumptions = list(
+            dict.fromkeys(
+                [
+                    *discovery_analysis.assumptions,
+                    *requirements_data.get("assumptions", []),
+                ]
+            )
+        )
         requirements_data["assumptions"] = merged_assumptions
 
         requirements_payload_model = RequirementsSummaryPayload.model_validate(
@@ -1142,7 +1162,7 @@ class AIBuilderProposalProcessor:
         tool_call_id: str,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
-        flow,
+        flow: "Flow | None",
         assistant_snapshots: dict[UUID, dict[str, Any]] | None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
@@ -1175,9 +1195,7 @@ class AIBuilderProposalProcessor:
                     failure_kind="validation",
                 )
 
-        valid_step_refs = [
-            f"existing_step_{step.step_order}" for step in flow.steps
-        ]
+        valid_step_refs = [f"existing_step_{step.step_order}" for step in flow.steps]
         edit_validation = validate_edit_draft(draft, valid_step_refs)
         if edit_validation.errors:
             error_messages = [err.message for err in edit_validation.errors]
@@ -1226,8 +1244,7 @@ class AIBuilderProposalProcessor:
             error_messages = [err.message for err in validation.errors]
             return ToolProcessingResult(
                 feedback=(
-                    "Compiled edit spec validation failed: "
-                    + "; ".join(error_messages)
+                    "Compiled edit spec validation failed: " + "; ".join(error_messages)
                 ),
                 failure_kind="validation",
             )
@@ -1249,14 +1266,16 @@ class AIBuilderProposalProcessor:
             )
             if repaired_spec is not None:
                 compiled_spec = repaired_spec
-                edit_result = edit_result.model_copy(update={
-                    "compiled_spec": compiled_spec,
-                    "advisories": [
-                        advisory
-                        for advisory in edit_result.advisories
-                        if advisory.code != "flow_description_update_required"
-                    ],
-                })
+                edit_result = edit_result.model_copy(
+                    update={
+                        "compiled_spec": compiled_spec,
+                        "advisories": [
+                            advisory
+                            for advisory in edit_result.advisories
+                            if advisory.code != "flow_description_update_required"
+                        ],
+                    }
+                )
 
         quality_feedback = self._format_quality_feedback(validation)
         contextual_quality_feedback = self._format_contextual_quality_feedback(
@@ -1348,7 +1367,8 @@ class AIBuilderProposalProcessor:
 
             async for event in self._request_tool_self_correction(
                 ctx=ctx,
-                error_message=confirm_result.feedback or "Invalid requirements summary.",
+                error_message=confirm_result.feedback
+                or "Invalid requirements summary.",
                 tool_call=tool_call,
                 retry_config=self._confirm_requirements_retry_config(ctx),
             ):
@@ -1444,9 +1464,13 @@ class AIBuilderProposalProcessor:
             if not new_description:
                 return None
 
-            repaired = compiled_spec.model_copy(update={"flow_description": new_description})
+            repaired = compiled_spec.model_copy(
+                update={"flow_description": new_description}
+            )
             if not validate_repair_invariance(compiled_spec, repaired):
-                logger.warning("Description repair changed non-description fields, rejecting")
+                logger.warning(
+                    "Description repair changed non-description fields, rejecting"
+                )
                 return None
 
             return repaired
@@ -1463,7 +1487,7 @@ class AIBuilderProposalProcessor:
         litellm_model: str | None = None,
         litellm_kwargs: dict[str, Any] | None = None,
         ui_language: str | None = None,
-        flow=None,
+        flow: "Flow | None" = None,
     ) -> list[dict[str, str]]:
         return await emit_discovery_followup_if_needed(
             repo=self.repo,
@@ -1481,7 +1505,7 @@ class AIBuilderProposalProcessor:
     def _submission_retry_config(
         self,
         *,
-        flow,
+        flow: "Flow | None",
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
         max_output_tokens: int,
@@ -1517,7 +1541,9 @@ class AIBuilderProposalProcessor:
             },
         )
 
-    def _confirm_requirements_retry_config(self, ctx: ProposalContext) -> ToolRetryConfig:
+    def _confirm_requirements_retry_config(
+        self, ctx: ProposalContext
+    ) -> ToolRetryConfig:
         return ToolRetryConfig(
             target_tool_name=CONFIRM_REQUIREMENTS_TOOL_NAME,
             forced_tool_prompt=(
@@ -1558,7 +1584,7 @@ def _extract_description_provenance(
     ai_builder = metadata_json.get("ai_builder")
     if not isinstance(ai_builder, dict):
         return None
-    desc_raw = ai_builder.get("description")
+    desc_raw = cast(dict[str, Any], ai_builder).get("description")
     if not isinstance(desc_raw, dict):
         return None
     try:
@@ -1567,5 +1593,5 @@ def _extract_description_provenance(
         return None
 
 
-def _active_submission_tool_name(flow: Any) -> str:
+def _active_submission_tool_name(flow: "Flow | None") -> str:
     return EDIT_FLOW_TOOL_NAME if flow is not None else CREATE_FLOW_TOOL_NAME

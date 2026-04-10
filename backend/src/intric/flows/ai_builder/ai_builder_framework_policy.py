@@ -1,24 +1,27 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-import json
-from typing import Any
+from typing import Any, cast
 
-from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
-    contains_any_phrase,
+from intric.flows.ai_builder.ai_builder_canonicalization import (
+    canonical_option_id,
+    canonical_question_id,
+    is_supported_structured_question_id,
+    normalize_question_answer,
+    normalize_structured_question_payload,
+    supported_structured_question_ids,
+)
+from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
+    build_flow_discovery_defaults,
 )
 from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_answer_signals_from_text,
     normalize_signal_text,
 )
-from intric.flows.ai_builder.ai_builder_canonicalization import (
-    canonical_question_id,
-    canonical_option_id,
-    is_supported_structured_question_id,
-    normalize_question_answer,
-    normalize_structured_question_payload,
-    supported_structured_question_ids,
+from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
+    contains_any_phrase,
 )
 from intric.flows.ai_builder.ai_builder_keywords import (
     DOCX_CONTEXT_MARKERS,
@@ -33,9 +36,7 @@ from intric.flows.ai_builder.ai_builder_keywords import (
     STRUCTURED_EXTRACTION_KEYWORDS,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage, OutputType
-from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
-    build_flow_discovery_defaults,
-)
+from intric.flows.domain.flow import Flow, JsonObject
 
 __all__ = [
     "aggregate_freeform_user_text",
@@ -81,7 +82,11 @@ def latest_pending_structured_question(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
 ) -> dict[str, Any] | None:
     for message in reversed(conversation):
-        role = message.role if isinstance(message, ConversationMessage) else message.get("role")
+        role = (
+            message.role
+            if isinstance(message, ConversationMessage)
+            else message.get("role")
+        )
         tool_calls = (
             message.tool_calls
             if isinstance(message, ConversationMessage)
@@ -89,12 +94,13 @@ def latest_pending_structured_question(
         )
         if role != "assistant" or not isinstance(tool_calls, Sequence):
             continue
-        for tool_call in reversed(tool_calls):
+        for tool_call in reversed(cast(Sequence[object], tool_calls)):
             if not isinstance(tool_call, Mapping):
                 continue
-            if tool_call.get("name") != "ask_structured_question":
+            tool_call_map = cast(Mapping[str, Any], tool_call)
+            if tool_call_map.get("name") != "ask_structured_question":
                 continue
-            arguments = tool_call.get("arguments")
+            arguments = tool_call_map.get("arguments")
             payload = arguments
             if isinstance(arguments, str):
                 try:
@@ -103,7 +109,9 @@ def latest_pending_structured_question(
                     payload = None
             if not isinstance(payload, Mapping):
                 continue
-            normalized = normalize_structured_question_payload(payload)
+            normalized = normalize_structured_question_payload(
+                cast(Mapping[str, Any], payload)
+            )
             question_id = normalized.get("question_id")
             if isinstance(question_id, str) and question_id:
                 return normalized
@@ -116,7 +124,11 @@ def has_explicit_structured_answer(
 ) -> bool:
     canonical_id = canonical_question_id(question_id)
     for message in conversation:
-        role = message.role if isinstance(message, ConversationMessage) else message.get("role")
+        role = (
+            message.role
+            if isinstance(message, ConversationMessage)
+            else message.get("role")
+        )
         metadata = (
             message.metadata
             if isinstance(message, ConversationMessage)
@@ -124,12 +136,16 @@ def has_explicit_structured_answer(
         )
         if role != "user" or not isinstance(metadata, Mapping):
             continue
-        answer = metadata.get("question_answer")
+        metadata_map = cast(Mapping[str, Any], metadata)
+        answer = metadata_map.get("question_answer")
         if not isinstance(answer, Mapping):
             continue
-        normalized = normalize_question_answer(answer)
+        normalized = normalize_question_answer(cast(Mapping[str, Any], answer))
         answer_question_id = normalized.get("question_id")
-        if isinstance(answer_question_id, str) and canonical_question_id(answer_question_id) == canonical_id:
+        if (
+            isinstance(answer_question_id, str)
+            and canonical_question_id(answer_question_id) == canonical_id
+        ):
             return True
     return False
 
@@ -166,12 +182,13 @@ def infer_question_answer_from_freeform(
     best_option: dict[str, Any] | None = None
     best_score = 0.0
     tie = False
-    for option in options:
+    for option in cast(list[object], options):
         if not isinstance(option, Mapping):
             continue
-        score = _score_option_match(normalized_message, option)
+        option_map = cast(Mapping[str, Any], option)
+        score = _score_option_match(normalized_message, option_map)
         if score > best_score:
-            best_option = dict(option)
+            best_option = dict(option_map)
             best_score = score
             tie = False
         elif score > 0 and abs(score - best_score) < 1e-6:
@@ -213,7 +230,11 @@ def extract_freeform_user_messages(
 ) -> list[tuple[int, str]]:
     messages: list[tuple[int, str]] = []
     for index, message in enumerate(conversation):
-        role = message.role if isinstance(message, ConversationMessage) else message.get("role")
+        role = (
+            message.role
+            if isinstance(message, ConversationMessage)
+            else message.get("role")
+        )
         content = (
             message.content
             if isinstance(message, ConversationMessage)
@@ -227,10 +248,13 @@ def extract_freeform_user_messages(
         if role != "user" or not isinstance(content, str):
             continue
         if isinstance(metadata, Mapping):
-            question_answer = metadata.get("question_answer")
-            if isinstance(question_answer, Mapping) and _looks_like_structured_answer_echo(
+            metadata_map = cast(Mapping[str, Any], metadata)
+            question_answer = metadata_map.get("question_answer")
+            if isinstance(
+                question_answer, Mapping
+            ) and _looks_like_structured_answer_echo(
                 content,
-                question_answer,
+                cast(Mapping[str, Any], question_answer),
             ):
                 continue
         messages.append((index, content.casefold()))
@@ -244,7 +268,11 @@ def _aggregate_user_text(
 ) -> str:
     parts: list[str] = []
     for message in conversation:
-        role = message.role if isinstance(message, ConversationMessage) else message.get("role")
+        role = (
+            message.role
+            if isinstance(message, ConversationMessage)
+            else message.get("role")
+        )
         content = (
             message.content
             if isinstance(message, ConversationMessage)
@@ -258,10 +286,13 @@ def _aggregate_user_text(
         if role != "user" or not isinstance(content, str):
             continue
         if not include_structured_answers and isinstance(metadata, Mapping):
-            question_answer = metadata.get("question_answer")
-            if isinstance(question_answer, Mapping) and _looks_like_structured_answer_echo(
+            metadata_map = cast(Mapping[str, Any], metadata)
+            question_answer = metadata_map.get("question_answer")
+            if isinstance(
+                question_answer, Mapping
+            ) and _looks_like_structured_answer_echo(
                 content,
-                question_answer,
+                cast(Mapping[str, Any], question_answer),
             ):
                 continue
         parts.append(content.casefold())
@@ -293,7 +324,7 @@ def _looks_like_structured_answer_echo(
         raw_values = question_answer.get(key)
         if not isinstance(raw_values, Sequence):
             continue
-        for raw_value in raw_values:
+        for raw_value in cast(Sequence[object], raw_values):
             if isinstance(raw_value, str) and raw_value:
                 candidates.add(raw_value.casefold())
 
@@ -324,7 +355,10 @@ def _has_real_structured_answer_payload(question_answer: Mapping[str, Any]) -> b
         raw_values = question_answer.get(key)
         if not isinstance(raw_values, Sequence):
             continue
-        if any(isinstance(raw_value, str) and raw_value for raw_value in raw_values):
+        if any(
+            isinstance(raw_value, str) and raw_value
+            for raw_value in cast(Sequence[object], raw_values)
+        ):
             return True
 
     return False
@@ -347,7 +381,10 @@ def _score_option_match(message: str, option: Mapping[str, Any]) -> float:
 
     if any(message == candidate for candidate in normalized_candidates):
         return 1.0
-    if any(candidate in message or message in candidate for candidate in normalized_candidates):
+    if any(
+        candidate in message or message in candidate
+        for candidate in normalized_candidates
+    ):
         return 0.8
 
     message_tokens = set(message.split())
@@ -375,7 +412,11 @@ def extract_answer_signals(
     """
     signals: dict[str, set[str]] = {}
     for message in conversation:
-        role = message.role if isinstance(message, ConversationMessage) else message.get("role")
+        role = (
+            message.role
+            if isinstance(message, ConversationMessage)
+            else message.get("role")
+        )
         metadata = (
             message.metadata
             if isinstance(message, ConversationMessage)
@@ -389,7 +430,11 @@ def extract_answer_signals(
         if role != "user":
             continue
 
-        answer = metadata.get("question_answer") if isinstance(metadata, dict) else None
+        answer = (
+            cast(JsonObject, metadata).get("question_answer")
+            if isinstance(metadata, dict)
+            else None
+        )
 
         if (
             isinstance(content, str)
@@ -407,16 +452,19 @@ def extract_answer_signals(
 
         if not isinstance(answer, dict):
             continue
-        answer = normalize_question_answer(answer)
+        answer = normalize_question_answer(cast(Mapping[str, Any], answer))
         question_id = answer.get("question_id")
         if not isinstance(question_id, str) or not question_id:
             continue
 
         values: set[str] = set()
-        for raw_values in (answer.get("selected_option_ids"), answer.get("selected_values")):
+        for raw_values in (
+            answer.get("selected_option_ids"),
+            answer.get("selected_values"),
+        ):
             if not isinstance(raw_values, list):
                 continue
-            for value in raw_values:
+            for value in cast(list[object], raw_values):
                 if isinstance(value, str) and value:
                     values.add(value.casefold())
                 elif value is not None:
@@ -441,7 +489,7 @@ def question_is_already_resolved(
     question_id: str,
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
     *,
-    flow=None,
+    flow: Flow | None = None,
 ) -> bool:
     canonical_id = canonical_question_id(question_id)
     answer_signals = extract_answer_signals(conversation)
@@ -462,9 +510,9 @@ def question_is_already_resolved(
         values = answer_signals.get("docx_output_mode", set())
         if values:
             return True
-        return bool(flow_defaults.get("docx_output_mode")) and not mentions_output_change(
-            freeform_text
-        )
+        return bool(
+            flow_defaults.get("docx_output_mode")
+        ) and not mentions_output_change(freeform_text)
 
     values = answer_signals.get(canonical_id, set())
     if values:
@@ -473,6 +521,8 @@ def question_is_already_resolved(
     return bool(flow_defaults.get(canonical_id)) and not mentions_output_change(
         freeform_text
     )
+
+
 def resolve_explicit_output_choice(
     text: str,
     answer_signals: dict[str, set[str]],
@@ -494,8 +544,10 @@ def resolve_explicit_output_choice(
     if direct_output is not None:
         return direct_output
 
-    if flow_defaults and "final_output_mode" in flow_defaults and not mentions_output_change(
-        normalized_text
+    if (
+        flow_defaults
+        and "final_output_mode" in flow_defaults
+        and not mentions_output_change(normalized_text)
     ):
         defaults = flow_defaults["final_output_mode"]
         return next(iter(defaults)) if defaults else None
@@ -531,7 +583,9 @@ def _resolve_direct_output_choice(
     pdf_generation_values = answer_signals.get("pdf_generation_mode", set())
     if (
         "pdf_document" in output_values
-        or pdf_generation_values.intersection({"generated_pdf", "pdf_template_requested"})
+        or pdf_generation_values.intersection(
+            {"generated_pdf", "pdf_template_requested"}
+        )
         or contains_any_phrase(text, PDF_OUTPUT_CONTEXT_MARKERS)
     ):
         return "pdf_document"
@@ -549,7 +603,9 @@ def _resolve_direct_output_choice(
         ),
     ):
         return "structured_text"
-    if "docx_document" in output_values or contains_any_phrase(text, DOCX_CONTEXT_MARKERS):
+    if "docx_document" in output_values or contains_any_phrase(
+        text, DOCX_CONTEXT_MARKERS
+    ):
         return "docx_document"
     if "structured_json" in output_values:
         return "structured_json"
@@ -740,7 +796,9 @@ def mentions_runtime_metadata(text: str) -> bool:
 
 def runtime_metadata_requested(answer_signals: dict[str, set[str]]) -> bool:
     values = answer_signals.get("runtime_metadata_fields", set())
-    return any(value in {"basic_case_metadata", "detailed_case_metadata"} for value in values)
+    return any(
+        value in {"basic_case_metadata", "detailed_case_metadata"} for value in values
+    )
 
 
 def needs_structured_extraction(

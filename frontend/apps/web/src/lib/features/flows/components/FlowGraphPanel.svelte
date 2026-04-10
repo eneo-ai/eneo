@@ -44,28 +44,22 @@
       class="hover:bg-hover-dimmer flex w-full items-center justify-between px-4 py-2 text-sm font-medium"
     >
       <span>{m.flow_graph_preview()}</span>
-      <span
-        class="transition-transform"
-        class:rotate-180={isOpen}
-      >
+      <span class="transition-transform" class:rotate-180={isOpen}>
         <IconChevronDown class="size-4" />
       </span>
     </Collapsible.Trigger>
 
     <Collapsible.Content>
-      <div
-        id="flow-graph-panel"
-        class="border-default h-[200px] border-t lg:h-[320px]"
-      >
+      <div id="flow-graph-panel" class="border-default h-[200px] border-t lg:h-[320px]">
         {#if loadState === "ready" && FlowGraphComponent && hasSteps}
           <svelte:component
             this={FlowGraphComponent}
             {flow}
             {activeStepId}
-            onnodeclick={(id) => dispatch("nodeClick", id)}
+            onnodeclick={(id: string) => dispatch("nodeClick", id)}
           />
         {:else if loadState === "error"}
-          <div class="flex h-full flex-col items-center justify-center gap-3 text-secondary">
+          <div class="text-secondary flex h-full flex-col items-center justify-center gap-3">
             <p class="text-sm">{m.flow_graph_error()}</p>
             <button
               class="bg-hover-dimmer hover:bg-hover-default flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
@@ -76,11 +70,11 @@
             </button>
           </div>
         {:else if loadState === "ready" && !hasSteps}
-          <div class="flex h-full items-center justify-center text-secondary">
+          <div class="text-secondary flex h-full items-center justify-center">
             <p class="text-sm">{m.flow_graph_empty()}</p>
           </div>
         {:else}
-          <div class="flex h-full items-center justify-center gap-2 text-secondary">
+          <div class="text-secondary flex h-full items-center justify-center gap-2">
             <IconLoadingSpinner class="size-4 animate-spin" />
             <p class="text-sm">{m.flow_graph_loading()}</p>
           </div>

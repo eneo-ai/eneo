@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, cast
 
 
 def build_step_ref_mapping(steps: Iterable[Any]) -> dict[str, int]:
@@ -31,12 +31,15 @@ def resolve_upstream_step_orders(
         orders.extend(range(1, step_order))
     for reference in references:
         referenced_order = getattr(reference, "step_order", None)
-        if isinstance(referenced_order, int) and 1 <= referenced_order <= max_prior_step_order:
+        if (
+            isinstance(referenced_order, int)
+            and 1 <= referenced_order <= max_prior_step_order
+        ):
             orders.append(referenced_order)
     return list(dict.fromkeys(sorted(orders)))
 
 
 def _read_step_value(step: Any, key: str) -> Any:
     if isinstance(step, dict):
-        return step.get(key)
+        return cast(dict[str, Any], step).get(key)
     return getattr(step, key, None)

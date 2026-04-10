@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
@@ -52,13 +52,13 @@ def _parse_optional_file_count(value: Any, field_name: str, max_bound: int) -> i
     if not isinstance(value, int) or isinstance(value, bool):
         raise BadRequestException(f"{field_name} must be an integer.")
     if value < 1 or value > max_bound:
-        raise BadRequestException(
-            f"{field_name} must be between 1 and {max_bound}."
-        )
+        raise BadRequestException(f"{field_name} must be between 1 and {max_bound}.")
     return value
 
 
-def _extract_input_limits(tenant_flow_settings: dict[str, Any] | None) -> dict[str, Any]:
+def _extract_input_limits(
+    tenant_flow_settings: dict[str, Any] | None,
+) -> dict[str, Any]:
     if not isinstance(tenant_flow_settings, dict):
         return {}
 
@@ -66,7 +66,7 @@ def _extract_input_limits(tenant_flow_settings: dict[str, Any] | None) -> dict[s
     if not isinstance(input_limits, dict):
         return {}
 
-    return input_limits
+    return dict(cast(dict[str, Any], input_limits))
 
 
 def resolve_flow_input_limits(
@@ -112,7 +112,9 @@ def resolve_flow_input_limits(
             max_files = None  # explicit null means unlimited
         else:
             try:
-                max_files = _parse_optional_file_count(raw, "max_files_per_run", _MAX_FILES_COUNT)
+                max_files = _parse_optional_file_count(
+                    raw, "max_files_per_run", _MAX_FILES_COUNT
+                )
             except BadRequestException:
                 logger.warning(
                     "Ignoring invalid tenant flow setting: max_files_per_run",
@@ -157,9 +159,7 @@ def apply_flow_input_limits_patch(
     (reverting to the env-var default on next resolve).
     """
     result = (
-        dict(current_flow_settings)
-        if isinstance(current_flow_settings, dict)
-        else {}
+        dict(current_flow_settings) if isinstance(current_flow_settings, dict) else {}
     )
     existing_input_limits = _extract_input_limits(result)
 
@@ -195,7 +195,9 @@ def effective_flow_input_limit(*, input_type: str, limits: FlowInputLimits) -> i
     return limits.file_max_size_bytes
 
 
-def effective_max_files_per_run(*, input_type: str, limits: FlowInputLimits) -> int | None:
+def effective_max_files_per_run(
+    *, input_type: str, limits: FlowInputLimits
+) -> int | None:
     if input_type == "audio":
         return limits.audio_max_files_per_run
     return limits.max_files_per_run

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import cast
 
-from intric.flows.domain.flow import Flow
 from intric.flows.ai_builder.ai_builder_discovery_families import (
     DiscoveryFamily,
 )
@@ -11,6 +11,7 @@ from intric.flows.ai_builder.ai_builder_step_capabilities import (
     is_citation_capable_step,
     resolve_document_generation_mode,
 )
+from intric.flows.domain.flow import Flow, FlowStep, JsonObject
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +39,9 @@ class FlowCapabilityProfile:
     contract_step_orders: tuple[int, ...] = ()
     variable_binding_step_orders: tuple[int, ...] = ()
     all_previous_steps_orders: tuple[int, ...] = ()
-    settled_families: frozenset[DiscoveryFamily] = field(default_factory=frozenset)
+    settled_families: frozenset[DiscoveryFamily] = field(
+        default_factory=lambda: frozenset()
+    )
 
     def to_signal_defaults(self) -> dict[str, set[str]]:
         defaults: dict[str, set[str]] = defaultdict(set)
@@ -70,9 +73,7 @@ class FlowCapabilityProfile:
             defaults["runtime_metadata_fields"].add(self.runtime_metadata_state)
 
         return {
-            question_id: values
-            for question_id, values in defaults.items()
-            if values
+            question_id: values for question_id, values in defaults.items() if values
         }
 
 
@@ -101,12 +102,14 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
         if _enum_value(step.input_source) == "flow_input"
     )
 
-    runtime_input_mode, runtime_input_settled = _derive_runtime_input_mode(flow_input_steps)
+    runtime_input_mode, runtime_input_settled = _derive_runtime_input_mode(
+        flow_input_steps
+    )
     document_material_scope, upload_pattern = _derive_document_scope(flow_input_steps)
     final_output_mode = _map_output_type(_enum_value(last_step.output_type))
     final_output_generation_mode = resolve_document_generation_mode(
-        output_type=_enum_value(last_step.output_type) if last_step.output_type is not None else None,
-        output_mode=_enum_value(last_step.output_mode) if last_step.output_mode is not None else None,
+        output_type=_enum_value(last_step.output_type),
+        output_mode=_enum_value(last_step.output_mode),
     )
     runtime_metadata_state = _derive_runtime_metadata_state(flow)
     citation_step_orders = tuple(
@@ -121,15 +124,16 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
     contract_step_orders = tuple(
         step.step_order
         for step in steps
-        if isinstance(step.input_contract, dict) or isinstance(step.output_contract, dict)
+        if isinstance(step.input_contract, dict)
+        or isinstance(step.output_contract, dict)
     )
     variable_binding_step_orders = tuple(
-        step.step_order
-        for step in steps
-        if _has_variable_bindings(step)
+        step.step_order for step in steps if _has_variable_bindings(step)
     )
     all_previous_steps_orders = tuple(
-        step.step_order for step in steps if _enum_value(step.input_source) == "all_previous_steps"
+        step.step_order
+        for step in steps
+        if _enum_value(step.input_source) == "all_previous_steps"
     )
 
     settled_families: set[DiscoveryFamily] = set()
@@ -146,7 +150,7 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
         runtime_input_settled=runtime_input_settled,
         document_material_scope=document_material_scope,
         upload_pattern=upload_pattern,
-        final_output_type=_enum_value(last_step.output_type) if last_step.output_type is not None else None,
+        final_output_type=_enum_value(last_step.output_type),
         final_output_mode=final_output_mode,
         final_output_generation_mode=final_output_generation_mode,
         runtime_metadata_state=runtime_metadata_state,
@@ -158,13 +162,13 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
     )
 
 
-def _runtime_input_max_files(input_config: dict | None) -> int | None:
+def _runtime_input_max_files(input_config: JsonObject | None) -> int | None:
     if not isinstance(input_config, dict):
         return None
     runtime_input = input_config.get("runtime_input")
     if not isinstance(runtime_input, dict):
         return None
-    max_files = runtime_input.get("max_files")
+    max_files = cast(JsonObject, runtime_input).get("max_files")
     return max_files if isinstance(max_files, int) else None
 
 
@@ -187,8 +191,7 @@ def _derive_runtime_input_mode(
         return None, False
 
     modes = {
-        _map_runtime_input_type(signature.input_type)
-        for signature in flow_input_steps
+        _map_runtime_input_type(signature.input_type) for signature in flow_input_steps
     }
     modes.discard(None)
     if not modes:
@@ -204,7 +207,9 @@ def _derive_document_scope(
     flow_input_steps: tuple[FlowInputStepSignature, ...],
 ) -> tuple[str | None, str | None]:
     document_steps = tuple(
-        signature for signature in flow_input_steps if _map_runtime_input_type(signature.input_type) == "documents"
+        signature
+        for signature in flow_input_steps
+        if _map_runtime_input_type(signature.input_type) == "documents"
     )
     if len(document_steps) != 1:
         return None, None
@@ -234,13 +239,15 @@ def _map_runtime_input_type(input_type: str | None) -> str | None:
     return None
 
 
-def _has_variable_bindings(step) -> bool:
+def _has_variable_bindings(step: FlowStep) -> bool:
     if isinstance(step.input_bindings, dict) and bool(step.input_bindings):
         return True
     if not isinstance(step.output_config, dict):
         return False
-    bindings = step.output_config.get("bindings")
-    return isinstance(bindings, dict) and bool(bindings)
+    bindings = (
+        step.output_config["bindings"] if "bindings" in step.output_config else None
+    )
+    return isinstance(bindings, dict) and bool(cast(JsonObject, bindings))
 
 
 def _enum_value(value: object) -> str:
@@ -255,5 +262,6 @@ def _has_form_fields(flow: Flow) -> bool:
     form_schema = metadata_json.get("form_schema")
     if not isinstance(form_schema, dict):
         return False
-    fields = form_schema.get("fields")
-    return isinstance(fields, list) and len(fields) > 0
+    form_schema_dict = cast(JsonObject, form_schema)
+    fields = form_schema_dict.get("fields")
+    return isinstance(fields, list) and len(cast(list[object], fields)) > 0

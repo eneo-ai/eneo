@@ -34,15 +34,12 @@
     step.input_config?.auth
       ? (step.input_config as unknown as HttpAuthoredConfig)
       : null;
-  $: httpMethod = (
-    step.input_source === "http_get" ? "GET" : "POST"
-  ) as HttpMethod;
-  $: httpSummary =
-    httpOutputConfig
-      ? getHttpSummaryText(httpOutputConfig, "POST")
-      : httpInputConfig
-        ? getHttpSummaryText(httpInputConfig, httpMethod)
-        : "";
+  $: httpMethod = (step.input_source === "http_get" ? "GET" : "POST") as HttpMethod;
+  $: httpSummary = httpOutputConfig
+    ? getHttpSummaryText(httpOutputConfig, "POST")
+    : httpInputConfig
+      ? getHttpSummaryText(httpInputConfig, httpMethod)
+      : "";
 
   $: summaryKey = `${getSummarySourceText(step, summaryModel, previousStep)}|${getInputTypeLabel(step.input_type)}|${getOutputTypeLabel(step.output_type)}|${getSummaryNextChannelText(step, summaryModel)}`;
 
@@ -54,19 +51,17 @@
     if (prevSummaryKey) {
       gridPulse = true;
       if (pulseTimer) clearTimeout(pulseTimer);
-      pulseTimer = setTimeout(() => { gridPulse = false; }, 700);
+      pulseTimer = setTimeout(() => {
+        gridPulse = false;
+      }, 700);
     }
     prevSummaryKey = summaryKey;
   }
 </script>
 
-<Card.Root
-  class="border-accent-default/18 bg-primary/75 mb-4 rounded-2xl px-4 py-4 sm:px-5"
->
+<Card.Root class="border-accent-default/18 bg-primary/75 mb-4 rounded-2xl px-4 py-4 sm:px-5">
   <div class="flex flex-wrap items-center gap-2">
-    <span class="text-base font-semibold tracking-tight"
-      >{m.flow_step_summary_title()}</span
-    >
+    <span class="text-base font-semibold tracking-tight">{m.flow_step_summary_title()}</span>
     {#if summaryModel?.usesInputTemplate}
       <Badge class="bg-accent-dimmer text-accent-stronger">
         {m.flow_step_summary_badge_input_template()}
@@ -90,24 +85,26 @@
   </div>
 
   <Card.Content
-    class="border-default/70 bg-secondary/15 mt-4 grid overflow-hidden rounded-2xl border p-0 sm:grid-cols-2 xl:grid-cols-4 {gridPulse ? 'summary-grid-pulse' : ''}"
+    class="border-default/70 bg-secondary/15 mt-4 grid overflow-hidden rounded-2xl border p-0 sm:grid-cols-2 xl:grid-cols-4 {gridPulse
+      ? 'summary-grid-pulse'
+      : ''}"
   >
     <div class="border-default/70 min-w-0 border-b px-4 py-3 sm:border-r xl:border-b-0">
-      <p class="text-muted text-[10px] font-semibold tracking-[0.07em] uppercase">
+      <p class="text-muted text-xs font-semibold tracking-[0.07em] uppercase">
         {m.flow_step_summary_source_label()}
       </p>
-      <p class="text-primary mt-1 text-sm">{getSummarySourceText(step, summaryModel, previousStep)}</p>
+      <p class="text-primary mt-1 text-sm">
+        {getSummarySourceText(step, summaryModel, previousStep)}
+      </p>
     </div>
     <div class="border-default/70 min-w-0 border-b px-4 py-3 xl:border-r xl:border-b-0">
-      <p class="text-muted text-[10px] font-semibold tracking-[0.07em] uppercase">
+      <p class="text-muted text-xs font-semibold tracking-[0.07em] uppercase">
         {m.flow_step_summary_input_format_label()}
       </p>
       <p class="text-primary mt-1 text-sm">{getInputTypeLabel(step.input_type)}</p>
     </div>
-    <div
-      class="border-default/70 min-w-0 border-b px-4 py-3 sm:border-r sm:border-b-0 xl:border-r"
-    >
-      <p class="text-muted text-[10px] font-semibold tracking-[0.07em] uppercase">
+    <div class="border-default/70 min-w-0 border-b px-4 py-3 sm:border-r sm:border-b-0 xl:border-r">
+      <p class="text-muted text-xs font-semibold tracking-[0.07em] uppercase">
         {m.flow_step_summary_output_format_label()}
       </p>
       <p class="text-primary mt-1 text-sm">
@@ -115,7 +112,7 @@
       </p>
     </div>
     <div class="min-w-0 px-4 py-3">
-      <p class="text-muted text-[10px] font-semibold tracking-[0.07em] uppercase">
+      <p class="text-muted text-xs font-semibold tracking-[0.07em] uppercase">
         {m.flow_step_summary_next_channel_label()}
       </p>
       <p class="text-primary mt-1 text-sm">{getSummaryNextChannelText(step, summaryModel)}</p>
@@ -134,7 +131,8 @@
   }
 
   @keyframes summary-pulse {
-    0%, 12% {
+    0%,
+    12% {
       border-color: var(--accent-default);
       box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-default) 20%, transparent);
     }

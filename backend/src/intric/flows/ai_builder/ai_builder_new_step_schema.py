@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
-from intric.flows.ai_builder.ai_builder_new_step_models import MAX_STRUCTURED_FIELD_DEPTH
 from intric.flows.ai_builder.ai_builder_models import InputSource, InputType, OutputType
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    MAX_STRUCTURED_FIELD_DEPTH,
+)
 
 
 def small_ref_enums(values: list[dict[str, Any]] | None) -> list[str] | None:
@@ -100,7 +102,8 @@ def build_new_step_draft_schema(
         "description": "Optional canonical model ref to use for this step.",
     }
     if model_refs is not None:
-        properties["model_ref"]["enum"] = model_refs + [None]
+        model_ref_property = cast(dict[str, Any], properties["model_ref"])
+        model_ref_property["enum"] = [*model_refs, None]
 
     properties["knowledge_refs"] = {
         "type": "array",
@@ -109,7 +112,9 @@ def build_new_step_draft_schema(
         "description": "Optional canonical knowledge base refs for this step.",
     }
     if kb_refs is not None:
-        properties["knowledge_refs"]["items"]["enum"] = kb_refs
+        knowledge_ref_property = cast(dict[str, Any], properties["knowledge_refs"])
+        knowledge_ref_items = cast(dict[str, Any], knowledge_ref_property["items"])
+        knowledge_ref_items["enum"] = kb_refs
 
     return {
         "type": "object",

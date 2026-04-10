@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
-from typing import Any
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,7 +19,6 @@ from intric.flows.enums import (
     FlowTemplateAssetStatus,
 )
 from intric.main.models import NOT_PROVIDED, NotProvided, partial_model
-
 
 FLOW_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000101",
@@ -94,12 +92,21 @@ FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "step_order": 1,
     "assistant_id": "00000000-0000-0000-0000-000000000201",
     "status": "completed",
-    "input_payload_json": {"diagnostics": [{"code": "runtime_input_consumed", "message": "Uploaded audio file was used."}]},
+    "input_payload_json": {
+        "diagnostics": [
+            {
+                "code": "runtime_input_consumed",
+                "message": "Uploaded audio file was used.",
+            }
+        ]
+    },
     "output_payload_json": {"text": "Hello and welcome to the annual review..."},
     "num_tokens_input": 0,
     "num_tokens_output": 0,
     "error_message": None,
-    "diagnostics": [{"code": "runtime_input_consumed", "message": "Uploaded audio file was used."}],
+    "diagnostics": [
+        {"code": "runtime_input_consumed", "message": "Uploaded audio file was used."}
+    ],
     "created_at": "2026-03-17T10:05:05Z",
     "updated_at": "2026-03-17T10:05:30Z",
 }
@@ -138,7 +145,12 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "published_flow_version": 3,
     "form_fields": [
-        {"name": "employee_name", "type": "text", "label": "Employee name", "required": True}
+        {
+            "name": "employee_name",
+            "type": "text",
+            "label": "Employee name",
+            "required": True,
+        }
     ],
     "steps_requiring_input": [
         {
@@ -281,7 +293,9 @@ class FlowUpdateRequest(BaseModel):
 
 
 class FlowStepPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True, json_schema_extra={"example": FLOW_STEP_PUBLIC_EXAMPLE})
+    model_config = ConfigDict(
+        from_attributes=True, json_schema_extra={"example": FLOW_STEP_PUBLIC_EXAMPLE}
+    )
 
     id: UUID | None = None
     assistant_id: UUID
@@ -332,7 +346,7 @@ class FlowPublic(FlowSparsePublic):
 
 
 class StepRunInput(BaseModel):
-    file_ids: list[UUID] = Field(default_factory=list)
+    file_ids: list[UUID] = Field(default_factory=lambda: cast(list[UUID], []))
 
 
 class FlowRunCreateRequest(BaseModel):
@@ -367,7 +381,9 @@ class FlowAssistantCreateRequest(BaseModel):
 
 
 class FlowRunPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True, json_schema_extra={"example": FLOW_RUN_PUBLIC_EXAMPLE})
+    model_config = ConfigDict(
+        from_attributes=True, json_schema_extra={"example": FLOW_RUN_PUBLIC_EXAMPLE}
+    )
 
     id: UUID
     flow_id: UUID
@@ -437,13 +453,17 @@ class FlowRunStepPublic(BaseModel):
     error_message: str | None = None
     flow_step_execution_hash: str | None = None
     tool_calls_metadata: list[dict[str, Any]] | dict[str, Any] | None = None
-    diagnostics: list[dict[str, Any]] = Field(default_factory=list)
+    diagnostics: list[dict[str, Any]] = Field(
+        default_factory=lambda: cast(list[dict[str, Any]], [])
+    )
     created_at: datetime
     updated_at: datetime
 
 
 class FlowRunRedispatchResponse(BaseModel):
-    model_config = ConfigDict(json_schema_extra={"example": FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE})
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE}
+    )
 
     run: FlowRunPublic
     redispatched_count: int
@@ -507,7 +527,9 @@ class FlowTemplatePlaceholderPublic(BaseModel):
 
 
 class FlowTemplateInspectionPublic(BaseModel):
-    model_config = ConfigDict(json_schema_extra={"example": FLOW_TEMPLATE_INSPECTION_PUBLIC_EXAMPLE})
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_TEMPLATE_INSPECTION_PUBLIC_EXAMPLE}
+    )
 
     asset_id: UUID | None = None
     file_id: UUID
@@ -577,14 +599,22 @@ class FormFieldPublic(BaseModel):
 
 
 class FlowRunContractPublic(BaseModel):
-    model_config = ConfigDict(json_schema_extra={"example": FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE})
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE}
+    )
 
     flow_id: UUID
     published_flow_version: int
-    form_fields: list[FormFieldPublic] = Field(default_factory=list)
-    steps_requiring_input: list[FlowRuntimeInputContractPublic] = Field(default_factory=list)
+    form_fields: list[FormFieldPublic] = Field(
+        default_factory=lambda: cast(list[FormFieldPublic], [])
+    )
+    steps_requiring_input: list[FlowRuntimeInputContractPublic] = Field(
+        default_factory=lambda: cast(list[FlowRuntimeInputContractPublic], [])
+    )
     aggregate_max_files: int | None = None
-    template_readiness: list[FlowTemplateReadinessPublic] = Field(default_factory=list)
+    template_readiness: list[FlowTemplateReadinessPublic] = Field(
+        default_factory=lambda: cast(list[FlowTemplateReadinessPublic], [])
+    )
 
 
 class FlowRunDebugIoTypes(BaseModel):
@@ -643,7 +673,9 @@ class FlowRunDebugRagReference(BaseModel):
     snippet_quality: str | None = None
     hit_count: int = 0
     best_score: float = 0.0
-    chunks: list[FlowRunDebugRagReferenceChunk] = Field(default_factory=list)
+    chunks: list[FlowRunDebugRagReferenceChunk] = Field(
+        default_factory=lambda: cast(list[FlowRunDebugRagReferenceChunk], [])
+    )
 
 
 class FlowRunDebugRagTracking(BaseModel):
@@ -679,7 +711,9 @@ class FlowRunDebugRagPromptContext(BaseModel):
     not_included_source_ids: list[str] = Field(default_factory=list)
     included_source_titles: list[str] = Field(default_factory=list)
     included_source_display_names: list[str] = Field(default_factory=list)
-    included_groups: list[FlowRunDebugRagPromptContextGroup] = Field(default_factory=list)
+    included_groups: list[FlowRunDebugRagPromptContextGroup] = Field(
+        default_factory=lambda: cast(list[FlowRunDebugRagPromptContextGroup], [])
+    )
     summary: dict[str, Any] | None = None
 
 
@@ -765,7 +799,9 @@ class FlowRunDebugStep(BaseModel):
     output: FlowRunDebugOutput
     mcp: FlowRunDebugMcp
     rag: FlowRunDebugRag | None = None
-    attempts: list[FlowRunDebugAttempt] = Field(default_factory=list)
+    attempts: list[FlowRunDebugAttempt] = Field(
+        default_factory=lambda: cast(list[FlowRunDebugAttempt], [])
+    )
 
 
 class FlowRunDebugRunSummary(BaseModel):
@@ -1052,8 +1088,12 @@ class FlowRunEvidenceExportResponse(BaseModel):
                                     "knowledge_tokens": 248,
                                     "truncated_by_token_budget": False,
                                     "included_source_ids": ["source-1"],
-                                    "included_source_titles": ["Municipality policy guide"],
-                                    "included_source_display_names": ["Municipality policy guide"],
+                                    "included_source_titles": [
+                                        "Municipality policy guide"
+                                    ],
+                                    "included_source_display_names": [
+                                        "Municipality policy guide"
+                                    ],
                                     "summary": {
                                         "total_sources": 1,
                                         "total_chunks": 2,
@@ -1127,9 +1167,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                                     "step_input.text",
                                 ],
                                 "upstream_step_orders": [1],
-                                "upstream_step_labels": [
-                                    "Collect the source document"
-                                ],
+                                "upstream_step_labels": ["Collect the source document"],
                             },
                             "configured_input_type": "text",
                             "configured_output_type": "pdf",

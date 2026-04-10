@@ -1,13 +1,15 @@
 import { createDropdownMenu } from "@melt-ui/svelte";
 import { getContext, setContext } from "svelte";
 
+type DropdownCtx = ReturnType<typeof createDropdownMenu>;
+
 const ctxKey = "dropdown";
 
 export function createDropdown(
   placement: "bottom" | "bottom-start" | "bottom-end" = "bottom",
   arrowSize = 12,
   gutter = 5
-) {
+): DropdownCtx {
   const ctx = createDropdownMenu({
     positioning: {
       fitViewport: true,
@@ -25,6 +27,6 @@ export function createDropdown(
   return ctx;
 }
 
-export function getDropdown() {
-  return getContext<ReturnType<typeof createDropdown>>(ctxKey);
+export function getDropdown(): DropdownCtx {
+  return getContext<DropdownCtx>(ctxKey);
 }

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any, Protocol, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
@@ -11,20 +11,28 @@ from intric.audit.domain.entity_types import EntityType
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import error_response
 from intric.flows.api.flow_assembler import FlowAssembler
+from intric.flows.api.flow_definition_access import require_flow_edit_access
 from intric.flows.api.flow_models import (
     FlowCreateRequest,
     FlowPublic,
     FlowSparsePublic,
     FlowUpdateRequest,
 )
+from intric.flows.application.flow_service import FlowService
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes, UnauthorizedException
 from intric.main.models import NOT_PROVIDED, PaginatedResponse
 from intric.server.dependencies.container import get_container
 
-from intric.flows.api.flow_definition_access import require_flow_edit_access
-
 router = APIRouter()
+
+
+class _FlowReaderProtocol(Protocol):
+    def can_read_flow(self, flow: object) -> bool: ...
+
+
+def _get_flow_service(container: Container) -> FlowService:
+    return container.flow_service()
 
 
 @router.post(
@@ -73,7 +81,7 @@ async def create_flow(
         )
 
     assembler = FlowAssembler()
-    flow_service = container.flow_service()
+    flow_service = _get_flow_service(container)
     user = container.user()
 
     created = await flow_service.create_flow(
@@ -137,9 +145,15 @@ async def create_flow(
 )
 async def list_flows(
     request: Request,
-    space_id: UUID = Query(..., description="Only return flows that belong to this space."),
-    limit: int = Query(default=50, ge=1, le=200, description="Maximum number of flows to return."),
-    offset: int = Query(default=0, ge=0, description="Number of flows to skip before returning results."),
+    space_id: UUID = Query(
+        ..., description="Only return flows that belong to this space."
+    ),
+    limit: int = Query(
+        default=50, ge=1, le=200, description="Maximum number of flows to return."
+    ),
+    offset: int = Query(
+        default=0, ge=0, description="Number of flows to skip before returning results."
+    ),
     container: Container = Depends(get_container(with_user=True)),
 ):
     access_context = await common.get_space_access_context_for_request(
@@ -157,13 +171,16 @@ async def list_flows(
         )
 
     assembler = FlowAssembler()
-    flows = await container.flow_service().list_flows(
+    flows = await _get_flow_service(container).list_flows(
         space_id=space_id,
         sparse=True,
         limit=limit,
         offset=offset,
     )
-    return {"count": len(flows), "items": [assembler.to_sparse_public(flow) for flow in flows]}
+    return {
+        "count": len(flows),
+        "items": [assembler.to_sparse_public(flow) for flow in flows],
+    }
 
 
 @router.get(
@@ -190,7 +207,9 @@ async def list_flows(
     },
 )
 async def get_flow(
-    id: Annotated[UUID, Path(description="Identifier of the draft flow definition to return.")],
+    id: Annotated[
+        UUID, Path(description="Identifier of the draft flow definition to return.")
+    ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
@@ -201,7 +220,8 @@ async def get_flow(
         required_access="view",
     )
     assembler = FlowAssembler()
-    if access_context.actor is None or not access_context.actor.can_read_flow(access_context.flow):
+    actor = cast(_FlowReaderProtocol | None, access_context.actor)
+    if actor is None or not actor.can_read_flow(cast(Any, access_context.flow)):
         raise UnauthorizedException(
             "You do not have permission to access this flow.",
             code="insufficient_space_permission",
@@ -241,7 +261,9 @@ async def get_flow(
     },
 )
 async def update_flow(
-    id: Annotated[UUID, Path(description="Identifier of the draft flow definition to update.")],
+    id: Annotated[
+        UUID, Path(description="Identifier of the draft flow definition to update.")
+    ],
     request: Request,
     flow_in: FlowUpdateRequest,
     container: Container = Depends(get_container(with_user=True)),
@@ -254,7 +276,7 @@ async def update_flow(
     if "steps" in payload:
         steps = [assembler.to_domain_step(step) for step in flow_in.steps]
 
-    updated = await container.flow_service().update_flow(
+    updated = await _get_flow_service(container).update_flow(
         flow_id=id,
         name=payload.get("name", NOT_PROVIDED),
         description=payload.get("description", NOT_PROVIDED),
@@ -316,7 +338,9 @@ async def update_flow(
     },
 )
 async def delete_flow(
-    id: Annotated[UUID, Path(description="Identifier of the draft flow definition to delete.")],
+    id: Annotated[
+        UUID, Path(description="Identifier of the draft flow definition to delete.")
+    ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
@@ -333,7 +357,7 @@ async def delete_flow(
             context={"auth_layer": "space_membership"},
         )
 
-    await container.flow_service().delete_flow(id)
+    await _get_flow_service(container).delete_flow(id)
     user = container.user()
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
@@ -376,7 +400,9 @@ async def delete_flow(
     },
 )
 async def publish_flow(
-    id: Annotated[UUID, Path(description="Identifier of the draft flow definition to publish.")],
+    id: Annotated[
+        UUID, Path(description="Identifier of the draft flow definition to publish.")
+    ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
@@ -393,7 +419,7 @@ async def publish_flow(
             context={"auth_layer": "space_membership"},
         )
 
-    published = await container.flow_service().publish_flow(flow_id=id)
+    published = await _get_flow_service(container).publish_flow(flow_id=id)
     user = container.user()
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
@@ -437,7 +463,10 @@ async def publish_flow(
     },
 )
 async def unpublish_flow(
-    id: Annotated[UUID, Path(description="Identifier of the published flow definition to unpublish.")],
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the published flow definition to unpublish."),
+    ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
@@ -454,7 +483,7 @@ async def unpublish_flow(
             context={"auth_layer": "space_membership"},
         )
 
-    unpublished = await container.flow_service().unpublish_flow(flow_id=id)
+    unpublished = await _get_flow_service(container).unpublish_flow(flow_id=id)
     user = container.user()
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,

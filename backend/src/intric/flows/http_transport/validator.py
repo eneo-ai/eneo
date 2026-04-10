@@ -7,11 +7,18 @@ from intric.flows.http_transport.authored_config import (
     HttpAuthApiKey,
     HttpAuthBasicAuth,
     HttpAuthBearer,
+    HttpAuthNone,
     HttpAuthoredConfig,
     HttpBodyMode,
 )
 from intric.flows.http_transport.errors import HttpTransportError
-from intric.flows.http_transport.secret_codec import _is_sentinel
+
+
+def _is_secret_sentinel(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and cast(dict[str, object], value).get("$secret") == "stored"
+    )
 
 
 def validate_authored_config(
@@ -38,14 +45,16 @@ def validate_authored_config(
     # Auth credentials validation (skip sentinel values — already stored)
     match config.auth:
         case HttpAuthBearer(token=token):
-            if not token and not _is_sentinel(token):
+            if not token and not _is_secret_sentinel(token):
                 errors.append(HttpTransportError.MISSING_AUTH_CREDENTIALS)
         case HttpAuthApiKey(key=key):
-            if not key and not _is_sentinel(key):
+            if not key and not _is_secret_sentinel(key):
                 errors.append(HttpTransportError.MISSING_AUTH_CREDENTIALS)
         case HttpAuthBasicAuth(username=username, password=password):
-            if not username and not password and not _is_sentinel(password):
+            if not username and not password and not _is_secret_sentinel(password):
                 errors.append(HttpTransportError.MISSING_AUTH_CREDENTIALS)
+        case HttpAuthNone():
+            pass
 
     # Body validation
     if method.upper() == "GET" and config.body.mode not in (
@@ -67,3 +76,6 @@ def validate_authored_config(
         errors.append(HttpTransportError.TIMEOUT_OUT_OF_RANGE)
 
     return errors
+
+
+from typing import cast

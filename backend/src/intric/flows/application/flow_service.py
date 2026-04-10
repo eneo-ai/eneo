@@ -10,18 +10,12 @@ from intric.assistants.assistant_service import AssistantService
 from intric.files.file_models import File
 from intric.files.file_repo import FileRepository
 from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, JsonObject
-from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
-from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.flow_validators import (
     normalize_legacy_form_schema,
     validate_form_schema,
     validate_steps,
     validate_variable_alias_collisions,
-)
-from intric.flows.runtime.docx_template_runtime import (
-    extract_docx_template_text_preview,
-    inspect_docx_template_bytes,
 )
 from intric.flows.http_transport import (
     HttpAuthoredConfig,
@@ -29,11 +23,18 @@ from intric.flows.http_transport import (
     is_authored_config,
     merge_secrets_on_update,
 )
+from intric.flows.infrastructure.flow_repo import FlowRepository
+from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from intric.flows.runtime.docx_template_runtime import (
+    extract_docx_template_text_preview,
+    inspect_docx_template_bytes,
+)
 from intric.flows.step_config_secrets import encrypt_step_headers_for_storage
 from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from intric.settings.encryption_service import EncryptionService
 from intric.users.user import UserInDB
+
 
 class FlowService:
     """Tenant-scoped business service for flow lifecycle operations."""
@@ -58,7 +59,9 @@ class FlowService:
 
     def _require_template_asset_repo(self) -> FlowTemplateAssetRepository:
         if self.template_asset_repo is None:
-            raise RuntimeError("FlowService requires template_asset_repo for template asset operations.")
+            raise RuntimeError(
+                "FlowService requires template_asset_repo for template asset operations."
+            )
         return self.template_asset_repo
 
     async def create_flow(
@@ -141,7 +144,9 @@ class FlowService:
     ) -> Flow:
         existing = await self.get_flow(flow_id)
         if existing.published_version is not None:
-            raise BadRequestException("Cannot mutate a published flow. Unpublish first.")
+            raise BadRequestException(
+                "Cannot mutate a published flow. Unpublish first."
+            )
 
         next_steps = steps if steps is not None else existing.steps
         await self._validate_assistant_scope_for_steps(
@@ -152,7 +157,9 @@ class FlowService:
 
         next_metadata = self._normalize_legacy_form_schema(existing.metadata_json)
         if metadata_json is not NOT_PROVIDED:
-            next_metadata = self._normalize_legacy_form_schema(cast(JsonObject | None, metadata_json))
+            next_metadata = self._normalize_legacy_form_schema(
+                cast(JsonObject | None, metadata_json)
+            )
         self._validate_form_schema(next_metadata)
         self._validate_steps(next_steps, metadata_json=next_metadata)
         self._validate_variable_alias_collisions(
@@ -172,9 +179,7 @@ class FlowService:
             update={
                 "name": existing.name if name is NOT_PROVIDED else name,
                 "description": (
-                    existing.description
-                    if description is NOT_PROVIDED
-                    else description
+                    existing.description if description is NOT_PROVIDED else description
                 ),
                 "steps": persisted_steps,
                 "metadata_json": next_metadata,
@@ -198,12 +203,16 @@ class FlowService:
     ) -> tuple[Assistant, list[ResourcePermission]]:
         flow = await self.get_flow(flow_id)
         self._ensure_flow_is_mutable(flow)
-        return await self.assistant_service.create_assistant(
-            name=name,
-            space_id=flow.space_id,
-            hidden=True,
-            origin=AssistantOrigin.FLOW_MANAGED,
-            managing_flow_id=flow.id,
+        assistant_service = cast(Any, self.assistant_service)
+        return cast(
+            tuple[Assistant, list[ResourcePermission]],
+            await assistant_service.create_assistant(
+                name=name,
+                space_id=flow.space_id,
+                hidden=True,
+                origin=AssistantOrigin.FLOW_MANAGED,
+                managing_flow_id=flow.id,
+            ),
         )
 
     async def get_flow_assistant(
@@ -213,16 +222,16 @@ class FlowService:
         assistant_id: UUID,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         flow = await self.get_flow(flow_id)
-        assistant, permissions = await self.assistant_service.get_assistant(assistant_id)
+        assistant, permissions = await self.assistant_service.get_assistant(
+            assistant_id
+        )
         self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)
         return assistant, permissions
 
-    async def get_flow_assistant_snapshots(self, flow: Flow) -> dict[UUID, dict[str, Any]]:
-        assistant_ids = list(
-            dict.fromkeys(
-                step.assistant_id for step in flow.steps if step.assistant_id is not None
-            )
-        )
+    async def get_flow_assistant_snapshots(
+        self, flow: Flow
+    ) -> dict[UUID, dict[str, Any]]:
+        assistant_ids = list(dict.fromkeys(step.assistant_id for step in flow.steps))
         return await self.flow_repo.get_assistant_snapshots(
             assistant_ids=assistant_ids,
             tenant_id=self.user.tenant_id,
@@ -239,10 +248,14 @@ class FlowService:
         self._ensure_flow_is_mutable(flow)
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
         self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)
-        return await self.assistant_service.update_assistant(
-            assistant_id=assistant_id,
-            include_hidden=True,
-            **changes,
+        assistant_service = cast(Any, self.assistant_service)
+        return cast(
+            tuple[Assistant, list[ResourcePermission]],
+            await assistant_service.update_assistant(
+                assistant_id=assistant_id,
+                include_hidden=True,
+                **changes,
+            ),
         )
 
     async def delete_flow_assistant(
@@ -324,14 +337,18 @@ class FlowService:
         )
         return await self.flow_repo.update(updated, tenant_id=self.user.tenant_id)
 
-    def _validate_publishable(self, flow: Flow, *, metadata_json: JsonObject | None) -> None:
+    def _validate_publishable(
+        self, flow: Flow, *, metadata_json: JsonObject | None
+    ) -> None:
         self._validate_steps(
             flow.steps,
             metadata_json=metadata_json,
             require_complete_template_fill_config=True,
         )
         if not flow.steps:
-            raise BadRequestException("Flow must contain at least one step before publish.")
+            raise BadRequestException(
+                "Flow must contain at least one step before publish."
+            )
 
     def _validate_steps(
         self,
@@ -349,7 +366,9 @@ class FlowService:
     def _validate_form_schema(self, metadata_json: JsonObject | None) -> None:
         validate_form_schema(metadata_json)
 
-    def _normalize_legacy_form_schema(self, metadata_json: JsonObject | None) -> JsonObject | None:
+    def _normalize_legacy_form_schema(
+        self, metadata_json: JsonObject | None
+    ) -> JsonObject | None:
         return normalize_legacy_form_schema(metadata_json)
 
     def _validate_variable_alias_collisions(
@@ -397,7 +416,7 @@ class FlowService:
         non_owned = [
             row.id
             for row in assistant_rows
-            if row.origin != AssistantOrigin.FLOW_MANAGED.value
+            if row.origin != AssistantOrigin.FLOW_MANAGED
             or row.managing_flow_id != owning_flow_id
         ]
         if non_owned:
@@ -435,7 +454,7 @@ class FlowService:
         if is_authored_config(config):
             authored = HttpAuthoredConfig.model_validate(config)
             encrypted = encrypt_authored_config(authored, self.encryption_service)
-            return cast(JsonObject, encrypted.model_dump(mode="json"))
+            return encrypted.model_dump(mode="json")
         return encrypt_step_headers_for_storage(
             config=config, encryption_service=self.encryption_service
         )
@@ -447,7 +466,7 @@ class FlowService:
     ) -> list[FlowStep]:
         """Merge sentinel secret values from incoming with stored encrypted values."""
         stored_by_order = {s.step_order: s for s in stored_steps}
-        result = []
+        result: list[FlowStep] = []
         for step in incoming_steps:
             stored = stored_by_order.get(step.step_order)
             input_config = self._merge_config_secrets(
@@ -458,7 +477,10 @@ class FlowService:
             )
             result.append(
                 step.model_copy(
-                    update={"input_config": input_config, "output_config": output_config},
+                    update={
+                        "input_config": input_config,
+                        "output_config": output_config,
+                    },
                     deep=True,
                 )
             )
@@ -475,7 +497,7 @@ class FlowService:
         incoming_config = HttpAuthoredConfig.model_validate(incoming)
         stored_config = HttpAuthoredConfig.model_validate(stored)
         merged = merge_secrets_on_update(incoming_config, stored_config)
-        return cast(JsonObject, merged.model_dump(mode="json"))
+        return merged.model_dump(mode="json")
 
     async def _build_definition(self, flow: Flow) -> JsonObject:
         return {
@@ -523,7 +545,9 @@ class FlowService:
         if flow.published_version is not None:
             raise BadRequestException("Cannot mutate assistant of a published flow")
 
-    def _assert_flow_assistant_owned_by_flow(self, *, flow: Flow, assistant: Assistant) -> None:
+    def _assert_flow_assistant_owned_by_flow(
+        self, *, flow: Flow, assistant: Assistant
+    ) -> None:
         if assistant.origin != AssistantOrigin.FLOW_MANAGED:
             raise NotFoundException("Assistant is not flow-managed.")
         if assistant.managing_flow_id != flow.id:
@@ -565,8 +589,8 @@ class FlowService:
             raise BadRequestException(
                 f"Step {step.step_order}: template placeholders are missing bindings: {', '.join(missing)}."
             )
-        for placeholder, binding in bindings.items():
-            if not isinstance(placeholder, str) or not placeholder.strip():
+        for placeholder, binding in cast(JsonObject, bindings).items():
+            if not placeholder.strip():
                 raise BadRequestException(
                     f"Step {step.step_order}: output_config.bindings keys must be non-empty strings."
                 )
@@ -631,7 +655,9 @@ class FlowService:
                     asset_id=template_asset_id,
                 )
             except NotFoundException as exc:
-                raise self._template_not_accessible_error(step_order=step.step_order) from exc
+                raise self._template_not_accessible_error(
+                    step_order=step.step_order
+                ) from exc
 
         template_file_id_raw = step.output_config.get("template_file_id")
         if template_file_id_raw in (None, ""):
@@ -662,14 +688,18 @@ class FlowService:
                     file_id=template_file_id,
                 )
             except NotFoundException as exc:
-                raise self._template_not_accessible_error(step_order=step.step_order) from exc
+                raise self._template_not_accessible_error(
+                    step_order=step.step_order
+                ) from exc
         try:
             return await self._get_template_asset_file(
                 flow_id=flow.id,
                 asset_id=asset.id,
             )
         except NotFoundException as exc:
-            raise self._template_not_accessible_error(step_order=step.step_order) from exc
+            raise self._template_not_accessible_error(
+                step_order=step.step_order
+            ) from exc
 
     def _inspect_docx_template(self, file: File) -> list[dict[str, Any]]:
         return inspect_docx_template_bytes(file.blob or b"", filename=file.name)

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from typing import Any, Literal
 
+from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_edit_models import (
     FlowEditDraft,
     StepEditOperation,
 )
-from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -66,7 +66,9 @@ class AIBuilderResourceCatalog:
     ) -> tuple[str | None, AIBuilderResourceResolutionIssue | None]:
         normalized = _normalize_alias(value)
         alias_index = (
-            self._kb_alias_index if kind == "knowledge_base" else self._model_alias_index
+            self._kb_alias_index
+            if kind == "knowledge_base"
+            else self._model_alias_index
         )
         entries: tuple[AIBuilderResourceCatalogEntry, ...] = alias_index.get(
             normalized,
@@ -75,20 +77,26 @@ class AIBuilderResourceCatalog:
         if not entries:
             return None, AIBuilderResourceResolutionIssue(
                 kind=kind,
-                code="unknown_kb_ref" if kind == "knowledge_base" else "unknown_model_ref",
+                code="unknown_kb_ref"
+                if kind == "knowledge_base"
+                else "unknown_model_ref",
                 provided_value=value,
                 location=location,
                 valid_options=tuple(
                     entry.option_label
                     for entry in (
-                        self.knowledge_bases if kind == "knowledge_base" else self.models
+                        self.knowledge_bases
+                        if kind == "knowledge_base"
+                        else self.models
                     )
                 ),
             )
         if len(entries) > 1:
             return None, AIBuilderResourceResolutionIssue(
                 kind=kind,
-                code="ambiguous_kb_ref" if kind == "knowledge_base" else "ambiguous_model_ref",
+                code="ambiguous_kb_ref"
+                if kind == "knowledge_base"
+                else "ambiguous_model_ref",
                 provided_value=value,
                 location=location,
                 valid_options=tuple(entry.option_label for entry in entries),
@@ -97,13 +105,17 @@ class AIBuilderResourceCatalog:
         if resolved_entry is None:
             return None, AIBuilderResourceResolutionIssue(
                 kind=kind,
-                code="unknown_kb_ref" if kind == "knowledge_base" else "unknown_model_ref",
+                code="unknown_kb_ref"
+                if kind == "knowledge_base"
+                else "unknown_model_ref",
                 provided_value=value,
                 location=location,
                 valid_options=tuple(
                     entry.option_label
                     for entry in (
-                        self.knowledge_bases if kind == "knowledge_base" else self.models
+                        self.knowledge_bases
+                        if kind == "knowledge_base"
+                        else self.models
                     )
                 ),
             )
@@ -115,12 +127,8 @@ def build_ai_builder_resource_catalog(
     available_models: list[dict[str, Any]] | None,
     available_kbs: list[dict[str, Any]] | None,
 ) -> AIBuilderResourceCatalog:
-    models = tuple(
-        _build_entries(available_models or [], kind="model")
-    )
-    knowledge_bases = tuple(
-        _build_entries(available_kbs or [], kind="knowledge_base")
-    )
+    models = tuple(_build_entries(available_models or [], kind="model"))
+    knowledge_bases = tuple(_build_entries(available_kbs or [], kind="knowledge_base"))
     return AIBuilderResourceCatalog(
         models=models,
         knowledge_bases=knowledge_bases,
@@ -146,7 +154,9 @@ def canonicalize_flow_spec_resources(
         issues.extend(assistant_issues)
         if assistant_spec != step.assistant_spec:
             changed = True
-            updated_steps.append(step.model_copy(update={"assistant_spec": assistant_spec}))
+            updated_steps.append(
+                step.model_copy(update={"assistant_spec": assistant_spec})
+            )
         else:
             updated_steps.append(step)
     if not changed:
@@ -168,7 +178,7 @@ def canonicalize_edit_draft_resources(
         if operation.add_payload is not None:
             assistant_spec, assistant_issues = canonicalize_assistant_spec_resources(
                 AssistantSpec(
-                    instructions=operation.add_payload.instructions,
+                    instructions=operation.add_payload.instructions or "",
                     model_ref=operation.add_payload.model_ref,
                     knowledge_refs=list(operation.add_payload.knowledge_refs),
                 ),
@@ -181,14 +191,16 @@ def canonicalize_edit_draft_resources(
                 or assistant_spec.knowledge_refs != operation.add_payload.knowledge_refs
             ):
                 changed = True
-                updated = updated.model_copy(update={
-                    "add_payload": operation.add_payload.model_copy(
-                        update={
-                            "model_ref": assistant_spec.model_ref,
-                            "knowledge_refs": assistant_spec.knowledge_refs,
-                        }
-                    ),
-                })
+                updated = updated.model_copy(
+                    update={
+                        "add_payload": operation.add_payload.model_copy(
+                            update={
+                                "model_ref": assistant_spec.model_ref,
+                                "knowledge_refs": assistant_spec.knowledge_refs,
+                            }
+                        ),
+                    }
+                )
         if updated.patch is not None and updated.patch.assistant_spec is not None:
             assistant_spec, assistant_issues = canonicalize_assistant_spec_resources(
                 updated.patch.assistant_spec,
@@ -198,9 +210,13 @@ def canonicalize_edit_draft_resources(
             issues.extend(assistant_issues)
             if assistant_spec != updated.patch.assistant_spec:
                 changed = True
-                updated = updated.model_copy(update={
-                    "patch": updated.patch.model_copy(update={"assistant_spec": assistant_spec}),
-                })
+                updated = updated.model_copy(
+                    update={
+                        "patch": updated.patch.model_copy(
+                            update={"assistant_spec": assistant_spec}
+                        ),
+                    }
+                )
         operations.append(updated)
     if not changed:
         return draft, issues
@@ -218,7 +234,7 @@ def canonicalize_create_draft_resources(
     for index, step in enumerate(draft.steps):
         assistant_spec, assistant_issues = canonicalize_assistant_spec_resources(
             AssistantSpec(
-                instructions=step.instructions,
+                instructions=step.instructions or "",
                 model_ref=step.model_ref,
                 knowledge_refs=list(step.knowledge_refs),
             ),
@@ -323,13 +339,20 @@ def _build_entries(
         ref = str(item.get("ref", item.get("id", ""))).strip()
         if not ref:
             continue
-        display_name = str(
-            item.get("display_name", item.get("name", ref))
-        ).strip() or ref
-        aliases = tuple(dict.fromkeys(filter(None, [
-            _normalize_alias(ref),
-            _normalize_alias(display_name),
-        ])))
+        display_name = (
+            str(item.get("display_name", item.get("name", ref))).strip() or ref
+        )
+        aliases = tuple(
+            dict.fromkeys(
+                filter(
+                    None,
+                    [
+                        _normalize_alias(ref),
+                        _normalize_alias(display_name),
+                    ],
+                )
+            )
+        )
         entries.append(
             AIBuilderResourceCatalogEntry(
                 ref=ref,
@@ -348,10 +371,7 @@ def _build_alias_index(
     for entry in entries:
         for alias in entry.aliases:
             alias_index.setdefault(alias, []).append(entry)
-    return {
-        alias: tuple(values)
-        for alias, values in alias_index.items()
-    }
+    return {alias: tuple(values) for alias, values in alias_index.items()}
 
 
 def _normalize_alias(value: str) -> str:

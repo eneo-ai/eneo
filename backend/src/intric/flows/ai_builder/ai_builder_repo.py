@@ -5,10 +5,11 @@ from __future__ import annotations
 import contextlib
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TypedDict, cast
 from uuid import UUID
 
-from sqlalchemy import cast, insert, select, update
+from sqlalchemy import cast as sql_cast
+from sqlalchemy import insert, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -93,16 +94,20 @@ class AIBuilderRepository:
                     BuilderSessions.actor_user_id == actor_user_id,
                     BuilderSessions.space_id == space_id,
                     BuilderSessions.target_kind == target_kind.value,
-                    BuilderSessions.status.in_([
-                        SessionStatus.CHATTING.value,
-                        SessionStatus.AWAITING_APPROVAL.value,
-                        SessionStatus.APPLYING.value,
-                    ]),
+                    BuilderSessions.status.in_(
+                        [
+                            SessionStatus.CHATTING.value,
+                            SessionStatus.AWAITING_APPROVAL.value,
+                            SessionStatus.APPLYING.value,
+                        ]
+                    ),
                     BuilderSessions.flow_id.is_(None)
                     if flow_id is None
                     else BuilderSessions.flow_id == flow_id,
                 )
-                .order_by(BuilderSessions.updated_at.desc(), BuilderSessions.created_at.desc())
+                .order_by(
+                    BuilderSessions.updated_at.desc(), BuilderSessions.created_at.desc()
+                )
             )
             row = (await self.session.execute(stmt)).scalars().first()
             return _session_from_row(row) if row is not None else None
@@ -121,7 +126,9 @@ class AIBuilderRepository:
                     BuilderSessions.tenant_id == tenant_id,
                     BuilderSessions.actor_user_id == actor_user_id,
                 )
-                .order_by(BuilderSessions.updated_at.desc(), BuilderSessions.created_at.desc())
+                .order_by(
+                    BuilderSessions.updated_at.desc(), BuilderSessions.created_at.desc()
+                )
                 .limit(limit)
             )
             rows = (await self.session.execute(stmt)).scalars().all()
@@ -164,11 +171,13 @@ class AIBuilderRepository:
                     BuilderSessions.actor_user_id == actor_user_id,
                     BuilderSessions.space_id == space_id,
                     BuilderSessions.target_kind == target_kind.value,
-                    BuilderSessions.status.in_([
-                        SessionStatus.CHATTING.value,
-                        SessionStatus.AWAITING_APPROVAL.value,
-                        SessionStatus.APPLYING.value,
-                    ]),
+                    BuilderSessions.status.in_(
+                        [
+                            SessionStatus.CHATTING.value,
+                            SessionStatus.AWAITING_APPROVAL.value,
+                            SessionStatus.APPLYING.value,
+                        ]
+                    ),
                     BuilderSessions.flow_id.is_(None)
                     if flow_id is None
                     else BuilderSessions.flow_id == flow_id,
@@ -261,7 +270,7 @@ class AIBuilderRepository:
                 )
                 .values(
                     conversation=BuilderSessions.conversation.op("||")(
-                        cast(serialized, JSONB)
+                        sql_cast(serialized, JSONB)
                     ),
                     updated_at=datetime.now(timezone.utc),
                 )
@@ -322,11 +331,11 @@ class AIBuilderRepository:
         tenant_id: UUID,
         spec: FlowDraftSpecCore,
         envelope: PlannerPlanEnvelope,
-        edit_result_json: dict | None = None,
+        edit_result_json: dict[str, object] | None = None,
     ) -> BuilderPlan:
         async with self._transaction():
             spec_hash = spec.spec_hash()
-            values: dict = {
+            values: dict[str, object] = {
                 "session_id": session_id,
                 "tenant_id": tenant_id,
                 "status": PlanStatus.PROPOSED.value,
@@ -336,11 +345,7 @@ class AIBuilderRepository:
             }
             if edit_result_json is not None:
                 values["edit_result_json"] = edit_result_json
-            stmt = (
-                insert(BuilderPlans)
-                .values(**values)
-                .returning(BuilderPlans)
-            )
+            stmt = insert(BuilderPlans).values(**values).returning(BuilderPlans)
             row = (await self.session.execute(stmt)).scalar_one()
             return _plan_from_row(row)
 
@@ -427,64 +432,131 @@ class AIBuilderRepository:
 # ---------------------------------------------------------------------------
 
 
-def _session_from_row(row: Any) -> BuilderSession:
-    """Convert a DB row/mapping to a BuilderSession domain model."""
-    # Handle both ORM objects and mappings
+class _SessionRowData(TypedDict):
+    id: UUID
+    tenant_id: UUID
+    space_id: UUID
+    flow_id: UUID | None
+    target_kind: str
+    status: str
+    actor_user_id: UUID
+    conversation: list[object]
+    latest_plan_id: UUID | None
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
+class _PlanRowData(TypedDict):
+    id: UUID
+    session_id: UUID
+    tenant_id: UUID
+    status: str
+    spec_json: dict[str, object]
+    spec_hash: str
+    envelope_json: dict[str, object]
+    edit_result_json: dict[str, object] | None
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
+def _session_row_data(row: Any) -> _SessionRowData:
     if hasattr(row, "__getitem__"):
-        data = dict(row)
-    else:
-        data = {
-            "id": row.id,
-            "tenant_id": row.tenant_id,
-            "space_id": row.space_id,
-            "flow_id": row.flow_id,
-            "target_kind": row.target_kind,
-            "status": row.status,
-            "actor_user_id": row.actor_user_id,
-            "conversation": row.conversation,
-            "latest_plan_id": row.latest_plan_id,
-            "created_at": row.created_at,
-            "updated_at": row.updated_at,
+        mapping = dict(cast(dict[str, object], row))
+        conversation = cast(list[object], mapping.get("conversation", []) or [])
+        return {
+            "id": cast(UUID, mapping["id"]),
+            "tenant_id": cast(UUID, mapping["tenant_id"]),
+            "space_id": cast(UUID, mapping["space_id"]),
+            "flow_id": cast(UUID | None, mapping.get("flow_id")),
+            "target_kind": cast(str, mapping["target_kind"]),
+            "status": cast(str, mapping["status"]),
+            "actor_user_id": cast(UUID, mapping["actor_user_id"]),
+            "conversation": conversation,
+            "latest_plan_id": cast(UUID | None, mapping.get("latest_plan_id")),
+            "created_at": cast(datetime | None, mapping.get("created_at")),
+            "updated_at": cast(datetime | None, mapping.get("updated_at")),
         }
 
-    conv_raw = data.get("conversation", [])
-    conversation = [
-        ConversationMessage.model_validate(msg) if isinstance(msg, dict) else msg
-        for msg in (conv_raw or [])
-    ]
+    return {
+        "id": cast(UUID, row.id),
+        "tenant_id": cast(UUID, row.tenant_id),
+        "space_id": cast(UUID, row.space_id),
+        "flow_id": cast(UUID | None, row.flow_id),
+        "target_kind": cast(str, row.target_kind),
+        "status": cast(str, row.status),
+        "actor_user_id": cast(UUID, row.actor_user_id),
+        "conversation": cast(list[object], row.conversation or []),
+        "latest_plan_id": cast(UUID | None, row.latest_plan_id),
+        "created_at": cast(datetime | None, row.created_at),
+        "updated_at": cast(datetime | None, row.updated_at),
+    }
+
+
+def _plan_row_data(row: Any) -> _PlanRowData:
+    if hasattr(row, "__getitem__"):
+        mapping = dict(cast(dict[str, object], row))
+        return {
+            "id": cast(UUID, mapping["id"]),
+            "session_id": cast(UUID, mapping["session_id"]),
+            "tenant_id": cast(UUID, mapping["tenant_id"]),
+            "status": cast(str, mapping["status"]),
+            "spec_json": cast(dict[str, object], mapping["spec_json"]),
+            "spec_hash": cast(str, mapping["spec_hash"]),
+            "envelope_json": cast(dict[str, object], mapping["envelope_json"]),
+            "edit_result_json": cast(
+                dict[str, object] | None, mapping.get("edit_result_json")
+            ),
+            "created_at": cast(datetime | None, mapping.get("created_at")),
+            "updated_at": cast(datetime | None, mapping.get("updated_at")),
+        }
+
+    return {
+        "id": cast(UUID, row.id),
+        "session_id": cast(UUID, row.session_id),
+        "tenant_id": cast(UUID, row.tenant_id),
+        "status": cast(str, row.status),
+        "spec_json": cast(dict[str, object], row.spec_json),
+        "spec_hash": cast(str, row.spec_hash),
+        "envelope_json": cast(dict[str, object], row.envelope_json),
+        "edit_result_json": cast(
+            dict[str, object] | None, getattr(row, "edit_result_json", None)
+        ),
+        "created_at": cast(datetime | None, row.created_at),
+        "updated_at": cast(datetime | None, row.updated_at),
+    }
+
+
+def _session_from_row(row: Any) -> BuilderSession:
+    """Convert a DB row/mapping to a BuilderSession domain model."""
+    data = _session_row_data(row)
+
+    conversation: list[ConversationMessage] = []
+    for msg in data["conversation"]:
+        if isinstance(msg, ConversationMessage):
+            conversation.append(msg)
+        else:
+            conversation.append(
+                ConversationMessage.model_validate(cast(dict[str, object], msg))
+            )
 
     return BuilderSession(
         id=data["id"],
         tenant_id=data["tenant_id"],
         space_id=data["space_id"],
-        flow_id=data.get("flow_id"),
+        flow_id=data["flow_id"],
         target_kind=TargetKind(data["target_kind"]),
         status=SessionStatus(data["status"]),
         actor_user_id=data["actor_user_id"],
         conversation=conversation,
-        latest_plan_id=data.get("latest_plan_id"),
-        created_at=data.get("created_at"),
-        updated_at=data.get("updated_at"),
+        latest_plan_id=data["latest_plan_id"],
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
     )
 
 
 def _plan_from_row(row: Any) -> BuilderPlan:
     """Convert a DB row/mapping to a BuilderPlan domain model."""
-    if hasattr(row, "__getitem__"):
-        data = dict(row)
-    else:
-        data = {
-            "id": row.id,
-            "session_id": row.session_id,
-            "tenant_id": row.tenant_id,
-            "status": row.status,
-            "spec_json": row.spec_json,
-            "spec_hash": row.spec_hash,
-            "envelope_json": row.envelope_json,
-            "edit_result_json": getattr(row, "edit_result_json", None),
-            "created_at": row.created_at,
-            "updated_at": row.updated_at,
-        }
+    data = _plan_row_data(row)
 
     spec = FlowDraftSpecCore.model_validate(data["spec_json"])
     envelope = PlannerPlanEnvelope.model_validate(data["envelope_json"])
@@ -497,7 +569,7 @@ def _plan_from_row(row: Any) -> BuilderPlan:
         spec=spec,
         spec_hash=data["spec_hash"],
         envelope=envelope,
-        edit_result_json=data.get("edit_result_json"),
-        created_at=data.get("created_at"),
-        updated_at=data.get("updated_at"),
+        edit_result_json=data["edit_result_json"],
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
     )

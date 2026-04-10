@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
@@ -14,35 +14,45 @@ logger = logging.getLogger(__name__)
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.audit.domain.outcome import Outcome
+from intric.completion_models.infrastructure.completion_service import CompletionService
+from intric.completion_models.infrastructure.context_builder import count_tokens
+from intric.files.file_models import FileCreate, FileType
+from intric.files.file_repo import FileRepository
 from intric.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepAttemptStatus,
     FlowStepResult,
 )
+from intric.flows.flow_run_provenance import (
+    FlowAttemptProvenance,
+    LlmProvenance,
+    normalize_json_preview,
+    normalize_text_preview,
+)
+from intric.flows.flow_template_asset_service import FlowTemplateAssetService
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from intric.flows.flow_template_asset_service import FlowTemplateAssetService
-from intric.flows.variable_resolver import FlowVariableResolver
-from intric.flows.runtime.http_runtime import FlowHttpRuntimeHelper, IPAddress
-from intric.flows.runtime.http_orchestration import (
-    FlowHttpOrchestrationDeps,
-    deliver_webhook as deliver_webhook_orchestrated,
-    resolve_http_input_source_text as resolve_http_input_source_text_orchestrated,
-)
+from intric.flows.runtime.claim_resolution import resolve_step_claim
+from intric.flows.runtime.execution_state_builder import build_run_execution_state
 from intric.flows.runtime.http_audit import (
     HttpAuditDeps,
+)
+from intric.flows.runtime.http_audit import (
     audit_http_outbound as audit_http_outbound_runtime,
 )
-from intric.flows.runtime.execution_state_builder import build_run_execution_state
-from intric.flows.runtime.output_runtime import (
-    OutputRuntimeDeps,
-    process_typed_output as process_typed_output_runtime,
+from intric.flows.runtime.http_orchestration import (
+    FlowHttpOrchestrationDeps,
 )
-from intric.flows.runtime.rag_retrieval import RagRetrievalDeps, retrieve_rag_chunks
-from intric.flows.runtime.run_outcome import determine_run_outcome
-from intric.flows.runtime.claim_resolution import resolve_step_claim
+from intric.flows.runtime.http_orchestration import (
+    deliver_webhook as deliver_webhook_orchestrated,
+)
+from intric.flows.runtime.http_orchestration import (
+    resolve_http_input_source_text as resolve_http_input_source_text_orchestrated,
+)
+from intric.flows.runtime.http_runtime import FlowHttpRuntimeHelper, IPAddress
 from intric.flows.runtime.models import (
     RunExecutionState,
     RuntimeStep,
@@ -50,15 +60,21 @@ from intric.flows.runtime.models import (
     StepExecutionOutput,
     StepInputValue,
 )
+from intric.flows.runtime.output_runtime import (
+    OutputRuntimeDeps,
+)
+from intric.flows.runtime.output_runtime import (
+    process_typed_output as process_typed_output_runtime,
+)
+from intric.flows.runtime.rag_retrieval import RagRetrievalDeps, retrieve_rag_chunks
+from intric.flows.runtime.run_outcome import determine_run_outcome
+from intric.flows.runtime.step_attempt_runtime import (
+    build_generic_failure_plan,
+    build_step_gate_decision,
+    build_step_success_plan,
+    build_typed_failure_plan,
+)
 from intric.flows.runtime.step_definition_parser import parse_runtime_steps
-from intric.flows.runtime.step_input_resolution import (
-    StepInputResolutionDeps,
-    resolve_step_input as resolve_step_input_runtime,
-)
-from intric.flows.runtime.step_result_builder import (
-    build_default_failed_input_payload,
-    with_webhook_delivery_status,
-)
 from intric.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
     attach_typed_failure_context,
@@ -70,36 +86,30 @@ from intric.flows.runtime.step_execution_runtime import (
     json_mode_cache_key,
     prepare_step_execution,
 )
-from intric.flows.runtime.step_attempt_runtime import (
-    build_generic_failure_plan,
-    build_step_gate_decision,
-    build_step_success_plan,
-    build_typed_failure_plan,
+from intric.flows.runtime.step_input_resolution import (
+    StepInputResolutionDeps,
+)
+from intric.flows.runtime.step_input_resolution import (
+    resolve_step_input as resolve_step_input_runtime,
+)
+from intric.flows.runtime.step_result_builder import (
+    build_default_failed_input_payload,
+    with_webhook_delivery_status,
 )
 from intric.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
     execute_template_fill_step,
 )
-from intric.flows.flow_run_provenance import (
-    FlowAttemptProvenance,
-    LlmProvenance,
-    normalize_json_preview,
-    normalize_text_preview,
-)
+from intric.flows.variable_resolver import FlowVariableResolver
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 from intric.settings.encryption_service import EncryptionService
 from intric.spaces.space_repo import SpaceRepository
-from intric.completion_models.infrastructure.completion_service import CompletionService
-from intric.files.file_models import FileCreate, FileType
-from intric.files.file_repo import FileRepository
-from intric.completion_models.infrastructure.context_builder import count_tokens
-from intric.audit.domain.outcome import Outcome
 from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
-    from intric.audit.application.audit_service import AuditService
     from intric.assistants.references import ReferencesService
+    from intric.audit.application.audit_service import AuditService
     from intric.files.transcriber import Transcriber
 
 
@@ -132,9 +142,7 @@ class FlowRunExecutorConfig:
                 settings.flow_http_request_timeout_seconds
             ),
             http_max_timeout_seconds=float(settings.flow_http_max_timeout_seconds),
-            http_allow_private_networks=bool(
-                settings.flow_http_allow_private_networks
-            ),
+            http_allow_private_networks=bool(settings.flow_http_allow_private_networks),
         )
 
 
@@ -152,7 +160,8 @@ def _build_attempt_provenance(
             if output.tool_calls_metadata is not None
             else None,
             raw_completion_text=normalize_text_preview(output.raw_completion_text)
-            if isinstance(output.raw_completion_text, str) and output.raw_completion_text
+            if isinstance(output.raw_completion_text, str)
+            and output.raw_completion_text
             else None,
         )
     ).to_payload()
@@ -182,7 +191,9 @@ def _build_attempt_provenance(
     if isinstance(artifacts, list):
         provenance["artifacts"] = {
             "items": artifacts,
-            "generated_file_ids": [str(file_id) for file_id in output.generated_file_ids],
+            "generated_file_ids": [
+                str(file_id) for file_id in output.generated_file_ids
+            ],
         }
     if step.input_source in {"http_get", "http_post"}:
         provenance["http"] = {
@@ -207,6 +218,7 @@ class FlowRunExecutor:
         FlowRunStatus.FAILED,
         FlowRunStatus.CANCELLED,
     }
+
     def __init__(
         self,
         *,
@@ -255,13 +267,9 @@ class FlowRunExecutor:
         self.references_service = references_service
         self.transcriber = transcriber
         self.variable_resolver = FlowVariableResolver()
-        self.http_request_timeout_seconds = (
-            resolved_config.http_request_timeout_seconds
-        )
+        self.http_request_timeout_seconds = resolved_config.http_request_timeout_seconds
         self.http_max_timeout_seconds = resolved_config.http_max_timeout_seconds
-        self.http_allow_private_networks = (
-            resolved_config.http_allow_private_networks
-        )
+        self.http_allow_private_networks = resolved_config.http_allow_private_networks
         self.http_runtime = FlowHttpRuntimeHelper(
             variable_resolver=self.variable_resolver,
             request_timeout_seconds=self.http_request_timeout_seconds,
@@ -285,10 +293,21 @@ class FlowRunExecutor:
         celery_task_id: str | None,
         retry_count: int,
     ) -> dict[str, Any]:
-        logger.info("flow_executor.start run_id=%s flow_id=%s tenant_id=%s", run_id, flow_id, tenant_id)
-        run = await self.flow_run_repo.get(run_id=run_id, tenant_id=tenant_id, flow_id=flow_id)
+        logger.info(
+            "flow_executor.start run_id=%s flow_id=%s tenant_id=%s",
+            run_id,
+            flow_id,
+            tenant_id,
+        )
+        run = await self.flow_run_repo.get(
+            run_id=run_id, tenant_id=tenant_id, flow_id=flow_id
+        )
         if run.status in self._TERMINAL_STATUSES:
-            logger.info("flow_executor.skip run_id=%s reason=run_terminal status=%s", run_id, run.status)
+            logger.info(
+                "flow_executor.skip run_id=%s reason=run_terminal status=%s",
+                run_id,
+                run.status,
+            )
             return {"status": "skipped", "reason": "run_terminal"}
 
         can_run = await self.flow_run_repo.mark_running_if_claimable(
@@ -297,7 +316,9 @@ class FlowRunExecutor:
         )
         await self._commit()
         if not can_run:
-            latest = await self.flow_run_repo.get(run_id=run_id, tenant_id=tenant_id, flow_id=flow_id)
+            latest = await self.flow_run_repo.get(
+                run_id=run_id, tenant_id=tenant_id, flow_id=flow_id
+            )
             return {"status": "skipped", "reason": f"run_{latest.status.value}"}
 
         if not await self._flow_is_active(flow_id=flow_id, tenant_id=tenant_id):
@@ -334,19 +355,25 @@ class FlowRunExecutor:
             )
             await self._commit()
             return {"status": "failed", "error": "invalid_flow_definition"}
-        version_metadata = (
-            version.definition_json.get("metadata_json")
-            if isinstance(version.definition_json, dict)
-            else None
+        version_metadata = version.definition_json.get("metadata_json")
+
+        persisted_results = await self.flow_run_repo.list_step_results(
+            run_id=run_id, tenant_id=tenant_id
+        )
+        state = build_run_execution_state(
+            steps=steps, persisted_results=persisted_results
         )
 
-        persisted_results = await self.flow_run_repo.list_step_results(run_id=run_id, tenant_id=tenant_id)
-        state = build_run_execution_state(steps=steps, persisted_results=persisted_results)
-
-        logger.info("flow_executor.steps_parsed run_id=%s step_count=%d", run_id, len(steps))
+        logger.info(
+            "flow_executor.steps_parsed run_id=%s step_count=%d", run_id, len(steps)
+        )
         for step in sorted(steps, key=lambda item: item.step_order):
-            latest_run = await self.flow_run_repo.get(run_id=run_id, tenant_id=tenant_id, flow_id=flow_id)
-            flow_active = await self._flow_is_active(flow_id=flow_id, tenant_id=tenant_id)
+            latest_run = await self.flow_run_repo.get(
+                run_id=run_id, tenant_id=tenant_id, flow_id=flow_id
+            )
+            flow_active = await self._flow_is_active(
+                flow_id=flow_id, tenant_id=tenant_id
+            )
             preclaim_decision = build_step_gate_decision(
                 latest_run_status=latest_run.status,
                 flow_active=flow_active,
@@ -354,22 +381,32 @@ class FlowRunExecutor:
                 step_id=step.step_id,
             )
             if preclaim_decision.action == "return":
-                return preclaim_decision.result or {"status": "skipped", "reason": "unknown"}
+                return preclaim_decision.result or {
+                    "status": "skipped",
+                    "reason": "unknown",
+                }
             if preclaim_decision.action == "cancel_flow_deleted":
                 await self.flow_run_repo.mark_pending_steps_cancelled(
                     run_id=run_id,
                     tenant_id=tenant_id,
-                    error_message=preclaim_decision.run_error_message or "Flow was deleted during execution.",
+                    error_message=preclaim_decision.run_error_message
+                    or "Flow was deleted during execution.",
                 )
                 await self.flow_run_repo.update_status(
                     run_id=run_id,
                     tenant_id=tenant_id,
                     status=FlowRunStatus.CANCELLED,
                     error_message=preclaim_decision.run_error_message,
-                    from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
+                    from_statuses=(
+                        FlowRunStatus.QUEUED.value,
+                        FlowRunStatus.RUNNING.value,
+                    ),
                 )
                 await self._commit()
-                return preclaim_decision.result or {"status": "cancelled", "reason": "flow_deleted"}
+                return preclaim_decision.result or {
+                    "status": "cancelled",
+                    "reason": "flow_deleted",
+                }
 
             claimed = await self.flow_run_repo.claim_step_result(
                 run_id=run_id,
@@ -395,18 +432,30 @@ class FlowRunExecutor:
                     step_id=step.step_id,
                 )
                 if postclaim_decision.action == "return":
-                    return postclaim_decision.result or {"status": "skipped", "reason": "unknown"}
+                    return postclaim_decision.result or {
+                        "status": "skipped",
+                        "reason": "unknown",
+                    }
                 if postclaim_decision.action == "fail_step_missing":
                     await self.flow_run_repo.update_status(
                         run_id=run_id,
                         tenant_id=tenant_id,
                         status=FlowRunStatus.FAILED,
                         error_message=postclaim_decision.run_error_message,
-                        from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
+                        from_statuses=(
+                            FlowRunStatus.QUEUED.value,
+                            FlowRunStatus.RUNNING.value,
+                        ),
                     )
                     await self._commit()
-                    return postclaim_decision.result or {"status": "failed", "error": "step_missing"}
-                if postclaim_decision.action == "append_completed" and postclaim_decision.completed_result is not None:
+                    return postclaim_decision.result or {
+                        "status": "failed",
+                        "error": "step_missing",
+                    }
+                if (
+                    postclaim_decision.action == "append_completed"
+                    and postclaim_decision.completed_result is not None
+                ):
                     state.append_completed(postclaim_decision.completed_result)
                     continue
                 if postclaim_decision.action == "continue":
@@ -435,7 +484,11 @@ class FlowRunExecutor:
 
             logger.info(
                 "flow_executor.step_start run_id=%s step_order=%d step_id=%s input_type=%s output_type=%s",
-                run_id, step.step_order, step.step_id, step.input_type, step.output_type,
+                run_id,
+                step.step_order,
+                step.step_id,
+                step.input_type,
+                step.output_type,
             )
             try:
                 output = await self._execute_step(
@@ -445,14 +498,25 @@ class FlowRunExecutor:
                     version_metadata=version_metadata,
                 )
             except TypedIOValidationException as typed_exc:
-                contract_diag = None
+                contract_diag: dict[str, Any] | None = None
                 failed_input_payload = getattr(typed_exc, "input_payload_json", None)
                 resolved_input_source = step.input_source
                 if isinstance(failed_input_payload, dict):
-                    contract_diag = failed_input_payload.get("contract_validation")
-                    payload_source = failed_input_payload.get("input_source")
+                    failed_input_payload_dict = cast(
+                        dict[str, Any], failed_input_payload
+                    )
+                    raw_contract_diag = failed_input_payload_dict.get(
+                        "contract_validation"
+                    )
+                    contract_diag = (
+                        cast(dict[str, Any], raw_contract_diag)
+                        if isinstance(raw_contract_diag, dict)
+                        else None
+                    )
+                    payload_source = failed_input_payload_dict.get("input_source")
                     if isinstance(payload_source, str) and payload_source:
                         resolved_input_source = payload_source
+                    failed_input_payload = failed_input_payload_dict
                 else:
                     failed_input_payload = build_default_failed_input_payload(
                         input_source=step.input_source
@@ -464,10 +528,18 @@ class FlowRunExecutor:
                     step.input_type,
                     resolved_input_source,
                     typed_exc.code,
-                    contract_diag.get("schema_type_hint") if isinstance(contract_diag, dict) else None,
-                    contract_diag.get("parse_attempted") if isinstance(contract_diag, dict) else None,
-                    contract_diag.get("parse_succeeded") if isinstance(contract_diag, dict) else None,
-                    contract_diag.get("candidate_type") if isinstance(contract_diag, dict) else None,
+                    contract_diag.get("schema_type_hint")
+                    if isinstance(contract_diag, dict)
+                    else None,
+                    contract_diag.get("parse_attempted")
+                    if isinstance(contract_diag, dict)
+                    else None,
+                    contract_diag.get("parse_succeeded")
+                    if isinstance(contract_diag, dict)
+                    else None,
+                    contract_diag.get("candidate_type")
+                    if isinstance(contract_diag, dict)
+                    else None,
                     str(typed_exc),
                 )
                 return await self._handle_typed_step_failure(
@@ -477,12 +549,16 @@ class FlowRunExecutor:
                     attempt_no=attempt_no,
                     claimed=claimed_result,
                     typed_exc=typed_exc,
-                    failed_input_payload=failed_input_payload if isinstance(failed_input_payload, dict) else None,
+                    failed_input_payload=cast(
+                        dict[str, Any] | None, failed_input_payload
+                    ),
                 )
             except Exception as exc:
                 logger.exception(
                     "flow_executor.step_failed run_id=%s step_order=%d error=%s",
-                    run_id, step.step_order, str(exc),
+                    run_id,
+                    step.step_order,
+                    str(exc),
                 )
                 return await self._handle_generic_step_failure(
                     run_id=run_id,
@@ -562,7 +638,9 @@ class FlowRunExecutor:
                 )
                 state.completed_by_order[step.step_order] = step_result
 
-        results = await self.flow_run_repo.list_step_results(run_id=run_id, tenant_id=tenant_id)
+        results = await self.flow_run_repo.list_step_results(
+            run_id=run_id, tenant_id=tenant_id
+        )
         outcome = determine_run_outcome(results=results)
         if outcome.result_status == "skipped":
             return {"status": "skipped", "reason": outcome.reason}
@@ -604,9 +682,16 @@ class FlowRunExecutor:
 
         logger.info(
             "flow_executor.execute_step run_id=%s step_order=%d input_type=%s output_type=%s",
-            run.id, step.step_order, step.input_type, step.output_type,
+            run.id,
+            step.step_order,
+            step.input_type,
+            step.output_type,
         )
-        logger.debug("flow_executor.resolving_input run_id=%s step_order=%d", run.id, step.step_order)
+        logger.debug(
+            "flow_executor.resolving_input run_id=%s step_order=%d",
+            run.id,
+            step.step_order,
+        )
         if step.output_mode == "template_fill":
             template_fill_deps = TemplateFillRuntimeDeps(
                 variable_resolver=self.variable_resolver,
@@ -699,7 +784,9 @@ class FlowRunExecutor:
             public_error=f"Flow step {step.step_order} execution failed.",
         )
         await self._rollback()
-        await self.flow_repo.save_step_result(run_id, failure_plan.failed_result, tenant_id=tenant_id)
+        await self.flow_repo.save_step_result(
+            run_id, failure_plan.failed_result, tenant_id=tenant_id
+        )
         await self._mark_run_failed(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -721,7 +808,7 @@ class FlowRunExecutor:
         failed_prompt = getattr(typed_exc, "effective_prompt", None)
         failure_plan = build_typed_failure_plan(
             claimed=claimed,
-            error_code=typed_exc.code,
+            error_code=typed_exc.code or "typed_io_validation_failed",
             error_message=str(typed_exc),
             input_payload_json=failed_input_payload,
             effective_prompt=failed_prompt if isinstance(failed_prompt, str) else None,
@@ -736,7 +823,9 @@ class FlowRunExecutor:
             error_code=failure_plan.error_code,
             error_message=failure_plan.error_message,
         )
-        await self.flow_repo.save_step_result(run_id, failure_plan.failed_result, tenant_id=tenant_id)
+        await self.flow_repo.save_step_result(
+            run_id, failure_plan.failed_result, tenant_id=tenant_id
+        )
         await self._mark_run_failed(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -767,7 +856,9 @@ class FlowRunExecutor:
             error_code=failure_plan.error_code,
             error_message=failure_plan.error_message,
         )
-        await self.flow_repo.save_step_result(run_id, failure_plan.failed_result, tenant_id=tenant_id)
+        await self.flow_repo.save_step_result(
+            run_id, failure_plan.failed_result, tenant_id=tenant_id
+        )
         await self._mark_run_failed(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -786,7 +877,11 @@ class FlowRunExecutor:
         attempt_no: int,
     ) -> None:
         await self.flow_repo.save_step_result(run_id, step_result, tenant_id=tenant_id)
-        logger.info("flow_executor.step_completed run_id=%s step_order=%d", run_id, step.step_order)
+        logger.info(
+            "flow_executor.step_completed run_id=%s step_order=%d",
+            run_id,
+            step.step_order,
+        )
         await self.flow_run_repo.finish_attempt(
             run_id=run_id,
             step_id=step.step_id,
@@ -853,7 +948,9 @@ class FlowRunExecutor:
             delivered=False,
             error=str(error),
         )
-        await self.flow_repo.save_step_result(run_id, failed_result, tenant_id=tenant_id)
+        await self.flow_repo.save_step_result(
+            run_id, failed_result, tenant_id=tenant_id
+        )
         await self._mark_run_failed(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -872,7 +969,9 @@ class FlowRunExecutor:
             step_result=step_result,
             delivered=True,
         )
-        await self.flow_repo.save_step_result(run_id, delivered_result, tenant_id=tenant_id)
+        await self.flow_repo.save_step_result(
+            run_id, delivered_result, tenant_id=tenant_id
+        )
         await self._commit()
         return delivered_result
 
@@ -1038,7 +1137,9 @@ class FlowRunExecutor:
             preflight_resolved_ips=preflight_resolved_ips,
         )
 
-    async def _load_assistant(self, assistant_id: UUID, state: RunExecutionState | None = None) -> Any:
+    async def _load_assistant(
+        self, assistant_id: UUID, state: RunExecutionState | None = None
+    ) -> Any:
         if state and assistant_id in state.assistant_cache:
             return state.assistant_cache[assistant_id]
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)

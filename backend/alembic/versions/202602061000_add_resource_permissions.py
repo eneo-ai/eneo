@@ -6,12 +6,13 @@ Create Date: 2026-02-06 10:00:00.000000
 """
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
+
+from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "202602061000"
-down_revision = "202602041600"
+down_revision = "202602051000"
 branch_labels = None
 depends_on = None
 

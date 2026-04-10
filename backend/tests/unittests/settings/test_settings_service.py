@@ -162,6 +162,48 @@ async def test_get_flow_input_limits_reads_tenant_override(monkeypatch):
     assert limits.audio_max_size_bytes == 28_000_000
 
 
+async def test_get_flow_input_limits_resolved_returns_domain_limits(monkeypatch):
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "input_limits": {
+                    "file_max_size_bytes": 13_000_000,
+                    "audio_max_size_bytes": 29_000_000,
+                    "max_files_per_run": 7,
+                    "audio_max_files_per_run": 3,
+                }
+            }
+        }
+    )
+
+    monkeypatch.setattr(
+        "intric.flows.flow_input_limits.get_settings",
+        lambda: SimpleNamespace(
+            upload_max_file_size=10_000_000,
+            transcription_max_file_size=25_000_000,
+        ),
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    limits = await service.get_flow_input_limits_resolved()
+
+    assert limits.file_max_size_bytes == 13_000_000
+    assert limits.audio_max_size_bytes == 29_000_000
+    assert limits.max_files_per_run == 7
+    assert limits.audio_max_files_per_run == 3
+
+
 async def test_update_flow_input_limits_persists_and_audits(monkeypatch):
     repo = MockRepo()
     tenant_repo = MockTenantRepo()

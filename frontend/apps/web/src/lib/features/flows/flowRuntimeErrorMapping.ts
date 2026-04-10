@@ -25,11 +25,15 @@ const UPLOAD_ERROR_HINTS: Record<string, string> = {
   network: " Kontrollera din internetanslutning och försök igen."
 };
 
-export function classifyUploadError(message: string): "timeout" | "file_too_large" | "network" | "unknown" {
+export function classifyUploadError(
+  message: string
+): "timeout" | "file_too_large" | "network" | "unknown" {
   const lower = message.toLowerCase();
   if (lower.includes("timeout") || lower.includes("timed out")) return "timeout";
-  if (lower.includes("too large") || lower.includes("max") || lower.includes("storlek")) return "file_too_large";
-  if (lower.includes("network") || lower.includes("fetch") || lower.includes("nät")) return "network";
+  if (lower.includes("too large") || lower.includes("max") || lower.includes("storlek"))
+    return "file_too_large";
+  if (lower.includes("network") || lower.includes("fetch") || lower.includes("nät"))
+    return "network";
   return "unknown";
 }
 
@@ -82,6 +86,7 @@ const MIME_FRIENDLY_NAMES: Record<string, string> = {
   "application/vnd.ms-powerpoint": "PowerPoint",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PowerPoint (.pptx)",
   "text/csv": "CSV",
+  "application/csv": "CSV",
   "text/plain": "Text",
   "text/html": "HTML",
   "text/markdown": "Markdown",
@@ -105,5 +110,6 @@ const MIME_FRIENDLY_NAMES: Record<string, string> = {
 };
 
 export function friendlyMimeNames(mimetypes: string[]): string[] {
-  return mimetypes.map((mime) => MIME_FRIENDLY_NAMES[mime] ?? mime);
+  const names = mimetypes.map((mime) => MIME_FRIENDLY_NAMES[mime] ?? mime);
+  return [...new Set(names)];
 }

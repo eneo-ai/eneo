@@ -3,11 +3,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, cast
 
 from intric.flows.domain.flow import FlowRun, FlowStepResult
 from intric.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
-from intric.flows.runtime_input import build_runtime_input_config
 from intric.flows.runtime.input_files import (
     load_files_by_requested_ids,
     parse_requested_file_ids,
@@ -23,14 +22,20 @@ from intric.flows.runtime.transcription_runtime import (
     AudioRuntimeRequest,
     resolve_transcribe_and_attach_audio_input,
 )
-from intric.flows.template_reference_analyzer import analyze_template, consumes_runtime_input
+from intric.flows.runtime_input import build_runtime_input_config
+from intric.flows.template_reference_analyzer import (
+    analyze_template,
+    consumes_runtime_input,
+)
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 
 
 @dataclass(frozen=True)
 class StepInputResolutionDeps:
     variable_resolver: Any
-    resolve_http_input_source_text: Callable[..., Awaitable[tuple[str, dict[str, Any] | list[Any] | None]]]
+    resolve_http_input_source_text: Callable[
+        ..., Awaitable[tuple[str, dict[str, Any] | list[Any] | None]]
+    ]
     file_repo: Any
     user_id: Any
     transcriber: Any | None
@@ -55,7 +60,10 @@ async def resolve_step_input(
     version_metadata: dict[str, Any] | None = None,
     deps: StepInputResolutionDeps,
 ) -> StepInputValue:
-    if step.step_order == 1 and step.input_source in {"previous_step", "all_previous_steps"}:
+    if step.step_order == 1 and step.input_source in {
+        "previous_step",
+        "all_previous_steps",
+    }:
         raise TypedIOValidationException(
             "Step 1 cannot use previous_step/all_previous_steps input source. Use flow_input.",
             code="typed_io_invalid_input_source_position",
@@ -188,7 +196,9 @@ async def resolve_step_input(
                         severity="info",
                     )
                 )
-                if runtime_input_metadata is not None and not consumes_runtime_input(references):
+                if runtime_input_metadata is not None and not consumes_runtime_input(
+                    references
+                ):
                     raise TypedIOValidationException(
                         f"Step {step.step_order}: explicit runtime-input bindings must reference step_input.*",
                         code="flow_runtime_input_not_consumed",
@@ -206,10 +216,17 @@ async def resolve_step_input(
         raw_file_ids = (run.input_payload_json or {}).get("file_ids", [])
         deps.logger.info(
             "flow_executor.file_resolve run_id=%s step_order=%d input_type=%s file_ids=%s",
-            run.id, step.step_order, step.input_type, raw_file_ids,
+            run.id,
+            step.step_order,
+            step.input_type,
+            raw_file_ids,
         )
         requested_ids = parse_requested_file_ids(raw_file_ids=raw_file_ids)
-        if requested_ids and step.input_type != "audio" and deps.max_generic_files is not None:
+        if (
+            requested_ids
+            and step.input_type != "audio"
+            and deps.max_generic_files is not None
+        ):
             if len(requested_ids) > deps.max_generic_files:
                 raise TypedIOValidationException(
                     f"Step {step.step_order}: too many files "
@@ -225,7 +242,11 @@ async def resolve_step_input(
             )
             deps.logger.info(
                 "flow_executor.file_resolve_result run_id=%s step_order=%d requested=%d returned=%d missing=%s",
-                run.id, step.step_order, len(requested_ids), len(files), [],
+                run.id,
+                step.step_order,
+                len(requested_ids),
+                len(files),
+                [],
             )
         if step.input_type == "audio":
             if deps.transcriber is None:
@@ -333,7 +354,9 @@ async def resolve_step_input(
             has_substantive_input = bool(source_text.strip())
         else:
             for pr in prior_results:
-                if pr.step_order < step.step_order and isinstance(pr.output_payload_json, dict):
+                if pr.step_order < step.step_order and isinstance(
+                    pr.output_payload_json, dict
+                ):
                     if str(pr.output_payload_json.get("text", "")).strip():
                         has_substantive_input = True
                         break
@@ -367,9 +390,12 @@ def _resolve_runtime_requested_ids(*, run: FlowRun, step: RuntimeStep) -> list[A
     payload = run.input_payload_json or {}
     raw_step_inputs = payload.get("step_inputs")
     if isinstance(raw_step_inputs, dict):
-        raw_step_input = raw_step_inputs.get(str(step.step_id)) or raw_step_inputs.get(step.step_id)
+        raw_step_inputs_dict = cast(dict[str, Any], raw_step_inputs)
+        raw_step_input = raw_step_inputs_dict.get(str(step.step_id))
         if isinstance(raw_step_input, dict):
-            return parse_requested_file_ids(raw_file_ids=raw_step_input.get("file_ids"))
+            return parse_requested_file_ids(
+                raw_file_ids=cast(dict[str, Any], raw_step_input).get("file_ids")
+            )
     if step.step_order == 1:
         return parse_requested_file_ids(raw_file_ids=payload.get("file_ids"))
     return []
@@ -472,7 +498,11 @@ def _compose_runtime_and_chained_input(
 ) -> str:
     if replace_chain:
         return runtime_text
-    segments = [segment.strip() for segment in (runtime_text, chained_text) if segment and segment.strip()]
+    segments = [
+        segment.strip()
+        for segment in (runtime_text, chained_text)
+        if segment and segment.strip()
+    ]
     return "\n\n".join(segments)
 
 
@@ -501,7 +531,10 @@ def is_legacy_mirrored_question_binding(
     interpolated_question: str,
     assistant_prompt_text: str | None,
 ) -> bool:
-    if not isinstance(assistant_prompt_text, str) or assistant_prompt_text.strip() == "":
+    if (
+        not isinstance(assistant_prompt_text, str)
+        or assistant_prompt_text.strip() == ""
+    ):
         return False
     prompt_normalized = normalize_binding_text(assistant_prompt_text)
     return (
@@ -525,34 +558,42 @@ def resolve_input_source_text(
             return payload["text"]
         return json.dumps(payload, ensure_ascii=False)
     if input_source == "previous_step":
-        previous = next((item for item in prior_results if item.step_order == step_order - 1), None)
+        previous = next(
+            (item for item in prior_results if item.step_order == step_order - 1), None
+        )
         if previous and isinstance(previous.output_payload_json, dict):
             text = str(previous.output_payload_json.get("text", ""))
             if not text.strip():
                 logger.warning(
                     "flow_executor.empty_previous_step_input run_id=%s step_order=%d "
                     "previous_step_order=%d reason=previous_output_text_empty",
-                    run.id, step_order, step_order - 1,
+                    run.id,
+                    step_order,
+                    step_order - 1,
                 )
             return text
         logger.warning(
             "flow_executor.empty_previous_step_input run_id=%s step_order=%d "
             "previous_step_order=%d reason=%s",
-            run.id, step_order, step_order - 1,
+            run.id,
+            step_order,
+            step_order - 1,
             "no_previous_result" if previous is None else "output_not_dict",
         )
         return ""
     if input_source == "all_previous_steps":
         if state:
             return state.all_previous_text
-        parts = []
+        parts: list[str] = []
         for previous in sorted(prior_results, key=lambda item: item.step_order):
             if previous.step_order >= step_order:
                 continue
             text = ""
             if isinstance(previous.output_payload_json, dict):
                 text = str(previous.output_payload_json.get("text", ""))
-            parts.append(f"<step_{previous.step_order}_output>\n{text}\n</step_{previous.step_order}_output>")
+            parts.append(
+                f"<step_{previous.step_order}_output>\n{text}\n</step_{previous.step_order}_output>"
+            )
         return "\n".join(parts)
     if input_source in ("http_get", "http_post"):
         raise BadRequestException(

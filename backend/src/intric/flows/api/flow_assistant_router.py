@@ -5,18 +5,31 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request, status
 
-from intric.assistants.api.assistant_models import AssistantPublic, AssistantUpdatePublic
+from intric.assistants.api.assistant_assembler import AssistantAssembler
+from intric.assistants.api.assistant_models import (
+    AssistantPublic,
+    AssistantUpdatePublic,
+)
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import error_response
 from intric.flows.api.flow_models import FlowAssistantCreateRequest
+from intric.flows.application.flow_service import FlowService
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes, UnauthorizedException
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
+
+
+def _get_flow_service(container: Container) -> FlowService:
+    return container.flow_service()
+
+
+def _get_assistant_assembler(container: Container) -> AssistantAssembler:
+    return container.assistant_assembler()
 
 
 async def _require_flow_assistant_access(
@@ -64,14 +77,19 @@ async def _require_flow_assistant_access(
     },
 )
 async def create_flow_assistant(
-    id: Annotated[UUID, Path(description="Identifier of the flow that will own the new flow-managed assistant.")],
+    id: Annotated[
+        UUID,
+        Path(
+            description="Identifier of the flow that will own the new flow-managed assistant."
+        ),
+    ],
     request: Request,
     assistant_in: FlowAssistantCreateRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
     await _require_flow_assistant_access(request, container, flow_id=id)
-    flow_service = container.flow_service()
-    assistant_assembler = container.assistant_assembler()
+    flow_service = _get_flow_service(container)
+    assistant_assembler = _get_assistant_assembler(container)
     user = container.user()
 
     created_assistant, permissions = await flow_service.create_flow_assistant(
@@ -91,7 +109,9 @@ async def create_flow_assistant(
             extra={"flow_id": str(id), "origin": "flow_managed"},
         ),
     )
-    return assistant_assembler.from_assistant_to_model(created_assistant, permissions=permissions)
+    return assistant_assembler.from_assistant_to_model(
+        created_assistant, permissions=permissions
+    )
 
 
 @router.get(
@@ -118,19 +138,26 @@ async def create_flow_assistant(
     },
 )
 async def get_flow_assistant(
-    id: Annotated[UUID, Path(description="Identifier of the flow that owns the requested assistant.")],
-    assistant_id: Annotated[UUID, Path(description="Identifier of the flow-managed assistant to return.")],
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the flow that owns the requested assistant."),
+    ],
+    assistant_id: Annotated[
+        UUID, Path(description="Identifier of the flow-managed assistant to return.")
+    ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
     await _require_flow_assistant_access(request, container, flow_id=id)
-    flow_service = container.flow_service()
-    assistant_assembler = container.assistant_assembler()
+    flow_service = _get_flow_service(container)
+    assistant_assembler = _get_assistant_assembler(container)
     assistant, permissions = await flow_service.get_flow_assistant(
         flow_id=id,
         assistant_id=assistant_id,
     )
-    return assistant_assembler.from_assistant_to_model(assistant, permissions=permissions)
+    return assistant_assembler.from_assistant_to_model(
+        assistant, permissions=permissions
+    )
 
 
 @router.patch(
@@ -157,15 +184,20 @@ async def get_flow_assistant(
     },
 )
 async def update_flow_assistant(
-    id: Annotated[UUID, Path(description="Identifier of the flow that owns the assistant to update.")],
-    assistant_id: Annotated[UUID, Path(description="Identifier of the flow-managed assistant to update.")],
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the flow that owns the assistant to update."),
+    ],
+    assistant_id: Annotated[
+        UUID, Path(description="Identifier of the flow-managed assistant to update.")
+    ],
     request: Request,
     assistant_in: AssistantUpdatePublic,
     container: Container = Depends(get_container(with_user=True)),
 ):
     await _require_flow_assistant_access(request, container, flow_id=id)
-    flow_service = container.flow_service()
-    assistant_assembler = container.assistant_assembler()
+    flow_service = _get_flow_service(container)
+    assistant_assembler = _get_assistant_assembler(container)
     user = container.user()
     update_payload = common.extract_assistant_update_payload(assistant_in)
 
@@ -187,7 +219,9 @@ async def update_flow_assistant(
             extra={"flow_id": str(id), "origin": "flow_managed"},
         ),
     )
-    return assistant_assembler.from_assistant_to_model(updated_assistant, permissions=permissions)
+    return assistant_assembler.from_assistant_to_model(
+        updated_assistant, permissions=permissions
+    )
 
 
 @router.delete(
@@ -213,15 +247,22 @@ async def update_flow_assistant(
     },
 )
 async def delete_flow_assistant(
-    id: Annotated[UUID, Path(description="Identifier of the flow that owns the assistant to delete.")],
-    assistant_id: Annotated[UUID, Path(description="Identifier of the flow-managed assistant to delete.")],
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the flow that owns the assistant to delete."),
+    ],
+    assistant_id: Annotated[
+        UUID, Path(description="Identifier of the flow-managed assistant to delete.")
+    ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
     await _require_flow_assistant_access(request, container, flow_id=id)
-    flow_service = container.flow_service()
+    flow_service = _get_flow_service(container)
     user = container.user()
-    assistant, _ = await flow_service.get_flow_assistant(flow_id=id, assistant_id=assistant_id)
+    assistant, _ = await flow_service.get_flow_assistant(
+        flow_id=id, assistant_id=assistant_id
+    )
     await flow_service.delete_flow_assistant(flow_id=id, assistant_id=assistant_id)
 
     await container.audit_service().log_async(
