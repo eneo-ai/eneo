@@ -38,9 +38,6 @@ class MockFeatureFlagService:
     async def check_is_feature_enabled_fail_closed(
         self, feature_name: str, tenant_id=None
     ):
-        # Scope enforcement is fail-closed by default when no explicit flag exists.
-        if feature_name == "api_key_scope_enforcement":
-            return True
         return False
 
 

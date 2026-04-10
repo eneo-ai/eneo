@@ -84,8 +84,6 @@
   let trackingConfigLoaded = $state(false);
   let apiKeyUsedTrackingEnabled = $state(false);
   let apiKeyAuthFailedTrackingEnabled = $state(true);
-  let scopeEnforcementEnabled = $state(true);
-  let strictModeEnabled = $state(false);
   let expiryNotificationsEnabled = $state(true);
   let tenantSettingsLoading = $state(false);
   let notificationPolicyLoading = $state(false);
@@ -561,8 +559,6 @@
     tenantSettingsLoading = true;
     try {
       const settings = await intric.settings.get();
-      scopeEnforcementEnabled = settings.api_key_scope_enforcement ?? true;
-      strictModeEnabled = settings.api_key_strict_mode ?? false;
       expiryNotificationsEnabled = settings.api_key_expiry_notifications ?? true;
     } catch (error) {
       console.error(error);
@@ -596,31 +592,6 @@
       console.error(error);
     } finally {
       notificationPolicyLoading = false;
-    }
-  }
-
-  async function toggleScopeEnforcement({ current, next }: { current: boolean; next: boolean }) {
-    scopeEnforcementEnabled = next;
-    try {
-      const updated = await intric.settings.updateScopeEnforcement(next);
-      scopeEnforcementEnabled = updated.api_key_scope_enforcement ?? true;
-      strictModeEnabled = updated.api_key_strict_mode ?? false;
-    } catch (error) {
-      console.error(error);
-      scopeEnforcementEnabled = current;
-      errorMessage = getErrorMessage(error);
-    }
-  }
-
-  async function toggleStrictMode({ current, next }: { current: boolean; next: boolean }) {
-    strictModeEnabled = next;
-    try {
-      const updated = await intric.settings.updateStrictMode(next);
-      strictModeEnabled = updated.api_key_strict_mode ?? false;
-    } catch (error) {
-      console.error(error);
-      strictModeEnabled = current;
-      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -1200,38 +1171,6 @@
 
         <!-- API key settings and feature flags -->
         <Settings.Group title={m.api_keys_admin_runtime_settings_title()}>
-          <Settings.Row
-            title={m.enable_scope_enforcement()}
-            description={m.enable_scope_enforcement_description()}
-          >
-            <Switch
-              checked={scopeEnforcementEnabled}
-              onCheckedChange={(next) => {
-                const current = scopeEnforcementEnabled;
-                scopeEnforcementEnabled = next;
-                void toggleScopeEnforcement({ current, next });
-              }}
-              disabled={tenantSettingsLoading}
-              aria-label={m.enable_scope_enforcement()}
-            />
-          </Settings.Row>
-          <Settings.Row
-            title={m.enable_strict_mode()}
-            description={scopeEnforcementEnabled
-              ? m.enable_strict_mode_description()
-              : m.enable_strict_mode_requires_scope_enforcement()}
-          >
-            <Switch
-              checked={strictModeEnabled}
-              onCheckedChange={(next) => {
-                const current = strictModeEnabled;
-                strictModeEnabled = next;
-                void toggleStrictMode({ current, next });
-              }}
-              disabled={!scopeEnforcementEnabled || tenantSettingsLoading}
-              aria-label={m.enable_strict_mode()}
-            />
-          </Settings.Row>
           <Settings.Row
             title={m.api_keys_notifications_feature_flag_title()}
             description={m.api_keys_notifications_feature_flag_description()}

@@ -13,13 +13,9 @@ Scope enforcement defaults to True (env flag + feature flag fail-closed).
 
 from __future__ import annotations
 
-from contextlib import contextmanager, nullcontext
-from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
-from intric.main.config import get_settings, set_settings
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -103,6 +99,7 @@ async def _create_assistant_with_prompt(
 ) -> tuple[str, str]:
     """Create assistant and seed a selected prompt mapping; return (assistant_id, prompt_id)."""
     import sqlalchemy as sa
+
     from intric.database.tables.prompts_table import Prompts, PromptsAssistants
 
     resp = await client.post(
@@ -277,30 +274,6 @@ def _error_code_from_response(response) -> str | None:
             return code
         current = current.get("detail")
     return None
-
-
-@contextmanager
-def _scope_enforcement_kill_switch(mode: str):
-    """Temporarily disable scope enforcement using env-off or tenant-flag-off mode."""
-    if mode not in {"env_off", "tenant_flag_off"}:
-        raise ValueError(f"Unsupported mode: {mode}")
-
-    settings = get_settings()
-    patched = settings.model_copy(update={"api_key_enforce_scope": mode != "env_off"})
-    set_settings(patched)
-    tenant_patch = (
-        patch(
-            "intric.users.user_service.UserService._is_scope_enforcement_enabled",
-            new=AsyncMock(return_value=False),
-        )
-        if mode == "tenant_flag_off"
-        else nullcontext()
-    )
-    try:
-        with tenant_patch:
-            yield
-    finally:
-        set_settings(settings)
 
 
 # ---------------------------------------------------------------------------
@@ -1114,151 +1087,3 @@ async def test_tenant_admin_key_delete_files_not_blocked_by_scope(
     assert resp.status_code == 404, (
         f"Expected 404 for non-existent file, got {resp.status_code}"
     )
-
-
-# ---------------------------------------------------------------------------
-# Kill-switch OFF behavior (env OFF or tenant flag OFF)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kill_switch_mode", ["env_off", "tenant_flag_off"])
-async def test_kill_switch_off_disables_scope_list_filtering(
-    api_client, bearer_token, db_container, default_user, kill_switch_mode
-):
-    """When scope enforcement is off, scoped keys should see cross-space list results."""
-    space_a = await _create_space(
-        api_client, token=bearer_token, name=f"ks-{kill_switch_mode}-A"
-    )
-    space_b = await _create_space(
-        api_client, token=bearer_token, name=f"ks-{kill_switch_mode}-B"
-    )
-
-    asst_a = await _create_assistant(api_client, token=bearer_token, space_id=space_a)
-    asst_b = await _create_assistant(api_client, token=bearer_token, space_id=space_b)
-    group_a = await _create_group(api_client, token=bearer_token, space_id=space_a)
-    group_b = await _create_group(api_client, token=bearer_token, space_id=space_b)
-    blob_a = await _seed_info_blob(
-        db_container,
-        user_id=default_user.id,
-        tenant_id=default_user.tenant_id,
-        group_id=group_a,
-        text=f"kill-switch-{kill_switch_mode}-blob-a",
-    )
-    blob_b = await _seed_info_blob(
-        db_container,
-        user_id=default_user.id,
-        tenant_id=default_user.tenant_id,
-        group_id=group_b,
-        text=f"kill-switch-{kill_switch_mode}-blob-b",
-    )
-
-    key_a = await _create_api_key(
-        api_client,
-        token=bearer_token,
-        scope_type="space",
-        scope_id=space_a,
-        permission="read",
-    )
-
-    with _scope_enforcement_kill_switch(kill_switch_mode):
-        resp_assistants = await api_client.get(
-            "/api/v1/assistants/",
-            headers={"X-API-Key": key_a},
-        )
-        assert resp_assistants.status_code == 200, resp_assistants.text
-        assistant_ids = {item["id"] for item in resp_assistants.json()["items"]}
-        assert asst_a in assistant_ids
-        assert asst_b in assistant_ids
-
-        resp_spaces = await api_client.get(
-            "/api/v1/spaces/",
-            headers={"X-API-Key": key_a},
-        )
-        assert resp_spaces.status_code == 200, resp_spaces.text
-        space_ids = {item["id"] for item in resp_spaces.json()["items"]}
-        assert space_a in space_ids
-        assert space_b in space_ids
-
-        resp_dashboard = await api_client.get(
-            "/api/v1/dashboard/",
-            headers={"X-API-Key": key_a},
-        )
-        assert resp_dashboard.status_code == 200, resp_dashboard.text
-        dashboard_space_ids = {
-            item["id"] for item in resp_dashboard.json()["spaces"]["items"]
-        }
-        assert space_a in dashboard_space_ids
-        assert space_b in dashboard_space_ids
-
-        resp_blobs = await api_client.get(
-            "/api/v1/info-blobs/",
-            headers={"X-API-Key": key_a},
-        )
-        assert resp_blobs.status_code == 200, resp_blobs.text
-        blob_ids = {item["id"] for item in resp_blobs.json()["items"]}
-        assert blob_a in blob_ids
-        assert blob_b in blob_ids
-
-        resp_groups = await api_client.get(
-            "/api/v1/groups/",
-            headers={"X-API-Key": key_a},
-        )
-        assert resp_groups.status_code == 200, resp_groups.text
-        group_ids = {item["id"] for item in resp_groups.json()["items"]}
-        assert group_a in group_ids
-        assert group_b in group_ids
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kill_switch_mode", ["env_off", "tenant_flag_off"])
-async def test_kill_switch_off_allows_cross_space_assistant_create(
-    api_client, bearer_token, kill_switch_mode
-):
-    """When scope enforcement is off, foreign-space create should not be scope-blocked."""
-    space_a = await _create_space(api_client, token=bearer_token)
-    space_b = await _create_space(api_client, token=bearer_token)
-
-    key_a = await _create_api_key(
-        api_client,
-        token=bearer_token,
-        scope_type="space",
-        scope_id=space_a,
-        permission="write",
-    )
-
-    with _scope_enforcement_kill_switch(kill_switch_mode):
-        resp = await api_client.post(
-            "/api/v1/assistants/",
-            json={"name": f"ks-{kill_switch_mode}-cross-space", "space_id": space_b},
-            headers={"X-API-Key": key_a},
-        )
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["space_id"] == space_b
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kill_switch_mode", ["env_off", "tenant_flag_off"])
-async def test_kill_switch_off_delete_file_not_scope_blocked(
-    api_client, bearer_token, kill_switch_mode
-):
-    """When scope enforcement is off, DELETE /files/{id} should pass scope guard."""
-    space = await _create_space(api_client, token=bearer_token)
-    key = await _create_api_key(
-        api_client,
-        token=bearer_token,
-        scope_type="space",
-        scope_id=space,
-        permission="admin",
-    )
-
-    with _scope_enforcement_kill_switch(kill_switch_mode):
-        resp = await api_client.delete(
-            f"/api/v1/files/{uuid4()}/",
-            headers={"X-API-Key": key},
-        )
-        assert resp.status_code != 403, resp.text
-        assert _error_code_from_response(resp) != "insufficient_scope"

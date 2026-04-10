@@ -79,10 +79,13 @@
 
       // Only show alert if there were errors
       if (response.failed > 0) {
+        const errorMessages = response.errors
+          .map((e: { error?: string }) => e.error)
+          .filter(Boolean);
+        const detail = errorMessages.length > 0 ? `: ${errorMessages.join(", ")}` : "";
         toast.error(
-          `${response.queued} website${response.queued > 1 ? "s" : ""} queued, ${response.failed} failed. Check console for error details.`
+          `${response.queued} website${response.queued !== 1 ? "s" : ""} queued, ${response.failed} failed${detail}`
         );
-        console.error("Bulk recrawl errors:", response.errors);
       }
 
       // Clear selection and refresh

@@ -10,7 +10,6 @@ from intric.services.output_parsing.pydantic_model_factory import PydanticModelF
 from intric.services.service import (
     CreateSpaceService,
     Service,
-    ServiceBase,
     ServiceCreate,
     ServiceCreatePublic,
     ServiceUpdate,
@@ -49,13 +48,13 @@ class ServiceService:
         self.completion_model_crud_service = completion_model_crud_service
         self.actor_manager = actor_manager
 
-    async def _validate(self, service: ServiceBase):
+    async def _validate(self, service: ServiceCreate | ServiceUpdate):
         if service.json_schema is not None:
             PydanticModelFactory(service.json_schema).validate_schema()
 
-        if service.completion_model_id is not None:  # type: ignore[attr-defined]
+        if service.completion_model_id is not None:  # pyright: ignore[reportUnnecessaryComparison]  # @partial_model makes fields Optional at runtime
             await self.completion_model_crud_service.get_completion_model(
-                service.completion_model_id  # type: ignore[attr-defined]
+                service.completion_model_id
             )
 
     async def _validate_same_embedding_model(

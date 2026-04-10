@@ -346,6 +346,10 @@ class SpaceFactory:
                     ),
                     None,
                 ),
+                # NOTE: These are Collection domain objects cast to GroupInDBBase
+                # to satisfy Service.groups typing. Downstream code (e.g.
+                # service_runner.py) must cast back to Collection before
+                # accessing Collection-specific attributes like .embedding_model.
                 groups=cast(
                     "list[GroupInDBBase]",
                     [

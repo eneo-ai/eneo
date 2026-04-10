@@ -603,8 +603,9 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                 # DEBUG: Log message details
                 logger.debug(f"[DEBUG] Message: {msg}")
-                if msg.reasoning_content:
-                    logger.debug(f"[DEBUG] reasoning_content: {msg.reasoning_content}")
+                reasoning = getattr(msg, "reasoning_content", None)
+                if reasoning:
+                    logger.debug(f"[DEBUG] reasoning_content: {reasoning}")
 
                 # Check if model wants to call MCP tools
                 if msg.tool_calls and mcp_proxy:

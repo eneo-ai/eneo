@@ -120,23 +120,23 @@ class AssistantCreatePublic(AssistantBase):
         deprecated=True,
         description="This field is deprecated and will be ignored",
     )
-    groups: list[UUID] = Field(
-        default_factory=_empty_uuid_list,
+    groups: list[ModelId] = Field(
+        default_factory=lambda: list[ModelId](),
         deprecated=True,
         description="This field is deprecated and will be ignored",
     )
-    websites: list[UUID] = Field(
-        default_factory=_empty_uuid_list,
+    websites: list[ModelId] = Field(
+        default_factory=lambda: list[ModelId](),
         deprecated=True,
         description="This field is deprecated and will be ignored",
     )
-    integration_knowledge_list: list[UUID] = Field(
-        default_factory=_empty_uuid_list,
+    integration_knowledge_list: list[ModelId] = Field(
+        default_factory=lambda: list[ModelId](),
         deprecated=True,
         description="This field is deprecated and will be ignored",
     )
-    mcp_servers: list[UUID] = Field(
-        default_factory=_empty_uuid_list,
+    mcp_servers: list[ModelId] = Field(
+        default_factory=lambda: list[ModelId](),
         deprecated=True,
         description="This field is deprecated and will be ignored",
     )
@@ -166,6 +166,10 @@ class AssistantCreatePublic(AssistantBase):
 class AssistantUpdatePublic(AssistantCreatePublic):
     prompt: Optional[PromptCreate] = None
     attachments: Optional[list[ModelId]] = None
+    groups: Optional[list[ModelId]] = None  # type: ignore[assignment]
+    websites: Optional[list[ModelId]] = None  # type: ignore[assignment]
+    integration_knowledge_list: Optional[list[ModelId]] = None  # type: ignore[assignment]
+    mcp_servers: Optional[list[ModelId]] = None  # type: ignore[assignment]
     mcp_tools: Optional[list[MCPToolSetting]] = None
     description: Optional[str] = Field(  # type: ignore[call-overload]
         default=NOT_PROVIDED,

@@ -247,13 +247,21 @@ async def update_assistant(
     if assistant.attachments is not None:
         attachment_ids = [attachment.id for attachment in assistant.attachments]
 
-    groups = list(assistant.groups)
+    groups = None
+    if assistant.groups is not None:
+        groups = [g.id for g in assistant.groups]
 
-    websites = list(assistant.websites)
+    websites = None
+    if assistant.websites is not None:
+        websites = [w.id for w in assistant.websites]
 
-    integration_knowledge_ids = list(assistant.integration_knowledge_list)
+    integration_knowledge_ids = None
+    if assistant.integration_knowledge_list is not None:
+        integration_knowledge_ids = [i.id for i in assistant.integration_knowledge_list]
 
-    mcp_server_ids = list(assistant.mcp_servers)
+    mcp_server_ids = None
+    if assistant.mcp_servers is not None:
+        mcp_server_ids = [m.id for m in assistant.mcp_servers]
 
     mcp_tool_settings = None
     if assistant.mcp_tools is not None:

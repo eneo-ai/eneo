@@ -891,19 +891,8 @@ class UserService:
         request.state.api_key_scope_id = resolved.key.scope_id
         request.state.api_key_resource_permissions = resolved.key.resource_permissions
 
-        # Evaluate scope enforcement once and stash result for downstream router-level
-        # filters (list/create validation) and deferred delete guard enforcement.
-        scope_enforcement_enabled = False
-        if settings.api_key_enforce_scope:
-            scope_enforcement_enabled = await self._is_scope_enforcement_enabled(
-                user.tenant_id
-            )
-        request.state.scope_enforcement_enabled = scope_enforcement_enabled
-
         # Deferred tenant-scope-for-delete check (stashed by router-level dep)
-        if scope_enforcement_enabled and getattr(
-            request.state, "_require_tenant_scope_for_delete", False
-        ):
+        if getattr(request.state, "_require_tenant_scope_for_delete", False):
             scope_type_str = (
                 resolved.key.scope_type.value
                 if hasattr(resolved.key.scope_type, "value")
@@ -983,32 +972,29 @@ class UserService:
                 )
                 raise
 
-        # Scope enforcement (gated by env flag AND tenant feature flag)
-        if scope_enforcement_enabled:
-            strict_mode_enabled = await self._is_strict_mode_enabled(user.tenant_id)
-            scope_config = getattr(request.state, "_scope_check_config", None)
-            if (
-                scope_config is not None
-                and resolved.key.scope_type != ApiKeyScopeType.TENANT.value
-            ):
-                try:
-                    await self._enforce_api_key_scope(
-                        request,
-                        resolved.key,
-                        scope_config,
-                        strict_mode=strict_mode_enabled,
-                    )
-                except ApiKeyValidationError as exc:
-                    await self._log_api_key_auth_failed(
-                        user,
-                        resolved.key,
-                        exc,
-                        ip_address=ip_address,
-                        request_id=request_id,
-                        user_agent=user_agent,
-                        request=request,
-                    )
-                    raise
+        # Scope enforcement (always active)
+        scope_config = getattr(request.state, "_scope_check_config", None)
+        if (
+            scope_config is not None
+            and resolved.key.scope_type != ApiKeyScopeType.TENANT.value
+        ):
+            try:
+                await self._enforce_api_key_scope(
+                    request,
+                    resolved.key,
+                    scope_config,
+                )
+            except ApiKeyValidationError as exc:
+                await self._log_api_key_auth_failed(
+                    user,
+                    resolved.key,
+                    exc,
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                    request=request,
+                )
+                raise
 
         await self._maybe_log_api_key_used(
             user,
@@ -1116,38 +1102,6 @@ class UserService:
         )
 
     # --- Scope enforcement (Phase 3) ---
-
-    async def _is_scope_enforcement_enabled(self, tenant_id: UUID) -> bool:
-        """Check if scope enforcement is enabled for tenant.
-
-        Security controls fail-closed: missing flag row defaults to enforced.
-        """
-        if self.feature_flag_service is None:
-            logger.warning(
-                "feature_flag_service not available, defaulting to scope enforced"
-            )
-            return True
-
-        return await self.feature_flag_service.check_is_feature_enabled_fail_closed(
-            feature_name="api_key_scope_enforcement",
-            tenant_id=tenant_id,
-        )
-
-    async def _is_strict_mode_enabled(self, tenant_id: UUID) -> bool:
-        """Check if strict mode is enabled for tenant.
-
-        Strict mode defaults OFF when the flag row is missing to support staged rollout.
-        """
-        if self.feature_flag_service is None:
-            logger.warning(
-                "feature_flag_service not available, defaulting strict mode to disabled"
-            )
-            return False
-
-        return await self.feature_flag_service.check_is_feature_enabled(
-            feature_name="api_key_strict_mode",
-            tenant_id=tenant_id,
-        )
 
     async def _resolve_space_id_for_resource(
         self,
@@ -1325,20 +1279,11 @@ class UserService:
 
         return None, None
 
-    def _strict_scope_hint(self, *, resource_type: str, path_param: str | None) -> str:
-        if path_param is not None:
-            return f"path parameter '{path_param}'"
-        if resource_type == "info_blob":
-            return "path parameter 'id' or 'space_id'"
-        return "a deterministic scoped path parameter"
-
     async def _enforce_api_key_scope(
         self,
         request: Request,
         key: ApiKeyV2InDB,
         scope_config: dict[str, object],
-        *,
-        strict_mode: bool = False,
     ) -> None:
         """Enforce API key scope restrictions.
 
@@ -1347,7 +1292,6 @@ class UserService:
         """
         resource_type = cast(str, scope_config["resource_type"])
         path_param = cast("str | None", scope_config["path_param"])
-        self_filtering = cast(bool, scope_config.get("self_filtering", False))
         scope_type = ApiKeyScopeType(key.scope_type)
 
         # 1. Tenant-scoped keys always pass (fast path)
@@ -1374,20 +1318,6 @@ class UserService:
 
         # 4. LIST-ENDPOINT RULES (no resource_id in path)
         if resource_id is None:
-            # Files are intentionally user-scoped (not space-scoped). They are allowed for
-            # scoped keys on GET/POST and restricted on DELETE by a separate tenant-only guard.
-            # Keep strict-mode protections for all other ambiguous list endpoints.
-            if strict_mode and not self_filtering and resource_type != "file":
-                raise ApiKeyValidationError(
-                    status_code=403,
-                    code="insufficient_scope",
-                    message=(
-                        f"API key is scoped to {key.scope_type} '{key.scope_id}'. "
-                        f"Strict mode requires deterministic scope filtering for "
-                        f"resource type '{resource_type}'. "
-                        f"Expected {self._strict_scope_hint(resource_type=resource_type, path_param=path_param)}."
-                    ),
-                )
             if scope_type == ApiKeyScopeType.SPACE:
                 # Space-scoped: pass — service layer filters by space membership
                 return

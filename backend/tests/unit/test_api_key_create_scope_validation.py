@@ -18,7 +18,6 @@ from starlette.datastructures import State
 
 from intric.authentication.auth_dependencies import ScopeFilter, get_scope_filter
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -127,19 +126,6 @@ class TestCreateAssistantScopeValidation:
         assert scope_filter.space_id is None
         _simulate_create_assistant_scope_check(scope_filter, uuid4())
 
-    def test_scope_enforcement_off_create_mismatch_not_blocked(self):
-        """Kill-switch OFF: space mismatch check should not trigger from scope filter."""
-        request = _make_request(
-            scope_type="space",
-            scope_id=uuid4(),
-            scope_enforcement_enabled=False,
-        )
-        scope_filter = get_scope_filter(request)
-
-        assert scope_filter.scope_type is None
-        assert scope_filter.space_id is None
-        _simulate_create_assistant_scope_check(scope_filter, uuid4())
-
 
 class TestScopeFilterExtraction:
     """Verify get_scope_filter correctly extracts scope from request state."""
@@ -174,19 +160,7 @@ class TestScopeFilterExtraction:
         assert sf.space_id is None
         assert sf.assistant_id is None
 
-    def test_scope_enforcement_disabled_returns_empty_even_with_scope_state(self):
-        space_id = uuid4()
-        request = _make_request(
-            scope_type="space",
-            scope_id=space_id,
-            scope_enforcement_enabled=False,
-        )
-        sf = get_scope_filter(request)
-        assert sf.scope_type is None
-        assert sf.space_id is None
-        assert sf.assistant_id is None
-
-    def test_scope_enforcement_enabled_preserves_scope_extraction(self):
+    def test_scope_enforcement_preserves_scope_extraction(self):
         space_id = uuid4()
         request = _make_request(
             scope_type="space",
