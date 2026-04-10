@@ -1,8 +1,7 @@
 <script lang="ts">
   import type { FlowStep } from "@intric/intric-js";
-  import { createEventDispatcher } from "svelte";
   import { IconTrash } from "@intric/icons/trash";
-  import { Badge } from "@eneo/ui";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
   import {
@@ -11,15 +10,31 @@
     getTemplateFillTemplateName
   } from "$lib/features/flows/templateFillConfig";
 
-  export let step: FlowStep;
-  export let isActive: boolean;
-  export let isPublished: boolean;
-  export let isPowerUser: boolean;
-  export let canMoveUp: boolean;
-  export let canMoveDown: boolean;
-  export let hasValidationError: boolean = false;
-
-  const dispatch = createEventDispatcher();
+  let {
+    step,
+    isActive,
+    isPublished,
+    isPowerUser,
+    canMoveUp,
+    canMoveDown,
+    hasValidationError = false,
+    onClick,
+    onMoveUp,
+    onMoveDown,
+    onRemove
+  }: {
+    step: FlowStep;
+    isActive: boolean;
+    isPublished: boolean;
+    isPowerUser: boolean;
+    canMoveUp: boolean;
+    canMoveDown: boolean;
+    hasValidationError?: boolean;
+    onClick?: () => void;
+    onMoveUp?: () => void;
+    onMoveDown?: () => void;
+    onRemove?: () => void;
+  } = $props();
 
   const INPUT_SOURCE_LABELS: Record<string, () => string> = {
     flow_input: () => m.flow_input_source_flow_input(),
@@ -30,17 +45,17 @@
   function handleKeydown(e: KeyboardEvent) {
     if ((e.key === "Enter" || e.key === " ") && !e.altKey) {
       e.preventDefault();
-      dispatch("click");
+      onClick?.();
       return;
     }
     if (isPublished) return;
     if (e.altKey && e.key === "ArrowUp" && canMoveUp) {
       e.preventDefault();
-      dispatch("moveUp");
+      onMoveUp?.();
     }
     if (e.altKey && e.key === "ArrowDown" && canMoveDown) {
       e.preventDefault();
-      dispatch("moveDown");
+      onMoveDown?.();
     }
   }
 
@@ -81,19 +96,21 @@
     docx: "bg-warning-dimmer text-warning-stronger"
   };
 
-  $: label =
-    step.user_description || m.flow_step_fallback_label({ order: String(step.step_order) });
-  $: inputLabel = INPUT_SOURCE_LABELS[step.input_source]?.() ?? step.input_source;
-  $: outputLabel = OUTPUT_TYPE_LABELS[step.output_type]?.() ?? step.output_type;
-  $: railOutputLabel = RAIL_OUTPUT_LABELS[step.output_type] ?? outputLabel;
-  $: nextChannelLabel =
+  const label = $derived(
+    step.user_description || m.flow_step_fallback_label({ order: String(step.step_order) })
+  );
+  const inputLabel = $derived(INPUT_SOURCE_LABELS[step.input_source]?.() ?? step.input_source);
+  const outputLabel = $derived(OUTPUT_TYPE_LABELS[step.output_type]?.() ?? step.output_type);
+  const railOutputLabel = $derived(RAIL_OUTPUT_LABELS[step.output_type] ?? outputLabel);
+  const nextChannelLabel = $derived(
     step.output_mode === "transcribe_only"
       ? m.flow_step_summary_next_channel_transcript_short()
       : getDownstreamKindForOutput(step.output_type) === "text_and_structured"
         ? m.flow_step_summary_next_channel_text_and_structured_short()
-        : m.flow_step_summary_next_channel_text_short();
-  $: inputTypeLabel = INPUT_TYPE_LABELS[step.input_type]?.() ?? step.input_type;
-  $: sourceSummary = (() => {
+        : m.flow_step_summary_next_channel_text_short()
+  );
+  const inputTypeLabel = $derived(INPUT_TYPE_LABELS[step.input_type]?.() ?? step.input_type);
+  const sourceSummary = $derived.by(() => {
     if (step.output_mode === "template_fill") {
       return getTemplateFillTemplateName(step) ?? m.flow_template_fill_card_secondary();
     }
@@ -111,13 +128,18 @@
       default:
         return inputLabel;
     }
-  })();
-  $: inputBadgeClass = INPUT_BADGE_CLASSES[step.input_type] ?? "bg-hover-dimmer text-secondary";
-  $: outputBadgeClass = OUTPUT_BADGE_CLASSES[step.output_type] ?? "bg-hover-dimmer text-secondary";
-  $: templateReadiness =
+  });
+  const inputBadgeClass = $derived(
+    INPUT_BADGE_CLASSES[step.input_type] ?? "bg-hover-dimmer text-secondary"
+  );
+  const outputBadgeClass = $derived(
+    OUTPUT_BADGE_CLASSES[step.output_type] ?? "bg-hover-dimmer text-secondary"
+  );
+  const templateReadiness = $derived(
     step.output_mode === "template_fill"
       ? getTemplateFillReadiness(getTemplateFillOutputConfig(step))
-      : null;
+      : null
+  );
 </script>
 
 <div
@@ -130,8 +152,8 @@
     type="button"
     class="focus-visible:ring-accent-default flex min-w-0 flex-1 items-start gap-2.5 rounded text-left focus-visible:ring-2 focus-visible:outline-none"
     aria-current={isActive ? "true" : undefined}
-    on:click={() => dispatch("click")}
-    on:keydown={handleKeydown}
+    onclick={() => onClick?.()}
+    onkeydown={handleKeydown}
   >
     <!-- Step order badge — filled circle -->
     <div
@@ -214,7 +236,10 @@
       <button
         type="button"
         class="text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
-        on:click|stopPropagation={() => dispatch("moveUp")}
+        onclick={(e) => {
+          e.stopPropagation();
+          onMoveUp?.();
+        }}
         disabled={!canMoveUp}
         title={m.flow_step_move_up()}
         aria-label={m.flow_step_move_up()}
@@ -234,7 +259,10 @@
       <button
         type="button"
         class="text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
-        on:click|stopPropagation={() => dispatch("moveDown")}
+        onclick={(e) => {
+          e.stopPropagation();
+          onMoveDown?.();
+        }}
         disabled={!canMoveDown}
         title={m.flow_step_move_down()}
         aria-label={m.flow_step_move_down()}
@@ -254,7 +282,10 @@
       <button
         type="button"
         class="text-secondary hover:bg-hover-dimmer hover:text-negative-stronger focus-visible:ring-accent-default inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none"
-        on:click|stopPropagation={() => dispatch("remove")}
+        onclick={(e) => {
+          e.stopPropagation();
+          onRemove?.();
+        }}
         title={m.flow_step_remove()}
         aria-label={m.flow_step_remove()}
       >

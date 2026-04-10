@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { Settings } from "$lib/components/layout";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import {
@@ -16,19 +15,20 @@
   } from "$lib/features/flows/flowFormSchema";
   import { IconPlus } from "@intric/icons/plus";
   import { IconTrash } from "@intric/icons/trash";
-  import { Button } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { IntricError } from "@intric/intric-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getChipClasses } from "$lib/features/flows/flowVariableTokens";
-  import { createEventDispatcher } from "svelte";
-  import { Badge, Card } from "@eneo/ui";
+  let {
+    isPublished,
+    onStatsChanged
+  }: {
+    isPublished: boolean;
+    onStatsChanged?: (detail: { definedCount: number; requiredCount: number }) => void;
+  } = $props();
 
-  export let isPublished: boolean;
-
-  const dispatch = createEventDispatcher<{
-    statsChanged: { definedCount: number; requiredCount: number };
-  }>();
   const userMode = getFlowUserMode();
 
   const flowEditor = getFlowEditor();
@@ -46,23 +46,25 @@
     { value: "multiselect", label: () => m.flow_form_field_type_multiselect() }
   ];
 
-  $: formSchema = $update.metadata_json?.form_schema as { fields: FlowFormField[] } | undefined;
+  const formSchema = $derived(
+    $update.metadata_json?.form_schema as { fields: FlowFormField[] } | undefined
+  );
 
-  let localFields: LocalFormField[] = [];
-  let nameBeforeEditById: Record<string, string> = {};
-  let idCounter = 0;
-  let localDirty = false;
+  let localFields: LocalFormField[] = $state([]);
+  let nameBeforeEditById: Record<string, string> = $state({});
+  let idCounter = $state(0);
+  let localDirty = $state(false);
 
   function uid(): string {
     return `field_${++idCounter}_${Date.now()}`;
   }
 
-  $: {
+  $effect(() => {
     if (!localDirty) {
       const normalized = normalizeForEditor(formSchema?.fields ?? []);
       localFields = normalized;
     }
-  }
+  });
 
   function normalizeForEditor(fields: FlowFormField[]): LocalFormField[] {
     return normalizeFlowFormFields(fields).map((field) => ({ ...field, _localId: uid() }));
@@ -89,20 +91,28 @@
     }
   }
 
-  $: formStats = getFlowFormStats(localFields);
-  $: namedVariableTokens = localFields
-    .map((field) => getFlowFormFieldVariableToken(field.name))
-    .filter((token) => token.length > 0)
-    .slice(0, 4);
-  $: emptyStateExamples =
+  const formStats = $derived(getFlowFormStats(localFields));
+  const namedVariableTokens = $derived(
+    localFields
+      .map((field) => getFlowFormFieldVariableToken(field.name))
+      .filter((token) => token.length > 0)
+      .slice(0, 4)
+  );
+  const emptyStateExamples = $derived(
     $userMode === "power_user"
       ? [
-          { label: "titel", token: "{{titel}}" },
-          { label: "datum", token: "{{datum}}" }
+          { label: "ärendenummer", token: "{{ärendenummer}}" },
+          { label: "verksamhet", token: "{{verksamhet}}" }
         ]
-      : [{ label: "titel", token: "{{titel}}" }];
-  $: previewVariableTokens = namedVariableTokens.slice(0, $userMode === "power_user" ? 4 : 2);
-  $: dispatch("statsChanged", formStats);
+      : [{ label: "ärendenummer", token: "{{ärendenummer}}" }]
+  );
+  const previewVariableTokens = $derived(
+    namedVariableTokens.slice(0, $userMode === "power_user" ? 4 : 2)
+  );
+
+  $effect(() => {
+    onStatsChanged?.(formStats);
+  });
 
   function addField() {
     localDirty = true;
@@ -181,212 +191,152 @@
   }
 </script>
 
-<Settings.Group title={m.flow_form_schema()}>
-  <div class="flex flex-col">
-    <p class="text-secondary px-4 text-sm">{m.flow_form_schema_description()}</p>
+<div class="flex flex-col gap-5">
+  {#if localFields.length === 0}
+    <!-- Empty state — clean and inviting -->
+    <div class="border-default bg-primary rounded-xl border px-6 py-8">
+      <div class="mx-auto max-w-lg text-center">
+        <p class="text-primary text-[0.9375rem] font-semibold tracking-[-0.01em]">
+          {m.flow_form_schema_empty()}
+        </p>
+        <p class="text-secondary mt-1.5 text-sm leading-relaxed">
+          {m.flow_form_schema_empty_hint()}
+        </p>
 
-    {#if localFields.length === 0}
-      <Card.Root class="bg-secondary/20 mx-4 mt-4">
-        <Card.Content class="p-4">
-          <div class="mb-3 max-w-2xl">
-            <p class="text-sm font-semibold">{m.flow_form_schema_intro_title()}</p>
-            <p class="text-secondary mt-1 text-xs leading-relaxed">
-              {m.flow_form_schema_intro_desc()}
-            </p>
+        {#if previewVariableTokens.length > 0 || emptyStateExamples.length > 0}
+          <div class="text-muted mt-4 flex flex-wrap items-center justify-center gap-2 text-xs">
+            <span class="text-secondary font-medium">{m.flow_form_schema_example_label()}</span>
+            {#each emptyStateExamples as example, exampleIndex (example.token)}
+              <span class="bg-hover-dimmer rounded-md px-2 py-0.5 font-medium">{example.label}</span
+              >
+              <span class="text-muted">&rarr;</span>
+              <span class={getChipClasses("field")}>{example.token}</span>
+              {#if exampleIndex < emptyStateExamples.length - 1}
+                <span class="text-muted/40">·</span>
+              {/if}
+            {/each}
           </div>
-          <div
-            class={`grid gap-3 ${$userMode === "power_user" ? "md:grid-cols-3" : "md:grid-cols-2"}`}
-          >
-            <Card.Root>
-              <Card.Content class="px-3 py-3">
-                <p class="text-muted text-xs font-semibold tracking-[0.16em] uppercase">
-                  {m.flow_form_schema_intro_fill_title()}
-                </p>
-                <p class="text-secondary mt-1.5 text-sm">{m.flow_form_schema_intro_fill_desc()}</p>
-              </Card.Content>
-            </Card.Root>
-            <Card.Root>
-              <Card.Content class="px-3 py-3">
-                <p class="text-muted text-xs font-semibold tracking-[0.16em] uppercase">
-                  {m.flow_form_schema_intro_variable_title()}
-                </p>
-                <p class="text-secondary mt-1.5 text-sm">
-                  {m.flow_form_schema_intro_variable_desc()}
-                </p>
-              </Card.Content>
-            </Card.Root>
-            {#if $userMode === "power_user"}
-              <Card.Root>
-                <Card.Content class="px-3 py-3">
-                  <p class="text-muted text-xs font-semibold tracking-[0.16em] uppercase">
-                    {m.flow_form_schema_intro_use_title()}
-                  </p>
-                  <p class="text-secondary mt-1.5 text-sm">{m.flow_form_schema_intro_use_desc()}</p>
-                </Card.Content>
-              </Card.Root>
-            {/if}
-          </div>
-        </Card.Content>
-      </Card.Root>
+        {/if}
 
-      <div class="mx-auto flex max-w-xl flex-col items-center gap-3 px-4 py-8 text-center">
-        <div class="bg-accent-dimmer rounded-xl p-3">
-          <svg
-            class="text-accent-stronger size-6"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <line x1="7" y1="8" x2="10" y2="8" />
-            <line x1="13" y1="8" x2="17" y2="8" />
-            <line x1="7" y1="12" x2="10" y2="12" />
-            <line x1="13" y1="12" x2="17" y2="12" />
-            <line x1="7" y1="16" x2="10" y2="16" />
-            <line x1="13" y1="16" x2="17" y2="16" />
-          </svg>
-        </div>
-        <p class="text-secondary text-sm">{m.flow_form_schema_empty()}</p>
-        <p class="text-muted max-w-sm text-xs">{m.flow_form_schema_empty_hint()}</p>
-        <div class="text-muted flex flex-wrap items-center justify-center gap-2 text-xs">
-          <span class="text-secondary font-medium">{m.flow_form_schema_example_label()}</span>
-          {#each emptyStateExamples as example, exampleIndex (example.token)}
-            <span class="bg-primary rounded-full px-2.5 py-1">{example.label}</span>
-            <span>&rarr;</span>
-            <span class={getChipClasses("field")}>{example.token}</span>
-            {#if exampleIndex < emptyStateExamples.length - 1}
-              <span class="px-1">•</span>
-            {/if}
-          {/each}
-        </div>
         {#if !isPublished}
-          <Button variant="primary" on:click={addField}>
-            <IconPlus size="sm" />
-            {m.flow_form_add_field()}
-          </Button>
+          <div class="mt-5">
+            <Button variant="default" onclick={addField}>
+              <IconPlus class="size-4" />
+              {m.flow_form_add_field()}
+            </Button>
+          </div>
         {/if}
       </div>
-    {:else}
-      <Card.Root class="mx-4 mb-4">
-        <Card.Content class="px-4 py-3">
-          <p class="text-sm font-medium">{m.flow_form_schema_live_hint()}</p>
-          <p class="text-secondary mt-1 text-xs">
-            {m.flow_form_schema_live_form_hint()}
-            {m.flow_form_schema_required_hint()}
-          </p>
-          {#if previewVariableTokens.length > 0}
-            <div class="text-muted mt-2 flex flex-wrap items-center gap-2 text-xs">
-              <span class="text-secondary font-medium">{m.flow_form_schema_example_label()}</span>
-              {#each previewVariableTokens as token (token)}
-                <span class={getChipClasses("field")}>{token}</span>
-              {/each}
-            </div>
-          {/if}
-        </Card.Content>
-      </Card.Root>
-    {/if}
+    </div>
+  {:else}
+    <!-- Field list -->
+    <p class="text-secondary text-sm">{m.flow_form_schema_description()}</p>
+    <div class="border-default bg-primary rounded-xl border">
+      <div class="flex items-center justify-between px-5 py-3">
+        <p class="text-sm font-medium">
+          {m.flow_form_schema_live_hint()}
+        </p>
+        {#if previewVariableTokens.length > 0}
+          <div class="flex flex-wrap items-center gap-1.5">
+            {#each previewVariableTokens as token (token)}
+              <span class={getChipClasses("field")}>{token}</span>
+            {/each}
+          </div>
+        {/if}
+      </div>
 
-    {#each localFields as field, index (field._localId)}
-      <Card.Root class="mx-4 mb-3 p-3.5">
-        <div class="flex items-start justify-between gap-3">
-          <div class="flex min-w-0 flex-1 flex-col gap-2.5">
+      <!-- Field rows -->
+      <div class="border-default divide-default divide-y border-t">
+        {#each localFields as field, index (field._localId)}
+          <div class="group/field hover:bg-hover-dimmer/30 px-4 py-3.5 transition-colors">
+            <!-- Row 1: Name + controls -->
             <div class="flex items-center gap-2">
-              <button
-                type="button"
-                class="text-secondary hover:bg-hover-dimmer inline-flex size-7 items-center justify-center rounded transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={index === 0 || isPublished}
-                on:click={() => moveField(index, -1)}
-                aria-label={m.flow_step_move_up()}
-                title={m.flow_step_move_up()}
+              <div
+                class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/field:opacity-100 focus-within:opacity-100"
               >
-                <svg
-                  class="size-3.5"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
+                <button
+                  type="button"
+                  class="text-muted hover:text-primary inline-flex size-6 items-center justify-center rounded transition-colors disabled:opacity-30"
+                  disabled={index === 0 || isPublished}
+                  onclick={() => moveField(index, -1)}
+                  aria-label={m.flow_step_move_up()}
                 >
-                  <path d="M8 12V4M4 7l4-3 4 3" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                class="text-secondary hover:bg-hover-dimmer inline-flex size-7 items-center justify-center rounded transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={index === localFields.length - 1 || isPublished}
-                on:click={() => moveField(index, 1)}
-                aria-label={m.flow_step_move_down()}
-                title={m.flow_step_move_down()}
-              >
-                <svg
-                  class="size-3.5"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
+                  <svg
+                    class="size-3"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M8 12V4M4 7l4-3 4 3" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="text-muted hover:text-primary inline-flex size-6 items-center justify-center rounded transition-colors disabled:opacity-30"
+                  disabled={index === localFields.length - 1 || isPublished}
+                  onclick={() => moveField(index, 1)}
+                  aria-label={m.flow_step_move_down()}
                 >
-                  <path d="M8 4v8M4 9l4 3 4-3" />
-                </svg>
-              </button>
+                  <svg
+                    class="size-3"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M8 4v8M4 9l4 3 4-3" />
+                  </svg>
+                </button>
+              </div>
+
               <input
                 type="text"
-                class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm font-medium shadow focus-within:ring-2"
+                class="border-default bg-primary focus:border-accent-default focus:ring-accent-default/20 min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-shadow focus:ring-2 focus:outline-none"
                 placeholder={m.flow_form_field_name()}
                 value={field.name}
                 disabled={isPublished}
-                on:focus={() => {
+                onfocus={() => {
                   nameBeforeEditById[field._localId] = field.name;
                 }}
-                on:input={(e) => updateField(index, { name: e.currentTarget.value })}
-                on:change={() => void rewriteVariablesOnCommittedRename(field)}
+                oninput={(e) => updateField(index, { name: e.currentTarget.value })}
+                onchange={() => void rewriteVariablesOnCommittedRename(field)}
               />
-              {#if field.required}
-                <Badge class="bg-accent-dimmer text-accent-stronger shrink-0"
-                  >{m.flow_form_field_required()}</Badge
-                >
-              {/if}
-              {#if !isPublished}
-                <button
-                  type="button"
-                  class="text-secondary hover:text-negative-stronger shrink-0"
-                  on:click={() => removeField(index)}
-                  aria-label={m.delete()}
-                >
-                  <IconTrash class="size-4" />
-                </button>
-              {/if}
-            </div>
 
-            <!-- Variable hint -->
-            {#if field.name.trim()}
-              <div class="text-muted flex items-center gap-1.5 text-[12px]">
-                {#if isFlowFormFieldNameUsableAsVariable(field.name)}
-                  <span>{m.flow_form_field_variable_hint()}</span>
-                  <span class={getChipClasses("field")}
-                    >{getFlowFormFieldVariableToken(field.name)}</span
+              <div class="flex shrink-0 items-center gap-2">
+                {#if field.required}
+                  <Badge
+                    variant="secondary"
+                    class="bg-accent-dimmer/60 text-accent-stronger text-[11px]"
+                    >{m.flow_form_field_required()}</Badge
                   >
-                {:else}
-                  <span class="text-warning-stronger">
-                    {m.flow_form_field_variable_unavailable()}
-                  </span>
+                {/if}
+                {#if !isPublished}
+                  <button
+                    type="button"
+                    class="text-muted hover:text-negative-stronger inline-flex size-7 items-center justify-center rounded-md opacity-0 transition-all group-hover/field:opacity-100 focus:opacity-100"
+                    onclick={() => removeField(index)}
+                    aria-label={m.delete()}
+                  >
+                    <IconTrash class="size-3.5" />
+                  </button>
                 {/if}
               </div>
-            {/if}
+            </div>
 
-            <div class="grid gap-2.5 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <!-- Row 2: Type + required + variable hint -->
+            <div class="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 pl-[52px]">
               <select
-                class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2"
+                class="border-default bg-primary focus:border-accent-default focus:ring-accent-default/20 w-40 rounded-lg border px-2.5 py-1.5 text-sm transition-shadow focus:ring-2 focus:outline-none"
                 disabled={isPublished}
                 value={normalizeFlowFormFieldType(
                   typeof field.type === "string" ? field.type : "text"
                 )}
-                on:change={(e) => {
+                onchange={(e) => {
                   const nextType = normalizeFlowFormFieldType(e.currentTarget.value);
                   updateField(index, {
                     type: nextType,
@@ -398,73 +348,90 @@
                   <option value={type.value}>{type.label()}</option>
                 {/each}
               </select>
-              <label class="text-secondary inline-flex items-center gap-2 text-sm">
+
+              <label class="text-secondary inline-flex cursor-pointer items-center gap-1.5 text-sm">
                 <input
                   type="checkbox"
+                  class="accent-accent-default size-3.5"
                   checked={field.required ?? false}
                   disabled={isPublished}
-                  on:change={(e) => updateField(index, { required: e.currentTarget.checked })}
+                  onchange={(e) => updateField(index, { required: e.currentTarget.checked })}
                 />
                 {m.flow_form_field_required()}
               </label>
+
+              {#if field.name.trim() && isFlowFormFieldNameUsableAsVariable(field.name)}
+                <span class="text-muted text-xs">
+                  &rarr; <span class={getChipClasses("field")}
+                    >{getFlowFormFieldVariableToken(field.name)}</span
+                  >
+                </span>
+              {:else if field.name.trim()}
+                <span class="text-warning-stronger text-xs"
+                  >{m.flow_form_field_variable_unavailable()}</span
+                >
+              {/if}
             </div>
 
+            <!-- Options (for select/multiselect) -->
             {#if flowFormFieldHasOptions(normalizeFlowFormFieldType(typeof field.type === "string" ? field.type : "text"))}
-              <Card.Root class="bg-hover-dimmer/30">
-                <Card.Content class="flex flex-col gap-2 p-2.5">
-                  <div class="text-secondary text-xs font-medium">{m.flow_form_field_option()}</div>
+              <div class="mt-3 pl-[52px]">
+                <div class="bg-hover-dimmer/40 rounded-lg px-3 py-2.5">
+                  <span class="text-secondary text-xs font-medium"
+                    >{m.flow_form_field_option()}</span
+                  >
                   {#if (field.options ?? []).length === 0}
-                    <p class="text-secondary text-xs">{m.flow_form_field_add_option_hint()}</p>
+                    <p class="text-muted mt-1 text-xs">{m.flow_form_field_add_option_hint()}</p>
                   {/if}
-                  {#each field.options ?? [] as option, optionIndex (`${field._localId}-${optionIndex}`)}
-                    <div class="flex items-center gap-2">
-                      <input
-                        type="text"
-                        class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2"
-                        value={option}
-                        placeholder={`${m.flow_form_field_option()} ${optionIndex + 1}`}
-                        disabled={isPublished}
-                        on:input={(e) => updateOption(index, optionIndex, e.currentTarget.value)}
-                      />
+                  <div class="mt-1.5 flex flex-col gap-1.5">
+                    {#each field.options ?? [] as option, optionIndex (`${field._localId}-${optionIndex}`)}
+                      <div class="flex items-center gap-2">
+                        <input
+                          type="text"
+                          class="border-default bg-primary focus:border-accent-default focus:ring-accent-default/20 w-full rounded-md border px-2.5 py-1.5 text-sm transition-shadow focus:ring-2 focus:outline-none"
+                          value={option}
+                          placeholder={`${m.flow_form_field_option()} ${optionIndex + 1}`}
+                          disabled={isPublished}
+                          oninput={(e) => updateOption(index, optionIndex, e.currentTarget.value)}
+                        />
+                        <button
+                          type="button"
+                          class="text-muted hover:text-negative-stronger inline-flex size-6 items-center justify-center rounded"
+                          onclick={() => removeOption(index, optionIndex)}
+                          disabled={isPublished}
+                          aria-label={m.delete()}
+                        >
+                          <IconTrash class="size-3" />
+                        </button>
+                      </div>
+                    {/each}
+                    {#if !isPublished}
                       <button
                         type="button"
-                        class="text-secondary hover:bg-hover-dimmer hover:text-negative-stronger inline-flex size-7 items-center justify-center rounded"
-                        on:click={() => removeOption(index, optionIndex)}
-                        disabled={isPublished}
-                        aria-label={m.delete()}
+                        class="text-accent-default hover:text-accent-stronger mt-0.5 text-left text-xs font-medium"
+                        onclick={() => addOption(index)}
                       >
-                        <IconTrash class="size-3.5" />
+                        + {m.flow_form_field_add_option()}
                       </button>
-                    </div>
-                  {/each}
-                  {#if !isPublished}
-                    <button
-                      type="button"
-                      class="border-default hover:bg-hover-dimmer mt-1 rounded-md border px-2.5 py-1 text-xs transition-colors"
-                      on:click={() => addOption(index)}
-                    >
-                      {m.flow_form_field_add_option()}
-                    </button>
-                  {/if}
-                </Card.Content>
-              </Card.Root>
+                    {/if}
+                  </div>
+                </div>
+              </div>
             {/if}
           </div>
-        </div>
-      </Card.Root>
-    {/each}
-
-    {#if !isPublished && localFields.length > 0}
-      <div class="px-4 pb-4">
-        <button
-          type="button"
-          class="border-default text-secondary hover:border-accent-default hover:bg-accent-dimmer hover:text-accent-default flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed py-3 text-sm transition-colors hover:shadow-sm"
-          on:click={addField}
-        >
-          <IconPlus class="size-4" />
-          {m.flow_form_add_field()}
-        </button>
+        {/each}
       </div>
+    </div>
+
+    {#if !isPublished}
+      <button
+        type="button"
+        class="border-default text-secondary hover:border-accent-default hover:bg-accent-dimmer hover:text-accent-default flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed py-3 text-sm transition-colors hover:shadow-sm"
+        onclick={addField}
+      >
+        <IconPlus class="size-4" />
+        {m.flow_form_add_field()}
+      </button>
     {/if}
-  </div>
-</Settings.Group>
+  {/if}
+</div>

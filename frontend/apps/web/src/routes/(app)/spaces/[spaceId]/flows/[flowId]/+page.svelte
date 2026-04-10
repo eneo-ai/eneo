@@ -14,15 +14,17 @@
   import FlowValidationBanner from "$lib/features/flows/components/FlowValidationBanner.svelte";
   import FlowRunsTable from "$lib/features/flows/components/FlowRunsTable.svelte";
   import FlowRunDialog from "$lib/features/flows/components/FlowRunDialog.svelte";
-  import { Button, Input } from "@intric/ui";
-  import { Badge, Card, Tabs } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import { Badge, Card } from "@eneo/ui";
   import { CheckCircle2 } from "lucide-svelte";
   import { IntricError, type TranscriptionModel } from "@intric/intric-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
-  import { onDestroy } from "svelte";
+  import { untrack } from "svelte";
   import { slide } from "svelte/transition";
   import FlowDryRun from "$lib/features/flows/components/FlowDryRun.svelte";
+  import FlowPageHeader from "$lib/features/flows/components/FlowPageHeader.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import { getFlowFormStats } from "$lib/features/flows/flowFormSchema";
   import FlowAIBuilderEditHost from "$lib/features/flows/ai-builder/FlowAIBuilderEditHost.svelte";
@@ -31,15 +33,15 @@
     resolveApplyFocusedStepId
   } from "$lib/features/flows/ai-builder/flowAIBuilderApplyNavigation";
 
-  export let data;
-  let publishLoading = false;
-  let validationBannerExpanded = false;
-  let showRunDialog = false;
-  let runsReloadTrigger = 0;
-  let latestHistoryPayload: Record<string, unknown> | null = null;
-  let pendingRunHighlight: string | null = null;
-  let hasStepJsonValidationErrors = false;
-  let stepJsonValidationFields: string[] = [];
+  let { data } = $props();
+  let publishLoading = $state(false);
+  let validationBannerExpanded = $state(false);
+  let showRunDialog = $state(false);
+  let runsReloadTrigger = $state(0);
+  let latestHistoryPayload = $state<Record<string, unknown> | null>(null);
+  let pendingRunHighlight = $state<string | null>(null);
+  let hasStepJsonValidationErrors = $state(false);
+  let stepJsonValidationFields = $state<string[]>([]);
   type BuilderStageId = 1 | 2 | 3 | 4 | 5;
   type FlowMetadataJson = Record<string, unknown>;
   type FlowWizardMetadata = {
@@ -47,7 +49,7 @@
     transcription_model?: { id: string } | null;
     transcription_language?: string;
   };
-  let builderStage: BuilderStageId = 1;
+  let builderStage = $state<BuilderStageId>(1);
 
   const {
     state: { currentSpace }
@@ -60,12 +62,12 @@
   const userMode = initFlowUserMode();
 
   const flowEditor = initFlowEditor({
-    flow: data.flow,
-    intric: data.intric
+    flow: untrack(() => data.flow),
+    intric: untrack(() => data.intric)
   });
 
   // AI Builder service — initialized lazily when user switches to the AI Builder tab
-  let aiBuilderInitialized = false;
+  let aiBuilderInitialized = $state(false);
   function ensureAIBuilder() {
     if (!aiBuilderInitialized) {
       aiBuilderInitialized = true;
@@ -83,23 +85,28 @@
     output_config: () => m.flow_step_output_config()
   };
 
-  $: stepJsonValidationSummary = stepJsonValidationFields
-    .map((field) => STEP_JSON_FIELD_LABELS[field]?.() ?? field)
-    .join(", ");
-  $: canPublish =
+  const stepJsonValidationSummary = $derived(
+    stepJsonValidationFields.map((field) => STEP_JSON_FIELD_LABELS[field]?.() ?? field).join(", ")
+  );
+  const canPublish = $derived(
     !$isPublished &&
-    $saveStatus === "saved" &&
-    $validationErrors.size === 0 &&
-    !hasStepJsonValidationErrors;
+      $saveStatus === "saved" &&
+      $validationErrors.size === 0 &&
+      !hasStepJsonValidationErrors
+  );
 
-  onDestroy(() => {
-    flowEditor.destroy();
+  $effect(() => {
+    return () => {
+      flowEditor.destroy();
+    };
   });
 
-  let activeTab: "builder" | "history" | "ai-builder" = "builder";
-  $: if (!canUseAIBuilder && activeTab === "ai-builder") {
-    activeTab = "builder";
-  }
+  let activeTab = $state<"builder" | "history" | "ai-builder">("builder");
+  $effect(() => {
+    if (!canUseAIBuilder && activeTab === "ai-builder") {
+      activeTab = "builder";
+    }
+  });
 
   const FLOW_BUILDER_STAGES: { id: BuilderStageId; labelKey: () => string }[] = [
     { id: 1, labelKey: () => m.flow_stage_basic_settings() },
@@ -109,69 +116,100 @@
     { id: 5, labelKey: () => m.flow_stage_review_test() }
   ];
 
-  $: currentStageIndex = FLOW_BUILDER_STAGES.findIndex((item) => item.id === builderStage);
-  $: previousStage = currentStageIndex > 0 ? FLOW_BUILDER_STAGES[currentStageIndex - 1] : null;
-  $: nextStage =
+  const currentStageIndex = $derived(
+    FLOW_BUILDER_STAGES.findIndex((item) => item.id === builderStage)
+  );
+  const previousStage = $derived(
+    currentStageIndex > 0 ? FLOW_BUILDER_STAGES[currentStageIndex - 1] : null
+  );
+  const nextStage = $derived(
     currentStageIndex >= 0 && currentStageIndex < FLOW_BUILDER_STAGES.length - 1
       ? FLOW_BUILDER_STAGES[currentStageIndex + 1]
-      : null;
-  $: formSchemaFields =
+      : null
+  );
+  const formSchemaFields = $derived(
     ($update.metadata_json as { form_schema?: { fields?: { required?: boolean }[] } } | undefined)
-      ?.form_schema?.fields ?? [];
-  let formSchemaDraftStats: { definedCount: number; requiredCount: number } | null = null;
-  $: persistedFormSchemaStats = getFlowFormStats(formSchemaFields);
-  $: displayedFormSchemaStats = formSchemaDraftStats ?? persistedFormSchemaStats;
-  $: formSchemaDefinedLabel =
-    displayedFormSchemaStats.definedCount === 0
+      ?.form_schema?.fields ?? []
+  );
+  let formSchemaDraftStats = $state<{ definedCount: number; requiredCount: number } | null>(null);
+  const persistedFormSchemaStats = $derived(getFlowFormStats(formSchemaFields));
+  const displayedFormSchemaStats = $derived(formSchemaDraftStats ?? persistedFormSchemaStats);
+  const formSchemaDefinedLabel = $derived.by(() => {
+    const count = displayedFormSchemaStats.definedCount;
+    return count === 0
       ? m.flow_fields_defined_zero()
-      : displayedFormSchemaStats.definedCount === 1
-        ? m.flow_fields_defined_singular({ count: displayedFormSchemaStats.definedCount })
-        : m.flow_fields_defined_plural({ count: displayedFormSchemaStats.definedCount });
-  $: formSchemaRequiredLabel =
-    displayedFormSchemaStats.requiredCount === 0
+      : count === 1
+        ? m.flow_fields_defined_singular({ count })
+        : m.flow_fields_defined_plural({ count });
+  });
+  const formSchemaRequiredLabel = $derived.by(() => {
+    const count = displayedFormSchemaStats.requiredCount;
+    return count === 0
       ? m.flow_fields_required_zero()
-      : displayedFormSchemaStats.requiredCount === 1
-        ? m.flow_fields_required_singular({ count: displayedFormSchemaStats.requiredCount })
-        : m.flow_fields_required_plural({ count: displayedFormSchemaStats.requiredCount });
-  $: if (builderStage !== 3 && formSchemaDraftStats !== null) {
-    formSchemaDraftStats = null;
-  }
-  $: hasAudioInputStep = ($update.steps ?? []).some((step) => step.input_type === "audio");
-  $: wizardMetadata =
+      : count === 1
+        ? m.flow_fields_required_singular({ count })
+        : m.flow_fields_required_plural({ count });
+  });
+  $effect(() => {
+    if (builderStage !== 3 && formSchemaDraftStats !== null) {
+      formSchemaDraftStats = null;
+    }
+  });
+  const hasAudioInputStep = $derived(
+    ($update.steps ?? []).some((step) => step.input_type === "audio")
+  );
+  const wizardMetadata = $derived(
     ((($update.metadata_json as FlowMetadataJson | null | undefined) ?? {}).wizard as
       | FlowWizardMetadata
-      | undefined) ?? {};
-  $: transcriptionEnabled =
+      | undefined) ?? {}
+  );
+  const transcriptionEnabled = $derived(
     typeof wizardMetadata.transcription_enabled === "boolean"
       ? wizardMetadata.transcription_enabled
-      : hasAudioInputStep;
-  $: isTranscriptionSkipped = !transcriptionEnabled;
-  $: transcriptionModelId =
+      : hasAudioInputStep
+  );
+  const isTranscriptionSkipped = $derived(!transcriptionEnabled);
+  const transcriptionModelId = $derived(
     typeof (wizardMetadata as FlowWizardMetadata).transcription_model?.id === "string"
       ? (wizardMetadata as FlowWizardMetadata).transcription_model?.id
-      : null;
-  let transcriptionModel: TranscriptionModel | null = null;
-  $: resolvedTranscriptionModel =
+      : null
+  );
+  let transcriptionModel = $state<TranscriptionModel | null>(null);
+  const resolvedTranscriptionModel = $derived(
     ($currentSpace.transcription_models ?? []).find((model) => model.id === transcriptionModelId) ??
-    null;
+      null
+  );
   // Sync from metadata → local ONLY when the persisted id changes.
-  // Using transcriptionModelId as sole trigger avoids a reactive race where
-  // the user's selection (transcriptionModel) is overwritten before it persists.
-  let lastSyncedTranscriptionModelId: string | null | undefined = undefined;
-  $: if (transcriptionModelId !== lastSyncedTranscriptionModelId) {
-    lastSyncedTranscriptionModelId = transcriptionModelId;
-    transcriptionModel = resolvedTranscriptionModel;
-  }
-  $: transcriptionModelMissingInSpace =
-    transcriptionModelId !== null && transcriptionModel === null;
-  $: transcriptionLanguage = (wizardMetadata as FlowWizardMetadata).transcription_language ?? "sv";
-  $: stepsCount = $update.steps?.length ?? 0;
-  $: checklistHasName = ($update.name ?? "").trim().length > 0;
-  $: checklistHasSteps = stepsCount > 0;
-  $: checklistHasNoErrors = $validationErrors.size === 0 && !hasStepJsonValidationErrors;
-  $: isFlowConfigured = checklistHasName && checklistHasSteps;
+  let lastSyncedTranscriptionModelId = $state<string | null | undefined>(undefined);
+  $effect(() => {
+    if (transcriptionModelId !== lastSyncedTranscriptionModelId) {
+      lastSyncedTranscriptionModelId = transcriptionModelId;
+      transcriptionModel = resolvedTranscriptionModel;
+    }
+  });
+  const transcriptionModelMissingInSpace = $derived(
+    transcriptionModelId !== null && transcriptionModel === null
+  );
+  const transcriptionLanguage = $derived(
+    (wizardMetadata as FlowWizardMetadata).transcription_language ?? "sv"
+  );
+  const stepsCount = $derived($update.steps?.length ?? 0);
+  const checklistHasName = $derived(($update.name ?? "").trim().length > 0);
+  const checklistHasSteps = $derived(stepsCount > 0);
+  const checklistHasNoErrors = $derived(
+    $validationErrors.size === 0 && !hasStepJsonValidationErrors
+  );
+  const isFlowConfigured = $derived(checklistHasName && checklistHasSteps);
 
-  let stageNavigating = false;
+  // Auto-select first step when entering stage 4 with no selection
+  $effect(() => {
+    if (builderStage === 4 && $activeStepId === null && $update.steps.length > 0) {
+      const firstStepId = $update.steps[0]?.id;
+      if (firstStepId) activeStepId.set(firstStepId);
+    }
+  });
+
+  let stageNavigating = $state(false);
 
   async function navigateToStage(stage: BuilderStageId) {
     if (stage === builderStage || stageNavigating) return;
@@ -224,92 +262,80 @@
 </svelte:head>
 
 <Page.Root>
-  <Page.Header>
-    <Page.Title
-      truncate={true}
-      parent={{ href: `/spaces/${$currentSpace.routeId}/flows` }}
-      title={$resource.name}
-    ></Page.Title>
-
-    <Page.Tabbar>
-      <Tabs.Root
-        bind:value={activeTab}
-        onValueChange={(v) => {
-          if (v === "ai-builder") ensureAIBuilder();
-        }}
-      >
-        <Tabs.List variant="line">
-          <Tabs.Trigger value="builder">{m.flow_builder()}</Tabs.Trigger>
-          <Tabs.Trigger value="history">{m.flow_history()}</Tabs.Trigger>
-          {#if canUseAIBuilder}
-            <Tabs.Trigger value="ai-builder">{m.ai_builder_tab()}</Tabs.Trigger>
-          {/if}
-        </Tabs.List>
-      </Tabs.Root>
-    </Page.Tabbar>
-
-    <div class="relative z-10 flex shrink-0 items-center gap-2">
-      <FlowVersionBadge publishedVersion={$resource.published_version} />
-      {#if !$isPublished}
-        <FlowSaveStatus status={$saveStatus} />
-      {/if}
-      <!-- Hide mode toggle on narrower screens to prevent crowding -->
-      <div class="hidden xl:block">
-        <FlowUserModeToggle />
-      </div>
-      <div class="flex shrink-0 items-center gap-2">
-        {#if $isPublished}
-          <Button
-            variant="primary"
-            on:click={() => {
-              showRunDialog = true;
-            }}
-          >
-            {m.flow_run_trigger()}
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={publishLoading}
-            on:click={async () => {
-              publishLoading = true;
-              try {
-                const updated = await data.intric.flows.unpublish({ id: $resource.id });
-                flowEditor.setResource(updated);
-              } catch (e) {
-                const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
-                console.error("Unpublish failed:", msg);
-                toast.error(msg);
-              } finally {
-                publishLoading = false;
-              }
-            }}>{m.flow_unpublish_to_edit()}</Button
-          >
-        {:else}
-          <Button
-            variant="primary"
-            disabled={!canPublish || publishLoading}
-            on:click={async () => {
-              publishLoading = true;
-              try {
-                await flowEditor.flushAssistantSaves();
-                const published = await data.intric.flows.publish({ id: $resource.id });
-                flowEditor.setResource(published);
-              } catch (e) {
-                const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
-                console.error("Publish failed:", msg);
-                toast.error(msg);
-                if ($validationErrors.size > 0) {
-                  validationBannerExpanded = true;
-                }
-              } finally {
-                publishLoading = false;
-              }
-            }}>{m.flow_publish()}</Button
-          >
+  <FlowPageHeader
+    flowName={$resource.name}
+    backHref={`/spaces/${$currentSpace.routeId}/flows`}
+    bind:activeTab
+    tabs={[
+      { value: "builder", label: m.flow_builder() },
+      { value: "history", label: m.flow_history() },
+      { value: "ai-builder", label: m.ai_builder_tab(), visible: canUseAIBuilder }
+    ]}
+    onTabChange={(v) => {
+      if (v === "ai-builder") ensureAIBuilder();
+    }}
+  >
+    {#snippet actions()}
+      <div class="hidden sm:contents">
+        <FlowVersionBadge publishedVersion={$resource.published_version} />
+        {#if !$isPublished}
+          <FlowSaveStatus status={$saveStatus} />
         {/if}
       </div>
-    </div>
-  </Page.Header>
+      <div class="hidden xl:contents">
+        <FlowUserModeToggle />
+      </div>
+      {#if $isPublished}
+        <Button
+          variant="default"
+          onclick={() => {
+            showRunDialog = true;
+          }}
+        >
+          {m.flow_run_trigger()}
+        </Button>
+        <Button
+          variant="destructive"
+          disabled={publishLoading}
+          onclick={async () => {
+            publishLoading = true;
+            try {
+              const updated = await data.intric.flows.unpublish({ id: $resource.id });
+              flowEditor.setResource(updated);
+            } catch (e) {
+              const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
+              console.error("Unpublish failed:", msg);
+              toast.error(msg);
+            } finally {
+              publishLoading = false;
+            }
+          }}>{m.flow_unpublish_to_edit()}</Button
+        >
+      {:else}
+        <Button
+          variant="default"
+          disabled={!canPublish || publishLoading}
+          onclick={async () => {
+            publishLoading = true;
+            try {
+              await flowEditor.flushAssistantSaves();
+              const published = await data.intric.flows.publish({ id: $resource.id });
+              flowEditor.setResource(published);
+            } catch (e) {
+              const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
+              console.error("Publish failed:", msg);
+              toast.error(msg);
+              if ($validationErrors.size > 0) {
+                validationBannerExpanded = true;
+              }
+            } finally {
+              publishLoading = false;
+            }
+          }}>{m.flow_publish()}</Button
+        >
+      {/if}
+    {/snippet}
+  </FlowPageHeader>
 
   <Page.Main>
     <div
@@ -344,11 +370,15 @@
       {/if}
 
       <!-- Wizard Stepper -->
-      <div
-        class="border-default bg-primary/95 sticky top-0 z-10 border-b px-4 py-3.5 backdrop-blur-sm md:px-6"
-      >
-        <nav class="flex items-center justify-between" aria-label="Flow builder stages">
-          <ol class="flex flex-1 items-center">
+      <div class="border-default bg-primary/95 sticky top-0 z-10 border-b backdrop-blur-sm">
+        <nav
+          class="mx-auto flex max-w-[1600px] items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 md:px-6 md:py-3.5"
+          aria-label="Flow builder stages"
+        >
+          <!-- Steps — scrollable on small screens -->
+          <ol
+            class="flex min-w-0 flex-1 items-center overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
             {#each FLOW_BUILDER_STAGES as stage, i (stage.id)}
               {@const isActive = builderStage === stage.id}
               {@const isCompleted = isStageCompleted(stage.id)}
@@ -357,27 +387,25 @@
                 i > 0 && isStageCompleted(FLOW_BUILDER_STAGES[i - 1].id)}
 
               {#if i > 0}
-                <!-- Connecting line -->
                 <div
-                  class="mx-1.5 h-0.5 flex-1 transition-colors duration-200 md:mx-3
+                  class="mx-1 h-0.5 w-4 shrink-0 transition-colors duration-200 sm:mx-1.5 sm:w-6 lg:mx-3 lg:w-auto lg:flex-1
                     {isPreviousCompleted ? 'bg-accent-default' : 'bg-border-default'}"
                 ></div>
               {/if}
 
-              <li class="flex flex-col items-center gap-1">
+              <li class="shrink-0">
                 <button
                   type="button"
-                  class="hover:bg-hover-dimmer flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-all duration-200
+                  class="hover:bg-hover-dimmer flex items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-sm transition-all duration-200 sm:gap-2 sm:px-2 lg:gap-2.5 lg:px-2.5
                     {isActive ? 'text-primary font-semibold' : ''}"
                   aria-current={isActive ? "step" : undefined}
-                  on:click={() => void navigateToStage(stage.id)}
+                  onclick={() => void navigateToStage(stage.id)}
                 >
-                  <!-- Number circle -->
                   {#if isCompleted}
                     <span
-                      class="bg-accent-default/15 text-accent-default inline-flex size-8 items-center justify-center rounded-full text-sm font-semibold transition-colors duration-200"
+                      class="bg-accent-default/15 text-accent-default inline-flex size-7 items-center justify-center rounded-full text-sm font-semibold transition-colors duration-200 sm:size-8"
                     >
-                      <svg class="size-4" viewBox="0 0 16 16" fill="none">
+                      <svg class="size-3.5 sm:size-4" viewBox="0 0 16 16" fill="none">
                         <path
                           d="M3.5 8.5L6.5 11.5L12.5 4.5"
                           stroke="currentColor"
@@ -389,27 +417,27 @@
                     </span>
                   {:else if isActive}
                     <span
-                      class="bg-accent-default text-on-fill ring-accent-default/20 inline-flex size-8 items-center justify-center rounded-full text-sm font-semibold ring-2 transition-all duration-200"
+                      class="bg-accent-default text-on-fill ring-accent-default/20 inline-flex size-7 items-center justify-center rounded-full text-sm font-semibold ring-2 transition-all duration-200 sm:size-8"
                     >
                       {stage.id}
                     </span>
                   {:else if isSkipped}
                     <span
-                      class="border-default text-muted inline-flex size-8 items-center justify-center rounded-full border-2 border-dashed text-sm font-medium opacity-60 transition-colors duration-200"
+                      class="border-default text-muted inline-flex size-7 items-center justify-center rounded-full border-2 border-dashed text-sm font-medium opacity-60 transition-colors duration-200 sm:size-8"
                     >
                       {stage.id}
                     </span>
                   {:else}
                     <span
-                      class="border-default text-muted inline-flex size-8 items-center justify-center rounded-full border-2 text-sm font-medium transition-colors duration-200"
+                      class="border-default text-muted inline-flex size-7 items-center justify-center rounded-full border-2 text-sm font-medium transition-colors duration-200 sm:size-8"
                     >
                       {stage.id}
                     </span>
                   {/if}
 
-                  <!-- Label (hidden on small screens) -->
+                  <!-- Label — only on large screens -->
                   <span
-                    class="hidden text-sm md:inline
+                    class="hidden text-sm whitespace-nowrap lg:inline
                       {isActive
                       ? 'text-primary font-semibold'
                       : isSkipped
@@ -424,30 +452,32 @@
               </li>
             {/each}
           </ol>
+
+          <!-- Navigation buttons — always visible, never overflow -->
           <div
-            class="border-default flex shrink-0 items-center gap-2 border-l pl-3 md:gap-2.5 md:pl-5"
+            class="border-default flex shrink-0 items-center gap-1.5 border-l pl-2.5 sm:gap-2 sm:pl-3 md:pl-5"
           >
             <Button
-              variant="simple"
-              size="default"
+              variant="ghost"
+              size="sm"
               disabled={!previousStage || stageNavigating}
-              on:click={goToPreviousStage}
+              onclick={goToPreviousStage}
             >
-              &larr; {m.flow_stage_previous()}
+              &larr; <span class="hidden lg:inline">{m.flow_stage_previous()}</span>
             </Button>
             {#if nextStage}
               <Button
-                variant="primary"
-                size="default"
+                variant="default"
+                size="sm"
                 disabled={stageNavigating}
-                on:click={goToNextStage}
+                onclick={goToNextStage}
               >
-                {m.flow_stage_next()} &rarr;
+                <span class="hidden lg:inline">{m.flow_stage_next()}</span> &rarr;
               </Button>
             {:else}
               <Button
-                variant="primary"
-                size="default"
+                variant="default"
+                size="sm"
                 disabled={!canPublish}
                 title={canPublish ? "" : m.flow_publish_not_ready_tooltip()}
               >
@@ -461,42 +491,45 @@
       <div class="flex flex-1 flex-col overflow-hidden p-4 pt-3">
         {#if builderStage === 1}
           <div class="flex-1 overflow-y-auto p-5 md:p-8">
-            <div class="mx-auto w-full max-w-5xl space-y-6">
+            <div class="mx-auto w-full max-w-6xl space-y-6">
               <div class="grid gap-6 lg:grid-cols-2">
                 <div class="border-default bg-primary rounded-xl border p-6">
                   <h3 class="text-base font-semibold">{m.flow_basic_settings_title()}</h3>
                   <p class="text-secondary mt-1.5 text-sm">
                     {m.flow_basic_settings_desc()}
                   </p>
-                  <div class="mt-5 space-y-4">
-                    <label class="text-secondary block text-sm font-medium" for="flow-name-input"
-                      >{m.flow_flow_name()}</label
-                    >
-                    <input
-                      id="flow-name-input"
-                      type="text"
-                      class="border-default bg-primary ring-default w-full rounded-lg border px-3.5 py-2.5 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-                      value={$update.name ?? ""}
-                      disabled={$isPublished}
-                      on:input={(event) => {
-                        $update.name = event.currentTarget.value;
-                      }}
-                      placeholder="Exempel: Biståndshandläggning hemtjänst"
-                    />
-                    <label
-                      class="text-secondary block pt-1 text-sm font-medium"
-                      for="flow-description-input">{m.flow_flow_description()}</label
-                    >
-                    <textarea
-                      id="flow-description-input"
-                      class="border-default bg-primary ring-default min-h-[120px] w-full resize-none rounded-lg border px-3.5 py-2.5 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-                      value={$update.description ?? ""}
-                      disabled={$isPublished}
-                      on:input={(event) => {
-                        $update.description = event.currentTarget.value;
-                      }}
-                      placeholder={m.flow_description_placeholder()}
-                    ></textarea>
+                  <div class="mt-5 flex flex-col gap-5">
+                    <div class="flex flex-col gap-1.5">
+                      <label class="text-secondary text-sm font-medium" for="flow-name-input"
+                        >{m.flow_flow_name()}</label
+                      >
+                      <input
+                        id="flow-name-input"
+                        type="text"
+                        class="border-default bg-primary ring-default w-full rounded-lg border px-3.5 py-2.5 text-sm shadow transition-shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+                        value={$update.name ?? ""}
+                        disabled={$isPublished}
+                        oninput={(event) => {
+                          $update.name = event.currentTarget.value;
+                        }}
+                        placeholder={m.flow_flow_name()}
+                      />
+                    </div>
+                    <div class="flex flex-col gap-1.5">
+                      <label class="text-secondary text-sm font-medium" for="flow-description-input"
+                        >{m.flow_flow_description()}</label
+                      >
+                      <textarea
+                        id="flow-description-input"
+                        class="border-default bg-primary ring-default min-h-[120px] w-full resize-none rounded-lg border px-3.5 py-2.5 text-sm shadow transition-shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+                        value={$update.description ?? ""}
+                        disabled={$isPublished}
+                        oninput={(event) => {
+                          $update.description = event.currentTarget.value;
+                        }}
+                        placeholder={m.flow_description_placeholder()}
+                      ></textarea>
+                    </div>
                     {#if $userMode === "power_user"}
                       <div
                         class="border-default mt-4 border-t pt-4"
@@ -518,7 +551,7 @@
                             value={$update.data_retention_days ?? ""}
                             disabled={$isPublished}
                             placeholder="—"
-                            on:input={(e) => {
+                            oninput={(e) => {
                               const val = e.currentTarget.value
                                 ? parseInt(e.currentTarget.value, 10)
                                 : null;
@@ -527,7 +560,7 @@
                           />
                           <span class="text-secondary text-sm">{m.flow_data_retention_unit()}</span>
                         </div>
-                        <p class="text-muted mt-1.5 text-xs">{m.flow_data_retention_desc()}</p>
+                        <p class="text-muted mt-1.5 text-sm">{m.flow_data_retention_desc()}</p>
                       </div>
                     {/if}
                   </div>
@@ -708,152 +741,131 @@
           </div>
         {:else if builderStage === 2}
           <div class="flex-1 overflow-y-auto p-4 md:p-6">
-            <div class="mx-auto w-full max-w-3xl space-y-4 pt-4">
-              {#if isTranscriptionSkipped}
-                <div class="border-default bg-secondary/30 rounded-xl border p-6 text-center">
-                  <svg
-                    class="text-muted/40 mx-auto mb-3 size-8"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
+            <div class="mx-auto w-full max-w-2xl space-y-5 pt-4">
+              <!-- Main transcription card — single unified card for all states -->
+              <div
+                class="bg-primary rounded-xl border transition-colors duration-300 {transcriptionEnabled
+                  ? 'border-accent-default/30'
+                  : 'border-default'}"
+              >
+                <!-- Header: toggle row -->
+                <div class="flex items-center justify-between px-5 py-4">
+                  <div class="min-w-0">
+                    <h3 class="text-[0.9375rem] font-semibold tracking-[-0.01em]">
+                      {m.flow_transcription_optional_title()}
+                    </h3>
+                    <p class="text-secondary mt-0.5 text-sm leading-relaxed">
+                      {m.flow_transcription_optional_desc_simple()}
+                    </p>
+                  </div>
+                  <label
+                    class="flex shrink-0 cursor-pointer items-center gap-2.5 pl-4"
+                    for="transcription-toggle"
                   >
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                    <line x1="12" y1="19" x2="12" y2="23" />
-                    <line x1="8" y1="23" x2="16" y2="23" />
+                    <span class="text-secondary text-sm"
+                      >{transcriptionEnabled
+                        ? m.flow_transcription_on()
+                        : m.flow_transcription_off()}</span
+                    >
+                    <Switch
+                      id="transcription-toggle"
+                      checked={transcriptionEnabled}
+                      disabled={$isPublished}
+                      onCheckedChange={(checked) => setTranscriptionEnabled(checked)}
+                    />
+                  </label>
+                </div>
+
+                <!-- Settings: shown when enabled -->
+                {#if transcriptionEnabled}
+                  <div
+                    class="border-default border-t px-5 py-4"
+                    transition:slide={{ duration: 200 }}
+                  >
+                    <div class="grid gap-4 sm:grid-cols-2">
+                      <div class="flex flex-col gap-1.5">
+                        <label
+                          for="flow-transcription-model"
+                          class="text-secondary text-sm font-medium"
+                          >{m.flow_transcription_model_label()}</label
+                        >
+                        <SelectAIModelV2
+                          bind:selectedModel={transcriptionModel}
+                          availableModels={$currentSpace.transcription_models}
+                          dropdownLabel={m.flow_transcription_model_label()}
+                          onchange={() => {
+                            if (transcriptionModel?.id) {
+                              setWizardMeta({ transcription_model: { id: transcriptionModel.id } });
+                            }
+                          }}
+                        />
+                      </div>
+                      <div class="flex flex-col gap-1.5">
+                        <label
+                          for="flow-transcription-language"
+                          class="text-secondary text-sm font-medium"
+                          >{m.flow_transcription_language_label()}</label
+                        >
+                        <select
+                          class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2"
+                          id="flow-transcription-language"
+                          value={transcriptionLanguage}
+                          disabled={$isPublished}
+                          onchange={(e) =>
+                            setWizardMeta({ transcription_language: e.currentTarget.value })}
+                        >
+                          <option value="sv">Svenska</option>
+                          <option value="en">English</option>
+                          <option value="auto">{m.flow_transcription_language_auto()}</option>
+                        </select>
+                      </div>
+                    </div>
+                    {#if transcriptionModelMissingInSpace}
+                      <div
+                        class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mt-4 rounded-lg border px-3 py-2 text-sm"
+                      >
+                        {m.flow_transcription_model_unavailable_warning()}
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+
+              <!-- Audio status hint — only when it adds real information -->
+              {#if !transcriptionEnabled && hasAudioInputStep}
+                <div
+                  class="border-warning-default/30 bg-warning-dimmer/50 text-warning-stronger flex items-start gap-3 rounded-xl border px-4 py-3.5 text-sm leading-relaxed"
+                >
+                  <svg class="mt-0.5 size-4 shrink-0" viewBox="0 0 16 16" fill="currentColor">
+                    <path
+                      d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"
+                    />
                   </svg>
-                  <h3 class="text-sm font-semibold">{m.flow_transcription_disabled()}</h3>
-                  <p class="text-secondary mx-auto mt-2 max-w-md text-sm leading-relaxed">
-                    {m.flow_transcription_disabled_subtitle({ variable: "{{transkribering}}" })}
-                  </p>
-                  <div class="mt-4">
-                    <Input.Switch
-                      value={transcriptionEnabled}
-                      disabled={$isPublished}
-                      sideEffect={({ next }) => setTranscriptionEnabled(next)}
-                    >
-                      {m.flow_transcription_enable()}
-                    </Input.Switch>
-                  </div>
-                  <p class="text-muted mt-3 text-sm">{m.flow_transcription_skip_hint()}</p>
+                  {m.flow_transcription_audio_nudge()}
                 </div>
-                {#if hasAudioInputStep}
-                  <div
-                    class="border-warning-default/40 bg-warning-dimmer text-warning-stronger rounded-xl border p-4 text-sm"
-                  >
-                    {m.flow_transcription_audio_nudge()}
-                  </div>
-                {/if}
-              {:else}
-                <div class="border-default bg-primary rounded-xl border p-5">
-                  <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h3 class="text-sm font-semibold">{m.flow_transcription_optional_title()}</h3>
-                      <p class="text-secondary mt-1 text-sm">
-                        {m.flow_transcription_optional_desc({ variable: "{{transkribering}}" })}
-                      </p>
-                    </div>
-                    <Input.Switch
-                      value={transcriptionEnabled}
-                      disabled={$isPublished}
-                      sideEffect={({ next }) => setTranscriptionEnabled(next)}
-                    >
-                      {m.flow_transcription_enable()}
-                    </Input.Switch>
-                  </div>
-                </div>
+              {/if}
 
-                <div class="border-default bg-primary rounded-xl border p-5">
-                  <h3 class="text-sm font-semibold">{m.flow_transcription_model_settings()}</h3>
-                  <div class="mt-4 grid gap-4 sm:grid-cols-2">
-                    <div class="flex flex-col gap-1.5">
-                      <span class="text-secondary text-sm font-medium"
-                        >{m.flow_transcription_model_label()}</span
-                      >
-                      <SelectAIModelV2
-                        bind:selectedModel={transcriptionModel}
-                        availableModels={$currentSpace.transcription_models}
-                        dropdownLabel={m.flow_transcription_model_label()}
-                        on:change={() => {
-                          if (transcriptionModel?.id) {
-                            setWizardMeta({ transcription_model: { id: transcriptionModel.id } });
-                          }
-                        }}
-                      />
-                    </div>
-                    <div class="flex flex-col gap-1.5">
-                      <label
-                        for="flow-transcription-language"
-                        class="text-secondary text-sm font-medium"
-                        >{m.flow_transcription_language_label()}</label
-                      >
-                      <select
-                        class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2"
-                        id="flow-transcription-language"
-                        value={transcriptionLanguage}
-                        disabled={$isPublished}
-                        on:change={(e) =>
-                          setWizardMeta({ transcription_language: e.currentTarget.value })}
-                      >
-                        <option value="sv">Svenska</option>
-                        <option value="en">English</option>
-                        <option value="auto">{m.flow_transcription_language_auto()}</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div class="pointer-events-none mt-4 flex items-center gap-3 opacity-60">
-                    <Input.Switch value={false} disabled />
-                    <span class="text-secondary text-sm">{m.flow_transcription_diarization()}</span>
-                    <span class="bg-secondary/40 text-muted rounded-full px-2 py-0.5 text-xs"
-                      >{m.flow_coming_soon()}</span
-                    >
-                  </div>
-                  {#if transcriptionModelMissingInSpace}
-                    <div
-                      class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mt-4 rounded-lg border px-3 py-2 text-sm"
-                    >
-                      {m.flow_transcription_model_unavailable_warning()}
-                    </div>
-                  {/if}
-                </div>
-
-                {#if hasAudioInputStep}
-                  <div
-                    class="border-positive-default/20 bg-positive-dimmer/50 text-positive-stronger rounded-xl border p-4 text-sm"
-                  >
-                    {m.flow_transcription_audio_detected()}
-                  </div>
-                {:else}
-                  <div
-                    class="border-default bg-secondary/30 text-secondary rounded-xl border p-4 text-sm"
-                  >
-                    {m.flow_transcription_no_audio()}
-                  </div>
-                {/if}
+              {#if !transcriptionEnabled && !hasAudioInputStep}
+                <p class="text-muted px-1 text-sm">{m.flow_transcription_skip_hint()}</p>
               {/if}
             </div>
           </div>
         {:else if builderStage === 3}
           <div class="flex-1 overflow-y-auto p-4 md:p-6">
-            <div
-              class="border-default bg-primary text-secondary mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
-            >
-              <span>{formSchemaDefinedLabel}</span>
-              <span>{formSchemaRequiredLabel}</span>
+            <div class="mx-auto w-full max-w-3xl pt-2">
+              <FlowFormSchemaEditor
+                isPublished={$isPublished}
+                onStatsChanged={(detail) => {
+                  formSchemaDraftStats = detail;
+                }}
+              />
             </div>
-            <FlowFormSchemaEditor
-              isPublished={$isPublished}
-              on:statsChanged={(e) => {
-                formSchemaDraftStats = e.detail;
-              }}
-            />
           </div>
         {:else if builderStage === 4}
           <!-- Side-by-side list-detail layout -->
-          <div class="flex flex-1 flex-col gap-3 overflow-hidden lg:flex-row">
+          <div
+            class="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-3 overflow-hidden lg:flex-row"
+          >
             <div
               class="border-default max-h-[40vh] w-full overflow-hidden rounded-xl border lg:max-h-none lg:w-80 lg:shrink-0 xl:w-[340px]"
             >
@@ -868,7 +880,7 @@
                       activeTab = "ai-builder";
                     }
                   : undefined}
-                on:selectStep={async (e) => {
+                onSelectStep={async (stepId) => {
                   try {
                     await flowEditor.flushAssistantSaves();
                   } catch (error) {
@@ -878,11 +890,11 @@
                         : "Kunde inte spara stegets ändringar.";
                     toast.error(message);
                   }
-                  activeStepId.set(e.detail);
+                  activeStepId.set(stepId);
                 }}
-                on:stepsChanged={async (e) => {
+                onStepsChanged={async (updatedSteps) => {
                   try {
-                    await flowEditor.applyStepsWithSafeOrderRemap(e.detail);
+                    await flowEditor.applyStepsWithSafeOrderRemap(updatedSteps);
                   } catch (error) {
                     const message =
                       error instanceof IntricError
@@ -894,7 +906,9 @@
               />
             </div>
 
-            <div class="border-default flex-1 overflow-hidden rounded-xl border">
+            <div
+              class="border-default flex-1 overflow-hidden rounded-xl border lg:max-w-[900px] 2xl:max-w-[1000px]"
+            >
               <div class="h-full overflow-y-auto">
                 <FlowStepEditPanel
                   steps={$update.steps}
@@ -916,18 +930,17 @@
                         }[];
                       }
                     | undefined}
-                  on:openTranscriptionSettings={() => void navigateToStage(2)}
-                  on:jsonValidationChanged={(e) => {
-                    hasStepJsonValidationErrors = e.detail.hasErrors;
-                    stepJsonValidationFields = e.detail.fields;
+                  onOpenTranscriptionSettings={() => void navigateToStage(2)}
+                  onJsonValidationChanged={(detail) => {
+                    hasStepJsonValidationErrors = detail.hasErrors;
+                    stepJsonValidationFields = detail.fields;
                   }}
-                  on:stepChanged={(e) => {
-                    const { index, step } = e.detail;
+                  onStepChanged={(detail) => {
+                    const { index, step } = detail;
                     $update.steps[index] = step;
                     $update.steps = $update.steps;
                   }}
-                  on:removeStep={async (e) => {
-                    const idx = e.detail;
+                  onRemoveStep={async (idx) => {
                     const nextSteps = ($update.steps ?? []).filter((_, i) => i !== idx);
                     nextSteps.forEach((s, i) => {
                       s.step_order = i + 1;
@@ -953,11 +966,11 @@
           <FlowGraphPanel
             flow={$update}
             activeStepId={$activeStepId}
-            on:nodeClick={(e) => activeStepId.set(e.detail)}
+            onNodeClick={(stepId) => activeStepId.set(stepId)}
           />
         {:else}
           <div class="flex-1 overflow-y-auto p-5 md:p-8">
-            <div class="mx-auto w-full max-w-5xl space-y-6">
+            <div class="mx-auto w-full max-w-6xl space-y-6">
               <!-- Pipeline summary -->
               <div class="border-default bg-primary rounded-xl border p-6">
                 <h3 class="text-base font-semibold">{m.flow_review_pipeline_title()}</h3>
@@ -1007,20 +1020,20 @@
                   {#if $isPublished}
                     <div class="flex flex-wrap items-center gap-3">
                       <Button
-                        variant="primary"
+                        variant="default"
                         size="default"
-                        on:click={() => (showRunDialog = true)}
+                        onclick={() => (showRunDialog = true)}
                       >
                         {m.flow_run_trigger()}
                       </Button>
-                      <Button variant="outlined" on:click={() => (activeTab = "history")}>
+                      <Button variant="outline" onclick={() => (activeTab = "history")}>
                         {m.flow_show_history()}
                       </Button>
                     </div>
                   {:else}
                     <div class="flex flex-wrap items-center gap-x-3 gap-y-4">
                       <FlowDryRun flow={$resource} />
-                      <Button variant="outlined" on:click={() => (activeTab = "history")}>
+                      <Button variant="outline" onclick={() => (activeTab = "history")}>
                         {m.flow_show_history()}
                       </Button>
                       {#if $validationErrors.size === 0}

@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { Button, Dialog } from "@intric/ui";
-  import { Badge, Card, Separator } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Separator } from "$lib/components/ui/separator/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
   import { m } from "$lib/paraglide/messages";
   import type { AIBuilderDraftSession } from "./protocol";
-  import { writable } from "svelte/store";
 
   interface Props {
     drafts: AIBuilderDraftSession[];
@@ -15,24 +17,24 @@
   let { drafts, onresume, onstartfresh, ondiscard }: Props = $props();
 
   let confirmDeleteId = $state<string | null>(null);
-  const showDeleteDialog = writable(false);
+  let showDeleteDialog = $state(false);
 
   function requestDiscard(sessionId: string) {
     confirmDeleteId = sessionId;
-    showDeleteDialog.set(true);
+    showDeleteDialog = true;
   }
 
   function confirmDiscard() {
     if (confirmDeleteId) {
       ondiscard(confirmDeleteId);
       confirmDeleteId = null;
-      showDeleteDialog.set(false);
+      showDeleteDialog = false;
     }
   }
 
   function cancelDiscard() {
     confirmDeleteId = null;
-    showDeleteDialog.set(false);
+    showDeleteDialog = false;
   }
 
   function formatRelativeTime(value?: string | null): string {
@@ -159,11 +161,11 @@
                 </svg>
               </button>
               {#if isFirst}
-                <Button variant="primary" size="small" onclick={() => onresume(draft.session_id)}>
+                <Button variant="default" size="sm" onclick={() => onresume(draft.session_id)}>
                   {m.ai_builder_resume_draft()}
                 </Button>
               {:else}
-                <Button variant="outlined" size="small" onclick={() => onresume(draft.session_id)}>
+                <Button variant="outline" size="sm" onclick={() => onresume(draft.session_id)}>
                   {m.ai_builder_resume_draft()}
                 </Button>
               {/if}
@@ -176,7 +178,7 @@
     <Separator />
 
     <div class="flex pt-1">
-      <Button variant="outlined" onclick={onstartfresh}>
+      <Button variant="outline" onclick={onstartfresh}>
         <svg
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 20 20"
@@ -194,17 +196,17 @@
 </section>
 
 <!-- Delete confirmation dialog -->
-<Dialog.Root openController={showDeleteDialog}>
-  <Dialog.Content>
-    <Dialog.Title>{m.ai_builder_draft_discard_title()}</Dialog.Title>
-    <Dialog.Description>{m.ai_builder_draft_discard_body()}</Dialog.Description>
-    <Dialog.Controls let:close>
-      <Button variant="outlined" is={close} onclick={cancelDiscard}>
-        {m.cancel()}
-      </Button>
-      <Button variant="destructive" is={close} onclick={confirmDiscard}>
+<AlertDialog.Root bind:open={showDeleteDialog}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.ai_builder_draft_discard_title()}</AlertDialog.Title>
+      <AlertDialog.Description>{m.ai_builder_draft_discard_body()}</AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel onclick={cancelDiscard}>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action variant="destructive" onclick={confirmDiscard}>
         {m.ai_builder_draft_discard_action()}
-      </Button>
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

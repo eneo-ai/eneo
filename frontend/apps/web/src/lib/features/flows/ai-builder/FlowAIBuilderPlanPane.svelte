@@ -1,7 +1,10 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Button } from "@intric/ui";
-  import { Alert, Badge, Card, Separator } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Separator } from "$lib/components/ui/separator/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
   import FlowAIBuilderStepCard from "./FlowAIBuilderStepCard.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import type { EditAdvisory } from "./protocol";
@@ -113,7 +116,7 @@
     <div class="flex-1 overflow-y-auto p-4 md:p-6">
       {#if service.isConflict}
         <!-- Conflict recovery banner -->
-        <Alert.Root class="mb-4 rounded-xl border-warning-default bg-warning-dimmer">
+        <Alert.Root class="border-warning-default bg-warning-dimmer mb-4 rounded-xl">
           <Alert.Title class="text-warning-stronger text-sm font-semibold">
             {m.ai_builder_conflict_title()}
           </Alert.Title>
@@ -121,10 +124,10 @@
             {m.ai_builder_conflict_description()}
           </Alert.Description>
           <div class="mt-3 flex gap-2">
-            <Button variant="primary" size="small" onclick={handleConflictRegenerate}>
+            <Button variant="default" size="sm" onclick={handleConflictRegenerate}>
               {m.ai_builder_conflict_regenerate()}
             </Button>
-            <Button variant="outlined" size="small" onclick={() => service.dismissConflict()}>
+            <Button variant="outline" size="sm" onclick={() => service.dismissConflict()}>
               {m.ai_builder_conflict_cancel()}
             </Button>
           </div>
@@ -132,36 +135,51 @@
       {/if}
 
       <!-- Plan card -->
-      <Card.Root class="plan-card-enter mx-auto max-w-3xl shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05),0_1px_3px_rgba(0,0,0,0.02)]">
+      <Card.Root
+        class="plan-card-enter mx-auto max-w-3xl shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05),0_1px_3px_rgba(0,0,0,0.02)]"
+      >
         <!-- Header -->
-        <Card.Header class="px-6 pb-0 pt-6">
-          <Card.Title class="text-primary text-lg font-semibold tracking-tight">{spec.flow_name}</Card.Title>
+        <Card.Header class="px-6 pt-6 pb-0">
+          <Card.Title class="text-primary text-lg font-semibold tracking-tight"
+            >{spec.flow_name}</Card.Title
+          >
           {#if spec.flow_description && !descriptionDiff && !hasDescriptionAdvisory}
-            <Card.Description class="mt-1 break-words text-[0.8125rem] leading-relaxed text-secondary">{spec.flow_description}</Card.Description>
+            <Card.Description
+              class="text-secondary mt-1 text-[0.8125rem] leading-relaxed break-words"
+              >{spec.flow_description}</Card.Description
+            >
           {/if}
         </Card.Header>
 
         <!-- Description diff -- flat layout, no nested cards -->
         {#if descriptionDiff || hasDescriptionAdvisory}
-          <div class="section-enter border-t border-default px-6 py-4" aria-live="polite">
-            <p class="mb-2 text-[0.8125rem] font-medium text-secondary">{m.ai_builder_description_diff_title()}</p>
+          <div class="section-enter border-default border-t px-6 py-4" aria-live="polite">
+            <p class="text-secondary mb-2 text-[0.8125rem] font-medium">
+              {m.ai_builder_description_diff_title()}
+            </p>
             {#if descriptionDiff}
               <div class="flex flex-col gap-3">
-                <p class="description-diff-old break-words text-[0.8125rem] leading-relaxed text-muted line-through" aria-label={m.ai_builder_description_current()}>
+                <p
+                  class="description-diff-old text-muted text-[0.8125rem] leading-relaxed break-words line-through"
+                  aria-label={m.ai_builder_description_current()}
+                >
                   {descriptionDiff.previous}
                 </p>
-                <p class="break-words border-l-[3px] border-accent-default pl-3 text-[0.8125rem] leading-relaxed text-primary" aria-label={m.ai_builder_description_proposed()}>
+                <p
+                  class="border-accent-default text-primary border-l-[3px] pl-3 text-[0.8125rem] leading-relaxed break-words"
+                  aria-label={m.ai_builder_description_proposed()}
+                >
                   {descriptionDiff.proposed}
                 </p>
               </div>
             {:else if hasDescriptionAdvisory}
-              <p class="mb-3 text-[0.8125rem] leading-relaxed text-secondary">
+              <p class="text-secondary mb-3 text-[0.8125rem] leading-relaxed">
                 {advisories.find((a) => a.code === "flow_description_update_required")?.message}
               </p>
               <div class="flex flex-wrap gap-2">
                 <Button
-                  variant="outlined"
-                  size="small"
+                  variant="outline"
+                  size="sm"
                   onclick={() => service.revisePlan("keep_current_description")}
                 >
                   {m.ai_builder_description_keep_current()}
@@ -173,10 +191,16 @@
 
         <!-- Edit advisories (non-description) -->
         {#if advisories.filter((a) => a.code !== "flow_description_update_required").length > 0}
-          <Alert.Root class="mx-6 mb-3 rounded-lg border-warning-default bg-warning-dimmer px-4 py-3" aria-live="polite">
-            <Alert.Title class="text-[0.8125rem] font-semibold text-warning-stronger">{m.ai_builder_advisory_section_title()}</Alert.Title>
+          <Alert.Root
+            class="border-warning-default bg-warning-dimmer mx-6 mb-3 rounded-lg px-4 py-3"
+            aria-live="polite"
+          >
+            <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold"
+              >{m.ai_builder_advisory_section_title()}</Alert.Title
+            >
             {#each advisories.filter((a) => a.code !== "flow_description_update_required") as advisory (advisory.code)}
-              <div class="mb-1 rounded-md px-2.5 py-1.5 text-[0.8125rem] leading-relaxed
+              <div
+                class="mb-1 rounded-md px-2.5 py-1.5 text-[0.8125rem] leading-relaxed
                 {advisory.severity === 'info' ? 'bg-info-dimmer text-info-default' : ''}
                 {advisory.severity === 'warning' ? 'bg-warning-dimmer text-warning-stronger' : ''}
                 {advisory.severity === 'error' ? 'bg-negative-dimmer text-negative-default' : ''}"
@@ -189,11 +213,11 @@
 
         <!-- Assumptions -->
         {#if plan.envelope.assumptions.length > 0}
-          <div class="mx-6 mb-4 rounded-lg border border-default bg-secondary/30 px-4 py-3">
-            <p class="mb-1.5 text-sm font-semibold text-primary">
+          <div class="border-default bg-secondary/30 mx-6 mb-4 rounded-lg border px-4 py-3">
+            <p class="text-primary mb-1.5 text-sm font-semibold">
               {m.ai_builder_assumptions()}
             </p>
-            <ul class="flex flex-col gap-1.5 text-sm leading-relaxed text-secondary">
+            <ul class="text-secondary flex flex-col gap-1.5 text-sm leading-relaxed">
               {#each plan.envelope.assumptions as assumption (assumption)}
                 <li class="flex items-start gap-2">
                   <span class="mt-2 block size-1 shrink-0 rounded-full bg-current opacity-40"
@@ -206,29 +230,32 @@
         {/if}
 
         {#if plan.envelope.plan_rationale}
-          <div class="border-t border-default px-6 py-4">
-            <p class="mb-1 text-sm font-medium text-primary">
+          <div class="border-default border-t px-6 py-4">
+            <p class="text-primary mb-1 text-sm font-medium">
               {m.ai_builder_plan_rationale()}
             </p>
-            <p class="text-sm leading-relaxed text-secondary">
+            <p class="text-secondary text-sm leading-relaxed">
               {plan.envelope.plan_rationale}
             </p>
           </div>
         {/if}
 
         {#if spec.form_fields && spec.form_fields.length > 0}
-          <div class="border-t border-default px-6 py-4">
-            <p class="mb-1.5 text-[0.8125rem] font-medium text-primary">
+          <div class="border-default border-t px-6 py-4">
+            <p class="text-primary mb-1.5 text-[0.8125rem] font-medium">
               {m.ai_builder_form_fields_title()}
             </p>
             <div class="grid gap-3 sm:grid-cols-2">
               {#each spec.form_fields as field (`${field.name}-${field.type}`)}
-                <div class="rounded-[0.625rem] border border-default bg-secondary p-3">
+                <div class="border-default bg-secondary rounded-[0.625rem] border p-3">
                   <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
-                    <span class="text-[0.8125rem] font-semibold text-primary">{field.label}</span>
-                    <span class="rounded-full border border-default bg-primary px-2 py-0.5 text-xs text-secondary">{field.type}</span>
+                    <span class="text-primary text-[0.8125rem] font-semibold">{field.label}</span>
+                    <span
+                      class="border-default bg-primary text-secondary rounded-full border px-2 py-0.5 text-xs"
+                      >{field.type}</span
+                    >
                   </div>
-                  <div class="flex flex-wrap items-center gap-2 text-xs text-secondary">
+                  <div class="text-secondary flex flex-wrap items-center gap-2 text-xs">
                     <span>{field.name}</span>
                     <span
                       >{field.required
@@ -239,7 +266,10 @@
                   {#if field.options && field.options.length > 0}
                     <div class="mt-2 flex flex-wrap items-center gap-2">
                       {#each field.options as option (option)}
-                        <span class="rounded-full border border-default bg-primary px-2 py-0.5 text-xs text-secondary">{option}</span>
+                        <span
+                          class="border-default bg-primary text-secondary rounded-full border px-2 py-0.5 text-xs"
+                          >{option}</span
+                        >
                       {/each}
                     </div>
                   {/if}
@@ -251,13 +281,15 @@
 
         <!-- Lint warnings -->
         {#if plan.envelope.lint_warnings.length > 0}
-          <Alert.Root class="mx-6 mb-6 rounded-lg border-warning-default bg-warning-dimmer px-5 py-4">
+          <Alert.Root
+            class="border-warning-default bg-warning-dimmer mx-6 mb-6 rounded-lg px-5 py-4"
+          >
             <div class="mb-2 flex items-center gap-1.5">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 16 16"
                 fill="currentColor"
-                class="size-3.5 shrink-0 text-warning-stronger"
+                class="text-warning-stronger size-3.5 shrink-0"
               >
                 <path
                   fill-rule="evenodd"
@@ -265,11 +297,15 @@
                   clip-rule="evenodd"
                 />
               </svg>
-              <span class="text-[0.8125rem] font-semibold text-warning-stronger">{m.ai_builder_quality_warnings()}</span>
+              <span class="text-warning-stronger text-[0.8125rem] font-semibold"
+                >{m.ai_builder_quality_warnings()}</span
+              >
             </div>
             <ul class="flex flex-col gap-1.5">
               {#each plan.envelope.lint_warnings as warning (`${warning.step_ref ?? "flow"}-${warning.code}-${warning.message}`)}
-                <li class="lint-item relative pl-5 text-[0.8125rem] leading-relaxed text-warning-stronger">
+                <li
+                  class="lint-item text-warning-stronger relative pl-5 text-[0.8125rem] leading-relaxed"
+                >
                   {#if warning.step_ref}
                     <span class="mr-1 font-semibold">{warning.step_ref}:</span>
                   {/if}
@@ -299,12 +335,20 @@
         {#if removedStepChanges.length > 0}
           <div class="mx-6 mb-6">
             <Separator class="mb-4" />
-            <p class="mb-2 text-[0.8125rem] font-semibold tracking-tight text-primary">{m.ai_builder_removed_steps_title()}</p>
+            <p class="text-primary mb-2 text-[0.8125rem] font-semibold tracking-tight">
+              {m.ai_builder_removed_steps_title()}
+            </p>
             <ul class="flex flex-col gap-2">
               {#each removedStepChanges as change (`${change.step_ref ?? change.step_name}-${change.kind}`)}
-                <li class="flex items-center gap-2.5 rounded-xl border border-dashed border-default bg-secondary px-3.5 py-3">
-                  <Badge variant="outline" class="border-warning-default/20 bg-warning-dimmer text-[0.6875rem] font-bold uppercase tracking-wide text-warning-stronger">{m.ai_builder_badge_removed()}</Badge>
-                  <span class="text-sm font-medium text-primary">{change.step_name}</span>
+                <li
+                  class="border-default bg-secondary flex items-center gap-2.5 rounded-xl border border-dashed px-3.5 py-3"
+                >
+                  <Badge
+                    variant="outline"
+                    class="border-warning-default/20 bg-warning-dimmer text-warning-stronger text-[0.6875rem] font-bold tracking-wide uppercase"
+                    >{m.ai_builder_badge_removed()}</Badge
+                  >
+                  <span class="text-primary text-sm font-medium">{change.step_name}</span>
                 </li>
               {/each}
             </ul>
@@ -314,11 +358,11 @@
 
       <!-- Applied result -->
       {#if service.applyResult}
-        <Alert.Root class="mt-4 rounded-xl border-positive-default/40 bg-positive-dimmer px-5 py-4">
-          <Alert.Title class="text-sm font-medium text-positive-stronger">
+        <Alert.Root class="border-positive-default/40 bg-positive-dimmer mt-4 rounded-xl px-5 py-4">
+          <Alert.Title class="text-positive-stronger text-sm font-medium">
             {m.ai_builder_applied_success()}
           </Alert.Title>
-          <Alert.Description class="mt-1 text-xs text-positive-default">
+          <Alert.Description class="text-positive-default mt-1 text-xs">
             {service.applyResult.steps_created}
             {m.ai_builder_created()},
             {service.applyResult.steps_updated}
@@ -328,7 +372,7 @@
           </Alert.Description>
           {#if service.canContinueEditing}
             <div class="mt-3">
-              <Button variant="outlined" size="small" onclick={handleContinueEditing}>
+              <Button variant="outline" size="sm" onclick={handleContinueEditing}>
                 {m.ai_builder_continue_editing()}
               </Button>
             </div>
@@ -339,13 +383,18 @@
 
     <!-- Published flow banner -- near actions where the error originated -->
     {#if isPublishedError}
-      <Alert.Root class="shrink-0 rounded-none border-x-0 border-b-0 border-warning-default bg-warning-dimmer px-4 py-3" aria-live="polite">
-        <Alert.Title class="text-[0.8125rem] font-semibold text-warning-stronger">{m.ai_builder_published_flow_title()}</Alert.Title>
-        <Alert.Description class="mt-1 text-[0.8125rem] leading-relaxed text-warning-default">
+      <Alert.Root
+        class="border-warning-default bg-warning-dimmer shrink-0 rounded-none border-x-0 border-b-0 px-4 py-3"
+        aria-live="polite"
+      >
+        <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold"
+          >{m.ai_builder_published_flow_title()}</Alert.Title
+        >
+        <Alert.Description class="text-warning-default mt-1 text-[0.8125rem] leading-relaxed">
           {m.ai_builder_published_flow_description({ version: String(publishedVersion ?? "") })}
         </Alert.Description>
         <div class="mt-2">
-          <Button variant="outlined" size="small" onclick={() => service.dismissApplyError()}>
+          <Button variant="outline" size="sm" onclick={() => service.dismissApplyError()}>
             {m.ai_builder_conflict_cancel()}
           </Button>
         </div>
@@ -353,7 +402,9 @@
     {/if}
 
     <!-- Action buttons -- pinned at bottom, always visible -->
-    <div class="plan-actions relative flex shrink-0 flex-col gap-2 border-t border-default bg-primary px-4 pb-4 pt-3 sm:flex-row">
+    <div
+      class="plan-actions border-default bg-primary relative flex shrink-0 flex-col gap-2 border-t px-4 pt-3 pb-4 sm:flex-row"
+    >
       {#if service.canApprove}
         <Button variant="positive" onclick={handleApprove} disabled={isApproving || isApplying}>
           {isApproving ? m.ai_builder_approving() : m.ai_builder_approve()}
@@ -361,13 +412,13 @@
       {/if}
 
       {#if service.canApply}
-        <Button variant="primary" onclick={handleApply} disabled={isApproving || isApplying}>
+        <Button variant="default" onclick={handleApply} disabled={isApproving || isApplying}>
           {isApplying ? m.ai_builder_applying() : m.ai_builder_apply()}
         </Button>
       {/if}
 
       {#if !service.applyResult}
-        <Button variant="outlined" onclick={handleModify} disabled={isApproving || isApplying}>
+        <Button variant="outline" onclick={handleModify} disabled={isApproving || isApplying}>
           {m.ai_builder_modify()}
         </Button>
       {/if}
@@ -375,7 +426,7 @@
   {:else if service.isConflict}
     <!-- Conflict recovery banner (no plan state) -->
     <div class="flex-1 overflow-y-auto p-4 md:p-6">
-      <Alert.Root class="rounded-xl border-warning-default bg-warning-dimmer px-5 py-4">
+      <Alert.Root class="border-warning-default bg-warning-dimmer rounded-xl px-5 py-4">
         <Alert.Title class="text-warning-stronger text-sm font-semibold">
           {m.ai_builder_conflict_title()}
         </Alert.Title>
@@ -383,10 +434,10 @@
           {m.ai_builder_conflict_description()}
         </Alert.Description>
         <div class="mt-3 flex gap-2">
-          <Button variant="primary" size="small" onclick={handleConflictRegenerate}>
+          <Button variant="default" size="sm" onclick={handleConflictRegenerate}>
             {m.ai_builder_conflict_regenerate()}
           </Button>
-          <Button variant="outlined" size="small" onclick={() => service.dismissConflict()}>
+          <Button variant="outline" size="sm" onclick={() => service.dismissConflict()}>
             {m.ai_builder_conflict_cancel()}
           </Button>
         </div>
@@ -396,7 +447,7 @@
     <!-- Progress state -->
     <div class="flex flex-1 flex-col items-center justify-center text-center opacity-65">
       <div class="progress-ring mb-5 size-12 rounded-full border-[3px]"></div>
-      <p class="text-sm font-medium text-primary">
+      <p class="text-primary text-sm font-medium">
         {#if service.statusMessage === "validating"}
           {m.ai_builder_status_validating()}
         {:else if service.statusMessage === "repairing"}
@@ -409,12 +460,14 @@
           {m.ai_builder_generating()}
         {/if}
       </p>
-      <p class="mt-1 text-xs text-muted">{m.ai_builder_status_patience()}</p>
+      <p class="text-muted mt-1 text-xs">{m.ai_builder_status_patience()}</p>
     </div>
   {:else}
     <!-- Empty state -->
     <div class="flex flex-1 flex-col items-center justify-center text-center opacity-65">
-      <div class="mb-4 flex size-14 items-center justify-center rounded-2xl border border-default bg-primary text-muted">
+      <div
+        class="border-default bg-primary text-muted mb-4 flex size-14 items-center justify-center rounded-2xl border"
+      >
         <svg
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 24 24"
@@ -430,7 +483,7 @@
           />
         </svg>
       </div>
-      <p class="text-sm text-secondary">{m.ai_builder_plan_empty()}</p>
+      <p class="text-secondary text-sm">{m.ai_builder_plan_empty()}</p>
     </div>
   {/if}
 </div>

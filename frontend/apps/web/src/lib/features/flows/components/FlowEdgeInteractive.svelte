@@ -3,65 +3,87 @@
   import { IconPlus } from "@intric/icons/plus";
   import { m } from "$lib/paraglide/messages";
 
-  export let id: string;
-  export let sourceX: number;
-  export let sourceY: number;
-  export let targetX: number;
-  export let targetY: number;
-  export let sourcePosition: Position;
-  export let targetPosition: Position;
-  export let markerStart: string | undefined = undefined;
-  export let markerEnd: string | undefined = undefined;
-  export let data:
-    | {
-        mode?: "user" | "power_user";
-        readOnly?: boolean;
-        dataType?: string;
-        edgeKind?: "flow_input" | "previous_step" | "all_previous_steps" | "flow_output";
-        animate?: boolean;
-        allowInsert?: boolean;
-        labelOffsetY?: number;
-        sourceStepOrder?: number;
-        sourceLabel?: string;
-        targetLabel?: string;
-        payload?: Record<string, unknown> | null;
-        classificationEscalation?: boolean;
-        classificationViolation?: boolean;
-        onInsert?: (sourceStepOrder: number) => Promise<void> | void;
-        onInspect?: (params: {
-          sourceStepOrder: number;
-          sourceLabel: string;
-          targetLabel: string;
-          payload: Record<string, unknown> | null;
-        }) => void;
-      }
-    | undefined = undefined;
-
-  $: [edgePath, labelX, labelY] = getBezierPath({
+  let {
+    id,
     sourceX,
     sourceY,
     targetX,
     targetY,
     sourcePosition,
-    targetPosition
-  });
-  $: isPowerUser = data?.mode === "power_user";
-  $: isEscalation = Boolean(data?.classificationEscalation);
-  $: isViolation = Boolean(data?.classificationViolation);
-  $: labelOffsetY = data?.labelOffsetY ?? 0;
-  $: edgeColor = isViolation
-    ? "var(--color-negative-default)"
-    : isEscalation
-      ? "var(--color-warning-default)"
-      : undefined;
-  $: edgeKind = data?.edgeKind ?? "previous_step";
-  $: isDirectEdge = edgeKind !== "all_previous_steps";
-  $: edgeStyle = [
-    edgeColor ? `stroke: ${edgeColor}` : null,
-    !isDirectEdge ? "stroke-dasharray: 4 4; opacity: 0.6" : null
-  ]
-    .filter(Boolean)
-    .join(";");
+    targetPosition,
+    markerStart = undefined,
+    markerEnd = undefined,
+    data = undefined
+  }: {
+    id: string;
+    sourceX: number;
+    sourceY: number;
+    targetX: number;
+    targetY: number;
+    sourcePosition: Position;
+    targetPosition: Position;
+    markerStart?: string | undefined;
+    markerEnd?: string | undefined;
+    data?:
+      | {
+          mode?: "user" | "power_user";
+          readOnly?: boolean;
+          dataType?: string;
+          edgeKind?: "flow_input" | "previous_step" | "all_previous_steps" | "flow_output";
+          animate?: boolean;
+          allowInsert?: boolean;
+          labelOffsetY?: number;
+          sourceStepOrder?: number;
+          sourceLabel?: string;
+          targetLabel?: string;
+          payload?: Record<string, unknown> | null;
+          classificationEscalation?: boolean;
+          classificationViolation?: boolean;
+          onInsert?: (sourceStepOrder: number) => Promise<void> | void;
+          onInspect?: (params: {
+            sourceStepOrder: number;
+            sourceLabel: string;
+            targetLabel: string;
+            payload: Record<string, unknown> | null;
+          }) => void;
+        }
+      | undefined;
+  } = $props();
+
+  const bezier = $derived(
+    getBezierPath({
+      sourceX,
+      sourceY,
+      targetX,
+      targetY,
+      sourcePosition,
+      targetPosition
+    })
+  );
+  const edgePath = $derived(bezier[0]);
+  const labelX = $derived(bezier[1]);
+  const labelY = $derived(bezier[2]);
+  const isPowerUser = $derived(data?.mode === "power_user");
+  const isEscalation = $derived(Boolean(data?.classificationEscalation));
+  const isViolation = $derived(Boolean(data?.classificationViolation));
+  const labelOffsetY = $derived(data?.labelOffsetY ?? 0);
+  const edgeColor = $derived(
+    isViolation
+      ? "var(--color-negative-default)"
+      : isEscalation
+        ? "var(--color-warning-default)"
+        : undefined
+  );
+  const edgeKind = $derived(data?.edgeKind ?? "previous_step");
+  const isDirectEdge = $derived(edgeKind !== "all_previous_steps");
+  const edgeStyle = $derived(
+    [
+      edgeColor ? `stroke: ${edgeColor}` : null,
+      !isDirectEdge ? "stroke-dasharray: 4 4; opacity: 0.6" : null
+    ]
+      .filter(Boolean)
+      .join(";")
+  );
 
   function inspectEdge() {
     if (!data?.onInspect) return;
@@ -156,7 +178,9 @@
   :global(.edge-label-actions) {
     visibility: hidden;
     opacity: 0;
-    transition: opacity 150ms ease, visibility 150ms ease;
+    transition:
+      opacity 150ms ease,
+      visibility 150ms ease;
     pointer-events: none;
   }
 

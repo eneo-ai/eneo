@@ -1,0 +1,189 @@
+import type { FlowStep, UploadedFile } from "@intric/intric-js";
+import type { FlowEditor } from "$lib/features/flows/FlowEditor";
+import type { Intric } from "@intric/intric-js";
+import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
+import type { Writable } from "svelte/store";
+
+export type LoadedAssistant = NonNullable<Awaited<ReturnType<FlowEditor["loadAssistant"]>>>;
+
+/**
+ * Manages the assistant lifecycle for the active flow step:
+ * loading, saving fields, attachment management, and cleanup.
+ */
+export class FlowStepAssistantState {
+  #flowEditor: FlowEditor;
+  #intric: Intric;
+  #attachmentRules: Writable<Record<string, unknown>>;
+  #newAttachments: Writable<
+    Array<{
+      id: string;
+      file: File;
+      status: string;
+      progress: number;
+      remove: () => void;
+      fileRef?: { id: string };
+    }>
+  >;
+  #clearUploads: () => void;
+  #getActiveStep: () => FlowStep | null;
+
+  assistant = $state<LoadedAssistant | null>(null);
+  loading = $state(false);
+
+  #lastLoadedId: string | null = null;
+  #loadRequestToken = 0;
+  #autoClearedLegacyTemplateByStepId = new Set<string>();
+
+  runningUploads = $derived(
+    (this.#getNewAttachments() ?? []).filter(
+      (attachment: { status: string }) => attachment.status !== "completed"
+    )
+  );
+
+  constructor(opts: {
+    flowEditor: FlowEditor;
+    intric: Intric;
+    attachmentRules: Writable<Record<string, unknown>>;
+    newAttachments: Writable<
+      Array<{
+        id: string;
+        file: File;
+        status: string;
+        progress: number;
+        remove: () => void;
+        fileRef?: { id: string };
+      }>
+    >;
+    clearUploads: () => void;
+    getActiveStep: () => FlowStep | null;
+  }) {
+    this.#flowEditor = opts.flowEditor;
+    this.#intric = opts.intric;
+    this.#attachmentRules = opts.attachmentRules;
+    this.#newAttachments = opts.newAttachments;
+    this.#clearUploads = opts.clearUploads;
+    this.#getActiveStep = opts.getActiveStep;
+  }
+
+  #getNewAttachments() {
+    let value: any[] = [];
+    this.#newAttachments.subscribe((v) => (value = v))();
+    return value;
+  }
+
+  cancelUploadsAndClearQueue() {
+    this.#getNewAttachments().forEach((upload: { status: string; remove: () => void }) => {
+      if (upload.status !== "completed") {
+        upload.remove();
+      }
+    });
+    this.#clearUploads();
+  }
+
+  async load(assistantId: string) {
+    if (!assistantId) return;
+    const requestToken = ++this.#loadRequestToken;
+    this.loading = true;
+    this.#lastLoadedId = assistantId;
+    try {
+      const loaded = await this.#flowEditor.loadAssistant(assistantId);
+      if (requestToken !== this.#loadRequestToken) return;
+      const activeStep = this.#getActiveStep();
+      if (activeStep?.assistant_id !== assistantId) return;
+      this.assistant = loaded;
+    } catch (error) {
+      if (requestToken !== this.#loadRequestToken) return;
+      console.error("Failed to load assistant for flow step:", error);
+      this.assistant = null;
+    } finally {
+      if (requestToken === this.#loadRequestToken) {
+        this.loading = false;
+      }
+    }
+  }
+
+  updateField(field: string, value: unknown) {
+    const activeStep = this.#getActiveStep();
+    if (!activeStep?.assistant_id) return;
+    if (this.assistant) {
+      this.assistant = { ...this.assistant, [field]: value };
+    }
+    this.#flowEditor.saveAssistant(activeStep.assistant_id, { [field]: value });
+  }
+
+  onFileUploaded(newFile: UploadedFile) {
+    if (!this.assistant) return;
+    const currentAttachments = Array.isArray(this.assistant.attachments)
+      ? this.assistant.attachments
+      : [];
+    if (currentAttachments.some((file: UploadedFile) => file.id === newFile.id)) return;
+    this.updateField("attachments", [...currentAttachments, newFile]);
+  }
+
+  async removeAttachment(file: { id: string }) {
+    if (!this.assistant) return;
+    const uploadStillQueued = this.#getNewAttachments().find(
+      (attachment: { fileRef?: { id: string } }) =>
+        attachment.fileRef && attachment.fileRef.id === file.id
+    );
+    if (uploadStillQueued) {
+      try {
+        await this.#intric.files.delete({ fileId: file.id });
+      } catch (error) {
+        console.error("Failed to delete newly uploaded attachment file", error);
+      }
+    }
+    const currentAttachments = Array.isArray(this.assistant.attachments)
+      ? this.assistant.attachments
+      : [];
+    this.updateField(
+      "attachments",
+      currentAttachments.filter((attachment: UploadedFile) => attachment.id !== file.id)
+    );
+  }
+
+  /** Sync attachment rules when assistant changes */
+  syncAttachmentRules() {
+    const allowed = this.assistant?.allowed_attachments;
+    if (allowed) {
+      this.#attachmentRules.set(getExplicitAttachmentRules(allowed));
+    } else {
+      this.#attachmentRules.set({});
+    }
+  }
+
+  /** React to active step changes — load, unload, or switch assistant */
+  syncWithActiveStep(activeStep: FlowStep | null) {
+    if (activeStep?.output_mode === "template_fill") {
+      this.assistant = null;
+      this.#lastLoadedId = null;
+      this.loading = false;
+      this.cancelUploadsAndClearQueue();
+    } else if (activeStep?.assistant_id && activeStep.assistant_id !== this.#lastLoadedId) {
+      const targetId = activeStep.assistant_id;
+      this.#lastLoadedId = targetId;
+      this.cancelUploadsAndClearQueue();
+      void (async () => {
+        await this.#flowEditor.flushAssistantSaves().catch(() => {});
+        if (this.#getActiveStep()?.assistant_id !== targetId) return;
+        await this.load(targetId);
+      })();
+    } else if (!activeStep || !activeStep.assistant_id) {
+      this.assistant = null;
+      this.#lastLoadedId = null;
+      this.loading = false;
+      this.cancelUploadsAndClearQueue();
+    }
+  }
+
+  /** Cleanup on destroy */
+  destroy() {
+    this.cancelUploadsAndClearQueue();
+    void this.#flowEditor.flushAssistantSaves().catch(() => {});
+  }
+
+  /** Check if legacy template should be auto-cleared */
+  get autoClearedLegacyTemplateByStepId() {
+    return this.#autoClearedLegacyTemplateByStepId;
+  }
+}

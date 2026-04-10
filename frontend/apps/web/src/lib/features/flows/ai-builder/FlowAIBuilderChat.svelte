@@ -1,6 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Alert } from "@eneo/ui";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import FlowAIBuilderMessage from "./FlowAIBuilderMessage.svelte";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
   import FlowAIBuilderPhaseIndicator from "./FlowAIBuilderPhaseIndicator.svelte";

@@ -1,5 +1,3 @@
-<svelte:options runes={false} />
-
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
@@ -11,39 +9,51 @@
     type FlowCitationMode
   } from "$lib/features/flows/flowCitationMode";
   import type { FlowStep } from "@intric/intric-js";
-  import { Button } from "@intric/ui";
-  import { Alert } from "@eneo/ui";
-  import { createEventDispatcher } from "svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { getOutputHintText } from "./flowStepEditHelpers";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
   import type { HttpAuthoredConfig } from "./http/httpConfigTypes";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
-
-  export let step: FlowStep;
-  export let isPublished: boolean;
-  export let isAdvancedMode: boolean;
-  export let availableOutputTypes: Array<{ value: string; label: string }>;
-  export let availableOutputModes: Array<{ value: string; label: string }>;
-  export let flowId: string = "";
   import type { FlowOutputHintKind } from "$lib/features/flows/flowStepPresentation";
 
-  export let outputHintKind: FlowOutputHintKind | null;
+  let {
+    step,
+    isPublished,
+    isAdvancedMode,
+    availableOutputTypes,
+    availableOutputModes,
+    flowId = "",
+    outputHintKind,
+    onOutputTypeChange,
+    onOutputModeChange,
+    onWebhookUrlChange,
+    onHttpConfigChange,
+    onCitationModeChange,
+    onSwitchToTemplateFill
+  }: {
+    step: FlowStep;
+    isPublished: boolean;
+    isAdvancedMode: boolean;
+    availableOutputTypes: Array<{ value: string; label: string }>;
+    availableOutputModes: Array<{ value: string; label: string }>;
+    flowId?: string;
+    outputHintKind: FlowOutputHintKind | null;
+    onOutputTypeChange?: (detail: { value: string }) => void;
+    onOutputModeChange?: (detail: { value: string }) => void;
+    onWebhookUrlChange?: (detail: { value: string }) => void;
+    onHttpConfigChange?: (detail: { config: HttpAuthoredConfig }) => void;
+    onCitationModeChange?: (detail: { value: FlowCitationMode }) => void;
+    onSwitchToTemplateFill?: () => void;
+  } = $props();
 
-  const dispatch = createEventDispatcher<{
-    outputTypeChange: { value: string };
-    outputModeChange: { value: string };
-    webhookUrlChange: { value: string };
-    httpConfigChange: { config: HttpAuthoredConfig };
-    citationModeChange: { value: FlowCitationMode };
-    switchToTemplateFill: void;
-  }>();
-
-  $: httpConfig =
+  const httpConfig = $derived(
     step.output_mode === "http_post" && step.output_config?.auth
       ? (step.output_config as unknown as HttpAuthoredConfig)
-      : createDefaultHttpConfig("output", "POST");
-  $: citationMode = resolveFlowCitationMode(step.output_config);
-  $: supportsCitationMode = supportsFlowCitationMode(step);
+      : createDefaultHttpConfig("output", "POST")
+  );
+  const citationMode = $derived(resolveFlowCitationMode(step.output_config));
+  const supportsCitationMode = $derived(supportsFlowCitationMode(step));
 </script>
 
 <Settings.Group title={m.flow_step_output_section()}>
@@ -53,7 +63,7 @@
         class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
         value={step.output_type}
         disabled={isPublished}
-        on:change={(e) => dispatch("outputTypeChange", { value: e.currentTarget.value })}
+        onchange={(e) => onOutputTypeChange?.({ value: e.currentTarget.value })}
       >
         {#each availableOutputTypes as t (t.value)}
           <option value={t.value}>{t.label}</option>
@@ -68,7 +78,10 @@
   </Settings.Row>
 
   {#if isAdvancedMode && step.output_type === "docx"}
-    <Alert.Root class="mb-4 rounded-xl border-accent-default/20 bg-accent-dimmer/30 px-4 py-3" role="status">
+    <Alert.Root
+      class="border-accent-default/20 bg-accent-dimmer/30 mb-4 rounded-xl px-4 py-3"
+      role="status"
+    >
       <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div class="space-y-1">
           <Alert.Title class="text-accent-stronger text-sm font-medium">
@@ -79,10 +92,10 @@
           </Alert.Description>
         </div>
         <Button
-          variant="outlined"
-          size="small"
+          variant="outline"
+          size="sm"
           disabled={isPublished}
-          on:click={() => dispatch("switchToTemplateFill")}
+          onclick={() => onSwitchToTemplateFill?.()}
         >
           {m.flow_output_mode_template_fill()}
         </Button>
@@ -95,7 +108,7 @@
       class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
       value={step.output_mode}
       disabled={isPublished}
-      on:change={(e) => dispatch("outputModeChange", { value: e.currentTarget.value })}
+      onchange={(e) => onOutputModeChange?.({ value: e.currentTarget.value })}
     >
       {#each availableOutputModes as mode (mode.value)}
         <option value={mode.value}>{mode.label}</option>
@@ -113,8 +126,8 @@
           class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
           value={citationMode}
           disabled={isPublished}
-          on:change={(e) =>
-            dispatch("citationModeChange", {
+          onchange={(e) =>
+            onCitationModeChange?.({
               value:
                 e.currentTarget.value === FLOW_CITATION_MODE_INLINE_INREF_SIDECAR
                   ? FLOW_CITATION_MODE_INLINE_INREF_SIDECAR
@@ -141,7 +154,7 @@
           class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
           value={step.output_config?.url ?? ""}
           disabled={isPublished}
-          on:input={(e) => dispatch("webhookUrlChange", { value: e.currentTarget.value })}
+          oninput={(e) => onWebhookUrlChange?.({ value: e.currentTarget.value })}
           placeholder="https://..."
         />
       </Settings.Row>
@@ -156,6 +169,6 @@
     method="POST"
     {isPublished}
     {flowId}
-    on:configChange={(e) => dispatch("httpConfigChange", { config: e.detail.config })}
+    onConfigChange={(detail) => onHttpConfigChange?.({ config: detail.config })}
   />
 {/if}

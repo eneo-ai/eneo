@@ -1,12 +1,9 @@
-<svelte:options runes={false} />
-
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import type { UploadedFile } from "@intric/intric-js";
-  import { createEventDispatcher } from "svelte";
-  import { Button } from "@intric/ui";
-  import { Alert } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconTrash } from "@intric/icons/trash";
   import { IconCancel } from "@intric/icons/cancel";
@@ -17,24 +14,29 @@
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatFileType } from "$lib/core/formatting/formatFileType";
 
-  export let assistant: any | null;
-  export let assistantLoading: boolean;
-  export let runningUploads: Array<{
-    id: string;
-    file: File;
-    status: string;
-    progress: number;
-    remove: () => void;
-  }>;
-
-  const dispatch = createEventDispatcher<{
-    knowledgeChange: {
+  let {
+    assistant,
+    assistantLoading,
+    runningUploads,
+    onKnowledgeChange,
+    onRemoveAttachment
+  }: {
+    assistant: any | null;
+    assistantLoading: boolean;
+    runningUploads: Array<{
+      id: string;
+      file: File;
+      status: string;
+      progress: number;
+      remove: () => void;
+    }>;
+    onKnowledgeChange?: (detail: {
       websites: any[];
       groups: any[];
       integrationKnowledgeList: any[];
-    };
-    removeAttachment: { file: { id: string } };
-  }>();
+    }) => void;
+    onRemoveAttachment?: (detail: { file: { id: string } }) => void;
+  } = $props();
 </script>
 
 <Settings.Group title={m.flow_step_section_context()}>
@@ -45,7 +47,7 @@
     </div>
   {:else if assistant}
     {@const currentAssistant = assistant}
-    <Alert.Root class="mb-4 rounded-xl border-accent-default/15 bg-accent-dimmer/50" role="status">
+    <Alert.Root class="border-accent-default/15 bg-accent-dimmer/50 mb-4 rounded-xl" role="status">
       <Alert.Title class="text-accent-stronger text-sm font-medium">
         {m.flow_step_context_runtime_files_title()}
       </Alert.Title>
@@ -60,7 +62,7 @@
         bind:selectedCollections={currentAssistant.groups}
         bind:selectedIntegrationKnowledge={currentAssistant.integration_knowledge_list}
         on:change={() => {
-          dispatch("knowledgeChange", {
+          onKnowledgeChange?.({
             websites: currentAssistant.websites,
             groups: currentAssistant.groups,
             integrationKnowledgeList: currentAssistant.integration_knowledge_list
@@ -73,7 +75,7 @@
         bind:selectedCollections={currentAssistant.groups}
         bind:selectedIntegrationKnowledge={currentAssistant.integration_knowledge_list}
         on:change={() => {
-          dispatch("knowledgeChange", {
+          onKnowledgeChange?.({
             websites: currentAssistant.websites,
             groups: currentAssistant.groups,
             integrationKnowledgeList: currentAssistant.integration_knowledge_list
@@ -92,7 +94,7 @@
               <AttachmentPreview {file} isTableView={true}>
                 {#snippet children({ showFile }: { showFile: () => void })}
                   <button
-                    on:click={showFile}
+                    onclick={showFile}
                     class="line-clamp-1 cursor-pointer text-left hover:underline"
                   >
                     {file.name}
@@ -106,8 +108,8 @@
             <div class="min-w-8">
               <Button
                 variant="destructive"
-                padding="icon"
-                on:click={() => dispatch("removeAttachment", { file })}
+                size="icon"
+                onclick={() => onRemoveAttachment?.({ file })}
               >
                 <IconTrash></IconTrash>
               </Button>
@@ -135,11 +137,7 @@
               </div>
             </div>
             <div class="min-w-8">
-              <Button
-                variant="destructive"
-                padding="icon"
-                on:click={() => upload.remove()}
-              >
+              <Button variant="destructive" size="icon" onclick={() => upload.remove()}>
                 <IconCancel />
               </Button>
             </div>

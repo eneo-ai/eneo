@@ -1,53 +1,72 @@
 <script lang="ts">
-  import type {
-    FlowRunDebugRagReferenceChunk,
-    Intric,
-  } from "@intric/intric-js";
-  import { Button, Dialog, Tooltip } from "@intric/ui";
+  import type { FlowRunDebugRagReferenceChunk, Intric } from "@intric/intric-js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { m } from "$lib/paraglide/messages";
-  import { onDestroy, tick } from "svelte";
+  import { tick, type Snippet } from "svelte";
   import {
     createDocumentHighlighter,
-    type FlowDocumentHighlighter,
+    type FlowDocumentHighlighter
   } from "$lib/features/flows/utils/document-highlighter";
 
-  export let intric: Intric;
-  export let infoBlobId: string;
-  export let title: string | null = null;
-  export let sourceIdShort: string | null = null;
-  export let chunks: FlowRunDebugRagReferenceChunk[] = [];
+  let {
+    intric,
+    infoBlobId,
+    title = null,
+    sourceIdShort = null,
+    chunks = [],
+    children
+  }: {
+    intric: Intric;
+    infoBlobId: string;
+    title?: string | null;
+    sourceIdShort?: string | null;
+    chunks?: FlowRunDebugRagReferenceChunk[];
+    children?: Snippet<[{ showViewer: () => void }]>;
+  } = $props();
 
-  let isOpen: Dialog.OpenState;
-  let loadingDocument = false;
-  let loadError = false;
-  let documentText = "";
-  let sourceUrl: string | null = null;
-  let textContainer: HTMLElement | null = null;
-  let highlighter: FlowDocumentHighlighter | null = null;
-  let activeChunkIndex: number | null = null;
+  let isOpen = $state(false);
+  let loadingDocument = $state(false);
+  let loadError = $state(false);
+  let documentText = $state("");
+  let sourceUrl: string | null = $state(null);
+  let textContainer: HTMLElement | null = $state(null);
+  let highlighter: FlowDocumentHighlighter | null = $state(null);
+  let activeChunkIndex: number | null = $state(null);
 
-  $: chunkItems = (chunks ?? [])
-    .filter((chunk) => typeof chunk.snippet === "string" && chunk.snippet.trim().length > 0)
-    .sort((a, b) => (a.chunk_no ?? 0) - (b.chunk_no ?? 0));
-  $: allSnippets = chunkItems.map((chunk) => chunk.snippet);
+  let chunkItems = $derived(
+    (chunks ?? [])
+      .filter((chunk) => typeof chunk.snippet === "string" && chunk.snippet.trim().length > 0)
+      .sort((a, b) => (a.chunk_no ?? 0) - (b.chunk_no ?? 0))
+  );
+  let allSnippets = $derived(chunkItems.map((chunk) => chunk.snippet));
 
-  $: if ($isOpen && !loadingDocument && !documentText && !loadError) {
-    void loadDocument();
-  }
+  $effect(() => {
+    if (isOpen && !loadingDocument && !documentText && !loadError) {
+      void loadDocument();
+    }
+  });
 
-  $: if ($isOpen && !loadingDocument && !loadError && documentText && textContainer) {
-    void applyHighlights();
-  }
+  $effect(() => {
+    if (isOpen && !loadingDocument && !loadError && documentText && textContainer) {
+      void applyHighlights();
+    }
+  });
 
-  $: if (!$isOpen) {
-    activeChunkIndex = null;
-    highlighter?.destroy();
-    highlighter = null;
-  }
+  $effect(() => {
+    if (!isOpen) {
+      activeChunkIndex = null;
+      highlighter?.destroy();
+      highlighter = null;
+    }
+  });
 
-  onDestroy(() => {
-    highlighter?.destroy();
+  $effect(() => {
+    return () => {
+      highlighter?.destroy();
+    };
   });
 
   function cleanSourceDisplay(displayTitle: string | null, url: string | null): string {
@@ -118,7 +137,7 @@
   }
 
   function showViewer() {
-    $isOpen = true;
+    isOpen = true;
   }
 
   function nextChunk() {
@@ -129,50 +148,60 @@
 
   function previousChunk() {
     if (!chunkItems.length) return;
-    const prev = activeChunkIndex === null
-      ? chunkItems.length - 1
-      : (activeChunkIndex - 1 + chunkItems.length) % chunkItems.length;
+    const prev =
+      activeChunkIndex === null
+        ? chunkItems.length - 1
+        : (activeChunkIndex - 1 + chunkItems.length) % chunkItems.length;
     activateChunk(prev);
   }
 </script>
 
-<svelte:options runes={false} />
-
-<Dialog.Root bind:isOpen>
-  {#if $$slots.default}
-    <slot {showViewer}></slot>
+<Dialog.Root bind:open={isOpen}>
+  {#if children}
+    {@render children({ showViewer })}
   {/if}
 
-  <Dialog.Content width="large">
-    <Dialog.Title>
-      {cleanSourceDisplay(title, sourceUrl) || m.flow_run_knowledge_untitled_source()}
-    </Dialog.Title>
-    <Dialog.Description hidden>{m.flow_run_knowledge_document_description()}</Dialog.Description>
+  <Dialog.Content class="!max-w-5xl" showCloseButton={false}>
+    <Dialog.Header>
+      <Dialog.Title>
+        {cleanSourceDisplay(title, sourceUrl) || m.flow_run_knowledge_untitled_source()}
+      </Dialog.Title>
+      <Dialog.Description class="sr-only"
+        >{m.flow_run_knowledge_document_description()}</Dialog.Description
+      >
+    </Dialog.Header>
 
-    <Dialog.Section scrollable class="max-h-[68vh]">
+    <div class="max-h-[68vh] overflow-y-auto">
       <div class="grid gap-4 p-4 lg:grid-cols-[minmax(230px,280px)_minmax(0,1fr)]">
         <aside class="space-y-3">
-          <div class="rounded-md border border-default bg-hover-dimmer p-3">
-            <div class="text-sm font-medium text-secondary">
+          <div class="border-default bg-hover-dimmer rounded-md border p-3">
+            <div class="text-secondary text-sm font-medium">
               {cleanSourceDisplay(title, sourceUrl) || m.flow_run_knowledge_untitled_source()}
             </div>
             {#if sourceUrl && title && !title.startsWith("http")}
-              <div class="mt-0.5 truncate font-mono text-[11px] text-muted">
+              <div class="text-muted mt-0.5 truncate font-mono text-[11px]">
                 {cleanSourceDisplay(null, sourceUrl)}
               </div>
             {/if}
             <div class="mt-1.5 flex items-center gap-3">
               {#if sourceIdShort}
-                <Tooltip text={infoBlobId}>
-                  <span class="font-mono text-[11px] text-muted opacity-60">{sourceIdShort}</span>
-                </Tooltip>
+                <Tooltip.Provider delayDuration={150}>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger>
+                      <span class="text-muted font-mono text-[11px] opacity-60"
+                        >{sourceIdShort}</span
+                      >
+                    </Tooltip.Trigger>
+                    <Tooltip.Content>{infoBlobId}</Tooltip.Content>
+                  </Tooltip.Root>
+                </Tooltip.Provider>
               {/if}
               {#if sourceUrl}
                 <a
                   href={sourceUrl}
                   target="_blank"
                   rel="noreferrer"
-                  class="text-[11px] font-medium text-accent-stronger hover:underline"
+                  class="text-accent-stronger text-[11px] font-medium hover:underline"
                 >
                   {m.go_to_website()}
                 </a>
@@ -182,42 +211,53 @@
 
           <div class="space-y-2">
             <div class="flex items-center justify-between">
-              <h4 class="text-xs font-semibold text-muted">
+              <h4 class="text-muted text-xs font-semibold">
                 {m.flow_run_knowledge_segment_header({ count: String(chunkItems.length) })}
               </h4>
               {#if activeChunkIndex !== null}
                 <button
-                  class="rounded px-2 py-1 text-[11px] font-medium text-accent-stronger hover:bg-hover-default"
-                  on:click={resetChunkHighlight}
+                  class="text-accent-stronger hover:bg-hover-default rounded px-2 py-1 text-[11px] font-medium"
+                  onclick={resetChunkHighlight}
                 >
                   {m.clear()}
                 </button>
               {/if}
             </div>
             {#if chunkItems.length === 0}
-              <p class="rounded-md border border-default bg-primary p-2 text-xs text-muted">
+              <p class="border-default bg-primary text-muted rounded-md border p-2 text-xs">
                 {m.flow_run_knowledge_no_snippets()}
               </p>
             {:else}
               <div class="max-h-[44vh] space-y-1.5 overflow-auto pr-1">
                 {#each chunkItems as chunk, index (`${chunk.chunk_no ?? 0}-${index}`)}
                   <button
-                    class="w-full rounded-md border border-default border-l-[3px] border-l-transparent px-2.5 py-2 text-left text-xs transition-colors hover:bg-hover-default"
+                    class="border-default hover:bg-hover-default w-full rounded-md border px-2.5 py-2 text-left text-xs transition-colors"
                     class:bg-accent-dimmer={activeChunkIndex === index}
-                    style:border-left-color={activeChunkIndex === index ? "var(--accent-default)" : undefined}
-                    on:click={() => activateChunk(index)}
+                    onclick={() => activateChunk(index)}
                   >
                     <div class="flex items-center justify-between gap-2">
-                      <span class="font-semibold text-secondary">
+                      <span class="text-secondary font-semibold">
                         {m.flow_run_knowledge_chunk_label({ chunk: String(chunk.chunk_no ?? 0) })}
                       </span>
-                      <Tooltip text={Number(chunk.score ?? 0).toFixed(2)}>
-                        <span class={["rounded-full px-1.5 py-0.5 text-[10px] font-medium", scoreBadgeClass(Number(chunk.score ?? 0))]}>
-                          {scoreLabel(Number(chunk.score ?? 0))}
-                        </span>
-                      </Tooltip>
+                      <Tooltip.Provider delayDuration={150}>
+                        <Tooltip.Root>
+                          <Tooltip.Trigger>
+                            <span
+                              class={[
+                                "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                                scoreBadgeClass(Number(chunk.score ?? 0))
+                              ]}
+                            >
+                              {scoreLabel(Number(chunk.score ?? 0))}
+                            </span>
+                          </Tooltip.Trigger>
+                          <Tooltip.Content>{Number(chunk.score ?? 0).toFixed(2)}</Tooltip.Content>
+                        </Tooltip.Root>
+                      </Tooltip.Provider>
                     </div>
-                    <p class="mt-1 line-clamp-3 text-[11px] leading-relaxed text-muted">{chunk.snippet}</p>
+                    <p class="text-muted mt-1 line-clamp-3 text-[11px] leading-relaxed">
+                      {chunk.snippet}
+                    </p>
                   </button>
                 {/each}
               </div>
@@ -225,43 +265,49 @@
           </div>
         </aside>
 
-        <section class="rounded-md border border-default bg-primary">
+        <section class="border-default bg-primary rounded-md border">
           {#if loadingDocument}
-            <div class="flex items-center gap-2 p-4 text-sm text-secondary">
+            <div class="text-secondary flex items-center gap-2 p-4 text-sm">
               <IconLoadingSpinner class="size-4 animate-spin" />
               {m.flow_run_knowledge_loading_document()}
             </div>
           {:else if loadError}
-            <p class="p-4 text-sm text-negative-default">
+            <p class="text-negative-default p-4 text-sm">
               {m.flow_run_knowledge_document_load_failed()}
             </p>
           {:else if !documentText}
-            <p class="p-4 text-sm text-muted">{m.empty()}</p>
+            <p class="text-muted p-4 text-sm">{m.empty()}</p>
           {:else}
             <div
               bind:this={textContainer}
               class="knowledge-document h-[52vh] overflow-auto px-4 py-3"
               style="content-visibility: auto;"
             >
-              <pre class="whitespace-pre-wrap break-words font-sans text-[15px] leading-relaxed">{documentText}</pre>
+              <pre
+                class="font-sans text-[15px] leading-relaxed break-words whitespace-pre-wrap">{documentText}</pre>
             </div>
-            <div class="flex items-center justify-between border-t border-default bg-hover-dimmer px-4 py-2.5">
-              <div class="inline-flex items-center gap-2 text-[11px] text-muted">
+            <div
+              class="border-default bg-hover-dimmer flex items-center justify-between border-t px-4 py-2.5"
+            >
+              <div class="text-muted inline-flex items-center gap-2 text-[11px]">
                 <span class="legend-swatch"></span>
                 <span>{m.flow_run_knowledge_highlight_legend()}</span>
               </div>
               <div class="inline-flex items-center gap-1">
-                <Button variant="outlined" class="text-xs" on:click={previousChunk}>
+                <Button variant="outline" class="text-xs" onclick={previousChunk}>
                   {m.flow_run_knowledge_prev_match()}
                 </Button>
-                <span class="px-2 text-[11px] tabular-nums text-muted">
+                <span class="text-muted px-2 text-[11px] tabular-nums">
                   {#if activeChunkIndex !== null}
-                    {m.flow_run_knowledge_chunk_position({ current: String(activeChunkIndex + 1), total: String(chunkItems.length) })}
+                    {m.flow_run_knowledge_chunk_position({
+                      current: String(activeChunkIndex + 1),
+                      total: String(chunkItems.length)
+                    })}
                   {:else}
                     {m.flow_run_knowledge_chunk_count({ count: String(chunkItems.length) })}
                   {/if}
                 </span>
-                <Button variant="outlined" class="text-xs" on:click={nextChunk}>
+                <Button variant="outline" class="text-xs" onclick={nextChunk}>
                   {m.flow_run_knowledge_next_match()}
                 </Button>
               </div>
@@ -269,11 +315,11 @@
           {/if}
         </section>
       </div>
-    </Dialog.Section>
+    </div>
 
-    <Dialog.Controls let:close>
-      <Button variant="primary" is={close}>{m.done()}</Button>
-    </Dialog.Controls>
+    <Dialog.Footer>
+      <Button variant="default" onclick={() => (isOpen = false)}>{m.done()}</Button>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
 

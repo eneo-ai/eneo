@@ -1,5 +1,3 @@
-<svelte:options runes={false} />
-
 <script lang="ts">
   import { IntricError, type FlowStep, type UploadedFile } from "@intric/intric-js";
   import { Settings } from "$lib/components/layout";
@@ -8,13 +6,11 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getIntric } from "$lib/core/Intric";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
-  import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
-  import { createEventDispatcher, onDestroy } from "svelte";
-  import { get, writable } from "svelte/store";
+  import { writable } from "svelte/store";
   import { IconWorkflow } from "@intric/icons/workflow";
   import { MousePointerClick } from "lucide-svelte";
-  import { Button } from "@intric/ui";
-  import { Separator } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Separator } from "$lib/components/ui/separator/index.js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -32,24 +28,11 @@
   import { buildNextFlowPrompt } from "$lib/features/flows/flowPromptDraft";
   import {
     applyAutoTemplateBindings,
-    applyTemplateInspection,
-    buildTemplateBindingAutoSuggestions,
-    buildTemplateBindingSuggestions,
-    type FlowTemplateAssetOption,
     getTemplateFillOutputConfig,
-    getTemplateFillReadiness,
-    groupTemplateBindingSuggestions,
     isTemplateFillStep,
-    listTemplateBindingRows,
-    listTemplatePlaceholders,
-    resolveTemplateAssetSelection,
-    updateTemplateBinding,
-    type TemplateBindingSuggestionLabels,
-    type FlowTemplateInspection
+    updateTemplateBinding
   } from "$lib/features/flows/templateFillConfig";
   import { shouldShowTemplateBodyTextHint } from "$lib/features/flows/templateFillAuthoringHints";
-  import { getTemplateFillErrorMessage } from "$lib/features/flows/templateFillErrors";
-  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import {
     buildRuntimeInputStepPatch,
     getRuntimeInputConfig,
@@ -67,6 +50,10 @@
     setFlowCitationMode,
     type FlowCitationMode
   } from "$lib/features/flows/flowCitationMode";
+
+  // Extracted state management
+  import { FlowStepAssistantState } from "./FlowStepAssistantState.svelte.ts";
+  import { FlowTemplateState } from "./FlowTemplateState.svelte.ts";
 
   // Extracted helpers
   import {
@@ -104,34 +91,41 @@
   // Props
   // ---------------------------------------------------------------------------
 
-  export let steps: FlowStep[];
-  export let activeStepId: string | null;
-  export let isPublished: boolean;
-  export let transcriptionEnabled: boolean = true;
-  export let transcriptionModelConfigured: boolean = false;
-  export let transcriptionModelLabel: string | null = null;
-  export let formSchema:
-    | {
-        fields: {
-          name: string;
-          type: string;
-          required?: boolean;
-          options?: string[];
-          order?: number;
-        }[];
-      }
-    | undefined;
-
-  // ---------------------------------------------------------------------------
-  // Event dispatcher
-  // ---------------------------------------------------------------------------
-
-  const dispatch = createEventDispatcher<{
-    stepChanged: { index: number; step: FlowStep };
-    removeStep: number;
-    jsonValidationChanged: { hasErrors: boolean; fields: string[] };
-    openTranscriptionSettings: void;
-  }>();
+  let {
+    steps,
+    activeStepId,
+    isPublished,
+    transcriptionEnabled = true,
+    transcriptionModelConfigured = false,
+    transcriptionModelLabel = null,
+    formSchema,
+    onStepChanged,
+    onRemoveStep,
+    onJsonValidationChanged,
+    onOpenTranscriptionSettings
+  }: {
+    steps: FlowStep[];
+    activeStepId: string | null;
+    isPublished: boolean;
+    transcriptionEnabled?: boolean;
+    transcriptionModelConfigured?: boolean;
+    transcriptionModelLabel?: string | null;
+    formSchema?:
+      | {
+          fields: {
+            name: string;
+            type: string;
+            required?: boolean;
+            options?: string[];
+            order?: number;
+          }[];
+        }
+      | undefined;
+    onStepChanged?: (detail: { index: number; step: FlowStep }) => void;
+    onRemoveStep?: (index: number) => void;
+    onJsonValidationChanged?: (detail: { hasErrors: boolean; fields: string[] }) => void;
+    onOpenTranscriptionSettings?: () => void;
+  } = $props();
 
   // ---------------------------------------------------------------------------
   // Context & services
@@ -139,9 +133,8 @@
 
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
-  type LoadedAssistant = NonNullable<Awaited<ReturnType<typeof flowEditor.loadAssistant>>>;
   const flowResource = flowEditor.state.resource;
-  $: currentFlowId = $flowResource?.id ?? "";
+  const currentFlowId = $derived($flowResource?.id ?? "");
   const {
     state: { currentSpace }
   } = getSpacesManager();
@@ -154,29 +147,40 @@
     intric,
     options: {
       rules: attachmentRules,
-      onFileUploaded
+      onFileUploaded: (newFile: UploadedFile) => assistantState.onFileUploaded(newFile)
     }
   });
+
+  const assistantState = new FlowStepAssistantState({
+    flowEditor,
+    intric,
+    attachmentRules,
+    newAttachments,
+    clearUploads,
+    getActiveStep: () => activeStep
+  });
+
+  const templateState = new FlowTemplateState({ intric, flowEditor });
 
   // ---------------------------------------------------------------------------
   // Core derived state
   // ---------------------------------------------------------------------------
 
-  $: activeIndex = steps.findIndex((s) => s.id === activeStepId);
-  $: activeStep = activeIndex >= 0 ? steps[activeIndex] : null;
-  $: isAdvancedMode = $mode === "power_user";
+  const activeIndex = $derived(steps.findIndex((s) => s.id === activeStepId));
+  const activeStep = $derived(activeIndex >= 0 ? steps[activeIndex] : null);
+  const isAdvancedMode = $derived($mode === "power_user");
   const locale = (getLocale() === "en" ? "en" : "sv") as "sv" | "en";
-  $: hasAudioInputSteps = steps.some((step) => step.input_type === "audio");
+  const hasAudioInputSteps = $derived(steps.some((step) => step.input_type === "audio"));
 
   // ---------------------------------------------------------------------------
   // Input feedback state
   // ---------------------------------------------------------------------------
 
-  let inputSourceFeedback: string | null = null;
-  let inputTypeFeedback: string | null = null;
-  let lastFeedbackStepKey: string | null = null;
+  let inputSourceFeedback: string | null = $state(null);
+  let inputTypeFeedback: string | null = $state(null);
+  let lastFeedbackStepKey: string | null = $state(null);
 
-  $: {
+  $effect(() => {
     const nextKey = activeStep ? `${activeStep.id ?? "new"}:${activeStep.step_order}` : null;
     if (nextKey !== lastFeedbackStepKey) {
       lastFeedbackStepKey = nextKey;
@@ -184,27 +188,27 @@
       inputTypeFeedback = null;
       revealInputTemplateInUserMode = false;
     }
-  }
+  });
 
   // ---------------------------------------------------------------------------
   // Advanced JSON drafts (uses extracted reducer functions)
   // ---------------------------------------------------------------------------
 
-  let advancedJsonDraftStepKey: string | null = null;
-  let advancedJsonDrafts: AdvancedJsonDrafts = {
+  let advancedJsonDraftStepKey: string | null = $state(null);
+  let advancedJsonDrafts: AdvancedJsonDrafts = $state({
     input_contract: "",
     output_contract: "",
     input_config: "",
     output_config: ""
-  };
-  let advancedJsonErrors: AdvancedJsonErrors = {};
+  });
+  let advancedJsonErrors: AdvancedJsonErrors = $state({});
 
   function emitAdvancedJsonValidationState() {
     const fields = getErrorFields(advancedJsonErrors);
-    dispatch("jsonValidationChanged", { hasErrors: fields.length > 0, fields });
+    onJsonValidationChanged?.({ hasErrors: fields.length > 0, fields });
   }
 
-  $: {
+  $effect(() => {
     const nextStepKey = getStepKeyForAdvancedJson(activeStep);
     if (nextStepKey !== advancedJsonDraftStepKey) {
       advancedJsonDraftStepKey = nextStepKey;
@@ -213,22 +217,26 @@
       advancedJsonErrors = synced.errors;
       emitAdvancedJsonValidationState();
     }
-  }
+  });
 
-  $: if (activeStep !== null) {
-    const updated = syncDraftsFromStepValues(advancedJsonDrafts, advancedJsonErrors, activeStep);
-    if (updated) {
-      advancedJsonDrafts = updated;
+  $effect(() => {
+    if (activeStep !== null) {
+      const updated = syncDraftsFromStepValues(advancedJsonDrafts, advancedJsonErrors, activeStep);
+      if (updated) {
+        advancedJsonDrafts = updated;
+      }
     }
-  }
+  });
 
-  $: if (activeStep !== null) {
-    const cleaned = clearHiddenFieldErrors(advancedJsonErrors, activeStep);
-    if (cleaned) {
-      advancedJsonErrors = cleaned;
-      emitAdvancedJsonValidationState();
+  $effect(() => {
+    if (activeStep !== null) {
+      const cleaned = clearHiddenFieldErrors(advancedJsonErrors, activeStep);
+      if (cleaned) {
+        advancedJsonErrors = cleaned;
+        emitAdvancedJsonValidationState();
+      }
     }
-  }
+  });
 
   function handleAdvancedJsonFieldUpdate(field: AdvancedJsonField, rawValue: string) {
     const result = parseAdvancedJsonField(advancedJsonDrafts, advancedJsonErrors, field, rawValue);
@@ -241,117 +249,22 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Template fill state
+  // Assistant & template state (delegated to extracted classes)
   // ---------------------------------------------------------------------------
 
-  let availableTemplateFiles: FlowTemplateAssetOption[] = [];
-  let templateFilesLoaded = false;
-  let templateFilesLoading = false;
-  let templateInspecting = false;
-  let templateInspection: FlowTemplateInspection | null = null;
-  let templateConfigError: string | null = null;
-  let lastTemplateInspectionKey: string | null = null;
+  let stepNameBeforeEdit = $state("");
 
-  const templateBindingLabels: TemplateBindingSuggestionLabels = {
-    formField: m.flow_template_fill_group_form(),
-    aiSection: m.flow_template_fill_group_steps(),
-    systemVariable: m.flow_template_fill_group_system(),
-    formFieldItem: (name: string) => m.flow_template_fill_source_form({ name }),
-    stepTextItem: (stepLabel: string) => m.flow_template_fill_source_step_text({ name: stepLabel }),
-    stepJsonItem: (stepLabel: string) => m.flow_template_fill_source_step_json({ name: stepLabel }),
-    todayDate: m.flow_template_fill_source_date(),
-    leaveEmpty: m.flow_template_fill_leave_empty(),
-    emptyValue: ""
-  };
-
-  // ---------------------------------------------------------------------------
-  // Assistant state
-  // ---------------------------------------------------------------------------
-
-  let assistant: LoadedAssistant | null = null;
-  let assistantLoading = false;
-  let lastLoadedAssistantId: string | null = null;
-  const autoClearedLegacyTemplateByStepId = new Set<string>();
-  let stepNameBeforeEdit = "";
-  let assistantLoadRequestToken = 0;
-  let runningUploads: {
-    id: string;
-    file: File;
-    status: string;
-    progress: number;
-    remove: () => void;
-  }[] = [];
-
-  function cancelUploadsAndClearQueue() {
-    $newAttachments.forEach((upload) => {
-      if (upload.status !== "completed") {
-        upload.remove();
-      }
-    });
-    clearUploads();
-  }
-
-  /* eslint-disable svelte/infinite-reactive-loop */
-  $: if (activeStep?.output_mode === "template_fill") {
-    assistant = null;
-    lastLoadedAssistantId = null;
-    assistantLoading = false;
-    cancelUploadsAndClearQueue();
-  } else if (activeStep?.assistant_id && activeStep.assistant_id !== lastLoadedAssistantId) {
-    const targetId = activeStep.assistant_id;
-    lastLoadedAssistantId = targetId;
-    cancelUploadsAndClearQueue();
-    void (async () => {
-      await flowEditor.flushAssistantSaves().catch(() => {});
-      if (activeStep?.assistant_id !== targetId) return;
-      await loadAssistantForStep(targetId);
-    })();
-  } else if (!activeStep || !activeStep.assistant_id) {
-    assistant = null;
-    lastLoadedAssistantId = null;
-    assistantLoading = false;
-    cancelUploadsAndClearQueue();
-  }
-  /* eslint-enable svelte/infinite-reactive-loop */
-
-  onDestroy(() => {
-    cancelUploadsAndClearQueue();
-    void flowEditor.flushAssistantSaves().catch(() => {});
+  $effect(() => {
+    assistantState.syncWithActiveStep(activeStep);
   });
-
-  $: runningUploads = $newAttachments.filter((attachment) => attachment.status !== "completed");
-
-  $: {
-    const allowed = assistant?.allowed_attachments;
-    if (allowed) {
-      attachmentRules.set(getExplicitAttachmentRules(allowed));
-    } else {
-      attachmentRules.set({});
-    }
-  }
-
-  /* eslint-disable svelte/infinite-reactive-loop */
-  async function loadAssistantForStep(assistantId: string) {
-    if (!assistantId || assistantId === "") return;
-    const requestToken = ++assistantLoadRequestToken;
-    assistantLoading = true;
-    lastLoadedAssistantId = assistantId;
-    try {
-      const loadedAssistant = await flowEditor.loadAssistant(assistantId);
-      if (requestToken !== assistantLoadRequestToken) return;
-      if (activeStep?.assistant_id !== assistantId) return;
-      assistant = loadedAssistant;
-    } catch (error) {
-      if (requestToken !== assistantLoadRequestToken) return;
-      console.error("Failed to load assistant for flow step:", error);
-      assistant = null;
-    } finally {
-      if (requestToken === assistantLoadRequestToken) {
-        assistantLoading = false;
-      }
-    }
-  }
-  /* eslint-enable svelte/infinite-reactive-loop */
+  $effect(() => {
+    return () => {
+      assistantState.destroy();
+    };
+  });
+  $effect(() => {
+    assistantState.syncAttachmentRules();
+  });
 
   // ---------------------------------------------------------------------------
   // Step mutation helpers
@@ -360,7 +273,7 @@
   function updateStep(field: string, value: unknown) {
     if (activeStep === null || activeIndex < 0) return;
     const updated = { ...activeStep, [field]: value };
-    dispatch("stepChanged", { index: activeIndex, step: updated });
+    onStepChanged?.({ index: activeIndex, step: updated });
     if (field === "user_description" && activeStep.assistant_id) {
       flowEditor.saveAssistant(activeStep.assistant_id, { name: value });
     }
@@ -368,41 +281,11 @@
 
   function updateStepPatch(patch: Partial<FlowStep>) {
     if (activeStep === null || activeIndex < 0) return;
-    dispatch("stepChanged", { index: activeIndex, step: { ...activeStep, ...patch } });
+    onStepChanged?.({ index: activeIndex, step: { ...activeStep, ...patch } });
   }
 
   function updateAssistantField(field: string, value: unknown) {
-    if (!activeStep?.assistant_id) return;
-    if (assistant) {
-      assistant = { ...assistant, [field]: value };
-    }
-    flowEditor.saveAssistant(activeStep.assistant_id, { [field]: value });
-  }
-
-  function onFileUploaded(newFile: UploadedFile) {
-    if (!assistant) return;
-    const currentAttachments = Array.isArray(assistant.attachments) ? assistant.attachments : [];
-    if (currentAttachments.some((file: UploadedFile) => file.id === newFile.id)) return;
-    updateAssistantField("attachments", [...currentAttachments, newFile]);
-  }
-
-  async function removeAttachment(file: { id: string }) {
-    if (!assistant) return;
-    const uploadStillQueued = $newAttachments.find(
-      (attachment) => attachment.fileRef && attachment.fileRef.id === file.id
-    );
-    if (uploadStillQueued) {
-      try {
-        await intric.files.delete({ fileId: file.id });
-      } catch (error) {
-        console.error("Failed to delete newly uploaded attachment file", error);
-      }
-    }
-    const currentAttachments = Array.isArray(assistant.attachments) ? assistant.attachments : [];
-    updateAssistantField(
-      "attachments",
-      currentAttachments.filter((attachment: UploadedFile) => attachment.id !== file.id)
-    );
+    assistantState.updateField(field, value);
   }
 
   // ---------------------------------------------------------------------------
@@ -410,16 +293,16 @@
   // ---------------------------------------------------------------------------
 
   async function updateInstruction(value: string) {
-    if (!activeStep?.assistant_id || !assistant) return;
-    const nextPrompt = buildNextFlowPrompt(assistant.prompt, value);
-    assistant = { ...assistant, prompt: nextPrompt };
+    if (!activeStep?.assistant_id || !assistantState.assistant) return;
+    const nextPrompt = buildNextFlowPrompt(assistantState.assistant.prompt, value);
+    assistantState.updateField("prompt", nextPrompt);
     await flowEditor.updateAssistantImmediately(activeStep.assistant_id, { prompt: nextPrompt });
   }
 
   function queueInstructionDraft(value: string) {
-    if (!activeStep?.assistant_id || !assistant) return;
-    const nextPrompt = buildNextFlowPrompt(assistant.prompt, value);
-    assistant = { ...assistant, prompt: nextPrompt };
+    if (!activeStep?.assistant_id || !assistantState.assistant) return;
+    const nextPrompt = buildNextFlowPrompt(assistantState.assistant.prompt, value);
+    assistantState.updateField("prompt", nextPrompt);
     void flowEditor.saveAssistant(activeStep.assistant_id, { prompt: nextPrompt }).catch(() => {});
   }
 
@@ -477,7 +360,7 @@
         inputType: getInputTypeLabel(result.step.input_type)
       });
     }
-    dispatch("stepChanged", { index: activeIndex, step: result.step });
+    onStepChanged?.({ index: activeIndex, step: result.step });
   }
 
   function handleInputTypeChange(nextType: FlowStep["input_type"]) {
@@ -494,12 +377,12 @@
         inputSource: getInputSourceLabel(result.step.input_source)
       });
     }
-    dispatch("stepChanged", { index: activeIndex, step: result.step });
+    onStepChanged?.({ index: activeIndex, step: result.step });
   }
 
   function handleOutputModeChange(nextMode: FlowStep["output_mode"]) {
     if (activeStep === null || activeIndex < 0) return;
-    dispatch("stepChanged", {
+    onStepChanged?.({
       index: activeIndex,
       step: applyOutputModeChange({
         step: activeStep,
@@ -512,7 +395,7 @@
 
   function handleOutputTypeChange(nextType: FlowStep["output_type"]) {
     if (activeStep === null || activeIndex < 0) return;
-    dispatch("stepChanged", {
+    onStepChanged?.({
       index: activeIndex,
       step: applyOutputTypeChange({ step: activeStep, nextType })
     });
@@ -535,127 +418,11 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Template fill functions
+  // Template fill handlers (delegated to templateState)
   // ---------------------------------------------------------------------------
 
-  function getFlowId() {
-    return (get(flowEditor.state.resource) as { id: string }).id;
-  }
-
-  /* eslint-disable svelte/infinite-reactive-loop */
-  async function loadTemplateFiles(force: boolean = false) {
-    if (!force && (templateFilesLoading || templateFilesLoaded)) return;
-    templateFilesLoading = true;
-    try {
-      const response = await intric.flows.templates.list({ id: getFlowId() });
-      availableTemplateFiles = Array.isArray(response)
-        ? response
-        : Array.isArray((response as { items?: FlowTemplateAssetOption[] })?.items)
-          ? ((response as { items: FlowTemplateAssetOption[] }).items ?? [])
-          : [];
-      templateFilesLoaded = true;
-    } catch (error) {
-      templateConfigError = getFlowRuntimeErrorMessage(
-        error,
-        getTemplateFillErrorMessage(error, m.flow_template_fill_template_help())
-      );
-    } finally {
-      templateFilesLoading = false;
-    }
-  }
-
-  async function inspectTemplateFile(assetId: string, options: { persist: boolean }) {
-    if (!activeStep) return;
-    templateInspecting = true;
-    templateConfigError = null;
-    try {
-      const inspection = await intric.flows.templates.inspect({ id: getFlowId(), fileId: assetId });
-      templateInspection = inspection;
-      if (options.persist) {
-        updateStep(
-          "output_config",
-          applyTemplateInspection(
-            templateFillConfig,
-            inspection,
-            buildTemplateBindingAutoSuggestions({
-              placeholders: inspection.placeholders.map((item: { name: string }) => item.name),
-              steps,
-              currentStepOrder: activeStep.step_order,
-              formSchema
-            })
-          )
-        );
-      }
-    } catch (error) {
-      templateConfigError = getFlowRuntimeErrorMessage(
-        error,
-        getTemplateFillErrorMessage(error, m.flow_template_fill_template_help())
-      );
-    } finally {
-      templateInspecting = false;
-    }
-  }
-  /* eslint-enable svelte/infinite-reactive-loop */
-
-  async function handleTemplateFileSelection(assetId: string) {
-    if (!assetId) {
-      updateStep("output_config", {
-        ...templateFillConfig,
-        template_asset_id: undefined,
-        template_file_id: undefined,
-        template_name: undefined,
-        placeholders: [],
-        bindings: {}
-      });
-      templateInspection = null;
-      return;
-    }
-    await inspectTemplateFile(assetId, { persist: true });
-  }
-
-  async function handleTemplateUpload(event: Event) {
-    const input = event.currentTarget as HTMLInputElement | null;
-    const file = input?.files?.[0];
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".docx")) {
-      templateConfigError = m.flow_template_fill_template_help();
-      input.value = "";
-      return;
-    }
-    templateConfigError = null;
-    templateInspecting = true;
-    try {
-      const uploaded = await intric.flows.templates.upload({ id: getFlowId(), file });
-      await loadTemplateFiles(true);
-      await inspectTemplateFile(uploaded.id, { persist: true });
-      toast.success(m.flow_template_fill_upload_action());
-    } catch (error) {
-      templateConfigError = getFlowRuntimeErrorMessage(
-        error,
-        getTemplateFillErrorMessage(error, m.flow_template_fill_template_help())
-      );
-    } finally {
-      templateInspecting = false;
-      if (input) input.value = "";
-    }
-  }
-
-  async function downloadCurrentTemplate() {
-    if (!resolvedTemplateAssetId) return;
-    try {
-      const { url } = await intric.flows.templates.signedUrl({
-        id: getFlowId(),
-        fileId: resolvedTemplateAssetId,
-        contentDisposition: "attachment"
-      });
-      window.open(url, "_blank");
-    } catch (error) {
-      console.error("Failed to download template", error);
-      templateConfigError = getFlowRuntimeErrorMessage(
-        error,
-        getTemplateFillErrorMessage(error, m.error_downloading_file())
-      );
-    }
+  function templateContext() {
+    return { activeStep: activeStep!, steps, formSchema, updateStep };
   }
 
   function applyAllTemplateSuggestions() {
@@ -669,10 +436,6 @@
     );
   }
 
-  function updateTemplateBindingExpression(placeholder: string, expression: string) {
-    updateStep("output_config", updateTemplateBinding(templateFillConfig, placeholder, expression));
-  }
-
   function handleTemplateBindingChange(placeholder: string, value: string) {
     if (value === "__unset__") {
       const nextBindings = { ...(templateFillConfig.bindings ?? {}) };
@@ -680,155 +443,143 @@
       updateStep("output_config", { ...templateFillConfig, bindings: nextBindings });
       return;
     }
-    updateTemplateBindingExpression(placeholder, value);
+    updateStep("output_config", updateTemplateBinding(templateFillConfig, placeholder, value));
   }
 
   // ---------------------------------------------------------------------------
   // Derived values for sub-components
   // ---------------------------------------------------------------------------
 
-  $: previousStep =
+  const previousStep = $derived(
     activeStep && activeStep.step_order > 1
       ? steps.find((s) => s.step_order === activeStep!.step_order - 1)
-      : null;
-  $: hasKnowledgeSelections = Boolean(
-    assistant &&
-      ((Array.isArray(assistant.websites) && assistant.websites.length > 0) ||
-        (Array.isArray(assistant.groups) && assistant.groups.length > 0) ||
-        (Array.isArray(assistant.integration_knowledge_list) &&
-          assistant.integration_knowledge_list.length > 0))
+      : null
   );
-  $: hasAttachmentSelections = Boolean(
-    assistant && Array.isArray(assistant.attachments) && assistant.attachments.length > 0
+  const hasKnowledgeSelections = $derived(
+    Boolean(
+      assistantState.assistant &&
+        ((Array.isArray(assistantState.assistant.websites) &&
+          assistantState.assistant.websites.length > 0) ||
+          (Array.isArray(assistantState.assistant.groups) &&
+            assistantState.assistant.groups.length > 0) ||
+          (Array.isArray(assistantState.assistant.integration_knowledge_list) &&
+            assistantState.assistant.integration_knowledge_list.length > 0))
+    )
   );
-  $: currentStepIssues = activeStep
-    ? getFlowStepValidationIssues(steps).filter(
-        (issue) => issue.stepOrder === activeStep.step_order
-      )
-    : [];
-  $: sourceValidationIssue =
-    currentStepIssues.find((issue) => issue.field === "input_source") ?? null;
-  $: inputTypeValidationIssue =
-    currentStepIssues.find((issue) => issue.field === "input_type") ?? null;
-  $: sourceValidationMessage = getIssueMessage(sourceValidationIssue, activeStep, previousStep);
-  $: inputTypeValidationMessage = getIssueMessage(
-    inputTypeValidationIssue,
-    activeStep,
-    previousStep
+  const hasAttachmentSelections = $derived(
+    Boolean(
+      assistantState.assistant &&
+        Array.isArray(assistantState.assistant.attachments) &&
+        assistantState.assistant.attachments.length > 0
+    )
+  );
+  const currentStepIssues = $derived(
+    activeStep
+      ? getFlowStepValidationIssues(steps).filter(
+          (issue) => issue.stepOrder === activeStep.step_order
+        )
+      : []
+  );
+  const sourceValidationIssue = $derived(
+    currentStepIssues.find((issue) => issue.field === "input_source") ?? null
+  );
+  const inputTypeValidationIssue = $derived(
+    currentStepIssues.find((issue) => issue.field === "input_type") ?? null
+  );
+  const sourceValidationMessage = $derived(
+    getIssueMessage(sourceValidationIssue, activeStep, previousStep)
+  );
+  const inputTypeValidationMessage = $derived(
+    getIssueMessage(inputTypeValidationIssue, activeStep, previousStep)
   );
 
-  $: selectableInputSourceOptions = activeStep
-    ? getSelectableInputSourceOptions({
-        steps,
-        stepOrder: activeStep.step_order,
-        currentInputSource: activeStep.input_source
-      })
-    : [];
-  $: selectableInputTypeOptions = activeStep
-    ? getSelectableInputTypeOptions({
-        inputSource: activeStep.input_source,
-        previousOutputType: previousStep?.output_type,
-        currentInputType: activeStep.input_type,
-        isAdvancedMode
-      })
-    : [];
-  $: displayedInputTypeOptions = activeStep
-    ? sortSelectableInputTypeOptionsForDisplay({
-        options: selectableInputTypeOptions,
-        inputSource: activeStep.input_source,
-        previousOutputType: previousStep?.output_type
-      })
-    : [];
-  $: sourceHintKind = activeStep
-    ? getSourceHintKind({
-        inputSource: activeStep.input_source,
-        previousOutputType: previousStep?.output_type
-      })
-    : null;
-  $: outputHintKind = activeStep ? getOutputHintKind(activeStep.output_type) : null;
-
-  $: stepSummaryModel = activeStep
-    ? getStepSummaryModel({
-        step: activeStep,
-        previousStep,
-        hasInputTemplateOverride,
-        hasKnowledge: hasKnowledgeSelections,
-        hasAttachments: hasAttachmentSelections
-      })
-    : null;
-
-  $: isTemplateFill = isTemplateFillStep(activeStep);
-  $: templateFillConfig = getTemplateFillOutputConfig(activeStep);
-  $: templatePlaceholders = listTemplatePlaceholders(templateInspection, templateFillConfig);
-  $: templateBindingSuggestions = activeStep
-    ? buildTemplateBindingSuggestions({
-        steps,
-        currentStepOrder: activeStep.step_order,
-        labels: templateBindingLabels,
-        formSchema
-      })
-    : [];
-  $: templateBindingSuggestionGroups = groupTemplateBindingSuggestions(
-    templateBindingSuggestions,
-    templateBindingLabels
+  const selectableInputSourceOptions = $derived(
+    activeStep
+      ? getSelectableInputSourceOptions({
+          steps,
+          stepOrder: activeStep.step_order,
+          currentInputSource: activeStep.input_source
+        })
+      : []
   );
-  $: templateAutoBindings = activeStep
-    ? buildTemplateBindingAutoSuggestions({
-        placeholders: templatePlaceholders.map((item) => item.name),
-        steps,
-        currentStepOrder: activeStep.step_order,
-        formSchema
-      })
-    : {};
-  $: templateBindingRows = listTemplateBindingRows({
-    inspection: templateInspection,
-    currentConfig: templateFillConfig,
-    suggestions: templateBindingSuggestions,
-    autoSuggestions: templateAutoBindings,
-    labels: templateBindingLabels
-  });
-  $: templateReadiness = getTemplateFillReadiness(templateFillConfig);
-  $: runtimeInputConfig = activeStep
-    ? getRuntimeInputConfig(activeStep)
-    : ({
-        enabled: false,
-        required: false,
-        max_files: null,
-        input_format: "document",
-        accepted_mimetypes_override: [],
-        label: "",
-        description: ""
-      } satisfies FlowRuntimeInputConfigValue);
+  const selectableInputTypeOptions = $derived(
+    activeStep
+      ? getSelectableInputTypeOptions({
+          inputSource: activeStep.input_source,
+          previousOutputType: previousStep?.output_type,
+          currentInputType: activeStep.input_type,
+          isAdvancedMode
+        })
+      : []
+  );
+  const displayedInputTypeOptions = $derived(
+    activeStep
+      ? sortSelectableInputTypeOptionsForDisplay({
+          options: selectableInputTypeOptions,
+          inputSource: activeStep.input_source,
+          previousOutputType: previousStep?.output_type
+        })
+      : []
+  );
+  const sourceHintKind = $derived(
+    activeStep
+      ? getSourceHintKind({
+          inputSource: activeStep.input_source,
+          previousOutputType: previousStep?.output_type
+        })
+      : null
+  );
+  const outputHintKind = $derived(activeStep ? getOutputHintKind(activeStep.output_type) : null);
 
-  $: templateOrphanedRows = templateBindingRows.filter((row) => row.status === "orphaned");
-  $: templateHasSelection = Boolean(
-    templateFillConfig.template_asset_id ?? templateFillConfig.template_file_id
+  const stepSummaryModel = $derived(
+    activeStep
+      ? getStepSummaryModel({
+          step: activeStep,
+          previousStep,
+          hasInputTemplateOverride,
+          hasKnowledge: hasKnowledgeSelections,
+          hasAttachments: hasAttachmentSelections
+        })
+      : null
   );
-  $: resolvedTemplateAssetSelection = resolveTemplateAssetSelection(
-    templateFillConfig,
-    availableTemplateFiles
+
+  const isTemplateFill = $derived(isTemplateFillStep(activeStep));
+  const templateFillConfig = $derived(getTemplateFillOutputConfig(activeStep));
+  const templateDerived = $derived(templateState.getDerived(activeStep, steps, formSchema));
+  const templatePlaceholders = $derived(templateDerived.placeholders);
+  const templateBindingSuggestionGroups = $derived(templateDerived.suggestionGroups);
+  const templateAutoBindings = $derived(templateDerived.autoBindings);
+  const templateBindingRows = $derived(templateDerived.bindingRows);
+  const templateReadiness = $derived(templateDerived.readiness);
+  const templateOrphanedRows = $derived(templateDerived.orphanedRows);
+  const templateHasSelection = $derived(templateDerived.hasSelection);
+  const resolvedTemplateAssetId = $derived(templateDerived.resolvedAssetId);
+  const selectedTemplateAsset = $derived(templateDerived.selectedAsset);
+  const templateUnnamedStepWarning = $derived(templateDerived.unnamedStepWarning);
+  const templateAutoMatchableCount = $derived(templateDerived.autoMatchableCount);
+  const runtimeInputConfig = $derived(
+    activeStep
+      ? getRuntimeInputConfig(activeStep)
+      : ({
+          enabled: false,
+          required: false,
+          max_files: null,
+          input_format: "document",
+          accepted_mimetypes_override: [],
+          label: "",
+          description: ""
+        } satisfies FlowRuntimeInputConfigValue)
   );
-  $: resolvedTemplateAssetId = resolvedTemplateAssetSelection.assetId;
-  $: selectedTemplateAsset = resolvedTemplateAssetSelection.asset;
-  $: templateUnnamedStepWarning =
-    isTemplateFill &&
-    steps.some(
-      (step) =>
-        step.step_order < (activeStep?.step_order ?? Number.MAX_SAFE_INTEGER) &&
-        (!step.user_description || !step.user_description.trim())
-    );
-  $: templateAutoMatchableCount = templateBindingRows.filter(
-    (row) => row.status === "missing" && Boolean(templateAutoBindings[row.placeholderName])
-  ).length;
 
   // Output type/mode options
-  $: availableOutputTypes =
+  const availableOutputTypes = $derived(
     activeStep?.output_mode === "transcribe_only"
       ? OUTPUT_TYPES.filter((type) => type.value === "text")
       : activeStep?.output_mode === "template_fill"
         ? OUTPUT_TYPES.filter((type) => type.value === "docx")
-        : OUTPUT_TYPES;
-  $: availableOutputModes = (() => {
+        : OUTPUT_TYPES
+  );
+  const availableOutputModes = $derived.by(() => {
     const base =
       activeStep?.input_type === "audio"
         ? OUTPUT_MODES
@@ -838,31 +589,36 @@
         ? base
         : base.filter((mode) => mode.value !== "template_fill");
     return visible;
-  })();
-  $: isTranscribeOnly = activeStep?.output_mode === "transcribe_only";
+  });
+  const isTranscribeOnly = $derived(activeStep?.output_mode === "transcribe_only");
 
   // Instruction & input template derived
-  $: instructionText =
-    assistant &&
-    typeof assistant === "object" &&
-    assistant.prompt &&
-    typeof assistant.prompt === "object"
-      ? (assistant.prompt.text ?? "")
-      : "";
-  $: inputTemplateText =
+  const instructionText = $derived(
+    assistantState.assistant &&
+      typeof assistantState.assistant === "object" &&
+      assistantState.assistant.prompt &&
+      typeof assistantState.assistant.prompt === "object"
+      ? (assistantState.assistant.prompt.text ?? "")
+      : ""
+  );
+  const inputTemplateText = $derived(
     activeStep && activeStep.input_bindings && typeof activeStep.input_bindings === "object"
       ? ((activeStep.input_bindings.question as string) ?? "")
-      : "";
-  $: hasInputTemplateOverride = inputTemplateText.trim().length > 0;
-  let revealInputTemplateInUserMode = false;
-  $: canRevealInputTemplate = !isTranscribeOnly && activeStep !== null && !isAdvancedMode;
-  $: showInputTemplate =
-    isAdvancedMode || (canRevealInputTemplate && revealInputTemplateInUserMode);
-  $: stepUxCopy = getFlowStepUxCopy({ locale, inputSource: activeStep?.input_source });
-  $: inputTemplateSectionTitle = stepUxCopy.inputTemplateTitle;
-  $: inputTemplateSectionDescription = stepUxCopy.inputTemplateDescription;
+      : ""
+  );
+  const hasInputTemplateOverride = $derived(inputTemplateText.trim().length > 0);
+  let revealInputTemplateInUserMode = $state(false);
+  const canRevealInputTemplate = $derived(
+    !isTranscribeOnly && activeStep !== null && !isAdvancedMode
+  );
+  const showInputTemplate = $derived(
+    isAdvancedMode || (canRevealInputTemplate && revealInputTemplateInUserMode)
+  );
+  const stepUxCopy = $derived(getFlowStepUxCopy({ locale, inputSource: activeStep?.input_source }));
+  const inputTemplateSectionTitle = $derived(stepUxCopy.inputTemplateTitle);
+  const inputTemplateSectionDescription = $derived(stepUxCopy.inputTemplateDescription);
 
-  $: templateStepRefs = (() => {
+  const templateStepRefs = $derived.by(() => {
     if (!inputTemplateText) return [];
     const refs: number[] = [];
     const regex = /\{\{\s*step_(\d+)\./g;
@@ -871,9 +627,9 @@
       refs.push(parseInt(match[1], 10));
     }
     return [...new Set(refs)];
-  })();
+  });
 
-  $: templateSourceConflict = (() => {
+  const templateSourceConflict = $derived.by(() => {
     if (!activeStep || templateStepRefs.length === 0) return null;
     if (activeStep.input_source === "all_previous_steps") return null;
     if (activeStep.input_source === "previous_step") {
@@ -882,67 +638,83 @@
       return unconnected.length > 0 ? unconnected : null;
     }
     return templateStepRefs;
-  })();
+  });
 
   // ---------------------------------------------------------------------------
-  // Template inspection reactive triggers
+  // Template inspection reactive triggers (delegated to templateState)
   // ---------------------------------------------------------------------------
 
-  $: {
-    const nextTemplateKey =
-      activeStep && isTemplateFill
-        ? `${activeStep.id ?? "new"}:${resolvedTemplateAssetId ?? ""}`
-        : null;
-    if (nextTemplateKey !== lastTemplateInspectionKey) {
-      lastTemplateInspectionKey = nextTemplateKey;
-      templateInspection = null;
-      templateConfigError = null;
-      if (nextTemplateKey && resolvedTemplateAssetId) {
-        // eslint-disable-next-line svelte/infinite-reactive-loop
-        void inspectTemplateFile(resolvedTemplateAssetId, { persist: false });
-      }
+  $effect(() => {
+    const assetToInspect = templateState.syncInspection(
+      activeStep,
+      isTemplateFill,
+      resolvedTemplateAssetId
+    );
+    if (assetToInspect && activeStep) {
+      void templateState.inspectFile(
+        assetToInspect,
+        { persist: false },
+        {
+          activeStep,
+          steps,
+          formSchema,
+          updateStep
+        }
+      );
     }
-  }
+  });
 
-  $: if (isAdvancedMode && isTemplateFill && !templateFilesLoaded && !templateFilesLoading) {
-    // eslint-disable-next-line svelte/infinite-reactive-loop
-    void loadTemplateFiles();
-  }
+  $effect(() => {
+    if (
+      isAdvancedMode &&
+      isTemplateFill &&
+      !templateState.filesLoaded &&
+      !templateState.filesLoading
+    ) {
+      void templateState.loadFiles();
+    }
+  });
 
   // ---------------------------------------------------------------------------
   // Guard reactive blocks
   // ---------------------------------------------------------------------------
 
   // Legacy cleanup: old builder versions could accidentally mirror instruction -> input template.
-  $: if (
-    activeStep?.id &&
-    !isPublished &&
-    hasInputTemplateOverride &&
-    instructionText.trim().length > 0 &&
-    inputTemplateText.trim() === instructionText.trim() &&
-    !autoClearedLegacyTemplateByStepId.has(activeStep.id)
-  ) {
-    autoClearedLegacyTemplateByStepId.add(activeStep.id);
-    updateInputTemplate("");
-  }
+  $effect(() => {
+    if (
+      activeStep?.id &&
+      !isPublished &&
+      hasInputTemplateOverride &&
+      instructionText.trim().length > 0 &&
+      inputTemplateText.trim() === instructionText.trim() &&
+      !assistantState.autoClearedLegacyTemplateByStepId.has(activeStep.id)
+    ) {
+      assistantState.autoClearedLegacyTemplateByStepId.add(activeStep.id);
+      updateInputTemplate("");
+    }
+  });
 
-  $: if (
-    activeStep &&
-    activeIndex >= 0 &&
-    activeStep.output_mode === "transcribe_only" &&
-    activeStep.output_type !== "text"
-  ) {
-    updateStep("output_type", "text");
-  }
+  $effect(() => {
+    if (
+      activeStep &&
+      activeIndex >= 0 &&
+      activeStep.output_mode === "transcribe_only" &&
+      activeStep.output_type !== "text"
+    ) {
+      updateStep("output_type", "text");
+    }
+  });
 
-  $: if (
-    activeStep &&
-    activeIndex >= 0 &&
-    activeStep.input_type !== "audio" &&
-    activeStep.output_mode === "transcribe_only"
-  ) {
-    updateStep("output_mode", "pass_through");
-  }
+  $effect(() => {
+    if (
+      activeStep &&
+      activeIndex >= 0 &&
+      activeStep.input_type !== "audio" &&
+      activeStep.output_mode === "transcribe_only"
+    ) {
+      updateStep("output_mode", "pass_through");
+    }
+  });
 </script>
 
 {#if activeStep === null}
@@ -958,7 +730,7 @@
         </p>
       </div>
       {#if !isPublished}
-        <Button variant="primary" on:click={() => flowEditor.addStep()}>
+        <Button onclick={() => flowEditor.addStep()}>
           {m.flow_empty_add_step()}
         </Button>
       {/if}
@@ -1002,11 +774,11 @@
                 value={activeStep.user_description ?? ""}
                 placeholder={m.flow_step_name_placeholder()}
                 disabled={isPublished}
-                on:focus={() => {
+                onfocus={() => {
                   stepNameBeforeEdit = activeStep.user_description ?? "";
                 }}
-                on:input={(e) => updateStep("user_description", e.currentTarget.value || null)}
-                on:change={() => void handleCommittedStepRename()}
+                oninput={(e) => updateStep("user_description", e.currentTarget.value || null)}
+                onchange={() => void handleCommittedStepRename()}
               />
               {#if shouldShowTemplateBodyTextHint( { steps, activeStep, isAdvancedMode, isTemplateFill, isTranscribeOnly } )}
                 <p
@@ -1035,13 +807,13 @@
             {transcriptionModelConfigured}
             {transcriptionModelLabel}
             flowId={currentFlowId}
-            on:inputSourceChange={(e) =>
-              handleInputSourceChange(e.detail.value as FlowStep["input_source"])}
-            on:inputTypeChange={(e) =>
-              handleInputTypeChange(e.detail.value as FlowStep["input_type"])}
-            on:runtimeInputChange={(e) => updateRuntimeInputSettings(e.detail.patch)}
-            on:httpConfigChange={(e) => updateStep("input_config", e.detail.config)}
-            on:openTranscriptionSettings={() => dispatch("openTranscriptionSettings")}
+            onInputSourceChange={(detail) =>
+              handleInputSourceChange(detail.value as FlowStep["input_source"])}
+            onInputTypeChange={(detail) =>
+              handleInputTypeChange(detail.value as FlowStep["input_type"])}
+            onRuntimeInputChange={(detail) => updateRuntimeInputSettings(detail.patch)}
+            onHttpConfigChange={(detail) => updateStep("input_config", detail.config)}
+            onOpenTranscriptionSettings={() => onOpenTranscriptionSettings?.()}
           />
         {/if}
 
@@ -1051,8 +823,8 @@
             {isPublished}
             {isAdvancedMode}
             {isTranscribeOnly}
-            {assistant}
-            {assistantLoading}
+            assistant={assistantState.assistant}
+            assistantLoading={assistantState.loading}
             availableModels={$currentSpace.completion_models}
             {steps}
             {formSchema}
@@ -1063,24 +835,24 @@
             {canRevealInputTemplate}
             {showInputTemplate}
             loadPromptVersions={(id) => flowEditor.listAssistantPrompts(id)}
-            on:assistantFieldChange={(e) => updateAssistantField(e.detail.field, e.detail.value)}
-            on:instructionDraft={(e) => queueInstructionDraft(e.detail.value)}
-            on:instructionCommit={(e) => void updateInstruction(e.detail.value)}
-            on:revealInputTemplate={() => (revealInputTemplateInUserMode = true)}
+            onAssistantFieldChange={(detail) => updateAssistantField(detail.field, detail.value)}
+            onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
+            onInstructionCommit={(detail) => void updateInstruction(detail.value)}
+            onRevealInputTemplate={() => (revealInputTemplateInUserMode = true)}
           />
         {/if}
 
         {#if !isTranscribeOnly && !isTemplateFill}
           <FlowStepContextSection
-            {assistant}
-            {assistantLoading}
-            {runningUploads}
-            on:knowledgeChange={(e) => {
-              updateAssistantField("websites", e.detail.websites);
-              updateAssistantField("groups", e.detail.groups);
-              updateAssistantField("integration_knowledge_list", e.detail.integrationKnowledgeList);
+            assistant={assistantState.assistant}
+            assistantLoading={assistantState.loading}
+            runningUploads={assistantState.runningUploads}
+            onKnowledgeChange={(detail) => {
+              updateAssistantField("websites", detail.websites);
+              updateAssistantField("groups", detail.groups);
+              updateAssistantField("integration_knowledge_list", detail.integrationKnowledgeList);
             }}
-            on:removeAttachment={(e) => void removeAttachment(e.detail.file)}
+            onRemoveAttachment={(detail) => void assistantState.removeAttachment(detail.file)}
           />
         {/if}
 
@@ -1102,11 +874,11 @@
             {stepUxCopy}
             {inputTemplateSectionTitle}
             {inputTemplateSectionDescription}
-            on:revealInputTemplate={() => (revealInputTemplateInUserMode = true)}
-            on:clearInputTemplate={() => updateInputTemplate("")}
-            on:inputTemplateChange={(e) => updateInputTemplate(e.detail.value)}
-            on:inputSourceChange={(e) =>
-              handleInputSourceChange(e.detail.value as FlowStep["input_source"])}
+            onRevealInputTemplate={() => (revealInputTemplateInUserMode = true)}
+            onClearInputTemplate={() => updateInputTemplate("")}
+            onInputTemplateChange={(detail) => updateInputTemplate(detail.value)}
+            onInputSourceChange={(detail) =>
+              handleInputSourceChange(detail.value as FlowStep["input_source"])}
           />
         {/if}
 
@@ -1116,10 +888,10 @@
             {isPublished}
             {isAdvancedMode}
             {templateFillConfig}
-            {templateInspection}
-            {templateInspecting}
-            {templateConfigError}
-            {templateFilesLoading}
+            templateInspection={templateState.inspection}
+            templateInspecting={templateState.inspecting}
+            templateConfigError={templateState.configError}
+            templateFilesLoading={templateState.filesLoading}
             {templatePlaceholders}
             {templateBindingRows}
             {templateBindingSuggestionGroups}
@@ -1131,18 +903,25 @@
             {selectedTemplateAsset}
             {templateUnnamedStepWarning}
             {templateAutoMatchableCount}
-            {availableTemplateFiles}
-            on:outputModeChange={(e) =>
-              handleOutputModeChange(e.detail.value as FlowStep["output_mode"])}
-            on:templateFileSelect={(e) => void handleTemplateFileSelection(e.detail.assetId)}
-            on:templateUpload={(e) => void handleTemplateUpload(e.detail.event)}
-            on:templateDownload={() => void downloadCurrentTemplate()}
-            on:templateRefresh={() =>
+            availableTemplateFiles={templateState.availableFiles}
+            onOutputModeChange={(detail) =>
+              handleOutputModeChange(detail.value as FlowStep["output_mode"])}
+            onTemplateFileSelect={(detail) =>
+              void templateState.handleFileSelection(detail.assetId, templateContext())}
+            onTemplateUpload={(detail) =>
+              void templateState.handleUpload(detail.event, templateContext())}
+            onTemplateDownload={() =>
+              resolvedTemplateAssetId && void templateState.download(resolvedTemplateAssetId)}
+            onTemplateRefresh={() =>
               resolvedTemplateAssetId &&
-              void inspectTemplateFile(resolvedTemplateAssetId, { persist: false })}
-            on:bindingChange={(e) =>
-              handleTemplateBindingChange(e.detail.placeholder, e.detail.value)}
-            on:applyAllSuggestions={applyAllTemplateSuggestions}
+              void templateState.inspectFile(
+                resolvedTemplateAssetId,
+                { persist: false },
+                templateContext()
+              )}
+            onBindingChange={(detail) =>
+              handleTemplateBindingChange(detail.placeholder, detail.value)}
+            onApplyAllSuggestions={applyAllTemplateSuggestions}
           />
         {:else}
           <FlowStepOutputSection
@@ -1153,33 +932,33 @@
             {availableOutputModes}
             {outputHintKind}
             flowId={currentFlowId}
-            on:outputTypeChange={(e) =>
-              handleOutputTypeChange(e.detail.value as FlowStep["output_type"])}
-            on:outputModeChange={(e) =>
-              handleOutputModeChange(e.detail.value as FlowStep["output_mode"])}
-            on:webhookUrlChange={(e) =>
+            onOutputTypeChange={(detail) =>
+              handleOutputTypeChange(detail.value as FlowStep["output_type"])}
+            onOutputModeChange={(detail) =>
+              handleOutputModeChange(detail.value as FlowStep["output_mode"])}
+            onWebhookUrlChange={(detail) =>
               updateStep("output_config", {
                 ...(activeStep?.output_config ?? {}),
-                url: e.detail.value
+                url: detail.value
               })}
-            on:httpConfigChange={(e) =>
+            onHttpConfigChange={(detail) =>
               updateStep(
                 "output_config",
                 preserveFlowCitationMode(
-                  e.detail.config as unknown as Record<string, unknown>,
+                  detail.config as unknown as Record<string, unknown>,
                   activeStep?.output_config ?? null
                 )
               )}
-            on:citationModeChange={(e) => handleCitationModeChange(e.detail.value)}
-            on:switchToTemplateFill={() => handleOutputModeChange("template_fill")}
+            onCitationModeChange={(detail) => handleCitationModeChange(detail.value)}
+            onSwitchToTemplateFill={() => handleOutputModeChange("template_fill")}
           />
         {/if}
 
         <FlowStepSecuritySection
           step={activeStep}
           {isPublished}
-          on:classificationChange={(e) =>
-            updateStep("output_classification_override", e.detail.value)}
+          onClassificationChange={(detail) =>
+            updateStep("output_classification_override", detail.value)}
         />
 
         <!-- Typed I/O info banners -->
@@ -1221,17 +1000,17 @@
             {isPublished}
             {advancedJsonDrafts}
             {advancedJsonErrors}
-            on:mcpPolicyChange={(e) => updateStep("mcp_policy", e.detail.value)}
-            on:jsonFieldUpdate={(e) =>
-              handleAdvancedJsonFieldUpdate(e.detail.field as AdvancedJsonField, e.detail.value)}
+            onMcpPolicyChange={(detail) => updateStep("mcp_policy", detail.value)}
+            onJsonFieldUpdate={(detail) =>
+              handleAdvancedJsonFieldUpdate(detail.field as AdvancedJsonField, detail.value)}
           />
         {/if}
 
         <FlowStepDeleteSection
           step={activeStep}
           {isPublished}
-          on:removeStep={() => {
-            if (activeIndex >= 0) dispatch("removeStep", activeIndex);
+          onRemoveStep={() => {
+            if (activeIndex >= 0) onRemoveStep?.(activeIndex);
           }}
         />
       </Settings.Page>

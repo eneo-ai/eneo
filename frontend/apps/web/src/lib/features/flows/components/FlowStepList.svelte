@@ -4,30 +4,37 @@
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import { IconPlus } from "@intric/icons/plus";
-  import { Button, Dialog } from "@intric/ui";
-  import { Separator } from "@eneo/ui";
-  import { createEventDispatcher } from "svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { Separator } from "$lib/components/ui/separator/index.js";
   import { m } from "$lib/paraglide/messages";
   import { parseValidationError } from "$lib/features/flows/flowStepValidationMessages";
 
-  export let steps: FlowStep[];
-  export let activeStepId: string | null;
-  export let isPublished: boolean;
-  export let validationErrors: Map<string, string[]> = new Map();
-  export let onBuildWithAI: (() => void) | undefined = undefined;
-
-  const dispatch = createEventDispatcher<{
-    selectStep: string | null;
-    stepsChanged: FlowStep[];
-  }>();
+  let {
+    steps,
+    activeStepId,
+    isPublished,
+    validationErrors = new Map(),
+    onBuildWithAI,
+    onSelectStep,
+    onStepsChanged
+  }: {
+    steps: FlowStep[];
+    activeStepId: string | null;
+    isPublished: boolean;
+    validationErrors?: Map<string, string[]>;
+    onBuildWithAI?: () => void;
+    onSelectStep?: (stepId: string | null) => void;
+    onStepsChanged?: (steps: FlowStep[]) => void;
+  } = $props();
 
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
 
-  let showRemoveConfirm: Dialog.OpenState;
-  let pendingRemoveIndex: number | null = null;
-  let pendingRemoveLabel = "";
-  let pendingRemoveIsAssembly = false;
+  let showRemoveConfirm = $state(false);
+  let pendingRemoveIndex: number | null = $state(null);
+  let pendingRemoveLabel = $state("");
+  let pendingRemoveIsAssembly = $state(false);
 
   function moveStep(index: number, direction: -1 | 1) {
     const newIndex = index + direction;
@@ -36,12 +43,11 @@
     const updated = [...steps];
     [updated[index], updated[newIndex]] = [updated[newIndex], updated[index]];
 
-    // Renumber step_order contiguously
     updated.forEach((step, i) => {
       step.step_order = i + 1;
     });
 
-    dispatch("stepsChanged", updated);
+    onStepsChanged?.(updated);
   }
 
   function requestRemoveStep(index: number) {
@@ -51,10 +57,10 @@
     pendingRemoveLabel =
       (targetStep?.user_description ?? "").trim() ||
       m.flow_step_fallback_label({ order: String(targetStep?.step_order ?? index + 1) });
-    $showRemoveConfirm = true;
+    showRemoveConfirm = true;
   }
 
-  $: stepOrdersWithErrors = (() => {
+  const stepOrdersWithErrors = $derived.by(() => {
     const orders = new Set<number>();
     for (const [key, values] of validationErrors.entries()) {
       const parsed = parseValidationError(key, values);
@@ -67,7 +73,7 @@
       }
     }
     return orders;
-  })();
+  });
 
   function confirmRemove() {
     if (pendingRemoveIndex === null) return;
@@ -75,8 +81,8 @@
     updated.forEach((step, i) => {
       step.step_order = i + 1;
     });
-    dispatch("stepsChanged", updated);
-    $showRemoveConfirm = false;
+    onStepsChanged?.(updated);
+    showRemoveConfirm = false;
     pendingRemoveIndex = null;
     pendingRemoveIsAssembly = false;
   }
@@ -96,11 +102,7 @@
         <p class="text-muted max-w-[200px] text-xs">{m.flow_step_list_empty_hint()}</p>
         {#if !isPublished && onBuildWithAI}
           <div class="mt-2 w-full">
-            <Button
-              variant="outlined"
-              size="small"
-              on:click={onBuildWithAI}
-            >
+            <Button variant="outline" size="sm" onclick={onBuildWithAI}>
               {m.ai_builder_empty_state_cta()}
             </Button>
           </div>
@@ -115,9 +117,9 @@
             </p>
             <div class="mt-3">
               <Button
-                variant="outlined"
-                size="small"
-                on:click={() => flowEditor.createTemplateFillStarter()}
+                variant="outline"
+                size="sm"
+                onclick={() => flowEditor.createTemplateFillStarter()}
               >
                 {m.flow_template_fill_empty_state_action()}
               </Button>
@@ -135,10 +137,10 @@
           canMoveUp={index > 0}
           canMoveDown={index < steps.length - 1}
           hasValidationError={stepOrdersWithErrors.has(step.step_order)}
-          on:click={() => dispatch("selectStep", step.id ?? null)}
-          on:moveUp={() => moveStep(index, -1)}
-          on:moveDown={() => moveStep(index, 1)}
-          on:remove={() => requestRemoveStep(index)}
+          onClick={() => onSelectStep?.(step.id ?? null)}
+          onMoveUp={() => moveStep(index, -1)}
+          onMoveDown={() => moveStep(index, 1)}
+          onRemove={() => requestRemoveStep(index)}
         />
       {/each}
     {/if}
@@ -150,7 +152,7 @@
       <button
         type="button"
         class="border-default text-secondary hover:border-accent-default hover:bg-accent-dimmer hover:text-accent-default flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed py-2.5 text-sm transition-colors"
-        on:click={() => flowEditor.addStep()}
+        onclick={() => flowEditor.addStep()}
       >
         <IconPlus class="size-4" />
         {m.flow_step_add()}
@@ -159,19 +161,23 @@
   {/if}
 </div>
 
-<Dialog.Root alert bind:isOpen={showRemoveConfirm}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.flow_step_remove()}</Dialog.Title>
-    <Dialog.Description>
-      {#if pendingRemoveIsAssembly}
-        {m.flow_template_fill_remove_confirm_named({ name: pendingRemoveLabel })}
-      {:else}
-        {m.flow_step_remove_confirm_named({ name: pendingRemoveLabel })}
-      {/if}
-    </Dialog.Description>
-    <Dialog.Controls let:close>
-      <Button is={close} variant="outlined">{m.cancel()}</Button>
-      <Button variant="destructive" on:click={confirmRemove}>{m.delete()}</Button>
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+<AlertDialog.Root bind:open={showRemoveConfirm}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.flow_step_remove()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {#if pendingRemoveIsAssembly}
+          {m.flow_template_fill_remove_confirm_named({ name: pendingRemoveLabel })}
+        {:else}
+          {m.flow_step_remove_confirm_named({ name: pendingRemoveLabel })}
+        {/if}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action variant="destructive" onclick={confirmRemove}
+        >{m.delete()}</AlertDialog.Action
+      >
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

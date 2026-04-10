@@ -1,6 +1,6 @@
 <script lang="ts">
+  import { tick, untrack, type Snippet } from "svelte";
   import type { FlowStep } from "@intric/intric-js";
-  import { createEventDispatcher, onDestroy, onMount, tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { isFlowFormFieldNameUsableAsVariable } from "$lib/features/flows/flowFormSchema";
   import {
@@ -12,13 +12,55 @@
     type VariableClassificationContext
   } from "$lib/features/flows/flowVariableTokens";
   import VariablePicker from "./VariablePicker.svelte";
-  import { Alert, Card } from "@eneo/ui";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
 
-  export let value: string;
-  let currentEditorValue = value;
-  let lastCommittedValue = value;
-  let lastSeenPropValue = value;
-  $: {
+  let {
+    value,
+    disabled = false,
+    placeholder = "",
+    label = m.flow_step_prompt(),
+    minHeight = 160,
+    steps,
+    currentStepOrder,
+    formSchema,
+    transcriptionEnabled,
+    isAdvancedMode = false,
+    toolbar,
+    onChange,
+    onCommit
+  }: {
+    value: string;
+    disabled?: boolean;
+    placeholder?: string;
+    label?: string;
+    minHeight?: number;
+    steps: FlowStep[];
+    currentStepOrder: number;
+    formSchema:
+      | {
+          fields: {
+            name: string;
+            type: string;
+            required?: boolean;
+            options?: string[];
+            order?: number;
+          }[];
+        }
+      | undefined;
+    transcriptionEnabled: boolean;
+    isAdvancedMode?: boolean;
+    toolbar?: Snippet;
+    onChange?: (value: string) => void;
+    onCommit?: (value: string) => void;
+  } = $props();
+
+  let currentEditorValue = $state(untrack(() => value));
+  let lastCommittedValue = $state(untrack(() => value));
+  let lastSeenPropValue = $state(untrack(() => value));
+
+  // Sync external value prop changes into the editor
+  $effect(() => {
     if (value !== lastSeenPropValue) {
       const isLocalEcho = value === currentEditorValue;
       lastSeenPropValue = value;
@@ -28,46 +70,24 @@
         tick().then(() => autoResize());
       }
     }
-  }
-  export let disabled: boolean = false;
-  export let placeholder: string = "";
-  export let label: string = m.flow_step_prompt();
-  export let minHeight: number = 160;
-  export let steps: FlowStep[];
-  export let currentStepOrder: number;
-  export let formSchema:
-    | {
-        fields: {
-          name: string;
-          type: string;
-          required?: boolean;
-          options?: string[];
-          order?: number;
-        }[];
-      }
-    | undefined;
-  export let transcriptionEnabled: boolean;
-  export let isAdvancedMode: boolean = false;
+  });
 
-  const dispatch = createEventDispatcher<{ change: string; commit: string }>();
-
-  onMount(() => {
-    // Initial auto-resize after first render
+  // Initial auto-resize + commit on teardown
+  $effect(() => {
     tick().then(() => autoResize());
+    return () => {
+      commitIfDirty(currentEditorValue);
+    };
   });
 
-  onDestroy(() => {
-    commitIfDirty(currentEditorValue);
-  });
-
-  let textareaEl: HTMLTextAreaElement | null = null;
-  let mirrorEl: HTMLDivElement | null = null;
-  let autocompleteOpen = false;
-  let autocompleteQuery = "";
-  let selectedSuggestionIndex = 0;
-  let activeTrigger: "braces" | "at" | null = null;
-  let autocompleteAnchorIndex: number = -1;
-  let markerEl: HTMLSpanElement | null = null;
+  let textareaEl: HTMLTextAreaElement | null = $state(null);
+  let mirrorEl: HTMLDivElement | null = $state(null);
+  let autocompleteOpen = $state(false);
+  let autocompleteQuery = $state("");
+  let selectedSuggestionIndex = $state(0);
+  let activeTrigger: "braces" | "at" | null = $state(null);
+  let autocompleteAnchorIndex = $state(-1);
+  let markerEl: HTMLSpanElement | null = $state(null);
 
   function resetAutocomplete() {
     autocompleteOpen = false;
@@ -77,11 +97,8 @@
   }
 
   // Build classification context
-  $: classificationContext = buildContext(
-    steps,
-    formSchema,
-    transcriptionEnabled,
-    currentStepOrder
+  const classificationContext = $derived.by(() =>
+    buildContext(steps, formSchema, transcriptionEnabled, currentStepOrder)
   );
 
   function buildContext(
@@ -122,16 +139,17 @@
   }
 
   // Parse segments for mirror rendering
-  $: segments = parsePromptSegments(currentEditorValue, classificationContext);
+  const segments = $derived(parsePromptSegments(currentEditorValue, classificationContext));
 
   // Build mirror segments with an optional marker at the autocomplete anchor position.
-  // The marker is a zero-width span used for accurate dropdown positioning.
   type MirrorSegment = {
     type: "text" | "variable" | "marker";
     value: string;
     category?: VariableCategory;
   };
-  $: mirrorSegments = buildMirrorSegments(segments, autocompleteAnchorIndex, autocompleteOpen);
+  const mirrorSegments = $derived.by(() =>
+    buildMirrorSegments(segments, autocompleteAnchorIndex, autocompleteOpen)
+  );
 
   function toMirror(seg: (typeof segments)[number]): MirrorSegment {
     return seg.type === "variable"
@@ -175,7 +193,9 @@
   }
 
   // Available variables for chip bar and autocomplete
-  $: availableVariables = buildAvailableVariables(classificationContext, steps, isAdvancedMode);
+  const availableVariables = $derived.by(() =>
+    buildAvailableVariables(classificationContext, steps, isAdvancedMode)
+  );
 
   type VariableSuggestion = {
     token: string;
@@ -248,27 +268,31 @@
   }
 
   // Chip bar variables (filtered in user mode)
-  $: chipBarVariables = isAdvancedMode
-    ? availableVariables
-    : availableVariables.filter((v) => v.category === "field" || v.category === "step");
+  const chipBarVariables = $derived(
+    isAdvancedMode
+      ? availableVariables
+      : availableVariables.filter((v) => v.category === "field" || v.category === "step")
+  );
 
   // Unresolved count
-  $: unresolvedCount = collectUnresolvedTemplateTokens(
-    currentEditorValue,
-    new Set(availableVariables.map((v) => v.token))
-  ).length;
-  $: invalidStructuredReferences = collectInvalidStructuredOutputReferences(
-    currentEditorValue,
-    steps,
-    currentStepOrder
+  const unresolvedCount = $derived(
+    collectUnresolvedTemplateTokens(
+      currentEditorValue,
+      new Set(availableVariables.map((v) => v.token))
+    ).length
+  );
+  const invalidStructuredReferences = $derived(
+    collectInvalidStructuredOutputReferences(currentEditorValue, steps, currentStepOrder)
   );
 
   // Filtered suggestions for autocomplete
-  $: filteredSuggestions = autocompleteQuery
-    ? availableVariables.filter((v) =>
-        v.label.toLowerCase().includes(autocompleteQuery.trim().toLowerCase())
-      )
-    : availableVariables;
+  const filteredSuggestions = $derived(
+    autocompleteQuery
+      ? availableVariables.filter((v) =>
+          v.label.toLowerCase().includes(autocompleteQuery.trim().toLowerCase())
+        )
+      : availableVariables
+  );
 
   // Scroll sync
   function syncScroll() {
@@ -290,7 +314,7 @@
     const target = e.target as HTMLTextAreaElement;
     lastInputType = (e as InputEvent).inputType ?? "";
     currentEditorValue = target.value;
-    dispatch("change", target.value);
+    onChange?.(target.value);
     updateAutocompleteState();
     autoResize();
   }
@@ -305,14 +329,11 @@
   }
 
   function findAtTriggerStart(text: string, cursor: number): number | null {
-    // Don't trigger inside {{...}} tokens
     if (findOpenTokenStart(text, cursor) !== null) return null;
     const beforeCursor = text.slice(0, cursor);
     const atIndex = beforeCursor.lastIndexOf("@");
     if (atIndex < 0) return null;
-    // Word boundary: @ must be at start or preceded by whitespace / opening bracket
     if (atIndex > 0 && !/[\s([{]/.test(beforeCursor[atIndex - 1])) return null;
-    // Space in query = user moved on, dismiss
     if (beforeCursor.slice(atIndex + 1).includes(" ")) return null;
     return atIndex;
   }
@@ -329,7 +350,6 @@
 
     const cursor = textareaEl.selectionStart ?? currentEditorValue.length;
 
-    // Priority 1: {{ trigger (always checked, positional)
     const openIndex = findOpenTokenStart(currentEditorValue, cursor);
     if (openIndex !== null) {
       activeTrigger = "braces";
@@ -341,7 +361,6 @@
       return;
     }
 
-    // Priority 2: @ trigger (only during active typing)
     if (lastInputType === "insertText" || activeTrigger === "at") {
       const atIndex = findAtTriggerStart(currentEditorValue, cursor);
       if (atIndex !== null) {
@@ -437,7 +456,7 @@
   }
 
   // Autocomplete position — read from marker span in mirror div
-  let autocompletePosition = { top: 0, left: 16 };
+  let autocompletePosition = $state({ top: 0, left: 16 });
 
   function measureAutocompletePosition() {
     if (!mirrorEl || !textareaEl || !autocompleteOpen || !markerEl) {
@@ -452,7 +471,7 @@
     const top = Math.min(rawTop, textareaEl.clientHeight);
 
     const rawLeft = markerRect.left - mirrorRect.left;
-    const maxLeft = textareaEl.clientWidth - 288; // 288px = w-72 dropdown width
+    const maxLeft = textareaEl.clientWidth - 288;
     const left = Math.max(8, Math.min(rawLeft, maxLeft > 8 ? maxLeft : 8));
 
     autocompletePosition = { top, left };
@@ -465,7 +484,7 @@
 
   function commitNow(val: string) {
     lastCommittedValue = val;
-    dispatch("commit", val);
+    onCommit?.(val);
   }
 </script>
 
@@ -478,7 +497,9 @@
   >
     <span class="text-muted text-[11px]">{label}</span>
     <div class="flex items-center gap-1">
-      <slot name="toolbar" />
+      {#if toolbar}
+        {@render toolbar()}
+      {/if}
       {#if !disabled}
         <VariablePicker
           {steps}
@@ -486,9 +507,8 @@
           {formSchema}
           {isAdvancedMode}
           {transcriptionEnabled}
-          on:insert={(e) => {
-            // e.detail is "{{token}}", extract the inner token
-            const match = e.detail.match(/^\{\{(.+)\}\}$/);
+          onInsert={(variable) => {
+            const match = variable.match(/^\{\{(.+)\}\}$/);
             if (match) void insertAtCursor(match[1]);
           }}
         />
@@ -523,21 +543,20 @@
       bind:this={textareaEl}
       class="selection:bg-accent-dimmer selection:text-primary relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-mono text-sm leading-relaxed text-transparent caret-gray-900 focus:outline-none dark:caret-gray-100"
       style={`min-height: ${minHeight}px`}
-      on:input={handleInput}
-      on:keydown={handleKeydown}
-      on:scroll={syncScroll}
-      on:click={() => {
+      oninput={handleInput}
+      onkeydown={handleKeydown}
+      onscroll={syncScroll}
+      onclick={() => {
         lastInputType = "";
         updateAutocompleteState();
       }}
-      on:keyup={(e) => {
-        // Only recheck on cursor movement keys (character keys already handled by on:input)
+      onkeyup={(e) => {
         if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
           lastInputType = "";
           updateAutocompleteState();
         }
       }}
-      on:blur={() => commitIfDirty(currentEditorValue)}
+      onblur={() => commitIfDirty(currentEditorValue)}
       value={currentEditorValue}
       {disabled}
       {placeholder}
@@ -554,7 +573,7 @@
             type="button"
             class="hover:bg-hover-dimmer flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm"
             class:bg-hover-dimmer={i === selectedSuggestionIndex}
-            on:click={() => void applySuggestion(suggestion)}
+            onclick={() => void applySuggestion(suggestion)}
           >
             <span class={getChipClasses(suggestion.category)}>{suggestion.label}</span>
             <span class="text-muted text-[10px]">{suggestion.description}</span>
@@ -573,7 +592,7 @@
           class="{getChipClasses(
             v.category
           )} cursor-pointer transition-all hover:scale-105 hover:shadow-sm active:scale-95"
-          on:click={() => void insertAtCursor(v.token)}
+          onclick={() => void insertAtCursor(v.token)}
         >
           {`{{${v.label}}}`}
         </button>

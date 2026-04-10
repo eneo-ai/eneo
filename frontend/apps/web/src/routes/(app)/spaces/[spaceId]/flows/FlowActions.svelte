@@ -3,15 +3,21 @@
   import { IconTrash } from "@intric/icons/trash";
   import { IconEllipsis } from "@intric/icons/ellipsis";
   import type { FlowSparse } from "@intric/intric-js";
-  import { Button, Dialog, Dropdown } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { m } from "$lib/paraglide/messages";
 
-  export let flow: FlowSparse;
+  let {
+    flow
+  }: {
+    flow: FlowSparse;
+  } = $props();
 
   const flowsManager = getFlowsManager();
 
-  let isProcessing = false;
-  let showDeleteDialog: Dialog.OpenState;
+  let isProcessing = $state(false);
+  let showDeleteDialog = $state(false);
 
   async function handleDelete() {
     isProcessing = true;
@@ -19,7 +25,7 @@
       if (flow.id) {
         await flowsManager.deleteFlow(flow.id);
       }
-      $showDeleteDialog = false;
+      showDeleteDialog = false;
     } catch (e) {
       console.error(e);
     }
@@ -27,29 +33,38 @@
   }
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger asFragment let:trigger>
-    <Button is={trigger} padding="icon" variant="on-fill">
-      <IconEllipsis />
-    </Button>
-  </Dropdown.Trigger>
-  <Dropdown.Menu let:item>
-    <Button is={item} variant="destructive" on:click={() => { $showDeleteDialog = true; }} padding="icon-leading">
-      <IconTrash size="sm" />
-      {m.delete()}
-    </Button>
-  </Dropdown.Menu>
-</Dropdown.Root>
-
-<Dialog.Root alert bind:isOpen={showDeleteDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.delete()}</Dialog.Title>
-    <Dialog.Description>{m.flow_delete_confirm()}</Dialog.Description>
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={handleDelete}>
-        {isProcessing ? m.deleting() : m.delete()}
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} size="icon" variant="ghost">
+        <IconEllipsis />
       </Button>
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+    {/snippet}
+  </DropdownMenu.Trigger>
+  <DropdownMenu.Content>
+    <DropdownMenu.Item
+      variant="destructive"
+      onclick={() => {
+        showDeleteDialog = true;
+      }}
+    >
+      <IconTrash class="size-4" />
+      {m.delete()}
+    </DropdownMenu.Item>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
+
+<AlertDialog.Root bind:open={showDeleteDialog}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.delete()}</AlertDialog.Title>
+      <AlertDialog.Description>{m.flow_delete_confirm()}</AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action variant="destructive" onclick={handleDelete}>
+        {isProcessing ? m.deleting() : m.delete()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

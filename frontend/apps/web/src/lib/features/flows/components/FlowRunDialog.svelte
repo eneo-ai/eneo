@@ -30,20 +30,17 @@
     buildFlowRunWizardPages,
     runtimeStepPageId,
     type FlowLocale,
-    type FlowRunBlocker,
     type FlowRunWizardPage
   } from "$lib/features/flows/flowRunWizard";
   import {
     getFlowRuntimeErrorMessage,
-    getFlowRuntimeErrorMessageByCode,
-    classifyUploadError,
-    getUploadErrorHint,
-    friendlyMimeNames
+    getFlowRuntimeErrorMessageByCode
   } from "$lib/features/flows/flowRuntimeErrorMapping";
-  import { IconUploadCloud } from "@intric/icons/upload-cloud";
   import { IconXMark } from "@intric/icons/x-mark";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconInfo } from "@intric/icons/info";
+  import { getFlowRunDialogLabels } from "./flowRunDialogLabels";
+  import FlowRunDialogForm from "./FlowRunDialogForm.svelte";
+  import FlowRunDialogRuntimeStep from "./FlowRunDialogRuntimeStep.svelte";
+  import FlowRunDialogReview from "./FlowRunDialogReview.svelte";
 
   let {
     open = $bindable(false),
@@ -78,7 +75,7 @@
   const FLOW_UPLOAD_TIMEOUT_MS = 120_000;
   const AUDIO_ACCEPT_FILTER = "audio/*,video/webm,video/mp4";
   const locale = (getLocale() === "en" ? "en" : "sv") as FlowLocale;
-  const labels = getRunDialogLabels(locale);
+  const labels = getFlowRunDialogLabels(locale);
 
   const formFields = $derived.by(() =>
     normalizeFlowFormFields(
@@ -371,33 +368,6 @@
     return step.max_files - getStepFileCount(step);
   }
 
-  function getUploadError(stepId: string): string | null {
-    return uploadErrorsByStepId[stepId] ?? null;
-  }
-
-  function getSkippedMessage(stepId: string): string | null {
-    return skippedMessagesByStepId[stepId] ?? null;
-  }
-
-  function isStepUploading(stepId: string): boolean {
-    return uploadingStepIds.includes(stepId);
-  }
-
-  function getStepLabel(step: FlowRunContractStepInput): string {
-    return step.label?.trim() || labels.unnamedStep(step.step_order);
-  }
-
-  function getInputFormatLabel(inputFormat: string): string {
-    switch (inputFormat) {
-      case "audio":
-        return labels.audio;
-      case "file":
-        return labels.file;
-      default:
-        return labels.document;
-    }
-  }
-
   function getTemplateStatusLabel(status: string | null | undefined): string {
     switch (status) {
       case "ready":
@@ -686,12 +656,6 @@
     return getFieldValue(field).trim();
   }
 
-  function getCurrentStepBlockerSummary(stepId: string): FlowRunBlocker[] {
-    return runBlockers.filter(
-      (blocker) => blocker.pageId === runtimeStepPageId(stepId) && blocker.blocksProgress
-    );
-  }
-
   function formatBytes(bytes: number): string {
     if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
     const units = ["B", "KB", "MB", "GB"];
@@ -702,108 +666,6 @@
       unitIndex += 1;
     }
     return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-  }
-
-  function getRunDialogLabels(locale: FlowLocale) {
-    if (locale === "sv") {
-      return {
-        progress: (current: number, total: number) => `${current} av ${total}`,
-        previous: "Tillbaka",
-        next: "Nästa",
-        audio: "Ljud",
-        file: "Fil",
-        document: "Dokument",
-        unnamedStep: (stepOrder: number) => `Steg ${stepOrder}`,
-        templateReady: "Klar",
-        templateNeedsAction: "Åtgärd krävs",
-        templateReadOnly: "Skrivskyddad",
-        templateUnavailable: "Otillgänglig",
-        templateReadOnlyMessage: "Du kan köra flödet men inte byta mall.",
-        templateNeedsActionMessage: "Mallen kräver åtgärd innan flödet kan köras.",
-        templateStatusTitle: "Mallstatus",
-        templateStatusDescription:
-          "Kontrollera att publicerade DOCX-mallar fortfarande är tillgängliga innan du kör flödet.",
-        templateFallbackName: (stepId: string) => `Mall för ${stepId}`,
-        formIntroTitle: "Fyll i innan du kör flödet",
-        formIntroDescription:
-          "Fyll i de fält du skapade tidigare. Värdena blir sedan tillgängliga i flödet.",
-        retryUpload: "Försök igen",
-        disabledNextHint: "Fyll i obligatoriska fält först",
-        runtimeGroupEyebrow: "Filer för denna körning",
-        runtimeScopeHint: (stepOrder: number) => `Detta underlag används bara i steg ${stepOrder}.`,
-        runtimeUploadHint: "Ladda upp fil eller dra den hit.",
-        runtimeUploadingHint: "Uppladdning pågår. Vänta tills filen är klar innan du går vidare.",
-        runtimeStepUploadTitle: "Uppladdning för detta steg",
-        allowedTypesToggle: "Visa tillåtna filtyper",
-        maxFiles: (count: number) => `Max ${count}`,
-        maxFilesReached: "Max antal filer har redan laddats upp för detta steg.",
-        requiredBadge: "Obligatoriskt",
-        selectedFiles: (count: number) =>
-          `${count} fil${count === 1 ? "" : "er"} vald${count === 1 ? "" : "a"}`,
-        runBlockersTitle: "Det här behöver lösas innan du kan köra flödet",
-        reviewReady: "Allt som krävs är klart. Du kan köra flödet nu.",
-        reviewSummaryTitle: "Det här följer med i körningen",
-        reviewFieldsTitle: "Fält som skickas med",
-        reviewTextTitle: "Text som skickas in",
-        reviewFilesTitle: "Uppladdade filer",
-        runtimeReviewStep: (stepOrder: number, stepLabel: string) =>
-          `Steg ${stepOrder}: ${stepLabel}`,
-        closeConfirmTitle: "Du har osparade uppgifter",
-        closeConfirmMessage: "Om du stänger dialogen försvinner uppladdade filer och ifyllda fält.",
-        closeConfirmDiscard: "Stäng ändå",
-        closeConfirmKeep: "Fortsätt redigera",
-        technicalMimeToggle: "Visa tekniska MIME-typer"
-      };
-    }
-
-    return {
-      progress: (current: number, total: number) => `${current} of ${total}`,
-      previous: "Back",
-      next: "Next",
-      audio: "Audio",
-      file: "File",
-      document: "Document",
-      unnamedStep: (stepOrder: number) => `Step ${stepOrder}`,
-      templateReady: "Ready",
-      templateNeedsAction: "Needs action",
-      templateReadOnly: "Read-only",
-      templateUnavailable: "Unavailable",
-      templateReadOnlyMessage: "You can run the flow but you cannot change the template.",
-      templateNeedsActionMessage: "The template needs attention before the flow can run.",
-      templateStatusTitle: "Template status",
-      templateStatusDescription:
-        "Check that published DOCX templates are still available before you run the flow.",
-      templateFallbackName: (stepId: string) => `Template for ${stepId}`,
-      formIntroTitle: "Fill in before running the flow",
-      formIntroDescription:
-        "Fill in the fields you created earlier. The values will then be available in the flow.",
-      retryUpload: "Try again",
-      disabledNextHint: "Fill in required fields first",
-      runtimeGroupEyebrow: "Files for this run",
-      runtimeScopeHint: (stepOrder: number) => `This material is only used in step ${stepOrder}.`,
-      runtimeUploadHint: "Upload a file or drag it here.",
-      runtimeUploadingHint:
-        "Upload in progress. Wait until the file is finished before continuing.",
-      runtimeStepUploadTitle: "Upload for this step",
-      allowedTypesToggle: "Show allowed file types",
-      maxFiles: (count: number) => `Max ${count}`,
-      maxFilesReached: "The maximum number of files has already been uploaded for this step.",
-      requiredBadge: "Required",
-      selectedFiles: (count: number) => `${count} file${count === 1 ? "" : "s"} selected`,
-      runBlockersTitle: "This still needs to be resolved before you can run the flow",
-      reviewReady: "Everything required is ready. You can run the flow now.",
-      reviewSummaryTitle: "Included in this run",
-      reviewFieldsTitle: "Fields that will be sent",
-      reviewTextTitle: "Text that will be sent",
-      reviewFilesTitle: "Uploaded files",
-      runtimeReviewStep: (stepOrder: number, stepLabel: string) =>
-        `Step ${stepOrder}: ${stepLabel}`,
-      closeConfirmTitle: "You have unsaved changes",
-      closeConfirmMessage: "Closing this dialog will discard uploaded files and filled-in fields.",
-      closeConfirmDiscard: "Discard and close",
-      closeConfirmKeep: "Keep editing",
-      technicalMimeToggle: "Show technical MIME types"
-    };
   }
 </script>
 
@@ -960,107 +822,14 @@
             {/if}
           </div>
         {:else if currentPage.kind === "form"}
-          <div class="flex flex-col gap-5">
-            <div class="px-1">
-              <p class="text-sm font-semibold">{labels.formIntroTitle}</p>
-              <div class="mt-1.5 space-y-1">
-                <p class="text-secondary text-sm leading-relaxed">
-                  {labels.formIntroDescription}
-                </p>
-                {#if hasRequiredFormFields}
-                  <p class="text-muted text-sm">{m.flow_run_required_hint()}</p>
-                {/if}
-              </div>
-            </div>
-
-            {#if missingRequiredFields.length > 0}
-              <div
-                id="form-validation-banner"
-                class="border-accent-default/20 bg-accent-dimmer/30 text-accent-stronger rounded-lg border px-3.5 py-2.5 text-sm"
-                role="status"
-                aria-live="polite"
-              >
-                {#if missingRequiredFieldNames.length > 0}
-                  {m.flow_run_missing_required_named({
-                    fields: missingRequiredFieldNames.join(", ")
-                  })}
-                {:else}
-                  {m.flow_run_missing_required()}
-                {/if}
-              </div>
-            {/if}
-
-            {#each formFields as field, fieldIndex (field.name)}
-              <div class="flex flex-col gap-1.5">
-                <label class="text-sm font-medium" for={`flow-input-${fieldIndex}`}>
-                  {field.name}
-                  {#if field.required}
-                    <span class="text-negative-default" aria-hidden="true">*</span>
-                    <span class="sr-only">({labels.requiredBadge})</span>
-                  {/if}
-                </label>
-                {#if field.type === "multiselect"}
-                  <select
-                    id={`flow-input-${fieldIndex}`}
-                    class="border-default bg-primary ring-default focus-visible:ring-accent-default min-h-[120px] w-full rounded-lg border px-3 py-2 shadow focus-visible:ring-2"
-                    multiple
-                    required={field.required}
-                    aria-required={field.required}
-                    aria-describedby={missingRequiredFields.includes(field)
-                      ? "form-validation-banner"
-                      : undefined}
-                    onchange={(event) => {
-                      const selected = Array.from(event.currentTarget.selectedOptions).map(
-                        (option) => option.value
-                      );
-                      setFieldValue(field, selected);
-                    }}
-                  >
-                    {#each field.options ?? [] as option (option)}
-                      <option value={option} selected={getFieldMultiValue(field).includes(option)}>
-                        {option}
-                      </option>
-                    {/each}
-                  </select>
-                {:else if field.type === "select"}
-                  <select
-                    id={`flow-input-${fieldIndex}`}
-                    class="border-default bg-primary ring-default focus-visible:ring-accent-default w-full rounded-lg border px-3 py-2 shadow focus-visible:ring-2"
-                    value={getFieldValue(field)}
-                    required={field.required}
-                    aria-required={field.required}
-                    aria-describedby={missingRequiredFields.includes(field)
-                      ? "form-validation-banner"
-                      : undefined}
-                    onchange={(event) => setFieldValue(field, event.currentTarget.value)}
-                  >
-                    <option value="">{m.flow_select_placeholder()}</option>
-                    {#each field.options ?? [] as option (option)}
-                      <option value={option}>{option}</option>
-                    {/each}
-                  </select>
-                {:else}
-                  <input
-                    id={`flow-input-${fieldIndex}`}
-                    type={field.type === "number"
-                      ? "number"
-                      : field.type === "date"
-                        ? "date"
-                        : "text"}
-                    class="border-default bg-primary ring-default focus-visible:ring-accent-default w-full rounded-lg border px-3 py-2 shadow focus-visible:ring-2"
-                    value={getFieldValue(field)}
-                    autocomplete="off"
-                    required={field.required}
-                    aria-required={field.required}
-                    aria-describedby={missingRequiredFields.includes(field)
-                      ? "form-validation-banner"
-                      : undefined}
-                    oninput={(event) => setFieldValue(field, event.currentTarget.value)}
-                  />
-                {/if}
-              </div>
-            {/each}
-          </div>
+          <FlowRunDialogForm
+            {formFields}
+            {formValues}
+            {missingRequiredFields}
+            {hasRequiredFormFields}
+            {labels}
+            onFieldChange={setFieldValue}
+          />
         {:else if currentPage.kind === "freeform"}
           <div class="flex flex-col gap-2">
             <span class="text-sm font-medium">{m.flow_run_input()}</span>
@@ -1072,335 +841,36 @@
             ></textarea>
           </div>
         {:else if currentPage.kind === "runtime-step" && currentRuntimeStep}
-          <div class="flex flex-col gap-5">
-            <div class="px-1">
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <p class="text-muted text-xs font-medium tracking-[0.14em] uppercase">
-                      {labels.runtimeStepUploadTitle}
-                    </p>
-                    {#if currentRuntimeStep.required}
-                      <span
-                        class="border-default bg-secondary/15 text-secondary rounded-full border px-2 py-0.5 text-xs font-medium"
-                      >
-                        {labels.requiredBadge}
-                      </span>
-                    {/if}
-                    {#if currentStepFileCount > 0}
-                      <span
-                        class="border-positive-default/30 bg-positive-dimmer/50 text-positive-stronger rounded-full border px-2 py-0.5 text-xs font-medium"
-                      >
-                        {labels.selectedFiles(currentStepFileCount)}
-                      </span>
-                    {/if}
-                  </div>
-                  <p class="mt-2 text-base font-semibold">{getStepLabel(currentRuntimeStep)}</p>
-                  {#if currentRuntimeStep.description}
-                    <p class="text-secondary mt-1 text-sm leading-relaxed">
-                      {currentRuntimeStep.description}
-                    </p>
-                  {/if}
-                  <p class="text-muted mt-2 text-sm leading-relaxed">
-                    {labels.runtimeScopeHint(currentRuntimeStep.step_order)}
-                  </p>
-                </div>
-                <div class="text-secondary flex flex-wrap gap-2 text-xs">
-                  <span class="border-default rounded-full border px-2 py-0.5">
-                    {getInputFormatLabel(currentRuntimeStep.input_format)}
-                  </span>
-                  {#if currentRuntimeStep.max_files != null}
-                    <span class="border-default rounded-full border px-2 py-0.5">
-                      {labels.maxFiles(currentRuntimeStep.max_files)}
-                    </span>
-                  {/if}
-                  {#if currentRuntimeStep.max_file_size_bytes != null}
-                    <span class="border-default rounded-full border px-2 py-0.5">
-                      Max {formatBytes(currentRuntimeStep.max_file_size_bytes)}/{locale === "sv"
-                        ? "fil"
-                        : "file"}
-                    </span>
-                  {/if}
-                </div>
-              </div>
-
-              {#if currentStepBlockers.length > 0}
-                <div
-                  class="border-accent-default/20 bg-accent-dimmer/30 text-accent-stronger mt-5 rounded-lg border px-3.5 py-2.5 text-sm"
-                  role="status"
-                  aria-live="polite"
-                >
-                  {currentStepBlockers[0]?.title}
-                </div>
-              {/if}
-
-              {#if currentStepIsUploading}
-                <div
-                  class="border-accent-default/30 bg-accent-dimmer text-accent-stronger mt-5 flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <IconLoadingSpinner class="size-4 shrink-0 animate-spin" />
-                  {labels.runtimeUploadingHint}
-                </div>
-              {/if}
-
-              <div
-                class="{currentStepFileCount > 0
-                  ? 'mt-4 py-3.5'
-                  : 'mt-6 min-h-[132px] py-6 sm:min-h-[100px]'} flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 text-center transition-all duration-150 {draggingStepId ===
-                currentRuntimeStep.step_id
-                  ? 'border-accent-default bg-accent-dimmer scale-[1.02]'
-                  : currentStepFileCount > 0
-                    ? 'border-positive-default/30 bg-positive-dimmer/10'
-                    : 'border-default bg-secondary/5'} {currentStepRemainingSlots > 0 &&
-                draggingStepId !== currentRuntimeStep.step_id
-                  ? 'hover:border-accent-default hover:bg-secondary/15'
-                  : ''} {currentStepRemainingSlots <= 0 ? 'pointer-events-none opacity-50' : ''}"
-                ondragover={(event) => handleDragOver(currentRuntimeStep.step_id, event)}
-                ondragleave={(event) => handleDragLeave(currentRuntimeStep.step_id, event)}
-                ondrop={(event) => handleDrop(currentRuntimeStep, event)}
-                onclick={() => openFilePicker(currentRuntimeStep)}
-                role="button"
-                tabindex={currentStepRemainingSlots <= 0 ? -1 : 0}
-                aria-label="{m.upload_file()} — {getStepLabel(currentRuntimeStep)}"
-                aria-disabled={currentStepRemainingSlots <= 0 ? "true" : undefined}
-                onkeydown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    openFilePicker(currentRuntimeStep);
-                  }
-                }}
-              >
-                {#if currentStepIsUploading}
-                  <IconLoadingSpinner class="text-accent-default size-6 animate-spin" />
-                  <span class="text-secondary text-sm">{m.loading()}</span>
-                {:else if currentStepFileCount > 0}
-                  <div class="flex items-center gap-2.5">
-                    <div
-                      class="bg-positive-default/10 flex size-8 shrink-0 items-center justify-center rounded-full"
-                    >
-                      <IconCheck class="text-positive-default size-4" />
-                    </div>
-                    <span class="text-sm font-medium"
-                      >{labels.selectedFiles(currentStepFileCount)}</span
-                    >
-                  </div>
-                  {#if currentStepRemainingSlots > 0}
-                    <span class="text-muted text-sm">{labels.runtimeUploadHint}</span>
-                  {:else}
-                    <span class="text-muted text-sm">{labels.maxFilesReached}</span>
-                  {/if}
-                {:else}
-                  <IconUploadCloud class="text-muted size-7" />
-                  <span class="text-secondary text-sm">{m.upload_file()}</span>
-                  <span class="text-muted text-sm">{labels.runtimeUploadHint}</span>
-                {/if}
-              </div>
-
-              {#if currentRuntimeStep.accepted_mimetypes.length > 0}
-                <details class="border-default bg-secondary/5 mt-3 rounded-lg border px-3 py-2.5">
-                  <summary class="cursor-pointer text-sm font-medium">
-                    {labels.allowedTypesToggle}
-                  </summary>
-                  <p class="text-secondary mt-2 max-w-prose text-sm leading-relaxed">
-                    {friendlyMimeNames(currentRuntimeStep.accepted_mimetypes).join(", ")}
-                  </p>
-                  <details class="mt-2">
-                    <summary class="text-muted cursor-pointer text-sm hover:underline">
-                      {labels.technicalMimeToggle}
-                    </summary>
-                    <p
-                      class="text-muted mt-1.5 max-w-prose text-xs leading-relaxed break-all"
-                      title={currentRuntimeStep.accepted_mimetypes.join(", ")}
-                    >
-                      {currentRuntimeStep.accepted_mimetypes.join(", ")}
-                    </p>
-                  </details>
-                </details>
-              {/if}
-
-              {#if currentRuntimeStep.max_files != null}
-                <span
-                  class="mt-2 inline-flex text-sm"
-                  class:text-accent-stronger={currentStepFileCount > 0 &&
-                    currentStepRemainingSlots > 0}
-                  class:text-warning-stronger={currentStepRemainingSlots <= 0}
-                  class:text-muted={currentStepFileCount === 0}
-                >
-                  {m.flow_run_files_count({
-                    current: String(currentStepFileCount),
-                    limit: String(currentRuntimeStep.max_files)
-                  })}
-                </span>
-              {/if}
-
-              {#if currentStepSkippedMessage}
-                <p
-                  class="border-warning-default/30 bg-warning-dimmer text-warning-stronger mt-3 rounded-md border px-3.5 py-2.5 text-sm"
-                  role="status"
-                  aria-live="polite"
-                >
-                  {currentStepSkippedMessage}
-                </p>
-              {/if}
-
-              {#if currentStepUploadError}
-                <div
-                  class="border-negative-default/30 bg-negative-dimmer text-negative-stronger mt-3 rounded-md border px-3.5 py-2.5 text-sm"
-                  role="alert"
-                  aria-live="assertive"
-                >
-                  <p>
-                    {currentStepUploadError}{getUploadErrorHint(
-                      classifyUploadError(currentStepUploadError ?? "")
-                    )}
-                  </p>
-                  <button
-                    class="text-negative-stronger mt-1.5 text-xs font-medium underline underline-offset-2 hover:no-underline"
-                    onclick={() => retryUpload(currentRuntimeStep)}
-                  >
-                    {labels.retryUpload}
-                  </button>
-                </div>
-              {/if}
-
-              {#if currentStepUploadedFiles.length > 0}
-                <div class="mt-3 mb-2 flex flex-col gap-1.5">
-                  {#each currentStepUploadedFiles as file (file.id)}
-                    <div
-                      class="group bg-hover-dimmer hover:bg-hover-default flex min-h-[44px] items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-100"
-                    >
-                      <div class="flex min-w-0 flex-col">
-                        <span class="min-w-0 truncate">{file.name ?? file.id}</span>
-                        {#if file.size}
-                          <span class="text-muted text-xs">{formatBytes(file.size)}</span>
-                        {/if}
-                      </div>
-                      <button
-                        class="text-muted/60 hover:text-negative-default group-hover:text-muted flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md transition-colors duration-100"
-                        onclick={() => removeFile(currentRuntimeStep.step_id, file.id)}
-                        aria-label="{m.delete()} {file.name ?? file.id}"
-                      >
-                        <IconXMark class="size-4" />
-                      </button>
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          </div>
+          <FlowRunDialogRuntimeStep
+            step={currentRuntimeStep}
+            files={currentStepUploadedFiles}
+            fileCount={currentStepFileCount}
+            remainingSlots={currentStepRemainingSlots}
+            isUploading={currentStepIsUploading}
+            uploadError={currentStepUploadError}
+            skippedMessage={currentStepSkippedMessage}
+            blockers={currentStepBlockers}
+            dragging={draggingStepId === currentRuntimeStep.step_id}
+            {labels}
+            {locale}
+            onOpenFilePicker={() => openFilePicker(currentRuntimeStep)}
+            onRemoveFile={(fileId) => removeFile(currentRuntimeStep.step_id, fileId)}
+            onRetryUpload={() => retryUpload(currentRuntimeStep)}
+            onDrop={(event) => handleDrop(currentRuntimeStep, event)}
+            onDragOver={(event) => handleDragOver(currentRuntimeStep.step_id, event)}
+            onDragLeave={(event) => handleDragLeave(currentRuntimeStep.step_id, event)}
+          />
         {:else if currentPage.kind === "review"}
-          <div class="flex flex-col gap-4">
-            {#if reviewSummaryItems.length > 0}
-              <div class="px-1 py-1">
-                <h4 class="text-sm font-semibold" data-wizard-heading tabindex="-1">
-                  {labels.reviewSummaryTitle}
-                </h4>
-                <div class="mt-3 flex flex-wrap gap-2">
-                  {#each reviewSummaryItems as item (item.id)}
-                    <span
-                      class="border-positive-default/20 bg-positive-dimmer/30 text-positive-stronger inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium"
-                    >
-                      <IconCheck class="size-3.5 shrink-0" />
-                      {item.label}
-                    </span>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-
-            {#if runBlockers.length > 0}
-              <div
-                class="border-warning-default/30 bg-warning-dimmer text-warning-stronger rounded-xl border px-4 py-4"
-                role="status"
-                aria-live="polite"
-              >
-                <p class="flex items-center gap-2 text-sm font-semibold">
-                  <IconInfo class="size-4 shrink-0" />
-                  {labels.runBlockersTitle}
-                </p>
-                <div class="mt-3 flex flex-col gap-2">
-                  {#each runBlockers as blocker (blocker.id)}
-                    <div class="bg-primary/70 rounded-lg px-3 py-3">
-                      <div class="flex flex-wrap items-center justify-between gap-3">
-                        <p class="text-sm">{blocker.title}</p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onclick={() => goToPageById(blocker.pageId)}
-                        >
-                          {blocker.actionLabel}
-                        </Button>
-                      </div>
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            {:else}
-              <div
-                class="bg-positive-default/10 text-positive-stronger flex items-center gap-3 rounded-xl px-4 py-3.5 text-sm"
-              >
-                <div
-                  class="bg-positive-default/15 flex size-7 shrink-0 items-center justify-center rounded-full"
-                >
-                  <IconCheck class="size-4 shrink-0" />
-                </div>
-                <span class="font-medium">{labels.reviewReady}</span>
-              </div>
-            {/if}
-
-            {#if completedFormFieldSummaries.length > 0}
-              <div class="px-1 py-1">
-                <h4 class="text-sm font-semibold">{labels.reviewFieldsTitle}</h4>
-                <div class="mt-3 grid gap-3 md:grid-cols-2">
-                  {#each completedFormFieldSummaries as item (item.field.name)}
-                    <div class="bg-secondary/20 rounded-lg px-3 py-3">
-                      <p class="text-muted text-xs font-medium tracking-[0.12em] uppercase">
-                        {item.field.name}
-                      </p>
-                      <p class="mt-1 text-sm leading-relaxed">{item.value}</p>
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-
-            {#if showFreeformTextInput && inputText.trim().length > 0}
-              <div class="px-1 py-1">
-                <h4 class="text-sm font-semibold">{labels.reviewTextTitle}</h4>
-                <pre
-                  class="bg-secondary/20 mt-3 overflow-x-auto rounded-lg px-3 py-3 text-sm whitespace-pre-wrap">
-{inputText.trim()}</pre>
-              </div>
-            {/if}
-
-            {#if reviewFileGroups.length > 0}
-              <div class="border-default rounded-xl border px-4 py-4">
-                <h4 class="text-sm font-semibold">{labels.reviewFilesTitle}</h4>
-                <div class="mt-3 flex flex-col gap-3">
-                  {#each reviewFileGroups as group (group.step.step_id)}
-                    <div class="flex flex-col gap-1.5">
-                      <p class="text-muted text-xs font-medium tracking-wide uppercase">
-                        {labels.runtimeReviewStep(group.step.step_order, getStepLabel(group.step))}
-                      </p>
-                      {#each group.files as file (file.id)}
-                        <div
-                          class="bg-secondary/10 flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm"
-                        >
-                          <span class="min-w-0 truncate">{file.name ?? file.id}</span>
-                          {#if file.size}
-                            <span class="text-muted shrink-0 text-xs">{formatBytes(file.size)}</span
-                            >
-                          {/if}
-                        </div>
-                      {/each}
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-          </div>
+          <FlowRunDialogReview
+            {runBlockers}
+            {reviewSummaryItems}
+            {completedFormFieldSummaries}
+            {inputText}
+            {showFreeformTextInput}
+            {reviewFileGroups}
+            {labels}
+            onGoToPage={goToPageById}
+          />
         {/if}
       </div>
     {/if}

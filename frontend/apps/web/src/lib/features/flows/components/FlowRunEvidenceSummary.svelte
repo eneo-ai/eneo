@@ -1,30 +1,48 @@
 <script lang="ts">
-  import { Tooltip } from "@intric/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { Badge, Card } from "@eneo/ui";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
 
-  export let runStatusLabel: string;
-  export let statusColorClass: string;
-  export let traceId: string | null = null;
-  export let redactionApplied = false;
+  let {
+    runStatusLabel,
+    statusColorClass,
+    traceId = null,
+    redactionApplied = false
+  }: {
+    runStatusLabel: string;
+    statusColorClass: string;
+    traceId?: string | null;
+    redactionApplied?: boolean;
+  } = $props();
 </script>
 
 <Card.Root>
   <Card.Content class="flex flex-wrap items-center gap-2 px-4 py-3">
     <span class="{statusColorClass} text-sm font-medium">{runStatusLabel}</span>
     {#if traceId}
-      <Tooltip text={m.flow_run_evidence_trace_id_tooltip()}>
-        <Badge variant="outline" class="font-mono text-[11px]">
-          {m.flow_run_evidence_trace_id()}: {traceId}
-        </Badge>
-      </Tooltip>
+      <Tooltip.Provider delayDuration={150}>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <Badge variant="outline" class="font-mono text-[11px]">
+              {m.flow_run_evidence_trace_id()}: {traceId}
+            </Badge>
+          </Tooltip.Trigger>
+          <Tooltip.Content>{m.flow_run_evidence_trace_id_tooltip()}</Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     {/if}
     {#if redactionApplied}
-      <Tooltip text={m.flow_run_evidence_redacted_tooltip()}>
-        <Badge variant="outline" class="text-[11px]">
-          {m.flow_run_evidence_redacted()}
-        </Badge>
-      </Tooltip>
+      <Tooltip.Provider delayDuration={150}>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <Badge variant="outline" class="text-[11px]">
+              {m.flow_run_evidence_redacted()}
+            </Badge>
+          </Tooltip.Trigger>
+          <Tooltip.Content>{m.flow_run_evidence_redacted_tooltip()}</Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     {/if}
   </Card.Content>
 </Card.Root>

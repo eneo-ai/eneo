@@ -1,6 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Button } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { SvelteSet } from "svelte/reactivity";
   import {
     buildStructuredQuestionCustomAnswer,
@@ -108,7 +108,7 @@
 
   {#if question.selection_mode === "multi" && selectedOptionKeys.size > 0 && !answered}
     <div class="mt-2">
-      <Button variant="primary" size="small" onclick={handleConfirmMulti}>
+      <Button variant="default" size="sm" onclick={handleConfirmMulti}>
         {m.ai_builder_question_confirm()}
       </Button>
     </div>
@@ -127,8 +127,8 @@
           }}
         />
         <Button
-          variant="outlined"
-          size="small"
+          variant="outline"
+          size="sm"
           onclick={handleCustomSubmit}
           disabled={!customText.trim()}
         >

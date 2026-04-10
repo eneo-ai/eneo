@@ -1,13 +1,11 @@
-<svelte:options runes={false} />
-
 <script lang="ts">
   import type { FlowStep } from "@intric/intric-js";
   import { Settings } from "$lib/components/layout";
-  import { Button } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { IconLockClosed } from "@intric/icons/lock-closed";
   import { IconDownload } from "@intric/icons/download";
   import { m } from "$lib/paraglide/messages";
-  import { createEventDispatcher } from "svelte";
   import {
     getTemplateAssetStatusLabel,
     getTemplateAssetStatusClass,
@@ -15,54 +13,81 @@
     getTemplateRowStatusClass,
     getTemplateReadinessPillClass
   } from "./flowStepEditHelpers";
-  import { Alert, Badge, Card } from "@eneo/ui";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
 
-  const dispatch = createEventDispatcher<{
-    outputModeChange: { value: FlowStep["output_mode"] };
-    templateFileSelect: { assetId: string };
-    templateUpload: { event: Event };
-    templateDownload: void;
-    templateRefresh: void;
-    bindingChange: { placeholder: string; value: string };
-    applyAllSuggestions: void;
-  }>();
+  let {
+    step,
+    isPublished,
+    isAdvancedMode,
+    templateFillConfig,
+    templateInspection,
+    templateInspecting,
+    templateConfigError,
+    templateFilesLoading,
+    templatePlaceholders,
+    templateBindingRows,
+    templateBindingSuggestionGroups,
+    templateAutoBindings,
+    templateReadiness,
+    templateOrphanedRows,
+    templateHasSelection,
+    resolvedTemplateAssetId,
+    selectedTemplateAsset,
+    templateUnnamedStepWarning,
+    templateAutoMatchableCount,
+    availableTemplateFiles,
+    onOutputModeChange,
+    onTemplateFileSelect,
+    onTemplateUpload,
+    onTemplateDownload,
+    onTemplateRefresh,
+    onBindingChange,
+    onApplyAllSuggestions
+  }: {
+    step: FlowStep;
+    isPublished: boolean;
+    isAdvancedMode: boolean;
+    templateFillConfig: any;
+    templateInspection: any | null;
+    templateInspecting: boolean;
+    templateConfigError: string | null;
+    templateFilesLoading: boolean;
+    templatePlaceholders: Array<{ name: string }>;
+    templateBindingRows: Array<{
+      key: string;
+      placeholderName: string;
+      status: "matched" | "missing" | "invalid" | "orphaned";
+      binding?: string | null;
+      preview?: string | null;
+      autoSuggested?: boolean;
+      sourceOutputType?: string | null;
+    }>;
+    templateBindingSuggestionGroups: Array<{
+      key: string;
+      label: string;
+      options: Array<{ value: string; label: string }>;
+    }>;
+    templateAutoBindings: Record<string, string>;
+    templateReadiness: { total: number; matched: number; incomplete: boolean };
+    templateOrphanedRows: Array<any>;
+    templateHasSelection: boolean;
+    resolvedTemplateAssetId: string | null;
+    selectedTemplateAsset: any | null;
+    templateUnnamedStepWarning: boolean;
+    templateAutoMatchableCount: number;
+    availableTemplateFiles: Array<{ id: string; name: string; status?: string | null }>;
+    onOutputModeChange?: (detail: { value: FlowStep["output_mode"] }) => void;
+    onTemplateFileSelect?: (detail: { assetId: string }) => void;
+    onTemplateUpload?: (detail: { event: Event }) => void;
+    onTemplateDownload?: () => void;
+    onTemplateRefresh?: () => void;
+    onBindingChange?: (detail: { placeholder: string; value: string }) => void;
+    onApplyAllSuggestions?: () => void;
+  } = $props();
 
-  export let step: FlowStep;
-  export let isPublished: boolean;
-  export let isAdvancedMode: boolean;
-  export let templateFillConfig: any;
-  export let templateInspection: any | null;
-  export let templateInspecting: boolean;
-  export let templateConfigError: string | null;
-  export let templateFilesLoading: boolean;
-  export let templatePlaceholders: Array<{ name: string }>;
-  export let templateBindingRows: Array<{
-    key: string;
-    placeholderName: string;
-    status: "matched" | "missing" | "invalid" | "orphaned";
-    binding?: string | null;
-    preview?: string | null;
-    autoSuggested?: boolean;
-    sourceOutputType?: string | null;
-  }>;
-  export let templateBindingSuggestionGroups: Array<{
-    key: string;
-    label: string;
-    options: Array<{ value: string; label: string }>;
-  }>;
-  export let templateAutoBindings: Record<string, string>;
-  export let templateReadiness: { total: number; matched: number; incomplete: boolean };
-  export let templateOrphanedRows: Array<any>;
-  export let templateHasSelection: boolean;
-  export let resolvedTemplateAssetId: string | null;
-  export let selectedTemplateAsset: any | null;
-  export let templateUnnamedStepWarning: boolean;
-  export let templateAutoMatchableCount: number;
-  export let availableTemplateFiles: Array<{ id: string; name: string; status?: string | null }>;
-
-  // Local state
-  let expandedTemplateExpressions = new Set<string>();
-  let templateUploadInput: HTMLInputElement | null = null;
+  let expandedTemplateExpressions = $state(new Set<string>());
+  let templateUploadInput: HTMLInputElement | null = $state(null);
 
   function toggleTemplateExpressionEditor(key: string) {
     const next = new Set(expandedTemplateExpressions);
@@ -95,10 +120,10 @@
           </Alert.Description>
         </div>
         <Button
-          variant="outlined"
-          size="small"
+          variant="outline"
+          size="sm"
           disabled={isPublished}
-          on:click={() => dispatch("outputModeChange", { value: "pass_through" })}
+          onclick={() => onOutputModeChange?.({ value: "pass_through" })}
         >
           {m.flow_template_fill_switch_back()}
         </Button>
@@ -149,7 +174,7 @@
           class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
           value={resolvedTemplateAssetId ?? ""}
           disabled={isPublished || templateInspecting || selectedTemplateAsset?.can_edit === false}
-          on:change={(e) => dispatch("templateFileSelect", { assetId: e.currentTarget.value })}
+          onchange={(e) => onTemplateFileSelect?.({ assetId: e.currentTarget.value })}
         >
           <option value="">{m.flow_template_fill_select_placeholder()}</option>
           {#each availableTemplateFiles as file (file.id)}
@@ -165,36 +190,36 @@
           accept=".docx"
           class="hidden"
           disabled={isPublished || templateInspecting || selectedTemplateAsset?.can_edit === false}
-          on:change={(e) => dispatch("templateUpload", { event: e })}
+          onchange={(e) => onTemplateUpload?.({ event: e })}
         />
         <div class="flex flex-wrap items-center gap-3">
           <Button
-            variant="outlined"
-            size="small"
+            variant="outline"
+            size="sm"
             disabled={isPublished ||
               templateInspecting ||
               selectedTemplateAsset?.can_edit === false}
-            on:click={() => templateUploadInput?.click()}
+            onclick={() => templateUploadInput?.click()}
           >
             {m.flow_template_fill_upload_action()}
           </Button>
           <Button
-            variant="outlined"
-            size="small"
+            variant="outline"
+            size="sm"
             disabled={isPublished ||
               templateInspecting ||
               !resolvedTemplateAssetId ||
               selectedTemplateAsset?.can_download === false}
-            on:click={() => dispatch("templateDownload")}
+            onclick={() => onTemplateDownload?.()}
           >
             <IconDownload class="size-3.5" />
             {m.flow_template_fill_download_action()}
           </Button>
           <Button
-            variant="outlined"
-            size="small"
+            variant="outline"
+            size="sm"
             disabled={isPublished || templateInspecting || !resolvedTemplateAssetId}
-            on:click={() => dispatch("templateRefresh")}
+            onclick={() => onTemplateRefresh?.()}
           >
             {m.flow_template_fill_refresh_action()}
           </Button>
@@ -245,10 +270,10 @@
               </div>
               {#if templateAutoMatchableCount > 0}
                 <Button
-                  variant="outlined"
-                  size="small"
+                  variant="outline"
+                  size="sm"
                   disabled={isPublished}
-                  on:click={() => dispatch("applyAllSuggestions")}
+                  onclick={() => onApplyAllSuggestions?.()}
                 >
                   {m.flow_template_fill_apply_all({
                     count: String(templateAutoMatchableCount)
@@ -304,11 +329,11 @@
             {#each templateBindingRows as row (row.key)}
               <Card.Root
                 class="transition-colors {row.status === 'matched'
-                  ? 'border-positive-default/30 bg-positive-dimmer/20 border-l-positive-default/40 border-l-[3px]'
+                  ? 'border-positive-default/30 bg-positive-dimmer/20'
                   : row.status === 'missing'
-                    ? 'border-default bg-primary border-l-warning-default/60 border-l-[3px]'
+                    ? 'border-default bg-primary'
                     : row.status === 'orphaned'
-                      ? 'border-negative-default/30 bg-negative-dimmer/10 border-l-negative-default/40 border-l-[3px]'
+                      ? 'border-negative-default/30 bg-negative-dimmer/10'
                       : 'border-default bg-primary'}"
               >
                 <Card.Content class="flex flex-col gap-2 px-3 py-3">
@@ -336,7 +361,7 @@
                       title={expandedTemplateExpressions.has(row.key)
                         ? m.flow_template_fill_hide_expression()
                         : m.flow_template_fill_show_expression()}
-                      on:click={() => toggleTemplateExpressionEditor(row.key)}
+                      onclick={() => toggleTemplateExpressionEditor(row.key)}
                     >
                       <svg
                         class="size-3.5 transition-transform {expandedTemplateExpressions.has(
@@ -374,8 +399,8 @@
                         class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm focus-within:ring-2 hover:ring-1 focus-visible:ring-2"
                         value={row.binding ?? "__unset__"}
                         disabled={isPublished}
-                        on:change={(e) =>
-                          dispatch("bindingChange", {
+                        onchange={(e) =>
+                          onBindingChange?.({
                             placeholder: row.placeholderName,
                             value: e.currentTarget.value
                           })}
@@ -398,11 +423,11 @@
                     </div>
                     {#if row.status === "missing" && templateAutoBindings[row.placeholderName]}
                       <Button
-                        variant="outlined"
-                        size="small"
+                        variant="outline"
+                        size="sm"
                         disabled={isPublished}
-                        on:click={() =>
-                          dispatch("bindingChange", {
+                        onclick={() =>
+                          onBindingChange?.({
                             placeholder: row.placeholderName,
                             value: templateAutoBindings[row.placeholderName]
                           })}
@@ -418,8 +443,8 @@
                       value={row.binding ?? ""}
                       disabled={isPublished}
                       placeholder={m.flow_template_fill_expression_placeholder()}
-                      on:input={(e) =>
-                        dispatch("bindingChange", {
+                      oninput={(e) =>
+                        onBindingChange?.({
                           placeholder: row.placeholderName,
                           value: e.currentTarget.value
                         })}

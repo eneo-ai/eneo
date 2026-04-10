@@ -1,5 +1,3 @@
-<svelte:options runes={false} />
-
 <script lang="ts">
   import type { FlowStepResult, Intric } from "@intric/intric-js";
   import { IconChevronDown } from "@intric/icons/chevron-down";
@@ -8,16 +6,16 @@
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { Markdown } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
-  import { Alert, Badge, Card, Collapsible } from "@eneo/ui";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import FlowRunKnowledgeTrace from "./FlowRunKnowledgeTrace.svelte";
   import type {
     RuntimeInputSummary,
     TemplateProvenanceSummary
   } from "$lib/features/flows/flowEvidenceProvenance";
 
-  export let result: FlowStepResult;
-  export let stepDef: Record<string, unknown> | undefined;
-  export let duration: string | null;
   type FlowRunTranscriptionTelemetry = {
     transcript_bytes?: number;
     estimated_tokens?: number;
@@ -29,37 +27,65 @@
     cached_files_count?: number;
   };
 
-  export let transcription: FlowRunTranscriptionTelemetry | null;
-  export let runtimeInput: RuntimeInputSummary | null;
-  export let templateProvenance: TemplateProvenanceSummary | null;
-  export let stepRag: Record<string, unknown> | null;
-  export let stepAttempts: Record<string, unknown>[];
-  export let copiedKey: string | null;
-  export let expanded: boolean;
-  export let inputExpanded: boolean;
-  export let panelId: string;
-  export let runId: string;
-  export let isPowerUser: boolean;
-  export let intric: Intric;
-  export let onToggle: (stepOrder: number) => void;
-  export let onToggleInput: (stepOrder: number) => void;
-  export let onCopyPayload: (
-    key: string,
-    payload: unknown,
-    failureMessage: string
-  ) => Promise<void>;
-  export let onDownloadArtifact: (fileId: string) => Promise<void>;
-  export let getStatusColor: (status: string) => string;
-  export let getStatusDotColor: (status: string) => string;
-  export let getStatusLabel: (status: string) => string;
-  export let getRuntimeInputSummaryLabel: (fileCount: number) => string;
-  export let formatElapsedMs: (value: number | undefined) => string;
-  export let formatBytes: (value: number | undefined) => string;
-  export let getCacheStatusLabel: (
-    usedCache: boolean | undefined,
-    cachedFilesCount: number | undefined,
-    filesCount: number | undefined
-  ) => string;
+  let {
+    result,
+    stepDef,
+    duration,
+    transcription,
+    runtimeInput,
+    templateProvenance,
+    stepRag,
+    stepAttempts,
+    copiedKey,
+    expanded,
+    inputExpanded,
+    panelId,
+    runId,
+    isPowerUser,
+    intric,
+    onToggle,
+    onToggleInput,
+    onCopyPayload,
+    onDownloadArtifact,
+    getStatusColor,
+    getStatusDotColor,
+    getStatusLabel,
+    getRuntimeInputSummaryLabel,
+    formatElapsedMs,
+    formatBytes,
+    getCacheStatusLabel
+  }: {
+    result: FlowStepResult;
+    stepDef: Record<string, unknown> | undefined;
+    duration: string | null;
+    transcription: FlowRunTranscriptionTelemetry | null;
+    runtimeInput: RuntimeInputSummary | null;
+    templateProvenance: TemplateProvenanceSummary | null;
+    stepRag: Record<string, unknown> | null;
+    stepAttempts: Record<string, unknown>[];
+    copiedKey: string | null;
+    expanded: boolean;
+    inputExpanded: boolean;
+    panelId: string;
+    runId: string;
+    isPowerUser: boolean;
+    intric: Intric;
+    onToggle: (stepOrder: number) => void;
+    onToggleInput: (stepOrder: number) => void;
+    onCopyPayload: (key: string, payload: unknown, failureMessage: string) => Promise<void>;
+    onDownloadArtifact: (fileId: string) => Promise<void>;
+    getStatusColor: (status: string) => string;
+    getStatusDotColor: (status: string) => string;
+    getStatusLabel: (status: string) => string;
+    getRuntimeInputSummaryLabel: (fileCount: number) => string;
+    formatElapsedMs: (value: number | undefined) => string;
+    formatBytes: (value: number | undefined) => string;
+    getCacheStatusLabel: (
+      usedCache: boolean | undefined,
+      cachedFilesCount: number | undefined,
+      filesCount: number | undefined
+    ) => string;
+  } = $props();
 </script>
 
 <Card.Root class="overflow-hidden transition-shadow hover:shadow-md">
@@ -67,7 +93,7 @@
     class="hover:bg-hover-dimmer flex w-full items-center justify-between px-5 py-3.5 text-left"
     aria-expanded={expanded}
     aria-controls={panelId}
-    on:click={() => onToggle(result.step_order)}
+    onclick={() => onToggle(result.step_order)}
   >
     <div class="flex items-center gap-2.5">
       <span
@@ -106,7 +132,7 @@
               <button
                 class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 aria-label={m.copy()}
-                on:click={() =>
+                onclick={() =>
                   void onCopyPayload(
                     `step-${result.step_order}-prompt`,
                     result.effective_prompt,
@@ -132,7 +158,7 @@
               <button
                 class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 aria-label={m.copy()}
-                on:click={() =>
+                onclick={() =>
                   void onCopyPayload(
                     `step-${result.step_order}-output`,
                     result.output_payload_json,
@@ -169,7 +195,7 @@
                       : ""}
                     <button
                       class="group border-default bg-primary inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition-all hover:-translate-y-px hover:shadow-md"
-                      on:click={() => void onDownloadArtifact(artifact.file_id)}
+                      onclick={() => void onDownloadArtifact(artifact.file_id)}
                     >
                       <IconArrowDownToLine class="text-muted group-hover:text-secondary size-4" />
                       <span>{artifact.name}</span>
@@ -215,7 +241,7 @@
               <button
                 class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 aria-label={m.copy()}
-                on:click={() =>
+                onclick={() =>
                   void onCopyPayload(
                     `step-${result.step_order}-input`,
                     result.input_payload_json,
@@ -246,7 +272,7 @@
         {#if runtimeInput}
           <Card.Root size="sm" class="bg-hover-dimmer">
             <Card.Content class="p-3">
-              <h4 class="text-muted text-xs font-semibold">Körningsindata</h4>
+              <h4 class="text-muted text-xs font-semibold">Korningsindata</h4>
               <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
                 <Badge variant="outline">
                   {getRuntimeInputSummaryLabel(runtimeInput.fileCount)}
@@ -272,10 +298,12 @@
               <h4 class="text-muted text-xs font-semibold">{m.flow_run_transcription_label()}</h4>
               <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
                 <Badge variant="outline">
-                  {m.flow_run_transcription_model({ model: transcription.model ?? "—" })}
+                  {m.flow_run_transcription_model({ model: transcription.model ?? "\u2014" })}
                 </Badge>
                 <Badge variant="outline">
-                  {m.flow_run_transcription_language({ language: transcription.language ?? "—" })}
+                  {m.flow_run_transcription_language({
+                    language: transcription.language ?? "\u2014"
+                  })}
                 </Badge>
                 <Badge variant="outline">
                   {m.flow_run_transcription_files({
@@ -359,7 +387,7 @@
               <button
                 class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 aria-label={m.copy()}
-                on:click={() =>
+                onclick={() =>
                   void onCopyPayload(
                     `step-${result.step_order}-attempts`,
                     stepAttempts,

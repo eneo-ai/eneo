@@ -1,12 +1,10 @@
-<svelte:options runes={false} />
-
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@intric/intric-js";
-  import { createEventDispatcher } from "svelte";
   import { slide } from "svelte/transition";
-  import { Alert, Collapsible } from "@eneo/ui";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { IconChevronRight } from "@intric/icons/chevron-right";
   import { IconMicrophone } from "@intric/icons/microphone";
   import {
@@ -26,61 +24,76 @@
   import type { HttpAuthoredConfig } from "./http/httpConfigTypes";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
 
-  export let step: FlowStep;
-  export let isPublished: boolean;
-  export let selectableInputSourceOptions: Array<{
-    value: string;
-    legacyInvalid: boolean;
-  }>;
-  export let displayedInputTypeOptions: Array<{
-    value: string;
-    disabled: boolean;
-    legacyInvalid: boolean;
-  }>;
-  export let runtimeInputConfig: FlowRuntimeInputConfigValue;
-  export let sourceHintKind: FlowSourceHintKind | null;
-  export let sourceValidationMessage: string | null;
-  export let inputSourceFeedback: string | null;
-  export let inputTypeValidationMessage: string | null;
-  export let inputTypeFeedback: string | null;
-  export let transcriptionEnabled: boolean;
-  export let transcriptionModelConfigured: boolean;
-  export let transcriptionModelLabel: string | null;
-  export let flowId: string = "";
+  let {
+    step,
+    isPublished,
+    selectableInputSourceOptions,
+    displayedInputTypeOptions,
+    runtimeInputConfig,
+    sourceHintKind,
+    sourceValidationMessage,
+    inputSourceFeedback,
+    inputTypeValidationMessage,
+    inputTypeFeedback,
+    transcriptionEnabled,
+    transcriptionModelConfigured,
+    transcriptionModelLabel,
+    flowId = "",
+    onInputSourceChange,
+    onInputTypeChange,
+    onRuntimeInputChange,
+    onHttpConfigChange,
+    onOpenTranscriptionSettings
+  }: {
+    step: FlowStep;
+    isPublished: boolean;
+    selectableInputSourceOptions: Array<{
+      value: string;
+      legacyInvalid: boolean;
+    }>;
+    displayedInputTypeOptions: Array<{
+      value: string;
+      disabled: boolean;
+      legacyInvalid: boolean;
+    }>;
+    runtimeInputConfig: FlowRuntimeInputConfigValue;
+    sourceHintKind: FlowSourceHintKind | null;
+    sourceValidationMessage: string | null;
+    inputSourceFeedback: string | null;
+    inputTypeValidationMessage: string | null;
+    inputTypeFeedback: string | null;
+    transcriptionEnabled: boolean;
+    transcriptionModelConfigured: boolean;
+    transcriptionModelLabel: string | null;
+    flowId?: string;
+    onInputSourceChange?: (detail: { value: string }) => void;
+    onInputTypeChange?: (detail: { value: string }) => void;
+    onRuntimeInputChange?: (detail: { patch: Partial<FlowRuntimeInputConfigValue> }) => void;
+    onHttpConfigChange?: (detail: { config: HttpAuthoredConfig }) => void;
+    onOpenTranscriptionSettings?: () => void;
+  } = $props();
 
-  const dispatch = createEventDispatcher<{
-    inputSourceChange: { value: string };
-    inputTypeChange: { value: string };
-    runtimeInputChange: { patch: Partial<FlowRuntimeInputConfigValue> };
-    httpConfigChange: { config: HttpAuthoredConfig };
-    openTranscriptionSettings: void;
-  }>();
+  const isHttpSource = $derived(
+    step.input_source === "http_get" || step.input_source === "http_post"
+  );
+  const httpMethod = $derived(
+    step.input_source === "http_get" ? ("GET" as const) : ("POST" as const)
+  );
+  const httpConfig = $derived(
+    isHttpSource && step.input_config?.auth
+      ? (step.input_config as unknown as HttpAuthoredConfig)
+      : createDefaultHttpConfig("input", httpMethod)
+  );
 
-  $: isHttpSource = step.input_source === "http_get" || step.input_source === "http_post";
-  $: httpMethod = step.input_source === "http_get" ? "GET" as const : "POST" as const;
-  $: httpConfig = isHttpSource && step.input_config?.auth
-    ? (step.input_config as unknown as HttpAuthoredConfig)
-    : createDefaultHttpConfig("input", httpMethod);
-
-  let showRuntimeInputAdvanced = false;
-
-  function handleInputSourceChange(value: string) {
-    dispatch("inputSourceChange", { value });
-  }
-
-  function handleInputTypeChange(value: string) {
-    dispatch("inputTypeChange", { value });
-  }
+  let showRuntimeInputAdvanced = $state(false);
 
   function updateRuntimeInputSettings(patch: Partial<FlowRuntimeInputConfigValue>) {
-    dispatch("runtimeInputChange", { patch });
+    onRuntimeInputChange?.({ patch });
   }
 
   function toggleMimePreset(mime: string) {
     const current = runtimeInputConfig.accepted_mimetypes_override;
-    const next = current.includes(mime)
-      ? current.filter((m) => m !== mime)
-      : [...current, mime];
+    const next = current.includes(mime) ? current.filter((m) => m !== mime) : [...current, mime];
     updateRuntimeInputSettings({ accepted_mimetypes_override: next });
   }
 </script>
@@ -89,15 +102,13 @@
   <Settings.Row
     title={m.flow_step_input_source_label()}
     description={m.flow_step_standard_input_desc()}
-    let:aria
   >
     <div class="flex flex-col gap-2">
       <select
-        class="border-default bg-primary w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:border-accent-default focus-within:ring-2 focus-within:ring-accent-default/20 hover:border-stronger focus-visible:outline-none disabled:opacity-50"
+        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
         value={step.input_source}
         disabled={isPublished}
-        on:change={(e) =>
-          handleInputSourceChange(e.currentTarget.value)}
+        onchange={(e) => onInputSourceChange?.({ value: e.currentTarget.value })}
       >
         {#each selectableInputSourceOptions as source (source.value)}
           <option value={source.value}>
@@ -116,18 +127,13 @@
     </div>
   </Settings.Row>
 
-  <Settings.Row
-    title={m.flow_step_input_type()}
-    description={m.flow_step_input_format_desc()}
-    let:aria
-  >
+  <Settings.Row title={m.flow_step_input_type()} description={m.flow_step_input_format_desc()}>
     <div class="flex flex-col gap-2">
       <select
-        class="border-default bg-primary w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:border-accent-default focus-within:ring-2 focus-within:ring-accent-default/20 hover:border-stronger focus-visible:outline-none disabled:opacity-50"
+        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
         value={step.input_type}
         disabled={isPublished}
-        on:change={(e) =>
-          handleInputTypeChange(e.currentTarget.value)}
+        onchange={(e) => onInputTypeChange?.({ value: e.currentTarget.value })}
       >
         {#each displayedInputTypeOptions as option (option.value)}
           <option value={option.value} disabled={option.disabled}>
@@ -165,8 +171,7 @@
           checked={runtimeInputConfig.enabled}
           disabled={isPublished}
           aria-label={m.flow_runtime_input_accept_files()}
-          on:change={(event) =>
-            updateRuntimeInputSettings({ enabled: event.currentTarget.checked })}
+          onchange={(event) => updateRuntimeInputSettings({ enabled: event.currentTarget.checked })}
         />
         <div class="min-w-0">
           <p class="text-sm font-medium">{m.flow_runtime_input_accept_files()}</p>
@@ -187,7 +192,7 @@
               class="accent-accent-default mt-0.5 size-4"
               checked={runtimeInputConfig.required}
               disabled={isPublished}
-              on:change={(event) =>
+              onchange={(event) =>
                 updateRuntimeInputSettings({ required: event.currentTarget.checked })}
             />
             <div class="min-w-0">
@@ -209,7 +214,7 @@
               disabled={isPublished ||
                 step.output_mode === "transcribe_only" ||
                 FILE_BASED_INPUT_TYPES.has(step.input_type)}
-              on:change={(event) =>
+              onchange={(event) =>
                 updateRuntimeInputSettings({
                   input_format: event.currentTarget
                     .value as FlowRuntimeInputConfigValue["input_format"]
@@ -231,7 +236,7 @@
               placeholder={m.flow_runtime_input_instruction_placeholder()}
               value={runtimeInputConfig.description}
               disabled={isPublished}
-              on:input={(event) =>
+              oninput={(event) =>
                 updateRuntimeInputSettings({ description: event.currentTarget.value })}
             ></textarea>
             <p class="text-muted text-xs leading-relaxed">
@@ -239,7 +244,10 @@
             </p>
           </div>
 
-          <Collapsible.Root bind:open={showRuntimeInputAdvanced} class="border-default/70 bg-secondary/10 overflow-hidden rounded-lg border">
+          <Collapsible.Root
+            bind:open={showRuntimeInputAdvanced}
+            class="border-default/70 bg-secondary/10 overflow-hidden rounded-lg border"
+          >
             <Collapsible.Trigger
               class="hover:bg-secondary/20 flex w-full items-center gap-2 px-3 py-3 text-left text-sm font-medium transition-colors"
             >
@@ -251,9 +259,7 @@
               {m.flow_runtime_input_more_settings()}
             </Collapsible.Trigger>
             <Collapsible.Content>
-              <div
-                class="border-default/70 border-t px-3 pt-3 pb-3"
-              >
+              <div class="border-default/70 border-t px-3 pt-3 pb-3">
                 <div class="grid gap-3 md:grid-cols-2">
                   <div class="flex flex-col gap-1">
                     <label class="text-sm font-medium" for="runtime-input-label"
@@ -266,7 +272,7 @@
                       placeholder={m.flow_runtime_input_heading_placeholder()}
                       value={runtimeInputConfig.label}
                       disabled={isPublished}
-                      on:input={(event) =>
+                      oninput={(event) =>
                         updateRuntimeInputSettings({ label: event.currentTarget.value })}
                     />
                   </div>
@@ -284,7 +290,7 @@
                       placeholder={m.flow_runtime_input_max_files_placeholder()}
                       value={runtimeInputConfig.max_files ?? ""}
                       disabled={isPublished}
-                      on:input={(event) =>
+                      oninput={(event) =>
                         updateRuntimeInputSettings({
                           max_files:
                             event.currentTarget.value.trim().length > 0
@@ -295,9 +301,9 @@
                   </div>
 
                   <div class="flex flex-col gap-2 md:col-span-2">
-                    <label class="text-sm font-medium">
+                    <span class="text-sm font-medium">
                       {m.flow_runtime_input_mimetypes_label()}
-                    </label>
+                    </span>
                     <div class="flex flex-wrap gap-1.5">
                       {#each getMimePresetsForFormat(runtimeInputConfig.input_format) as preset (preset.mime)}
                         <button
@@ -308,7 +314,7 @@
                             ? 'border-accent-default/60 bg-accent-dimmer/50 text-accent-stronger'
                             : 'border-default bg-primary text-secondary hover:bg-secondary/10'}"
                           disabled={isPublished}
-                          on:click={() => toggleMimePreset(preset.mime)}
+                          onclick={() => toggleMimePreset(preset.mime)}
                         >
                           {preset.label}
                         </button>
@@ -319,9 +325,9 @@
                         + {runtimeInputConfig.accepted_mimetypes_override
                           .filter(
                             (mt) =>
-                              !getMimePresetsForFormat(
-                                runtimeInputConfig.input_format
-                              ).some((p) => p.mime === mt)
+                              !getMimePresetsForFormat(runtimeInputConfig.input_format).some(
+                                (p) => p.mime === mt
+                              )
                           )
                           .join(", ")}
                       </p>
@@ -334,22 +340,20 @@
                       value={runtimeInputConfig.accepted_mimetypes_override
                         .filter(
                           (mt) =>
-                            !getMimePresetsForFormat(
-                              runtimeInputConfig.input_format
-                            ).some((p) => p.mime === mt)
+                            !getMimePresetsForFormat(runtimeInputConfig.input_format).some(
+                              (p) => p.mime === mt
+                            )
                         )
                         .join(", ")}
                       disabled={isPublished}
-                      on:input={(event) => {
-                        const presetMimes =
-                          runtimeInputConfig.accepted_mimetypes_override.filter((mt) =>
+                      oninput={(event) => {
+                        const presetMimes = runtimeInputConfig.accepted_mimetypes_override.filter(
+                          (mt) =>
                             getMimePresetsForFormat(runtimeInputConfig.input_format).some(
                               (p) => p.mime === mt
                             )
-                          );
-                        const customMimes = parseMimeOverrideDraft(
-                          event.currentTarget.value
                         );
+                        const customMimes = parseMimeOverrideDraft(event.currentTarget.value);
                         updateRuntimeInputSettings({
                           accepted_mimetypes_override: [...presetMimes, ...customMimes]
                         });
@@ -374,15 +378,16 @@
     config={httpConfig}
     direction="input"
     method={httpMethod}
-    isPublished={isPublished}
+    {isPublished}
     {flowId}
-    on:configChange={(e) => dispatch("httpConfigChange", { config: e.detail.config })}
+    onConfigChange={(detail) => onHttpConfigChange?.({ config: detail.config })}
   />
 {/if}
 
 {#if step.input_type === "audio"}
   <Alert.Root
-    class="mb-3 flex items-center justify-between rounded-[1rem] px-5 py-4 {!transcriptionEnabled || !transcriptionModelConfigured
+    class="mb-3 flex items-center justify-between rounded-[1rem] px-5 py-4 {!transcriptionEnabled ||
+    !transcriptionModelConfigured
       ? 'border-warning-default/30 bg-warning-dimmer/50'
       : 'border-accent-default/15 bg-accent-default/5'}"
     role="status"
@@ -398,26 +403,27 @@
           ? 'text-warning-stronger'
           : 'text-primary'}"
       >
-          {#if !transcriptionEnabled}
-            {m.flow_transcription_audio_nudge()}
-          {:else if !transcriptionModelConfigured}
-            {m.flow_transcription_model_label()}:
-            <span class="text-warning-stronger font-medium">{m.select_a_model()}</span>
-          {:else}
-            {m.flow_transcription_model_label()}:
-            <span class="font-medium">{transcriptionModelLabel ?? "---"}</span>
-          {/if}
-        </span>
-      </div>
-      <button
-        class="flex items-center gap-1 text-xs font-medium transition-colors {!transcriptionEnabled || !transcriptionModelConfigured
-          ? 'text-warning-stronger/80 hover:text-warning-stronger'
-          : 'text-accent-default hover:text-accent-stronger'}"
-        on:click={() => dispatch("openTranscriptionSettings")}
-      >
-        {m.edit()}
-        {m.flow_stage_transcription()}
-        <IconChevronRight class="size-3.5" />
-      </button>
-    </Alert.Root>
+        {#if !transcriptionEnabled}
+          {m.flow_transcription_audio_nudge()}
+        {:else if !transcriptionModelConfigured}
+          {m.flow_transcription_model_label()}:
+          <span class="text-warning-stronger font-medium">{m.select_a_model()}</span>
+        {:else}
+          {m.flow_transcription_model_label()}:
+          <span class="font-medium">{transcriptionModelLabel ?? "---"}</span>
+        {/if}
+      </span>
+    </div>
+    <button
+      class="flex items-center gap-1 text-xs font-medium transition-colors {!transcriptionEnabled ||
+      !transcriptionModelConfigured
+        ? 'text-warning-stronger/80 hover:text-warning-stronger'
+        : 'text-accent-default hover:text-accent-stronger'}"
+      onclick={() => onOpenTranscriptionSettings?.()}
+    >
+      {m.edit()}
+      {m.flow_stage_transcription()}
+      <IconChevronRight class="size-3.5" />
+    </button>
+  </Alert.Root>
 {/if}

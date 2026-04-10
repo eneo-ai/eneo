@@ -1,40 +1,47 @@
 <script lang="ts">
   import type { FlowStep } from "@intric/intric-js";
   import { Handle, Position } from "@xyflow/svelte";
-  import { Badge, Card } from "@eneo/ui";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
 
-  export let data: {
-    label: string;
-    step: Pick<
-      FlowStep,
-      | "step_order"
-      | "input_type"
-      | "output_type"
-      | "output_mode"
-      | "mcp_policy"
-      | "output_classification_override"
-    >;
-    isActive: boolean;
-    mode: "user" | "power_user";
-    runStatus?: string;
-    numTokensInput?: number;
-    numTokensOutput?: number;
-    modelName?: string;
-    classLevel?: number | null;
-    assistantClassLevel?: number | null;
-  };
+  let {
+    data
+  }: {
+    data: {
+      label: string;
+      step: Pick<
+        FlowStep,
+        | "step_order"
+        | "input_type"
+        | "output_type"
+        | "output_mode"
+        | "mcp_policy"
+        | "output_classification_override"
+      >;
+      isActive: boolean;
+      mode: "user" | "power_user";
+      runStatus?: string;
+      numTokensInput?: number;
+      numTokensOutput?: number;
+      modelName?: string;
+      classLevel?: number | null;
+      assistantClassLevel?: number | null;
+    };
+  } = $props();
 
-  $: isPowerUser = data.mode === "power_user";
-  $: isAssembly = data.step.output_mode === "template_fill";
-  $: nextChannelLabel = isAssembly
-    ? m.flow_template_fill_card_badge()
-    : getDownstreamKindForOutput(data.step.output_type as FlowStep["output_type"]) ===
-        "text_and_structured"
-      ? m.flow_step_summary_next_channel_text_and_structured_short()
-      : m.flow_step_summary_next_channel_text_short();
-  $: inputTypeLabel = (() => {
+  const isPowerUser = $derived(data.mode === "power_user");
+  const isAssembly = $derived(data.step.output_mode === "template_fill");
+  const nextChannelLabel = $derived(
+    isAssembly
+      ? m.flow_template_fill_card_badge()
+      : getDownstreamKindForOutput(data.step.output_type as FlowStep["output_type"]) ===
+          "text_and_structured"
+        ? m.flow_step_summary_next_channel_text_and_structured_short()
+        : m.flow_step_summary_next_channel_text_short()
+  );
+  const inputTypeLabel = $derived.by(() => {
     switch (data.step.input_type) {
       case "json":
         return m.flow_type_json();
@@ -50,8 +57,8 @@
       default:
         return m.flow_type_text();
     }
-  })();
-  $: outputTypeLabel = (() => {
+  });
+  const outputTypeLabel = $derived.by(() => {
     switch (data.step.output_type) {
       case "json":
         return m.flow_output_type_json();
@@ -63,21 +70,23 @@
       default:
         return m.flow_output_type_text();
     }
-  })();
+  });
 
-  $: borderColor = data.runStatus
-    ? data.runStatus === "completed"
-      ? "border-positive-default"
-      : data.runStatus === "failed"
-        ? "border-negative-default"
-        : data.runStatus === "running"
-          ? "border-accent-default"
-          : "border-default"
-    : data.isActive
-      ? "border-accent-default"
-      : "border-default";
-  $: surfaceClass = isAssembly ? "bg-warning-dimmer/25" : "bg-primary";
-  $: headerClass = isAssembly ? "bg-warning-dimmer/50" : "bg-hover-dimmer";
+  const borderColor = $derived(
+    data.runStatus
+      ? data.runStatus === "completed"
+        ? "border-positive-default"
+        : data.runStatus === "failed"
+          ? "border-negative-default"
+          : data.runStatus === "running"
+            ? "border-accent-default"
+            : "border-default"
+      : data.isActive
+        ? "border-accent-default"
+        : "border-default"
+  );
+  const surfaceClass = $derived(isAssembly ? "bg-warning-dimmer/25" : "bg-primary");
+  const headerClass = $derived(isAssembly ? "bg-warning-dimmer/50" : "bg-hover-dimmer");
 </script>
 
 {#if isPowerUser}
@@ -87,7 +96,7 @@
     style="width: 300px;"
   >
     <Card.Header class="{headerClass} flex-row items-center justify-between gap-2 px-3 py-1.5">
-      <div class="min-w-0 flex items-center gap-2">
+      <div class="flex min-w-0 items-center gap-2">
         <span
           class="bg-hover-default flex size-5 shrink-0 items-center justify-center rounded text-xs font-bold"
         >
@@ -95,14 +104,20 @@
         </span>
         <span class="truncate text-sm font-semibold">{data.label}</span>
         {#if isAssembly}
-          <Badge variant="secondary" class="bg-warning-dimmer text-warning-stronger text-[10px] font-bold">
+          <Badge
+            variant="secondary"
+            class="bg-warning-dimmer text-warning-stronger text-[10px] font-bold"
+          >
             DOCX
           </Badge>
         {/if}
       </div>
       <div class="flex items-center gap-1">
         {#if data.assistantClassLevel != null}
-          <Badge variant="secondary" class="bg-accent-dimmer text-accent-stronger text-[10px] font-bold">
+          <Badge
+            variant="secondary"
+            class="bg-accent-dimmer text-accent-stronger text-[10px] font-bold"
+          >
             Model K{data.assistantClassLevel}
           </Badge>
         {/if}

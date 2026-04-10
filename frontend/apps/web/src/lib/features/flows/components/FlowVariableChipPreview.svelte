@@ -6,26 +6,23 @@
     type VariableClassificationContext
   } from "$lib/features/flows/flowVariableTokens";
 
-  export let text: string;
-  export let steps: FlowStep[];
-  export let compact: boolean = false;
-  export let formSchema: { fields: { name: string }[] } | undefined = undefined;
-  export let transcriptionEnabled: boolean = true;
-  export let currentStepOrder: number = 1;
-
-  $: classificationContext = buildContext(
+  let {
+    text,
     steps,
-    formSchema,
-    transcriptionEnabled,
-    currentStepOrder
-  );
+    compact = false,
+    formSchema = undefined,
+    transcriptionEnabled = true,
+    currentStepOrder = 1
+  }: {
+    text: string;
+    steps: FlowStep[];
+    compact?: boolean;
+    formSchema?: { fields: { name: string }[] } | undefined;
+    transcriptionEnabled?: boolean;
+    currentStepOrder?: number;
+  } = $props();
 
-  function buildContext(
-    steps: FlowStep[],
-    formSchema: { fields: { name: string }[] } | undefined,
-    transcriptionEnabled: boolean,
-    currentStepOrder: number
-  ): VariableClassificationContext {
+  const classificationContext = $derived.by(() => {
     const knownFieldNames = new Set<string>();
     for (const field of formSchema?.fields ?? []) {
       const name = (field.name ?? "").trim();
@@ -46,10 +43,10 @@
       stepOutputTypes,
       transcriptionEnabled,
       currentStepOrder
-    };
-  }
+    } satisfies VariableClassificationContext;
+  });
 
-  $: segments = parsePromptSegments(text, classificationContext);
+  const segments = $derived(parsePromptSegments(text, classificationContext));
 </script>
 
 {#if segments.some((s) => s.type === "variable")}

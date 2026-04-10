@@ -1,9 +1,8 @@
-<svelte:options runes={false} />
-
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@intric/intric-js";
-  import { Badge, Card } from "@eneo/ui";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
   import {
     getInputTypeLabel,
     getOutputTypeLabel,
@@ -14,49 +13,65 @@
   import { getHttpSummaryText } from "./http/httpConfigHelpers";
   import type { HttpAuthoredConfig, HttpMethod } from "./http/httpConfigTypes";
 
-  export let step: FlowStep;
-  export let summaryModel: {
-    usesInputTemplate?: boolean;
-    hasKnowledge?: boolean;
-    hasAttachments?: boolean;
-    downstreamKind?: string;
-  } | null;
-  export let previousStep: FlowStep | undefined | null;
-  export let isAdvancedMode: boolean;
-  export let hasInputTemplateOverride: boolean;
+  let {
+    step,
+    summaryModel,
+    previousStep,
+    isAdvancedMode,
+    hasInputTemplateOverride
+  }: {
+    step: FlowStep;
+    summaryModel: {
+      usesInputTemplate?: boolean;
+      hasKnowledge?: boolean;
+      hasAttachments?: boolean;
+      downstreamKind?: string;
+    } | null;
+    previousStep: FlowStep | undefined | null;
+    isAdvancedMode: boolean;
+    hasInputTemplateOverride: boolean;
+  } = $props();
 
-  $: httpOutputConfig =
+  const httpOutputConfig = $derived(
     step.output_mode === "http_post" && step.output_config?.auth
       ? (step.output_config as unknown as HttpAuthoredConfig)
-      : null;
-  $: httpInputConfig =
+      : null
+  );
+  const httpInputConfig = $derived(
     (step.input_source === "http_get" || step.input_source === "http_post") &&
-    step.input_config?.auth
+      step.input_config?.auth
       ? (step.input_config as unknown as HttpAuthoredConfig)
-      : null;
-  $: httpMethod = (step.input_source === "http_get" ? "GET" : "POST") as HttpMethod;
-  $: httpSummary = httpOutputConfig
-    ? getHttpSummaryText(httpOutputConfig, "POST")
-    : httpInputConfig
-      ? getHttpSummaryText(httpInputConfig, httpMethod)
-      : "";
+      : null
+  );
+  const httpMethod = $derived((step.input_source === "http_get" ? "GET" : "POST") as HttpMethod);
+  const httpSummary = $derived(
+    httpOutputConfig
+      ? getHttpSummaryText(httpOutputConfig, "POST")
+      : httpInputConfig
+        ? getHttpSummaryText(httpInputConfig, httpMethod)
+        : ""
+  );
 
-  $: summaryKey = `${getSummarySourceText(step, summaryModel, previousStep)}|${getInputTypeLabel(step.input_type)}|${getOutputTypeLabel(step.output_type)}|${getSummaryNextChannelText(step, summaryModel)}`;
+  const summaryKey = $derived(
+    `${getSummarySourceText(step, summaryModel, previousStep)}|${getInputTypeLabel(step.input_type)}|${getOutputTypeLabel(step.output_type)}|${getSummaryNextChannelText(step, summaryModel)}`
+  );
 
-  let prevSummaryKey = "";
-  let gridPulse = false;
+  let prevSummaryKey = $state("");
+  let gridPulse = $state(false);
   let pulseTimer: ReturnType<typeof setTimeout> | null = null;
 
-  $: if (summaryKey !== prevSummaryKey) {
-    if (prevSummaryKey) {
-      gridPulse = true;
-      if (pulseTimer) clearTimeout(pulseTimer);
-      pulseTimer = setTimeout(() => {
-        gridPulse = false;
-      }, 700);
+  $effect(() => {
+    if (summaryKey !== prevSummaryKey) {
+      if (prevSummaryKey) {
+        gridPulse = true;
+        if (pulseTimer) clearTimeout(pulseTimer);
+        pulseTimer = setTimeout(() => {
+          gridPulse = false;
+        }, 700);
+      }
+      prevSummaryKey = summaryKey;
     }
-    prevSummaryKey = summaryKey;
-  }
+  });
 </script>
 
 <Card.Root class="border-accent-default/18 bg-primary/75 mb-4 rounded-2xl px-4 py-4 sm:px-5">
@@ -125,7 +140,7 @@
 
 <style>
   @media (prefers-reduced-motion: no-preference) {
-    .summary-grid-pulse {
+    :global(.summary-grid-pulse) {
       animation: summary-pulse 700ms ease-out;
     }
   }

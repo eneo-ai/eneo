@@ -1,20 +1,25 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import type { Flow } from "@intric/intric-js";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { IconRefresh } from "@intric/icons/refresh";
-  import { createEventDispatcher, onMount } from "svelte";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { m } from "$lib/paraglide/messages";
-  import { Collapsible } from "@eneo/ui";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
 
-  export let flow: Flow;
-  export let activeStepId: string | null;
+  let {
+    flow,
+    activeStepId,
+    onNodeClick
+  }: {
+    flow: Flow;
+    activeStepId: string | null;
+    onNodeClick?: (stepId: string) => void;
+  } = $props();
 
-  const dispatch = createEventDispatcher<{ nodeClick: string }>();
-
-  let isOpen = false;
-  let FlowGraphComponent: any = null;
-  let loadState: "idle" | "loading" | "ready" | "error" = "idle";
+  let isOpen = $state(false);
+  let FlowGraphComponent: any = $state(null);
+  let loadState: "idle" | "loading" | "ready" | "error" = $state("idle");
 
   onMount(() => {
     loadState = "loading";
@@ -35,7 +40,7 @@
     }
   }
 
-  $: hasSteps = (flow?.steps ?? []).length > 0;
+  const hasSteps = $derived((flow?.steps ?? []).length > 0);
 </script>
 
 <div class="border-default border-t">
@@ -52,18 +57,17 @@
     <Collapsible.Content>
       <div id="flow-graph-panel" class="border-default h-[200px] border-t lg:h-[320px]">
         {#if loadState === "ready" && FlowGraphComponent && hasSteps}
-          <svelte:component
-            this={FlowGraphComponent}
+          <FlowGraphComponent
             {flow}
             {activeStepId}
-            onnodeclick={(id: string) => dispatch("nodeClick", id)}
+            onnodeclick={(id: string) => onNodeClick?.(id)}
           />
         {:else if loadState === "error"}
           <div class="text-secondary flex h-full flex-col items-center justify-center gap-3">
             <p class="text-sm">{m.flow_graph_error()}</p>
             <button
               class="bg-hover-dimmer hover:bg-hover-default flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
-              on:click={loadGraph}
+              onclick={loadGraph}
             >
               <IconRefresh class="size-3.5" />
               {m.flow_graph_retry()}

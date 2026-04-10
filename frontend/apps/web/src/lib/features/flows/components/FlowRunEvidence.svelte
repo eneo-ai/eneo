@@ -1,9 +1,7 @@
-<svelte:options runes={false} />
-
 <script lang="ts">
   import type { FlowRunDebugExport, Intric, FlowStepResult } from "@intric/intric-js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { onDestroy, onMount } from "svelte";
+  import { onMount } from "svelte";
   import { toast } from "$lib/components/toast";
   import {
     downloadEvidenceExport,
@@ -17,15 +15,22 @@
     getRuntimeInputSummary,
     getTemplateProvenanceSummary
   } from "$lib/features/flows/flowEvidenceProvenance";
-  import { Alert } from "@eneo/ui";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import FlowRunEvidenceToolbar from "./FlowRunEvidenceToolbar.svelte";
   import FlowRunEvidenceSummary from "./FlowRunEvidenceSummary.svelte";
   import FlowRunEvidenceStepCard from "./FlowRunEvidenceStepCard.svelte";
 
-  export let runId: string;
-  export let flowId: string;
-  export let intric: Intric;
-  export let runStatus: string;
+  let {
+    runId,
+    flowId,
+    intric,
+    runStatus
+  }: {
+    runId: string;
+    flowId: string;
+    intric: Intric;
+    runStatus: string;
+  } = $props();
 
   type EvidencePayload = {
     run: Record<string, unknown>;
@@ -46,18 +51,20 @@
     cached_files_count?: number;
   };
 
-  let evidence: EvidencePayload | null = null;
-  let loading = true;
-  let loadError = false;
-  let expandedSteps: number[] = [];
-  let expandedInputSteps: number[] = [];
-  let hasAutoExpanded = false;
-  let copiedKey: string | null = null;
-  let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+  let evidence: EvidencePayload | null = $state(null);
+  let loading = $state(true);
+  let loadError = $state(false);
+  let expandedSteps: number[] = $state([]);
+  let expandedInputSteps: number[] = $state([]);
+  let hasAutoExpanded = $state(false);
+  let copiedKey: string | null = $state(null);
+  let copiedTimer: ReturnType<typeof setTimeout> | null = $state(null);
   const mode = getFlowUserMode();
-  let stepAttemptsByOrder: Record<number, Record<string, unknown>[]> = {};
-  let lastFetchedStatus: string | null = null;
-  let pendingTerminalRefetchStatus: string | null = null;
+  let stepAttemptsByOrder: Record<number, Record<string, unknown>[]> = $derived(
+    groupStepAttemptsByOrder(evidence?.step_attempts ?? [])
+  );
+  let lastFetchedStatus: string | null = $state(null);
+  let pendingTerminalRefetchStatus: string | null = $state(null);
 
   onMount(async () => {
     try {
@@ -69,41 +76,47 @@
     loading = false;
   });
 
-  $: if (
-    runStatus &&
-    evidence &&
-    lastFetchedStatus !== runStatus &&
-    (runStatus === "completed" || runStatus === "failed" || runStatus === "cancelled")
-  ) {
-    lastFetchedStatus = runStatus;
-    pendingTerminalRefetchStatus = runStatus;
-  }
+  $effect(() => {
+    if (
+      runStatus &&
+      evidence &&
+      lastFetchedStatus !== runStatus &&
+      (runStatus === "completed" || runStatus === "failed" || runStatus === "cancelled")
+    ) {
+      lastFetchedStatus = runStatus;
+      pendingTerminalRefetchStatus = runStatus;
+    }
+  });
 
-  $: if (evidence && evidence.step_results.length > 0 && !hasAutoExpanded) {
-    hasAutoExpanded = true;
-    expandedSteps = [evidence.step_results[0].step_order];
-  }
+  $effect(() => {
+    if (evidence && evidence.step_results.length > 0 && !hasAutoExpanded) {
+      hasAutoExpanded = true;
+      expandedSteps = [evidence.step_results[0].step_order];
+    }
+  });
 
-  $: if (pendingTerminalRefetchStatus !== null) {
-    pendingTerminalRefetchStatus = null;
-    queueMicrotask(() => {
-      void refetchEvidence();
-    });
-  }
+  $effect(() => {
+    if (pendingTerminalRefetchStatus !== null) {
+      pendingTerminalRefetchStatus = null;
+      queueMicrotask(() => {
+        void refetchEvidence();
+      });
+    }
+  });
 
-  $: stepAttemptsByOrder = groupStepAttemptsByOrder(evidence?.step_attempts ?? []);
+  $effect(() => {
+    return () => {
+      if (copiedTimer) clearTimeout(copiedTimer);
+    };
+  });
 
   async function refetchEvidence() {
     try {
       evidence = await intric.flows.runs.evidence({ id: runId, flowId });
     } catch {
-      /* ignore — already have stale data */
+      /* ignore -- already have stale data */
     }
   }
-
-  onDestroy(() => {
-    if (copiedTimer) clearTimeout(copiedTimer);
-  });
 
   function toggleStep(order: number) {
     expandedSteps = expandedSteps.includes(order)
@@ -199,7 +212,7 @@
   }
 
   function groupStepAttemptsByOrder(
-    attempts: Record<string, unknown>[],
+    attempts: Record<string, unknown>[]
   ): Record<number, Record<string, unknown>[]> {
     const grouped: Record<number, Record<string, unknown>[]> = {};
     for (const attempt of attempts) {
@@ -259,13 +272,13 @@
   }
 
   function formatElapsedMs(value: number | undefined): string {
-    if (value === undefined) return "—";
+    if (value === undefined) return "\u2014";
     if (value < 1000) return `${value}ms`;
     return `${(value / 1000).toFixed(1)}s`;
   }
 
   function formatBytes(value: number | undefined): string {
-    if (value === undefined) return "—";
+    if (value === undefined) return "\u2014";
     if (value < 1024) return `${value} B`;
     if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
     return `${(value / (1024 * 1024)).toFixed(1)} MB`;
@@ -305,7 +318,7 @@
     {#if $mode === "power_user"}
       <FlowRunEvidenceToolbar
         debugExport={evidence.debug_export}
-        evidence={evidence}
+        {evidence}
         {copiedKey}
         onDownloadCanonicalEvidence={downloadCanonicalEvidenceExport}
         onCopyPayload={copyPayload}
@@ -321,9 +334,9 @@
     />
 
     {#each evidence.step_results as result (result.id ?? result.step_order)}
-      {@const stepDef = ((evidence.definition_snapshot?.steps ?? []) as Record<string, unknown>[]).find(
-        (step) => step.step_order === result.step_order
-      )}
+      {@const stepDef = (
+        (evidence.definition_snapshot?.steps ?? []) as Record<string, unknown>[]
+      ).find((step) => step.step_order === result.step_order)}
       <FlowRunEvidenceStepCard
         {result}
         {stepDef}

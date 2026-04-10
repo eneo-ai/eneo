@@ -1,18 +1,24 @@
-<svelte:options runes={false} />
-
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Button } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
   import type { HttpAuthoredConfig, HttpDirection, HttpMethod } from "./httpConfigTypes";
-  import { Card } from "@eneo/ui";
 
-  export let config: HttpAuthoredConfig;
-  export let direction: HttpDirection;
-  export let method: HttpMethod;
-  export let flowId: string;
-  export let isPublished: boolean;
+  let {
+    config,
+    direction,
+    method,
+    flowId,
+    isPublished
+  }: {
+    config: HttpAuthoredConfig;
+    direction: HttpDirection;
+    method: HttpMethod;
+    flowId: string;
+    isPublished: boolean;
+  } = $props();
 
-  let testing = false;
+  let testing = $state(false);
   let result: {
     success: boolean;
     status_code?: number | null;
@@ -20,7 +26,7 @@
     response_preview?: string | null;
     error_code?: string | null;
     error_message?: string | null;
-  } | null = null;
+  } | null = $state(null);
 
   async function runTest() {
     if (!config.url.trim()) return;
@@ -53,10 +59,10 @@
 <div class="flex flex-col gap-3">
   <div class="flex items-center gap-3">
     <Button
-      variant="outlined"
-      size="small"
+      variant="outline"
+      size="sm"
       disabled={isPublished || testing || !config.url.trim()}
-      on:click={runTest}
+      onclick={runTest}
     >
       {#if testing}
         {m.http_test_testing()}
@@ -66,9 +72,7 @@
     </Button>
     {#if result}
       <span
-        class="text-xs font-medium {result.success
-          ? 'text-accent-default'
-          : 'text-danger-default'}"
+        class="text-xs font-medium {result.success ? 'text-accent-default' : 'text-danger-default'}"
       >
         {#if result.success}
           {result.status_code}

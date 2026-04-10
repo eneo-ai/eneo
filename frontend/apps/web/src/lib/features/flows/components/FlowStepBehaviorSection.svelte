@@ -1,12 +1,11 @@
-<svelte:options runes={false} />
-
 <script lang="ts">
   import type { FlowStep } from "@intric/intric-js";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
-  import { createEventDispatcher } from "svelte";
-  import { Button, Tooltip } from "@intric/ui";
-  import { Alert, Card } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconLockClosed } from "@intric/icons/lock-closed";
   import { IconQuestionMark } from "@intric/icons/question-mark";
@@ -18,45 +17,70 @@
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
   import { buildNextFlowPrompt } from "$lib/features/flows/flowPromptDraft";
 
-  export let step: FlowStep;
-  export let isPublished: boolean;
-  export let isAdvancedMode: boolean;
-  export let isTranscribeOnly: boolean;
-  export let assistant: any | null;
-  export let assistantLoading: boolean;
-  export let availableModels: any[];
-  export let steps: FlowStep[];
-  export let formSchema: any;
-  export let transcriptionEnabled: boolean;
-  export let hasAudioInputSteps: boolean;
-  export let stepUxCopy: any;
-  export let instructionText: string;
-  export let canRevealInputTemplate: boolean;
-  export let showInputTemplate: boolean;
-  export let loadPromptVersions: (assistantId: string) => Promise<any[]>;
-
-  const dispatch = createEventDispatcher<{
-    assistantFieldChange: { field: string; value: unknown };
-    instructionDraft: { value: string };
-    instructionCommit: { value: string };
-    revealInputTemplate: void;
-  }>();
+  let {
+    step,
+    isPublished,
+    isAdvancedMode,
+    isTranscribeOnly,
+    assistant,
+    assistantLoading,
+    availableModels,
+    steps,
+    formSchema,
+    transcriptionEnabled,
+    hasAudioInputSteps,
+    stepUxCopy,
+    instructionText,
+    canRevealInputTemplate,
+    showInputTemplate,
+    loadPromptVersions,
+    onAssistantFieldChange,
+    onInstructionDraft,
+    onInstructionCommit,
+    onRevealInputTemplate
+  }: {
+    step: FlowStep;
+    isPublished: boolean;
+    isAdvancedMode: boolean;
+    isTranscribeOnly: boolean;
+    assistant: any | null;
+    assistantLoading: boolean;
+    availableModels: any[];
+    steps: FlowStep[];
+    formSchema: any;
+    transcriptionEnabled: boolean;
+    hasAudioInputSteps: boolean;
+    stepUxCopy: any;
+    instructionText: string;
+    canRevealInputTemplate: boolean;
+    showInputTemplate: boolean;
+    loadPromptVersions: (assistantId: string) => Promise<any[]>;
+    onAssistantFieldChange?: (detail: { field: string; value: unknown }) => void;
+    onInstructionDraft?: (detail: { value: string }) => void;
+    onInstructionCommit?: (detail: { value: string }) => void;
+    onRevealInputTemplate?: () => void;
+  } = $props();
 
   function updateAssistantField(field: string, value: unknown) {
-    dispatch("assistantFieldChange", { field, value });
+    onAssistantFieldChange?.({ field, value });
   }
 </script>
 
 <Settings.Group title={m.flow_step_section_behavior()}>
   {#if step.output_mode === "transcribe_only"}
-    <Alert.Root class="mb-4 rounded-[1rem] border-accent-default/15 bg-accent-default/5 px-5 py-4" role="status">
+    <Alert.Root
+      class="border-accent-default/15 bg-accent-default/5 mb-4 rounded-[1rem] px-5 py-4"
+      role="status"
+    >
       <IconLockClosed class="text-accent-default mt-0.5 size-4 shrink-0" />
       <Alert.Title class="text-accent-stronger text-sm font-semibold tracking-tight">
         {m.flow_transcribe_only_title()}
       </Alert.Title>
-      <Alert.Description class="flex flex-col gap-1.5 text-accent-stronger/80">
+      <Alert.Description class="text-accent-stronger/80 flex flex-col gap-1.5">
         <span class="text-[0.8125rem] leading-relaxed">{m.flow_transcribe_only_description()}</span>
-        <span class="text-accent-stronger/75 text-[0.8125rem] leading-relaxed">{m.flow_transcribe_only_next_step_hint()}</span>
+        <span class="text-accent-stronger/75 text-[0.8125rem] leading-relaxed"
+          >{m.flow_transcribe_only_next_step_hint()}</span
+        >
       </Alert.Description>
     </Alert.Root>
   {/if}
@@ -84,19 +108,13 @@
         selectedModel={currentAssistant.completion_model}
         isDisabled={!supportsTemperature(currentAssistant.completion_model?.name)}
         on:change={() =>
-          updateAssistantField(
-            "completion_model_kwargs",
-            currentAssistant.completion_model_kwargs
-          )}
+          updateAssistantField("completion_model_kwargs", currentAssistant.completion_model_kwargs)}
       />
       <SelectModelSpecificSettings
         bind:kwArgs={currentAssistant.completion_model_kwargs}
         selectedModel={currentAssistant.completion_model}
         on:change={() =>
-          updateAssistantField(
-            "completion_model_kwargs",
-            currentAssistant.completion_model_kwargs
-          )}
+          updateAssistantField("completion_model_kwargs", currentAssistant.completion_model_kwargs)}
       />
     </Settings.Row>
 
@@ -106,9 +124,14 @@
       fullWidth
     >
       <svelte:fragment slot="title">
-        <Tooltip text={m.flow_step_instructions_tooltip()}>
-          <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
-        </Tooltip>
+        <Tooltip.Provider delayDuration={150}>
+          <Tooltip.Root>
+            <Tooltip.Trigger>
+              <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
+            </Tooltip.Trigger>
+            <Tooltip.Content>{m.flow_step_instructions_tooltip()}</Tooltip.Content>
+          </Tooltip.Root>
+        </Tooltip.Provider>
       </svelte:fragment>
       <div class="flex flex-col gap-2">
         <div class="grid gap-3 md:grid-cols-2">
@@ -155,11 +178,7 @@
                     {stepUxCopy.inputTemplateDefaultHint}
                   </p>
                 </div>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  on:click={() => dispatch("revealInputTemplate")}
-                >
+                <Button variant="outline" size="sm" onclick={() => onRevealInputTemplate?.()}>
                   {stepUxCopy.inputTemplateCtaAction}
                 </Button>
               </div>
@@ -179,10 +198,10 @@
           {formSchema}
           transcriptionEnabled={transcriptionEnabled && hasAudioInputSteps}
           {isAdvancedMode}
-          on:change={(e) => dispatch("instructionDraft", { value: e.detail })}
-          on:commit={(e) => dispatch("instructionCommit", { value: e.detail })}
+          onChange={(value) => onInstructionDraft?.({ value })}
+          onCommit={(value) => onInstructionCommit?.({ value })}
         >
-          <svelte:fragment slot="toolbar">
+          {#snippet toolbar()}
             {#if assistant?.id && !isPublished}
               <PromptVersionDialog
                 title={m.prompt_history_for({ name: m.instructions() })}
@@ -198,7 +217,7 @@
                 }}
               />
             {/if}
-          </svelte:fragment>
+          {/snippet}
         </FlowPromptEditor>
       </div>
     </Settings.Row>

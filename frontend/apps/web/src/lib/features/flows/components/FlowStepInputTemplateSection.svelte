@@ -1,57 +1,74 @@
-<svelte:options runes={false} />
-
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@intric/intric-js";
-  import { createEventDispatcher } from "svelte";
-  import { Button, Tooltip } from "@intric/ui";
-  import { Alert } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { IconQuestionMark } from "@intric/icons/question-mark";
   import { slide } from "svelte/transition";
   import FlowPromptEditor from "./FlowPromptEditor.svelte";
   import { INPUT_SOURCE_LABELS } from "./flowStepEditHelpers";
 
-  export let step: FlowStep;
-  export let isPublished: boolean;
-  export let isAdvancedMode: boolean;
-  export let isPowerUser: boolean;
-  export let hasInputTemplateOverride: boolean;
-  export let showInputTemplate: boolean;
-  export let inputTemplateText: string;
-  export let templateSourceConflict: number[] | null;
-  export let templateStepRefs: number[];
-  export let steps: FlowStep[];
-  export let formSchema: any;
-  export let transcriptionEnabled: boolean;
-  export let hasAudioInputSteps: boolean;
-  export let stepUxCopy: any;
-  export let inputTemplateSectionTitle: string;
-  export let inputTemplateSectionDescription: string;
-
-  const dispatch = createEventDispatcher<{
-    revealInputTemplate: void;
-    clearInputTemplate: void;
-    inputTemplateChange: { value: string };
-    inputSourceChange: { value: string };
-  }>();
+  let {
+    step,
+    isPublished,
+    isAdvancedMode,
+    isPowerUser,
+    hasInputTemplateOverride,
+    showInputTemplate,
+    inputTemplateText,
+    templateSourceConflict,
+    templateStepRefs,
+    steps,
+    formSchema,
+    transcriptionEnabled,
+    hasAudioInputSteps,
+    stepUxCopy,
+    inputTemplateSectionTitle,
+    inputTemplateSectionDescription,
+    onRevealInputTemplate,
+    onClearInputTemplate,
+    onInputTemplateChange,
+    onInputSourceChange
+  }: {
+    step: FlowStep;
+    isPublished: boolean;
+    isAdvancedMode: boolean;
+    isPowerUser: boolean;
+    hasInputTemplateOverride: boolean;
+    showInputTemplate: boolean;
+    inputTemplateText: string;
+    templateSourceConflict: number[] | null;
+    templateStepRefs: number[];
+    steps: FlowStep[];
+    formSchema: any;
+    transcriptionEnabled: boolean;
+    hasAudioInputSteps: boolean;
+    stepUxCopy: any;
+    inputTemplateSectionTitle: string;
+    inputTemplateSectionDescription: string;
+    onRevealInputTemplate?: () => void;
+    onClearInputTemplate?: () => void;
+    onInputTemplateChange?: (detail: { value: string }) => void;
+    onInputSourceChange?: (detail: { value: string }) => void;
+  } = $props();
 </script>
 
 {#if !isPowerUser && hasInputTemplateOverride}
-  <Alert.Root class="mb-3 border-warning-default/40 bg-warning-dimmer text-warning-stronger" role="status">
-    <Alert.Description class="flex items-start gap-3 text-xs text-warning-stronger">
+  <Alert.Root
+    class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mb-3"
+    role="status"
+  >
+    <Alert.Description class="text-warning-stronger flex items-start gap-3 text-xs">
       <span class="flex-1">{m.flow_input_template_active_notice()}</span>
       <div class="flex shrink-0 gap-1.5">
         {#if !showInputTemplate}
-          <Button
-            variant="outlined"
-            size="small"
-            on:click={() => dispatch("revealInputTemplate")}
-          >
+          <Button variant="outline" size="sm" onclick={() => onRevealInputTemplate?.()}>
             {m.show()}
           </Button>
         {/if}
-        <Button variant="outlined" size="small" on:click={() => dispatch("clearInputTemplate")}>
+        <Button variant="outline" size="sm" onclick={() => onClearInputTemplate?.()}>
           {m.clear()}
         </Button>
       </div>
@@ -60,25 +77,24 @@
 {/if}
 
 {#if templateSourceConflict && isPowerUser}
-  <Alert.Root class="mb-3 border-warning-default/40 bg-warning-dimmer text-warning-stronger">
-    <Alert.Description class="flex items-start gap-3 text-xs text-warning-stronger">
+  <Alert.Root class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mb-3">
+    <Alert.Description class="text-warning-stronger flex items-start gap-3 text-xs">
       <span class="flex-1">
         {m.flow_template_source_conflict_warning({
           steps: templateSourceConflict.map((n) => `Step ${n}`).join(", "),
-          source:
-            INPUT_SOURCE_LABELS[step.input_source]?.() ?? step.input_source
+          source: INPUT_SOURCE_LABELS[step.input_source]?.() ?? step.input_source
         })}
       </span>
       <div class="flex shrink-0 gap-1.5">
         {#if step.input_source === "flow_input" && templateStepRefs.length === 1 && templateStepRefs[0] === step.step_order - 1}
           <Button
-            variant="outlined"
-            size="small"
-            on:click={() => dispatch("inputSourceChange", { value: "previous_step" })}
+            variant="outline"
+            size="sm"
+            onclick={() => onInputSourceChange?.({ value: "previous_step" })}
             >{m.flow_template_source_conflict_fix_source()}</Button
           >
         {/if}
-        <Button variant="outlined" size="small" on:click={() => dispatch("clearInputTemplate")}
+        <Button variant="outline" size="sm" onclick={() => onClearInputTemplate?.()}
           >{m.flow_template_source_conflict_fix_clear()}</Button
         >
       </div>
@@ -89,18 +105,20 @@
 {#if showInputTemplate}
   <div transition:slide={{ duration: 200 }}>
     <Settings.Group title={inputTemplateSectionTitle}>
-      <Settings.Row
-        title={inputTemplateSectionTitle}
-        description={inputTemplateSectionDescription}
-      >
+      <Settings.Row title={inputTemplateSectionTitle} description={inputTemplateSectionDescription}>
         <svelte:fragment slot="title">
-          <Tooltip text={m.flow_step_input_template_tooltip()}>
-            <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
-          </Tooltip>
+          <Tooltip.Provider delayDuration={150}>
+            <Tooltip.Root>
+              <Tooltip.Trigger>
+                <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
+              </Tooltip.Trigger>
+              <Tooltip.Content>{m.flow_step_input_template_tooltip()}</Tooltip.Content>
+            </Tooltip.Root>
+          </Tooltip.Provider>
         </svelte:fragment>
         <div class="flex flex-col gap-2">
-          <Alert.Root class="border-l-[3px] border-l-stronger bg-secondary/20" role="status">
-            <Alert.Description class="text-xs leading-relaxed text-secondary">
+          <Alert.Root class="bg-secondary/20 rounded-lg" role="status">
+            <Alert.Description class="text-secondary text-xs leading-relaxed">
               {stepUxCopy.inputTemplateDefaultHint}
             </Alert.Description>
           </Alert.Root>
@@ -115,7 +133,7 @@
             {formSchema}
             transcriptionEnabled={transcriptionEnabled && hasAudioInputSteps}
             {isAdvancedMode}
-            on:change={(e) => dispatch("inputTemplateChange", { value: e.detail })}
+            onChange={(value) => onInputTemplateChange?.({ value })}
           />
         </div>
       </Settings.Row>

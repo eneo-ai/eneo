@@ -2,12 +2,17 @@
   import type { Flow } from "@intric/intric-js";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getTemplateFillDryRunIssues } from "$lib/features/flows/templateFillConfig";
-  import { Button } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { IconPlay } from "@intric/icons/play";
   import { m } from "$lib/paraglide/messages";
-  import { Alert, Card } from "@eneo/ui";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
 
-  export let flow: Flow;
+  let {
+    flow
+  }: {
+    flow: Flow;
+  } = $props();
 
   const mode = getFlowUserMode();
 
@@ -26,26 +31,23 @@
     errors: string[];
   };
 
-  let dryRunResults: StepValidation[] = [];
-  let isRunning = false;
-  let hasRun = false;
+  let dryRunResults: StepValidation[] = $state([]);
+  let isRunning = $state(false);
+  let hasRun = $state(false);
 
   async function runDryRun() {
     isRunning = true;
     dryRunResults = [];
 
-    // Compile-time validation — no backend call needed for basic validation
     const results: StepValidation[] = [];
 
     for (const step of flow.steps) {
       const errors: string[] = [];
 
-      // Validate assistant_id is set
       if (!step.assistant_id) {
         errors.push("Missing assistant");
       }
 
-      // Validate step 1 doesn't use previous_step
       if (
         step.step_order === 1 &&
         (step.input_source === "previous_step" || step.input_source === "all_previous_steps")
@@ -53,7 +55,6 @@
         errors.push("First step cannot use previous step as input source");
       }
 
-      // Validate variable references
       if (step.input_bindings) {
         const bindingStr = JSON.stringify(step.input_bindings);
         const refRegex = /step_(\d+)/g;
@@ -85,7 +86,7 @@
     hasRun = true;
   }
 
-  $: errorCount = dryRunResults.filter((r) => !r.valid).length;
+  const errorCount = $derived(dryRunResults.filter((r) => !r.valid).length);
 
   function getStepByOrder(order: number) {
     return flow.steps.find((s) => s.step_order === order);
@@ -93,7 +94,7 @@
 </script>
 
 <div class="contents">
-  <Button variant="outlined" disabled={isRunning || flow.steps.length === 0} on:click={runDryRun}>
+  <Button variant="outline" disabled={isRunning || flow.steps.length === 0} onclick={runDryRun}>
     <IconPlay class="size-3.5" />
     {m.flow_dry_run()}
   </Button>
@@ -138,13 +139,16 @@
     </Card.Root>
 
     {#if errorCount === 0}
-      <Alert.Root class="order-2 w-full bg-positive-dimmer text-positive-stronger">
+      <Alert.Root class="bg-positive-dimmer text-positive-stronger order-2 w-full">
         <Alert.Description class="text-xs font-medium">
           &#10003; {m.flow_dry_run_ready()}
         </Alert.Description>
       </Alert.Root>
     {:else}
-      <Alert.Root variant="destructive" class="order-2 w-full bg-negative-dimmer text-negative-stronger">
+      <Alert.Root
+        variant="destructive"
+        class="bg-negative-dimmer text-negative-stronger order-2 w-full"
+      >
         <Alert.Description class="text-xs font-medium">
           &#10007; {m.flow_dry_run_issues({ count: String(errorCount) })}
         </Alert.Description>

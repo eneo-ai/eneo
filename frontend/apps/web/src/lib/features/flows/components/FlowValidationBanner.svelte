@@ -3,21 +3,27 @@
   import { IconInfo } from "@intric/icons/info";
   import { fade, slide } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
-  import { Alert, Collapsible, Badge } from "@eneo/ui";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import {
     getValidationIssueMessage,
     parseValidationError,
     type ParsedValidationError
   } from "$lib/features/flows/flowStepValidationMessages";
 
-  export let errors: Map<string, string[]>;
-  export let steps: FlowStep[] = [];
-  export let onNavigateToStep: ((stepId: string) => void) | undefined = undefined;
+  let {
+    errors,
+    steps = [],
+    onNavigateToStep,
+    isExpanded = $bindable(false)
+  }: {
+    errors: Map<string, string[]>;
+    steps?: FlowStep[];
+    onNavigateToStep?: (stepId: string) => void;
+    isExpanded?: boolean;
+  } = $props();
 
-  export let isExpanded = false;
-
-  $: errorCount = errors.size;
-  $: hasErrors = errorCount > 0;
+  const errorCount = $derived(errors.size);
+  const hasErrors = $derived(errorCount > 0);
 
   type DisplayIssue = {
     key: string;
@@ -27,7 +33,7 @@
     message: string;
   };
 
-  $: displayIssues = (() => {
+  const displayIssues = $derived.by(() => {
     const result: DisplayIssue[] = [];
     for (const [key, values] of errors.entries()) {
       const parsed = parseValidationError(key, values);
@@ -35,7 +41,7 @@
       result.push(toDisplayIssue(key, parsed));
     }
     return result.sort((a, b) => (a.stepOrder ?? 999) - (b.stepOrder ?? 999));
-  })();
+  });
 
   function toDisplayIssue(key: string, parsed: ParsedValidationError): DisplayIssue {
     switch (parsed.kind) {
@@ -87,16 +93,22 @@
 {#if hasErrors}
   <div role="alert" aria-live="polite" transition:fade={{ duration: 200 }}>
     <Collapsible.Root bind:open={isExpanded}>
-      <div class="border-b border-negative-default/30 bg-negative-dimmer/80 backdrop-blur-sm">
-        <Collapsible.Trigger class="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm transition-colors hover:bg-negative-dimmer">
-          <div class="flex size-5 shrink-0 items-center justify-center rounded-full bg-negative-default/15">
-            <IconInfo class="size-3 text-negative-stronger" />
+      <div class="border-negative-default/30 bg-negative-dimmer/80 border-b backdrop-blur-sm">
+        <Collapsible.Trigger
+          class="hover:bg-negative-dimmer flex w-full items-center gap-2.5 px-4 py-2.5 text-sm transition-colors"
+        >
+          <div
+            class="bg-negative-default/15 flex size-5 shrink-0 items-center justify-center rounded-full"
+          >
+            <IconInfo class="text-negative-stronger size-3" />
           </div>
-          <span class="flex-1 text-left font-medium text-negative-stronger">
+          <span class="text-negative-stronger flex-1 text-left font-medium">
             {m.flow_validation_issues({ count: String(errorCount) })}
           </span>
           <svg
-            class="size-4 shrink-0 text-negative-stronger/60 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] {isExpanded ? 'rotate-180' : ''}"
+            class="text-negative-stronger/60 size-4 shrink-0 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] {isExpanded
+              ? 'rotate-180'
+              : ''}"
             viewBox="0 0 16 16"
             fill="none"
             stroke="currentColor"
@@ -111,9 +123,13 @@
         <Collapsible.Content>
           <div class="flex flex-col gap-2 px-4 pb-3" transition:slide={{ duration: 200 }}>
             {#each displayIssues as issue (issue.key)}
-              <div class="group flex items-start gap-3 rounded-xl border border-negative-default/15 bg-primary px-4 py-3 shadow-sm transition-shadow hover:shadow-md">
+              <div
+                class="group border-negative-default/15 bg-primary flex items-start gap-3 rounded-xl border px-4 py-3 shadow-sm transition-shadow hover:shadow-md"
+              >
                 {#if issue.stepOrder != null}
-                  <span class="flex size-7 shrink-0 items-center justify-center rounded-lg bg-negative-dimmer text-xs font-bold text-negative-stronger">
+                  <span
+                    class="bg-negative-dimmer text-negative-stronger flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold"
+                  >
                     {issue.stepOrder}
                   </span>
                 {/if}
@@ -121,13 +137,16 @@
                   {#if issue.stepName}
                     <span class="text-sm font-semibold tracking-[-0.01em]">{issue.stepName}</span>
                   {/if}
-                  <span class="text-[13px] leading-relaxed text-secondary">{issue.message}</span>
+                  <span class="text-secondary text-[13px] leading-relaxed">{issue.message}</span>
                 </div>
                 {#if issue.stepId && onNavigateToStep}
                   <button
                     type="button"
-                    class="shrink-0 rounded-lg border border-accent-default/20 bg-accent-default/5 px-3 py-1.5 text-xs font-medium text-accent-default transition-all duration-200 hover:border-accent-default/40 hover:bg-accent-default/10 hover:shadow-sm active:scale-[0.98]"
-                    on:click|stopPropagation={() => handleNavigate(issue.stepId)}
+                    class="border-accent-default/20 bg-accent-default/5 text-accent-default hover:border-accent-default/40 hover:bg-accent-default/10 shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all duration-200 hover:shadow-sm active:scale-[0.98]"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      handleNavigate(issue.stepId);
+                    }}
                   >
                     {m.flow_validation_go_to_step()}
                   </button>
