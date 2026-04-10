@@ -55,6 +55,7 @@ from intric.authentication.auth_models import (
     ExpiringKeySummaryItem,
 )
 from intric.database.tables.settings_table import Settings
+from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.roles.permissions import Permission
 from intric.server.dependencies.container import get_container
@@ -442,10 +443,14 @@ async def get_creation_constraints(
 ) -> ApiKeyCreationConstraints:
     user: UserInDB = container.user()
     policy: dict[str, Any] = getattr(user.tenant, "api_key_policy", None) or {}
+    settings = get_settings()
     return ApiKeyCreationConstraints(
         require_expiration=bool(policy.get("require_expiration")),
         max_expiration_days=policy.get("max_expiration_days"),
         max_rate_limit=policy.get("max_rate_limit_override"),
+        rotation_grace_hours=policy.get(
+            "rotation_grace_hours", settings.api_key_rotation_grace_hours
+        ),
     )
 
 

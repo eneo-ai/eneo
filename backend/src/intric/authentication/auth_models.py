@@ -275,6 +275,7 @@ class ApiKeyPolicyUpdate(BaseModel):
     max_expiration_days: Optional[int] = None
     auto_expire_unused_days: Optional[int] = None
     max_rate_limit_override: Optional[int] = None
+    rotation_grace_hours: Optional[int] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -294,6 +295,17 @@ class ApiKeyPolicyUpdate(BaseModel):
             raise ValueError(f"{info.field_name} must be a positive integer.")
         return value
 
+    @field_validator("rotation_grace_hours")
+    @classmethod
+    def _validate_non_negative(
+        cls, value: Optional[int], info: ValidationInfo
+    ) -> Optional[int]:
+        if value is None:
+            return value
+        if value < 0:
+            raise ValueError(f"{info.field_name} must be zero or a positive integer.")
+        return value
+
 
 class ApiKeyPolicyResponse(BaseModel):
     max_delegation_depth: Optional[int] = None
@@ -302,6 +314,7 @@ class ApiKeyPolicyResponse(BaseModel):
     max_expiration_days: Optional[int] = None
     auto_expire_unused_days: Optional[int] = None
     max_rate_limit_override: Optional[int] = None
+    rotation_grace_hours: Optional[int] = None
 
     model_config = ConfigDict(extra="ignore")
 
@@ -449,6 +462,7 @@ class ApiKeyCreationConstraints(BaseModel):
     require_expiration: bool = False
     max_expiration_days: Optional[int] = None
     max_rate_limit: Optional[int] = None
+    rotation_grace_hours: int = 24
 
 
 class ExpiringKeySummaryItem(BaseModel):

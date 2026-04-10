@@ -53,6 +53,8 @@ class ErrorCodes(int, Enum):
     # MCP upstream errors
     MCP_UPSTREAM_ERROR = 9036
     MCP_UPSTREAM_AUTH_ERROR = 9037
+    # Resource readiness
+    RESOURCE_NOT_READY = 9038
 
 
 class NotFoundException(Exception):
@@ -439,5 +441,10 @@ EXCEPTION_MAP = {
         502,
         "MCP upstream authentication failed.",
         ErrorCodes.MCP_UPSTREAM_AUTH_ERROR,
+    ),
+    NotReadyException: (
+        503,
+        "Resource is not ready yet.",
+        ErrorCodes.RESOURCE_NOT_READY,
     ),
 }

@@ -1,26 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from uuid import uuid4
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
 from intric.audit.domain.action_types import ActionType
+from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
+from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import (
     ApiKeyPermission,
-    ResourcePermissionLevel,
-    ResourcePermissions,
+    ApiKeyState,
     ApiKeyStateChangeRequest,
     ApiKeyStateReasonCode,
-    ApiKeyState,
-    ApiKeyUpdateRequest,
     ApiKeyType,
+    ApiKeyUpdateRequest,
     ApiKeyV2InDB,
+    ResourcePermissionLevel,
+    ResourcePermissions,
 )
-from intric.authentication.api_key_resolver import ApiKeyValidationError
-from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from tests.unit.api_key_test_utils import make_api_key
 
 
@@ -244,6 +244,42 @@ async def test_rotate_key_with_existing_grace_period(user):
     update_kwargs = repo.update.call_args.kwargs
     assert "rotation_grace_until" in update_kwargs
     assert update_kwargs["rotation_grace_until"] > key.rotation_grace_until
+
+
+@pytest.mark.asyncio
+async def test_rotate_key_uses_default_when_policy_grace_period_is_null(user):
+    """Explicit null policy value falls back to settings default, while avoiding timedelta(None)."""
+    user.tenant = SimpleNamespace(api_key_policy={"rotation_grace_hours": None})
+    key = _make_key(tenant_id=user.tenant_id)
+    new_key = _make_key(tenant_id=user.tenant_id, rotated_from_key_id=key.id)
+    repo = AsyncMock()
+    repo.get.return_value = key
+    repo.create.return_value = new_key
+    repo.update.return_value = key
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(), validate_key_state=AsyncMock()
+    )
+    audit = AsyncMock()
+
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        user=user,
+    )
+    service.settings = SimpleNamespace(
+        api_key_hash_secret="test-api-key-hash-secret",
+        api_key_length=32,
+        api_key_rotation_grace_hours=24,
+        jwt_secret="test-jwt-secret",
+    )
+
+    before = datetime.now(timezone.utc)
+    await service.rotate_key(key_id=key.id)
+
+    grace_until = repo.update.call_args.kwargs["rotation_grace_until"]
+    assert before + timedelta(hours=23, minutes=59) < grace_until
+    assert grace_until < before + timedelta(hours=24, minutes=1)
 
 
 @pytest.mark.asyncio

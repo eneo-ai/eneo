@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -197,7 +197,13 @@ class ApiKeyLifecycleService:
             rotated_from_key_id=key.id,
         )
 
-        grace_hours = self.settings.api_key_rotation_grace_hours
+        tenant = getattr(user, "tenant", None)
+        policy = cast(
+            dict[str, int | None], getattr(tenant, "api_key_policy", None) or {}
+        )
+        grace_hours = policy.get("rotation_grace_hours")
+        if grace_hours is None:
+            grace_hours = self.settings.api_key_rotation_grace_hours
         grace_until = datetime.now(timezone.utc) + timedelta(hours=grace_hours)
         await self.api_key_repo.update(
             key_id=key.id,
