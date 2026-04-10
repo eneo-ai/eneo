@@ -223,8 +223,9 @@ async def test_recalculate_tenant_usage_stats_success():
     assert task == Task.UPDATE_MODEL_USAGE_STATS
     assert isinstance(params, UpdateUsageStatsTaskParams)
     assert params.tenant_id == tenant.id
-    assert container.user() == user
-    assert container.tenant() == tenant
+    assert params.user_id == user.id
+    assert container.user() is None
+    assert container.tenant() is None
 
 
 @pytest.mark.asyncio
@@ -295,11 +296,14 @@ async def test_recalculate_tenant_usage_stats_isolated_between_tenants():
     assert first_params.tenant_id == tenant_a.id
     assert second_params.tenant_id == tenant_b.id
 
-    # Ensure per-container context is scoped to the tenant of the job being queued
-    assert container_a.tenant() == tenant_a
-    assert container_b.tenant() == tenant_b
-    assert container_a.user() == user_a
-    assert container_b.user() == user_b
+    # The queued jobs carry their tenant/user context in params, while provider
+    # overrides are reset after queuing so contexts do not leak across tenants.
+    assert first_params.user_id == user_a.id
+    assert second_params.user_id == user_b.id
+    assert container_a.tenant() is None
+    assert container_b.tenant() is None
+    assert container_a.user() is None
+    assert container_b.user() is None
 
 
 @pytest.mark.asyncio

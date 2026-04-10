@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
-from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Callable, cast
 from uuid import UUID
@@ -19,7 +18,7 @@ from intric.main.config import Settings, get_settings
 from intric.main.container.container import Container, SessionProxy
 from intric.main.container.container_overrides import override_user
 from intric.main.logging import get_logger
-from intric.main.models import ChannelType, Status
+from intric.main.models import ChannelType
 from intric.redis.connection import build_arq_redis_settings
 from intric.server.dependencies import lifespan
 from intric.worker.task_manager import TaskManager, WorkerConfig
@@ -176,47 +175,6 @@ class Worker:
         # NOTE: on_job_start removed - conflicts with mark_job_started() CAS check
         # after_job_end is safe - runs AFTER job completes, no CAS conflict
         self.after_job_end = self._after_job_end
-
-    async def _on_job_start(self, ctx: ARQContext) -> None:
-        """ARQ hook: Called before each job starts.
-
-        Updates job status to IN_PROGRESS in the database.
-        This centralizes status management that was previously scattered.
-
-        Args:
-            ctx: ARQ context containing job_id, job_try, enqueue_time
-        """
-        job_id = _job_id_from_ctx(ctx)
-        if not job_id:
-            return
-
-        try:
-            # Import here to avoid circular import
-            from intric.database.tables.job_table import Jobs
-
-            async with sessionmanager.session() as session:
-                async with session.begin():
-                    # Use direct SQL to avoid session lifecycle issues
-                    stmt = (
-                        sa.update(Jobs)
-                        .where(Jobs.id == job_id)
-                        .values(
-                            status=Status.IN_PROGRESS.value,
-                            updated_at=datetime.now(timezone.utc),
-                        )
-                    )
-                    await session.execute(stmt)
-
-            logger.debug(
-                "Job started (ARQ hook)",
-                extra={"job_id": str(job_id), "job_try": ctx.get("job_try", 1)},
-            )
-        except Exception as exc:
-            # Don't fail the job if status update fails
-            logger.warning(
-                "Failed to update job status on start",
-                extra={"job_id": str(job_id), "error": str(exc)},
-            )
 
     async def _after_job_end(self, ctx: ARQContext) -> None:
         """ARQ hook: Called after each job ends AND result is recorded.
