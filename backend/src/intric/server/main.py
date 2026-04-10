@@ -35,8 +35,6 @@ def _log_api_key_security_overrides() -> None:
         logger.critical(
             "API key resource permission enforcement is disabled by configuration"
         )
-    if not settings.api_key_enforce_scope:
-        logger.critical("API key scope enforcement is disabled by configuration")
     if settings.api_key_rate_limit_fail_open:
         logger.warning(
             "API key rate limiting is configured fail-open; requests may bypass limits when Redis is unavailable"

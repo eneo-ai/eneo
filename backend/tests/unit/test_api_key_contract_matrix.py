@@ -25,18 +25,17 @@ from intric.authentication.api_key_resolver import (
     check_resource_permission,
 )
 from intric.authentication.auth_models import (
+    METHOD_PERMISSION_MAP,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyV2InDB,
-    METHOD_PERMISSION_MAP,
 )
-from tests.unit.api_key_test_utils import make_api_key
 from intric.users.user_service import (
     _check_basic_method_permission,
     _check_management_permission,
     _check_method_resource_permission,
 )
-
+from tests.unit.api_key_test_utils import make_api_key
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -200,10 +199,10 @@ class TestAuthPrecedence:
 
     def test_bearer_token_checked_first(self):
         """Bearer token takes precedence — API key branch only if token is None."""
-        from intric.users.user_service import UserService
-
         # Verify the authenticate method's structure: token checked before api_key
         import inspect
+
+        from intric.users.user_service import UserService
 
         source = inspect.getsource(UserService.authenticate)
         token_check_pos = source.find("if token is not None")
@@ -215,16 +214,18 @@ class TestAuthPrecedence:
     def test_api_key_only_triggers_enforcement_chain(self):
         """API key without bearer → full enforcement chain runs."""
         # Verify _resolve_api_key is called in the api_key branch
-        from intric.users.user_service import UserService
         import inspect
+
+        from intric.users.user_service import UserService
 
         source = inspect.getsource(UserService.authenticate)
         assert "_resolve_api_key" in source
 
     def test_bearer_token_skips_api_key_enforcement(self):
         """Bearer token path calls _get_user_from_token, not _resolve_api_key."""
-        from intric.users.user_service import UserService
         import inspect
+
+        from intric.users.user_service import UserService
 
         source = inspect.getsource(UserService.authenticate)
 
@@ -285,29 +286,6 @@ class TestCorsOptionsBypass:
         request = _fake_request("OPTIONS")
         # Should not raise
         _check_basic_method_permission(request, key)
-
-
-class TestScopeFailClosedInvariant:
-    """Missing scope enforcement feature flag row → enforcement ON (fail-closed)."""
-
-    @pytest.mark.asyncio
-    async def test_missing_flag_defaults_to_enforced(self):
-        """_is_scope_enforcement_enabled returns True when flag row is missing."""
-        mock_ff_service = MagicMock()
-        mock_ff_service.check_is_feature_enabled_fail_closed = AsyncMock(
-            return_value=True
-        )
-
-        svc = _make_user_service(feature_flag_service=mock_ff_service)
-        result = await svc._is_scope_enforcement_enabled(uuid4())
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_no_feature_flag_service_defaults_to_enforced(self):
-        """No feature_flag_service at all → enforcement ON."""
-        svc = _make_user_service(feature_flag_service=None)
-        result = await svc._is_scope_enforcement_enabled(uuid4())
-        assert result is True
 
 
 # ---------------------------------------------------------------------------
@@ -793,6 +771,7 @@ class TestGuardrailPolicyEnforcement:
     def test_guardrail_runs_before_permission_in_resolve_api_key(self):
         """enforce_guardrails() must run before permission checks in _resolve_api_key."""
         import inspect
+
         from intric.users.user_service import UserService
 
         source = inspect.getsource(UserService._resolve_api_key)
@@ -813,6 +792,7 @@ class TestGuardrailPolicyEnforcement:
     def test_management_guard_runs_after_permission_check(self):
         """_check_management_permission runs after Layer 1/2 in _resolve_api_key."""
         import inspect
+
         from intric.users.user_service import UserService
 
         source = inspect.getsource(UserService._resolve_api_key)
@@ -826,6 +806,7 @@ class TestGuardrailPolicyEnforcement:
     def test_scope_enforcement_runs_last(self):
         """_enforce_api_key_scope runs after all permission checks."""
         import inspect
+
         from intric.users.user_service import UserService
 
         source = inspect.getsource(UserService._resolve_api_key)
@@ -1027,10 +1008,10 @@ class TestModelProvidersBearerRoleContract:
 
     @pytest.mark.asyncio
     async def test_admin_allowed_on_list(self):
-        from intric.roles.permissions import Permission
         from intric.model_providers.presentation.model_provider_router import (
             list_providers,
         )
+        from intric.roles.permissions import Permission
 
         provider = MagicMock()
         provider.to_dict.return_value = self._provider_dict()
@@ -1059,10 +1040,10 @@ class TestModelProvidersBearerRoleContract:
 
     @pytest.mark.asyncio
     async def test_admin_allowed_on_get(self):
-        from intric.roles.permissions import Permission
         from intric.model_providers.presentation.model_provider_router import (
             get_provider,
         )
+        from intric.roles.permissions import Permission
 
         provider = MagicMock()
         provider.to_dict.return_value = self._provider_dict()

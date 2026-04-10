@@ -17,7 +17,6 @@ from intric.audit.infrastructure.rate_limiting import (
 )
 from intric.conversations.conversation_models import ConversationRequest
 from intric.database.database import AsyncSession
-from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.exceptions import NotFoundException
 from intric.main.logging import get_logger
@@ -85,34 +84,12 @@ async def _validate_conversation_scope(
     """Validate body-driven fields against API key scope.
 
     Runs after auth (request.state has scope info) but before service call.
-    Only validates when scope enforcement is active and key is non-tenant.
-    Gated by the same env flag + tenant feature flag as _enforce_api_key_scope().
+    Only validates when key is non-tenant scoped.
     """
-    # Check env-level kill switch
-    if not get_settings().api_key_enforce_scope:
-        return
-
     scope_type = getattr(http_request.state, "api_key_scope_type", None)
     scope_id = getattr(http_request.state, "api_key_scope_id", None)
     if scope_type is None or scope_type == "tenant":
         return
-
-    # Check tenant-level feature flag
-    try:
-        feature_flag_service = container.feature_flag_service()
-        flag = await feature_flag_service.feature_flag_repo.one_or_none(
-            name="api_key_scope_enforcement"
-        )
-        if flag is not None:
-            user = container.user()
-            if not flag.is_enabled(tenant_id=user.tenant_id):
-                return
-    except Exception as exc:
-        # Fail-closed: if we can't check the flag, enforce scope
-        logger.warning(
-            "Could not check scope enforcement feature flag, defaulting to enforced",
-            extra={"error_type": type(exc).__name__},
-        )
 
     scope_id = UUID(str(scope_id)) if scope_id is not None else None
 

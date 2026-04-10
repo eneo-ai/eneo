@@ -7,13 +7,11 @@ These tests lock the policy contract for scope lockdown:
 
 from __future__ import annotations
 
-from contextlib import contextmanager, nullcontext
-from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 
-from intric.main.config import get_settings, set_settings
+from intric.main.config import get_settings
 
 
 @pytest.fixture
@@ -182,30 +180,6 @@ def _low_risk_paths() -> list[str]:
         "/api/v1/users/me/",
         "/api/v1/limits/",
     ]
-
-
-@contextmanager
-def _scope_enforcement_kill_switch(mode: str):
-    """Temporarily disable scope enforcement by env flag or tenant feature flag."""
-    if mode not in {"env_off", "tenant_flag_off"}:
-        raise ValueError(f"Unsupported mode: {mode}")
-
-    settings = get_settings()
-    patched = settings.model_copy(update={"api_key_enforce_scope": mode != "env_off"})
-    set_settings(patched)
-    tenant_patch = (
-        patch(
-            "intric.users.user_service.UserService._is_scope_enforcement_enabled",
-            new=AsyncMock(return_value=False),
-        )
-        if mode == "tenant_flag_off"
-        else nullcontext()
-    )
-    try:
-        with tenant_patch:
-            yield
-    finally:
-        set_settings(settings)
 
 
 async def _resolve_scoped_ids(client, *, bearer_token: str) -> dict[str, str]:
@@ -557,147 +531,6 @@ async def test_tenant_read_key_logging_missing_message_returns_404_not_scope_err
     detail = _error_detail(response)
     assert detail.get("request_id") == request_id, response.text
     assert detail.get("code") != "insufficient_scope", response.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["env_off", "tenant_flag_off"])
-async def test_kill_switch_scoped_admin_key_not_scope_blocked_on_locked_governance_routes(
-    client,
-    default_user_token,
-    mode: str,
-):
-    scoped_ids = await _resolve_scoped_ids(client, bearer_token=default_user_token)
-    assistant_id = scoped_ids["assistant"]
-    scoped_admin = await _create_api_key(
-        client,
-        bearer_token=default_user_token,
-        scope_type="assistant",
-        scope_id=assistant_id,
-        permission="admin",
-    )
-
-    with _scope_enforcement_kill_switch(mode):
-        for path in _governance_paths():
-            request_id = f"kill-switch-admin-{mode}-{uuid4().hex[:8]}"
-            response = await client.get(
-                path,
-                headers={
-                    "X-API-Key": scoped_admin,
-                    "X-Correlation-ID": request_id,
-                },
-            )
-            detail = _error_detail(response)
-            assert not (
-                response.status_code == 403
-                and detail.get("code") == "insufficient_scope"
-            ), response.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["env_off", "tenant_flag_off"])
-async def test_kill_switch_keeps_management_permission_for_scoped_read_keys(
-    client,
-    default_user_token,
-    mode: str,
-):
-    scoped_ids = await _resolve_scoped_ids(client, bearer_token=default_user_token)
-    assistant_id = scoped_ids["assistant"]
-    scoped_read = await _create_api_key(
-        client,
-        bearer_token=default_user_token,
-        scope_type="assistant",
-        scope_id=assistant_id,
-        permission="read",
-    )
-
-    with _scope_enforcement_kill_switch(mode):
-        request_id = f"kill-switch-read-{mode}-{uuid4().hex[:8]}"
-        response = await client.get(
-            "/api/v1/allowed-origins/",
-            headers={
-                "X-API-Key": scoped_read,
-                "X-Correlation-ID": request_id,
-            },
-        )
-        detail = _assert_api_key_error(
-            response,
-            expected_code="insufficient_permission",
-            expected_auth_layer="api_key_method",
-            request_id=request_id,
-        )
-        assert detail.get("context", {}).get("required_level") == "admin", response.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["env_off", "tenant_flag_off"])
-async def test_kill_switch_scoped_keys_not_scope_blocked_on_diagnostics(
-    client,
-    default_user_token,
-    mode: str,
-):
-    scoped_ids = await _resolve_scoped_ids(client, bearer_token=default_user_token)
-    space_id = scoped_ids["space"]
-    scoped_read = await _create_api_key(
-        client,
-        bearer_token=default_user_token,
-        scope_type="space",
-        scope_id=space_id,
-        permission="read",
-    )
-
-    with _scope_enforcement_kill_switch(mode):
-        for path in _diagnostics_paths(include_logging=False):
-            request_id = f"kill-switch-diag-{mode}-{uuid4().hex[:8]}"
-            response = await client.get(
-                path,
-                headers={
-                    "X-API-Key": scoped_read,
-                    "X-Correlation-ID": request_id,
-                },
-            )
-            detail = _error_detail(response)
-            assert not (
-                response.status_code == 403
-                and detail.get("code") == "insufficient_scope"
-            ), response.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["env_off", "tenant_flag_off"])
-async def test_kill_switch_scoped_keys_not_scope_blocked_on_logging_route(
-    client,
-    default_user_token,
-    mode: str,
-):
-    scoped_ids = await _resolve_scoped_ids(client, bearer_token=default_user_token)
-    assistant_id = scoped_ids["assistant"]
-    scoped_read = await _create_api_key(
-        client,
-        bearer_token=default_user_token,
-        scope_type="assistant",
-        scope_id=assistant_id,
-        permission="read",
-    )
-
-    with _scope_enforcement_kill_switch(mode):
-        request_id = f"kill-switch-logging-{mode}-{uuid4().hex[:8]}"
-        response = await client.get(
-            f"/api/v1/logging/{uuid4()}/",
-            headers={
-                "X-API-Key": scoped_read,
-                "X-Correlation-ID": request_id,
-            },
-        )
-        detail = _error_detail(response)
-        assert not (
-            response.status_code == 403 and detail.get("code") == "insufficient_scope"
-        ), response.text
-        if isinstance(detail, dict):
-            assert detail.get("request_id") == request_id, response.text
 
 
 @pytest.mark.integration
