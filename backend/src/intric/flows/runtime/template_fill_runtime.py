@@ -413,9 +413,9 @@ def _resolve_template_bindings(
         try:
             match = _FULL_TEMPLATE_EXPRESSION_PATTERN.fullmatch(expression)
             if match is not None:
-                raw_value = variable_resolver._resolve_path(
+                raw_value = variable_resolver.resolve_path(
                     context, match.group(1).strip()
-                )  # pyright: ignore[reportPrivateUsage]
+                )
                 resolved[placeholder] = _stringify_template_binding_value(raw_value)
             else:
                 resolved[placeholder] = variable_resolver.interpolate(

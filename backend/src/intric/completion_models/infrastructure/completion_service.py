@@ -12,6 +12,9 @@ from intric.ai_models.completion_models.completion_model import (
     ModelKwargs,
     ResponseType,
 )
+from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
+    TenantModelAdapter,
+)
 from intric.completion_models.infrastructure.context_builder import ContextBuilder
 from intric.files.file_models import File
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -28,9 +31,6 @@ from intric.settings.encryption_service import EncryptionService
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
-    from intric.completion_models.infrastructure.adapters.base_adapter import (
-        CompletionModelAdapter,
-    )
     from intric.completion_models.infrastructure.web_search import WebSearchResult
     from intric.database.database import AsyncSession
     from intric.main.container.container import Container
@@ -73,7 +73,7 @@ class CompletionService:
         )
         super().__init__()
 
-    async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
+    async def _get_adapter(self, model: CompletionModel) -> TenantModelAdapter:
         """
         Get the adapter for the given model.
 
@@ -82,9 +82,6 @@ class CompletionService:
         """
         import sqlalchemy as sa
 
-        from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
-            TenantModelAdapter,
-        )
         from intric.database.tables.model_providers_table import ModelProviders
         from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
             TenantModelCredentialResolver,
@@ -164,28 +161,7 @@ class CompletionService:
     ) -> tuple[str, dict[str, object]]:
         """Resolve the LiteLLM model name and provider kwargs for a model."""
         adapter = await self._get_adapter(model)
-        prepare_kwargs = getattr(adapter, "_prepare_kwargs", None)
-        if callable(prepare_kwargs):
-            return adapter.litellm_model, prepare_kwargs()
-
-        kwargs: dict[str, object] = {}
-        api_key = adapter.credential_resolver.get_api_key()
-        if api_key:
-            kwargs["api_key"] = api_key
-
-        field_mapping = {
-            "endpoint": "api_base",
-            "api_version": "api_version",
-            "api_type": "api_type",
-            "organization": "organization",
-            "deployment_name": "deployment_name",
-        }
-        for field, key in field_mapping.items():
-            value = adapter.credential_resolver.get_credential_field(field=field)
-            if value:
-                kwargs[key] = value
-
-        return adapter.litellm_model, kwargs
+        return adapter.resolve_litellm_params()
 
     @staticmethod
     def is_valid_arguments(arguments: str):

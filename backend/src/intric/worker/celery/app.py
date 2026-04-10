@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from celery import Celery
+from typing import Any
 
+from celery import Celery  # pyright: ignore[reportMissingTypeStubs]
 from intric.main.config import get_settings
 
 
@@ -18,7 +19,8 @@ def create_celery_app(
 ) -> Celery:
     settings = get_settings()
     app = Celery(app_name)
-    app.conf.update(
+    conf: Any = getattr(app, "conf")
+    conf.update(
         broker_url=build_redis_url(settings.redis_db_celery_broker),
         result_backend=build_redis_url(settings.redis_db_celery_result),
         task_default_queue=default_queue,

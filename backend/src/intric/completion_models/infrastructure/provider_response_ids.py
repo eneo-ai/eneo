@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 
 def extract_provider_response_id(response: Any) -> str | None:
     candidates: list[Any] = []
 
     if isinstance(response, Mapping):
-        candidates.append(response.get("id"))
+        candidates.append(cast(Mapping[str, Any], response).get("id"))
     else:
         candidates.append(getattr(response, "id", None))
         model_dump = getattr(response, "model_dump", None)
@@ -18,7 +18,7 @@ def extract_provider_response_id(response: Any) -> str | None:
             except TypeError:
                 payload = model_dump()
             if isinstance(payload, Mapping):
-                candidates.append(payload.get("id"))
+                candidates.append(cast(Mapping[str, Any], payload).get("id"))
 
     for candidate in candidates:
         if isinstance(candidate, str):

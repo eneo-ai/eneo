@@ -95,11 +95,7 @@ def _check_basic_method_permission(
     request: Request,
     key: ApiKeyV2InDB,
 ) -> None:
-    """Enforce the key's basic permission level against the HTTP method.
-
-    Catch-all for routes without a specific resource guard.
-    No read-overrides — only the raw method->permission mapping applies.
-    """
+    """Enforce the key's basic permission level against the HTTP method."""
     required = METHOD_PERMISSION_MAP.get(request.method, "admin")
     required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
     granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
@@ -124,125 +120,7 @@ def _check_management_permission(
     key: ApiKeyV2InDB,
     required: str,
 ) -> None:
-    """Enforce a minimum API key permission for management endpoints.
-
-    NOT gated by the feature flag — management guards always enforce.
-    """
-    granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
-    required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
-
-    if granted_level < required_level:
-        raise ApiKeyValidationError(
-            status_code=403,
-            code="insufficient_permission",
-            message=(
-                "API key does not have required permission. "
-                "Use a key with 'admin' permission, or authenticate "
-                "with a bearer token."
-            ),
-            context={
-                "auth_layer": "api_key_method",
-                "action": "management",
-                "required_level": required,
-            },
-        )
-
-
-def _check_method_resource_permission(
-    request: Request,
-    key: ApiKeyV2InDB,
-    config: dict,
-) -> None:
-    """Check method→permission and fine-grained resource permission.
-
-    The method→permission check (with read-overrides) is ALWAYS enforced,
-    even when ``api_key_enforce_resource_permissions`` is disabled.
-    The fine-grained resource-type check is delegated to
-    ``check_resource_permission`` which self-gates via the flag.
-
-    Called after authentication has set ``request.state.api_key``.
-    *config* is written by the router-level
-    ``require_resource_permission_for_method`` dependency.
-    """
-    resource_type: str = config["resource_type"]
-    read_override_endpoints: frozenset[str] | None = config.get(
-        "read_override_endpoints"
-    )
-
-    required = METHOD_PERMISSION_MAP.get(request.method, "admin")
-
-    if required != "read" and read_override_endpoints:
-        route = request.scope.get("route")
-        if route and hasattr(route, "endpoint"):
-            if route.endpoint.__name__ in read_override_endpoints:
-                required = "read"
-
-    # Method→permission: always enforced (respects read-overrides above)
-    required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
-    granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
-    if granted_level < required_level:
-        raise ApiKeyValidationError(
-            status_code=403,
-            code="insufficient_permission",
-            message=(
-                f"API key cannot perform {request.method} requests "
-                f"on this endpoint (requires '{required}' permission)."
-            ),
-            context={
-                "auth_layer": "api_key_method",
-                "action": request.method.lower(),
-                "required_level": required,
-                "resource_type": resource_type,
-            },
-        )
-
-    # Fine-grained resource permission (self-gated by flag)
-    check_resource_permission(key, resource_type, required)
-
-
-def _permission_allows(key: ApiKeyV2InDB, required: ApiKeyPermission) -> bool:
-    granted = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
-    needed = PERMISSION_LEVEL_ORDER.get(required.value, 3)
-    return granted >= needed
-
-
-def _check_basic_method_permission(
-    request: Request,
-    key: ApiKeyV2InDB,
-) -> None:
-    """Enforce the key's basic permission level against the HTTP method.
-
-    Catch-all for routes without a specific resource guard.
-    No read-overrides — only the raw method->permission mapping applies.
-    """
-    required = METHOD_PERMISSION_MAP.get(request.method, "admin")
-    required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
-    granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
-
-    if granted_level < required_level:
-        raise ApiKeyValidationError(
-            status_code=403,
-            code="insufficient_permission",
-            message=(
-                f"API key cannot perform {request.method} requests "
-                f"on this endpoint (requires '{required}' permission)."
-            ),
-            context={
-                "auth_layer": "api_key_method",
-                "action": request.method.lower(),
-                "required_level": required,
-            },
-        )
-
-
-def _check_management_permission(
-    key: ApiKeyV2InDB,
-    required: str,
-) -> None:
-    """Enforce a minimum API key permission for management endpoints.
-
-    NOT gated by the feature flag — management guards always enforce.
-    """
+    """Enforce a minimum API key permission for management endpoints."""
     granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
     required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
 
@@ -268,17 +146,7 @@ def _check_method_resource_permission(
     key: ApiKeyV2InDB,
     config: dict[str, object],
 ) -> None:
-    """Check method→permission and fine-grained resource permission.
-
-    The method→permission check (with read-overrides) is ALWAYS enforced,
-    even when ``api_key_enforce_resource_permissions`` is disabled.
-    The fine-grained resource-type check is delegated to
-    ``check_resource_permission`` which self-gates via the flag.
-
-    Called after authentication has set ``request.state.api_key``.
-    *config* is written by the router-level
-    ``require_resource_permission_for_method`` dependency.
-    """
+    """Check method→permission and fine-grained resource permission."""
     resource_type = cast(str, config["resource_type"])
     read_override_endpoints = cast(
         "frozenset[str] | None", config.get("read_override_endpoints")
@@ -288,11 +156,11 @@ def _check_method_resource_permission(
 
     if required != "read" and read_override_endpoints:
         route = request.scope.get("route")
-        if route and hasattr(route, "endpoint"):
-            if route.endpoint.__name__ in read_override_endpoints:
-                required = "read"
+        endpoint = getattr(route, "endpoint", None)
+        endpoint_name = getattr(endpoint, "__name__", None)
+        if isinstance(endpoint_name, str) and endpoint_name in read_override_endpoints:
+            required = "read"
 
-    # Method→permission: always enforced (respects read-overrides above)
     required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
     granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
     if granted_level < required_level:
@@ -311,7 +179,6 @@ def _check_method_resource_permission(
             },
         )
 
-    # Fine-grained resource permission (self-gated by flag)
     check_resource_permission(key, resource_type, required)
 
 

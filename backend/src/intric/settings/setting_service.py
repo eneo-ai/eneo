@@ -17,6 +17,7 @@ from intric.flows.flow_input_limits import (
     resolve_flow_input_limits,
 )
 from intric.main.config import get_settings as get_app_settings
+from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permissions
 from intric.settings.settings import (

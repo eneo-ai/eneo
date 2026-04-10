@@ -47,7 +47,7 @@ class ModelProviderRepository:
         provider_db = result.scalar_one_or_none()
 
         if provider_db is None:
-            raise NotFoundException("ModelProvider", provider_id)
+            raise NotFoundException(f"ModelProvider {provider_id} not found")
 
         return ModelProvider.create_from_db(provider_db)
 
@@ -94,7 +94,7 @@ class ModelProviderRepository:
         provider_db = result.scalar_one_or_none()
 
         if provider_db is None:
-            raise NotFoundException("ModelProvider", provider.id)
+            raise NotFoundException(f"ModelProvider {provider.id} not found")
 
         provider_db.name = provider.name
         provider_db.provider_type = provider.provider_type
@@ -116,7 +116,7 @@ class ModelProviderRepository:
         result = await self.session.execute(stmt)
 
         if result.rowcount == 0:
-            raise NotFoundException("ModelProvider", provider_id)
+            raise NotFoundException(f"ModelProvider {provider_id} not found")
 
     async def count_models_for_provider(self, provider_id: UUID) -> int:
         """Count how many models are using this provider."""

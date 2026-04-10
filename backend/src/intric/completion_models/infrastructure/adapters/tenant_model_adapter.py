@@ -454,6 +454,9 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         return messages
 
+    def resolve_litellm_params(self) -> tuple[str, dict[str, object]]:
+        return self.litellm_model, cast(dict[str, object], self._prepare_kwargs())
+
     def _prepare_kwargs(
         self,
         model_kwargs: ModelKwargs | dict[str, Any] | None = None,

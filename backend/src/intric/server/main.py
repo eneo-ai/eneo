@@ -177,6 +177,10 @@ def _parse_watchdog_metrics(raw: str) -> WatchdogMetricsData:
     return cast(WatchdogMetricsData, json.loads(raw))
 
 
+def _json_obj(value: Any) -> dict[str, Any]:
+    return cast(dict[str, Any], value) if isinstance(value, dict) else {}
+
+
 def _remove_invalid_defaults(schema: dict[str, Any]) -> None:
     """Remove invalid 'NOT_PROVIDED' defaults from OpenAPI schema recursively."""
     if schema.get("default") == "NOT_PROVIDED":
@@ -202,25 +206,23 @@ def _remove_invalid_defaults(schema: dict[str, Any]) -> None:
                 _remove_invalid_defaults(sub_schema)
 
 
-def _retag_flow_ai_builder_operations(openapi_schema: dict) -> None:
+def _retag_flow_ai_builder_operations(openapi_schema: dict[str, Any]) -> None:
     """Keep AI Builder operations grouped under their dedicated tag in OpenAPI.
 
     The runtime path stays nested under `/flows`, but from an API consumer perspective
     these operations read better as one workflow section instead of appearing under
     both `flows` and `ai-builder`.
     """
-    paths = openapi_schema.get("paths", {})
-    if not isinstance(paths, dict):
-        return
+    paths = _json_obj(openapi_schema.get("paths"))
 
     for path, operations in paths.items():
-        if not isinstance(path, str) or not path.startswith("/api/v1/flows/ai-builder"):
+        if not path.startswith("/api/v1/flows/ai-builder"):
             continue
         if not isinstance(operations, dict):
             continue
-        for operation in operations.values():
+        for operation in _json_obj(operations).values():
             if isinstance(operation, dict):
-                operation["tags"] = ["ai-builder"]
+                cast(dict[str, Any], operation)["tags"] = ["ai-builder"]
 
 
 def get_application():
@@ -270,7 +272,7 @@ def get_application():
             status_code=exc.status_code, content={"detail": detail}, headers=headers
         )
 
-    def custom_openapi():
+    def custom_openapi() -> dict[str, Any]:
         if app.openapi_schema:
             return app.openapi_schema
 
@@ -284,17 +286,14 @@ def get_application():
 
         # WSO2 compatibility: Rename "default" security scheme to "APIKeyAuth"
         # WSO2 API Manager treats "default" as a reserved keyword expecting a boolean
-        if (
-            "components" in openapi_schema
-            and "securitySchemes" in openapi_schema["components"]
-        ):
-            schemes = openapi_schema["components"]["securitySchemes"]
-            if "default" in schemes:
-                schemes["APIKeyAuth"] = schemes.pop("default")
+        components = _json_obj(openapi_schema.get("components"))
+        security_schemes = _json_obj(components.get("securitySchemes"))
+        if "default" in security_schemes:
+            security_schemes["APIKeyAuth"] = security_schemes.pop("default")
 
         # Update all security references from "default" to "APIKeyAuth"
-        for path in cast(dict[str, Any], openapi_schema.get("paths", {})).values():
-            for operation in cast(dict[str, Any], path).values():
+        for path in _json_obj(openapi_schema.get("paths")).values():
+            for operation in _json_obj(path).values():
                 if isinstance(operation, dict) and "security" in operation:
                     security = cast(list[dict[str, list[Any]]], operation["security"])
                     operation["security"] = [
@@ -304,53 +303,47 @@ def get_application():
                     ]
 
         # WSO2 compatibility: Remove invalid "NOT_PROVIDED" defaults from schemas
-        if "components" in openapi_schema and "schemas" in openapi_schema["components"]:
-            for schema in openapi_schema["components"]["schemas"].values():
-                _remove_invalid_defaults(schema)
+        schemas = _json_obj(components.get("schemas"))
+        for schema in schemas.values():
+            if isinstance(schema, dict):
+                _remove_invalid_defaults(cast(dict[str, Any], schema))
 
         _retag_flow_ai_builder_operations(openapi_schema)
 
-        flow_upload_operation = (
-            openapi_schema.get("paths", {})
-            .get("/api/v1/flows/{id}/files/", {})
-            .get("post", {})
+        paths = _json_obj(openapi_schema.get("paths"))
+        flow_upload_operation = _json_obj(
+            _json_obj(paths.get("/api/v1/flows/{id}/files/")).get("post")
         )
-        flow_upload_schema = (
-            flow_upload_operation.get("requestBody", {})
-            .get("content", {})
-            .get("multipart/form-data", {})
-            .get("schema", {})
+        flow_upload_schema = _json_obj(
+            _json_obj(
+                _json_obj(
+                    _json_obj(flow_upload_operation.get("requestBody")).get("content")
+                ).get("multipart/form-data")
+            ).get("schema")
         )
-        if isinstance(flow_upload_schema, dict) and "$ref" in flow_upload_schema:
+        if "$ref" in flow_upload_schema:
             ref = str(flow_upload_schema["$ref"])
             prefix = "#/components/schemas/"
             if ref.startswith(prefix):
                 component_name = ref.removeprefix(prefix)
-                upload_component = (
-                    openapi_schema.get("components", {})
-                    .get("schemas", {})
-                    .get(component_name)
-                )
-                if isinstance(upload_component, dict):
-                    properties = upload_component.setdefault("properties", {})
-                    upload_field = properties.get("upload_file")
-                    if isinstance(upload_field, dict):
-                        upload_field["type"] = "string"
-                        upload_field["format"] = "binary"
-                        upload_field.pop("contentMediaType", None)
+                upload_component = _json_obj(schemas.get(component_name))
+                properties = _json_obj(upload_component.setdefault("properties", {}))
+                upload_field = _json_obj(properties.get("upload_file"))
+                if upload_field:
+                    upload_field["type"] = "string"
+                    upload_field["format"] = "binary"
+                    upload_field.pop("contentMediaType", None)
 
         # Fix only the missing SSE-related schemas that FastAPI doesn't auto-detect
-        if "components" not in openapi_schema:
-            openapi_schema["components"] = {}
-        if "schemas" not in openapi_schema["components"]:
-            openapi_schema["components"]["schemas"] = {}
+        components = _json_obj(openapi_schema.setdefault("components", {}))
+        schemas = _json_obj(components.setdefault("schemas", {}))
 
         # Import SSE models and enums
         from intric.sessions.session import SSE_MODELS, IntricEventType
 
         # Add IntricEventType enum if not already there
-        if "IntricEventType" not in openapi_schema["components"]["schemas"]:
-            openapi_schema["components"]["schemas"]["IntricEventType"] = {
+        if "IntricEventType" not in schemas:
+            schemas["IntricEventType"] = {
                 "type": "string",
                 "enum": [item.value for item in IntricEventType],
             }
@@ -359,16 +352,16 @@ def get_application():
         # so that openapi-typescript can resolve all $ref pointers.
         for model in SSE_MODELS:
             model_name = model.__name__
-            if model_name not in openapi_schema["components"]["schemas"]:
+            if model_name not in schemas:
                 schema = model.model_json_schema(
                     ref_template="#/components/schemas/{model}"
                 )
                 # Extract $defs and promote them to top-level schemas
                 defs = schema.pop("$defs", {})
                 for def_name, def_schema in defs.items():
-                    if def_name not in openapi_schema["components"]["schemas"]:
-                        openapi_schema["components"]["schemas"][def_name] = def_schema
-                openapi_schema["components"]["schemas"][model_name] = schema
+                    if def_name not in schemas:
+                        schemas[def_name] = def_schema
+                schemas[model_name] = schema
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema

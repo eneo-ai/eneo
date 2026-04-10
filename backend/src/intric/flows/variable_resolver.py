@@ -127,6 +127,9 @@ class FlowVariableResolver:
 
         return _TEMPLATE_VAR_PATTERN.sub(_replace, template)
 
+    def resolve_path(self, context: dict[str, Any], path: str) -> Any:
+        return self._resolve_path(context, path)
+
     def _resolve_path(self, context: dict[str, Any], path: str) -> Any:
         current: Any = context
         for token in path.split("."):

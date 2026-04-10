@@ -85,12 +85,9 @@ class TenantRepository:
 
     async def get_all_tenants(self, domain: str | None = None) -> list[TenantInDB]:
         if domain is not None:
-            return cast(
-                list[TenantInDB],
-                await self.delegate.filter_by(conditions={Tenants.domain: domain}),
-            )
+            return await self.delegate.filter_by(conditions={Tenants.domain: domain})
 
-        return cast(list[TenantInDB], await self.delegate.get_all())
+        return await self.delegate.get_all()
 
     async def add_modules(self, list_of_module_ids: list[ModelId], tenant_id: UUID):
         module_ids = [module.id for module in list_of_module_ids]

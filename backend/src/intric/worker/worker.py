@@ -5,7 +5,7 @@ import inspect
 import os
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Callable, cast
+from typing import Any, Awaitable, Callable, cast
 from uuid import UUID
 
 import crochet
@@ -502,7 +502,10 @@ class Worker:
         self,
         with_user: bool = True,
         channel_type: ChannelType | None = None,
-    ):
+    ) -> Callable[
+        [Callable[..., Awaitable[Any]]],
+        Callable[[ARQContext, ResourceTaskParams], Awaitable[bool | None]],
+    ]:
         """Task decorator for long-running operations without long-lived DB sessions.
 
         Contract:
@@ -511,11 +514,13 @@ class Worker:
         - Never keep one transaction open across provider/network calls.
         """
 
-        def decorator(func):
+        def decorator(
+            func: Callable[..., Awaitable[Any]],
+        ) -> Callable[[ARQContext, ResourceTaskParams], Awaitable[bool | None]]:
             @wraps(func)
-            async def wrapper(*args):
-                ctx: dict = args[0]
-                params: ResourceTaskParams = args[1]
+            async def wrapper(
+                ctx: ARQContext, params: ResourceTaskParams
+            ) -> bool | None:
                 logger.debug(
                     f"Executing long-running task {func.__name__} with context {ctx} and params {params}"
                 )
@@ -524,14 +529,19 @@ class Worker:
                     params=params,
                     with_user=with_user,
                 )
+                job_id = _job_id_from_ctx(ctx)
+                assert job_id is not None
                 task_manager = container.task_manager(
-                    job_id=ctx["job_id"],
+                    job_id=job_id,
                     resource_id=params.id,
                     channel_type=channel_type,
                 )
                 optional_kwargs = self._get_kwargs(func, task_manager=task_manager)
 
-                async def _tm_call(callable_, *call_args):
+                async def _tm_call(
+                    callable_: Callable[..., Awaitable[Any]],
+                    *call_args: Any,
+                ) -> Any:
                     # Job status persistence needs a DB session because job_service uses repositories.
                     async with container.session_scope():
                         return await callable_(*call_args)

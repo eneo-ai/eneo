@@ -8,6 +8,7 @@ from intric.roles.permissions import Permission
 if TYPE_CHECKING:
     from intric.apps.apps.app import App
     from intric.assistants.assistant import Assistant
+    from intric.flows.flow import Flow
     from intric.group_chat.domain.entities.group_chat import GroupChat
     from intric.spaces.space import Space
     from intric.users.user import UserInDB
@@ -608,7 +609,7 @@ class SpaceActor:
         self,
         action: SpaceAction,
         resource_type: SpaceResourceType,
-        resource: Optional[Union["Assistant", "GroupChat", "App"]] = None,
+        resource: Optional[Union["Assistant", "GroupChat", "App", "Flow"]] = None,
     ):
         role = self._get_role()
         permissions = self._get_permissions(role=role)
@@ -839,7 +840,7 @@ class SpaceActor:
             resource_type=SpaceResourceType.FLOW,
         )
 
-    def can_read_flow(self, flow):
+    def can_read_flow(self, flow: "Flow"):
         return self.can_perform_action(
             action=SpaceAction.READ,
             resource_type=SpaceResourceType.FLOW,
