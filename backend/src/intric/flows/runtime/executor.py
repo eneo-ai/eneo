@@ -31,10 +31,14 @@ from intric.flows.flow_run_provenance import (
     normalize_json_preview,
     normalize_text_preview,
 )
+from intric.flows.flow_security_classification import (
+    evaluate_step_security_classification,
+)
 from intric.flows.flow_template_asset_service import FlowTemplateAssetService
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.claim_resolution import resolve_step_claim
 from intric.flows.runtime.execution_state_builder import build_run_execution_state
 from intric.flows.runtime.http_audit import (
@@ -253,6 +257,7 @@ class FlowRunExecutor:
             )
 
         self.user = user
+        self.principal = FlowPrincipal.from_user(user)
         self.session = session
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
@@ -367,7 +372,15 @@ class FlowRunExecutor:
         logger.info(
             "flow_executor.steps_parsed run_id=%s step_count=%d", run_id, len(steps)
         )
+        step_output_levels: dict[int, int | None] = {}
         for step in sorted(steps, key=lambda item: item.step_order):
+            step_output_levels[
+                step.step_order
+            ] = await self._validate_runtime_step_security(
+                step=step,
+                state=state,
+                prior_output_levels_by_order=step_output_levels,
+            )
             latest_run = await self.flow_run_repo.get(
                 run_id=run_id, tenant_id=tenant_id, flow_id=flow_id
             )
@@ -699,6 +712,7 @@ class FlowRunExecutor:
                 template_asset_service=self.template_asset_service,
                 apply_output_cap=self._apply_output_cap_positional,
                 user_id=self.user.id,
+                principal=self.principal,
                 logger=logger,
             )
             return await execute_template_fill_step(
@@ -1018,9 +1032,12 @@ class FlowRunExecutor:
             },
         )
         try:
+            actor_kwargs = self.principal.audit_actor_fields()
             await self.audit_service.log_async(
                 tenant_id=self.user.tenant_id,
-                actor_id=self.user.id,
+                actor_id=actor_kwargs["actor_id"],
+                actor_type=actor_kwargs["actor_type"],
+                actor_api_key_id=actor_kwargs["actor_api_key_id"],
                 action=action,
                 entity_type=EntityType.FLOW_RUN,
                 entity_id=run.id,
@@ -1054,6 +1071,7 @@ class FlowRunExecutor:
             resolve_http_input_source_text=self._resolve_http_input_source_text,
             file_repo=self.file_repo,
             user_id=self.user.id,
+            principal=self.principal,
             transcriber=self.transcriber,
             space_repo=self.space_repo,
             flow_run_repo=self.flow_run_repo,
@@ -1148,6 +1166,27 @@ class FlowRunExecutor:
             state.assistant_cache[assistant_id] = assistant
         return assistant
 
+    async def _validate_runtime_step_security(
+        self,
+        *,
+        step: RuntimeStep,
+        state: RunExecutionState,
+        prior_output_levels_by_order: dict[int, int | None],
+    ) -> int | None:
+        space = await self.space_repo.get_space_by_assistant(
+            assistant_id=step.assistant_id
+        )
+        assistant = await self._load_assistant(step.assistant_id, state)
+        evaluation = evaluate_step_security_classification(
+            step_order=step.step_order,
+            input_source=step.input_source,
+            output_classification_override=step.output_classification_override,
+            prior_output_levels_by_order=prior_output_levels_by_order,
+            assistant=assistant,
+            space=space,
+        )
+        return evaluation.effective_output_level
+
     async def _audit_http_outbound(
         self,
         *,
@@ -1222,6 +1261,7 @@ class FlowRunExecutor:
         deps = OutputRuntimeDeps(
             file_repo=self.file_repo,
             user_id=self.user.id,
+            principal=self.principal,
             compile_validators=compile_validators,
             parse_json_output=parse_json_output,
             validate_against_contract=validate_against_contract,
@@ -1245,19 +1285,18 @@ class FlowRunExecutor:
         if len(encoded) <= self.max_inline_text_bytes:
             return text, []
 
-        if run.user_id is None:
-            return text[:4096], []
-
         file_row = await self.file_repo.add(
-            FileCreate(
-                name=f"flow-{run.id}-step-{step.step_order}-output.txt",
-                checksum=hashlib.sha256(encoded).hexdigest(),
-                size=len(encoded),
-                mimetype="text/plain",
-                file_type=FileType.TEXT,
-                text=text,
-                user_id=run.user_id,
-                tenant_id=run.tenant_id,
+            FileCreate.model_validate(
+                {
+                    "name": f"flow-{run.id}-step-{step.step_order}-output.txt",
+                    "checksum": hashlib.sha256(encoded).hexdigest(),
+                    "size": len(encoded),
+                    "mimetype": "text/plain",
+                    "file_type": FileType.TEXT,
+                    "text": text,
+                    **self.principal.file_owner_fields(),
+                    "tenant_id": run.tenant_id,
+                }
             )
         )
         return text[:4096], [file_row.id]

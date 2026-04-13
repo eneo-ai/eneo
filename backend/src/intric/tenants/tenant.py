@@ -307,6 +307,29 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             except Exception as error:
                 raise ValueError(str(error))
 
+        evidence_policy = v.get("evidence_policy")
+        if evidence_policy is not None:
+            if not isinstance(evidence_policy, dict):
+                raise ValueError("flow_settings.evidence_policy must be an object")
+            class3 = cast(dict[str, Any], evidence_policy).get("classification_3")
+            if class3 is not None:
+                if not isinstance(class3, dict):
+                    raise ValueError(
+                        "flow_settings.evidence_policy.classification_3 must be an object"
+                    )
+                for key in (
+                    "allow_space_admin_raw_export",
+                    "allow_run_owner_raw_export",
+                    "allow_service_key_raw_export",
+                ):
+                    if key not in class3:
+                        continue
+                    value = cast(dict[str, Any], class3)[key]
+                    if not isinstance(value, bool):
+                        raise ValueError(
+                            f"flow_settings.evidence_policy.classification_3.{key} must be a boolean"
+                        )
+
         return v
 
 

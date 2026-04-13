@@ -30,6 +30,7 @@ class RuntimeStep:
     input_config: dict[str, Any] | None
     output_mode: str
     output_config: dict[str, Any] | None
+    output_classification_override: int | None = None
     output_type: str = "text"
     output_contract: dict[str, Any] | None = None
     input_type: str = "text"

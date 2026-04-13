@@ -8,7 +8,12 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.flow_tables import FlowRuns, FlowStepResults, FlowSteps, Flows
+from intric.database.tables.flow_tables import (
+    FlowRuns,
+    Flows,
+    FlowStepResults,
+    FlowSteps,
+)
 from intric.flows import (
     Flow,
     FlowFactory,
@@ -37,7 +42,9 @@ def _build_flow(
         created_by_user_id=user_id,
         owner_user_id=user_id,
         published_version=None,
-        metadata_json={"form_schema": {"fields": [{"name": "question", "type": "string"}]}},
+        metadata_json={
+            "form_schema": {"fields": [{"name": "question", "type": "string"}]}
+        },
         data_retention_days=30,
         created_at=None,
         updated_at=None,
@@ -197,6 +204,8 @@ async def test_save_step_result_upserts_on_run_and_step(
         run_row = FlowRuns(
             flow_id=flow.id,
             flow_version=1,
+            principal_type="user",
+            principal_user_id=admin_user.id,
             user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             status="queued",
@@ -328,6 +337,8 @@ async def test_save_step_result_legacy_update_raises_when_row_missing(
         run_row = FlowRuns(
             flow_id=flow.id,
             flow_version=1,
+            principal_type="user",
+            principal_user_id=admin_user.id,
             user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             status="queued",
@@ -550,6 +561,88 @@ async def test_flow_delete_cascades_owned_flow_managed_assistants(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_flow_delete_preserves_steps_and_flow_managed_assistant_when_runs_exist(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(
+            session, "Flow delete history preservation", [model.id]
+        )
+        assistant = await assistant_factory(
+            session,
+            "Flow-owned Assistant With Runs",
+            model.id,
+            space_id=space.id,
+        )
+
+        repo = FlowRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        created = await repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+
+        step_id = created.steps[0].id
+        assert step_id is not None
+
+        await session.execute(
+            sa.update(Assistants)
+            .where(Assistants.id == assistant.id)
+            .values(
+                origin="flow_managed",
+                managing_flow_id=created.id,
+                hidden=True,
+            )
+        )
+        await version_repo.create(
+            flow_id=created.id,
+            version=1,
+            definition_checksum="checksum-preserve-history",
+            definition_json={"steps": [{"id": str(step_id), "step_order": 1}]},
+            tenant_id=admin_user.tenant_id,
+        )
+        run_row = FlowRuns(
+            flow_id=created.id,
+            flow_version=1,
+            principal_type="user",
+            principal_user_id=admin_user.id,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            status="completed",
+            input_payload_json={"question": "What happened?"},
+            output_payload_json={"summary": "done"},
+        )
+        session.add(run_row)
+        await session.flush()
+
+        await repo.delete(created.id, tenant_id=admin_user.tenant_id)
+
+        step_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowSteps)
+            .where(FlowSteps.flow_id == created.id)
+        )
+        assistant_row = await session.scalar(
+            sa.select(Assistants).where(Assistants.id == assistant.id)
+        )
+
+        assert step_count == 1
+        assert assistant_row is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_flow_delete_keeps_shared_flow_managed_assistant_referenced_by_other_flow(
     db_container,
     completion_model_factory,
@@ -675,7 +768,9 @@ async def test_flow_repository_rejects_duplicate_active_name_in_space(
         await repo.create(flow=base_flow, tenant_id=admin_user.tenant_id)
 
         with pytest.raises(IntegrityError):
-            await repo.create(flow=base_flow.model_copy(deep=True), tenant_id=admin_user.tenant_id)
+            await repo.create(
+                flow=base_flow.model_copy(deep=True), tenant_id=admin_user.tenant_id
+            )
 
 
 @pytest.mark.asyncio

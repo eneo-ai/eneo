@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from intric.authentication.principal_types import PrincipalType
 from intric.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -69,6 +70,30 @@ FLOW_PUBLIC_EXAMPLE: dict[str, Any] = {
     ],
 }
 
+FLOW_RUNTIME_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "space_id": "00000000-0000-0000-0000-000000000020",
+    "name": "Employee Review Summary",
+    "description": "Transcribe a review conversation and return a PDF summary.",
+    "published_version": 3,
+    "created_at": "2026-03-17T09:30:00Z",
+    "updated_at": "2026-03-17T10:00:00Z",
+    "runtime_paths": {
+        "run_contract": "/api/v1/flows/00000000-0000-0000-0000-000000000001/run-contract/",
+        "input_policy": "/api/v1/flows/00000000-0000-0000-0000-000000000001/input-policy/",
+        "graph": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/",
+        "upload_flow_file": "/api/v1/flows/00000000-0000-0000-0000-000000000001/files/",
+        "upload_step_runtime_file_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/steps/{step_id}/runtime-files/",
+        "create_run": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
+        "list_runs": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
+        "get_graph_for_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/?run_id={run_id}",
+        "get_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/",
+        "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/",
+        "evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/",
+        "artifact_signed_url_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/artifacts/{file_id}/signed-url/",
+    },
+}
+
 FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000301",
     "flow_id": "00000000-0000-0000-0000-000000000001",
@@ -78,6 +103,8 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "trace_id": "00000000-0000-0000-0000-000000000302",
     "status": "queued",
     "cancelled_at": None,
+    "started_at": None,
+    "finished_at": None,
     "input_payload_json": {"employee_name": "Alex Example"},
     "output_payload_json": None,
     "error_message": None,
@@ -107,6 +134,8 @@ FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "diagnostics": [
         {"code": "runtime_input_consumed", "message": "Uploaded audio file was used."}
     ],
+    "started_at": "2026-03-17T10:05:05Z",
+    "finished_at": "2026-03-17T10:05:30Z",
     "created_at": "2026-03-17T10:05:05Z",
     "updated_at": "2026-03-17T10:05:30Z",
 }
@@ -345,6 +374,39 @@ class FlowPublic(FlowSparsePublic):
     steps: list[FlowStepPublic]
 
 
+class FlowRuntimePathsPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    run_contract: str
+    input_policy: str
+    graph: str
+    upload_flow_file: str
+    upload_step_runtime_file_template: str
+    create_run: str
+    list_runs: str
+    get_graph_for_run_template: str
+    get_run_template: str
+    list_steps_template: str
+    evidence_template: str
+    artifact_signed_url_template: str
+
+
+class FlowRuntimePublic(BaseModel):
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={"example": FLOW_RUNTIME_PUBLIC_EXAMPLE},
+    )
+
+    id: UUID
+    space_id: UUID
+    name: str
+    description: str | None = None
+    published_version: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    runtime_paths: FlowRuntimePathsPublic
+
+
 class StepRunInput(BaseModel):
     file_ids: list[UUID] = Field(default_factory=lambda: cast(list[UUID], []))
 
@@ -388,11 +450,14 @@ class FlowRunPublic(BaseModel):
     id: UUID
     flow_id: UUID
     flow_version: int
+    principal_type: PrincipalType | None = None
     user_id: UUID | None = None
     tenant_id: UUID
     trace_id: UUID
     status: FlowRunStatus
     cancelled_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     input_payload_json: dict[str, Any] | None = None
     output_payload_json: dict[str, Any] | None = None
     error_message: str | None = None
@@ -456,6 +521,8 @@ class FlowRunStepPublic(BaseModel):
     diagnostics: list[dict[str, Any]] = Field(
         default_factory=lambda: cast(list[dict[str, Any]], [])
     )
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

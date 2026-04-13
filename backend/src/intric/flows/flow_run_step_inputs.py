@@ -7,6 +7,7 @@ from uuid import UUID
 
 from intric.files.file_models import File
 from intric.flows.flow_input_limits import FlowInputLimits, effective_max_files_per_run
+from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.models import RuntimeStep
 from intric.flows.runtime_input import (
     build_runtime_input_config,
@@ -20,6 +21,16 @@ class _FileRepositoryProtocol(Protocol):
         self,
         ids: list[UUID],
         user_id: UUID,
+        include_transcription: bool = True,
+    ) -> list[File]: ...
+
+    async def get_list_by_id_for_owner(
+        self,
+        *,
+        ids: list[UUID],
+        owner_type: str,
+        owner_user_id: UUID | None = None,
+        owner_api_key_id: UUID | None = None,
         include_transcription: bool = True,
     ) -> list[File]: ...
 
@@ -124,6 +135,7 @@ async def validate_submitted_step_inputs(
     normalized_step_inputs: dict[UUID, list[UUID]],
     file_repo: _FileRepositoryProtocol | None,
     user_id: UUID,
+    principal: FlowPrincipal | None = None,
 ) -> None:
     step_by_id = {step.step_id: step for step in steps}
     aggregate_count = 0
@@ -161,11 +173,20 @@ async def validate_submitted_step_inputs(
         if file_repo is None or not requested_file_ids:
             continue
 
-        files = await file_repo.get_list_by_id_and_user(
-            ids=requested_file_ids,
-            user_id=user_id,
-            include_transcription=False,
-        )
+        if principal is not None and principal.is_service_key:
+            files = await file_repo.get_list_by_id_for_owner(
+                ids=requested_file_ids,
+                owner_type=principal.principal_type.value,
+                owner_user_id=principal.principal_user_id,
+                owner_api_key_id=principal.principal_api_key_id,
+                include_transcription=False,
+            )
+        else:
+            files = await file_repo.get_list_by_id_and_user(
+                ids=requested_file_ids,
+                user_id=user_id,
+                include_transcription=False,
+            )
         resolved_ids = {file.id for file in files}
         missing_ids = [
             str(file_id)

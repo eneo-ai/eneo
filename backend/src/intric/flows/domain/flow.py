@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from intric.authentication.principal_types import PrincipalType
 from intric.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -18,7 +19,6 @@ from intric.flows.enums import (
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
 )
-
 
 JsonObject: TypeAlias = dict[str, Any]
 ToolCallMetadata: TypeAlias = dict[str, Any]
@@ -130,11 +130,16 @@ class FlowRun(BaseModel):
     id: UUID
     flow_id: UUID
     flow_version: int
+    principal_type: PrincipalType | None = None
+    principal_user_id: Optional[UUID] = None
+    principal_api_key_id: Optional[UUID] = None
     user_id: Optional[UUID] = None
     tenant_id: UUID
     trace_id: UUID
     status: FlowRunStatus
     cancelled_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
     input_payload_json: JsonObject | None = None
     output_payload_json: JsonObject | None = None
     error_message: Optional[str] = None
@@ -163,6 +168,8 @@ class FlowStepResult(BaseModel):
     error_message: Optional[str] = None
     flow_step_execution_hash: Optional[str] = None
     tool_calls_metadata: list[ToolCallMetadata] | ToolCallMetadata | None = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

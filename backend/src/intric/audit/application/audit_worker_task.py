@@ -45,6 +45,7 @@ async def log_audit_event_task(
         tenant_id=task_params.tenant_id,
         actor_id=task_params.actor_id,
         actor_type=task_params.actor_type,
+        actor_api_key_id=task_params.actor_api_key_id,
         action=task_params.action,
         entity_type=task_params.entity_type,
         entity_id=task_params.entity_id,

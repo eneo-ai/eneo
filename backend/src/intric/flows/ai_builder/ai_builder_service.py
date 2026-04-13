@@ -140,6 +140,8 @@ class AIBuilderService:
             flow = await self.flow_service.get_flow(flow_id)
             self._assert_flow_in_space(flow=flow, space_id=space_id)
 
+        await self.repo.acquire_session_creation_lock(tenant_id=self.user.tenant_id)
+
         should_resume_existing = target_kind == TargetKind.EDIT and not force_new
         if should_resume_existing:
             existing_session = await self.repo.find_latest_resumable_session(

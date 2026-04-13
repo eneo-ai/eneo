@@ -17,6 +17,7 @@ class AuditLogRawRow(TypedDict):
     tenant_id: str
     timestamp: str
     actor_id: str | None
+    actor_api_key_id: str | None
     actor_type: str
     action: str
     entity_type: str

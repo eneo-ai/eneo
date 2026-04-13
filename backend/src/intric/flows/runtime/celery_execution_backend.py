@@ -32,8 +32,14 @@ class CeleryFlowExecutionBackend:
         run_id: UUID,
         flow_id: UUID,
         tenant_id: UUID,
-        user_id: UUID | None,
+        principal_type: str | None = None,
+        principal_user_id: UUID | None = None,
+        principal_api_key_id: UUID | None = None,
+        user_id: UUID | None = None,
     ) -> None:
+        if principal_type is None:
+            principal_type = "user"
+            principal_user_id = user_id
         send_task = cast(
             Callable[..., Any],
             self.celery_app.send_task,  # pyright: ignore[reportUnknownMemberType]
@@ -48,7 +54,17 @@ class CeleryFlowExecutionBackend:
                         "run_id": str(run_id),
                         "flow_id": str(flow_id),
                         "tenant_id": str(tenant_id),
-                        "user_id": str(user_id) if user_id is not None else None,
+                        "principal_type": principal_type,
+                        "principal_user_id": (
+                            str(principal_user_id)
+                            if principal_user_id is not None
+                            else None
+                        ),
+                        "principal_api_key_id": (
+                            str(principal_api_key_id)
+                            if principal_api_key_id is not None
+                            else None
+                        ),
                     },
                     queue=self.queue_name,
                 ),

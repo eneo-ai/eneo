@@ -11,8 +11,8 @@ from intric.ai_models.completion_models.completion_model import ModelKwargs
 from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.flows.flow import Flow, FlowStep, FlowVersion
 from intric.flows.flow_service import FlowService
-from intric.main.models import NOT_PROVIDED
 from intric.main.exceptions import BadRequestException, NotFoundException
+from intric.main.models import NOT_PROVIDED
 
 
 class _FakeEncryptionService:
@@ -93,7 +93,15 @@ def _stub_template_asset_lookup(
     return asset
 
 
-def _service(*, user, flow_repo, version_repo, encryption_service=None) -> FlowService:
+def _service(
+    *,
+    user,
+    flow_repo,
+    version_repo,
+    encryption_service=None,
+    space_service=None,
+    stub_assistant_scope: bool = True,
+) -> FlowService:
     service = FlowService(
         user=user,
         flow_repo=flow_repo,
@@ -102,9 +110,61 @@ def _service(*, user, flow_repo, version_repo, encryption_service=None) -> FlowS
         file_repo=AsyncMock(),
         template_asset_repo=AsyncMock(),
         encryption_service=encryption_service,
+        space_service=space_service,
     )
-    service._validate_assistant_scope_for_steps = AsyncMock()  # type: ignore[method-assign]
+    if stub_assistant_scope:
+        service._validate_assistant_scope_for_steps = AsyncMock()  # type: ignore[method-assign]
     return service
+
+
+@pytest.mark.asyncio
+async def test_list_flows_passes_published_only_to_sparse_repo_path(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.get_sparse_by_space.return_value = []
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    space_id = uuid4()
+
+    await service.list_flows(
+        space_id=space_id,
+        sparse=True,
+        published_only=True,
+        limit=25,
+        offset=10,
+    )
+
+    flow_repo.get_sparse_by_space.assert_awaited_once_with(
+        space_id=space_id,
+        tenant_id=user.tenant_id,
+        published_only=True,
+        limit=25,
+        offset=10,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_flows_passes_published_only_to_full_repo_path(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.get_by_space.return_value = []
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    space_id = uuid4()
+
+    await service.list_flows(
+        space_id=space_id,
+        sparse=False,
+        published_only=True,
+        limit=5,
+        offset=0,
+    )
+
+    flow_repo.get_by_space.assert_awaited_once_with(
+        space_id=space_id,
+        tenant_id=user.tenant_id,
+        published_only=True,
+        limit=5,
+        offset=0,
+    )
 
 
 @pytest.mark.asyncio
@@ -238,7 +298,9 @@ async def test_update_flow_passes_expected_revision_to_repo(user):
 
 
 @pytest.mark.asyncio
-async def test_get_flow_assistant_snapshots_batches_and_deduplicates_assistant_ids(user):
+async def test_get_flow_assistant_snapshots_batches_and_deduplicates_assistant_ids(
+    user,
+):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
@@ -265,7 +327,11 @@ async def test_get_flow_assistant_snapshots_batches_and_deduplicates_assistant_i
     )
     expected = {
         assistant_id: {"instructions": "A", "model_ref": None, "knowledge_refs": []},
-        other_assistant_id: {"instructions": "B", "model_ref": None, "knowledge_refs": []},
+        other_assistant_id: {
+            "instructions": "B",
+            "model_ref": None,
+            "knowledge_refs": [],
+        },
     }
     flow_repo.get_assistant_snapshots.return_value = expected
 
@@ -313,7 +379,9 @@ async def test_publish_flow_pins_template_metadata_for_template_fill(user):
     )
     flow_repo.get.return_value = source_flow
     version_repo.get_latest.return_value = None
-    flow_repo.update.return_value = source_flow.model_copy(update={"published_version": 1})
+    flow_repo.update.return_value = source_flow.model_copy(
+        update={"published_version": 1}
+    )
     asset = _stub_template_asset_lookup(
         service,
         flow_id=flow_id,
@@ -356,13 +424,13 @@ async def test_publish_flow_preserves_template_placeholder_order(user):
         updated_at=datetime.now(timezone.utc),
         steps=[
             _step(step_order=1),
-                _step(step_order=1).model_copy(
-                    update={
-                        "step_order": 2,
-                        "user_description": "Sammanställ dokument",
-                        "input_source": "previous_step",
-                        "output_mode": "template_fill",
-                        "output_type": "docx",
+            _step(step_order=1).model_copy(
+                update={
+                    "step_order": 2,
+                    "user_description": "Sammanställ dokument",
+                    "input_source": "previous_step",
+                    "output_mode": "template_fill",
+                    "output_type": "docx",
                     "output_config": {
                         "template_file_id": str(template_file_id),
                         "bindings": {
@@ -372,12 +440,14 @@ async def test_publish_flow_preserves_template_placeholder_order(user):
                         },
                     },
                 }
-            )
+            ),
         ],
     )
     flow_repo.get.return_value = source_flow
     version_repo.get_latest.return_value = None
-    flow_repo.update.return_value = source_flow.model_copy(update={"published_version": 1})
+    flow_repo.update.return_value = source_flow.model_copy(
+        update={"published_version": 1}
+    )
     _stub_template_asset_lookup(
         service,
         flow_id=flow_id,
@@ -543,14 +613,22 @@ async def test_publish_flow_allows_explicit_empty_template_binding(user):
     )
     flow_repo.get.return_value = source_flow
     version_repo.get_latest.return_value = None
-    flow_repo.update.return_value = source_flow.model_copy(update={"published_version": 1})
+    flow_repo.update.return_value = source_flow.model_copy(
+        update={"published_version": 1}
+    )
     _stub_template_asset_lookup(
         service,
         flow_id=flow_id,
         file_id=template_file_id,
     )
     service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
-        return_value=[{"name": "optional_section", "location": "body", "preview": "{{optional_section}}"}]
+        return_value=[
+            {
+                "name": "optional_section",
+                "location": "body",
+                "preview": "{{optional_section}}",
+            }
+        ]
     )
 
     await service.publish_flow(flow_id=flow_id)
@@ -626,8 +704,14 @@ async def test_create_flow_encrypts_step_header_values(user):
     )
     step = _step(step_order=1).model_copy(
         update={
-            "input_config": {"url": "https://example.org/input", "headers": {"Authorization": "Bearer topsecret"}},
-            "output_config": {"url": "https://example.org/output", "headers": {"X-Api-Key": "abc123"}},
+            "input_config": {
+                "url": "https://example.org/input",
+                "headers": {"Authorization": "Bearer topsecret"},
+            },
+            "output_config": {
+                "url": "https://example.org/output",
+                "headers": {"X-Api-Key": "abc123"},
+            },
         }
     )
 
@@ -638,7 +722,10 @@ async def test_create_flow_encrypts_step_header_values(user):
         metadata_json=None,
     )
 
-    assert created.steps[0].input_config["headers"]["Authorization"] == "enc:Bearer topsecret"
+    assert (
+        created.steps[0].input_config["headers"]["Authorization"]
+        == "enc:Bearer topsecret"
+    )
     assert created.steps[0].output_config["headers"]["X-Api-Key"] == "enc:abc123"
 
 
@@ -725,7 +812,10 @@ async def test_create_flow_allows_http_get_input_source_with_valid_config(user):
     step = _step(step_order=1).model_copy(
         update={
             "input_source": "http_get",
-            "input_config": {"url": "https://example.org/source", "timeout_seconds": 12},
+            "input_config": {
+                "url": "https://example.org/source",
+                "timeout_seconds": 12,
+            },
             "input_type": "text",
         }
     )
@@ -848,7 +938,9 @@ async def test_create_flow_rejects_assistants_outside_space_or_tenant(user):
         template_asset_repo=AsyncMock(),
     )
 
-    with pytest.raises(BadRequestException, match="outside the selected space or tenant"):
+    with pytest.raises(
+        BadRequestException, match="outside the selected space or tenant"
+    ):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
@@ -899,7 +991,9 @@ async def test_create_flow_allows_scoped_assistant_references_before_flow_exists
 
 
 @pytest.mark.asyncio
-async def test_create_flow_allows_empty_steps_with_strict_flow_managed_enforcement(user):
+async def test_create_flow_allows_empty_steps_with_strict_flow_managed_enforcement(
+    user,
+):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     flow_repo.create.side_effect = lambda **kwargs: kwargs["flow"]
@@ -970,7 +1064,9 @@ async def test_update_flow_rejects_flow_managed_assistants_not_owned_by_flow(use
     ):
         await service.update_flow(
             flow_id=flow_id,
-            steps=[_step(step_order=1).model_copy(update={"assistant_id": assistant_id})],
+            steps=[
+                _step(step_order=1).model_copy(update={"assistant_id": assistant_id})
+            ],
         )
 
 
@@ -1018,6 +1114,160 @@ async def test_publish_flow_rejects_flow_managed_assistants_not_owned_by_flow(us
         BadRequestException,
         match="Flow steps must reference flow-managed assistants owned by the flow",
     ):
+        await service.publish_flow(flow_id=flow_id)
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_rejects_assistant_model_below_required_security_level(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_id = uuid4()
+    assistant_id = uuid4()
+    flow_repo.get_assistant_scope_rows.return_value = [
+        SimpleNamespace(
+            id=assistant_id,
+            origin=AssistantOrigin.FLOW_MANAGED.value,
+            managing_flow_id=flow_id,
+        )
+    ]
+
+    source_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Draft",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1).model_copy(update={"assistant_id": assistant_id})],
+    )
+    flow_repo.get.return_value = source_flow
+
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=AsyncMock(),
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+        space_service=AsyncMock(),
+    )
+    service.space_service.get_space.return_value = SimpleNamespace(
+        security_classification=SimpleNamespace(security_level=3)
+    )
+    service.assistant_service.get_assistant.return_value = (
+        SimpleNamespace(
+            completion_model=SimpleNamespace(
+                security_classification=SimpleNamespace(security_level=2)
+            ),
+            collections=[],
+            websites=[],
+            integration_knowledge_list=[],
+            mcp_servers=[],
+        ),
+        [],
+    )
+
+    with pytest.raises(BadRequestException, match="security classification"):
+        await service.publish_flow(flow_id=flow_id)
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_rejects_output_override_write_down(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_id = uuid4()
+    assistant_a = uuid4()
+    assistant_b = uuid4()
+    flow_repo.get_assistant_scope_rows.return_value = [
+        SimpleNamespace(
+            id=assistant_a,
+            origin=AssistantOrigin.FLOW_MANAGED.value,
+            managing_flow_id=flow_id,
+        ),
+        SimpleNamespace(
+            id=assistant_b,
+            origin=AssistantOrigin.FLOW_MANAGED.value,
+            managing_flow_id=flow_id,
+        ),
+    ]
+
+    source_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Draft",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[
+            _step(step_order=1).model_copy(
+                update={
+                    "assistant_id": assistant_a,
+                    "output_classification_override": 3,
+                }
+            ),
+            _step(step_order=2).model_copy(
+                update={
+                    "assistant_id": assistant_b,
+                    "input_source": "previous_step",
+                    "output_classification_override": 1,
+                }
+            ),
+        ],
+    )
+    flow_repo.get.return_value = source_flow
+
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=AsyncMock(),
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+        space_service=AsyncMock(),
+    )
+    service.space_service.get_space.return_value = SimpleNamespace(
+        security_classification=SimpleNamespace(security_level=1)
+    )
+    service.assistant_service.get_assistant.side_effect = [
+        (
+            SimpleNamespace(
+                completion_model=SimpleNamespace(
+                    security_classification=SimpleNamespace(security_level=3)
+                ),
+                collections=[],
+                websites=[],
+                integration_knowledge_list=[],
+                mcp_servers=[],
+            ),
+            [],
+        ),
+        (
+            SimpleNamespace(
+                completion_model=SimpleNamespace(
+                    security_classification=SimpleNamespace(security_level=3)
+                ),
+                collections=[],
+                websites=[],
+                integration_knowledge_list=[],
+                mcp_servers=[],
+            ),
+            [],
+        ),
+    ]
+
+    with pytest.raises(BadRequestException, match="output classification override"):
         await service.publish_flow(flow_id=flow_id)
 
 
@@ -1081,7 +1331,9 @@ async def test_update_flow_assistant_rejects_when_flow_published(user):
     )
     flow_repo.get.return_value = published_flow
 
-    with pytest.raises(BadRequestException, match="Cannot mutate assistant of a published flow"):
+    with pytest.raises(
+        BadRequestException, match="Cannot mutate assistant of a published flow"
+    ):
         await service.update_flow_assistant(
             flow_id=flow_id,
             assistant_id=uuid4(),
@@ -1174,7 +1426,9 @@ async def test_get_flow_assistant_rejects_wrong_owner(user):
     assistant_service.get_assistant.return_value = (wrong_owner_assistant, [])
 
     with pytest.raises(NotFoundException, match="belongs to a different flow"):
-        await service.get_flow_assistant(flow_id=flow_id, assistant_id=wrong_owner_assistant.id)
+        await service.get_flow_assistant(
+            flow_id=flow_id, assistant_id=wrong_owner_assistant.id
+        )
 
 
 @pytest.mark.asyncio
@@ -1211,12 +1465,16 @@ async def test_get_flow_assistant_rejects_non_flow_managed(user):
     flow_repo.get.return_value = flow
 
     # Assistant with origin != FLOW_MANAGED
-    regular_assistant = _build_assistant(flow_id=flow_id, space_id=flow.space_id, user=user)
+    regular_assistant = _build_assistant(
+        flow_id=flow_id, space_id=flow.space_id, user=user
+    )
     regular_assistant.origin = AssistantOrigin.USER
     assistant_service.get_assistant.return_value = (regular_assistant, [])
 
     with pytest.raises(NotFoundException, match="not flow-managed"):
-        await service.get_flow_assistant(flow_id=flow_id, assistant_id=regular_assistant.id)
+        await service.get_flow_assistant(
+            flow_id=flow_id, assistant_id=regular_assistant.id
+        )
 
 
 @pytest.mark.asyncio
@@ -1303,7 +1561,11 @@ async def test_create_flow_rejects_invalid_form_field_type(user):
             metadata_json={
                 "form_schema": {
                     "fields": [
-                        {"name": "Namn på brukare", "type": "unsupported_type", "required": True}
+                        {
+                            "name": "Namn på brukare",
+                            "type": "unsupported_type",
+                            "required": True,
+                        }
                     ]
                 }
             },
@@ -1324,7 +1586,11 @@ async def test_create_flow_rejects_multiselect_without_options(user):
             metadata_json={
                 "form_schema": {
                     "fields": [
-                        {"name": "Typ av insats", "type": "multiselect", "required": True}
+                        {
+                            "name": "Typ av insats",
+                            "type": "multiselect",
+                            "required": True,
+                        }
                     ]
                 }
             },
@@ -1337,7 +1603,9 @@ async def test_create_flow_rejects_options_for_non_multiselect(user):
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
 
-    with pytest.raises(BadRequestException, match="only valid for select or multiselect"):
+    with pytest.raises(
+        BadRequestException, match="only valid for select or multiselect"
+    ):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
@@ -1378,7 +1646,9 @@ async def test_create_flow_normalizes_legacy_form_field_types(user):
         },
     )
 
-    field_types = [field["type"] for field in created.metadata_json["form_schema"]["fields"]]
+    field_types = [
+        field["type"] for field in created.metadata_json["form_schema"]["fields"]
+    ]
     assert field_types == ["text", "text"]
 
 
@@ -1395,9 +1665,7 @@ async def test_create_flow_rejects_reserved_form_field_alias_names(user):
             steps=[_step()],
             metadata_json={
                 "form_schema": {
-                    "fields": [
-                        {"name": "flow_input", "type": "text", "required": True}
-                    ]
+                    "fields": [{"name": "flow_input", "type": "text", "required": True}]
                 }
             },
         )
@@ -1414,7 +1682,9 @@ async def test_create_flow_rejects_form_field_name_conflicting_with_step_name(us
             space_id=uuid4(),
             name="Flow",
             steps=[
-                _step(step_order=1).model_copy(update={"user_description": "Sammanfattning"}),
+                _step(step_order=1).model_copy(
+                    update={"user_description": "Sammanfattning"}
+                ),
                 _step(step_order=2).model_copy(update={"user_description": "Analys"}),
             ],
             metadata_json={

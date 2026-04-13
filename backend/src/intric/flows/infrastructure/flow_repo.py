@@ -14,6 +14,7 @@ from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.assistant_table import Assistants, AssistantsGroups
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.flow_tables import (
+    FlowRuns,
     Flows,
     FlowStepResults,
     FlowSteps,
@@ -22,6 +23,7 @@ from intric.database.tables.prompts_table import Prompts, PromptsAssistants
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.users_table import Users
 from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, FlowStepResult
+from intric.flows.enums import FlowStepResultStatus
 from intric.flows.flow_factory import FlowFactory
 from intric.main.exceptions import BadRequestException, NotFoundException
 
@@ -128,6 +130,7 @@ class FlowRepository:
         space_id: UUID,
         tenant_id: UUID,
         *,
+        published_only: bool = False,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Flow]:
@@ -138,6 +141,8 @@ class FlowRepository:
             .where(Flows.deleted_at.is_(None))
             .order_by(Flows.created_at.asc())
         )
+        if published_only:
+            stmt = stmt.where(Flows.published_version.is_not(None))
         if offset is not None:
             stmt = stmt.offset(offset)
         if limit is not None:
@@ -176,6 +181,7 @@ class FlowRepository:
         space_id: UUID,
         tenant_id: UUID,
         *,
+        published_only: bool = False,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[FlowSparse]:
@@ -186,6 +192,8 @@ class FlowRepository:
             .where(Flows.deleted_at.is_(None))
             .order_by(Flows.created_at.asc())
         )
+        if published_only:
+            stmt = stmt.where(Flows.published_version.is_not(None))
         if offset is not None:
             stmt = stmt.offset(offset)
         if limit is not None:
@@ -377,6 +385,18 @@ class FlowRepository:
         if getattr(result, "rowcount", 0) == 0:
             raise NotFoundException("Flow not found.")
 
+        has_runs = bool(
+            await self.session.scalar(
+                sa.select(sa.literal(True))
+                .select_from(FlowRuns)
+                .where(FlowRuns.flow_id == flow_id)
+                .where(FlowRuns.tenant_id == tenant_id)
+                .limit(1)
+            )
+        )
+        if has_runs:
+            return
+
         await self.session.execute(
             sa.delete(FlowSteps)
             .where(FlowSteps.flow_id == flow_id)
@@ -452,6 +472,13 @@ class FlowRepository:
             "flow_step_execution_hash": result.flow_step_execution_hash,
             "tool_calls_metadata": result.tool_calls_metadata,
         }
+
+        if result.status in (
+            FlowStepResultStatus.COMPLETED,
+            FlowStepResultStatus.FAILED,
+            FlowStepResultStatus.CANCELLED,
+        ):
+            payload["finished_at"] = datetime.now(timezone.utc)
 
         if result.step_id is None:
             if result.id is None:

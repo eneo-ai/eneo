@@ -26,7 +26,6 @@
   import FlowDryRun from "$lib/features/flows/components/FlowDryRun.svelte";
   import FlowPageHeader from "$lib/features/flows/components/FlowPageHeader.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
-  import { getFlowFormStats } from "$lib/features/flows/flowFormSchema";
   import FlowAIBuilderEditHost from "$lib/features/flows/ai-builder/FlowAIBuilderEditHost.svelte";
   import {
     resolveAIBuilderApplyNavigation,
@@ -132,24 +131,6 @@
       ?.form_schema?.fields ?? []
   );
   let formSchemaDraftStats = $state<{ definedCount: number; requiredCount: number } | null>(null);
-  const persistedFormSchemaStats = $derived(getFlowFormStats(formSchemaFields));
-  const displayedFormSchemaStats = $derived(formSchemaDraftStats ?? persistedFormSchemaStats);
-  const formSchemaDefinedLabel = $derived.by(() => {
-    const count = displayedFormSchemaStats.definedCount;
-    return count === 0
-      ? m.flow_fields_defined_zero()
-      : count === 1
-        ? m.flow_fields_defined_singular({ count })
-        : m.flow_fields_defined_plural({ count });
-  });
-  const formSchemaRequiredLabel = $derived.by(() => {
-    const count = displayedFormSchemaStats.requiredCount;
-    return count === 0
-      ? m.flow_fields_required_zero()
-      : count === 1
-        ? m.flow_fields_required_singular({ count })
-        : m.flow_fields_required_plural({ count });
-  });
   $effect(() => {
     if (builderStage !== 3 && formSchemaDraftStats !== null) {
       formSchemaDraftStats = null;
@@ -1103,7 +1084,7 @@
     >
       <FlowRunsTable
         flow={$resource}
-        intric={data.intric}
+        eneo={data.intric}
         visible={activeTab === "history"}
         reloadTrigger={runsReloadTrigger}
         bind:latestRunPayload={latestHistoryPayload}

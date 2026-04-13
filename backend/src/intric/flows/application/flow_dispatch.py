@@ -17,19 +17,32 @@ async def dispatch_flow_run_after_commit(
     run_id: UUID,
     flow_id: UUID,
     tenant_id: UUID,
-    user_id: UUID | None,
+    principal_type: str | None = None,
+    principal_user_id: UUID | None = None,
+    principal_api_key_id: UUID | None = None,
+    user_id: UUID | None = None,
 ) -> None:
     async with sessionmanager.session() as session:
         container = Container(session=providers.Object(session))
         backend = container.flow_execution_backend()
         run_repo = container.flow_run_repo()
         try:
-            await backend.dispatch(
-                run_id=run_id,
-                flow_id=flow_id,
-                tenant_id=tenant_id,
-                user_id=user_id,
-            )
+            if principal_type is None:
+                await backend.dispatch(
+                    run_id=run_id,
+                    flow_id=flow_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+            else:
+                await backend.dispatch(
+                    run_id=run_id,
+                    flow_id=flow_id,
+                    tenant_id=tenant_id,
+                    principal_type=principal_type,
+                    principal_user_id=principal_user_id,
+                    principal_api_key_id=principal_api_key_id,
+                )
         except Exception:
             logger.exception(
                 "flow_dispatch_after_commit_failed run_id=%s flow_id=%s tenant_id=%s",

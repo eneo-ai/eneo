@@ -19,7 +19,6 @@ import sqlalchemy as sa
 
 from intric.users.user import UserAdd, UserState
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -79,6 +78,59 @@ async def _create_space(client, *, token):
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
+
+
+async def _create_flow(client, *, token: str, space_id: str, name: str) -> str:
+    resp = await client.post(
+        "/api/v1/flows/",
+        json={
+            "space_id": space_id,
+            "name": name,
+            "description": "service key integration test flow",
+            "steps": [],
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 201, resp.text
+    flow_id = resp.json()["id"]
+
+    flow_assistant_resp = await client.post(
+        f"/api/v1/flows/{flow_id}/assistants/",
+        json={"name": f"flow-asst-{uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert flow_assistant_resp.status_code == 201, flow_assistant_resp.text
+    flow_assistant_id = flow_assistant_resp.json()["id"]
+
+    patch_resp = await client.patch(
+        f"/api/v1/flows/{flow_id}/",
+        json={
+            "name": name,
+            "description": "service key integration test flow",
+            "steps": [
+                {
+                    "assistant_id": flow_assistant_id,
+                    "step_order": 1,
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                    "mcp_policy": "inherit",
+                }
+            ],
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert patch_resp.status_code == 200, patch_resp.text
+    return flow_id
+
+
+async def _publish_flow(client, *, token: str, flow_id: str) -> None:
+    resp = await client.post(
+        f"/api/v1/flows/{flow_id}/publish/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
 
 
 async def _create_service_key(
@@ -524,3 +576,164 @@ async def test_service_key_survives_member_removal(
             {"sid": space_id, "uid": str(default_user.id)},
         )
         await session.commit()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_service_key_space_scoped_lists_only_published_flows(
+    client, default_user_token
+):
+    space_id = await _create_space(client, token=default_user_token)
+    published_flow_id = await _create_flow(
+        client,
+        token=default_user_token,
+        space_id=space_id,
+        name=f"published-flow-{uuid4().hex[:8]}",
+    )
+    await _publish_flow(client, token=default_user_token, flow_id=published_flow_id)
+    await _create_flow(
+        client,
+        token=default_user_token,
+        space_id=space_id,
+        name=f"draft-flow-{uuid4().hex[:8]}",
+    )
+
+    resp = await _create_service_key(
+        client,
+        token=default_user_token,
+        scope_type="space",
+        scope_id=space_id,
+        permission="read",
+    )
+    assert resp.status_code == 201, resp.text
+    secret = resp.json()["secret"]
+
+    probe = await client.get(
+        f"/api/v1/flows/?space_id={space_id}&limit=50&offset=0",
+        headers={"X-API-Key": secret},
+    )
+    assert probe.status_code == 200, probe.text
+    items = probe.json()["items"]
+    assert [item["id"] for item in items] == [published_flow_id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_service_key_space_scoped_published_runtime_surfaces_work_and_ai_builder_stays_denied(
+    client, default_user_token
+):
+    space_id = await _create_space(client, token=default_user_token)
+    flow_id = await _create_flow(
+        client,
+        token=default_user_token,
+        space_id=space_id,
+        name=f"runtime-flow-{uuid4().hex[:8]}",
+    )
+    await _publish_flow(client, token=default_user_token, flow_id=flow_id)
+
+    expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    resp = await _create_service_key(
+        client,
+        token=default_user_token,
+        scope_type="space",
+        scope_id=space_id,
+        permission="admin",
+        expires_at=expires,
+    )
+    assert resp.status_code == 201, resp.text
+    secret = resp.json()["secret"]
+
+    contract_resp = await client.get(
+        f"/api/v1/flows/{flow_id}/run-contract/",
+        headers={"X-API-Key": secret},
+    )
+    assert contract_resp.status_code == 200, contract_resp.text
+
+    runtime_projection_resp = await client.get(
+        f"/api/v1/flows/{flow_id}/published/",
+        headers={"X-API-Key": secret},
+    )
+    assert runtime_projection_resp.status_code == 200, runtime_projection_resp.text
+    runtime_projection = runtime_projection_resp.json()
+    assert runtime_projection["id"] == flow_id
+    assert runtime_projection["published_version"] == 1
+    assert runtime_projection["runtime_paths"]["create_run"].endswith(
+        f"/flows/{flow_id}/runs/"
+    )
+
+    input_policy_resp = await client.get(
+        f"/api/v1/flows/{flow_id}/input-policy/",
+        headers={"X-API-Key": secret},
+    )
+    assert input_policy_resp.status_code == 200, input_policy_resp.text
+
+    graph_resp = await client.get(
+        f"/api/v1/flows/{flow_id}/graph/",
+        headers={"X-API-Key": secret},
+    )
+    assert graph_resp.status_code == 200, graph_resp.text
+
+    create_run_resp = await client.post(
+        f"/api/v1/flows/{flow_id}/runs/",
+        json={"input_payload_json": {"text": "hello from service key"}},
+        headers={"X-API-Key": secret},
+    )
+    assert create_run_resp.status_code == 201, create_run_resp.text
+    service_run_id = create_run_resp.json()["id"]
+
+    human_run_resp = await client.post(
+        f"/api/v1/flows/{flow_id}/runs/",
+        json={"input_payload_json": {"text": "hello from human"}},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert human_run_resp.status_code == 201, human_run_resp.text
+    human_run_id = human_run_resp.json()["id"]
+
+    list_runs_resp = await client.get(
+        f"/api/v1/flows/{flow_id}/runs/?limit=50&offset=0",
+        headers={"X-API-Key": secret},
+    )
+    assert list_runs_resp.status_code == 200, list_runs_resp.text
+    listed_ids = {item["id"] for item in list_runs_resp.json()["items"]}
+    assert service_run_id in listed_ids
+    assert human_run_id not in listed_ids
+
+    ai_builder_resp = await client.post(
+        "/api/v1/flows/ai-builder/sessions",
+        json={"space_id": space_id, "target_kind": "create"},
+        headers={"X-API-Key": secret},
+    )
+    assert ai_builder_resp.status_code == 403, ai_builder_resp.text
+    assert ai_builder_resp.json()["code"] == "flow_service_key_principal_not_supported"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_service_key_runtime_projection_hides_unpublished_flow(
+    client, default_user_token
+):
+    space_id = await _create_space(client, token=default_user_token)
+    flow_id = await _create_flow(
+        client,
+        token=default_user_token,
+        space_id=space_id,
+        name=f"draft-only-flow-{uuid4().hex[:8]}",
+    )
+
+    expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    resp = await _create_service_key(
+        client,
+        token=default_user_token,
+        scope_type="space",
+        scope_id=space_id,
+        permission="admin",
+        expires_at=expires,
+    )
+    assert resp.status_code == 201, resp.text
+    secret = resp.json()["secret"]
+
+    runtime_projection_resp = await client.get(
+        f"/api/v1/flows/{flow_id}/published/",
+        headers={"X-API-Key": secret},
+    )
+    assert runtime_projection_resp.status_code == 404, runtime_projection_resp.text

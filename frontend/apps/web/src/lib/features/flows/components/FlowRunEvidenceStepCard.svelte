@@ -40,7 +40,6 @@
     expanded,
     inputExpanded,
     panelId,
-    runId,
     isPowerUser,
     intric,
     onToggle,
@@ -67,7 +66,6 @@
     expanded: boolean;
     inputExpanded: boolean;
     panelId: string;
-    runId: string;
     isPowerUser: boolean;
     intric: Intric;
     onToggle: (stepOrder: number) => void;
@@ -177,7 +175,7 @@
               <div class="mt-1">
                 <Badge class="bg-accent-dimmer text-accent-stronger mb-1">JSON</Badge>
                 <pre
-                  class="border-accent-default bg-hover-dimmer max-h-80 overflow-auto rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
+                  class="bg-hover-dimmer max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
                     result.output_payload_json.structured,
                     null,
                     2
@@ -214,7 +212,7 @@
               </div>
             {:else if !result.output_payload_json.structured && !result.output_payload_json.artifacts?.length}
               <pre
-                class="border-accent-default bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
+                class="bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
                   result.output_payload_json,
                   null,
                   2
@@ -272,7 +270,7 @@
         {#if runtimeInput}
           <Card.Root size="sm" class="bg-hover-dimmer">
             <Card.Content class="p-3">
-              <h4 class="text-muted text-xs font-semibold">Korningsindata</h4>
+              <h4 class="text-muted text-xs font-semibold">{m.flow_run_runtime_input_label()}</h4>
               <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
                 <Badge variant="outline">
                   {getRuntimeInputSummaryLabel(runtimeInput.fileCount)}
@@ -346,7 +344,9 @@
         {#if templateProvenance}
           <Card.Root size="sm" class="bg-hover-dimmer">
             <Card.Content class="p-3">
-              <h4 class="text-muted text-xs font-semibold">Mallproveniens</h4>
+              <h4 class="text-muted text-xs font-semibold">
+                {m.flow_run_template_provenance_label()}
+              </h4>
               <div class="text-secondary mt-2 flex flex-col gap-2 text-[11px]">
                 <div class="flex flex-wrap gap-2">
                   <Badge variant="outline">
@@ -402,7 +402,7 @@
               </button>
             </div>
             <pre
-              class="border-accent-default bg-hover-dimmer mt-1 max-h-[300px] overflow-y-auto rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
+              class="bg-hover-dimmer mt-1 max-h-[300px] overflow-y-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
                 stepAttempts,
                 null,
                 2
@@ -414,9 +414,13 @@
           <div class="border-default text-muted flex items-center gap-2 border-t pt-3 text-xs">
             <span class="tabular-nums">{m.flow_run_tokens()}</span>
             <span class="text-dimmer">&middot;</span>
-            <span class="tabular-nums">{result.num_tokens_input ?? 0} in</span>
+            <span class="tabular-nums"
+              >{m.flow_run_tokens_in({ count: String(result.num_tokens_input ?? 0) })}</span
+            >
             <span class="text-dimmer">&middot;</span>
-            <span class="tabular-nums">{result.num_tokens_output ?? 0} out</span>
+            <span class="tabular-nums"
+              >{m.flow_run_tokens_out({ count: String(result.num_tokens_output ?? 0) })}</span
+            >
           </div>
         {/if}
 

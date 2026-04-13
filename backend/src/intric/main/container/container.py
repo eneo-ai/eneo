@@ -1122,6 +1122,7 @@ class Container(containers.DeclarativeContainer):
         file_repo=file_repo,
         template_asset_repo=flow_template_asset_repo,
         encryption_service=encryption_service,
+        space_service=space_service,
     )
     flow_run_service = providers.Factory(
         FlowRunService,
@@ -1132,6 +1133,8 @@ class Container(containers.DeclarativeContainer):
         file_repo=file_repo,
         settings_service=settings_service,
         execution_backend=flow_execution_backend,
+        space_service=space_service,
+        actor_manager=actor_manager,
     )
     flow_template_asset_service = providers.Factory(
         FlowTemplateAssetService,

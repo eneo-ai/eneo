@@ -20,14 +20,26 @@ logger = get_logger(__name__)
 
 def create_flow_celery_app() -> Celery:
     settings = get_settings()
+    soft_time_limit = max(int(settings.flow_task_timeout_seconds), 1)
     app = create_shared_celery_app(
         app_name="intric_flows",
         default_queue=settings.flow_celery_queue,
         task_routes={
             "flows.execute": {"queue": settings.flow_celery_queue},
+            "flows.reconcile_running": {"queue": settings.flow_celery_queue},
         },
     )
-    app.conf.update(include=["intric.flows.runtime.tasks"])  # pyright: ignore[reportUnknownMemberType]
+    app.conf.update(  # pyright: ignore[reportUnknownMemberType]
+        include=["intric.flows.runtime.tasks"],
+        task_soft_time_limit=soft_time_limit,
+        task_time_limit=soft_time_limit + 60,
+        beat_schedule={
+            "reconcile-stale-running": {
+                "task": "flows.reconcile_running",
+                "schedule": 60.0,
+            }
+        },
+    )
     return app
 
 

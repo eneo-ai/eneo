@@ -20,11 +20,11 @@ from intric.flows.ai_builder.ai_builder_models import (
     PlanResponse,
     PlanStatus,
     RevisePlanRequest,
+    SendMessageRequest,
     SessionListItemResponse,
     SessionListResponse,
     SessionModelsResponse,
     SessionPlansResponse,
-    SendMessageRequest,
     SessionStatus,
     TargetKind,
 )
@@ -40,14 +40,18 @@ from intric.flows.ai_builder.ai_builder_router import (
     get_plan,
     get_session,
     get_session_models,
-    list_sessions,
     list_session_plans,
+    list_sessions,
     revise_plan,
     send_message,
 )
-from intric.main.exceptions import BadRequestException, ErrorCodes, NotFoundException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    ErrorCodes,
+    NotFoundException,
+    UnauthorizedException,
+)
 from intric.roles.permissions import Permission
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -147,7 +151,9 @@ async def _read_sse_events(response) -> list[dict[str, object]]:
     async for chunk in response.body_iterator:
         if hasattr(chunk, "encode") and not isinstance(chunk, (bytes, str)):
             encoded = chunk.encode()
-            chunks.append(encoded.decode() if isinstance(encoded, bytes) else str(encoded))
+            chunks.append(
+                encoded.decode() if isinstance(encoded, bytes) else str(encoded)
+            )
         elif isinstance(chunk, bytes):
             chunks.append(chunk.decode())
         else:
@@ -178,7 +184,9 @@ async def _read_sse_events(response) -> list[dict[str, object]]:
 
     if current_event is not None:
         raw_data = "\n".join(data_lines)
-        events.append({"event": current_event, "data": json.loads(raw_data) if raw_data else {}})
+        events.append(
+            {"event": current_event, "data": json.loads(raw_data) if raw_data else {}}
+        )
 
     return events
 
@@ -538,7 +546,7 @@ class TestGetSessionEndpoint:
     @pytest.mark.anyio
     async def test_returns_session_response(self):
         container = _make_container()
-        session = _make_session_domain()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
 
@@ -600,6 +608,22 @@ class TestGetSessionEndpoint:
         assert exc_info.value.code == "insufficient_scope"
         assert exc_info.value.context == {"auth_layer": "api_key_scope"}
 
+    @pytest.mark.anyio
+    async def test_rejects_non_creator_even_with_space_edit_permission(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=uuid4())
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await get_session(
+                request=MagicMock(),
+                session_id=session.id,
+                container=container,
+            )
+
+        assert exc_info.value.code == "session_creator_required"
+
 
 class TestListSessionsEndpoint:
     @pytest.mark.anyio
@@ -621,7 +645,9 @@ class TestListSessionsEndpoint:
 
         assert isinstance(result, SessionListResponse)
         assert result.sessions == [session]
-        container.space_service.return_value.get_space.assert_awaited_once_with(session.space_id)
+        container.space_service.return_value.get_space.assert_awaited_once_with(
+            session.space_id
+        )
 
     @pytest.mark.anyio
     async def test_filters_sessions_for_scoped_api_key(self):
@@ -672,7 +698,9 @@ class TestListSessionsEndpoint:
         )
         service = container.ai_builder_service.return_value
         service.list_sessions.return_value = [session]
-        container.space_service.return_value.get_space.side_effect = NotFoundException("missing")
+        container.space_service.return_value.get_space.side_effect = NotFoundException(
+            "missing"
+        )
 
         result = await list_sessions(request=MagicMock(), container=container)
 
@@ -692,7 +720,9 @@ class TestListSessionsEndpoint:
         )
         service = container.ai_builder_service.return_value
         service.list_sessions.return_value = [session]
-        container.space_service.return_value.get_space.side_effect = RuntimeError("db down")
+        container.space_service.return_value.get_space.side_effect = RuntimeError(
+            "db down"
+        )
 
         with pytest.raises(RuntimeError, match="db down"):
             await list_sessions(request=MagicMock(), container=container)
@@ -734,12 +764,29 @@ class TestCancelSessionEndpoint:
         audit_service = container.audit_service.return_value
         audit_service.log_async.assert_awaited_once()
 
+    @pytest.mark.anyio
+    async def test_rejects_non_creator_even_with_space_edit_permission(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=uuid4())
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await cancel_session(
+                request=MagicMock(),
+                session_id=session.id,
+                container=container,
+            )
+
+        assert exc_info.value.code == "session_creator_required"
+        service.cancel_session.assert_not_called()
+
 
 class TestGetSessionModelsEndpoint:
     @pytest.mark.anyio
     async def test_returns_typed_models_response(self):
         container = _make_container()
-        session = _make_session_domain()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
 
@@ -777,6 +824,22 @@ class TestGetSessionModelsEndpoint:
                 session_id=session.id,
                 container=container,
             )
+
+    @pytest.mark.anyio
+    async def test_rejects_non_creator_even_with_space_edit_permission(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=uuid4())
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await get_session_models(
+                request=MagicMock(),
+                session_id=session.id,
+                container=container,
+            )
+
+        assert exc_info.value.code == "session_creator_required"
 
 
 class TestPlanRecoveryEndpoints:
@@ -848,6 +911,27 @@ class TestPlanRecoveryEndpoints:
         assert exc_info.value.context == {"auth_layer": "api_key_scope"}
 
     @pytest.mark.anyio
+    async def test_get_plan_rejects_non_creator_even_with_space_edit_permission(self):
+        container = _make_container()
+        plan = _make_plan_domain()
+        session = _make_session_domain(
+            session_id=plan.session_id,
+            actor_user_id=uuid4(),
+        )
+        service = container.ai_builder_service.return_value
+        service.get_plan.return_value = plan
+        service.get_session.return_value = session
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await get_plan(
+                request=MagicMock(),
+                plan_id=plan.id,
+                container=container,
+            )
+
+        assert exc_info.value.code == "session_creator_required"
+
+    @pytest.mark.anyio
     async def test_list_session_plans_returns_typed_response(self):
         container = _make_container()
         session = _make_session_domain(actor_user_id=container.user.return_value.id)
@@ -880,6 +964,25 @@ class TestPlanRecoveryEndpoints:
                 container=container,
             )
 
+    @pytest.mark.anyio
+    async def test_list_session_plans_rejects_non_creator_even_with_space_edit_permission(
+        self,
+    ):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=uuid4())
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await list_session_plans(
+                request=MagicMock(),
+                session_id=session.id,
+                container=container,
+            )
+
+        assert exc_info.value.code == "session_creator_required"
+        service.list_session_plans.assert_not_called()
+
 
 class TestSendMessageEndpoint:
     @pytest.mark.anyio
@@ -888,7 +991,7 @@ class TestSendMessageEndpoint:
 
         container = _make_container()
         _configure_space_with_planner_model(container)
-        session = _make_session_domain()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
 
@@ -925,10 +1028,32 @@ class TestSendMessageEndpoint:
             )
 
     @pytest.mark.anyio
+    async def test_rejects_non_creator_even_with_space_edit_permission(self):
+        container = _make_container()
+        _configure_space_with_planner_model(container)
+        session = _make_session_domain(actor_user_id=uuid4())
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await send_message(
+                request=MagicMock(),
+                session_id=session.id,
+                body=SendMessageRequest(message="Hello"),
+                container=container,
+            )
+
+        assert exc_info.value.code == "session_creator_required"
+        service.prepare_message_context.assert_not_called()
+
+    @pytest.mark.anyio
     async def test_resolves_model_and_context(self):
         """Verify the endpoint resolves planner context through the service seam."""
         container = _make_container()
-        session = _make_session_domain(flow_id=uuid4())
+        session = _make_session_domain(
+            flow_id=uuid4(),
+            actor_user_id=container.user.return_value.id,
+        )
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
 
@@ -952,8 +1077,16 @@ class TestSendMessageEndpoint:
         flow.id = session.flow_id
         service.prepare_message_context.return_value = SimpleNamespace(
             planner_context=SimpleNamespace(
-                available_models=[{"id": str(model.id), "name": "GPT-4", "provider": "openai"}],
-                available_kbs=[{"id": str(collection.id), "name": "Docs", "description": "Documentation"}],
+                available_models=[
+                    {"id": str(model.id), "name": "GPT-4", "provider": "openai"}
+                ],
+                available_kbs=[
+                    {
+                        "id": str(collection.id),
+                        "name": "Docs",
+                        "description": "Documentation",
+                    }
+                ],
                 max_input_tokens=4096,
                 max_output_tokens=2048,
                 budget_policy=SimpleNamespace(),
@@ -988,7 +1121,7 @@ class TestSendMessageEndpoint:
         from sse_starlette import EventSourceResponse
 
         container = _make_container()
-        session = _make_session_domain()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
 
@@ -1005,7 +1138,9 @@ class TestSendMessageEndpoint:
 
         service.prepare_message_context.return_value = SimpleNamespace(
             planner_context=SimpleNamespace(
-                available_models=[{"id": str(model.id), "name": "GPT-4", "provider": "azure"}],
+                available_models=[
+                    {"id": str(model.id), "name": "GPT-4", "provider": "azure"}
+                ],
                 available_kbs=[],
                 max_input_tokens=4096,
                 max_output_tokens=4096,
@@ -1059,7 +1194,7 @@ class TestSendMessageEndpoint:
 
         container = _make_container()
         _configure_space_with_planner_model(container)
-        session = _make_session_domain()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
 
@@ -1092,7 +1227,7 @@ class TestSendMessageEndpoint:
     async def test_streams_typed_error_and_done_when_message_stream_raises(self):
         container = _make_container()
         _configure_space_with_planner_model(container)
-        session = _make_session_domain()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
 
@@ -1117,7 +1252,9 @@ class TestSendMessageEndpoint:
         error_payload = events[1]["data"]
         assert error_payload["code"] == "planner_stream_failed"
         assert error_payload["phase"] == "router"
-        assert error_payload["intric_error_code"] == int(ErrorCodes.INTERNAL_SERVER_ERROR)
+        assert error_payload["intric_error_code"] == int(
+            ErrorCodes.INTERNAL_SERVER_ERROR
+        )
         assert error_payload["request_id"] == "req-stream-1"
 
 

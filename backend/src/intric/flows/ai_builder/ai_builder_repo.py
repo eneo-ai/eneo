@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.flow_tables import BuilderPlans, BuilderSessions
+from intric.database.tables.tenant_table import Tenants
 from intric.flows.ai_builder.ai_builder_models import (
     BuilderPlan,
     BuilderSession,
@@ -50,6 +51,12 @@ class AIBuilderRepository:
     # ---------------------------------------------------------------------------
     # Sessions
     # ---------------------------------------------------------------------------
+
+    async def acquire_session_creation_lock(self, *, tenant_id: UUID) -> None:
+        async with self._transaction():
+            await self.session.execute(
+                select(Tenants.id).where(Tenants.id == tenant_id).with_for_update()
+            )
 
     async def create_session(
         self,

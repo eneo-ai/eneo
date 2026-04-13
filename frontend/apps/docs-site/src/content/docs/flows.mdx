@@ -1,0 +1,332 @@
+import { Callout } from 'nextra/components'
+
+# Flows
+
+A Flow is a multi-step AI pipeline you build inside a space. You design it as a draft, publish it to make it runnable, and then execute runs against that published version. Every run is tied to an immutable version snapshot, so results are traceable to the exact definition that produced them.
+
+<Callout type="info">
+If you want to build on Flows from your own application, read this page first and then continue with the <a href="/guides/flows-api-guide">Flows API Guide</a>.
+</Callout>
+
+![High-level Flows lifecycle diagram showing user-principal-only authoring, publishing to a versioned definition, and runtime execution with outputs, artifacts, and evidence](/diagrams/flows-overview.svg)
+
+*Flows at a glance: user principals author and publish drafts, API consumers run published versions, and completed runs produce outputs, artifacts, and evidence.*
+
+## Key terms
+
+| Term | Meaning |
+| --- | --- |
+| Space | The workspace where flows, assistants, and permissions live |
+| Step | One ordered unit in the flow pipeline |
+| Execution principal | The identity that owns a run: a user principal or a service key |
+| Material | The text or structured data a step actually receives as input |
+| Classification level | The security level that constrains how data can move through the flow |
+
+## The mental model
+
+The easiest way to understand Flows is to think in three layers:
+
+| Layer | What it does |
+| --- | --- |
+| Human-owned draft | Lets a user-principal author design and publish the flow |
+| Published execution contract | Defines the versioned runtime shape that API consumers call |
+| Evidence-aware runtime | Executes runs, stores outputs and artifacts, and records RAG/evidence data |
+
+The rest of this page explains those three layers in order.
+
+## Drafts, published versions, and runs
+
+A flow definition lives inside a space and contains:
+
+- top-level metadata such as name, description, retention, creator, and owner
+- an ordered list of steps
+- optional form fields and runtime input requirements for published runs
+- optional DOCX template assets for document assembly
+
+### Three separate objects
+
+| Concept | What it means | Who owns it |
+| --- | --- | --- |
+| Draft flow | The editable authoring definition | A human draft owner |
+| Published version | An immutable snapshot used for execution | Versioned from the draft |
+| Flow run | One execution of a published version | The execution principal: a user principal or a service key |
+
+That split is intentional. Draft editing stays human-governed, while runtime execution can safely belong to a machine principal.
+
+### Owner vs creator
+
+For authoring, Flows track both:
+
+- the person who originally created the draft
+- the person who currently owns the draft
+
+In the API and backend this maps to `created_by_user_id` and `owner_user_id`. The distinction matters because authorship history and current authoring authority are not always the same thing.
+
+## How a flow executes
+
+Flows execute **sequentially**. Each step receives input, produces output, and passes input data onward according to its `input_source`.
+
+![Sequential step execution diagram showing run input flowing through three example steps (Transcribe, Summarize, Render DOCX) into run output, with reference panels for input_source, output_mode, and output_type values](/diagrams/flows-sequence.svg)
+
+*A worked example: audio goes in, a DOCX document comes out. Each step declares where it reads from and how it writes its result.*
+
+### Core step fields
+
+| Field | What it controls | Common values | Default behavior |
+| --- | --- | --- | --- |
+| `input_source` | Where the step gets its material from | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, `http_post` | Explicit per step |
+| `input_type` | What kind of input the step expects | `text`, `json`, `audio`, `document`, `file`, `image`, `any` | Explicit per step |
+| `output_mode` | How the step produces its result | `pass_through`, `http_post`, `transcribe_only`, `template_fill` | Explicit per step |
+| `output_type` | The result shape | `text`, `json`, `pdf`, `docx` | Explicit per step |
+| `mcp_policy` | How MCP tool access is handled for the step | `inherit`, `restricted` | Usually `inherit` |
+| `output_classification_override` | Optional higher classification for the step output | integer override, often discussed as levels such as K1-K4 | No override |
+
+### Step chaining
+
+The backend sorts steps by `step_order`. A later step can:
+
+- reuse the original flow input
+- consume the previous step's output
+- aggregate all previous step outputs
+- fetch input from HTTP
+
+The flow graph endpoint and the web editor both expose this structure directly.
+
+## Published runtime inputs and run contracts
+
+Published flows can expose two runtime input shapes to API consumers:
+
+1. **structured form fields** that become variables in steps
+2. **file inputs** either at the flow level or for specific runtime-input-enabled steps
+
+The runtime API exposes this through:
+
+- `GET /api/v1/flows/{id}/run-contract/`
+- `GET /api/v1/flows/{id}/input-policy/`
+
+Those endpoints are the canonical way for a client to discover what a published flow expects before starting a run.
+
+### How form fields map to runtime payloads
+
+If a published flow exposes form fields, the client sends those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field types and required flags.
+
+## Output modes and what they mean
+
+| `output_mode` | What it is for | Constraints |
+| --- | --- | --- |
+| `pass_through` | Standard LLM-backed generation | Historical name; the step still runs an LLM and returns the configured `output_type` |
+| `http_post` | Send the step output to an external HTTP endpoint | Requires valid authored HTTP config |
+| `transcribe_only` | Audio transcription | Requires `input_type=audio` and `output_type=text` |
+| `template_fill` | DOCX document assembly | Requires `output_type=docx` |
+
+### `transcribe_only`
+
+`transcribe_only` is the built-in transcription mode for audio-to-text steps. Flows do not need transcription by default; transcription is effectively turned on only when a step uses this mode.
+
+Current validation rules are strict:
+
+- `input_type` must be `audio`
+- `output_type` must be `text`
+- if runtime input is enabled for that step, its runtime input format must also be `audio`
+
+This is the normal starting point for flows that ingest recorded meetings, interviews, or citizen-submitted audio.
+
+### `template_fill`
+
+`template_fill` is the document-assembly mode for DOCX output.
+
+Current validation rules:
+
+- `output_type` must be `docx`
+- the step must point at a valid template asset or template file configuration before the flow can be published successfully
+
+Use this when a later step should produce a deterministic DOCX document rather than free-form text.
+
+## Advanced step input templates ("Underlag till steget")
+
+The web editor exposes an advanced per-step input template labeled **“Underlag till steget”** / **“Underlag (avancerat)”**.
+
+Use this when the default material assembly is not enough and you want to control exactly what text a step receives.
+
+This feature does **not** replace the step's instructions. It changes the **material text** the model receives for that step.
+
+- **Instructions** tell the model what to do
+- **Underlag till steget** controls what text the model actually works on
+
+If you leave the advanced input template empty, the step uses its normal material based on `input_source`, form fields, runtime files, and previous outputs. If you override it, you can compose custom text with variables such as earlier step outputs.
+
+### What the LLM sees
+
+| Without custom material | With custom material |
+| --- | --- |
+| The step receives the default assembled material from flow input, previous outputs, and runtime data | The step receives the exact text you compose in the advanced input template |
+
+This is one of the most powerful Flow features because it lets you keep the same step sequence while changing the exact context sent into the model.
+
+## Knowledge, files, RAG, and citations
+
+Each step uses an underlying assistant configuration. In the current UI and runtime model, that means a step can carry:
+
+- attached files
+- knowledge sources such as collections, websites, or integration knowledge
+- MCP server access through the assistant context
+
+### RAG in flows
+
+When a step uses knowledge, the runtime records RAG provenance in the step-attempt provenance payload. The evidence and debug surfaces can then expose:
+
+- retrieval status
+- source documents
+- chunk references and scores
+- prompt-context inclusion summaries
+- citation sidecar data when citation mode is active
+
+### Citation mode
+
+A step can enable `output_config.citation_mode = inline_inref_sidecar`.
+
+Current validation allows that only on **LLM-backed text steps**. It is not supported for `transcribe_only` or `template_fill` steps.
+
+### Highlighted source segments in the UI
+
+The web app includes a knowledge trace viewer for flow runs. It can open the underlying source document and highlight the retrieved segments used during RAG, which makes review and explainability much easier.
+
+## Security classification and MCP policy
+
+### Security classification inside a flow
+
+Flows evaluate step security classification from several inputs:
+
+- the space baseline classification
+- the classification implied by previous outputs
+- knowledge-source classifications
+- MCP server classifications
+- any explicit output classification override
+
+Current enforcement prevents a step from lowering the effective classification of its output. In practice, that means a flow cannot use an override to lower the classification below what the input material already implies.
+
+### MCP policy
+
+Each step has an `mcp_policy`:
+
+- `inherit` uses the shared/default MCP configuration for the step context
+- `restricted` narrows which MCP tools the step can use
+
+A common use for `restricted` is to leave most steps on the shared MCP surface while tightening tool access on one especially sensitive or narrowly scoped step.
+
+## Ownership and visibility
+
+### Authoring ownership
+
+Current authoring policy is intentionally narrow:
+
+- drafts are user-principal-owned
+- AI Builder requires a user principal
+- service keys are not supported for draft editing
+- tenant admins and space owners can override draft ownership according to the current authoring rules
+
+### Runtime principals
+
+Runs are principal-owned rather than draft-owned. A run can belong to:
+
+- a user principal
+- a service key principal
+
+That is what allows a service-backed application to keep working even if the employee who originally created the flow leaves the organization.
+
+## Access model
+
+![Flows access by lifecycle phase showing authoring requires user principal and published runtime supports both](/diagrams/flows-access-lifecycle.svg)
+
+*Authoring is user-principal-only. Published runtime supports both user principals and service keys.*
+
+The cleanest way to think about Flow permissions is on **two axes**:
+
+1. **Lifecycle phase** — authoring vs published runtime
+2. **Principal type** — user-principal author/operator vs run owner vs service key
+
+That split is deliberate. A service key is a **runtime principal**, not a draft author.
+
+### Core rules
+
+- **Drafts are user-principal-owned.** Draft CRUD, publish/unpublish, template management, flow-assistant authoring, and AI Builder require a user principal.
+- **Published runtime is broader.** Published flows can be executed by a user principal or a service key, but runtime visibility still depends on who owns the run and who is a trusted operator.
+- **Own-run isolation matters.** Service keys are always own-run-only. They do not become cross-run space operators, even if the key is scoped to a space.
+- **Trusted operator roles use user principals.** In this context, trusted in-space operators means **space owner** and **space admin**. Tenant admin remains the tenant-wide trusted operator.
+- **Single-flow runtime lookups should use the published projection.** Runtime consumers should prefer `GET /api/v1/flows/{id}/published/` over the user-principal current-definition endpoint.
+
+<Callout type="info">
+For machine integrations, service keys should discover published flows with <code>GET /api/v1/flows/?space_id=...</code>, then fetch one flow's runtime-safe projection with <code>GET /api/v1/flows/{'{id}'}/published/</code>. Do <strong>not</strong> treat <code>GET /api/v1/flows/{'{id}'}/</code> as a service-key discovery endpoint; that route requires a user principal and returns the current draft/current-definition view.
+</Callout>
+
+![Run visibility and evidence access showing four actor types with their access scope and evidence gating](/diagrams/flows-run-visibility.svg)
+
+*Once a run exists, what you can see depends on who you are. Evidence is additionally gated by policy or capability.*
+
+### Quick access view
+
+| Surface family | User-principal draft author | User-principal run owner | Trusted in-space operator | Tenant admin | Service key |
+| --- | --- | --- | --- | --- | --- |
+| Draft authoring | Yes | n/a | Yes, per authoring policy | Yes | No |
+| Published runtime discovery | Yes | Yes | Yes | Yes | Yes, published only in scoped space |
+| Create runs | Yes | Yes | Yes | Yes | Yes, published only |
+| Read run status, step outputs, artifacts | Own runs | Own runs | In-scope runs | Tenant-wide runs | Own runs only |
+| Evidence view / export | Own runs, policy-gated | Own runs, policy-gated | In-scope runs, policy-gated | Tenant-wide, policy-gated | Own runs only, explicit `flow_evidence` capability required |
+| AI Builder | Yes | n/a | Yes | Yes | No |
+
+If you need the endpoint-by-endpoint version of this model, use the access matrix in the <a href="/guides/flows-api-guide#access-matrix">Flows API Guide</a>.
+
+## Evidence and classification-aware export
+
+Flows use a tiered evidence model rather than a binary debug/no-debug split.
+
+| Tier | Purpose |
+| --- | --- |
+| Evidence view | Inspect the rich run trace in the UI or API |
+| Redacted export | Standard support/compliance export |
+| Raw export | Full unredacted export for stricter debugging or compliance scenarios |
+
+### What classification 3 changes
+
+The main tightening for classification-3 spaces is on **raw export**.
+
+Tenant flow settings can block raw export for:
+
+- space admins
+- user-principal run owners
+- service keys
+
+The purpose is not to disable all evidence support. It is to keep normal inspection and redacted export practical while treating full raw export as the most sensitive surface.
+
+## Authoring surfaces
+
+Flows have two user-principal authoring surfaces:
+
+### Direct flow authoring
+
+The draft API under `/api/v1/flows/` covers:
+
+- create, list, get, update, delete
+- publish and unpublish
+- template asset upload and inspection
+- assistant-specific step configuration routes
+
+### AI Builder
+
+AI Builder lives under `/api/v1/flows/ai-builder/` and is session-based. It supports:
+
+- creating or resuming sessions
+- sending planner messages over SSE
+- reading plans and session state
+- approving and applying plans
+
+Important current rule: **AI Builder requires a user principal**. It relies on flow-edit permission checks plus creator-scoped session access, so it is not a service-key authoring surface.
+
+## Practical takeaway
+
+Flows are best understood as a user-principal-owned draft workflow on top of a versioned runtime contract with evidence-aware execution. Once that model is clear, the API and UI make much more sense:
+
+- user principals own drafts
+- published versions define the runtime contract
+- users and service keys can own runs
+- evidence, RAG provenance, and classification rules govern how runs are inspected afterward

@@ -10,6 +10,8 @@ from uuid import uuid4
 import httpx
 import pytest
 
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.outcome import Outcome
 from intric.flows.flow import (
     FlowRun,
     FlowRunStatus,
@@ -18,8 +20,6 @@ from intric.flows.flow import (
     FlowStepResultStatus,
     FlowVersion,
 )
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.outcome import Outcome
 from intric.flows.runtime.executor import (
     FlowRunExecutor,
     FlowRunExecutorConfig,
@@ -51,7 +51,9 @@ def _run(*, status: FlowRunStatus, user) -> FlowRun:
     )
 
 
-def _claimed_step_result(*, run_id, flow_id, tenant_id, step_id, assistant_id) -> FlowStepResult:
+def _claimed_step_result(
+    *, run_id, flow_id, tenant_id, step_id, assistant_id
+) -> FlowStepResult:
     now = datetime.now(timezone.utc)
     return FlowStepResult(
         id=uuid4(),
@@ -187,7 +189,9 @@ def _assistant_for_execute_step(*, has_knowledge: bool):
     assistant.integration_knowledge_list = []
     assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = model_kwargs
-    assistant.completion_model = SimpleNamespace(id=uuid4(), name="gpt-4o-mini", provider_type="openai")
+    assistant.completion_model = SimpleNamespace(
+        id=uuid4(), name="gpt-4o-mini", provider_type="openai"
+    )
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
             completion="answer",
@@ -274,7 +278,9 @@ async def test_webhook_failure_keeps_completed_step_evidence(user):
             },
         )
     )
-    executor._deliver_webhook = AsyncMock(side_effect=RuntimeError("webhook unavailable"))
+    executor._deliver_webhook = AsyncMock(
+        side_effect=RuntimeError("webhook unavailable")
+    )
 
     result = await executor.execute(
         run_id=queued_run.id,
@@ -378,7 +384,9 @@ async def test_webhook_failure_logs_exception_context(user, caplog):
             model_parameters_json={"temperature": 0.2},
         )
     )
-    executor._deliver_webhook = AsyncMock(side_effect=RuntimeError("webhook unavailable"))
+    executor._deliver_webhook = AsyncMock(
+        side_effect=RuntimeError("webhook unavailable")
+    )
 
     with caplog.at_level(logging.ERROR):
         await executor.execute(
@@ -480,7 +488,10 @@ async def test_webhook_success_persists_delivery_and_completes_run(user):
     assert second_saved.output_payload_json["webhook_delivered"] is True
     assert "webhook_error" not in second_saved.output_payload_json
     flow_run_repo.update_status.assert_awaited()
-    assert flow_run_repo.update_status.await_args_list[-1].kwargs["status"] == FlowRunStatus.COMPLETED
+    assert (
+        flow_run_repo.update_status.await_args_list[-1].kwargs["status"]
+        == FlowRunStatus.COMPLETED
+    )
     assert (
         flow_run_repo.update_status.await_args_list[-1].kwargs["output_payload_json"]
         == second_saved.output_payload_json
@@ -513,7 +524,9 @@ async def test_execute_persists_distinct_model_parameters_for_each_step(user):
 
     flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
-    flow_run_repo.claim_step_result = AsyncMock(side_effect=[first_claimed, second_claimed])
+    flow_run_repo.claim_step_result = AsyncMock(
+        side_effect=[first_claimed, second_claimed]
+    )
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
     flow_run_repo.update_status = AsyncMock()
@@ -640,7 +653,9 @@ async def test_deliver_webhook_uses_interpolated_url_and_body_template(user):
     )
     run = run.model_copy(update={"input_payload_json": {"id": "abc-123"}})
     request = httpx.Request("POST", "https://example.org/hook/abc-123")
-    executor._send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+    executor._send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request)
+    )
 
     await executor._deliver_webhook(
         step=step,
@@ -685,7 +700,9 @@ async def test_deliver_webhook_uses_interpolated_body_json_and_headers(user):
         output_type="text",
     )
     request = httpx.Request("POST", "https://example.org/hook/777")
-    executor._send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+    executor._send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request)
+    )
 
     await executor._deliver_webhook(
         step=step,
@@ -724,13 +741,16 @@ async def test_deliver_webhook_rejects_conflicting_body_template_and_body_json(u
         output_mode="http_post",
         output_config={
             "url": "https://example.org/hook",
-            "body_template": "{\"result\":\"{{text}}\"}",
+            "body_template": '{"result":"{{text}}"}',
             "body_json": {"result": "{{text}}"},
         },
         output_type="text",
     )
 
-    with pytest.raises(TypedIOValidationException, match="cannot define both body_template and body_json"):
+    with pytest.raises(
+        TypedIOValidationException,
+        match="cannot define both body_template and body_json",
+    ):
         await executor._deliver_webhook(
             step=step,
             text_payload="done",
@@ -781,7 +801,9 @@ async def test_deliver_webhook_timeout_raises_bad_request(user):
         output_config={"url": "https://example.org/hook"},
         output_type="text",
     )
-    executor._send_http_request = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+    executor._send_http_request = AsyncMock(
+        side_effect=httpx.TimeoutException("timeout")
+    )
 
     with pytest.raises(BadRequestException, match="timed out"):
         await executor._deliver_webhook(
@@ -1001,7 +1023,9 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
     flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
-    flow_run_repo.create_or_get_attempt_started = AsyncMock(side_effect=RuntimeError("db write failed"))
+    flow_run_repo.create_or_get_attempt_started = AsyncMock(
+        side_effect=RuntimeError("db write failed")
+    )
     flow_run_repo.finish_attempt = AsyncMock()
     flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
@@ -1040,7 +1064,9 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
     saved_result = flow_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.error_message == "Flow step 1 execution failed."
-    assert flow_run_repo.update_status.await_args.kwargs["status"] == FlowRunStatus.FAILED
+    assert (
+        flow_run_repo.update_status.await_args.kwargs["status"] == FlowRunStatus.FAILED
+    )
 
 
 @pytest.mark.asyncio
@@ -1123,7 +1149,9 @@ async def test_typed_validation_failure_persists_input_context_for_export(user):
 
 
 @pytest.mark.asyncio
-async def test_typed_validation_failure_without_attached_context_uses_fallback_payload(user):
+async def test_typed_validation_failure_without_attached_context_uses_fallback_payload(
+    user,
+):
     executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
     running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
@@ -1220,7 +1248,9 @@ async def test_apply_output_cap_persists_file_when_over_limit(user):
 async def test_apply_output_cap_handles_utf8_byte_limit(user):
     executor, _, _, _ = _build_executor(user)
     executor.max_inline_text_bytes = 5
-    run = _run(status=FlowRunStatus.RUNNING, user=user).model_copy(update={"user_id": None})
+    run = _run(status=FlowRunStatus.RUNNING, user=user).model_copy(
+        update={"user_id": None}
+    )
     step = SimpleNamespace(step_order=1)
     utf8_text = "ååå"  # 6 bytes in UTF-8, exceeds 5-byte cap.
 
@@ -1363,7 +1393,10 @@ async def test_execute_returns_cancelled_when_any_step_result_cancelled(user):
 
     assert result == {"status": "cancelled"}
     flow_run_repo.update_status.assert_awaited_once()
-    assert flow_run_repo.update_status.await_args.kwargs["status"] == FlowRunStatus.CANCELLED
+    assert (
+        flow_run_repo.update_status.await_args.kwargs["status"]
+        == FlowRunStatus.CANCELLED
+    )
 
 
 @pytest.mark.asyncio
@@ -1507,12 +1540,16 @@ async def test_execute_uses_retry_count_plus_one_for_attempt_lifecycle(user):
     )
 
     assert result == {"status": "completed"}
-    assert flow_run_repo.create_or_get_attempt_started.await_args.kwargs["attempt_no"] == 3
+    assert (
+        flow_run_repo.create_or_get_attempt_started.await_args.kwargs["attempt_no"] == 3
+    )
     assert flow_run_repo.finish_attempt.await_args.kwargs["attempt_no"] == 3
 
 
 @pytest.mark.asyncio
-async def test_execute_stops_before_claiming_later_steps_when_run_becomes_cancelled(user):
+async def test_execute_stops_before_claiming_later_steps_when_run_becomes_cancelled(
+    user,
+):
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
     running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
@@ -1609,9 +1646,7 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = AsyncMock(
-        side_effect=[queued_run, running_run, cancelled_run]
-    )
+    flow_run_repo.get = AsyncMock(side_effect=[queued_run, running_run, cancelled_run])
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
@@ -1668,7 +1703,10 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
     assert result == {"status": "skipped", "reason": "run_cancelled"}
     flow_repo.save_step_result.assert_not_awaited()
     flow_run_repo.finish_attempt.assert_awaited_once()
-    assert flow_run_repo.finish_attempt.await_args.kwargs["status"] == FlowStepAttemptStatus.CANCELLED
+    assert (
+        flow_run_repo.finish_attempt.await_args.kwargs["status"]
+        == FlowStepAttemptStatus.CANCELLED
+    )
     flow_run_repo.update_status.assert_not_awaited()
 
 
@@ -1774,13 +1812,21 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
 
     assert result == {"status": "completed"}
     flow_run_repo.create_or_get_attempt_started.assert_awaited_once()
-    assert flow_run_repo.create_or_get_attempt_started.await_args.kwargs["step_id"] == step_id_2
+    assert (
+        flow_run_repo.create_or_get_attempt_started.await_args.kwargs["step_id"]
+        == step_id_2
+    )
     executor._execute_step.assert_awaited_once()
-    assert executor._execute_step.await_args.kwargs["state"].completed_by_order[1] == existing_completed
+    assert (
+        executor._execute_step.await_args.kwargs["state"].completed_by_order[1]
+        == existing_completed
+    )
 
 
 @pytest.mark.asyncio
-async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_completed_evidence(user):
+async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_completed_evidence(
+    user,
+):
     executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
     running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
@@ -1919,7 +1965,9 @@ def _completed_step_result(
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_previous_step_prefers_source_text_over_legacy_text_binding(user):
+async def test_resolve_step_input_previous_step_prefers_source_text_over_legacy_text_binding(
+    user,
+):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     prior = [
@@ -1952,7 +2000,9 @@ async def test_resolve_step_input_previous_step_prefers_source_text_over_legacy_
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_all_previous_steps_prefers_aggregated_source_text(user):
+async def test_resolve_step_input_all_previous_steps_prefers_aggregated_source_text(
+    user,
+):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     prior = [
@@ -2008,7 +2058,10 @@ async def test_resolve_step_input_question_binding_overrides_source_text(user):
     step = _runtime_step(
         step_order=2,
         input_source="previous_step",
-        input_bindings={"question": "Summarize: {{step_1.output.text}}", "text": "legacy"},
+        input_bindings={
+            "question": "Summarize: {{step_1.output.text}}",
+            "text": "legacy",
+        },
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, prior)
 
@@ -2025,7 +2078,9 @@ async def test_resolve_step_input_question_binding_overrides_source_text(user):
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_legacy_mirrored_question_binding_uses_source_text(user):
+async def test_resolve_step_input_legacy_mirrored_question_binding_uses_source_text(
+    user,
+):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     prior = [
@@ -2040,7 +2095,9 @@ async def test_resolve_step_input_legacy_mirrored_question_binding_uses_source_t
     step = _runtime_step(
         step_order=2,
         input_source="previous_step",
-        input_bindings={"question": "Du ska alltid konvertera texten till stora bokstäver"},
+        input_bindings={
+            "question": "Du ska alltid konvertera texten till stora bokstäver"
+        },
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, prior)
 
@@ -2118,7 +2175,9 @@ async def test_execute_fails_run_when_claimed_step_result_missing(user):
 
     assert result == {"status": "failed", "error": "step_missing"}
     flow_run_repo.update_status.assert_awaited_once()
-    assert flow_run_repo.update_status.await_args.kwargs["status"] == FlowRunStatus.FAILED
+    assert (
+        flow_run_repo.update_status.await_args.kwargs["status"] == FlowRunStatus.FAILED
+    )
 
 
 @pytest.mark.asyncio
@@ -2161,7 +2220,9 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
 
     assert result == {"status": "failed", "error": "invalid_flow_definition"}
     flow_run_repo.update_status.assert_awaited_once()
-    assert flow_run_repo.update_status.await_args.kwargs["status"] == FlowRunStatus.FAILED
+    assert (
+        flow_run_repo.update_status.await_args.kwargs["status"] == FlowRunStatus.FAILED
+    )
 
 
 def test_parse_runtime_steps_rejects_invalid_output_mode(user):
@@ -2249,7 +2310,9 @@ def test_parse_runtime_steps_accepts_transcribe_only_output_mode(user):
 def test_parse_runtime_steps_rejects_non_object_webhook_headers(user):
     executor, _, _, _ = _build_executor(user)
 
-    with pytest.raises(BadRequestException, match="output_config.headers must be an object"):
+    with pytest.raises(
+        BadRequestException, match="output_config.headers must be an object"
+    ):
         executor._parse_runtime_steps(
             {
                 "steps": [
@@ -2259,7 +2322,10 @@ def test_parse_runtime_steps_rejects_non_object_webhook_headers(user):
                         "assistant_id": str(uuid4()),
                         "input_source": "flow_input",
                         "output_mode": "http_post",
-                        "output_config": {"url": "https://example.org", "headers": "not-an-object"},
+                        "output_config": {
+                            "url": "https://example.org",
+                            "headers": "not-an-object",
+                        },
                     }
                 ]
             }
@@ -2269,7 +2335,9 @@ def test_parse_runtime_steps_rejects_non_object_webhook_headers(user):
 def test_parse_runtime_steps_rejects_all_previous_steps_json_input(user):
     executor, _, _, _ = _build_executor(user)
 
-    with pytest.raises(BadRequestException, match="incompatible with input_source 'all_previous_steps'"):
+    with pytest.raises(
+        BadRequestException, match="incompatible with input_source 'all_previous_steps'"
+    ):
         executor._parse_runtime_steps(
             {
                 "steps": [
@@ -2355,7 +2423,9 @@ def test_parse_runtime_steps_rejects_duplicate_step_orders(user):
 def test_parse_runtime_steps_rejects_non_contiguous_step_orders(user):
     executor, _, _, _ = _build_executor(user)
 
-    with pytest.raises(BadRequestException, match="Step order must be contiguous and start at 1"):
+    with pytest.raises(
+        BadRequestException, match="Step order must be contiguous and start at 1"
+    ):
         executor._parse_runtime_steps(
             {
                 "steps": [
@@ -2522,7 +2592,9 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
     assistant = _assistant_for_execute_step(has_knowledge=True)
     executor._load_assistant = AsyncMock(return_value=assistant)
     executor._resolve_step_input = AsyncMock(
-        return_value=StepInputValue(text="hello", source_text="hello", input_source="flow_input")
+        return_value=StepInputValue(
+            text="hello", source_text="hello", input_source="flow_input"
+        )
     )
     executor._process_typed_output = AsyncMock(return_value=(None, None))
     executor._apply_output_cap = AsyncMock(return_value=("answer", []))
@@ -2588,7 +2660,9 @@ async def test_execute_step_skips_rag_when_assistant_has_no_knowledge(user):
     assistant = _assistant_for_execute_step(has_knowledge=False)
     executor._load_assistant = AsyncMock(return_value=assistant)
     executor._resolve_step_input = AsyncMock(
-        return_value=StepInputValue(text="hello", source_text="hello", input_source="flow_input")
+        return_value=StepInputValue(
+            text="hello", source_text="hello", input_source="flow_input"
+        )
     )
     executor._process_typed_output = AsyncMock(return_value=(None, None))
     executor._apply_output_cap = AsyncMock(return_value=("answer", []))
@@ -2621,13 +2695,17 @@ async def test_execute_step_rag_timeout_appends_diagnostic_and_continues(user):
     assistant = _assistant_for_execute_step(has_knowledge=True)
     executor._load_assistant = AsyncMock(return_value=assistant)
     executor._resolve_step_input = AsyncMock(
-        return_value=StepInputValue(text="hello", source_text="hello", input_source="flow_input")
+        return_value=StepInputValue(
+            text="hello", source_text="hello", input_source="flow_input"
+        )
     )
     executor._process_typed_output = AsyncMock(return_value=(None, None))
     executor._apply_output_cap = AsyncMock(return_value=("answer", []))
     executor._commit = AsyncMock()
     executor.references_service = AsyncMock()
-    executor.references_service.get_references = AsyncMock(side_effect=asyncio.TimeoutError())
+    executor.references_service.get_references = AsyncMock(
+        side_effect=asyncio.TimeoutError()
+    )
 
     output = await executor._execute_step(step=step, run=run, state=state)
 
@@ -2655,13 +2733,17 @@ async def test_execute_step_rag_failure_appends_diagnostic_and_continues(user):
     assistant = _assistant_for_execute_step(has_knowledge=True)
     executor._load_assistant = AsyncMock(return_value=assistant)
     executor._resolve_step_input = AsyncMock(
-        return_value=StepInputValue(text="hello", source_text="hello", input_source="flow_input")
+        return_value=StepInputValue(
+            text="hello", source_text="hello", input_source="flow_input"
+        )
     )
     executor._process_typed_output = AsyncMock(return_value=(None, None))
     executor._apply_output_cap = AsyncMock(return_value=("answer", []))
     executor._commit = AsyncMock()
     executor.references_service = AsyncMock()
-    executor.references_service.get_references = AsyncMock(side_effect=RuntimeError("boom"))
+    executor.references_service.get_references = AsyncMock(
+        side_effect=RuntimeError("boom")
+    )
 
     output = await executor._execute_step(step=step, run=run, state=state)
 
@@ -2689,7 +2771,9 @@ async def test_execute_step_skips_rag_when_input_is_whitespace(user):
     assistant = _assistant_for_execute_step(has_knowledge=True)
     executor._load_assistant = AsyncMock(return_value=assistant)
     executor._resolve_step_input = AsyncMock(
-        return_value=StepInputValue(text="   ", source_text="   ", input_source="flow_input")
+        return_value=StepInputValue(
+            text="   ", source_text="   ", input_source="flow_input"
+        )
     )
     executor._process_typed_output = AsyncMock(return_value=(None, None))
     executor._apply_output_cap = AsyncMock(return_value=("answer", []))
@@ -2880,7 +2964,9 @@ async def test_file_cache_hit(user):
     )
 
     run = _run(status=FlowRunStatus.RUNNING, user=user)
-    run = run.model_copy(update={"input_payload_json": {"text": "x", "file_ids": [str(file_id)]}})
+    run = run.model_copy(
+        update={"input_payload_json": {"text": "x", "file_ids": [str(file_id)]}}
+    )
     step = RuntimeStep(
         step_id=uuid4(),
         step_order=1,
@@ -2895,8 +2981,12 @@ async def test_file_cache_hit(user):
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    await executor._resolve_step_input(step=step, context=context, run=run, prior_results=[], state=state)
-    await executor._resolve_step_input(step=step, context=context, run=run, prior_results=[], state=state)
+    await executor._resolve_step_input(
+        step=step, context=context, run=run, prior_results=[], state=state
+    )
+    await executor._resolve_step_input(
+        step=step, context=context, run=run, prior_results=[], state=state
+    )
 
     assert executor.file_repo.get_list_by_id_and_user.call_count == 1
 
@@ -2929,10 +3019,15 @@ async def test_deliver_webhook_audit_logged_on_success(user):
         output_type="text",
     )
     request = httpx.Request("POST", "https://example.org/hook/abc")
-    executor._send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+    executor._send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request)
+    )
 
     await executor._deliver_webhook(
-        step=step, text_payload="done", run=run, context={"text": "done"},
+        step=step,
+        text_payload="done",
+        run=run,
+        context={"text": "done"},
     )
 
     audit_service.log_async.assert_awaited_once()
@@ -2968,11 +3063,16 @@ async def test_deliver_webhook_audit_logged_on_failure(user):
         output_config={"url": "https://example.org/hook"},
         output_type="text",
     )
-    executor._send_http_request = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+    executor._send_http_request = AsyncMock(
+        side_effect=httpx.TimeoutException("timeout")
+    )
 
     with pytest.raises(BadRequestException, match="timed out"):
         await executor._deliver_webhook(
-            step=step, text_payload="done", run=run, context={"text": "done"},
+            step=step,
+            text_payload="done",
+            run=run,
+            context={"text": "done"},
         )
 
     audit_service.log_async.assert_awaited_once()
@@ -3002,11 +3102,16 @@ async def test_audit_service_failure_does_not_break_webhook(user):
         output_type="text",
     )
     request = httpx.Request("POST", "https://example.org/hook")
-    executor._send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+    executor._send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request)
+    )
 
     # Should NOT raise despite audit failure
     await executor._deliver_webhook(
-        step=step, text_payload="done", run=run, context={"text": "done"},
+        step=step,
+        text_payload="done",
+        run=run,
+        context={"text": "done"},
     )
 
 
@@ -3183,7 +3288,7 @@ async def test_deliver_webhook_decrypts_encrypted_headers(user):
         side_effect=lambda v: v.startswith("enc:")
     )
     executor.encryption_service.decrypt = MagicMock(
-        side_effect=lambda v: v[len("enc:"):]
+        side_effect=lambda v: v[len("enc:") :]
     )
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     step = RuntimeStep(
@@ -3202,10 +3307,15 @@ async def test_deliver_webhook_decrypts_encrypted_headers(user):
         output_type="text",
     )
     request = httpx.Request("POST", "https://example.org/hook")
-    executor._send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+    executor._send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request)
+    )
 
     await executor._deliver_webhook(
-        step=step, text_payload="done", run=run, context={"text": "done"},
+        step=step,
+        text_payload="done",
+        run=run,
+        context={"text": "done"},
     )
 
     executor._send_http_request.assert_awaited_once()
@@ -3213,3 +3323,48 @@ async def test_deliver_webhook_decrypts_encrypted_headers(user):
     assert headers["Authorization"] == "Bearer secret123"
     assert headers["X-Plain"] == "visible"
     executor.encryption_service.decrypt.assert_called_once_with("enc:Bearer secret123")
+
+
+@pytest.mark.asyncio
+async def test_validate_runtime_step_security_rejects_write_down(user):
+    executor, _, _, _ = _build_executor(user)
+    assistant_id = uuid4()
+    space = SimpleNamespace(security_classification=SimpleNamespace(security_level=1))
+    assistant = SimpleNamespace(
+        completion_model=SimpleNamespace(
+            security_classification=SimpleNamespace(security_level=3)
+        ),
+        collections=[],
+        websites=[],
+        integration_knowledge_list=[],
+        mcp_servers=[],
+    )
+    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        all_previous_segments=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=2,
+        assistant_id=assistant_id,
+        user_description="Step 2",
+        input_source="previous_step",
+        input_bindings=None,
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+        output_classification_override=1,
+    )
+
+    with pytest.raises(BadRequestException, match="output classification override"):
+        await executor._validate_runtime_step_security(
+            step=step,
+            state=state,
+            prior_output_levels_by_order={1: 3},
+        )

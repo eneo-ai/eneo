@@ -6,6 +6,7 @@ import pytest
 
 from intric.flows.flow_permissions import (
     ensure_can_manage_flows,
+    ensure_can_run_flows,
     ensure_can_use_flow_ai_builder,
     ensure_can_view_flow_trace,
     ensure_can_view_flows,
@@ -16,6 +17,13 @@ from intric.roles.permissions import Permission
 
 def _user(*permissions: Permission):
     return MagicMock(permissions=list(permissions))
+
+
+def _service_key_user(*permissions: Permission):
+    return MagicMock(
+        permissions=list(permissions),
+        active_api_key=MagicMock(ownership="service"),
+    )
 
 
 def test_view_permission_accepts_legacy_flows_alias() -> None:
@@ -43,3 +51,26 @@ def test_trace_permission_rejects_view_only_user() -> None:
 
 def test_trace_permission_accepts_legacy_flows_alias() -> None:
     ensure_can_view_flow_trace(_user(Permission.FLOWS))
+
+
+@pytest.mark.parametrize(
+    ("checker", "capability"),
+    [
+        (ensure_can_view_flows, "view"),
+        (ensure_can_run_flows, "run"),
+        (ensure_can_manage_flows, "manage"),
+        (ensure_can_use_flow_ai_builder, "ai_builder"),
+        (ensure_can_view_flow_trace, "trace"),
+    ],
+)
+def test_service_key_principals_fail_closed_with_typed_error(
+    checker, capability
+) -> None:
+    with pytest.raises(UnauthorizedException) as exc_info:
+        checker(_service_key_user())
+
+    assert exc_info.value.code == "flow_service_key_principal_not_supported"
+    assert exc_info.value.context == {
+        "auth_layer": "service_key_principal",
+        "capability": capability,
+    }

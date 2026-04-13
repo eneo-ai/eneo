@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable, cast
 
 from intric.flows.domain.flow import FlowRun, FlowStepResult
 from intric.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
+from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.input_files import (
     load_files_by_requested_ids,
     parse_requested_file_ids,
@@ -47,6 +48,7 @@ class StepInputResolutionDeps:
     max_audio_files: int | None
     max_inline_text_bytes: int
     logger: Any
+    principal: FlowPrincipal | None = None
 
 
 async def resolve_step_input(
@@ -413,6 +415,7 @@ async def _load_runtime_files(
         file_repo=deps.file_repo,
         requested_ids=requested_ids,
         user_id=deps.user_id,
+        principal=deps.principal,
         file_cache=file_cache,
     )
     returned_ids = {f.id for f in files}

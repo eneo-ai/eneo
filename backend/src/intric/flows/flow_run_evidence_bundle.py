@@ -3,9 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence, cast
 
-from intric.flows.domain.flow import FlowRun, FlowStepAttempt, FlowStepResult, FlowVersion
+from intric.flows.domain.flow import (
+    FlowRun,
+    FlowStepAttempt,
+    FlowStepResult,
+    FlowVersion,
+)
 from intric.flows.flow_run_evidence import build_debug_export
-from intric.flows.flow_run_provenance import normalize_attempt_provenance, normalize_model_parameters_payload
+from intric.flows.flow_run_provenance import (
+    normalize_attempt_provenance,
+    normalize_model_parameters_payload,
+)
 from intric.flows.flow_run_redaction import MaskedField, redact_payload_with_manifest
 
 
@@ -16,6 +24,19 @@ class EvidenceBundle:
     step_results: Sequence[FlowStepResult]
     step_attempts: Sequence[FlowStepAttempt]
     debug_export: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "run": self.run.model_dump(mode="json"),
+            "definition_snapshot": self.version.definition_json,
+            "step_results": [
+                item.model_dump(mode="json") for item in self.step_results
+            ],
+            "step_attempts": [
+                item.model_dump(mode="json") for item in self.step_attempts
+            ],
+            "debug_export": dict(self.debug_export),
+        }
 
 
 @dataclass(frozen=True)
@@ -88,7 +109,9 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         step_attempt_payloads.append(cast(dict[str, Any], result.value))
         masked_paths.extend(result.masked_paths)
         masked_fields.extend(result.masked_fields)
-    debug_result = redact_payload_with_manifest(bundle.debug_export, path="bundle.debug_export")
+    debug_result = redact_payload_with_manifest(
+        bundle.debug_export, path="bundle.debug_export"
+    )
     debug_export = cast(dict[str, Any], debug_result.value)
     security = debug_export.get("security")
     if isinstance(security, dict):
@@ -140,13 +163,19 @@ def _dump_json_record(item: FlowStepResult | FlowStepAttempt) -> dict[str, Any]:
                 or item.requested_model,
                 "provider": model_parameters.get("provider") or item.provider,
             }
-            llm_payload.model_parameters = normalize_model_parameters_payload(model_parameters)
+            llm_payload.model_parameters = normalize_model_parameters_payload(
+                model_parameters
+            )
         dumped["provenance_json"] = (
             normalized_provenance.to_payload()
             if normalized_provenance is not None
             else None
         )
-        if dumped.get("provider") is None and normalized_provenance is not None and normalized_provenance.llm is not None:
+        if (
+            dumped.get("provider") is None
+            and normalized_provenance is not None
+            and normalized_provenance.llm is not None
+        ):
             model_parameters = normalized_provenance.llm.model_parameters
             if isinstance(model_parameters, dict):
                 raw_provider = model_parameters.get("provider")

@@ -19,7 +19,6 @@ from intric.files.file_models import File, FileType
 from intric.files.file_service import FileService
 from intric.main.exceptions import NotFoundException
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -62,16 +61,21 @@ class TestDeleteFile:
 
     @pytest.mark.asyncio
     async def test_delete_file_calls_delete_by_owner_with_user_id(self):
-        """delete_file must use delete_by_owner (atomic), not plain delete."""
+        """delete_file must use principal-aware delete (atomic), not plain delete."""
         svc, repo = _make_service()
         file_id = uuid4()
         expected_file = _make_file(user_id=svc.user.id, file_id=file_id)
-        repo.delete_by_owner = AsyncMock(return_value=expected_file)
+        repo.delete_by_owner_principal = AsyncMock(return_value=expected_file)
 
         await svc.delete_file(file_id)
 
         # Verify delete_by_owner is called with both id and user_id
-        repo.delete_by_owner.assert_awaited_once_with(id=file_id, user_id=svc.user.id)
+        repo.delete_by_owner_principal.assert_awaited_once_with(
+            id=file_id,
+            owner_type="user",
+            owner_user_id=svc.user.id,
+            owner_api_key_id=None,
+        )
         # Verify plain delete is NOT called
         repo.delete.assert_not_awaited()
 
@@ -83,7 +87,7 @@ class TestDeleteFile:
         """
         svc, repo = _make_service()
         file_id = uuid4()
-        repo.delete_by_owner = AsyncMock(return_value=None)
+        repo.delete_by_owner_principal = AsyncMock(return_value=None)
 
         with pytest.raises(NotFoundException):
             await svc.delete_file(file_id)
@@ -96,7 +100,7 @@ class TestDeleteFile:
         """
         svc, repo = _make_service()
         nonexistent_id = uuid4()
-        repo.delete_by_owner = AsyncMock(return_value=None)
+        repo.delete_by_owner_principal = AsyncMock(return_value=None)
 
         with pytest.raises(NotFoundException):
             await svc.delete_file(nonexistent_id)
@@ -107,7 +111,7 @@ class TestDeleteFile:
         svc, repo = _make_service()
         file_id = uuid4()
         expected_file = _make_file(user_id=svc.user.id, file_id=file_id)
-        repo.delete_by_owner = AsyncMock(return_value=expected_file)
+        repo.delete_by_owner_principal = AsyncMock(return_value=expected_file)
 
         result = await svc.delete_file(file_id)
 
@@ -123,7 +127,7 @@ class TestDeleteFile:
         as-is, not be masked as a 404.
         """
         svc, repo = _make_service()
-        repo.delete_by_owner = AsyncMock(
+        repo.delete_by_owner_principal = AsyncMock(
             side_effect=RuntimeError("database connection lost")
         )
 

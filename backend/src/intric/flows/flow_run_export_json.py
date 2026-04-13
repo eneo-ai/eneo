@@ -14,7 +14,7 @@ from intric.flows.citation_sidecar import (
     summarize_step_citations,
 )
 from intric.flows.domain.flow import JsonObject
-from intric.flows.flow_run_evidence_bundle import RedactedEvidenceBundle
+from intric.flows.flow_run_evidence_bundle import EvidenceBundle, RedactedEvidenceBundle
 from intric.flows.flow_run_provenance import (
     default_rag_tracking,
     normalize_text_preview,
@@ -57,7 +57,10 @@ def _as_json_object_list(value: Any) -> list[JsonObject]:
     ]
 
 
-def render_evidence_json_export(*, bundle: RedactedEvidenceBundle) -> dict[str, object]:
+def render_evidence_json_export(
+    *,
+    bundle: EvidenceBundle | RedactedEvidenceBundle,
+) -> dict[str, object]:
     bundle_payload = bundle.to_dict()
     debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
     security = _as_json_object_or_empty(debug_export.get("security"))
@@ -68,10 +71,28 @@ def render_evidence_json_export(*, bundle: RedactedEvidenceBundle) -> dict[str, 
         separators=(",", ":"),
     ).encode("utf-8")
     content_hash = hashlib.sha256(serialized_bundle).hexdigest()
+    if isinstance(bundle, RedactedEvidenceBundle):
+        masked_fields_count = len(bundle.masked_paths)
+        masked_paths = list(bundle.masked_paths)
+        masked_fields = [
+            {
+                "path": field.path,
+                "key": field.key,
+                "reason": field.reason,
+            }
+            for field in bundle.masked_fields
+        ]
+        redaction_applied = bool(security.get("redaction_applied"))
+    else:
+        masked_fields_count = 0
+        masked_paths = []
+        masked_fields = []
+        redaction_applied = False
+
     manifest = _build_manifest(
         bundle_payload,
         content_hash,
-        masked_fields_count=len(bundle.masked_paths),
+        masked_fields_count=masked_fields_count,
     )
     return {
         "schema_version": EVIDENCE_EXPORT_SCHEMA_VERSION,
@@ -80,18 +101,11 @@ def render_evidence_json_export(*, bundle: RedactedEvidenceBundle) -> dict[str, 
         "manifest": manifest,
         "summary": _build_summary(bundle_payload),
         "redaction": {
-            "applied": bool(security.get("redaction_applied")),
+            "applied": redaction_applied,
             "policy_version": REDACTION_POLICY_VERSION,
-            "masked_fields_count": len(bundle.masked_paths),
-            "masked_paths": list(bundle.masked_paths),
-            "masked_fields": [
-                {
-                    "path": field.path,
-                    "key": field.key,
-                    "reason": field.reason,
-                }
-                for field in bundle.masked_fields
-            ],
+            "masked_fields_count": masked_fields_count,
+            "masked_paths": masked_paths,
+            "masked_fields": masked_fields,
         },
         "bundle": bundle_payload,
     }

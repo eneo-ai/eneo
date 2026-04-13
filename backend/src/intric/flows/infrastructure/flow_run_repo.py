@@ -8,8 +8,13 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from intric.authentication.principal_types import PrincipalType
+from intric.database.tables.flow_tables import (
+    FlowRuns,
+    FlowStepAttempts,
+    FlowStepResults,
+)
 from intric.database.tables.tenant_table import Tenants
-from intric.database.tables.flow_tables import FlowRuns, FlowStepAttempts, FlowStepResults
 from intric.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
@@ -19,6 +24,7 @@ from intric.flows.domain.flow import (
     FlowStepResultStatus,
 )
 from intric.flows.flow_factory import FlowFactory
+from intric.flows.principal import FlowPrincipal
 from intric.main.exceptions import NotFoundException
 
 
@@ -42,19 +48,31 @@ class FlowRunRepository:
         *,
         flow_id: UUID,
         flow_version: int,
-        user_id: UUID,
+        user_id: UUID | None,
+        principal_type: str = "user",
+        principal_user_id: UUID | None = None,
+        principal_api_key_id: UUID | None = None,
         tenant_id: UUID,
         input_payload_json: dict[str, Any] | None,
         preseed_steps: Sequence["PreseedStep"],
+        idempotency_key: str | None = None,
+        request_fingerprint: str | None = None,
     ) -> FlowRun:
+        if principal_type == PrincipalType.USER.value and principal_user_id is None:
+            principal_user_id = user_id
         run_row = await self.session.scalar(
             sa.insert(FlowRuns)
             .values(
                 flow_id=flow_id,
                 flow_version=flow_version,
                 user_id=user_id,
+                principal_type=principal_type,
+                principal_user_id=principal_user_id,
+                principal_api_key_id=principal_api_key_id,
                 tenant_id=tenant_id,
                 trace_id=uuid4(),
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
                 status=FlowRunStatus.QUEUED.value,
                 input_payload_json=input_payload_json,
             )
@@ -100,6 +118,40 @@ class FlowRunRepository:
             raise NotFoundException("Flow run not found.")
         return self.factory.from_flow_run_db(run_row)
 
+    async def get_idempotent_run(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_id: UUID,
+        idempotency_key: str,
+        principal: FlowPrincipal | None = None,
+        user_id: UUID | None = None,
+    ) -> tuple[FlowRun, str | None] | None:
+        if principal is None:
+            if user_id is None:
+                raise ValueError("principal or user_id is required")
+            principal = FlowPrincipal(
+                principal_type=PrincipalType.USER,
+                principal_user_id=user_id,
+            )
+        stmt = (
+            sa.select(FlowRuns)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.flow_id == flow_id)
+            .where(FlowRuns.idempotency_key == idempotency_key)
+            .where(FlowRuns.principal_type == principal.principal_type.value)
+        )
+        if principal.principal_user_id is not None:
+            stmt = stmt.where(FlowRuns.principal_user_id == principal.principal_user_id)
+        if principal.principal_api_key_id is not None:
+            stmt = stmt.where(
+                FlowRuns.principal_api_key_id == principal.principal_api_key_id
+            )
+        row = await self.session.scalar(stmt)
+        if row is None:
+            return None
+        return self.factory.from_flow_run_db(row), row.request_fingerprint
+
     async def count_active_runs(self, *, tenant_id: UUID) -> int:
         count = await self.session.scalar(
             sa.select(sa.func.count())
@@ -111,9 +163,7 @@ class FlowRunRepository:
 
     async def acquire_tenant_run_creation_lock(self, *, tenant_id: UUID) -> None:
         await self.session.execute(
-            sa.select(Tenants.id)
-            .where(Tenants.id == tenant_id)
-            .with_for_update()
+            sa.select(Tenants.id).where(Tenants.id == tenant_id).with_for_update()
         )
 
     async def list_runs(
@@ -121,6 +171,9 @@ class FlowRunRepository:
         *,
         tenant_id: UUID,
         flow_id: UUID | None = None,
+        principal_user_id: UUID | None = None,
+        principal_api_key_id: UUID | None = None,
+        user_id: UUID | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[FlowRun]:
@@ -131,6 +184,11 @@ class FlowRunRepository:
         )
         if flow_id is not None:
             stmt = stmt.where(FlowRuns.flow_id == flow_id)
+        resolved_principal_user_id = principal_user_id or user_id
+        if resolved_principal_user_id is not None:
+            stmt = stmt.where(FlowRuns.principal_user_id == resolved_principal_user_id)
+        if principal_api_key_id is not None:
+            stmt = stmt.where(FlowRuns.principal_api_key_id == principal_api_key_id)
         if offset is not None:
             stmt = stmt.offset(offset)
         if limit is not None:
@@ -164,6 +222,24 @@ class FlowRunRepository:
         rows = (await self.session.execute(stmt)).scalars().all()
         return [self.factory.from_flow_run_db(row) for row in rows]
 
+    async def list_stale_running_runs(
+        self,
+        *,
+        tenant_id: UUID,
+        stale_before: datetime,
+        limit: int = 25,
+    ) -> list[FlowRun]:
+        stmt = (
+            sa.select(FlowRuns)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.RUNNING.value)
+            .where(FlowRuns.updated_at <= stale_before)
+            .order_by(FlowRuns.updated_at.asc())
+            .limit(limit)
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return [self.factory.from_flow_run_db(row) for row in rows]
+
     async def claim_stale_queued_run_for_redispatch(
         self,
         *,
@@ -189,6 +265,31 @@ class FlowRunRepository:
             return None
         return self.factory.from_flow_run_db(claimed)
 
+    async def fail_stale_running_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        stale_before: datetime,
+        error_message: str,
+    ) -> FlowRun | None:
+        row = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.RUNNING.value)
+            .where(FlowRuns.updated_at <= stale_before)
+            .values(
+                status=FlowRunStatus.FAILED.value,
+                error_message=error_message,
+                finished_at=datetime.now(timezone.utc),
+            )
+            .returning(FlowRuns)
+        )
+        if row is None:
+            return None
+        return self.factory.from_flow_run_db(row)
+
     async def update_status(
         self,
         *,
@@ -207,6 +308,13 @@ class FlowRunRepository:
         }
         if cancelled_at is not None:
             values["cancelled_at"] = cancelled_at
+
+        if status in (
+            FlowRunStatus.COMPLETED,
+            FlowRunStatus.FAILED,
+            FlowRunStatus.CANCELLED,
+        ):
+            values["finished_at"] = datetime.now(timezone.utc)
 
         if from_statuses is None and status in (
             FlowRunStatus.COMPLETED,
@@ -273,13 +381,17 @@ class FlowRunRepository:
         tenant_id: UUID,
     ) -> list[FlowStepResult]:
         rows = (
-            await self.session.execute(
-                sa.select(FlowStepResults)
-                .where(FlowStepResults.flow_run_id == run_id)
-                .where(FlowStepResults.tenant_id == tenant_id)
-                .order_by(FlowStepResults.step_order.asc())
+            (
+                await self.session.execute(
+                    sa.select(FlowStepResults)
+                    .where(FlowStepResults.flow_run_id == run_id)
+                    .where(FlowStepResults.tenant_id == tenant_id)
+                    .order_by(FlowStepResults.step_order.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [self.factory.from_flow_step_result_db(row) for row in rows]
 
     async def list_step_attempts(
@@ -289,16 +401,20 @@ class FlowRunRepository:
         tenant_id: UUID,
     ) -> list[FlowStepAttempt]:
         rows = (
-            await self.session.execute(
-                sa.select(FlowStepAttempts)
-                .where(FlowStepAttempts.flow_run_id == run_id)
-                .where(FlowStepAttempts.tenant_id == tenant_id)
-                .order_by(
-                    FlowStepAttempts.step_order.asc(),
-                    FlowStepAttempts.attempt_no.asc(),
+            (
+                await self.session.execute(
+                    sa.select(FlowStepAttempts)
+                    .where(FlowStepAttempts.flow_run_id == run_id)
+                    .where(FlowStepAttempts.tenant_id == tenant_id)
+                    .order_by(
+                        FlowStepAttempts.step_order.asc(),
+                        FlowStepAttempts.attempt_no.asc(),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [self.factory.from_flow_step_attempt_db(row) for row in rows]
 
     async def mark_running_if_claimable(self, *, run_id: UUID, tenant_id: UUID) -> bool:
@@ -307,7 +423,10 @@ class FlowRunRepository:
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
             .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
-            .values(status=FlowRunStatus.RUNNING.value)
+            .values(
+                status=FlowRunStatus.RUNNING.value,
+                started_at=datetime.now(timezone.utc),
+            )
         )
         return bool(getattr(result, "rowcount", 0))
 
@@ -335,6 +454,7 @@ class FlowRunRepository:
         step_id: UUID,
         tenant_id: UUID,
     ) -> FlowStepResult | None:
+        now_utc = datetime.now(timezone.utc)
         row = await self.session.scalar(
             sa.update(FlowStepResults)
             .where(FlowStepResults.flow_run_id == run_id)
@@ -351,6 +471,8 @@ class FlowRunRepository:
             .values(
                 status=FlowStepResultStatus.RUNNING.value,
                 error_message=None,
+                started_at=sa.func.coalesce(FlowStepResults.started_at, now_utc),
+                finished_at=None,
             )
             .returning(FlowStepResults)
         )
@@ -380,6 +502,7 @@ class FlowRunRepository:
             .values(
                 status=FlowStepResultStatus.CANCELLED.value,
                 error_message=error_message,
+                finished_at=datetime.now(timezone.utc),
             )
         )
 

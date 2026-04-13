@@ -124,6 +124,18 @@ async def _require_flow_edit_permission(
     return resolved_space
 
 
+def _ensure_session_creator(
+    container: Container,
+    session: BuilderSession,
+) -> None:
+    if session.actor_user_id != container.user().id:
+        raise UnauthorizedException(
+            "Only the session creator can access this AI builder session.",
+            code="session_creator_required",
+            context={"auth_layer": "session_creator"},
+        )
+
+
 def _raise_scope_mismatch() -> None:
     raise UnauthorizedException(
         "API key space scope does not match requested AI builder resource.",
@@ -439,6 +451,7 @@ async def send_message(
     session: BuilderSession = await service.get_session(session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     space = await _require_flow_edit_permission(container, session.space_id)
+    _ensure_session_creator(container, session)
     tenant = await _get_tenant_repo(container).get(container.user().tenant_id)
     prepared_context: PreparedMessageContext = await service.prepare_message_context(
         session=session,
@@ -529,6 +542,7 @@ async def get_session(
     session: BuilderSession = await service.get_session(session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     await _require_flow_edit_permission(container, session.space_id)
+    _ensure_session_creator(container, session)
 
     return SessionResponse(
         session_id=session.id,
@@ -580,6 +594,7 @@ async def get_session_models(
     session: BuilderSession = await service.get_session(session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     space = await _require_flow_edit_permission(container, session.space_id)
+    _ensure_session_creator(container, session)
     models = serialize_space_models(space)
     default_model = resolve_planner_model(space)
     default_model_id = default_model.id if default_model else None
@@ -626,6 +641,7 @@ async def get_plan(
     session: BuilderSession = await service.get_session(plan.session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     await _require_flow_edit_permission(container, session.space_id)
+    _ensure_session_creator(container, session)
     return _to_plan_response(plan)
 
 
@@ -666,6 +682,7 @@ async def list_session_plans(
     session: BuilderSession = await service.get_session(session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     await _require_flow_edit_permission(container, session.space_id)
+    _ensure_session_creator(container, session)
     plans: list[BuilderPlan] = await service.list_session_plans(session_id)
     return SessionPlansResponse(plans=[_to_plan_response(plan) for plan in plans])
 
@@ -705,6 +722,7 @@ async def cancel_session(
     session: BuilderSession = await service.get_session(session_id)
     _require_ai_builder_scope(request, space_id=session.space_id)
     await _require_flow_edit_permission(container, session.space_id)
+    _ensure_session_creator(container, session)
     session = await service.cancel_session(session_id)
 
     user = container.user()

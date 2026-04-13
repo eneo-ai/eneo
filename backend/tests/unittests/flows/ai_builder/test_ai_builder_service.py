@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+
 from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_events import SSE_EVENT_REQUIREMENTS_SUMMARY
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     BuilderPlan,
@@ -26,23 +28,21 @@ from intric.flows.ai_builder.ai_builder_models import (
     StepSpec,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
+from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
-from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
-from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_service import (
-    AIBuilderService,
-    PreparedMessageContext,
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
     SSE_EVENT_PLAN,
     SSE_EVENT_QUESTION,
     SSE_EVENT_TEXT,
+    AIBuilderService,
+    PreparedMessageContext,
 )
-from intric.flows.ai_builder.ai_builder_events import SSE_EVENT_REQUIREMENTS_SUMMARY
 from intric.main.exceptions import BadRequestException, UnauthorizedException
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -260,7 +260,11 @@ def _normalize_create_step(step: Any) -> Any:
         normalized["model_ref"] = assistant_spec["model_ref"]
     if assistant_spec.get("knowledge_refs"):
         normalized["knowledge_refs"] = assistant_spec["knowledge_refs"]
-    if input_source == "flow_input" and normalized["input_type"] in {"audio", "document", "file"}:
+    if input_source == "flow_input" and normalized["input_type"] in {
+        "audio",
+        "document",
+        "file",
+    }:
         normalized["runtime_upload"] = True
         normalized["runtime_required"] = True
     if normalized["output_type"] == "docx":
@@ -269,7 +273,9 @@ def _normalize_create_step(step: Any) -> Any:
     if output_config.get("citations", {}).get("enabled"):
         normalized["citations_requested"] = True
     if step.get("output_contract"):
-        normalized["output_fields"] = _output_fields_from_schema(step["output_contract"])
+        normalized["output_fields"] = _output_fields_from_schema(
+            step["output_contract"]
+        )
     return normalized
 
 
@@ -281,7 +287,9 @@ def _output_fields_from_schema(schema: dict[str, Any]) -> list[dict[str, Any]]:
         field_type = definition.get("type", "string")
         field: dict[str, Any] = {
             "name": field_name,
-            "field_type": field_type if field_type in {"string", "number", "boolean", "object", "array"} else "string",
+            "field_type": field_type
+            if field_type in {"string", "number", "boolean", "object", "array"}
+            else "string",
             "description": definition.get("description", f"{field_name} field."),
             "required": field_name in required,
         }
@@ -293,7 +301,9 @@ def _output_fields_from_schema(schema: dict[str, Any]) -> list[dict[str, Any]]:
                 {
                     "name": f"{field_name}_item",
                     "field_type": item_schema.get("type", "string"),
-                    "description": item_schema.get("description", f"One {field_name} item."),
+                    "description": item_schema.get(
+                        "description", f"One {field_name} item."
+                    ),
                     "required": True,
                 }
             ]
@@ -480,7 +490,9 @@ class TestCreateSession:
     async def test_force_new_cancels_matching_draft_before_creating(self):
         user = _make_user()
         repo = AsyncMock()
-        repo.create_session.return_value = _make_session(tenant_id=user.tenant_id, actor_user_id=user.id)
+        repo.create_session.return_value = _make_session(
+            tenant_id=user.tenant_id, actor_user_id=user.id
+        )
         service = _make_service(user=user, repo=repo)
         space_id = uuid4()
 
@@ -497,6 +509,40 @@ class TestCreateSession:
             target_kind=TargetKind.CREATE,
             flow_id=None,
         )
+
+    @pytest.mark.anyio
+    async def test_create_session_serializes_creation_before_resume_or_create(self):
+        user = _make_user()
+        repo = AsyncMock()
+        repo.find_latest_resumable_session.return_value = None
+        repo.create_session.return_value = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            target_kind=TargetKind.EDIT,
+        )
+        flow_id = uuid4()
+        space_id = uuid4()
+        flow_service = AsyncMock()
+        flow_service.get_flow.return_value = SimpleNamespace(
+            id=flow_id,
+            space_id=space_id,
+        )
+        service = _make_service(user=user, repo=repo, flow_service=flow_service)
+
+        await service.create_session(
+            space_id=space_id,
+            target_kind=TargetKind.EDIT,
+            flow_id=flow_id,
+        )
+
+        repo.acquire_session_creation_lock.assert_awaited_once_with(
+            tenant_id=user.tenant_id
+        )
+        method_order = [call[0] for call in repo.mock_calls]
+        lock_index = method_order.index("acquire_session_creation_lock")
+        resume_index = method_order.index("find_latest_resumable_session")
+        create_index = method_order.index("create_session")
+        assert lock_index < resume_index < create_index
 
     @pytest.mark.anyio
     async def test_force_new_supersedes_actionable_plans_on_cancelled_sessions(self):
@@ -530,9 +576,12 @@ class TestCreateSession:
 
         assert repo.supersede_existing_plans.await_count == 2
         superseded_session_ids = {
-            call.kwargs["session_id"] for call in repo.supersede_existing_plans.await_args_list
+            call.kwargs["session_id"]
+            for call in repo.supersede_existing_plans.await_args_list
         }
-        assert superseded_session_ids == set(repo.cancel_matching_active_sessions.return_value)
+        assert superseded_session_ids == set(
+            repo.cancel_matching_active_sessions.return_value
+        )
 
 
 class TestSessionRecovery:
@@ -540,7 +589,9 @@ class TestSessionRecovery:
     async def test_list_sessions_builds_draft_titles_from_latest_plan(self):
         user = _make_user()
         repo = AsyncMock()
-        session = _make_session(tenant_id=user.tenant_id, actor_user_id=user.id, latest_plan_id=uuid4())
+        session = _make_session(
+            tenant_id=user.tenant_id, actor_user_id=user.id, latest_plan_id=uuid4()
+        )
         repo.list_sessions_for_user.return_value = [session]
         repo.get_plan.return_value = _make_plan(
             plan_id=session.latest_plan_id,
@@ -566,15 +617,21 @@ class TestSessionRecovery:
         assert result[0].space_id == session.space_id
 
     @pytest.mark.anyio
-    async def test_list_sessions_logs_plan_lookup_failures_and_keeps_summary(self, caplog):
+    async def test_list_sessions_logs_plan_lookup_failures_and_keeps_summary(
+        self, caplog
+    ):
         user = _make_user()
         repo = AsyncMock()
-        session = _make_session(tenant_id=user.tenant_id, actor_user_id=user.id, latest_plan_id=uuid4())
+        session = _make_session(
+            tenant_id=user.tenant_id, actor_user_id=user.id, latest_plan_id=uuid4()
+        )
         repo.list_sessions_for_user.return_value = [session]
         repo.get_plan.side_effect = RuntimeError("boom")
         service = _make_service(user=user, repo=repo)
 
-        with patch("intric.flows.ai_builder.ai_builder_service.logger.warning") as mock_warning:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.logger.warning"
+        ) as mock_warning:
             caplog.set_level(logging.WARNING)
             result = await service.list_sessions()
 
@@ -957,7 +1014,9 @@ class TestSendMessage:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content="OK")
             )
@@ -997,7 +1056,9 @@ class TestSendMessage:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content="Vilken typ av indata?")
             )
@@ -1037,7 +1098,9 @@ class TestSendMessage:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content="I understand.")
             )
@@ -1080,7 +1143,9 @@ class TestSendMessage:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(side_effect=RuntimeError("API error"))
             events = await _collect_events(
                 service.send_message(
@@ -1127,7 +1192,9 @@ class TestSendMessageToolCall:
         )
 
         tool_call = _make_tool_call()
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(
                     content="Här är mitt förslag:",
@@ -1170,21 +1237,27 @@ class TestSendMessageToolCall:
 
         service = _make_service(user=user, repo=repo)
 
-        tool_call = _make_tool_call(arguments={
-            "flow_name": "Test Flow",
-            "plan_rationale": "JSON first keeps downstream DOCX bindings explicit and safer.",
-            "steps": [
-                {
-                    "plan_step_ref": "step_a",
-                    "name": "Extrahera fakta",
-                    "assistant_spec": {"instructions": "Extrahera fakta."},
-                    "input_source": "flow_input",
-                }
-            ],
-        })
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        tool_call = _make_tool_call(
+            arguments={
+                "flow_name": "Test Flow",
+                "plan_rationale": "JSON first keeps downstream DOCX bindings explicit and safer.",
+                "steps": [
+                    {
+                        "plan_step_ref": "step_a",
+                        "name": "Extrahera fakta",
+                        "assistant_spec": {"instructions": "Extrahera fakta."},
+                        "input_source": "flow_input",
+                    }
+                ],
+            }
+        )
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
-                return_value=_make_llm_response(content="Här är mitt förslag:", tool_calls=[tool_call])
+                return_value=_make_llm_response(
+                    content="Här är mitt förslag:", tool_calls=[tool_call]
+                )
             )
             events = await _collect_events(
                 service.send_message(
@@ -1217,21 +1290,27 @@ class TestSendMessageToolCall:
 
         service = _make_service(user=user, repo=repo)
 
-        tool_call = _make_tool_call(arguments={
-            "reasoning": "Hidden chain of thought that should not reach the client.",
-            "flow_name": "Test Flow",
-            "steps": [
-                {
-                    "plan_step_ref": "step_a",
-                    "name": "Extrahera fakta",
-                    "assistant_spec": {"instructions": "Extrahera fakta."},
-                    "input_source": "flow_input",
-                }
-            ],
-        })
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        tool_call = _make_tool_call(
+            arguments={
+                "reasoning": "Hidden chain of thought that should not reach the client.",
+                "flow_name": "Test Flow",
+                "steps": [
+                    {
+                        "plan_step_ref": "step_a",
+                        "name": "Extrahera fakta",
+                        "assistant_spec": {"instructions": "Extrahera fakta."},
+                        "input_source": "flow_input",
+                    }
+                ],
+            }
+        )
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
-                return_value=_make_llm_response(content="Här är mitt förslag:", tool_calls=[tool_call])
+                return_value=_make_llm_response(
+                    content="Här är mitt förslag:", tool_calls=[tool_call]
+                )
             )
             events = await _collect_events(
                 service.send_message(
@@ -1269,21 +1348,29 @@ class TestSendMessageToolCall:
 
         service = _make_service(user=user, repo=repo)
 
-        tool_call = _make_tool_call(arguments={
-            "flow_name": "Dokumentflöde",
-            "steps": [
-                {
-                    "plan_step_ref": "step_a",
-                    "name": "Extrahera dokumentpaket",
-                    "assistant_spec": {"instructions": "Extrahera struktur från dokumenten."},
-                    "input_source": "flow_input",
-                    "input_type": "document",
-                }
-            ],
-        })
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        tool_call = _make_tool_call(
+            arguments={
+                "flow_name": "Dokumentflöde",
+                "steps": [
+                    {
+                        "plan_step_ref": "step_a",
+                        "name": "Extrahera dokumentpaket",
+                        "assistant_spec": {
+                            "instructions": "Extrahera struktur från dokumenten."
+                        },
+                        "input_source": "flow_input",
+                        "input_type": "document",
+                    }
+                ],
+            }
+        )
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
-                return_value=_make_llm_response(content="Här är mitt förslag:", tool_calls=[tool_call])
+                return_value=_make_llm_response(
+                    content="Här är mitt förslag:", tool_calls=[tool_call]
+                )
             )
             events = await _collect_events(
                 service.send_message(
@@ -1297,13 +1384,20 @@ class TestSendMessageToolCall:
 
         plan_event = next(e for e in events if e["event"] == SSE_EVENT_PLAN)
         plan_data = json.loads(plan_event["data"])
-        runtime_input = plan_data["envelope"]["spec"]["steps"][0]["input_config"]["runtime_input"]
+        runtime_input = plan_data["envelope"]["spec"]["steps"][0]["input_config"][
+            "runtime_input"
+        ]
         assert runtime_input["enabled"] is True
         assert runtime_input["input_format"] == "document"
-        assert runtime_input["description"] == "Ladda upp dokument som detta steg ska analysera."
+        assert (
+            runtime_input["description"]
+            == "Ladda upp dokument som detta steg ska analysera."
+        )
 
     @pytest.mark.anyio
-    async def test_backend_discovery_short_circuits_ambiguous_pdf_docx_flow_before_llm_call(self):
+    async def test_backend_discovery_short_circuits_ambiguous_pdf_docx_flow_before_llm_call(
+        self,
+    ):
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(status=SessionStatus.CHATTING, tenant_id=user.tenant_id)
@@ -1311,7 +1405,9 @@ class TestSendMessageToolCall:
 
         service = _make_service(user=user, repo=repo)
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock()
             events = await _collect_events(
                 service.send_message(
@@ -1329,7 +1425,11 @@ class TestSendMessageToolCall:
         question_events = [e for e in events if e["event"] == SSE_EVENT_QUESTION]
         assert len(question_events) == 1
         question = json.loads(question_events[0]["data"])
-        assert question["question_id"] in {"processing_scope", "document_kind", "comparison_scope"}
+        assert question["question_id"] in {
+            "processing_scope",
+            "document_kind",
+            "comparison_scope",
+        }
 
     @pytest.mark.anyio
     async def test_tool_call_supersedes_existing_plans(self):
@@ -1355,7 +1455,9 @@ class TestSendMessageToolCall:
         )
 
         tool_call = _make_tool_call()
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(
                     content=None,
@@ -1401,7 +1503,9 @@ class TestSendMessageToolCall:
         )
 
         tool_call = _make_tool_call()
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(
                     content=None,
@@ -1441,7 +1545,9 @@ class TestSendMessageToolCall:
         service = _make_service(user=user, repo=repo)
 
         tool_call = _make_tool_call()
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(
                     content="Här är mitt förslag:",
@@ -1478,7 +1584,13 @@ class TestSendMessageToolCall:
             ConversationMessage(
                 role="assistant",
                 content="Här är mitt förslag:",
-                tool_calls=[{"id": "call_prior", "name": CREATE_FLOW_TOOL_NAME, "arguments": {"flow_name": "Old"}}],
+                tool_calls=[
+                    {
+                        "id": "call_prior",
+                        "name": CREATE_FLOW_TOOL_NAME,
+                        "arguments": {"flow_name": "Old"},
+                    }
+                ],
             ),
             ConversationMessage(
                 role="tool",
@@ -1491,7 +1603,9 @@ class TestSendMessageToolCall:
             AIBuilderPlanner.conversation_msg_to_llm_dict(message)
             for message in prior_conversation
         ]
-        assistant_msgs = [m for m in messages if m["role"] == "assistant" and m.get("tool_calls")]
+        assistant_msgs = [
+            m for m in messages if m["role"] == "assistant" and m.get("tool_calls")
+        ]
         assert len(assistant_msgs) == 1
         assert assistant_msgs[0]["tool_calls"][0]["id"] == "call_prior"
         tool_msgs = [m for m in messages if m["role"] == "tool"]
@@ -1525,7 +1639,9 @@ class TestSendMessageToolCall:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -1541,7 +1657,10 @@ class TestSendMessageToolCall:
 
         error_events = [e for e in events if e["event"] == SSE_EVENT_ERROR]
         assert len(error_events) >= 1
-        assert "Invalid tool call arguments" in json.loads(error_events[0]["data"])["error"]
+        assert (
+            "Invalid tool call arguments"
+            in json.loads(error_events[0]["data"])["error"]
+        )
 
     @pytest.mark.anyio
     async def test_unknown_tool_calls_are_ignored(self):
@@ -1570,7 +1689,9 @@ class TestSendMessageToolCall:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -1641,7 +1762,9 @@ class TestSendMessageToolCall:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[bad_tc]),
@@ -1687,10 +1810,12 @@ class TestSendMessageToolCall:
                 {
                     "plan_step_ref": "step_b",
                     "name": "Skriv rapport",
-                    "assistant_spec": {"instructions": "Skriv en rapport baserat på strukturerade fält."},
+                    "assistant_spec": {
+                        "instructions": "Skriv en rapport baserat på strukturerade fält."
+                    },
                     "input_source": "previous_step",
                     "output_type": "text",
-                }
+                },
             ],
         }
         good_args = {
@@ -1699,14 +1824,19 @@ class TestSendMessageToolCall:
                 {
                     "plan_step_ref": "step_a",
                     "name": "Extrahera fakta",
-                    "assistant_spec": {"instructions": "Extrahera fälten titel, sammanfattning och risk i JSON-format."},
+                    "assistant_spec": {
+                        "instructions": "Extrahera fälten titel, sammanfattning och risk i JSON-format."
+                    },
                     "input_source": "flow_input",
                     "output_type": "json",
                     "output_contract": {
                         "type": "object",
                         "properties": {
                             "titel": {"type": "string", "description": "Kort rubrik"},
-                            "sammanfattning": {"type": "string", "description": "Sammanfattning"},
+                            "sammanfattning": {
+                                "type": "string",
+                                "description": "Sammanfattning",
+                            },
                             "risk": {"type": "string", "description": "Bedömd risk"},
                         },
                     },
@@ -1714,10 +1844,12 @@ class TestSendMessageToolCall:
                 {
                     "plan_step_ref": "step_b",
                     "name": "Skriv rapport",
-                    "assistant_spec": {"instructions": "Skriv en rapport baserat på strukturerade fält."},
+                    "assistant_spec": {
+                        "instructions": "Skriv en rapport baserat på strukturerade fält."
+                    },
                     "input_source": "previous_step",
                     "output_type": "text",
-                }
+                },
             ],
         }
 
@@ -1728,7 +1860,9 @@ class TestSendMessageToolCall:
 
         service = _make_service(user=user, repo=repo)
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[bad_tc]),
@@ -1749,7 +1883,9 @@ class TestSendMessageToolCall:
         assert mock_litellm.acompletion.call_count == 2
 
     @pytest.mark.anyio
-    async def test_self_correction_retries_when_corrected_plan_still_has_quality_warning(self):
+    async def test_self_correction_retries_when_corrected_plan_still_has_quality_warning(
+        self,
+    ):
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(
@@ -1773,14 +1909,18 @@ class TestSendMessageToolCall:
                 {
                     "plan_step_ref": "step_b",
                     "name": "Extrahera marknadsinsikter",
-                    "assistant_spec": {"instructions": "Returnera JSON med marknadsinsikter."},
+                    "assistant_spec": {
+                        "instructions": "Returnera JSON med marknadsinsikter."
+                    },
                     "input_source": "previous_step",
                     "output_type": "json",
                 },
                 {
                     "plan_step_ref": "step_c",
                     "name": "Skriv slutrapport",
-                    "assistant_spec": {"instructions": "Skriv slutrapport utifrån den strukturerade analysen."},
+                    "assistant_spec": {
+                        "instructions": "Skriv slutrapport utifrån den strukturerade analysen."
+                    },
                     "input_source": "previous_step",
                     "output_type": "text",
                 },
@@ -1809,7 +1949,9 @@ class TestSendMessageToolCall:
                 {
                     "plan_step_ref": "step_c",
                     "name": "Skriv slutrapport",
-                    "assistant_spec": {"instructions": "Skriv slutrapport utifrån den strukturerade analysen."},
+                    "assistant_spec": {
+                        "instructions": "Skriv slutrapport utifrån den strukturerade analysen."
+                    },
                     "input_source": "previous_step",
                     "output_type": "text",
                 },
@@ -1861,7 +2003,9 @@ class TestSendMessageToolCall:
                 {
                     "plan_step_ref": "step_c",
                     "name": "Skriv slutrapport",
-                    "assistant_spec": {"instructions": "Skriv slutrapport utifrån den strukturerade analysen."},
+                    "assistant_spec": {
+                        "instructions": "Skriv slutrapport utifrån den strukturerade analysen."
+                    },
                     "input_source": "previous_step",
                     "output_type": "text",
                 },
@@ -1874,7 +2018,9 @@ class TestSendMessageToolCall:
         )
         service = _make_service(user=user, repo=repo)
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(
@@ -1911,7 +2057,9 @@ class TestSendMessageToolCall:
                 )
             )
 
-        correction_messages = mock_litellm.acompletion.await_args_list[2].kwargs["messages"]
+        correction_messages = mock_litellm.acompletion.await_args_list[2].kwargs[
+            "messages"
+        ]
         correction_feedback = correction_messages[-1]["content"]
         assert "Quality issues" in correction_feedback
         assert "output_contract" in correction_feedback
@@ -1942,10 +2090,14 @@ class TestSendMessageToolCall:
                 ],
             }
         )
-        repo.create_plan.return_value = _make_plan(session_id=session.id, tenant_id=user.tenant_id)
+        repo.create_plan.return_value = _make_plan(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
         service = _make_service(user=user, repo=repo)
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[good_tc])
             )
@@ -1990,7 +2142,9 @@ class TestSendMessageToolCall:
                 {
                     "plan_step_ref": "step_a",
                     "name": "Analysera dokument",
-                    "assistant_spec": {"instructions": "Extrahera strukturerade fakta."},
+                    "assistant_spec": {
+                        "instructions": "Extrahera strukturerade fakta."
+                    },
                     "input_source": "flow_input",
                 }
             ],
@@ -2006,7 +2160,9 @@ class TestSendMessageToolCall:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[bad_tc]),
@@ -2021,7 +2177,7 @@ class TestSendMessageToolCall:
                     litellm_model="openai/gpt-4",
                     litellm_kwargs={"api_key": "sk-test"},
                 )
-        )
+            )
 
         assert any(e["event"] == SSE_EVENT_PLAN for e in events)
         assert not any(
@@ -2069,7 +2225,9 @@ class TestSendMessageToolCall:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[bad_tc1]),
@@ -2138,15 +2296,36 @@ class TestSendMessageToolCall:
             ],
         }
 
-        repo.create_plan.return_value = _make_plan(session_id=session.id, tenant_id=user.tenant_id)
+        repo.create_plan.return_value = _make_plan(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
         service = _make_service(user=user, repo=repo)
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
-                    _make_llm_response(content=None, tool_calls=[_make_tool_call(arguments=initial_bad_args)]),
-                    _make_llm_response(content=None, tool_calls=[_make_tool_call(tool_call_id="call_retry_1", arguments=second_bad_args)]),
-                    _make_llm_response(content=None, tool_calls=[_make_tool_call(tool_call_id="call_retry_2", arguments=corrected_args)]),
+                    _make_llm_response(
+                        content=None,
+                        tool_calls=[_make_tool_call(arguments=initial_bad_args)],
+                    ),
+                    _make_llm_response(
+                        content=None,
+                        tool_calls=[
+                            _make_tool_call(
+                                tool_call_id="call_retry_1", arguments=second_bad_args
+                            )
+                        ],
+                    ),
+                    _make_llm_response(
+                        content=None,
+                        tool_calls=[
+                            _make_tool_call(
+                                tool_call_id="call_retry_2", arguments=corrected_args
+                            )
+                        ],
+                    ),
                 ]
             )
             events = await _collect_events(
@@ -2199,7 +2378,9 @@ class TestSendMessageToolCall:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[bad_tc]),
@@ -2272,7 +2453,9 @@ class TestSendMessageToolCall:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[bad_tc]),
@@ -2387,8 +2570,13 @@ class TestApprovePlan:
 
 class TestRevisePlan:
     @pytest.mark.anyio
-    @patch("intric.flows.ai_builder.ai_builder_plan_store.persist_plan", new_callable=AsyncMock)
-    async def test_keep_current_description_sets_manual_override(self, mock_persist_plan):
+    @patch(
+        "intric.flows.ai_builder.ai_builder_plan_store.persist_plan",
+        new_callable=AsyncMock,
+    )
+    async def test_keep_current_description_sets_manual_override(
+        self, mock_persist_plan
+    ):
         user = _make_user()
         repo = AsyncMock()
 
@@ -2640,9 +2828,7 @@ class TestApplyPlan:
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
-    async def test_apply_create_session_success(
-        self, mock_compile, mock_execute
-    ):
+    async def test_apply_create_session_success(self, mock_compile, mock_execute):
         from intric.flows.ai_builder.ai_builder_models import ApplyResultResponse
 
         user = _make_user()
@@ -2747,7 +2933,9 @@ class TestApplyPlan:
             space_service=space_service,
         )
 
-        with pytest.raises(BadRequestException, match="transcription model must be selected"):
+        with pytest.raises(
+            BadRequestException, match="transcription model must be selected"
+        ):
             await lifecycle.apply_plan(plan_id=plan.id)
 
         repo.update_session_status.assert_not_awaited()
@@ -3015,7 +3203,9 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -3051,7 +3241,9 @@ class TestSendMessageStructuredQuestion:
         repo.update_session_conversation.assert_not_called()
 
     @pytest.mark.anyio
-    async def test_duplicate_output_question_alias_is_suppressed_when_budget_exhausted(self):
+    async def test_duplicate_output_question_alias_is_suppressed_when_budget_exhausted(
+        self,
+    ):
         """When the question budget is exhausted (5 answers given, budget is 3),
         a duplicate final_output_mode from the LLM is suppressed and no backend
         followup question is emitted either — the service falls through to
@@ -3145,7 +3337,9 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -3203,7 +3397,9 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -3228,7 +3424,9 @@ class TestSendMessageStructuredQuestion:
         assert data["question_id"] != "multi_file_strategy"
 
     @pytest.mark.anyio
-    async def test_supported_model_question_for_resolved_output_recovers_into_requirements_summary(self):
+    async def test_supported_model_question_for_resolved_output_recovers_into_requirements_summary(
+        self,
+    ):
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(
@@ -3322,7 +3520,9 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[tc]),
@@ -3340,11 +3540,15 @@ class TestSendMessageStructuredQuestion:
 
         question_events = [e for e in events if e["event"] == SSE_EVENT_QUESTION]
         assert question_events == []
-        summary_events = [e for e in events if e["event"] == SSE_EVENT_REQUIREMENTS_SUMMARY]
+        summary_events = [
+            e for e in events if e["event"] == SSE_EVENT_REQUIREMENTS_SUMMARY
+        ]
         assert len(summary_events) == 1
 
     @pytest.mark.anyio
-    async def test_unexpected_model_question_after_discovery_ready_triggers_requirements_summary_retry(self):
+    async def test_unexpected_model_question_after_discovery_ready_triggers_requirements_summary_retry(
+        self,
+    ):
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(
@@ -3461,7 +3665,9 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[unexpected_question]),
@@ -3479,11 +3685,15 @@ class TestSendMessageStructuredQuestion:
 
         question_events = [e for e in events if e["event"] == SSE_EVENT_QUESTION]
         assert question_events == []
-        summary_events = [e for e in events if e["event"] == SSE_EVENT_REQUIREMENTS_SUMMARY]
+        summary_events = [
+            e for e in events if e["event"] == SSE_EVENT_REQUIREMENTS_SUMMARY
+        ]
         assert len(summary_events) == 1
 
     @pytest.mark.anyio
-    async def test_repeated_output_question_after_answer_recovers_without_internal_error(self):
+    async def test_repeated_output_question_after_answer_recovers_without_internal_error(
+        self,
+    ):
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(
@@ -3498,22 +3708,30 @@ class TestSendMessageStructuredQuestion:
                 ConversationMessage(
                     role="assistant",
                     content="Jag behöver förstå slutresultatet lite bättre innan jag kan bekräfta lösningen.",
-                    tool_calls=[{
-                        "id": "call_q1",
-                        "name": "ask_structured_question",
-                        "arguments": {
-                            "question_id": "final_output_mode",
-                            "question": "Vad ska flödet producera som slutresultat?",
-                            "options": [
-                                {"id": "structured_text", "label": "Strukturerat beslutsunderlag som text"},
-                                {"id": "pdf_document", "label": "PDF-dokument"},
-                                {"id": "docx_document", "label": "DOCX-dokument"},
-                                {"id": "structured_json", "label": "Strukturerad JSON"},
-                            ],
-                            "selection_mode": "single",
-                            "allow_custom": True,
-                        },
-                    }],
+                    tool_calls=[
+                        {
+                            "id": "call_q1",
+                            "name": "ask_structured_question",
+                            "arguments": {
+                                "question_id": "final_output_mode",
+                                "question": "Vad ska flödet producera som slutresultat?",
+                                "options": [
+                                    {
+                                        "id": "structured_text",
+                                        "label": "Strukturerat beslutsunderlag som text",
+                                    },
+                                    {"id": "pdf_document", "label": "PDF-dokument"},
+                                    {"id": "docx_document", "label": "DOCX-dokument"},
+                                    {
+                                        "id": "structured_json",
+                                        "label": "Strukturerad JSON",
+                                    },
+                                ],
+                                "selection_mode": "single",
+                                "allow_custom": True,
+                            },
+                        }
+                    ],
                 ),
                 ConversationMessage(
                     role="tool",
@@ -3561,7 +3779,9 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[repeated_question]),
@@ -3585,11 +3805,15 @@ class TestSendMessageStructuredQuestion:
 
         error_events = [e for e in events if e["event"] == SSE_EVENT_ERROR]
         assert error_events == []
-        summary_events = [e for e in events if e["event"] == SSE_EVENT_REQUIREMENTS_SUMMARY]
+        summary_events = [
+            e for e in events if e["event"] == SSE_EVENT_REQUIREMENTS_SUMMARY
+        ]
         assert len(summary_events) == 1
 
     @pytest.mark.anyio
-    async def test_repeated_output_question_after_freeform_label_answer_continues_without_internal_error(self):
+    async def test_repeated_output_question_after_freeform_label_answer_continues_without_internal_error(
+        self,
+    ):
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(
@@ -3604,22 +3828,30 @@ class TestSendMessageStructuredQuestion:
                 ConversationMessage(
                     role="assistant",
                     content="Jag behöver förstå slutresultatet lite bättre innan jag kan bekräfta lösningen.",
-                    tool_calls=[{
-                        "id": "call_q1",
-                        "name": "ask_structured_question",
-                        "arguments": {
-                            "question_id": "final_output_mode",
-                            "question": "Vad ska flödet producera som slutresultat?",
-                            "options": [
-                                {"id": "structured_text", "label": "Strukturerat beslutsunderlag som text"},
-                                {"id": "pdf_document", "label": "PDF-dokument"},
-                                {"id": "docx_document", "label": "DOCX-dokument"},
-                                {"id": "structured_json", "label": "Strukturerad JSON"},
-                            ],
-                            "selection_mode": "single",
-                            "allow_custom": True,
-                        },
-                    }],
+                    tool_calls=[
+                        {
+                            "id": "call_q1",
+                            "name": "ask_structured_question",
+                            "arguments": {
+                                "question_id": "final_output_mode",
+                                "question": "Vad ska flödet producera som slutresultat?",
+                                "options": [
+                                    {
+                                        "id": "structured_text",
+                                        "label": "Strukturerat beslutsunderlag som text",
+                                    },
+                                    {"id": "pdf_document", "label": "PDF-dokument"},
+                                    {"id": "docx_document", "label": "DOCX-dokument"},
+                                    {
+                                        "id": "structured_json",
+                                        "label": "Strukturerad JSON",
+                                    },
+                                ],
+                                "selection_mode": "single",
+                                "allow_custom": True,
+                            },
+                        }
+                    ],
                 ),
                 ConversationMessage(
                     role="tool",
@@ -3667,7 +3899,9 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[repeated_question]),
@@ -3693,7 +3927,9 @@ class TestSendMessageStructuredQuestion:
         assert non_terminal_events
 
     @pytest.mark.anyio
-    async def test_repeated_processing_scope_question_after_answer_advances_to_different_backend_question(self):
+    async def test_repeated_processing_scope_question_after_answer_advances_to_different_backend_question(
+        self,
+    ):
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(
@@ -3708,20 +3944,25 @@ class TestSendMessageStructuredQuestion:
                 ConversationMessage(
                     role="assistant",
                     content="Jag behöver förstå hur flödet ska arbeta innan jag går vidare.",
-                    tool_calls=[{
-                        "id": "call_scope_q1",
-                        "name": "ask_structured_question",
-                        "arguments": {
-                            "question_id": "processing_scope",
-                            "question": "Hur ska flödet arbeta?",
-                            "options": [
-                                {"id": "single_case", "label": "Ett ärende åt gången"},
-                                {"id": "batch_cases", "label": "Många ärenden"},
-                            ],
-                            "selection_mode": "single",
-                            "allow_custom": True,
-                        },
-                    }],
+                    tool_calls=[
+                        {
+                            "id": "call_scope_q1",
+                            "name": "ask_structured_question",
+                            "arguments": {
+                                "question_id": "processing_scope",
+                                "question": "Hur ska flödet arbeta?",
+                                "options": [
+                                    {
+                                        "id": "single_case",
+                                        "label": "Ett ärende åt gången",
+                                    },
+                                    {"id": "batch_cases", "label": "Många ärenden"},
+                                ],
+                                "selection_mode": "single",
+                                "allow_custom": True,
+                            },
+                        }
+                    ],
                 ),
                 ConversationMessage(
                     role="tool",
@@ -3756,9 +3997,13 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
-                return_value=_make_llm_response(content=None, tool_calls=[repeated_question])
+                return_value=_make_llm_response(
+                    content=None, tool_calls=[repeated_question]
+                )
             )
             events = await _collect_events(
                 service.send_message(
@@ -3783,14 +4028,18 @@ class TestSendMessageStructuredQuestion:
         assert data["question_id"] != "processing_scope"
 
     @pytest.mark.anyio
-    async def test_question_recovery_exhausts_when_model_repeats_structured_question(self):
+    async def test_question_recovery_exhausts_when_model_repeats_structured_question(
+        self,
+    ):
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
             conversation=[
-                ConversationMessage(role="user", content="Jag vill bygga ett enkelt PDF-flöde."),
+                ConversationMessage(
+                    role="user", content="Jag vill bygga ett enkelt PDF-flöde."
+                ),
                 ConversationMessage(
                     role="user",
                     content="Ett ärende åt gången",
@@ -3885,7 +4134,9 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[repeated_question]),
@@ -3938,7 +4189,9 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -3996,7 +4249,9 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -4014,7 +4269,9 @@ class TestSendMessageStructuredQuestion:
         assert "Invalid question" in json.loads(error_events[0]["data"])["error"]
 
     @pytest.mark.anyio
-    async def test_invalid_supported_question_without_question_text_uses_generic_fallback(self):
+    async def test_invalid_supported_question_without_question_text_uses_generic_fallback(
+        self,
+    ):
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(
@@ -4044,7 +4301,9 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -4077,9 +4336,13 @@ class TestSendMessageStructuredQuestion:
 
         service = _make_service(user=user, repo=repo)
 
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
-                return_value=_make_llm_response(content="Perfekt, då bygger jag för ett dokument i taget.")
+                return_value=_make_llm_response(
+                    content="Perfekt, då bygger jag för ett dokument i taget."
+                )
             )
             await _collect_events(
                 service.send_message(
@@ -4188,16 +4451,18 @@ class TestReasoningLeakRegression:
             ConversationMessage(
                 role="assistant",
                 content="Here is a plan.",
-                tool_calls=[{
-                    "id": "call_123",
-                    "name": CREATE_FLOW_TOOL_NAME,
-                    "arguments": {
-                        "flow_name": "Test",
-                        "step_count": 1,
-                        "step_names": ["Step A"],
-                        "plan_rationale": "Simple flow.",
-                    },
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_123",
+                        "name": CREATE_FLOW_TOOL_NAME,
+                        "arguments": {
+                            "flow_name": "Test",
+                            "step_count": 1,
+                            "step_names": ["Step A"],
+                            "plan_rationale": "Simple flow.",
+                        },
+                    }
+                ],
             ),
         ]
 

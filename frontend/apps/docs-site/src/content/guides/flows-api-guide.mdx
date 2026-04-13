@@ -1,0 +1,569 @@
+import { Callout } from 'nextra/components'
+
+# Flows API Guide
+
+This guide is for developers building applications on top of published Eneo Flows, such as transcription services, municipality intake services, or other multi-step AI workflows.
+
+It focuses on the **runtime** API. For the mental model behind drafts, steps, ownership, and evidence, start with <a href="/docs/flows">Flows</a>.
+
+## Before you start
+
+A few rules matter up front:
+
+- only **published** flows can be run
+- draft editing and AI Builder require a user principal
+- a flow run is owned by the execution principal: a user principal or a service key
+- service keys can run published flows, but they can access only **their own** runs and artifacts
+
+### Authentication
+
+Runtime examples in this guide use `Authorization: Bearer ...`. In practice that bearer token can be:
+
+- a user token for a user principal
+- an API key for a backend or integration
+
+For the underlying auth model, see:
+
+- <a href="/docs/api-key-management">API Key Management</a>
+- <a href="/guides/authentication">Authentication & OIDC</a>
+
+<Callout type="warning">
+Service keys do not get broad operator access. If a service key needs access to its own run evidence, it must have explicit <code>flow_evidence</code> capability on the key.
+</Callout>
+
+## Authentication and principal model
+
+A Flow run is owned by the principal that created it.
+
+- **Human user** → owns their own run
+- **Service key** → owns the runs created with that key
+- **Space owner / space admin** → trusted in-space operator for support/debug surfaces
+- **Tenant admin** → trusted tenant-wide operator
+
+### What “own run” means
+
+An **own run** is a run created by the current principal. It does not mean “any run in my space”.
+
+That distinction matters because service keys and ordinary human members are intentionally not cross-run operators.
+
+## User-principal vs service-key runtime surfaces
+
+### Endpoint families that require a user principal
+
+| Endpoint family | Why it requires a user principal |
+| --- | --- |
+| Draft CRUD (`POST/PATCH/DELETE /flows/…`) | Drafts are user-principal-owned authoring objects |
+| Publish / unpublish | Publishing is part of authoring governance |
+| Template management and inspection | Template configuration belongs to draft authoring |
+| Flow-assistant authoring | Step-assistant configuration belongs to draft authoring |
+| AI Builder | Session-based user-principal drafting workflow |
+| `GET /api/v1/flows/{id}/` | Returns the current draft/current-definition view, not a service-key runtime projection |
+
+### Service-key runtime endpoint families
+
+| Endpoint family | Current service-key rule |
+| --- | --- |
+| `GET /api/v1/flows/?space_id=...` | Allowed for published-flow discovery in the key's scoped space |
+| `GET /api/v1/flows/{id}/published/` | Allowed for a runtime-safe single-flow published projection |
+| `GET /run-contract/` and `GET /input-policy/` | Allowed for published-flow runtime discovery |
+| `GET /graph/` | Allowed for published/runtime-safe topology and own-run snapshots |
+| Runtime uploads | Allowed for published flows |
+| Run creation | Allowed for published flows |
+| List / get / cancel / redispatch runs | Own runs only |
+| Step outputs | Own runs only |
+| Artifact downloads | Own runs only |
+| Evidence | Own runs only, and only when explicit evidence capability allows it |
+
+![High-level Flows lifecycle diagram showing user-principal-only authoring, publishing to a versioned definition, and runtime execution with outputs, artifacts, and evidence](/diagrams/flows-overview.svg)
+
+*Flows at a glance: user principals author and publish drafts, API consumers run published versions, and completed runs produce outputs, artifacts, and evidence.*
+
+## Common application patterns
+
+### Transcription service
+
+A typical transcription app uses a first step with `transcribe_only` on uploaded audio, then adds later steps for summarization, redaction, classification, or document generation. This is usually a good fit for a **service key**, because the integration should not depend on one employee account.
+
+### Municipality intake or case-work service
+
+A municipality service often combines:
+
+1. structured form fields and uploaded documents
+2. retrieval over approved knowledge sources
+3. generated text or DOCX output
+4. evidence and highlighted source passages for explainability
+
+This is where the run contract, runtime uploads, graph, artifacts, and evidence surfaces become especially valuable.
+
+## Integration sequence
+
+For most consumer apps, the safest order is:
+
+1. list published flows in the scoped space
+2. fetch the published runtime projection for the chosen flow
+3. fetch the published run contract
+4. fetch the effective input policy
+5. upload files if the flow requires them
+6. create a run with an optional `Idempotency-Key`
+7. poll the run and step endpoints
+8. fetch artifacts or evidence if your principal is allowed to
+
+### 1) Discover what the published flow expects
+
+#### Get the published runtime projection
+
+```http
+GET /api/v1/flows/{flow_id}/published/
+```
+
+Use this when you already know the flow id and want a **runtime-safe single-flow view** instead of the user-principal current-definition endpoint.
+
+It is especially useful for service-key integrations because it gives you:
+
+- stable published metadata such as name, description, and published version
+- the canonical runtime paths to use next
+- a clean alternative to calling `GET /api/v1/flows/{flow_id}/`, which still requires a user principal
+
+Example response:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000001",
+  "space_id": "00000000-0000-0000-0000-000000000020",
+  "name": "Employee Review Summary",
+  "description": "Transcribe a review conversation and return a PDF summary.",
+  "published_version": 3,
+  "runtime_paths": {
+    "run_contract": "/api/v1/flows/00000000-0000-0000-0000-000000000001/run-contract/",
+    "input_policy": "/api/v1/flows/00000000-0000-0000-0000-000000000001/input-policy/",
+    "create_run": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
+    "list_runs": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
+    "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/"
+  }
+}
+```
+
+<Callout type="info">
+The example above shows a representative subset of <code>runtime_paths</code> for readability. In the real response, the server returns the full runtime path set. These paths are <strong>server-relative</strong> (for example <code>/api/v1/...</code>), so callers should prepend their API base URL when needed.
+</Callout>
+
+#### Get the run contract
+
+```http
+GET /api/v1/flows/{flow_id}/run-contract/
+```
+
+<Callout type="info">
+If you are integrating with a service key, the recommended discovery path is: list published flows in the scoped space, fetch <code>GET /api/v1/flows/{'{flow_id}'}/published/</code>, then call <code>run-contract</code> and <code>input-policy</code>. Do not build service-key discovery around <code>GET /api/v1/flows/{'{flow_id}'}/</code>.
+</Callout>
+
+This endpoint is the canonical published runtime contract. It includes:
+
+- `published_flow_version` for version mismatch detection
+- `form_fields` for structured input fields
+- `steps_requiring_input` for runtime step uploads
+- `aggregate_max_files`, which is the combined runtime-step file limit when the published flow can calculate one
+- `template_readiness` for document-assembly readiness, such as whether a DOCX template is fully configured
+
+Example:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://your-domain.example/api/v1/flows/$FLOW_ID/run-contract/
+```
+
+Response shape:
+
+```json
+{
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "published_flow_version": 3,
+  "form_fields": [
+    {
+      "name": "employee_name",
+      "type": "text",
+      "label": "Employee name",
+      "required": true
+    }
+  ],
+  "steps_requiring_input": [
+    {
+      "step_id": "00000000-0000-0000-0000-000000000101",
+      "step_order": 1,
+      "label": "Upload audio",
+      "required": true,
+      "input_format": "audio",
+      "max_files": 1,
+      "max_file_size_bytes": 52428800,
+      "accepted_mimetypes": ["audio/wav", "audio/mpeg"]
+    }
+  ],
+  "aggregate_max_files": 1,
+  "template_readiness": []
+}
+```
+
+<Callout type="info">
+If your UI caches flow configuration, pass <code>published_flow_version</code> back into run creation so the server can reject stale submissions cleanly.
+</Callout>
+
+#### Get the input policy
+
+```http
+GET /api/v1/flows/{flow_id}/input-policy/
+```
+
+This resolves the effective upload rules for the first `flow_input` step. Here, `flow_input` means the published entry point for the flow's main input.
+
+It tells you:
+
+- whether flow-level upload is supported
+- accepted MIME types
+- max file size
+- max files per run
+- the recommended run payload shape
+
+That makes it the right API to call before rendering an upload form.
+
+### 2) Upload files
+
+There are two different upload paths.
+
+#### Flow-level input upload
+
+```http
+POST /api/v1/flows/{flow_id}/files/
+Content-Type: multipart/form-data
+```
+
+Use this when the published flow expects files from the main `flow_input` surface.
+
+The multipart field name is:
+
+- `upload_file`
+
+Example:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "upload_file=@meeting.wav" \
+  https://your-domain.example/api/v1/flows/$FLOW_ID/files/
+```
+
+The response returns a stored file id. Include that id in `file_ids` when you create the run.
+
+#### Runtime step upload
+
+```http
+POST /api/v1/flows/{flow_id}/steps/{step_id}/runtime-files/
+Content-Type: multipart/form-data
+```
+
+Use this when a specific published step has `runtime_input.enabled=true` and expects its own uploaded files.
+
+Example:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "upload_file=@citizen-letter.pdf" \
+  https://your-domain.example/api/v1/flows/$FLOW_ID/steps/$STEP_ID/runtime-files/
+```
+
+The returned file id belongs under `step_inputs[step_id].file_ids` when starting the run.
+
+### 3) Create the run
+
+```http
+POST /api/v1/flows/{flow_id}/runs/
+Idempotency-Key: your-stable-client-key
+```
+
+Minimal request shape:
+
+```json
+{
+  "expected_flow_version": 7,
+  "input_payload_json": {
+    "case_id": "MUN-2026-1042",
+    "language": "sv"
+  },
+  "file_ids": ["uploaded-flow-input-file-id"],
+  "step_inputs": {
+    "runtime-step-id": {
+      "file_ids": ["uploaded-runtime-step-file-id"]
+    }
+  }
+}
+```
+
+If the flow is still a draft, the API will return `flow_not_published`.
+
+#### How `input_payload_json` maps to form fields
+
+If the run contract exposes `form_fields`, send those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field type and required/optional settings.
+
+#### Why `Idempotency-Key` matters
+
+Run creation supports caller-supplied idempotency. Reusing the same key with the same payload returns the existing run. Reusing the same key with a different payload returns:
+
+- `400`
+- code: `flow_run_idempotency_conflict`
+
+This is especially useful for browser retries, webhook retries, and unreliable networks.
+
+### 4) Monitor and control the run
+
+Key endpoints:
+
+| Purpose | Endpoint |
+| --- | --- |
+| List runs for a flow | `GET /api/v1/flows/{flow_id}/runs/` |
+| Get one run | `GET /api/v1/flows/{flow_id}/runs/{run_id}/` |
+| Cancel a run | `POST /api/v1/flows/{flow_id}/runs/{run_id}/cancel/` |
+| Redispatch a run | `POST /api/v1/flows/{flow_id}/runs/{run_id}/redispatch/` |
+
+Typical polling loop:
+
+- create the run
+- poll `GET /runs/{run_id}/`
+- once the run becomes terminal, fetch step outputs, artifacts, and any evidence you need
+
+The runtime API is asynchronous: create the run first, then poll for completion.
+
+Current run statuses:
+
+- `queued`
+- `running`
+- `completed`
+- `failed`
+- `cancelled`
+
+Example run response:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000301",
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "flow_version": 3,
+  "principal_type": null,
+  "user_id": "00000000-0000-0000-0000-000000000030",
+  "tenant_id": "00000000-0000-0000-0000-000000000010",
+  "trace_id": "00000000-0000-0000-0000-000000000302",
+  "status": "queued",
+  "input_payload_json": {"employee_name": "Alex Example"},
+  "output_payload_json": null,
+  "error_message": null,
+  "job_id": "00000000-0000-0000-0000-000000000401",
+  "created_at": "2026-03-17T10:05:00Z",
+  "updated_at": "2026-03-17T10:05:00Z"
+}
+```
+
+#### What redispatch does
+
+`redispatch` is for **stale queued runs**. It asks the system to try dispatching a queued run again if it appears stuck before execution started. It is not the same as creating a brand-new run.
+
+If no stale queued work is found, the endpoint can still return `200` with `redispatched_count: 0`. Treat that as a no-op rather than as a new execution.
+
+### 5) Read results
+
+#### Step outputs
+
+```http
+GET /api/v1/flows/{flow_id}/runs/{run_id}/steps/
+```
+
+This is the main endpoint for consumer UIs that want intermediate outputs, diagnostics, token counts, prompts, and structured payloads without depending on the heavier debug export.
+
+Important runtime rule: **the public API runs a flow as a whole, not one step at a time**. If your UI wants per-step progress or completed-step results, create one run and then read the individual step states from this endpoint while the run is queued, running, completed, or failed.
+
+#### Flow graph
+
+```http
+GET /api/v1/flows/{flow_id}/graph/
+GET /api/v1/flows/{flow_id}/graph/?run_id={run_id}
+```
+
+Without `run_id`, the API returns the current live flow graph.
+
+With `run_id`, it resolves the graph from that run's published version snapshot and annotates the nodes with run execution results. That is useful when you want to show the exact step topology and status history for a finished run.
+
+#### Artifact downloads
+
+```http
+POST /api/v1/flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/
+```
+
+This returns a time-limited signed download URL for an artifact produced by that run. The client chooses the requested lifetime through the signed-URL request payload.
+
+Typical response shape:
+
+```json
+{
+  "url": "https://your-domain.example/api/v1/files/<file-id>/download/?token=...",
+  "expires_at": 1776028235
+}
+```
+
+### 6) Evidence and explainability
+
+#### Evidence view
+
+```http
+GET /api/v1/flows/{flow_id}/runs/{run_id}/evidence/
+```
+
+Use this when you want the rich evidence payload for one run, including:
+
+- the run summary
+- the published definition snapshot
+- step results
+- step attempts
+- the debug export payload
+
+#### Evidence export
+
+```http
+GET /api/v1/flows/{flow_id}/runs/{run_id}/evidence/export?format=json&detail=redacted
+GET /api/v1/flows/{flow_id}/runs/{run_id}/evidence/export?format=json&detail=raw
+```
+
+You can also pass a `reason` query parameter if you want the audit trail to capture why the export was performed.
+
+For the full evidence and classification policy model, see <a href="/docs/flows">Flows</a>. The short version is:
+
+- `evidence/` is the inline inspection surface
+- redacted export is the normal support/compliance export
+- raw export is the strictest export surface and may be tightened further in classification-3 spaces
+
+#### Service keys and evidence
+
+A service key can access evidence only for **its own runs**, and only if the key has explicit `resource_permissions.flow_evidence` capability. Those capability levels are conventional permission tiers for the evidence surface:
+
+- `read` → evidence view
+- `write` → redacted export
+- `admin` → raw export, still subject to classification-3 tenant policy
+
+#### RAG trace and highlighted segments
+
+If a step used knowledge, the evidence/debug payload includes RAG provenance such as retrieved sources, chunk snippets, scores, and prompt-context inclusion metadata.
+
+In the web UI, that same trace can open the source document and highlight the matched segments that influenced the answer.
+
+## Reference
+
+### Access matrix
+
+Use this table as the canonical quick-reference for runtime access decisions.
+
+| Endpoint family | Service key | Editor | Viewer | Space owner / admin | Tenant admin |
+| --- | --- | --- | --- | --- | --- |
+| Draft CRUD | No | Per user-principal authoring policy | No | Yes | Yes |
+| Publish / unpublish | No | No | No | Yes | Yes |
+| Template management / flow-assistant authoring | No | Per user-principal authoring policy | No | Yes | Yes |
+| AI Builder | No | Per user-principal authoring policy | No | Yes | Yes |
+| List published flows in a space | Yes, published only in scoped space | Yes | Yes | Yes | Yes |
+| `GET /api/v1/flows/{id}/published/` | Yes | Yes | Yes | Yes | Yes |
+| `GET /api/v1/flows/{id}/` | No | Yes | Read-only if visible by human policy | Yes | Yes |
+| Run-contract / input-policy / runtime-safe graph | Yes | Yes | Yes | Yes | Yes |
+| Create run | Yes | Yes | No | Yes | Yes |
+| List / get / cancel / redispatch runs | Own runs only | Own runs only | No | In-scope runs | Tenant-wide runs |
+| Step outputs / artifacts | Own runs only | Own runs only | No | In-scope runs | Tenant-wide runs |
+| Evidence view / export | Own runs only, explicit `flow_evidence` capability required | Own runs, policy-gated | No | In-scope runs, policy-gated | Tenant-wide, policy-gated |
+
+### Principal visibility rules
+
+The published runtime API is intentionally not “open to anyone who can see the flow”.
+
+- user-principal run owners can inspect their own runs
+- trusted in-space operators (space owner and space admin) can inspect in-scope runs, artifacts, and evidence
+- tenant admins can inspect across the tenant
+- service keys can inspect only their **own** runs and evidence
+- user-principal run owners need `FLOWS_TRACE` for their own evidence access
+- a service key never becomes a user-principal operator just because the key is scoped to a space with admin-level permission
+
+### Standard error envelope
+
+Flow endpoints use the platform's standard JSON error shape:
+
+```json
+{
+  "message": "Flow must be published before creating runs.",
+  "intric_error_code": 4000,
+  "code": "flow_not_published",
+  "context": null,
+  "request_id": null,
+  "details": null
+}
+```
+
+The exact `intric_error_code` depends on the endpoint, but the envelope shape stays the same.
+
+### Minimal end-to-end runtime example
+
+A typical runtime-only integration looks like this:
+
+```text
+GET  /api/v1/flows/{flow_id}/run-contract/
+GET  /api/v1/flows/{flow_id}/input-policy/
+POST /api/v1/flows/{flow_id}/files/                          (optional)
+POST /api/v1/flows/{flow_id}/steps/{step_id}/runtime-files/ (optional)
+POST /api/v1/flows/{flow_id}/runs/                           with Idempotency-Key
+GET  /api/v1/flows/{flow_id}/runs/{run_id}/
+GET  /api/v1/flows/{flow_id}/runs/{run_id}/steps/
+POST /api/v1/flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/ (optional)
+GET  /api/v1/flows/{flow_id}/runs/{run_id}/evidence/        (optional)
+```
+
+### Appendix: user-principal authoring and AI Builder surfaces
+
+If your application also needs to create or maintain flows, there are two user-principal authoring surfaces.
+
+#### Direct flow authoring
+
+| Purpose | Endpoint |
+| --- | --- |
+| Create draft | `POST /api/v1/flows/` |
+| List drafts / published flows | `GET /api/v1/flows/?space_id=...` |
+| Get draft | `GET /api/v1/flows/{flow_id}/` |
+| Update draft | `PATCH /api/v1/flows/{flow_id}/` |
+| Publish | `POST /api/v1/flows/{flow_id}/publish/` |
+| Unpublish | `POST /api/v1/flows/{flow_id}/unpublish/` |
+| Delete draft | `DELETE /api/v1/flows/{flow_id}/` |
+| Upload DOCX template asset | `POST /api/v1/flows/{flow_id}/template-files/` |
+
+#### AI Builder
+
+AI Builder lives under `/api/v1/flows/ai-builder/` and is session-based. It is useful when a user-principal operator should draft or revise a flow conversationally.
+
+Important current behavior:
+
+- AI Builder requires flow-edit permission
+- access is session-creator-scoped for session and plan details
+- service keys are not supported on this surface
+- planner interaction happens over SSE on `POST /api/v1/flows/ai-builder/sessions/{session_id}/messages`
+
+## Troubleshooting
+
+| Status | Scenario | Typical machine-readable code | What to do |
+| --- | --- | --- | --- |
+| `400` | Caller tries to run a draft flow | `flow_not_published` | Publish the draft first |
+| `400` | Reused idempotency key with a different payload | `flow_run_idempotency_conflict` | Generate a new idempotency key for the new payload |
+| `403` | Wrong space scope on API key | `insufficient_scope` | Use a key scoped to the flow's space or a broader valid scope |
+| `403` | Caller tries to inspect someone else's run | `flow_run_access_denied` | Fetch only runs visible to the current principal |
+| `403` | Service key lacks evidence capability | `flow_run_evidence_forbidden` | Add the right `flow_evidence` resource permission |
+| `403` | Raw export blocked by policy | `flow_run_evidence_raw_export_forbidden` | Fall back to redacted export or adjust tenant policy intentionally |
+
+## Practical takeaway
+
+If you treat Flows as a **published contract plus a versioned runtime**, the API becomes straightforward:
+
+- discover the contract
+- upload what the contract requires
+- create the run with idempotency
+- poll run and step results
+- fetch artifacts or evidence only within the visibility rules of the current principal
+
+That is the cleanest way to build robust web applications on top of Eneo Flows.

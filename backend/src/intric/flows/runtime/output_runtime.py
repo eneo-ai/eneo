@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from intric.files.file_models import FileCreate, FileType
+from intric.flows.principal import FlowPrincipal
 
 
 class RuntimeOutputStep(Protocol):
@@ -59,6 +60,7 @@ class OutputRuntimeDeps:
     parse_json_output: Callable[[str], dict[str, Any] | list[Any]]
     validate_against_contract: ValidateAgainstContractFn
     render_document: RenderDocumentFn
+    principal: FlowPrincipal | None = None
 
 
 async def process_typed_output(
@@ -101,15 +103,21 @@ async def process_typed_output(
                 step_order=step.step_order,
             )
         file_record = await deps.file_repo.add(
-            FileCreate(
-                file_type=FileType.DOCUMENT,
-                blob=blob,
-                name=filename,
-                mimetype=mimetype,
-                checksum=hashlib.sha256(blob).hexdigest(),
-                size=len(blob),
-                user_id=deps.user_id,
-                tenant_id=run.tenant_id,
+            FileCreate.model_validate(
+                {
+                    "file_type": FileType.DOCUMENT,
+                    "blob": blob,
+                    "name": filename,
+                    "mimetype": mimetype,
+                    "checksum": hashlib.sha256(blob).hexdigest(),
+                    "size": len(blob),
+                    **(
+                        deps.principal.file_owner_fields()
+                        if deps.principal is not None
+                        else {"user_id": deps.user_id}
+                    ),
+                    "tenant_id": run.tenant_id,
+                }
             )
         )
         artifacts = [

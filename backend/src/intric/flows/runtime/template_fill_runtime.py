@@ -12,6 +12,7 @@ from uuid import UUID
 from intric.files.file_models import FileCreate, FileType
 from intric.files.file_repo import FileRepository
 from intric.flows.domain.flow import FlowRun, FlowStepResultStatus
+from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.docx_template_runtime import (
     extract_docx_text,
     render_docx_template,
@@ -42,6 +43,7 @@ class TemplateFillRuntimeDeps:
     user_id: UUID
     logger: logging.Logger
     template_asset_service: Any | None = None
+    principal: FlowPrincipal | None = None
 
 
 async def execute_template_fill_step(
@@ -152,15 +154,21 @@ async def execute_template_fill_step(
     try:
         output_checksum = hashlib.sha256(blob).hexdigest()
         stored_file = await deps.file_repo.add(
-            FileCreate(
-                file_type=FileType.DOCUMENT,
-                blob=blob,
-                name=filename,
-                mimetype=mimetype,
-                checksum=output_checksum,
-                size=len(blob),
-                user_id=deps.user_id,
-                tenant_id=run.tenant_id,
+            FileCreate.model_validate(
+                {
+                    "file_type": FileType.DOCUMENT,
+                    "blob": blob,
+                    "name": filename,
+                    "mimetype": mimetype,
+                    "checksum": output_checksum,
+                    "size": len(blob),
+                    **(
+                        deps.principal.file_owner_fields()
+                        if deps.principal is not None
+                        else {"user_id": deps.user_id}
+                    ),
+                    "tenant_id": run.tenant_id,
+                }
             )
         )
     except Exception as exc:

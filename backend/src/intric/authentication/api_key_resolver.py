@@ -109,6 +109,26 @@ def check_resource_permission(
         )
 
     granted_value = getattr(rp, resource_type, None)
+    if resource_type == "flows" and granted_value is None:
+        key_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
+        required_level = PERMISSION_LEVEL_ORDER.get(required, 0)
+        if key_level < required_level:
+            raise ApiKeyValidationError(
+                status_code=403,
+                code="insufficient_resource_permission",
+                message=(
+                    f"API key does not have sufficient permission for "
+                    f"'{resource_type}' (requires '{required}')."
+                ),
+                context=ResourceDenialContext(
+                    resource_type=resource_type,
+                    required_level=required,
+                    granted_level=key.permission,
+                    auth_layer="api_key_resource",
+                    action="resource_permission_check",
+                ),
+            )
+        return
     if granted_value is None:
         # Unknown resource type — fail closed
         granted_level = 0

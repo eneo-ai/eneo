@@ -2,7 +2,7 @@ import random
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Optional, cast
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 import jwt
 import sqlalchemy as sa
@@ -34,9 +34,11 @@ from intric.authentication.auth_models import (
     ApiKeyV2InDB,
 )
 from intric.authentication.auth_service import AuthService
+from intric.authentication.service_key_user import build_service_key_user
 from intric.database.tables.app_table import AppRuns, Apps
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.flow_tables import Flows
 from intric.database.tables.group_chats_table import GroupChatsTable
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.integration_table import IntegrationKnowledge
@@ -706,30 +708,12 @@ class UserService:
         Stores the API key on `service_api_key` so that SpaceActor can derive
         the correct role without a real membership row.
         """
-        from intric.users.user import UserInDB as UserInDBModel
-
         tenant = await self.tenant_repo.get(key.tenant_id)
         if tenant is None:
             raise BadRequestException(
                 f"Tenant {key.tenant_id} does not exist for service key {key.id}"
             )
-        synthetic_id = uuid5(NAMESPACE_URL, f"service-key:{key.id}")
-
-        key_suffix = key.key_suffix or key.id.hex[:8]
-        return UserInDBModel(
-            id=synthetic_id,
-            email=f"sk-{key_suffix}@service.key",
-            username=f"Service Key ({key.name})",
-            state=UserState.ACTIVE,
-            tenant_id=key.tenant_id,
-            tenant=tenant,
-            active_api_key=key,
-            roles=[],
-            predefined_roles=[],
-            used_tokens=0,
-            email_verified=True,
-            is_active=True,
-        )
+        return build_service_key_user(key=key, tenant=tenant)
 
     async def _resolve_api_key(
         self,
@@ -1141,6 +1125,9 @@ class UserService:
             return await session.scalar(stmt)
         elif resource_type == "website":
             stmt = sa.select(Websites.space_id).where(Websites.id == resource_id)
+            return await session.scalar(stmt)
+        elif resource_type == "flow":
+            stmt = sa.select(Flows.space_id).where(Flows.id == resource_id)
             return await session.scalar(stmt)
         elif resource_type == "app_run":
             return await self._resolve_app_run_space_id(resource_id)

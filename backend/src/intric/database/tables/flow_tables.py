@@ -3,7 +3,13 @@ from typing import Any, Optional
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
-from sqlalchemy import CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,7 +33,6 @@ from intric.flows.enums import (
     FlowTemplateAssetStatus,
 )
 
-
 FLOW_STEP_INPUT_SOURCE_VALUES = tuple(item.value for item in FlowInputSource)
 FLOW_STEP_INPUT_TYPE_VALUES = tuple(item.value for item in FlowInputType)
 FLOW_STEP_OUTPUT_MODE_VALUES = tuple(item.value for item in FlowOutputMode)
@@ -38,7 +43,9 @@ FLOW_STEP_RESULT_STATUS_VALUES = tuple(item.value for item in FlowStepResultStat
 FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(item.value for item in FlowStepAttemptStatus)
 MODULE_HEALTH_STATUS_VALUES = ("healthy", "unhealthy", "unknown")
 MODULE_COMPAT_STATUS_VALUES = ("compatible", "incompatible", "unknown")
-FLOW_TEMPLATE_ASSET_STATUS_VALUES = tuple(item.value for item in FlowTemplateAssetStatus)
+FLOW_TEMPLATE_ASSET_STATUS_VALUES = tuple(
+    item.value for item in FlowTemplateAssetStatus
+)
 
 
 class Flows(BasePublic):
@@ -63,7 +70,9 @@ class Flows(BasePublic):
         nullable=True,
     )
     published_version: Mapped[Optional[int]] = mapped_column(nullable=True)
-    metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
     data_retention_days: Mapped[Optional[int]] = mapped_column(nullable=True)
     draft_revision: Mapped[int] = mapped_column(nullable=False, server_default="0")
     deleted_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
@@ -109,7 +118,9 @@ class FlowSteps(BasePublic):
         nullable=False,
         server_default="any",
     )
-    input_contract: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    input_contract: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
     output_mode: Mapped[str] = mapped_column(
         sa.String(32),
         nullable=False,
@@ -120,8 +131,12 @@ class FlowSteps(BasePublic):
         nullable=False,
         server_default="text",
     )
-    output_contract: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
-    input_bindings: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    output_contract: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    input_bindings: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
     output_classification_override: Mapped[Optional[int]] = mapped_column(nullable=True)
     mcp_policy: Mapped[str] = mapped_column(
         sa.String(32),
@@ -129,20 +144,33 @@ class FlowSteps(BasePublic):
         server_default="inherit",
     )
     input_config: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
-    output_config: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    output_config: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     __table_args__ = (
         UniqueConstraint("flow_id", "step_order", name="uq_flow_steps_flow_step_order"),
         UniqueConstraint("flow_id", "id", name="uq_flow_steps_flow_id_id"),
         UniqueConstraint("id", "tenant_id", name="uq_flow_steps_id_tenant_id"),
-        CheckConstraint("input_source IN ('flow_input','previous_step','all_previous_steps','http_get','http_post')", name="ck_flow_steps_input_source"),
-        CheckConstraint("input_type IN ('text','json','image','audio','document','file','any')", name="ck_flow_steps_input_type"),
+        CheckConstraint(
+            "input_source IN ('flow_input','previous_step','all_previous_steps','http_get','http_post')",
+            name="ck_flow_steps_input_source",
+        ),
+        CheckConstraint(
+            "input_type IN ('text','json','image','audio','document','file','any')",
+            name="ck_flow_steps_input_type",
+        ),
         CheckConstraint(
             "output_mode IN ('pass_through','http_post','transcribe_only','template_fill')",
             name="ck_flow_steps_output_mode",
         ),
-        CheckConstraint("output_type IN ('text','json','pdf','docx')", name="ck_flow_steps_output_type"),
-        CheckConstraint("mcp_policy IN ('inherit','restricted')", name="ck_flow_steps_mcp_policy"),
+        CheckConstraint(
+            "output_type IN ('text','json','pdf','docx')",
+            name="ck_flow_steps_output_type",
+        ),
+        CheckConstraint(
+            "mcp_policy IN ('inherit','restricted')", name="ck_flow_steps_mcp_policy"
+        ),
         ForeignKeyConstraint(
             ["flow_id", "tenant_id"],
             ["flows.id", "flows.tenant_id"],
@@ -197,7 +225,10 @@ class FlowStepDependencies(BaseCrossReference):
     )
 
     __table_args__ = (
-        CheckConstraint("parent_step_id <> child_step_id", name="ck_flow_step_dependencies_no_self_ref"),
+        CheckConstraint(
+            "parent_step_id <> child_step_id",
+            name="ck_flow_step_dependencies_no_self_ref",
+        ),
         ForeignKeyConstraint(
             ["flow_id", "parent_step_id"],
             ["flow_steps.flow_id", "flow_steps.id"],
@@ -268,7 +299,9 @@ class FlowTemplateAssets(BasePublic):
     name: Mapped[str] = mapped_column(nullable=False)
     checksum: Mapped[str] = mapped_column(nullable=False)
     mimetype: Mapped[Optional[str]] = mapped_column(nullable=True)
-    placeholders: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default="[]")
+    placeholders: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
     created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="SET NULL"),
         nullable=True,
@@ -285,7 +318,9 @@ class FlowTemplateAssets(BasePublic):
     deleted_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
 
     __table_args__ = (
-        UniqueConstraint("id", "tenant_id", name="uq_flow_template_assets_id_tenant_id"),
+        UniqueConstraint(
+            "id", "tenant_id", name="uq_flow_template_assets_id_tenant_id"
+        ),
         ForeignKeyConstraint(
             ["flow_id", "tenant_id"],
             ["flows.id", "flows.tenant_id"],
@@ -312,6 +347,19 @@ class FlowRuns(BasePublic):
         index=True,
     )
     flow_version: Mapped[int] = mapped_column(nullable=False)
+    principal_type: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="user",
+    )
+    principal_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="RESTRICT"),
+        nullable=True,
+    )
+    principal_api_key_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("api_keys_v2.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="SET NULL"),
         nullable=True,
@@ -322,6 +370,14 @@ class FlowRuns(BasePublic):
         index=True,
     )
     trace_id: Mapped[UUID] = mapped_column(default=uuid4, nullable=False, index=True)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(
+        sa.String(255),
+        nullable=True,
+    )
+    request_fingerprint: Mapped[Optional[str]] = mapped_column(
+        sa.String(64),
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(
         sa.String(32),
         nullable=False,
@@ -329,8 +385,18 @@ class FlowRuns(BasePublic):
         index=True,
     )
     cancelled_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
-    input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
-    output_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    output_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
     error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
     job_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Jobs.id, ondelete="SET NULL"),
@@ -338,7 +404,22 @@ class FlowRuns(BasePublic):
     )
 
     __table_args__ = (
-        CheckConstraint("status IN ('queued','running','completed','failed','cancelled')", name="ck_flow_runs_status"),
+        CheckConstraint(
+            "principal_type IN ('user','service_key')",
+            name="ck_flow_runs_principal_type",
+        ),
+        CheckConstraint(
+            "("
+            "(principal_type = 'user' AND principal_user_id IS NOT NULL AND principal_api_key_id IS NULL) "
+            "OR "
+            "(principal_type = 'service_key' AND principal_user_id IS NULL AND principal_api_key_id IS NOT NULL)"
+            ")",
+            name="ck_flow_runs_principal_identity",
+        ),
+        CheckConstraint(
+            "status IN ('queued','running','completed','failed','cancelled')",
+            name="ck_flow_runs_status",
+        ),
         ForeignKeyConstraint(
             ["flow_id", "tenant_id"],
             ["flows.id", "flows.tenant_id"],
@@ -355,6 +436,28 @@ class FlowRuns(BasePublic):
         UniqueConstraint("id", "flow_id", name="uq_flow_runs_id_flow_id"),
         Index("ix_flow_runs_flow_id_status", "flow_id", "status"),
         Index("ix_flow_runs_tenant_created_at", "tenant_id", "created_at"),
+        Index(
+            "uq_flow_runs_idempotency_user_key",
+            "tenant_id",
+            "flow_id",
+            "principal_user_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=sa.text(
+                "principal_type = 'user' AND idempotency_key IS NOT NULL"
+            ),
+        ),
+        Index(
+            "uq_flow_runs_idempotency_service_key",
+            "tenant_id",
+            "flow_id",
+            "principal_api_key_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=sa.text(
+                "principal_type = 'service_key' AND idempotency_key IS NOT NULL"
+            ),
+        ),
         Index(
             "ix_flow_runs_running_updated_at",
             "status",
@@ -389,10 +492,16 @@ class FlowStepResults(BasePublic):
         ForeignKey(Assistants.id, ondelete="SET NULL"),
         nullable=True,
     )
-    input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
     effective_prompt: Mapped[Optional[str]] = mapped_column(nullable=True)
-    output_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
-    model_parameters_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    output_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    model_parameters_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
     num_tokens_input: Mapped[Optional[int]] = mapped_column(nullable=True)
     num_tokens_output: Mapped[Optional[int]] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(
@@ -402,10 +511,21 @@ class FlowStepResults(BasePublic):
     )
     error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
     flow_step_execution_hash: Mapped[Optional[str]] = mapped_column(nullable=True)
-    tool_calls_metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    tool_calls_metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
-        CheckConstraint("status IN ('pending','running','completed','failed','cancelled')", name="ck_flow_step_results_status"),
+        CheckConstraint(
+            "status IN ('pending','running','completed','failed','cancelled')",
+            name="ck_flow_step_results_status",
+        ),
         ForeignKeyConstraint(
             ["flow_run_id", "tenant_id"],
             ["flow_runs.id", "flow_runs.tenant_id"],
@@ -418,8 +538,12 @@ class FlowStepResults(BasePublic):
             ondelete="CASCADE",
             name="fk_flow_step_results_run_flow",
         ),
-        UniqueConstraint("flow_run_id", "step_id", name="uq_flow_step_results_run_step"),
-        Index("ix_flow_step_results_run_flow_step", "flow_run_id", "flow_id", "step_id"),
+        UniqueConstraint(
+            "flow_run_id", "step_id", name="uq_flow_step_results_run_step"
+        ),
+        Index(
+            "ix_flow_step_results_run_flow_step", "flow_run_id", "flow_id", "step_id"
+        ),
     )
 
 
@@ -456,12 +580,19 @@ class FlowStepAttempts(BasePublic):
     provider_response_id: Mapped[Optional[str]] = mapped_column(nullable=True)
     num_tokens_input: Mapped[Optional[int]] = mapped_column(nullable=True)
     num_tokens_output: Mapped[Optional[int]] = mapped_column(nullable=True)
-    provenance_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
-    started_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    provenance_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
     finished_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
 
     __table_args__ = (
-        CheckConstraint("status IN ('started','retried','failed','completed','cancelled')", name="ck_flow_step_attempts_status"),
+        CheckConstraint(
+            "status IN ('started','retried','failed','completed','cancelled')",
+            name="ck_flow_step_attempts_status",
+        ),
         ForeignKeyConstraint(
             ["flow_run_id", "tenant_id"],
             ["flow_runs.id", "flow_runs.tenant_id"],
@@ -494,8 +625,12 @@ class ModuleRegistry(BasePublic):
     name: Mapped[str] = mapped_column(nullable=False)
     module_id: Mapped[str] = mapped_column(nullable=False, unique=True)
     internal_url: Mapped[str] = mapped_column(nullable=False)
-    health_endpoint: Mapped[str] = mapped_column(nullable=False, server_default="/health")
-    last_health_check_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
+    health_endpoint: Mapped[str] = mapped_column(
+        nullable=False, server_default="/health"
+    )
+    last_health_check_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True)
+    )
     last_health_status: Mapped[str] = mapped_column(
         sa.String(16),
         nullable=False,
@@ -513,11 +648,19 @@ class ModuleRegistry(BasePublic):
         server_default="unknown",
     )
     release_notes_url: Mapped[Optional[str]] = mapped_column(nullable=True)
-    metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     __table_args__ = (
-        CheckConstraint("last_health_status IN ('healthy','unhealthy','unknown')", name="ck_module_registry_last_health_status"),
-        CheckConstraint("compat_status IN ('compatible','incompatible','unknown')", name="ck_module_registry_compat_status"),
+        CheckConstraint(
+            "last_health_status IN ('healthy','unhealthy','unknown')",
+            name="ck_module_registry_last_health_status",
+        ),
+        CheckConstraint(
+            "compat_status IN ('compatible','incompatible','unknown')",
+            name="ck_module_registry_compat_status",
+        ),
     )
 
 
@@ -606,7 +749,9 @@ class BuilderPlans(BasePublic):
     spec_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     spec_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     envelope_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    edit_result_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    edit_result_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint(

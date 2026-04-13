@@ -19,12 +19,44 @@ from intric.flows.api.flow_trace_audit import (
     log_flow_trace_audit_or_deny,
 )
 from intric.flows.application.flow_run_service import FlowRunService
-from intric.flows.flow_permissions import ensure_can_view_flow_trace
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
+
+_FLOW_TRACE_FORBIDDEN_DESCRIPTION = (
+    "Forbidden. Machine-readable codes include `insufficient_scope` when the API key "
+    "space scope does not match the flow, `insufficient_tenant_permission` when an "
+    "ordinary principal lacks trace permission, `flow_run_access_denied` when a caller "
+    "tries to inspect another principal's run, `flow_run_evidence_forbidden` when a "
+    "service key lacks explicit own-run evidence capability, and "
+    "`flow_run_evidence_raw_export_forbidden` when raw export is blocked by "
+    "classification-aware policy."
+)
+
+_FLOW_EVIDENCE_DESCRIPTION = """
+Get the redacted rich evidence trace for one flow run.
+
+Use `/steps/` for baseline consumer step inspection and `/evidence/` for rich traceability,
+attempt history, and debug-export provenance.
+
+Evidence visibility is policy-based:
+- trusted operators (tenant admin, space owner, space admin) may inspect in-scope evidence
+- user-principal run owners may inspect own-run evidence when `FLOWS_TRACE` permits it
+- service keys may inspect only their own-run evidence when explicit machine evidence capability
+  allows it
+    """
+
+_FLOW_EVIDENCE_EXPORT_DESCRIPTION = """
+Export the redacted rich evidence bundle for one flow run as a JSON attachment.
+
+Evidence export is policy-based and tiered:
+- redacted/default export is the standard support/compliance export
+- raw/full export is a stricter surface, especially for classification 3 spaces
+- service keys may export only their own-run evidence and only when explicit machine evidence
+  capability allows it
+    """
 
 
 def _get_flow_run_service(container: Container) -> FlowRunService:
@@ -37,15 +69,10 @@ def _get_flow_run_service(container: Container) -> FlowRunService:
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_run_evidence_alias",
     summary="Get flow run evidence trace",
-    description="""
-Get the redacted rich evidence trace for one flow run.
-
-Use `/steps/` for baseline consumer step inspection and `/evidence/` for rich traceability,
-attempt history, and debug-export provenance.
-    """,
+    description=_FLOW_EVIDENCE_DESCRIPTION,
     responses={
         403: error_response(
-            description="Forbidden: API key scope does not match flow space.",
+            description=_FLOW_TRACE_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             intric_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
@@ -85,18 +112,23 @@ async def get_flow_run_evidence_alias(
         container,
         flow_id=id,
         required_access="view",
+        allow_service_key_principals=True,
     )
     user = container.user()
-    ensure_can_view_flow_trace(user)
     run_service = _get_flow_run_service(container)
-    run = await run_service.get_run(run_id=run_id, flow_id=id)
-    evidence = await run_service.get_evidence(run_id=run_id)
+    run = await run_service.get_run(
+        run_id=run_id,
+        flow_id=id,
+        access_kind="evidence_view",
+    )
+    evidence = await run_service.get_evidence(run_id=run_id, run=run)
     audit_failure = await log_flow_trace_audit_or_deny(
         container=container,
         user=user,
         run=run,
         action=ActionType.FLOW_EVIDENCE_VIEWED,
         description=f"Viewed evidence for flow run {run.id}",
+        extra={"evidence_detail": "view"},
     )
     if audit_failure is not None:
         return audit_failure
@@ -109,9 +141,7 @@ async def get_flow_run_evidence_alias(
     status_code=status.HTTP_200_OK,
     operation_id="export_flow_run_evidence_alias",
     summary="Export flow run evidence bundle",
-    description="""
-Export the redacted rich evidence bundle for one flow run as a JSON attachment.
-    """,
+    description=_FLOW_EVIDENCE_EXPORT_DESCRIPTION,
     responses={
         400: error_response(
             description="Requested evidence export format is not supported.",
@@ -121,7 +151,7 @@ Export the redacted rich evidence bundle for one flow run as a JSON attachment.
             context={"supported_formats": ["json"]},
         ),
         403: error_response(
-            description="Forbidden: API key scope does not match flow space.",
+            description=_FLOW_TRACE_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             intric_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
@@ -155,6 +185,20 @@ async def export_flow_run_evidence_alias(
     ],
     request: Request,
     format: Annotated[Literal["json"], Query(description="Export format.")] = "json",
+    detail: Annotated[
+        Literal["redacted", "raw"],
+        Query(
+            description="Export detail. `redacted` is the default support/compliance export; `raw` requests the full unredacted bundle."
+        ),
+    ] = "redacted",
+    reason: Annotated[
+        str,
+        Query(
+            min_length=3,
+            max_length=500,
+            description="Reason or purpose for exporting evidence.",
+        ),
+    ] = "support_debug",
     container: Container = Depends(get_container(with_user=True)),
 ):
     await common.enforce_flow_scope_for_request(
@@ -162,11 +206,18 @@ async def export_flow_run_evidence_alias(
         container,
         flow_id=id,
         required_access="view",
+        allow_service_key_principals=True,
     )
     user = container.user()
-    ensure_can_view_flow_trace(user)
     run_service = _get_flow_run_service(container)
-    run = await run_service.get_run(run_id=run_id, flow_id=id)
+    access_kind = (
+        "evidence_export_raw" if detail == "raw" else "evidence_export_redacted"
+    )
+    run = await run_service.get_run(
+        run_id=run_id,
+        flow_id=id,
+        access_kind=access_kind,
+    )
     if format != "json":
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -177,13 +228,18 @@ async def export_flow_run_evidence_alias(
                 context={"supported_formats": ["json"]},
             ),
         )
-    export_payload = await run_service.export_evidence_json(run_id=run_id)
+    export_payload = await run_service.export_evidence_json(
+        run_id=run_id,
+        detail=detail,
+        run=run,
+    )
     audit_failure = await log_flow_trace_audit_or_deny(
         container=container,
         user=user,
         run=run,
         action=ActionType.FLOW_EVIDENCE_EXPORTED_JSON,
         description=f"Exported evidence JSON for flow run {run.id}",
+        extra={"evidence_detail": detail, "export_reason": reason},
     )
     if audit_failure is not None:
         return audit_failure

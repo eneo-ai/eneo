@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
+from intric.flows.principal import FlowPrincipal
 from intric.main.exceptions import TypedIOValidationException
 
 if TYPE_CHECKING:
@@ -32,12 +33,21 @@ async def load_files_by_requested_ids(
     file_repo: Any,
     requested_ids: list[UUID],
     user_id: UUID,
+    principal: FlowPrincipal | None = None,
     file_cache: dict[frozenset[UUID], list["File"]] | None = None,
 ) -> list["File"]:
     cache_key = frozenset(requested_ids)
     if file_cache is not None and cache_key in file_cache:
         return file_cache[cache_key]
-    files = await file_repo.get_list_by_id_and_user(requested_ids, user_id=user_id)
+    if principal is not None:
+        files = await file_repo.get_list_by_id_for_owner(
+            ids=requested_ids,
+            owner_type=principal.principal_type.value,
+            owner_user_id=principal.principal_user_id,
+            owner_api_key_id=principal.principal_api_key_id,
+        )
+    else:
+        files = await file_repo.get_list_by_id_and_user(requested_ids, user_id=user_id)
     if file_cache is not None:
         file_cache[cache_key] = files
     return files

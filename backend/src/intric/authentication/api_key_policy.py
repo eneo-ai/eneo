@@ -398,8 +398,18 @@ class ApiKeyPolicyService:
         permission: ApiKeyPermission,
     ) -> None:
         ceiling = PERMISSION_LEVEL_ORDER.get(permission.value, 0)
-        for resource_type in ("assistants", "apps", "spaces", "knowledge"):
-            level: str = getattr(resource_permissions, resource_type).value
+        for resource_type in (
+            "flows",
+            "assistants",
+            "apps",
+            "spaces",
+            "knowledge",
+            "flow_evidence",
+        ):
+            raw_level = getattr(resource_permissions, resource_type)
+            if raw_level is None:
+                continue
+            level: str = raw_level.value
             level_order = PERMISSION_LEVEL_ORDER.get(level, 0)
             if level_order > ceiling:
                 raise ApiKeyValidationError(

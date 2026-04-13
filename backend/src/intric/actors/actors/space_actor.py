@@ -871,6 +871,9 @@ class SpaceActor:
             resource_type=SpaceResourceType.FLOW,
         )
 
+    def get_current_role(self) -> SpaceRole | None:
+        return self._get_role()
+
     def can_toggle_insight(self):
         # NOTE: if user can toggle insight on assistants => true for group chats as well
         return self.can_perform_action(

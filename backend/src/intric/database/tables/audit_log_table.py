@@ -25,6 +25,11 @@ class AuditLog(BasePublic):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    actor_api_key_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("api_keys_v2.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     actor_type = Column(String(50), nullable=False, default="user")
 
     # WHAT: Action Information
@@ -63,6 +68,7 @@ class AuditLog(BasePublic):
         Index("idx_audit_tenant_timestamp", "tenant_id", "timestamp"),
         # Index for actor queries (GDPR export)
         Index("idx_audit_actor", "tenant_id", "actor_id", "timestamp"),
+        Index("idx_audit_actor_api_key", "tenant_id", "actor_api_key_id", "timestamp"),
         # Index for entity queries (resource audit trail)
         Index("idx_audit_entity", "tenant_id", "entity_type", "entity_id"),
         # Index for action queries (compliance review)

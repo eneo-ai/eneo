@@ -77,6 +77,14 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
         ):
             raise BadRequestException("Webhook output_config must be an object.")
         raw_output_config = _optional_json_object(cast(object, raw_output_config_raw))
+        output_classification_override_raw: object = item_dict.get(
+            "output_classification_override"
+        )
+        output_classification_override = (
+            output_classification_override_raw
+            if isinstance(output_classification_override_raw, int)
+            else None
+        )
         if isinstance(raw_output_config, dict):
             if output_mode == "template_fill":
                 bindings = raw_output_config.get("bindings")
@@ -158,6 +166,7 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
                 input_config=raw_input_config,
                 output_mode=output_mode,
                 output_config=raw_output_config,
+                output_classification_override=output_classification_override,
                 output_type=output_type,
                 output_contract=output_contract,
                 input_type=input_type,

@@ -66,3 +66,15 @@ class AIBuilderBudgetSettingsUpdate(BaseModel):
     conversation_safety_buffer_tokens: int | None = None
     minimum_conversation_budget_tokens: int | None = None
     unknown_model_context_window_tokens: int | None = None
+
+
+class FlowEvidencePolicyPublic(BaseModel):
+    allow_space_admin_raw_export_class3: bool = False
+    allow_run_owner_raw_export_class3: bool = False
+    allow_service_key_raw_export_class3: bool = False
+
+
+class FlowEvidencePolicyUpdate(BaseModel):
+    allow_space_admin_raw_export_class3: bool | None = None
+    allow_run_owner_raw_export_class3: bool | None = None
+    allow_service_key_raw_export_class3: bool | None = None

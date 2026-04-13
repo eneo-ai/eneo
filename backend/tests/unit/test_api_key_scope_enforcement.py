@@ -155,6 +155,33 @@ class TestScopeEnforcementUnit:
         await svc._enforce_api_key_scope(request, key, scope_config)
 
     @pytest.mark.asyncio
+    async def test_space_key_matching_flow_space_passes(self):
+        """Space-scoped key accessing a flow in its own space → pass."""
+        space_id = uuid4()
+        flow_id = uuid4()
+        svc = _make_user_service(session_scalar_return=space_id)
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=space_id)
+        request = _scope_request(path_params={"id": str(flow_id)})
+        scope_config = {"resource_type": "flow", "path_param": "id"}
+
+        await svc._enforce_api_key_scope(request, key, scope_config)
+
+    @pytest.mark.asyncio
+    async def test_space_key_different_flow_space_denied(self):
+        """Space-scoped key accessing a flow in another space → 403."""
+        key_space = uuid4()
+        other_space = uuid4()
+        flow_id = uuid4()
+        svc = _make_user_service(session_scalar_return=other_space)
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=key_space)
+        request = _scope_request(path_params={"id": str(flow_id)})
+        scope_config = {"resource_type": "flow", "path_param": "id"}
+
+        with pytest.raises(ApiKeyValidationError) as exc_info:
+            await svc._enforce_api_key_scope(request, key, scope_config)
+        assert exc_info.value.code == "insufficient_scope"
+
+    @pytest.mark.asyncio
     async def test_space_key_different_space_denied(self):
         """Space-scoped key accessing resource in another space → 403."""
         key_space = uuid4()

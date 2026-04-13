@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from intric.authentication.principal_types import PrincipalType
 from intric.main.models import InDB
 
 
@@ -42,12 +43,18 @@ class FileBaseWithContent(FileBase):
 
 
 class FileInfo(InDB, FileBase):
-    user_id: UUID
+    owner_type: PrincipalType | None = None
+    owner_user_id: UUID | None = None
+    owner_api_key_id: UUID | None = None
+    user_id: UUID | None = None
     tenant_id: UUID
 
 
 class FileCreate(FileBaseWithContent):
-    user_id: UUID
+    owner_type: PrincipalType | None = None
+    owner_user_id: UUID | None = None
+    owner_api_key_id: UUID | None = None
+    user_id: UUID | None = None
     tenant_id: UUID
 
 

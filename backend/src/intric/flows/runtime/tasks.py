@@ -3,12 +3,15 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import threading
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 from uuid import UUID
 
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from intric.authentication.principal_types import PrincipalType
+from intric.authentication.service_key_user import build_service_key_user
 from intric.database.database import sessionmanager
 from intric.flows.domain.flow import FlowRunStatus
 from intric.flows.flow_input_limits import (
@@ -65,23 +68,43 @@ async def _execute_flow_run_async(
     run_id: UUID,
     flow_id: UUID,
     tenant_id: UUID,
-    user_id: UUID,
+    principal_type: PrincipalType,
+    principal_user_id: UUID | None,
+    principal_api_key_id: UUID | None,
     celery_task_id: str | None,
     retry_count: int,
 ) -> dict[str, str]:
     async with sessionmanager.session() as session:
         _enable_autobegin_for_flow_task_session(session)
-        user_repo = UsersRepository(session=session)
-        user = await user_repo.get_user_by_id_and_tenant_id(
-            id=user_id, tenant_id=tenant_id
-        )
-        if user is None:
-            raise RuntimeError("Flow execution task user not found for tenant.")
-
         container = Container(session=providers.Object(session))
+        user_repo = UsersRepository(session=session)
+        tenant = await container.tenant_repo().get(tenant_id)
+        if tenant is None:
+            raise RuntimeError("Flow execution task tenant not found.")
+
+        if principal_type == PrincipalType.USER:
+            if principal_user_id is None:
+                raise RuntimeError("Flow execution task principal_user_id is missing.")
+            user = await user_repo.get_user_by_id_and_tenant_id(
+                id=principal_user_id, tenant_id=tenant_id
+            )
+            if user is None:
+                raise RuntimeError("Flow execution task user not found for tenant.")
+        else:
+            if principal_api_key_id is None:
+                raise RuntimeError(
+                    "Flow execution task principal_api_key_id is missing."
+                )
+            key = await container.api_key_v2_repo().get(
+                key_id=principal_api_key_id,
+                tenant_id=tenant_id,
+            )
+            if key is None:
+                raise RuntimeError("Flow execution task API key not found for tenant.")
+            user = build_service_key_user(key=key, tenant=tenant)
+
         override_user(container=container, user=user)
 
-        tenant = await container.tenant_repo().get(tenant_id)
         flow_limits = resolve_flow_input_limits(
             tenant.flow_settings if tenant else None
         )
@@ -95,7 +118,10 @@ async def _execute_flow_run_async(
             space_repo=container.space_repo(),
             completion_service=container.completion_service(),
             file_repo=container.file_repo(),
-            template_asset_service=cast(Any, container.flow_template_asset_service()),  # pyright: ignore[reportUnknownMemberType]
+            template_asset_service=cast(
+                Any,
+                container.flow_template_asset_service(),
+            ),  # pyright: ignore[reportUnknownMemberType]
             encryption_service=container.encryption_service(),
             audit_service=container.audit_service(),
             references_service=container.references_service(),
@@ -137,23 +163,35 @@ async def _mark_run_failed(
                 tenant_id=tenant_id,
                 status=FlowRunStatus.FAILED,
                 error_message=error_message,
-                from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
+                from_statuses=(
+                    FlowRunStatus.QUEUED.value,
+                    FlowRunStatus.RUNNING.value,
+                ),
             )
 
 
-@celery_app.task(name="flows.execute", bind=True)  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="flows.execute",
+    bind=True,
+)
 def execute_flow_run(
     self: Any,
     *,
     run_id: str,
     flow_id: str,
     tenant_id: str,
-    user_id: str | None,
+    principal_type: str | None = None,
+    principal_user_id: str | None = None,
+    principal_api_key_id: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, str]:
     return _execute_flow_run_task(
         run_id=run_id,
         flow_id=flow_id,
         tenant_id=tenant_id,
+        principal_type=principal_type,
+        principal_user_id=principal_user_id,
+        principal_api_key_id=principal_api_key_id,
         user_id=user_id,
         task_id=self.request.id,
         retry_count=self.request.retries,
@@ -165,10 +203,16 @@ def _execute_flow_run_task(
     run_id: str,
     flow_id: str,
     tenant_id: str,
-    user_id: str | None,
+    principal_type: str | None = None,
+    principal_user_id: str | None = None,
+    principal_api_key_id: str | None = None,
+    user_id: str | None = None,
     task_id: str | None,
     retry_count: int,
 ) -> dict[str, str]:
+    if principal_type is None:
+        principal_type = "user"
+        principal_user_id = user_id
     run_id_uuid = UUID(run_id)
     tenant_id_uuid = UUID(tenant_id)
     logger.info(
@@ -179,27 +223,35 @@ def _execute_flow_run_task(
             "run_id": run_id,
             "flow_id": flow_id,
             "tenant_id": tenant_id,
-            "user_id": user_id,
+            "principal_type": principal_type,
+            "principal_user_id": principal_user_id,
+            "principal_api_key_id": principal_api_key_id,
         },
     )
-    if user_id is None:
+    resolved_principal_type = PrincipalType(principal_type)
+    if (
+        resolved_principal_type == PrincipalType.USER and principal_user_id is None
+    ) or (
+        resolved_principal_type == PrincipalType.SERVICE_KEY
+        and principal_api_key_id is None
+    ):
         loop = _get_flow_task_loop()
         asyncio.run_coroutine_threadsafe(
             _mark_run_failed(
                 run_id=run_id_uuid,
                 tenant_id=tenant_id_uuid,
                 error_message=(
-                    "flow_missing_user_id: "
-                    "Flow run execution skipped because run has no user_id."
+                    "flow_missing_principal: "
+                    "Flow run execution skipped because run has no execution principal."
                 ),
             ),
             loop,
         ).result(timeout=10)
         logger.error(
-            "Flow run execution skipped because run has no user_id",
+            "Flow run execution skipped because run has no execution principal",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
         )
-        return {"status": "failed", "reason": "missing_user_id"}
+        return {"status": "failed", "reason": "missing_principal"}
 
     loop = _get_flow_task_loop()
     future: concurrent.futures.Future[dict[str, str]] | None = None
@@ -209,7 +261,15 @@ def _execute_flow_run_task(
                 run_id=run_id_uuid,
                 flow_id=UUID(flow_id),
                 tenant_id=tenant_id_uuid,
-                user_id=UUID(user_id),
+                principal_type=resolved_principal_type,
+                principal_user_id=(
+                    UUID(principal_user_id) if principal_user_id is not None else None
+                ),
+                principal_api_key_id=(
+                    UUID(principal_api_key_id)
+                    if principal_api_key_id is not None
+                    else None
+                ),
                 celery_task_id=task_id,
                 retry_count=retry_count,
             ),
@@ -252,3 +312,54 @@ def _execute_flow_run_task(
             loop,
         ).result(timeout=10)
         return {"status": "failed", "reason": "task_failure"}
+
+
+async def _reconcile_stale_running_runs_all_tenants(
+    *, limit: int = 100
+) -> dict[str, int | str]:
+    stale_before = datetime.now(timezone.utc) - timedelta(
+        seconds=max(1, int(get_settings().flow_task_timeout_seconds)) + 60
+    )
+    reconciled = 0
+    async with sessionmanager.session() as session:
+        container = Container(session=providers.Object(session))
+        run_repo: FlowRunRepository = container.flow_run_repo()
+        tenant_repo = container.tenant_repo()
+        tenants = await tenant_repo.get_all_tenants()
+        for tenant in tenants:
+            stale_runs = await run_repo.list_stale_running_runs(
+                tenant_id=tenant.id,
+                stale_before=stale_before,
+                limit=limit,
+            )
+            for run in stale_runs:
+                await run_repo.mark_pending_steps_cancelled(
+                    run_id=run.id,
+                    tenant_id=run.tenant_id,
+                    error_message=(
+                        "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
+                    ),
+                )
+                updated = await run_repo.fail_stale_running_run(
+                    run_id=run.id,
+                    tenant_id=run.tenant_id,
+                    stale_before=stale_before,
+                    error_message=(
+                        "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
+                    ),
+                )
+                if updated is not None:
+                    reconciled += 1
+    return {"status": "ok", "reconciled": reconciled}
+
+
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="flows.reconcile_running",
+)
+def reconcile_stale_running_runs() -> dict[str, int | str]:
+    loop = _get_flow_task_loop()
+    future = asyncio.run_coroutine_threadsafe(
+        _reconcile_stale_running_runs_all_tenants(),
+        loop,
+    )
+    return future.result(timeout=30)

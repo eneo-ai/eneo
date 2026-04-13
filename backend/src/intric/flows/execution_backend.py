@@ -13,6 +13,8 @@ class FlowExecutionBackend(Protocol):
         run_id: UUID,
         flow_id: UUID,
         tenant_id: UUID,
-        user_id: UUID | None,
+        principal_type: str | None = None,
+        principal_user_id: UUID | None = None,
+        principal_api_key_id: UUID | None = None,
+        user_id: UUID | None = None,
     ) -> None: ...
-

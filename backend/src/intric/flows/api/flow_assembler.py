@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from intric.flows.domain.flow import Flow, FlowRun, FlowSparse, FlowStep
 from intric.flows.api.flow_models import (
     FlowPublic,
     FlowRunPublic,
+    FlowRuntimePathsPublic,
+    FlowRuntimePublic,
     FlowSparsePublic,
     FlowStepCreateRequest,
 )
+from intric.flows.domain.flow import Flow, FlowRun, FlowSparse, FlowStep
 from intric.flows.http_transport import (
     HttpAuthoredConfig,
     is_authored_config,
@@ -41,6 +43,44 @@ class FlowAssembler:
 
     def to_sparse_public(self, flow: FlowSparse) -> FlowSparsePublic:
         return FlowSparsePublic.model_validate(flow)
+
+    def to_runtime_public(self, flow: Flow) -> FlowRuntimePublic:
+        if flow.id is None:
+            raise ValueError("Flow id must be present for runtime projection.")
+        if flow.published_version is None:
+            raise ValueError(
+                "Published flow version must be present for runtime projection."
+            )
+
+        flow_id = str(flow.id)
+        runtime_paths = FlowRuntimePathsPublic(
+            run_contract=f"/api/v1/flows/{flow_id}/run-contract/",
+            input_policy=f"/api/v1/flows/{flow_id}/input-policy/",
+            graph=f"/api/v1/flows/{flow_id}/graph/",
+            upload_flow_file=f"/api/v1/flows/{flow_id}/files/",
+            upload_step_runtime_file_template=(
+                f"/api/v1/flows/{flow_id}/steps/{{step_id}}/runtime-files/"
+            ),
+            create_run=f"/api/v1/flows/{flow_id}/runs/",
+            list_runs=f"/api/v1/flows/{flow_id}/runs/",
+            get_graph_for_run_template=f"/api/v1/flows/{flow_id}/graph/?run_id={{run_id}}",
+            get_run_template=f"/api/v1/flows/{flow_id}/runs/{{run_id}}/",
+            list_steps_template=f"/api/v1/flows/{flow_id}/runs/{{run_id}}/steps/",
+            evidence_template=f"/api/v1/flows/{flow_id}/runs/{{run_id}}/evidence/",
+            artifact_signed_url_template=(
+                f"/api/v1/flows/{flow_id}/runs/{{run_id}}/artifacts/{{file_id}}/signed-url/"
+            ),
+        )
+        return FlowRuntimePublic(
+            id=flow.id,
+            space_id=flow.space_id,
+            name=flow.name,
+            description=flow.description,
+            published_version=flow.published_version,
+            created_at=flow.created_at,
+            updated_at=flow.updated_at,
+            runtime_paths=runtime_paths,
+        )
 
     def to_run_public(self, run: FlowRun) -> FlowRunPublic:
         return FlowRunPublic.model_validate(run)

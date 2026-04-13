@@ -25,12 +25,32 @@ class FileRepository:
     async def get_list_by_id_and_user(
         self, ids: list[UUID], user_id: UUID, include_transcription: bool = True
     ) -> list[File]:
+        return await self.get_list_by_id_for_owner(
+            ids=ids,
+            owner_type="user",
+            owner_user_id=user_id,
+            include_transcription=include_transcription,
+        )
+
+    async def get_list_by_id_for_owner(
+        self,
+        *,
+        ids: list[UUID],
+        owner_type: str,
+        owner_user_id: UUID | None = None,
+        owner_api_key_id: UUID | None = None,
+        include_transcription: bool = True,
+    ) -> list[File]:
         stmt = (
             sa.select(Files)
             .where(Files.id.in_(ids))
-            .where(Files.user_id == user_id)
+            .where(Files.owner_type == owner_type)
             .order_by(Files.created_at)
         )
+        if owner_user_id is not None:
+            stmt = stmt.where(Files.owner_user_id == owner_user_id)
+        if owner_api_key_id is not None:
+            stmt = stmt.where(Files.owner_api_key_id == owner_api_key_id)
 
         if not include_transcription:
             stmt = stmt.options(defer(Files.transcription, raiseload=True))
@@ -71,7 +91,26 @@ class FileRepository:
         return File.model_validate(file)
 
     async def get_list_by_user(self, user_id: UUID) -> list[File]:
-        return await self._delegate.filter_by(conditions={Files.user_id: user_id})
+        return await self._delegate.filter_by(conditions={Files.owner_user_id: user_id})
+
+    async def get_list_by_owner_principal(
+        self,
+        *,
+        owner_type: str,
+        owner_user_id: UUID | None = None,
+        owner_api_key_id: UUID | None = None,
+    ) -> list[File]:
+        stmt = (
+            sa.select(Files)
+            .where(Files.owner_type == owner_type)
+            .order_by(Files.created_at)
+        )
+        if owner_user_id is not None:
+            stmt = stmt.where(Files.owner_user_id == owner_user_id)
+        if owner_api_key_id is not None:
+            stmt = stmt.where(Files.owner_api_key_id == owner_api_key_id)
+        files_in_db = await self.session.scalars(stmt)
+        return [File.model_validate(file) for file in files_in_db]
 
     async def get_by_checksum(self, checksum: str) -> File:
         return cast(
@@ -84,11 +123,30 @@ class FileRepository:
 
     async def delete_by_owner(self, id: UUID, user_id: UUID) -> File | None:
         """Atomic owner-bound delete. Returns None if no matching row."""
+        return await self.delete_by_owner_principal(
+            id=id,
+            owner_type="user",
+            owner_user_id=user_id,
+        )
+
+    async def delete_by_owner_principal(
+        self,
+        *,
+        id: UUID,
+        owner_type: str,
+        owner_user_id: UUID | None = None,
+        owner_api_key_id: UUID | None = None,
+    ) -> File | None:
+        """Atomic owner-bound delete. Returns None if no matching row."""
         stmt = (
             sa.delete(Files)
-            .where(Files.id == id, Files.user_id == user_id)
+            .where(Files.id == id, Files.owner_type == owner_type)
             .returning(Files)
         )
+        if owner_user_id is not None:
+            stmt = stmt.where(Files.owner_user_id == owner_user_id)
+        if owner_api_key_id is not None:
+            stmt = stmt.where(Files.owner_api_key_id == owner_api_key_id)
         result = await self.session.execute(stmt)
         row = result.scalar_one_or_none()
         if row is None:
@@ -131,6 +189,9 @@ class FileRepository:
                 "text": file.text,
                 "blob": file.blob,
                 "transcription": None,
+                "owner_type": file.owner_type,
+                "owner_user_id": file.owner_user_id,
+                "owner_api_key_id": file.owner_api_key_id,
                 "user_id": file.user_id,
                 "tenant_id": file.tenant_id,
             }

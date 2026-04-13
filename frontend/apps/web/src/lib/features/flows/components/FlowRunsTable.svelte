@@ -5,22 +5,28 @@
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import FlowRunEvidenceComponent from "./FlowRunEvidence.svelte";
+  import FlowRunEvidence from "./FlowRunEvidence.svelte";
+  import FlowRunProgressPanel from "./FlowRunProgressPanel.svelte";
   import { toast } from "$lib/components/toast";
-  import { getFlowRunStatusLabel } from "./flowRunStatusLabel";
   import { getRedispatchToastKind } from "./flowRunRedispatchFeedback";
   import { m } from "$lib/paraglide/messages";
+  import { isFlowRunActive, type FlowRunProgressSnapshot } from "./flowRunProgress";
+  import {
+    getFlowRunLocalizedStatusLabel,
+    getFlowRunStatusColor,
+    getFlowRunStatusDotColor
+  } from "./flowRunStatusPresentation";
 
   let {
     flow,
-    intric,
+    eneo,
     visible = true,
     reloadTrigger = 0,
     latestRunPayload = $bindable(null),
     pendingHighlightRunId = $bindable(null)
   }: {
     flow: Flow;
-    intric: Intric;
+    eneo: Intric;
     visible?: boolean;
     reloadTrigger?: number;
     latestRunPayload?: Record<string, unknown> | null;
@@ -37,18 +43,21 @@
   let cancellingRunId: string | null = $state(null);
   let showCancelConfirm = $state(false);
   let pendingCancelRunId: string | null = $state(null);
-  const FlowRunEvidence = FlowRunEvidenceComponent as any;
-
+  let progressSnapshotsByRunId = $state<Record<string, FlowRunProgressSnapshot>>({});
+  let isRunListPolling = $state(false);
   async function loadRuns() {
+    if (isRunListPolling) return;
+    isRunListPolling = true;
     if (!flow?.id) {
       runs = [];
       loading = false;
+      isRunListPolling = false;
       return;
     }
     if (isInitialLoad) loading = true;
     loadError = null;
     try {
-      const result = await intric.flows.runs.list({ flowId: flow.id });
+      const result = await eneo.flows.runs.list({ flowId: flow.id });
       runs = (result.items ?? result) as FlowRun[];
       latestRunPayload = runs.length > 0 ? (runs[0].input_payload_json ?? null) : null;
       if (pendingHighlightRunId && runs.some((r) => r.id === pendingHighlightRunId)) {
@@ -61,6 +70,7 @@
       loadError = e instanceof Error ? e.message : "Failed to load runs";
     } finally {
       loading = false;
+      isRunListPolling = false;
     }
   }
 
@@ -81,60 +91,43 @@
   });
 
   // Poll for updates every 5s when there are running runs
-  let pollInterval: ReturnType<typeof setInterval> | null = $state(null);
+  let pollTimeout: ReturnType<typeof setTimeout> | null = $state(null);
   let hasActiveRuns = $derived(runs.some((r) => r.status === "queued" || r.status === "running"));
 
   $effect(() => {
-    if (hasActiveRuns && !pollInterval && visible) {
-      pollInterval = setInterval(loadRuns, 5000);
-    } else if ((!hasActiveRuns || !visible) && pollInterval) {
-      clearInterval(pollInterval);
-      pollInterval = null;
+    if (hasActiveRuns && !pollTimeout && visible) {
+      const scheduleNextPoll = () => {
+        pollTimeout = setTimeout(async () => {
+          await loadRuns();
+          pollTimeout = null;
+          if (hasActiveRuns && visible) {
+            scheduleNextPoll();
+          }
+        }, 5000);
+      };
+      scheduleNextPoll();
+    } else if ((!hasActiveRuns || !visible) && pollTimeout) {
+      clearTimeout(pollTimeout);
+      pollTimeout = null;
     }
   });
 
   $effect(() => {
     return () => {
-      if (pollInterval) clearInterval(pollInterval);
+      if (pollTimeout) clearTimeout(pollTimeout);
     };
   });
 
   function getStatusColor(status: string): string {
-    switch (status) {
-      case "completed":
-        return "text-positive-stronger";
-      case "failed":
-        return "text-negative-stronger";
-      case "running":
-        return "text-accent-stronger";
-      case "queued":
-        return "text-secondary";
-      case "cancelled":
-        return "text-warning-stronger";
-      default:
-        return "text-secondary";
-    }
+    return getFlowRunStatusColor(status);
   }
 
   function getStatusDotColor(status: string): string {
-    switch (status) {
-      case "completed":
-        return "bg-positive-default";
-      case "failed":
-        return "bg-negative-default";
-      case "running":
-        return "bg-accent-default animate-pulse";
-      case "queued":
-        return "bg-secondary";
-      case "cancelled":
-        return "bg-warning-default";
-      default:
-        return "bg-secondary";
-    }
+    return getFlowRunStatusDotColor(status);
   }
 
   function getStatusLabel(status: string): string {
-    return getFlowRunStatusLabel(status, {
+    return getFlowRunLocalizedStatusLabel(status, {
       completed: m.flow_run_status_completed,
       failed: m.flow_run_status_failed,
       queued: m.flow_run_status_queued,
@@ -152,7 +145,7 @@
 
   async function downloadArtifact(runId: string, fileId: string) {
     try {
-      const { url } = await intric.flows.runs.artifactSignedUrl({
+      const { url } = await eneo.flows.runs.artifactSignedUrl({
         flowId: flow.id,
         runId,
         fileId,
@@ -168,7 +161,7 @@
   async function redispatchRun(runId: string) {
     redispatchingRunId = runId;
     try {
-      const result = await intric.flows.runs.redispatch({ id: runId, flowId: flow.id });
+      const result = await eneo.flows.runs.redispatch({ id: runId, flowId: flow.id });
       if (getRedispatchToastKind(result?.redispatched_count) === "success") {
         toast.success(m.flow_run_redispatch_requested());
       } else {
@@ -195,7 +188,7 @@
     pendingCancelRunId = null;
     cancellingRunId = runId;
     try {
-      await intric.flows.runs.cancel({ id: runId, flowId: flow.id });
+      await eneo.flows.runs.cancel({ id: runId, flowId: flow.id });
       toast.success(m.flow_run_cancel_requested());
       await loadRuns();
     } catch (error) {
@@ -208,6 +201,13 @@
 
   function getEvidenceRowId(runId: string): string {
     return `flow-run-evidence-${runId}`;
+  }
+
+  function updateProgressSnapshot(runId: string, snapshot: FlowRunProgressSnapshot) {
+    progressSnapshotsByRunId = {
+      ...progressSnapshotsByRunId,
+      [runId]: snapshot
+    };
   }
 </script>
 
@@ -439,14 +439,27 @@
                   <td
                     id={getEvidenceRowId(run.id)}
                     colspan="5"
-                    class="border-default bg-hover-dimmer/50 border-b px-4 py-4"
+                    class="border-default bg-hover-dimmer/50 border-b px-2 py-3"
                   >
-                    <FlowRunEvidence
-                      runId={run.id}
-                      flowId={flow.id}
-                      {intric}
-                      runStatus={run.status}
-                    />
+                    {#if isFlowRunActive(run.status)}
+                      <FlowRunProgressPanel
+                        runId={run.id}
+                        flowId={flow.id}
+                        {eneo}
+                        runStatus={run.status}
+                        runStartedAt={run.started_at ?? run.created_at}
+                        initialSnapshot={progressSnapshotsByRunId[run.id] ?? null}
+                        onSnapshotUpdate={(snapshot) => updateProgressSnapshot(run.id, snapshot)}
+                      />
+                    {:else}
+                      <FlowRunEvidence
+                        runId={run.id}
+                        flowId={flow.id}
+                        {eneo}
+                        runStatus={run.status}
+                        fallbackSnapshot={progressSnapshotsByRunId[run.id] ?? null}
+                      />
+                    {/if}
                   </td>
                 </tr>
               {/if}

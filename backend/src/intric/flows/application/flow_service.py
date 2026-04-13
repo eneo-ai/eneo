@@ -10,6 +10,9 @@ from intric.assistants.assistant_service import AssistantService
 from intric.files.file_models import File
 from intric.files.file_repo import FileRepository
 from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, JsonObject
+from intric.flows.flow_security_classification import (
+    evaluate_step_security_classification,
+)
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.flow_validators import (
     normalize_legacy_form_schema,
@@ -33,6 +36,7 @@ from intric.flows.step_config_secrets import encrypt_step_headers_for_storage
 from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from intric.settings.encryption_service import EncryptionService
+from intric.spaces.space_service import SpaceService
 from intric.users.user import UserInDB
 
 
@@ -48,6 +52,7 @@ class FlowService:
         file_repo: FileRepository,
         template_asset_repo: FlowTemplateAssetRepository | None = None,
         encryption_service: EncryptionService | None = None,
+        space_service: SpaceService | None = None,
     ):
         self.user = user
         self.flow_repo = flow_repo
@@ -56,6 +61,7 @@ class FlowService:
         self.file_repo = file_repo
         self.template_asset_repo = template_asset_repo
         self.encryption_service = encryption_service
+        self.space_service = space_service
 
     def _require_template_asset_repo(self) -> FlowTemplateAssetRepository:
         if self.template_asset_repo is None:
@@ -83,6 +89,10 @@ class FlowService:
             metadata_json=normalized_metadata,
         )
         await self._validate_assistant_scope_for_steps(
+            space_id=space_id,
+            steps=steps,
+        )
+        await self._validate_step_security_classification_for_steps(
             space_id=space_id,
             steps=steps,
         )
@@ -114,6 +124,7 @@ class FlowService:
         *,
         space_id: UUID,
         sparse: bool = True,
+        published_only: bool = False,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[FlowSparse] | list[Flow]:
@@ -121,12 +132,14 @@ class FlowService:
             return await self.flow_repo.get_sparse_by_space(
                 space_id=space_id,
                 tenant_id=self.user.tenant_id,
+                published_only=published_only,
                 limit=limit,
                 offset=offset,
             )
         return await self.flow_repo.get_by_space(
             space_id=space_id,
             tenant_id=self.user.tenant_id,
+            published_only=published_only,
             limit=limit,
             offset=offset,
         )
@@ -153,6 +166,10 @@ class FlowService:
             space_id=existing.space_id,
             steps=next_steps,
             owning_flow_id=existing.id,
+        )
+        await self._validate_step_security_classification_for_steps(
+            space_id=existing.space_id,
+            steps=next_steps,
         )
 
         next_metadata = self._normalize_legacy_form_schema(existing.metadata_json)
@@ -311,6 +328,10 @@ class FlowService:
             steps=flow.steps,
             owning_flow_id=flow.id,
         )
+        await self._validate_step_security_classification_for_steps(
+            space_id=flow.space_id,
+            steps=flow.steps,
+        )
 
         latest = await self.flow_version_repo.get_latest(
             flow_id=flow_id,
@@ -423,6 +444,29 @@ class FlowService:
             raise BadRequestException(
                 "Flow steps must reference flow-managed assistants owned by the flow."
             )
+
+    async def _validate_step_security_classification_for_steps(
+        self,
+        *,
+        space_id: UUID,
+        steps: list[FlowStep],
+    ) -> None:
+        if self.space_service is None or not steps:
+            return
+
+        space = await self.space_service.get_space(space_id)
+        prior_output_levels: dict[int, int | None] = {}
+        for step in sorted(steps, key=lambda item: item.step_order):
+            assistant, _ = await self.assistant_service.get_assistant(step.assistant_id)
+            evaluation = evaluate_step_security_classification(
+                step_order=step.step_order,
+                input_source=str(step.input_source),
+                output_classification_override=step.output_classification_override,
+                prior_output_levels_by_order=prior_output_levels,
+                assistant=assistant,
+                space=space,
+            )
+            prior_output_levels[step.step_order] = evaluation.effective_output_level
 
     def _normalize_steps_for_tenant(self, steps: list[FlowStep]) -> list[FlowStep]:
         return [

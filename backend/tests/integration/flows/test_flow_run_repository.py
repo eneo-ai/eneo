@@ -1,16 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import asyncio
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
-from intric.database.tables.flow_tables import FlowRuns, FlowStepAttempts, FlowStepResults
 from intric.database.database import sessionmanager
-from intric.flows import Flow, FlowFactory, FlowRepository, FlowStep, FlowVersionRepository
+from intric.database.tables.flow_tables import (
+    FlowRuns,
+    FlowStepAttempts,
+    FlowStepResults,
+)
+from intric.flows import (
+    Flow,
+    FlowFactory,
+    FlowRepository,
+    FlowStep,
+    FlowVersionRepository,
+)
 from intric.flows.flow import FlowRunStatus, FlowStepAttemptStatus, FlowStepResultStatus
 from intric.flows.flow_run_repo import FlowRunRepository
 
@@ -157,12 +167,16 @@ async def test_create_run_preseeds_pending_step_results(
         assert run.status == "queued"
 
         rows = (
-            await session.execute(
-                sa.select(FlowStepResults)
-                .where(FlowStepResults.flow_run_id == run.id)
-                .order_by(FlowStepResults.step_order.asc())
+            (
+                await session.execute(
+                    sa.select(FlowStepResults)
+                    .where(FlowStepResults.flow_run_id == run.id)
+                    .order_by(FlowStepResults.step_order.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         assert len(rows) == 2
         assert rows[0].step_order == 1
@@ -285,6 +299,72 @@ async def test_list_runs_filters_by_flow_id(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_get_idempotent_run_returns_existing_run_and_fingerprint(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows idempotent run lookup", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Flow Run Assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        flow = flow.model_copy(update={"published_version": 1})
+        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_checksum="checksum-idempotent-run",
+            definition_json={"steps": []},
+            tenant_id=admin_user.tenant_id,
+        )
+
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        created = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"question": "What happened?"},
+            preseed_steps=[],
+            idempotency_key="idem-123",
+            request_fingerprint="abc123fingerprint",
+        )
+
+        existing = await run_repo.get_idempotent_run(
+            tenant_id=admin_user.tenant_id,
+            flow_id=flow.id,
+            user_id=admin_user.id,
+            idempotency_key="idem-123",
+        )
+
+    assert existing is not None
+    existing_run, existing_fingerprint = existing
+    assert existing_run.id == created.id
+    assert existing_fingerprint == "abc123fingerprint"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_count_active_runs_counts_only_queued_and_running_statuses(
     db_container,
     completion_model_factory,
@@ -389,7 +469,9 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
         assert active_count == 2
 
         await run_repo.cancel(run_id=queued_run.id, tenant_id=admin_user.tenant_id)
-        active_after_cancel = await run_repo.count_active_runs(tenant_id=admin_user.tenant_id)
+        active_after_cancel = await run_repo.count_active_runs(
+            tenant_id=admin_user.tenant_id
+        )
         assert active_after_cancel == 1
 
 
@@ -405,7 +487,9 @@ async def test_create_run_rejects_cross_tenant_flow_reference(
     async with db_container() as container:
         session = container.session()
         model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(session, "Flows tenant-active-count space", [model.id])
+        space = await space_factory(
+            session, "Flows tenant-active-count space", [model.id]
+        )
         assistant = await assistant_factory(
             session,
             "Flow tenant-active-count assistant",
@@ -471,6 +555,7 @@ async def test_create_run_rejects_cross_tenant_flow_reference(
                     }
                 ],
             )
+
 
 @pytest.mark.asyncio
 @pytest.mark.integration
@@ -798,7 +883,9 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
 ):
     async with sessionmanager.session() as session, session.begin():
         model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(session, "Flows concurrent run-claim space", [model.id])
+        space = await space_factory(
+            session, "Flows concurrent run-claim space", [model.id]
+        )
         assistant = await assistant_factory(
             session,
             "Flow concurrent run-claim assistant",
@@ -863,10 +950,7 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
     assert sum(1 for claimed in claim_results if claimed) == 1
 
     async with sessionmanager.session() as session, session.begin():
-        row = await session.scalar(
-            sa.select(FlowRuns)
-            .where(FlowRuns.id == run_id)
-        )
+        row = await session.scalar(sa.select(FlowRuns).where(FlowRuns.id == run_id))
         assert row is not None
         assert row.status == FlowRunStatus.RUNNING.value
 
@@ -1054,7 +1138,9 @@ async def test_claim_step_result_returns_none_for_wrong_tenant(
     async with db_container() as container:
         session = container.session()
         model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(session, "Flows wrong-tenant claim space", [model.id])
+        space = await space_factory(
+            session, "Flows wrong-tenant claim space", [model.id]
+        )
         assistant = await assistant_factory(
             session,
             "Flow wrong-tenant assistant",
@@ -1124,7 +1210,9 @@ async def test_create_or_get_attempt_started_is_idempotent(
     async with db_container() as container:
         session = container.session()
         model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(session, "Flows attempt idempotency space", [model.id])
+        space = await space_factory(
+            session, "Flows attempt idempotency space", [model.id]
+        )
         assistant = await assistant_factory(
             session,
             "Flow attempt idempotency assistant",
@@ -1216,7 +1304,9 @@ async def test_create_or_get_attempt_started_is_single_row_under_concurrency(
 ):
     async with sessionmanager.session() as session, session.begin():
         model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(session, "Flows concurrent attempt space", [model.id])
+        space = await space_factory(
+            session, "Flows concurrent attempt space", [model.id]
+        )
         assistant = await assistant_factory(
             session,
             "Flow concurrent attempt assistant",
@@ -1313,7 +1403,9 @@ async def test_mark_pending_steps_cancelled_only_updates_pending_or_running(
     async with db_container() as container:
         session = container.session()
         model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(session, "Flows cancel-step-status space", [model.id])
+        space = await space_factory(
+            session, "Flows cancel-step-status space", [model.id]
+        )
         assistant = await assistant_factory(
             session,
             "Flow cancel-step-status assistant",
@@ -1393,12 +1485,16 @@ async def test_mark_pending_steps_cancelled_only_updates_pending_or_running(
         )
 
         rows = (
-            await session.execute(
-                sa.select(FlowStepResults)
-                .where(FlowStepResults.flow_run_id == run.id)
-                .order_by(FlowStepResults.step_order.asc())
+            (
+                await session.execute(
+                    sa.select(FlowStepResults)
+                    .where(FlowStepResults.flow_run_id == run.id)
+                    .order_by(FlowStepResults.step_order.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert rows[0].status == FlowStepResultStatus.CANCELLED.value
         assert rows[1].status == FlowStepResultStatus.COMPLETED.value
 

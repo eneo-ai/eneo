@@ -7,16 +7,33 @@ from uuid import UUID, uuid4
 
 import jwt
 import pytest
-from httpx import AsyncClient
 import sqlalchemy as sa
-
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from httpx import AsyncClient
 
 from intric.authentication.auth_service import AuthService
-from intric.tenants.tenant_repo import TenantRepository
-from intric.database.tables.tenant_table import Tenants
 from intric.database.database import sessionmanager
+from intric.database.tables.tenant_table import Tenants
+from intric.tenants.tenant_repo import TenantRepository
+
+
+@pytest.fixture
+def override_runtime_settings(test_settings):
+    """Apply runtime settings changes through the global settings singleton."""
+    from intric.main.config import get_settings, set_settings
+
+    original_settings = get_settings()
+
+    def _override(**updates):
+        updated = test_settings.model_copy(update=updates)
+        set_settings(updated)
+        return updated
+
+    try:
+        yield _override
+    finally:
+        set_settings(original_settings)
 
 
 async def _patch_federation_config(async_session, tenant_id: UUID, new_config: dict):
@@ -848,6 +865,7 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
     mock_transcription_models,
     test_settings,
     async_session,
+    override_runtime_settings,
 ):
     slug = f"federation-redirect-{uuid4().hex[:6]}"
     tenant = await _create_tenant(client, super_admin_token, slug)
@@ -890,12 +908,11 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
         lambda *_, **__: {"email": allowed_email},
     )
 
-    original_grace = test_settings.oidc_redirect_grace_period_seconds
-    original_strict = test_settings.strict_oidc_redirect_validation
+    runtime_settings = override_runtime_settings(
+        oidc_redirect_grace_period_seconds=0,
+        strict_oidc_redirect_validation=True,
+    )
     try:
-        test_settings.oidc_redirect_grace_period_seconds = 0
-        test_settings.strict_oidc_redirect_validation = True
-
         await _configure_federation(
             client,
             super_admin_token,
@@ -969,8 +986,7 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
         assert response.status_code == 400
         assert "redirect" in response.json()["detail"].lower()
     finally:
-        test_settings.oidc_redirect_grace_period_seconds = original_grace
-        test_settings.strict_oidc_redirect_validation = original_strict
+        _ = runtime_settings
 
 
 @pytest.mark.integration

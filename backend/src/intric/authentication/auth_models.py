@@ -103,10 +103,12 @@ class ResourcePermissionLevel(str, Enum):
 class ResourcePermissions(BaseModel):
     """Per-resource-type permission overrides. Each level must not exceed the key's simple permission."""
 
+    flows: ResourcePermissionLevel | None = None
     assistants: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     apps: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     spaces: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     knowledge: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    flow_evidence: ResourcePermissionLevel = ResourcePermissionLevel.NONE
 
     model_config = ConfigDict(extra="forbid")
 

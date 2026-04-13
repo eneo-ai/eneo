@@ -1,11 +1,18 @@
 import hashlib
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 from uuid import UUID
 
 from fastapi import UploadFile
 
-from intric.files.file_models import File, FileBaseWithContent, FileCreate, FileType
+from intric.authentication.principal_types import PrincipalType
+from intric.files.file_models import (
+    File,
+    FileBaseWithContent,
+    FileCreate,
+    FileInfo,
+    FileType,
+)
 from intric.files.file_protocol import FileProtocol
 from intric.files.file_repo import FileRepository
 from intric.main.exceptions import NotFoundException, UnauthorizedException
@@ -38,10 +45,12 @@ class FileService:
 
         async with self._write_transaction():
             saved_file = await self.repo.add(
-                FileCreate(
-                    **file.model_dump(),
-                    user_id=self.user.id,
-                    tenant_id=self.user.tenant_id,
+                FileCreate.model_validate(
+                    {
+                        **file.model_dump(mode="python"),
+                        **self._owner_fields(),
+                        "tenant_id": self.user.tenant_id,
+                    }
                 )
             )
 
@@ -50,10 +59,12 @@ class FileService:
     async def _save_file_record(self, file: FileBaseWithContent):
         async with self._write_transaction():
             saved_file = await self.repo.add(
-                FileCreate(
-                    **file.model_dump(),
-                    user_id=self.user.id,
-                    tenant_id=self.user.tenant_id,
+                FileCreate.model_validate(
+                    {
+                        **file.model_dump(mode="python"),
+                        **self._owner_fields(),
+                        "tenant_id": self.user.tenant_id,
+                    }
                 )
             )
 
@@ -82,17 +93,19 @@ class FileService:
 
         async with self._write_transaction():
             return await self.repo.add(
-                FileCreate(
-                    **file_base.model_dump(),
-                    user_id=self.user.id,
-                    tenant_id=self.user.tenant_id,
+                FileCreate.model_validate(
+                    {
+                        **file_base.model_dump(mode="python"),
+                        **self._owner_fields(),
+                        "tenant_id": self.user.tenant_id,
+                    }
                 )
             )
 
     async def get_file_by_id(self, file_id: UUID):
         file = await self.repo.get_by_id(file_id=file_id)
 
-        if file.user_id != self.user.id:
+        if not self._owns_file(file):
             raise UnauthorizedException(
                 "You can only access files you own.",
                 code="forbidden_action",
@@ -108,9 +121,11 @@ class FileService:
     async def get_files_by_ids(
         self, file_ids: list[UUID], include_transcription: bool = True
     ):
-        return await self.repo.get_list_by_id_and_user(
+        return await self.repo.get_list_by_id_for_owner(
             ids=file_ids,
-            user_id=self.user.id,
+            owner_type=self._owner_type().value,
+            owner_user_id=self._owner_user_id(),
+            owner_api_key_id=self._owner_api_key_id(),
             include_transcription=include_transcription,
         )
 
@@ -124,13 +139,18 @@ class FileService:
         )
 
     async def get_files(self) -> list[File]:
-        return await self.repo.get_list_by_user(user_id=self.user.id)
+        if self._owner_type() == PrincipalType.USER:
+            return await self.repo.get_list_by_user(user_id=self.user.id)
+        return await self.repo.get_list_by_owner_principal(
+            owner_type=self._owner_type().value,
+            owner_api_key_id=self._owner_api_key_id(),
+        )
 
     async def get_file_infos(self, file_ids: list[UUID]):
         files = await self.repo.get_file_infos(file_ids)
 
         for file in files:
-            if file.user_id != self.user.id:
+            if not self._owns_file(file):
                 raise UnauthorizedException(
                     "You can only access files you own.",
                     code="forbidden_action",
@@ -144,7 +164,12 @@ class FileService:
         return files
 
     async def delete_file(self, id: UUID):
-        file_deleted = await self.repo.delete_by_owner(id=id, user_id=self.user.id)
+        file_deleted = await self.repo.delete_by_owner_principal(
+            id=id,
+            owner_type=self._owner_type().value,
+            owner_user_id=self._owner_user_id(),
+            owner_api_key_id=self._owner_api_key_id(),
+        )
 
         if file_deleted is None:
             raise NotFoundException()
@@ -152,7 +177,7 @@ class FileService:
         return file_deleted
 
     async def update_file(self, file: File) -> File:
-        if file.user_id != self.user.id:
+        if not self._owns_file(file):
             raise UnauthorizedException(
                 "You can only update files you own.",
                 code="forbidden_action",
@@ -168,7 +193,7 @@ class FileService:
     async def get_file_content(self, file_id: UUID):
         file = await self.repo.get_by_id(file_id=file_id)
 
-        if file.user_id != self.user.id:
+        if not self._owns_file(file):
             raise UnauthorizedException(
                 "You can only access files you own.",
                 code="forbidden_action",
@@ -183,6 +208,42 @@ class FileService:
             raise NotFoundException("File content not found")
 
         return file
+
+    def _owner_type(self) -> PrincipalType:
+        key = getattr(self.user, "active_api_key", None)
+        if key is not None:
+            ownership = getattr(key, "ownership", "user")
+            ownership_value = str(getattr(ownership, "value", ownership))
+            if ownership_value == "service":
+                return PrincipalType.SERVICE_KEY
+        return PrincipalType.USER
+
+    def _owner_api_key_id(self) -> UUID | None:
+        if self._owner_type() == PrincipalType.SERVICE_KEY:
+            key = getattr(self.user, "active_api_key", None)
+            return getattr(key, "id", None)
+        return None
+
+    def _owner_user_id(self) -> UUID | None:
+        if self._owner_type() == PrincipalType.USER:
+            return self.user.id
+        return None
+
+    def _owner_fields(self) -> dict[str, Any]:
+        return {
+            "owner_type": self._owner_type(),
+            "owner_user_id": self._owner_user_id(),
+            "owner_api_key_id": self._owner_api_key_id(),
+            "user_id": self._owner_user_id(),
+        }
+
+    def _owns_file(self, file: File | FileInfo) -> bool:
+        owner_type = file.owner_type
+        if owner_type is None:
+            return file.user_id == self.user.id
+        if owner_type == PrincipalType.USER:
+            return file.owner_user_id == self.user.id
+        return file.owner_api_key_id == self._owner_api_key_id()
 
     async def get_file_content_no_auth(self, file_id: UUID):
         """Get file content without checking user authorization.

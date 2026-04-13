@@ -8,7 +8,6 @@
     downloadJsonArtifact as triggerJsonDownload,
     serializeEvidencePayload
   } from "./flowRunEvidenceActions";
-  import { getFlowRunStatusLabel } from "./flowRunStatusLabel";
   import { m } from "$lib/paraglide/messages";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import {
@@ -16,20 +15,29 @@
     getTemplateProvenanceSummary
   } from "$lib/features/flows/flowEvidenceProvenance";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import FlowRunProgressView from "./FlowRunProgressView.svelte";
   import FlowRunEvidenceToolbar from "./FlowRunEvidenceToolbar.svelte";
   import FlowRunEvidenceSummary from "./FlowRunEvidenceSummary.svelte";
   import FlowRunEvidenceStepCard from "./FlowRunEvidenceStepCard.svelte";
+  import type { FlowRunProgressSnapshot } from "./flowRunProgress";
+  import {
+    getFlowRunLocalizedStatusLabel,
+    getFlowRunStatusColor,
+    getFlowRunStatusDotColor
+  } from "./flowRunStatusPresentation";
 
   let {
     runId,
     flowId,
-    intric,
-    runStatus
+    eneo,
+    runStatus,
+    fallbackSnapshot = null
   }: {
     runId: string;
     flowId: string;
-    intric: Intric;
+    eneo: Intric;
     runStatus: string;
+    fallbackSnapshot?: FlowRunProgressSnapshot | null;
   } = $props();
 
   type EvidencePayload = {
@@ -63,29 +71,15 @@
   let stepAttemptsByOrder: Record<number, Record<string, unknown>[]> = $derived(
     groupStepAttemptsByOrder(evidence?.step_attempts ?? [])
   );
-  let lastFetchedStatus: string | null = $state(null);
-  let pendingTerminalRefetchStatus: string | null = $state(null);
 
   onMount(async () => {
     try {
-      evidence = await intric.flows.runs.evidence({ id: runId, flowId });
+      evidence = await eneo.flows.runs.evidence({ id: runId, flowId });
     } catch (e) {
       console.error("Error loading evidence", e);
       loadError = true;
     }
     loading = false;
-  });
-
-  $effect(() => {
-    if (
-      runStatus &&
-      evidence &&
-      lastFetchedStatus !== runStatus &&
-      (runStatus === "completed" || runStatus === "failed" || runStatus === "cancelled")
-    ) {
-      lastFetchedStatus = runStatus;
-      pendingTerminalRefetchStatus = runStatus;
-    }
   });
 
   $effect(() => {
@@ -96,27 +90,10 @@
   });
 
   $effect(() => {
-    if (pendingTerminalRefetchStatus !== null) {
-      pendingTerminalRefetchStatus = null;
-      queueMicrotask(() => {
-        void refetchEvidence();
-      });
-    }
-  });
-
-  $effect(() => {
     return () => {
       if (copiedTimer) clearTimeout(copiedTimer);
     };
   });
-
-  async function refetchEvidence() {
-    try {
-      evidence = await intric.flows.runs.evidence({ id: runId, flowId });
-    } catch {
-      /* ignore -- already have stale data */
-    }
-  }
 
   function toggleStep(order: number) {
     expandedSteps = expandedSteps.includes(order)
@@ -131,37 +108,15 @@
   }
 
   function getStatusColor(status: string): string {
-    switch (status) {
-      case "completed":
-        return "text-positive-stronger";
-      case "failed":
-        return "text-negative-stronger";
-      case "running":
-        return "text-accent-stronger";
-      case "pending":
-        return "text-secondary";
-      default:
-        return "text-secondary";
-    }
+    return getFlowRunStatusColor(status);
   }
 
   function getStatusDotColor(status: string): string {
-    switch (status) {
-      case "completed":
-        return "bg-positive-default";
-      case "failed":
-        return "bg-negative-default";
-      case "running":
-        return "bg-accent-default animate-pulse";
-      case "pending":
-        return "bg-secondary";
-      default:
-        return "bg-secondary";
-    }
+    return getFlowRunStatusDotColor(status);
   }
 
   function getStatusLabel(status: string): string {
-    return getFlowRunStatusLabel(status, {
+    return getFlowRunLocalizedStatusLabel(status, {
       completed: m.flow_run_status_completed,
       failed: m.flow_run_status_failed,
       queued: m.flow_run_status_queued,
@@ -200,7 +155,7 @@
 
   async function downloadCanonicalEvidenceExport() {
     try {
-      await downloadEvidenceExport({ intric, flowId, runId });
+      await downloadEvidenceExport({ intric: eneo, flowId, runId });
     } catch (error) {
       console.error("Could not download canonical evidence export", error);
       toast.error(m.flow_run_download_evidence_export_failed());
@@ -237,7 +192,7 @@
 
   async function downloadArtifact(fileId: string) {
     try {
-      const { url } = await intric.flows.runs.artifactSignedUrl({
+      const { url } = await eneo.flows.runs.artifactSignedUrl({
         flowId,
         runId,
         fileId,
@@ -300,15 +255,21 @@
   }
 
   function getRuntimeInputSummaryLabel(fileCount: number): string {
-    return `${fileCount} ${fileCount === 1 ? "fil uppladdad" : "filer uppladdade"}`;
+    return fileCount === 1
+      ? m.flow_run_uploaded_files_singular()
+      : m.flow_run_uploaded_files_plural({ count: String(fileCount) });
   }
 </script>
 
 {#if loading}
-  <div class="text-secondary flex items-center gap-2 text-sm">
-    <IconLoadingSpinner class="size-4 animate-spin" />
-    {m.flow_run_evidence_loading()}
-  </div>
+  {#if fallbackSnapshot}
+    <FlowRunProgressView snapshot={fallbackSnapshot} loadingTerminalDetails />
+  {:else}
+    <div class="text-secondary flex items-center gap-2 text-sm">
+      <IconLoadingSpinner class="size-4 animate-spin" />
+      {m.flow_run_evidence_loading()}
+    </div>
+  {/if}
 {:else if loadError || evidence === null}
   <Alert.Root variant="destructive">
     <Alert.Description class="text-sm">{m.flow_run_evidence_error()}</Alert.Description>
@@ -350,9 +311,8 @@
         expanded={expandedSteps.includes(result.step_order)}
         inputExpanded={expandedInputSteps.includes(result.step_order)}
         panelId={getStepPanelId(result.step_order)}
-        {runId}
         isPowerUser={$mode === "power_user"}
-        {intric}
+        intric={eneo}
         onToggle={toggleStep}
         onToggleInput={toggleInputExpand}
         onCopyPayload={copyPayload}

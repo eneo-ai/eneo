@@ -284,6 +284,8 @@ export type FlowRun = {
   tenant_id: string;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   cancelled_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
   input_payload_json?: Record<string, unknown> | null;
   output_payload_json?: FlowRunOutputPayload | null;
   error_message?: string | null;
@@ -317,6 +319,8 @@ export type FlowRunStepOutput = {
   num_tokens_output?: number | null;
   error_message?: string | null;
   diagnostics?: Record<string, unknown>[];
+  started_at?: string | null;
+  finished_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -339,6 +343,8 @@ export type FlowStepResult = {
   error_message?: string | null;
   flow_step_execution_hash?: string | null;
   tool_calls_metadata?: unknown[] | Record<string, unknown> | null;
+  started_at?: string | null;
+  finished_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };

@@ -6,6 +6,7 @@ from intric.main.exceptions import BadRequestException
 from intric.settings.setting_service import SettingService
 from intric.settings.settings import (
     AIBuilderBudgetSettingsUpdate,
+    FlowEvidencePolicyUpdate,
     FlowInputLimitsUpdate,
     SettingsInDB,
     SettingsPublic,
@@ -260,6 +261,122 @@ async def test_update_flow_input_limits_rejects_empty_patch():
         BadRequestException, match="At least one flow input limit field"
     ):
         await service.update_flow_input_limits(FlowInputLimitsUpdate())
+
+
+async def test_get_flow_evidence_policy_reads_tenant_override():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "evidence_policy": {
+                    "classification_3": {
+                        "allow_space_admin_raw_export": True,
+                        "allow_run_owner_raw_export": False,
+                        "allow_service_key_raw_export": True,
+                    }
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    policy = await service.get_flow_evidence_policy()
+
+    assert policy.allow_space_admin_raw_export_class3 is True
+    assert policy.allow_run_owner_raw_export_class3 is False
+    assert policy.allow_service_key_raw_export_class3 is True
+
+
+async def test_update_flow_evidence_policy_persists_and_audits():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log_async = _capture
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+    )
+
+    updated = await service.update_flow_evidence_policy(
+        FlowEvidencePolicyUpdate(allow_service_key_raw_export_class3=True)
+    )
+
+    assert updated.allow_service_key_raw_export_class3 is True
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert (
+        tenant.flow_settings["evidence_policy"]["classification_3"][
+            "allow_service_key_raw_export"
+        ]
+        is True
+    )
+    assert calls[0]["metadata"]["setting"] == "flow_evidence_policy"
+
+
+async def test_update_flow_evidence_policy_rejects_empty_patch():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    with pytest.raises(
+        BadRequestException, match="At least one flow evidence policy field"
+    ):
+        await service.update_flow_evidence_policy(FlowEvidencePolicyUpdate())
+
+
+async def test_get_flow_evidence_policy_requires_admin_permission():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "evidence_policy": {
+                    "classification_3": {
+                        "allow_service_key_raw_export": True,
+                    }
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER.model_copy(update={"roles": []}),
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    with pytest.raises(Exception, match="Need permission admin"):
+        await service.get_flow_evidence_policy()
 
 
 async def test_get_ai_builder_budget_settings_reads_tenant_override(monkeypatch):

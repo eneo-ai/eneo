@@ -22,13 +22,32 @@ from uuid import UUID, uuid4
 
 import jwt
 import pytest
-from httpx import AsyncClient
 import sqlalchemy as sa
+from httpx import AsyncClient
 
 from intric.authentication.auth_service import AuthService
-from intric.tenants.tenant_repo import TenantRepository
-from intric.database.tables.tenant_table import Tenants
 from intric.database.database import sessionmanager
+from intric.database.tables.tenant_table import Tenants
+from intric.tenants.tenant_repo import TenantRepository
+
+
+@pytest.fixture
+def override_runtime_settings(test_settings):
+    """Apply runtime settings changes through the global settings singleton."""
+    from intric.main.config import get_settings, set_settings
+
+    original_settings = get_settings()
+
+    def _override(**updates):
+        nonlocal original_settings
+        updated = test_settings.model_copy(update=updates)
+        set_settings(updated)
+        return updated
+
+    try:
+        yield _override
+    finally:
+        set_settings(original_settings)
 
 
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
@@ -151,6 +170,7 @@ async def test_federation_config_drift_rejected_with_zero_grace(
     mock_transcription_models,
     test_settings,
     async_session,
+    override_runtime_settings,
 ):
     """Verify config drift detection with OIDC_REDIRECT_GRACE_PERIOD_SECONDS=0.
 
@@ -208,15 +228,12 @@ async def test_federation_config_drift_rejected_with_zero_grace(
         lambda *_, **__: {"email": allowed_email},
     )
 
-    # Store original settings
-    original_grace = test_settings.oidc_redirect_grace_period_seconds
-    original_strict = test_settings.strict_oidc_redirect_validation
+    runtime_settings = override_runtime_settings(
+        oidc_redirect_grace_period_seconds=0,
+        strict_oidc_redirect_validation=True,
+    )
 
     try:
-        # Set ZERO grace period and strict validation
-        test_settings.oidc_redirect_grace_period_seconds = 0
-        test_settings.strict_oidc_redirect_validation = True
-
         # Configure federation with origin A
         await _configure_federation(
             client,
@@ -263,8 +280,7 @@ async def test_federation_config_drift_rejected_with_zero_grace(
         )
 
     finally:
-        test_settings.oidc_redirect_grace_period_seconds = original_grace
-        test_settings.strict_oidc_redirect_validation = original_strict
+        _ = runtime_settings
 
 
 @pytest.mark.integration
@@ -279,6 +295,7 @@ async def test_federation_grace_period_allows_recent_config_change(
     mock_transcription_models,
     test_settings,
     async_session,
+    override_runtime_settings,
 ):
     """Verify grace period allows config changes within tolerance window.
 
@@ -505,6 +522,7 @@ async def test_tenant_deleted_during_oidc_flow_returns_404(
     mock_transcription_models,
     test_settings,
     async_session,
+    override_runtime_settings,
 ):
     """Verify graceful handling when tenant is deleted mid-OIDC flow.
 
@@ -611,6 +629,7 @@ async def test_state_token_tampering_rejected(
     mock_transcription_models,
     test_settings,
     async_session,
+    override_runtime_settings,
 ):
     """Verify tampered state tokens are rejected.
 
@@ -720,6 +739,7 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
     mock_transcription_models,
     test_settings,
     async_session,
+    override_runtime_settings,
 ):
     """Verify grace period boundary: config change exactly at (now - grace).
 

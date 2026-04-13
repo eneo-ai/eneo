@@ -3,14 +3,24 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from dependency_injector import providers
 import pytest
 import sqlalchemy as sa
+from dependency_injector import providers
 
-from intric.database.tables.flow_tables import FlowRuns, FlowStepAttempts, FlowStepResults
+from intric.database.tables.flow_tables import (
+    FlowRuns,
+    FlowStepAttempts,
+    FlowStepResults,
+)
 from intric.database.tables.roles_table import Roles
 from intric.database.tables.users_table import users_roles_table
-from intric.flows import Flow, FlowFactory, FlowRepository, FlowStep, FlowVersionRepository
+from intric.flows import (
+    Flow,
+    FlowFactory,
+    FlowRepository,
+    FlowStep,
+    FlowVersionRepository,
+)
 from intric.main.container.container import Container
 from intric.roles.permissions import Permission
 from intric.spaces.api.space_models import SpaceRoleValue
@@ -33,7 +43,9 @@ def _build_flow(
         created_by_user_id=user_id,
         owner_user_id=user_id,
         published_version=None,
-        metadata_json={"form_schema": {"fields": [{"name": "question", "type": "string"}]}},
+        metadata_json={
+            "form_schema": {"fields": [{"name": "question", "type": "string"}]}
+        },
         data_retention_days=30,
         created_at=None,
         updated_at=None,
@@ -67,7 +79,9 @@ def _build_flow(
     )
 
 
-async def _create_view_only_user_and_token(*, db_container, patch_auth_service_jwt, tenant_id: UUID):
+async def _create_view_only_user_and_token(
+    *, db_container, patch_auth_service_jwt, tenant_id: UUID
+):
     async with db_container() as container:
         session = container.session()
         user_repo = container.user_repo()
@@ -191,7 +205,7 @@ async def _seed_flow_run_contract_data(
                             },
                         },
                     }
-                ]
+                ],
             },
             tenant_id=admin_user.tenant_id,
         )
@@ -201,6 +215,8 @@ async def _seed_flow_run_contract_data(
         run = FlowRuns(
             flow_id=flow.id,
             flow_version=1,
+            principal_type="user",
+            principal_user_id=admin_user.id,
             user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             trace_id=uuid4(),
@@ -310,7 +326,9 @@ async def _seed_flow_run_contract_data(
                             "truncated_by_token_budget": False,
                             "included_source_ids": ["source-1"],
                             "not_included_source_ids": [],
-                            "included_source_titles": ["https://kunskap.example.se/beslut/underlag"],
+                            "included_source_titles": [
+                                "https://kunskap.example.se/beslut/underlag"
+                            ],
                             "included_groups": [
                                 {
                                     "source_id": "source-1",
@@ -360,7 +378,7 @@ async def _seed_flow_run_contract_data(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_run_steps_endpoint_allows_view_only_access(
+async def test_flow_run_steps_endpoint_rejects_view_only_access_to_other_users_run(
     client,
     db_container,
     patch_auth_service_jwt,
@@ -392,11 +410,9 @@ async def test_flow_run_steps_endpoint_allows_view_only_access(
         headers={"Authorization": f"Bearer {viewer_token}"},
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 403, response.text
     payload = response.json()
-    assert len(payload) == 1
-    assert payload[0]["step_order"] == 1
-    assert payload[0]["diagnostics"] == [{"code": "ok"}]
+    assert payload["code"] == "flow_run_access_denied"
 
 
 @pytest.mark.asyncio
@@ -434,8 +450,8 @@ async def test_flow_run_evidence_endpoint_requires_trace_permission(
     )
 
     assert response.status_code == 403, response.text
-    assert response.json()["code"] == "insufficient_tenant_permission"
-    assert response.json()["context"]["auth_layer"] == "tenant_role"
+    assert response.json()["code"] == "flow_run_access_denied"
+    assert response.json()["context"]["auth_layer"] == "flow_run_owner"
 
 
 @pytest.mark.asyncio
@@ -477,14 +493,27 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert payload["summary"]["status"] == "completed"
     assert payload["summary"]["steps_count"] == 1
     assert payload["summary"]["models_used"] == ["gpt-4o-mini"]
-    assert payload["summary"]["rag_source_names"] == ["https://kunskap.example.se/beslut/underlag"]
-    assert payload["summary"]["rag_source_display_names"] == ["kunskap.example.se/beslut/underlag"]
+    assert payload["summary"]["rag_source_names"] == [
+        "https://kunskap.example.se/beslut/underlag"
+    ]
+    assert payload["summary"]["rag_source_display_names"] == [
+        "kunskap.example.se/beslut/underlag"
+    ]
     assert payload["summary"]["rag_usage_tracking"]["retrieval_tracked"] is True
-    assert payload["summary"]["rag_usage_tracking"]["prompt_context_inclusion_tracked"] is True
+    assert (
+        payload["summary"]["rag_usage_tracking"]["prompt_context_inclusion_tracked"]
+        is True
+    )
     assert payload["summary"]["rag_usage_tracking"]["citation_tracked"] is False
     assert payload["summary"]["rag_sources"][0]["usage_state"] == "inserted_into_prompt"
-    assert payload["summary"]["rag_sources"][0]["source_container_display_name"] == "kunskap.example.se"
-    assert payload["summary"]["rag_sources"][0]["source_container_label"] == "kunskap.example.se"
+    assert (
+        payload["summary"]["rag_sources"][0]["source_container_display_name"]
+        == "kunskap.example.se"
+    )
+    assert (
+        payload["summary"]["rag_sources"][0]["source_container_label"]
+        == "kunskap.example.se"
+    )
     assert payload["summary"]["citations"]["tracking_mode"] == "passive_inline_scan"
     assert payload["summary"]["citations"]["citation_expected"] is False
     assert payload["summary"]["citations"]["citation_observed"] is False
@@ -493,22 +522,42 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert payload["summary"]["citations"]["steps_with_citations_expected"] == 0
     assert payload["summary"]["final_output"]["kind"] == "structured"
     assert payload["summary"]["step_overview"][0]["step_order"] == 1
-    assert payload["summary"]["step_overview"][0]["knowledge_retrieval"]["status"] == "success"
-    assert payload["summary"]["step_overview"][0]["knowledge_retrieval"]["unique_sources"] == 1
-    assert payload["summary"]["step_overview"][0]["knowledge_retrieval"]["prompt_context"]["included_source_ids"] == ["source-1"]
     assert (
-        payload["summary"]["step_overview"][0]["knowledge_retrieval"]["prompt_context"]["summary"]["total_sources"]
+        payload["summary"]["step_overview"][0]["knowledge_retrieval"]["status"]
+        == "success"
+    )
+    assert (
+        payload["summary"]["step_overview"][0]["knowledge_retrieval"]["unique_sources"]
         == 1
     )
-    assert payload["summary"]["step_overview"][0]["input_lineage"]["runtime_file_names"] == ["underlag.pdf"]
-    assert payload["summary"]["step_overview"][0]["input_lineage"]["runtime_file_checksums"] == ["input-checksum"]
-    assert payload["summary"]["step_overview"][0]["output_summary"]["preview"] == "Looks good"
+    assert payload["summary"]["step_overview"][0]["knowledge_retrieval"][
+        "prompt_context"
+    ]["included_source_ids"] == ["source-1"]
+    assert (
+        payload["summary"]["step_overview"][0]["knowledge_retrieval"]["prompt_context"][
+            "summary"
+        ]["total_sources"]
+        == 1
+    )
+    assert payload["summary"]["step_overview"][0]["input_lineage"][
+        "runtime_file_names"
+    ] == ["underlag.pdf"]
+    assert payload["summary"]["step_overview"][0]["input_lineage"][
+        "runtime_file_checksums"
+    ] == ["input-checksum"]
+    assert (
+        payload["summary"]["step_overview"][0]["output_summary"]["preview"]
+        == "Looks good"
+    )
     assert payload["redaction"]["applied"] is True
     assert payload["redaction"]["policy_version"] == "flow-evidence-redaction.v3"
     assert payload["redaction"]["masked_fields_count"] >= 1
-    assert "bundle.run.input_payload_json.api_key" in payload["redaction"]["masked_paths"]
+    assert (
+        "bundle.run.input_payload_json.api_key" in payload["redaction"]["masked_paths"]
+    )
     assert any(
-        item["path"] == "bundle.run.input_payload_json.api_key" and item["reason"] == "sensitive_key"
+        item["path"] == "bundle.run.input_payload_json.api_key"
+        and item["reason"] == "sensitive_key"
         for item in payload["redaction"]["masked_fields"]
     )
     assert (
@@ -518,7 +567,9 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert payload["bundle"]["run"]["trace_id"] == seeded["trace_id"]
     assert payload["bundle"]["run"]["input_payload_json"]["api_key"] == "[REDACTED]"
     assert (
-        payload["bundle"]["definition_snapshot"]["metadata_json"]["ai_builder"]["origin"]["builder_session_id"]
+        payload["bundle"]["definition_snapshot"]["metadata_json"]["ai_builder"][
+            "origin"
+        ]["builder_session_id"]
         == "builder-session-123"
     )
     assert (
@@ -526,10 +577,17 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
         == "Authorization: Bearer [REDACTED]"
     )
     assert (
-        payload["bundle"]["definition_snapshot"]["steps"][0]["output_config"]["headers"]["Authorization"]
+        payload["bundle"]["definition_snapshot"]["steps"][0]["output_config"][
+            "headers"
+        ]["Authorization"]
         == "[REDACTED]"
     )
-    assert payload["bundle"]["step_attempts"][0]["provenance_json"]["llm"]["model_parameters"]["parameter_semantics"]["reasoning_effort"]["mode"] == "model_default"
+    assert (
+        payload["bundle"]["step_attempts"][0]["provenance_json"]["llm"][
+            "model_parameters"
+        ]["parameter_semantics"]["reasoning_effort"]["mode"]
+        == "model_default"
+    )
 
 
 @pytest.mark.asyncio

@@ -96,6 +96,7 @@ class AuditService:
         metadata: dict[str, Any],
         outcome: Outcome = Outcome.SUCCESS,
         actor_type: ActorType = ActorType.USER,
+        actor_api_key_id: Optional[UUID] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
@@ -130,13 +131,17 @@ class AuditService:
         if not should_log:
             return None
 
-        if actor_type != ActorType.SYSTEM and actor_id is None:
+        if actor_type == ActorType.API_KEY:
+            if actor_api_key_id is None:
+                raise ValueError("actor_api_key_id required for api_key actions")
+        elif actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
 
         audit_log = AuditLog(
             id=uuid4(),
             tenant_id=tenant_id,
             actor_id=actor_id,
+            actor_api_key_id=actor_api_key_id,
             actor_type=actor_type,
             action=action,
             entity_type=entity_type,
@@ -237,6 +242,7 @@ class AuditService:
         metadata: dict[str, Any],
         outcome: Outcome = Outcome.SUCCESS,
         actor_type: ActorType = ActorType.USER,
+        actor_api_key_id: Optional[UUID] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
@@ -278,7 +284,10 @@ class AuditService:
         if not should_log:
             return None
 
-        if actor_type != ActorType.SYSTEM and actor_id is None:
+        if actor_type == ActorType.API_KEY:
+            if actor_api_key_id is None:
+                raise ValueError("actor_api_key_id required for api_key actions")
+        elif actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
 
         # Validate
@@ -292,6 +301,7 @@ class AuditService:
         params = {
             "tenant_id": str(tenant_id),
             "actor_id": str(actor_id) if actor_id else None,
+            "actor_api_key_id": (str(actor_api_key_id) if actor_api_key_id else None),
             "actor_type": actor_type.value,
             "action": action.value,
             "entity_type": entity_type.value,

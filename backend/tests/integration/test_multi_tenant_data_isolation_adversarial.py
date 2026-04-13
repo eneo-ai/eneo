@@ -25,6 +25,34 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+@pytest.fixture
+def enable_tenant_credentials_mode(test_settings):
+    """Override runtime settings so tenant credential routes are actually enabled."""
+    from dependency_injector import providers
+
+    from intric.main.config import get_settings, set_settings
+    from intric.main.container.container import Container
+    from intric.settings.encryption_service import EncryptionService
+
+    original_settings = get_settings()
+    enabled_settings = test_settings.model_copy(
+        update={"tenant_credentials_enabled": True}
+    )
+    set_settings(enabled_settings)
+    Container.encryption_service.reset_last_overriding()
+    Container.encryption_service.override(
+        providers.Object(EncryptionService(enabled_settings.encryption_key))
+    )
+    try:
+        yield enabled_settings
+    finally:
+        set_settings(original_settings)
+        Container.encryption_service.reset_last_overriding()
+        Container.encryption_service.override(
+            providers.Object(EncryptionService(original_settings.encryption_key))
+        )
+
+
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
     """Helper to create a test tenant via API."""
     payload = {
@@ -195,6 +223,7 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     test_settings,
     mock_transcription_models,
     monkeypatch,
+    enable_tenant_credentials_mode,
 ):
     """Verify GET /tenants/{id}/credentials is strictly tenant-scoped.
 
@@ -209,8 +238,7 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     - Credential enumeration attacks
     - Response filtering bugs
     """
-    # Enable tenant credentials for this test
-    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
+    _ = enable_tenant_credentials_mode
     # Create two tenants with credentials
     tenant_a = await _create_tenant(
         client, super_admin_token, f"tenant-cred-a-{uuid4().hex[:6]}"

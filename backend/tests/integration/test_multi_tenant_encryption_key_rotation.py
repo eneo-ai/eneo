@@ -30,9 +30,31 @@ from intric.tenants.tenant_repo import TenantRepository
 
 
 @pytest.fixture(autouse=True)
-def enable_tenant_credentials(test_settings, monkeypatch):
+def enable_tenant_credentials(test_settings):
     """Enable tenant credentials feature for all tests in this module."""
-    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
+    from dependency_injector import providers
+
+    from intric.main.config import get_settings, set_settings
+    from intric.main.container.container import Container
+    from intric.settings.encryption_service import EncryptionService
+
+    original_settings = get_settings()
+    enabled_settings = test_settings.model_copy(
+        update={"tenant_credentials_enabled": True}
+    )
+    set_settings(enabled_settings)
+    Container.encryption_service.reset_last_overriding()
+    Container.encryption_service.override(
+        providers.Object(EncryptionService(enabled_settings.encryption_key))
+    )
+    try:
+        yield enabled_settings
+    finally:
+        set_settings(original_settings)
+        Container.encryption_service.reset_last_overriding()
+        Container.encryption_service.override(
+            providers.Object(EncryptionService(original_settings.encryption_key))
+        )
 
 
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
@@ -446,6 +468,7 @@ async def test_credential_re_encryption_with_new_key(
 
     # Step 4: Update database (manual UPDATE to simulate migration script)
     import sqlalchemy as sa
+
     from intric.database.tables.tenant_table import Tenants
 
     # Create new api_credentials with re-encrypted key
@@ -535,6 +558,7 @@ async def test_encryption_service_detects_corrupted_ciphertext(
     for corrupted_value in corruptions:
         # Update tenant with corrupted ciphertext
         import sqlalchemy as sa
+
         from intric.database.tables.tenant_table import Tenants
 
         corrupted_credentials = {"openai": {"api_key": corrupted_value}}

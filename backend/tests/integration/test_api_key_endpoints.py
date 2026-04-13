@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
+
 import pytest
 import sqlalchemy as sa
 
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
-from intric.spaces.api.space_models import SpaceRoleValue
 from intric.main.config import get_settings, set_settings
+from intric.spaces.api.space_models import SpaceRoleValue
 from intric.users.user import UserAdd, UserState
 
 # Authenticated endpoint for guardrail/enforcement tests.
@@ -1346,7 +1347,11 @@ async def test_rotate_preserves_resource_permissions(client, default_user_token)
     )
     assert rotate_response.status_code == 200, rotate_response.text
     rotated_payload = rotate_response.json()
-    assert rotated_payload["api_key"]["resource_permissions"] == requested_permissions
+    assert rotated_payload["api_key"]["resource_permissions"] == {
+        **requested_permissions,
+        "flow_evidence": "none",
+        "flows": None,
+    }
 
 
 @pytest.mark.integration

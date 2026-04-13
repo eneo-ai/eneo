@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.flows.api.flow_api_common import audit_actor_kwargs
 from intric.flows.domain.flow import FlowRun
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
@@ -40,16 +41,20 @@ async def log_flow_trace_audit_or_deny(
     run: FlowRun,
     action: ActionType,
     description: str,
+    extra: dict[str, Any] | None = None,
 ) -> JSONResponse | None:
     try:
+        actor_kwargs = audit_actor_kwargs(user)
         await container.audit_service().log_async(
             tenant_id=user.tenant_id,
-            actor_id=user.id,
+            actor_id=actor_kwargs["actor_id"],
+            actor_type=actor_kwargs["actor_type"],
+            actor_api_key_id=actor_kwargs["actor_api_key_id"],
             action=action,
             entity_type=EntityType.FLOW_RUN,
             entity_id=run.id,
             description=description,
-            metadata=AuditMetadata.standard(actor=user, target=run),
+            metadata=AuditMetadata.standard(actor=user, target=run, extra=extra or {}),
         )
     except Exception:
         logger.exception(

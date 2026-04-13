@@ -17,6 +17,8 @@ from intric.settings.setting_service import SettingService
 from intric.settings.settings import (
     AIBuilderBudgetSettingsPublic,
     AIBuilderBudgetSettingsUpdate,
+    FlowEvidencePolicyPublic,
+    FlowEvidencePolicyUpdate,
     FlowInputLimitsPublic,
     FlowInputLimitsUpdate,
     GetModelsResponse,
@@ -35,6 +37,10 @@ class _FlowSettingsServiceProtocol(Protocol):
     async def update_flow_input_limits(
         self, payload: FlowInputLimitsUpdate
     ) -> FlowInputLimitsPublic: ...
+    async def get_flow_evidence_policy(self) -> FlowEvidencePolicyPublic: ...
+    async def update_flow_evidence_policy(
+        self, payload: FlowEvidencePolicyUpdate
+    ) -> FlowEvidencePolicyPublic: ...
     async def get_ai_builder_budget_settings(self) -> AIBuilderBudgetSettingsPublic: ...
     async def update_ai_builder_budget_settings(
         self, payload: AIBuilderBudgetSettingsUpdate
@@ -102,6 +108,7 @@ def get_formats():
 async def get_flow_input_limits(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowInputLimitsPublic:
+    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.get_flow_input_limits()
 
@@ -120,8 +127,38 @@ async def update_flow_input_limits(
     payload: FlowInputLimitsUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowInputLimitsPublic:
+    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_input_limits(payload)
+
+
+@settings_admin_router.get(
+    "/flow-evidence-policy",
+    response_model=FlowEvidencePolicyPublic,
+    summary="Get flow evidence policy",
+    description="Return the tenant's effective flow evidence export policy, including classification-3 raw export defaults.",
+)
+async def get_flow_evidence_policy(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowEvidencePolicyPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.get_flow_evidence_policy()
+
+
+@settings_admin_router.patch(
+    "/flow-evidence-policy",
+    response_model=FlowEvidencePolicyPublic,
+    summary="Update flow evidence policy",
+    description="Update tenant-level policy flags that control raw evidence export behavior for classification-3 spaces.",
+)
+async def update_flow_evidence_policy(
+    payload: FlowEvidencePolicyUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowEvidencePolicyPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.update_flow_evidence_policy(payload)
 
 
 @settings_admin_router.get(
@@ -133,6 +170,7 @@ async def update_flow_input_limits(
 async def get_ai_builder_budget_settings(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> AIBuilderBudgetSettingsPublic:
+    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.get_ai_builder_budget_settings()
 
@@ -147,6 +185,7 @@ async def update_ai_builder_budget_settings(
     payload: AIBuilderBudgetSettingsUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> AIBuilderBudgetSettingsPublic:
+    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_ai_builder_budget_settings(payload)
 

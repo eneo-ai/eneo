@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, TypedDict, cast
 from uuid import UUID
 
 from intric.files.file_repo import FileRepository
@@ -14,7 +15,14 @@ from intric.flows.domain.flow import (
     JsonObject,
 )
 from intric.flows.execution_backend import FlowExecutionBackend
+from intric.flows.flow_evidence_policy import (
+    EvidenceCapabilityLevel,
+    classification_level_for_space,
+    resolve_flow_evidence_policy,
+    resolve_service_key_evidence_capability,
+)
 from intric.flows.flow_input_limits import FlowInputLimits, resolve_flow_input_limits
+from intric.flows.flow_permissions import user_can_view_flow_trace
 from intric.flows.flow_run_evidence_bundle import (
     EvidenceBundle,
     RedactedEvidenceBundle,
@@ -33,6 +41,7 @@ from intric.flows.flow_run_step_inputs import (
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository, PreseedStep
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.step_definition_parser import parse_runtime_steps
 from intric.main.config import get_settings
 from intric.main.exceptions import (
@@ -41,14 +50,35 @@ from intric.main.exceptions import (
     UnauthorizedException,
 )
 from intric.main.logging import get_logger
+from intric.roles.permissions import Permission
 from intric.settings.setting_service import SettingService
 from intric.users.user import UserInDB
 
 logger = get_logger(__name__)
 
+FlowRunAccessKind = Literal[
+    "status",
+    "cancel",
+    "content",
+    "artifact",
+    "evidence_view",
+    "evidence_export_redacted",
+    "evidence_export_raw",
+]
+
 
 class _SettingsServiceProtocol(Protocol):
     async def get_flow_input_limits_resolved(self) -> FlowInputLimits: ...
+
+
+class FlowRunDispatchRequest(TypedDict, total=False):
+    run_id: UUID
+    flow_id: UUID
+    tenant_id: UUID
+    user_id: UUID | None
+    principal_type: str
+    principal_user_id: UUID | None
+    principal_api_key_id: UUID | None
 
 
 class FlowRunService:
@@ -69,6 +99,8 @@ class FlowRunService:
         file_repo: FileRepository | None = None,
         settings_service: SettingService | None = None,
         execution_backend: FlowExecutionBackend | None = None,
+        space_service: Any | None = None,
+        actor_manager: Any | None = None,
         max_concurrent_runs: int | None = None,
         queued_redispatch_after_seconds: int | None = None,
     ):
@@ -79,6 +111,8 @@ class FlowRunService:
         self.file_repo = file_repo
         self.settings_service = settings_service
         self.execution_backend = execution_backend
+        self.space_service = space_service
+        self.actor_manager = actor_manager
         self.max_concurrent_runs = (
             max_concurrent_runs
             if max_concurrent_runs is not None
@@ -89,6 +123,188 @@ class FlowRunService:
             if queued_redispatch_after_seconds is not None
             else 30
         )
+        self.running_reconcile_after_seconds = (
+            max(int(get_settings().flow_task_timeout_seconds), 1) + 60
+        )
+
+    def _is_tenant_admin(self) -> bool:
+        return Permission.ADMIN in self.user.permissions
+
+    def _principal(self) -> FlowPrincipal:
+        return FlowPrincipal.from_user(self.user)
+
+    async def _load_space_access(self, *, flow_id: UUID) -> tuple[Any | None, int]:
+        if self.space_service is None or self.actor_manager is None:
+            return None, 0
+        flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
+        space = await self.space_service.get_space(flow.space_id)
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        return actor, classification_level_for_space(space)
+
+    def _evidence_policy(self):
+        tenant = getattr(self.user, "tenant", None)
+        tenant_flow_settings = getattr(tenant, "flow_settings", None)
+        return resolve_flow_evidence_policy(tenant_flow_settings)
+
+    def _service_key_evidence_capability(self) -> EvidenceCapabilityLevel:
+        return resolve_service_key_evidence_capability(self.user)
+
+    def _human_trace_allowed(self) -> bool:
+        return user_can_view_flow_trace(self.user)
+
+    @staticmethod
+    def _raise_run_access_denied(*, auth_layer: str) -> None:
+        raise UnauthorizedException(
+            "You do not have access to this flow run.",
+            code="flow_run_access_denied",
+            context={"auth_layer": auth_layer},
+        )
+
+    @staticmethod
+    def _raise_evidence_forbidden(*, auth_layer: str, message: str) -> None:
+        raise UnauthorizedException(
+            message,
+            code="flow_run_evidence_forbidden",
+            context={"auth_layer": auth_layer},
+        )
+
+    @staticmethod
+    def _raise_raw_export_forbidden(*, auth_layer: str, message: str) -> None:
+        raise UnauthorizedException(
+            message,
+            code="flow_run_evidence_raw_export_forbidden",
+            context={"auth_layer": auth_layer},
+        )
+
+    async def _ensure_can_access_run(self, run: FlowRun, *, access_kind: str) -> None:
+        if self._is_tenant_admin():
+            return
+        principal = self._principal()
+        if principal.is_service_key:
+            if not principal.matches_run(run):
+                self._raise_run_access_denied(auth_layer="flow_run_principal")
+            capability = self._service_key_evidence_capability()
+            policy = self._evidence_policy()
+            actor, classification_level = await self._load_space_access(
+                flow_id=run.flow_id
+            )
+            _ = actor  # classification still derives from the space, actor unused for service keys
+            if access_kind in {"status", "cancel", "content", "artifact"}:
+                return
+            if access_kind == "evidence_view":
+                if capability >= EvidenceCapabilityLevel.VIEW:
+                    return
+                self._raise_evidence_forbidden(
+                    auth_layer="flow_run_principal",
+                    message="Service principal is not authorized to view evidence for this run.",
+                )
+            if access_kind == "evidence_export_redacted":
+                if capability >= EvidenceCapabilityLevel.REDACTED_EXPORT:
+                    return
+                self._raise_evidence_forbidden(
+                    auth_layer="flow_run_principal",
+                    message="Service principal is not authorized to export evidence for this run.",
+                )
+            if access_kind == "evidence_export_raw":
+                if capability < EvidenceCapabilityLevel.RAW_EXPORT:
+                    self._raise_evidence_forbidden(
+                        auth_layer="flow_run_principal",
+                        message="Service principal is not authorized to export raw evidence for this run.",
+                    )
+                if (
+                    classification_level >= 3
+                    and not policy.allow_service_key_raw_export_class3
+                ):
+                    self._raise_raw_export_forbidden(
+                        auth_layer="flow_run_principal",
+                        message="Raw evidence export is not allowed for service principals in classification 3 spaces.",
+                    )
+                return
+            self._raise_run_access_denied(auth_layer="flow_run_principal")
+
+        actor, classification_level = await self._load_space_access(flow_id=run.flow_id)
+        role_value = (
+            getattr(actor.get_current_role(), "value", actor.get_current_role())
+            if actor is not None
+            else None
+        )
+        policy = self._evidence_policy()
+
+        if role_value in {"admin", "owner"}:
+            if access_kind in {
+                "status",
+                "cancel",
+                "content",
+                "artifact",
+                "evidence_view",
+                "evidence_export_redacted",
+            }:
+                return
+            if access_kind == "evidence_export_raw":
+                if role_value == "owner":
+                    return
+                if (
+                    classification_level < 3
+                    or policy.allow_space_admin_raw_export_class3
+                ):
+                    return
+                self._raise_raw_export_forbidden(
+                    auth_layer="space_membership",
+                    message="Raw evidence export is not allowed for space admins in classification 3 spaces.",
+                )
+
+        if principal.matches_run(run):
+            if access_kind in {"status", "cancel", "content", "artifact"}:
+                return
+            if access_kind in {"evidence_view", "evidence_export_redacted"}:
+                if self._human_trace_allowed():
+                    return
+                raise UnauthorizedException(
+                    "You do not have permission to view flow trace.",
+                    code="insufficient_tenant_permission",
+                    context={"auth_layer": "tenant_role"},
+                )
+            if access_kind == "evidence_export_raw":
+                if not self._human_trace_allowed():
+                    raise UnauthorizedException(
+                        "You do not have permission to view flow trace.",
+                        code="insufficient_tenant_permission",
+                        context={"auth_layer": "tenant_role"},
+                    )
+                if classification_level < 3 or policy.allow_run_owner_raw_export_class3:
+                    return
+                self._raise_raw_export_forbidden(
+                    auth_layer="flow_run_owner",
+                    message="Raw evidence export is not allowed for this run in a classification 3 space.",
+                )
+
+        self._raise_run_access_denied(auth_layer="flow_run_owner")
+
+    def build_dispatch_request(self, run: FlowRun) -> FlowRunDispatchRequest:
+        principal = FlowPrincipal.from_run(run)
+        request: FlowRunDispatchRequest = {
+            "run_id": run.id,
+            "flow_id": run.flow_id,
+            "tenant_id": run.tenant_id,
+        }
+        if principal.is_service_key:
+            request["principal_type"] = principal.principal_type.value
+            request["principal_user_id"] = principal.principal_user_id
+            request["principal_api_key_id"] = principal.principal_api_key_id
+        else:
+            request["user_id"] = principal.principal_user_id
+        return request
+
+    def _validate_idempotency_key(self, idempotency_key: str | None) -> str | None:
+        if idempotency_key is None:
+            return None
+        normalized = idempotency_key.strip()
+        if not normalized or len(normalized) > 255:
+            raise BadRequestException(
+                "Idempotency key must be between 1 and 255 characters.",
+                code="flow_run_invalid_idempotency_key",
+            )
+        return normalized
 
     async def create_run(
         self,
@@ -98,7 +314,10 @@ class FlowRunService:
         expected_flow_version: int | None = None,
         step_inputs: dict[UUID, dict[str, list[UUID]]] | None = None,
         file_ids: list[UUID] | None = None,
+        idempotency_key: str | None = None,
     ) -> FlowRun:
+        idempotency_key = self._validate_idempotency_key(idempotency_key)
+        principal = self._principal()
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
         if flow.published_version is None:
             raise BadRequestException(
@@ -159,6 +378,7 @@ class FlowRunService:
                 normalized_step_inputs=normalized_step_inputs,
                 file_repo=self.file_repo,
                 user_id=self.user.id,
+                principal=principal,
             )
         effective_payload = dict(normalized_inline_payload or {})
         effective_payload["expected_flow_version"] = flow.published_version
@@ -169,6 +389,11 @@ class FlowRunService:
         if file_ids:
             effective_payload["file_ids"] = [str(fid) for fid in file_ids]
         input_payload_json = effective_payload or None
+        request_fingerprint = self._build_idempotency_fingerprint(
+            flow_id=flow_id,
+            flow_version=flow.published_version,
+            input_payload_json=input_payload_json,
+        )
 
         if input_payload_json is not None:
             payload_size = len(
@@ -193,6 +418,21 @@ class FlowRunService:
         await self.flow_run_repo.acquire_tenant_run_creation_lock(
             tenant_id=self.user.tenant_id
         )
+        if idempotency_key is not None:
+            existing = await self.flow_run_repo.get_idempotent_run(
+                tenant_id=self.user.tenant_id,
+                flow_id=flow_id,
+                idempotency_key=idempotency_key,
+                principal=principal,
+            )
+            if existing is not None:
+                existing_run, existing_fingerprint = existing
+                if existing_fingerprint != request_fingerprint:
+                    raise BadRequestException(
+                        "Idempotency key was already used with a different run request payload.",
+                        code="flow_run_idempotency_conflict",
+                    )
+                return existing_run
         active_runs = await self.flow_run_repo.count_active_runs(
             tenant_id=self.user.tenant_id
         )
@@ -218,44 +458,55 @@ class FlowRunService:
         created = await self.flow_run_repo.create(
             flow_id=flow.id,
             flow_version=flow.published_version,
-            user_id=self.user.id,
+            user_id=principal.legacy_user_id,
+            principal_type=principal.principal_type.value,
+            principal_user_id=principal.principal_user_id,
+            principal_api_key_id=principal.principal_api_key_id,
             tenant_id=self.user.tenant_id,
             input_payload_json=input_payload_json,
             preseed_steps=self._build_preseed_steps(
                 definition_json=version.definition_json,
                 fallback_steps=flow.steps,
             ),
+            idempotency_key=idempotency_key,
+            request_fingerprint=request_fingerprint,
         )
-        if self.execution_backend is None:
-            return created
-
-        try:
-            await self.execution_backend.dispatch(
-                run_id=created.id,
-                flow_id=flow.id,
-                tenant_id=self.user.tenant_id,
-                user_id=self.user.id,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to dispatch newly created flow run",
-                extra={
-                    "run_id": str(created.id),
-                    "flow_id": str(flow.id),
-                    "tenant_id": str(self.user.tenant_id),
-                },
-            )
-            # If dispatch fails here, request-level transaction handling decides
-            # whether run creation is committed or rolled back as one unit.
-            raise
         return created
 
-    async def get_run(self, *, run_id: UUID, flow_id: UUID | None = None) -> FlowRun:
-        return await self.flow_run_repo.get(
+    def _build_idempotency_fingerprint(
+        self,
+        *,
+        flow_id: UUID,
+        flow_version: int,
+        input_payload_json: dict[str, Any] | None,
+    ) -> str:
+        normalized = {
+            "flow_id": str(flow_id),
+            "flow_version": flow_version,
+            "input_payload_json": input_payload_json,
+        }
+        payload = json.dumps(
+            normalized,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    async def get_run(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID | None = None,
+        access_kind: FlowRunAccessKind = "status",
+    ) -> FlowRun:
+        run = await self.flow_run_repo.get(
             run_id=run_id,
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
         )
+        await self._ensure_can_access_run(run, access_kind=access_kind)
+        return run
 
     async def list_runs(
         self,
@@ -264,9 +515,42 @@ class FlowRunService:
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[FlowRun]:
+        principal = self._principal()
+        if (
+            not self._is_tenant_admin()
+            and not principal.is_service_key
+            and flow_id is not None
+        ):
+            actor, _classification_level = await self._load_space_access(
+                flow_id=flow_id
+            )
+            role_value = (
+                getattr(actor.get_current_role(), "value", actor.get_current_role())
+                if actor is not None
+                else None
+            )
+            if role_value in {"admin", "owner"}:
+                return await self.flow_run_repo.list_runs(
+                    tenant_id=self.user.tenant_id,
+                    flow_id=flow_id,
+                    user_id=None,
+                    principal_api_key_id=None,
+                    limit=limit,
+                    offset=offset,
+                )
         return await self.flow_run_repo.list_runs(
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
+            user_id=(
+                None
+                if self._is_tenant_admin() or principal.is_service_key
+                else principal.principal_user_id
+            ),
+            principal_api_key_id=(
+                principal.principal_api_key_id
+                if not self._is_tenant_admin() and principal.is_service_key
+                else None
+            ),
             limit=limit,
             offset=offset,
         )
@@ -277,7 +561,7 @@ class FlowRunService:
         run_id: UUID,
         flow_id: UUID | None = None,
     ) -> list[FlowStepResult]:
-        run = await self.get_run(run_id=run_id, flow_id=flow_id)
+        run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
         return await self.flow_run_repo.list_step_results(
             run_id=run.id,
             tenant_id=self.user.tenant_id,
@@ -315,15 +599,29 @@ class FlowRunService:
                     flow_id=flow_id,
                 )
             )
-            if claimed_run is None or claimed_run.user_id is None:
+            if claimed_run is None:
                 continue
             try:
-                await backend.dispatch(
-                    run_id=claimed_run.id,
-                    flow_id=claimed_run.flow_id,
-                    tenant_id=claimed_run.tenant_id,
-                    user_id=claimed_run.user_id,
-                )
+                principal = FlowPrincipal.from_run(claimed_run)
+            except ValueError:
+                continue
+            try:
+                if principal.is_service_key:
+                    await backend.dispatch(
+                        run_id=claimed_run.id,
+                        flow_id=claimed_run.flow_id,
+                        tenant_id=claimed_run.tenant_id,
+                        principal_type=principal.principal_type.value,
+                        principal_user_id=principal.principal_user_id,
+                        principal_api_key_id=(principal.principal_api_key_id),
+                    )
+                else:
+                    await backend.dispatch(
+                        run_id=claimed_run.id,
+                        flow_id=claimed_run.flow_id,
+                        tenant_id=claimed_run.tenant_id,
+                        user_id=principal.principal_user_id,
+                    )
                 redispatched += 1
             except Exception:
                 logger.exception(
@@ -338,8 +636,30 @@ class FlowRunService:
                     raise
         return redispatched
 
+    async def reconcile_stale_running_runs(self, *, limit: int = 25) -> int:
+        stale_before = datetime.now(timezone.utc) - timedelta(
+            seconds=max(1, self.running_reconcile_after_seconds)
+        )
+        stale_runs = await self.flow_run_repo.list_stale_running_runs(
+            tenant_id=self.user.tenant_id,
+            stale_before=stale_before,
+            limit=limit,
+        )
+        reconciled = 0
+        error_message = "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
+        for run in stale_runs:
+            updated = await self.flow_run_repo.fail_stale_running_run(
+                run_id=run.id,
+                tenant_id=self.user.tenant_id,
+                stale_before=stale_before,
+                error_message=error_message,
+            )
+            if updated is not None:
+                reconciled += 1
+        return reconciled
+
     async def cancel_run(self, *, run_id: UUID) -> FlowRun:
-        run = await self.get_run(run_id=run_id)
+        run = await self.get_run(run_id=run_id, access_kind="cancel")
         if run.status in self._TERMINAL_STATUSES:
             return run
         await self.flow_run_repo.mark_pending_steps_cancelled(
@@ -388,7 +708,7 @@ class FlowRunService:
                 code="file_repo_unavailable",
             )
 
-        run = await self.get_run(run_id=run_id, flow_id=flow_id)
+        run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="artifact")
         step_results = await self.flow_run_repo.list_step_results(
             run_id=run.id,
             tenant_id=self.user.tenant_id,
@@ -421,37 +741,74 @@ class FlowRunService:
             )
         return file
 
-    async def get_evidence(self, *, run_id: UUID) -> dict[str, Any]:
-        bundle = await self._get_redacted_evidence_bundle(run_id=run_id)
+    async def get_evidence(
+        self, *, run_id: UUID, run: FlowRun | None = None
+    ) -> dict[str, Any]:
+        bundle = await self._get_redacted_evidence_bundle(
+            run_id=run_id,
+            access_kind="evidence_view",
+            run=run,
+        )
         return bundle.to_dict()
 
-    async def export_evidence_json(self, *, run_id: UUID) -> dict[str, Any]:
-        bundle = await self._get_redacted_evidence_bundle(run_id=run_id)
+    async def export_evidence_json(
+        self,
+        *,
+        run_id: UUID,
+        detail: str = "redacted",
+        run: FlowRun | None = None,
+    ) -> dict[str, Any]:
+        if detail == "raw":
+            bundle = await self._get_evidence_bundle(
+                run_id=run_id,
+                access_kind="evidence_export_raw",
+                run=run,
+            )
+            return cast(dict[str, Any], render_evidence_json_export(bundle=bundle))
+        bundle = await self._get_redacted_evidence_bundle(
+            run_id=run_id,
+            access_kind="evidence_export_redacted",
+            run=run,
+        )
         return cast(dict[str, Any], render_evidence_json_export(bundle=bundle))
 
     async def _get_redacted_evidence_bundle(
-        self, *, run_id: UUID
+        self,
+        *,
+        run_id: UUID,
+        access_kind: FlowRunAccessKind,
+        run: FlowRun | None = None,
     ) -> RedactedEvidenceBundle:
-        bundle = await self._get_evidence_bundle(run_id=run_id)
+        bundle = await self._get_evidence_bundle(
+            run_id=run_id,
+            access_kind=access_kind,
+            run=run,
+        )
         return redact_evidence_bundle(bundle)
 
-    async def _get_evidence_bundle(self, *, run_id: UUID) -> EvidenceBundle:
-        run = await self.get_run(run_id=run_id)
+    async def _get_evidence_bundle(
+        self,
+        *,
+        run_id: UUID,
+        access_kind: FlowRunAccessKind,
+        run: FlowRun | None = None,
+    ) -> EvidenceBundle:
+        resolved_run = run or await self.get_run(run_id=run_id, access_kind=access_kind)
         version = await self.flow_version_repo.get(
-            flow_id=run.flow_id,
-            version=run.flow_version,
+            flow_id=resolved_run.flow_id,
+            version=resolved_run.flow_version,
             tenant_id=self.user.tenant_id,
         )
         step_results = await self.flow_run_repo.list_step_results(
-            run_id=run.id,
+            run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
         )
         step_attempts = await self.flow_run_repo.list_step_attempts(
-            run_id=run.id,
+            run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
         )
         return build_evidence_bundle(
-            run=run,
+            run=resolved_run,
             version=version,
             step_results=step_results,
             step_attempts=step_attempts,

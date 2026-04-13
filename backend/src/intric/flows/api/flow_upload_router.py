@@ -34,6 +34,8 @@ Use this endpoint before rendering a run form to discover:
 - step-specific runtime input requirements
 - aggregate file limits
 - published template readiness and capability state
+
+Service-key principals may use this endpoint for published-flow runtime only.
     """,
     responses={
         400: error_response(
@@ -60,7 +62,9 @@ Use this endpoint before rendering a run form to discover:
 async def get_flow_run_contract(
     id: Annotated[
         UUID,
-        Path(description="Identifier of the published flow whose run contract should be returned."),
+        Path(
+            description="Identifier of the published flow whose run contract should be returned."
+        ),
     ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
@@ -70,6 +74,8 @@ async def get_flow_run_contract(
         container,
         flow_id=id,
         required_access="view",
+        allow_service_key_principals=True,
+        require_published_for_service_key=True,
     )
     contract = await common.flow_upload_service(container).get_run_contract(flow_id=id)
     return FlowRunContractPublic.model_validate(contract)
@@ -90,6 +96,8 @@ Use this endpoint before upload/run to discover:
 - the effective max file size limit in bytes
 - max files per run (when constrained)
 - recommended run payload shape for API consumers
+
+Service-key principals may use this endpoint for published-flow runtime only.
     """,
     responses={
         403: error_response(
@@ -110,7 +118,9 @@ Use this endpoint before upload/run to discover:
 async def get_flow_input_policy(
     id: Annotated[
         UUID,
-        Path(description="Identifier of the flow whose effective input policy should be returned."),
+        Path(
+            description="Identifier of the flow whose effective input policy should be returned."
+        ),
     ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
@@ -120,6 +130,8 @@ async def get_flow_input_policy(
         container,
         flow_id=id,
         required_access="view",
+        allow_service_key_principals=True,
+        require_published_for_service_key=True,
     )
     policy = await common.flow_upload_service(container).get_input_policy(flow_id=id)
     return FlowInputPolicyPublic(
@@ -210,7 +222,9 @@ generic file routes directly. Validation is based on the first `flow_input` step
 async def upload_flow_file(
     id: Annotated[
         UUID,
-        Path(description="Identifier of the published flow that should receive the uploaded run input file."),
+        Path(
+            description="Identifier of the published flow that should receive the uploaded run input file."
+        ),
     ],
     request: Request,
     upload_file: UploadFile = File(...),
@@ -221,15 +235,20 @@ async def upload_flow_file(
         container,
         flow_id=id,
         required_access="run",
+        allow_service_key_principals=True,
+        require_published_for_service_key=True,
     )
     file = await common.flow_upload_service(container).upload_file_for_flow(
         flow_id=id,
         upload_file=upload_file,
     )
     user = container.user()
+    actor_kwargs = common.audit_actor_kwargs(user)
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        actor_id=actor_kwargs["actor_id"],
+        actor_type=actor_kwargs["actor_type"],
+        actor_api_key_id=actor_kwargs["actor_api_key_id"],
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=file.id,
@@ -314,11 +333,15 @@ effective size limits for the published flow version before storing the file.
 async def upload_flow_runtime_file(
     id: Annotated[
         UUID,
-        Path(description="Identifier of the published flow that owns the runtime-input step."),
+        Path(
+            description="Identifier of the published flow that owns the runtime-input step."
+        ),
     ],
     step_id: Annotated[
         UUID,
-        Path(description="Identifier of the published step that should receive the uploaded runtime file."),
+        Path(
+            description="Identifier of the published step that should receive the uploaded runtime file."
+        ),
     ],
     request: Request,
     upload_file: UploadFile = File(...),
@@ -329,6 +352,8 @@ async def upload_flow_runtime_file(
         container,
         flow_id=id,
         required_access="run",
+        allow_service_key_principals=True,
+        require_published_for_service_key=True,
     )
     file = await common.flow_upload_service(container).upload_runtime_file_for_step(
         flow_id=id,
@@ -336,9 +361,12 @@ async def upload_flow_runtime_file(
         upload_file=upload_file,
     )
     user = container.user()
+    actor_kwargs = common.audit_actor_kwargs(user)
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        actor_id=actor_kwargs["actor_id"],
+        actor_type=actor_kwargs["actor_type"],
+        actor_api_key_id=actor_kwargs["actor_api_key_id"],
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=file.id,

@@ -22,11 +22,11 @@ def _resolve_component_ref(openapi_spec: dict, schema: dict) -> dict:
 
     component_name = ref.removeprefix(prefix)
     component = (
-        openapi_spec.get("components", {})
-        .get("schemas", {})
-        .get(component_name)
+        openapi_spec.get("components", {}).get("schemas", {}).get(component_name)
     )
-    assert isinstance(component, dict), f"Missing OpenAPI component schema: {component_name}"
+    assert isinstance(component, dict), (
+        f"Missing OpenAPI component schema: {component_name}"
+    )
     return component
 
 
@@ -50,7 +50,24 @@ def _extract_enum_values(openapi_spec: dict, schema: dict) -> set[str]:
     return values
 
 
+def _get_operation(openapi_spec: dict, path: str, method: str) -> dict:
+    return openapi_spec.get("paths", {}).get(path, {}).get(method, {})
+
+
+def _find_parameter(operation: dict, *, name: str, location: str) -> dict:
+    for parameter in operation.get("parameters", []):
+        if not isinstance(parameter, dict):
+            continue
+        if parameter.get("name") == name and parameter.get("in") == location:
+            return parameter
+    pytest.fail(
+        f"Missing OpenAPI parameter {location}:{name} on operation "
+        f"{operation.get('operationId', '<unknown>')}"
+    )
+
+
 REQUIRED_PATHS: dict[str, set[str]] = {
+    "/api/v1/flows/{id}/published/": {"get"},
     "/api/v1/flows/{id}/input-policy/": {"get"},
     "/api/v1/flows/{id}/files/": {"post"},
     "/api/v1/flows/{id}/run-contract/": {"get"},
@@ -69,6 +86,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
 
 REQUIRED_SCHEMAS = {
     "FlowInputPolicyPublic",
+    "FlowRuntimePublic",
     "FlowRunContractPublic",
     "FlowRuntimeInputContractPublic",
     "FlowRunStepPublic",
@@ -82,6 +100,7 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
     ("/api/v1/flows/", "post"): "create_flow",
     ("/api/v1/flows/", "get"): "list_flows",
     ("/api/v1/flows/{id}/", "get"): "get_flow",
+    ("/api/v1/flows/{id}/published/", "get"): "get_published_flow_runtime",
     ("/api/v1/flows/{id}/", "patch"): "update_flow",
     ("/api/v1/flows/{id}/", "delete"): "delete_flow",
     ("/api/v1/flows/{id}/publish/", "post"): "publish_flow",
@@ -89,25 +108,44 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
     ("/api/v1/flows/{id}/assistants/", "post"): "create_flow_assistant",
     ("/api/v1/flows/{id}/assistants/{assistant_id}/", "get"): "get_flow_assistant",
     ("/api/v1/flows/{id}/assistants/{assistant_id}/", "patch"): "update_flow_assistant",
-    ("/api/v1/flows/{id}/assistants/{assistant_id}/", "delete"): "delete_flow_assistant",
+    (
+        "/api/v1/flows/{id}/assistants/{assistant_id}/",
+        "delete",
+    ): "delete_flow_assistant",
     ("/api/v1/flows/{id}/template-files/", "post"): "upload_flow_template_file",
     ("/api/v1/flows/{id}/template-inspect/", "get"): "inspect_flow_template",
     ("/api/v1/flows/{id}/run-contract/", "get"): "get_flow_run_contract",
-    ("/api/v1/flows/{id}/steps/{step_id}/runtime-files/", "post"): "upload_flow_runtime_file",
+    (
+        "/api/v1/flows/{id}/steps/{step_id}/runtime-files/",
+        "post",
+    ): "upload_flow_runtime_file",
     ("/api/v1/flows/{id}/runs/", "post"): "create_flow_run",
     ("/api/v1/flows/{id}/runs/", "get"): "list_flow_runs_alias",
     ("/api/v1/flows/{id}/input-policy/", "get"): "get_flow_input_policy",
     ("/api/v1/flows/{id}/files/", "post"): "upload_flow_file",
     ("/api/v1/flows/{id}/runs/{run_id}/", "get"): "get_flow_run_alias",
     ("/api/v1/flows/{id}/runs/{run_id}/cancel/", "post"): "cancel_flow_run_alias",
-    ("/api/v1/flows/{id}/runs/{run_id}/redispatch/", "post"): "redispatch_flow_run_alias",
-    ("/api/v1/flows/{id}/runs/{run_id}/evidence/", "get"): "get_flow_run_evidence_alias",
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/redispatch/",
+        "post",
+    ): "redispatch_flow_run_alias",
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/evidence/",
+        "get",
+    ): "get_flow_run_evidence_alias",
     ("/api/v1/flows/{id}/runs/{run_id}/steps/", "get"): "list_flow_run_steps",
-    ("/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/", "post"): "generate_flow_run_artifact_signed_url",
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
+        "post",
+    ): "generate_flow_run_artifact_signed_url",
     ("/api/v1/flows/{id}/graph/", "get"): "get_flow_graph",
 }
 
 REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
+    (
+        "/api/v1/flows/{id}/published/",
+        "get",
+    ): {"403", "404"},
     (
         "/api/v1/flows/{id}/run-contract/",
         "get",
@@ -163,6 +201,10 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
 }
 
 REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
+    (
+        "/api/v1/flows/{id}/published/",
+        "get",
+    ): {"403", "404"},
     (
         "/api/v1/flows/{id}/run-contract/",
         "get",
@@ -232,7 +274,9 @@ def test_openapi_flow_operation_ids_are_pinned(openapi_spec: dict) -> None:
 
 def test_openapi_legacy_flow_run_paths_absent(openapi_spec: dict) -> None:
     paths = openapi_spec.get("paths", {})
-    legacy_paths = sorted(path for path in paths if path.startswith("/api/v1/flow-runs"))
+    legacy_paths = sorted(
+        path for path in paths if path.startswith("/api/v1/flow-runs")
+    )
     assert not legacy_paths, f"Legacy flow-run paths must be absent: {legacy_paths}"
 
 
@@ -251,7 +295,9 @@ def test_openapi_flow_consumer_operations_have_docs(openapi_spec: dict) -> None:
             )
 
 
-def test_openapi_flow_run_control_paths_include_flow_and_run_ids(openapi_spec: dict) -> None:
+def test_openapi_flow_run_control_paths_include_flow_and_run_ids(
+    openapi_spec: dict,
+) -> None:
     paths = openapi_spec.get("paths", {})
     targets = (
         ("/api/v1/flows/{id}/runs/{run_id}/cancel/", "post"),
@@ -272,7 +318,9 @@ def test_openapi_flow_consumer_error_contracts(openapi_spec: dict) -> None:
     for (path, method), expected_codes in REQUIRED_ERROR_RESPONSES.items():
         responses = paths[path][method].get("responses", {})
         missing = expected_codes - set(responses.keys())
-        assert not missing, f"{method.upper()} {path} missing response codes: {sorted(missing)}"
+        assert not missing, (
+            f"{method.upper()} {path} missing response codes: {sorted(missing)}"
+        )
 
 
 def test_openapi_flow_consumer_typed_error_schemas(openapi_spec: dict) -> None:
@@ -297,7 +345,9 @@ def test_openapi_flow_consumer_schemas_present(openapi_spec: dict) -> None:
     assert not missing, f"Missing OpenAPI schemas: {sorted(missing)}"
 
 
-def test_openapi_flow_input_policy_schema_contains_consumer_hints(openapi_spec: dict) -> None:
+def test_openapi_flow_input_policy_schema_contains_consumer_hints(
+    openapi_spec: dict,
+) -> None:
     flow_input_policy = (
         openapi_spec.get("components", {})
         .get("schemas", {})
@@ -332,10 +382,22 @@ def test_openapi_flow_input_policy_schema_exposes_enum_constraints(
     )
     properties = schema.get("properties", {})
 
-    input_type_values = _extract_enum_values(openapi_spec, properties.get("input_type", {}))
-    input_source_values = _extract_enum_values(openapi_spec, properties.get("input_source", {}))
+    input_type_values = _extract_enum_values(
+        openapi_spec, properties.get("input_type", {})
+    )
+    input_source_values = _extract_enum_values(
+        openapi_spec, properties.get("input_source", {})
+    )
 
-    assert {"text", "json", "image", "audio", "document", "file", "any"} <= input_type_values
+    assert {
+        "text",
+        "json",
+        "image",
+        "audio",
+        "document",
+        "file",
+        "any",
+    } <= input_type_values
     assert {
         "flow_input",
         "previous_step",
@@ -352,18 +414,24 @@ def test_openapi_flow_run_create_schema_has_request_example(openapi_spec: dict) 
         .get("FlowRunCreateRequest", {})
     )
     example = schema.get("example")
-    assert isinstance(example, dict), "FlowRunCreateRequest schema must include an example"
+    assert isinstance(example, dict), (
+        "FlowRunCreateRequest schema must include an example"
+    )
     assert "input_payload_json" in example
 
 
-def test_openapi_flow_run_create_example_shape_is_consumer_valid(openapi_spec: dict) -> None:
+def test_openapi_flow_run_create_example_shape_is_consumer_valid(
+    openapi_spec: dict,
+) -> None:
     schema = (
         openapi_spec.get("components", {})
         .get("schemas", {})
         .get("FlowRunCreateRequest", {})
     )
     example = schema.get("example", {})
-    assert isinstance(example, dict), "FlowRunCreateRequest example must be a JSON object"
+    assert isinstance(example, dict), (
+        "FlowRunCreateRequest example must be a JSON object"
+    )
     assert set(example.keys()) <= {
         "expected_flow_version",
         "file_ids",
@@ -379,23 +447,35 @@ def test_openapi_flow_run_create_example_shape_is_consumer_valid(openapi_spec: d
     )
     step_inputs = example.get("step_inputs")
     assert isinstance(step_inputs, dict)
-    assert step_inputs, "FlowRunCreateRequest.example.step_inputs must include at least one step"
+    assert step_inputs, (
+        "FlowRunCreateRequest.example.step_inputs must include at least one step"
+    )
 
 
-def test_openapi_flow_step_create_schema_exposes_enum_constraints(openapi_spec: dict) -> None:
+def test_openapi_flow_step_create_schema_exposes_enum_constraints(
+    openapi_spec: dict,
+) -> None:
     schema = (
         openapi_spec.get("components", {})
         .get("schemas", {})
         .get("FlowStepCreateRequest", {})
     )
     properties = schema.get("properties", {})
-    for field in ("input_source", "input_type", "output_mode", "output_type", "mcp_policy"):
+    for field in (
+        "input_source",
+        "input_type",
+        "output_mode",
+        "output_type",
+        "mcp_policy",
+    ):
         field_schema = properties.get(field, {})
         enum_values = _extract_enum_values(openapi_spec, field_schema)
         assert enum_values, f"{field} must include enum-constrained OpenAPI values"
 
 
-def test_openapi_flow_step_create_enum_values_match_contract(openapi_spec: dict) -> None:
+def test_openapi_flow_step_create_enum_values_match_contract(
+    openapi_spec: dict,
+) -> None:
     schema = (
         openapi_spec.get("components", {})
         .get("schemas", {})
@@ -411,7 +491,12 @@ def test_openapi_flow_step_create_enum_values_match_contract(openapi_spec: dict)
             "http_post",
         },
         "input_type": {"text", "json", "image", "audio", "document", "file", "any"},
-        "output_mode": {"pass_through", "http_post", "transcribe_only", "template_fill"},
+        "output_mode": {
+            "pass_through",
+            "http_post",
+            "transcribe_only",
+            "template_fill",
+        },
         "output_type": {"text", "json", "pdf", "docx"},
         "mcp_policy": {"inherit", "restricted"},
     }
@@ -477,12 +562,16 @@ def test_openapi_flow_consumer_request_response_schemas(openapi_spec: dict) -> N
         .get("schema", {})
     )
     files_request_resolved = _resolve_component_ref(openapi_spec, files_request_schema)
-    upload_file_schema = files_request_resolved.get("properties", {}).get("upload_file", {})
+    upload_file_schema = files_request_resolved.get("properties", {}).get(
+        "upload_file", {}
+    )
     assert upload_file_schema.get("type") == "string"
     assert upload_file_schema.get("format") == "binary"
 
 
-def test_openapi_flow_error_responses_include_general_error_examples(openapi_spec: dict) -> None:
+def test_openapi_flow_error_responses_include_general_error_examples(
+    openapi_spec: dict,
+) -> None:
     paths = openapi_spec.get("paths", {})
     for (path, method), status_codes in REQUIRED_TYPED_ERROR_CODES.items():
         responses = paths[path][method].get("responses", {})
@@ -493,12 +582,16 @@ def test_openapi_flow_error_responses_include_general_error_examples(openapi_spe
             assert isinstance(example, dict), (
                 f"{method.upper()} {path} {status_code} must include JSON example"
             )
-            assert isinstance(example.get("message"), str) and example["message"].strip()
+            assert (
+                isinstance(example.get("message"), str) and example["message"].strip()
+            )
             assert "intric_error_code" in example
             assert isinstance(example.get("code"), str) and example["code"].strip()
 
 
-def test_openapi_flow_file_upload_error_codes_are_machine_readable(openapi_spec: dict) -> None:
+def test_openapi_flow_file_upload_error_codes_are_machine_readable(
+    openapi_spec: dict,
+) -> None:
     responses = (
         openapi_spec.get("paths", {})
         .get("/api/v1/flows/{id}/files/", {})
@@ -544,3 +637,128 @@ def test_openapi_flow_run_operation_error_responses_use_general_error_model(
             assert resolved.get("title") == "GeneralError", (
                 f"{method.upper()} {path} {status_code} must return GeneralError model"
             )
+
+
+def test_openapi_create_flow_run_documents_idempotency_contract(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(openapi_spec, "/api/v1/flows/{id}/runs/", "post")
+    header = _find_parameter(
+        operation,
+        name="Idempotency-Key",
+        location="header",
+    )
+
+    description = str(header.get("description", ""))
+    assert "same key" in description.lower()
+    assert "existing run" in description.lower()
+    assert "flow_run_idempotency_conflict" in description
+
+    operation_description = str(operation.get("description", ""))
+    assert (
+        "Service-key principals may create published-flow runs in v1"
+        in operation_description
+    )
+
+    conflict_response = operation.get("responses", {}).get("400", {})
+    assert "flow_run_idempotency_conflict" in str(
+        conflict_response.get("description", "")
+    )
+
+
+def test_openapi_flow_run_forbidden_docs_list_current_codes(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(openapi_spec, "/api/v1/flows/{id}/runs/", "post")
+    forbidden_description = str(
+        operation.get("responses", {}).get("403", {}).get("description", "")
+    )
+
+    assert "insufficient_scope" in forbidden_description
+    assert "flow_run_access_denied" in forbidden_description
+
+
+def test_openapi_flow_runtime_visibility_docs_are_explicit(openapi_spec: dict) -> None:
+    get_run_description = str(
+        _get_operation(openapi_spec, "/api/v1/flows/{id}/runs/{run_id}/", "get").get(
+            "description", ""
+        )
+    )
+    steps_description = str(
+        _get_operation(
+            openapi_spec, "/api/v1/flows/{id}/runs/{run_id}/steps/", "get"
+        ).get("description", "")
+    )
+    artifact_description = str(
+        _get_operation(
+            openapi_spec,
+            "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
+            "post",
+        ).get("description", "")
+    )
+    evidence_description = str(
+        _get_operation(
+            openapi_spec, "/api/v1/flows/{id}/runs/{run_id}/evidence/", "get"
+        ).get("description", "")
+    )
+    export_description = str(
+        _get_operation(
+            openapi_spec,
+            "/api/v1/flows/{id}/runs/{run_id}/evidence/export",
+            "get",
+        ).get("description", "")
+    )
+
+    assert (
+        "service-key principals can inspect only their own runs" in get_run_description
+    )
+    assert (
+        "same-space admins and owners can inspect run metadata" in get_run_description
+    )
+    assert "space owner and space admin" in steps_description.lower()
+    assert "inspect content for runs in their space" in steps_description.lower()
+    artifact_description_lower = artifact_description.lower()
+    assert (
+        "service-key principals are supported for their own runtime artifacts"
+        in artifact_description_lower
+    )
+    assert "trusted in-space operators" in artifact_description_lower
+    assert "space admin" in evidence_description.lower()
+    assert (
+        "service keys may inspect only their own-run evidence"
+        in evidence_description.lower()
+    )
+    assert "redacted/default export" in export_description.lower()
+
+
+def test_openapi_evidence_export_query_params_are_documented(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/evidence/export",
+        "get",
+    )
+    params = {
+        param.get("name"): param
+        for param in operation.get("parameters", [])
+        if isinstance(param, dict)
+    }
+    assert "detail" in params
+    assert "reason" in params
+    assert "redacted" in str(params["detail"].get("description", "")).lower()
+
+
+def test_openapi_flow_authoring_docs_explain_owner_override_semantics(
+    openapi_spec: dict,
+) -> None:
+    update_operation = _get_operation(openapi_spec, "/api/v1/flows/{id}/", "patch")
+    update_description = str(update_operation.get("description", ""))
+    forbidden_description = str(
+        update_operation.get("responses", {}).get("403", {}).get("description", "")
+    )
+
+    assert "draft owner" in update_description.lower()
+    assert "space owner" in update_description.lower()
+    assert "tenant admin" in update_description.lower()
+    assert "flow_owner_required" in forbidden_description

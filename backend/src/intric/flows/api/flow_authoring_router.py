@@ -11,20 +11,58 @@ from intric.audit.domain.entity_types import EntityType
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import error_response
 from intric.flows.api.flow_assembler import FlowAssembler
-from intric.flows.api.flow_definition_access import require_flow_edit_access
+from intric.flows.api.flow_definition_access import (
+    ensure_can_mutate_flow_draft,
+    require_flow_edit_access,
+)
 from intric.flows.api.flow_models import (
     FlowCreateRequest,
     FlowPublic,
+    FlowRuntimePublic,
     FlowSparsePublic,
     FlowUpdateRequest,
 )
 from intric.flows.application.flow_service import FlowService
 from intric.main.container.container import Container
-from intric.main.exceptions import ErrorCodes, UnauthorizedException
+from intric.main.exceptions import ErrorCodes, NotFoundException, UnauthorizedException
 from intric.main.models import NOT_PROVIDED, PaginatedResponse
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
+
+_FLOW_AUTHORING_FORBIDDEN_DESCRIPTION = (
+    "Forbidden. Machine-readable codes include `insufficient_scope` when the API key "
+    "space scope does not match the flow, `insufficient_space_permission` when the "
+    "caller lacks the required shared-space role, and the "
+    "fail-closed `flow_service_key_principal_not_supported` when a service-key "
+    "principal calls flow authoring endpoints that require a user principal."
+)
+
+_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION = (
+    "Forbidden. Machine-readable codes include `insufficient_scope` when the API key "
+    "space scope does not match the flow, `insufficient_space_permission` when the "
+    "caller lacks the required shared-space role, `flow_owner_required` when the "
+    "caller is not allowed to override another member's draft, and the current "
+    "fail-closed `flow_service_key_principal_not_supported` when a service-key "
+    "principal calls flow authoring endpoints before first-class support lands."
+)
+
+_FLOW_DRAFT_OWNERSHIP_DESCRIPTION = (
+    "Draft ownership stays with the draft owner in the current backend policy. "
+    "Space admins can manage shared space resources, but overriding another member's "
+    "draft still requires the draft owner, a space owner, or a tenant admin."
+)
+
+_FLOW_SERVICE_KEY_DISCOVERY_DESCRIPTION = (
+    "Service-key principals may use this endpoint only for published-flow discovery in "
+    "their scoped space. Draft authoring and AI Builder still require a user principal."
+)
+
+_FLOW_PUBLISHED_RUNTIME_DESCRIPTION = (
+    "Return the runtime-safe published projection of a flow. "
+    "This endpoint is intended for runtime consumers, including service-key principals, "
+    "and does not expose the current draft/current-definition authoring view."
+)
 
 
 class _FlowReaderProtocol(Protocol):
@@ -41,7 +79,10 @@ def _get_flow_service(container: Container) -> FlowService:
     status_code=status.HTTP_201_CREATED,
     operation_id="create_flow",
     summary="Create Flow",
-    description="Create a new draft flow definition, including its initial ordered steps, inside a space.",
+    description=(
+        "Create a new draft flow definition, including its initial ordered steps, "
+        f"inside a space. {_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
+    ),
     responses={
         400: error_response(
             description="The submitted draft flow definition is invalid.",
@@ -50,7 +91,7 @@ def _get_flow_service(container: Container) -> FlowService:
             code="bad_request",
         ),
         403: error_response(
-            description="Caller lacks permission or API key scope to create flows in this space.",
+            description=_FLOW_AUTHORING_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             intric_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
@@ -131,11 +172,12 @@ async def create_flow(
     description=(
         "List flow definitions in a space with pagination-friendly sparse metadata. "
         "The `count` field in the paginated response reports the number of items returned "
-        "in the current page, not the total number of matching flows across all pages."
+        "in the current page, not the total number of matching flows across all pages. "
+        f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION} {_FLOW_SERVICE_KEY_DISCOVERY_DESCRIPTION}"
     ),
     responses={
         403: error_response(
-            description="Caller lacks permission or API key scope to list flows in this space.",
+            description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             intric_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
@@ -162,6 +204,7 @@ async def list_flows(
         space_id=space_id,
         required_access="view",
         scope_mismatch_message="API key space scope does not match requested space.",
+        allow_service_key_principals=True,
     )
     if not access_context.actor.can_read_flows():
         raise UnauthorizedException(
@@ -170,10 +213,13 @@ async def list_flows(
             context={"auth_layer": "space_membership"},
         )
 
+    service_key_principal = common.is_service_key_principal(container.user())
     assembler = FlowAssembler()
     flows = await _get_flow_service(container).list_flows(
         space_id=space_id,
         sparse=True,
+        published_only=service_key_principal
+        or not access_context.actor.can_edit_flows(),
         limit=limit,
         offset=offset,
     )
@@ -189,10 +235,14 @@ async def list_flows(
     status_code=status.HTTP_200_OK,
     operation_id="get_flow",
     summary="Get Flow",
-    description="Return the full draft representation of a flow, including all configured steps and metadata.",
+    description=(
+        "Return the full draft representation of a flow, including all configured steps "
+        f"and metadata. {_FLOW_DRAFT_OWNERSHIP_DESCRIPTION} "
+        "This endpoint is user-principal-oriented and returns the current draft definition."
+    ),
     responses={
         403: error_response(
-            description="Caller lacks permission or API key scope to view this flow.",
+            description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             intric_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
@@ -231,13 +281,81 @@ async def get_flow(
     return assembler.to_public(access_context.flow)
 
 
+@router.get(
+    "/{id}/published/",
+    response_model=FlowRuntimePublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="get_published_flow_runtime",
+    summary="Get Published Flow Runtime View",
+    description=(
+        f"{_FLOW_PUBLISHED_RUNTIME_DESCRIPTION} "
+        "Use this endpoint when a client needs one published flow's metadata plus the "
+        "canonical runtime paths for contract discovery, run creation, polling, and "
+        "artifact/evidence retrieval."
+    ),
+    responses={
+        403: error_response(
+            description=(
+                "Forbidden. Machine-readable codes include `insufficient_scope` when the "
+                "API key scope does not match the flow and `insufficient_space_permission` "
+                "when the caller cannot read the published flow in the space."
+            ),
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Published flow not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def get_published_flow_runtime(
+    id: Annotated[
+        UUID,
+        Path(
+            description="Identifier of the published flow to expose as a runtime-safe projection."
+        ),
+    ],
+    request: Request,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    access_context = await common.get_flow_access_context_for_request(
+        request,
+        container,
+        flow_id=id,
+        required_access="view",
+        allow_service_key_principals=True,
+        require_published_for_service_key=True,
+    )
+    if access_context.flow.published_version is None:
+        raise NotFoundException("Flow not found.")
+
+    actor = cast(_FlowReaderProtocol | None, access_context.actor)
+    if actor is None or not actor.can_read_flow(cast(Any, access_context.flow)):
+        raise UnauthorizedException(
+            "You do not have permission to access this flow.",
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
+        )
+
+    assembler = FlowAssembler()
+    return assembler.to_runtime_public(access_context.flow)
+
+
 @router.patch(
     "/{id}/",
     response_model=FlowPublic,
     status_code=status.HTTP_200_OK,
     operation_id="update_flow",
     summary="Update Flow",
-    description="Update a draft flow definition, including steps, metadata, and retention settings.",
+    description=(
+        "Update a draft flow definition, including steps, metadata, and retention "
+        f"settings. {_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
+    ),
     responses={
         400: error_response(
             description="The submitted draft flow update is invalid or the flow cannot be updated in its current state.",
@@ -246,7 +364,7 @@ async def get_flow(
             code="bad_request",
         ),
         403: error_response(
-            description="Caller lacks permission or API key scope to update this flow.",
+            description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             intric_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
@@ -320,10 +438,13 @@ async def update_flow(
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_flow",
     summary="Delete Flow",
-    description="Soft-delete a flow definition so it is no longer available for editing or execution.",
+    description=(
+        "Soft-delete a flow definition so it is no longer available for editing or "
+        f"execution. {_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
+    ),
     responses={
         403: error_response(
-            description="Caller lacks permission or API key scope to delete this flow.",
+            description=_FLOW_AUTHORING_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             intric_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
@@ -356,6 +477,7 @@ async def delete_flow(
             code="insufficient_space_permission",
             context={"auth_layer": "space_membership"},
         )
+    ensure_can_mutate_flow_draft(container, access_context)
 
     await _get_flow_service(container).delete_flow(id)
     user = container.user()
@@ -376,7 +498,10 @@ async def delete_flow(
     status_code=status.HTTP_200_OK,
     operation_id="publish_flow",
     summary="Publish Flow",
-    description="Publish the current draft revision so new runs use a version-pinned definition.",
+    description=(
+        "Publish the current draft revision so new runs use a version-pinned definition. "
+        f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
+    ),
     responses={
         400: error_response(
             description="The flow cannot be published because its draft definition is incomplete or invalid.",
@@ -385,7 +510,7 @@ async def delete_flow(
             code="bad_request",
         ),
         403: error_response(
-            description="Caller lacks permission or API key scope to publish this flow.",
+            description=_FLOW_AUTHORING_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             intric_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
@@ -418,6 +543,7 @@ async def publish_flow(
             code="insufficient_space_permission",
             context={"auth_layer": "space_membership"},
         )
+    ensure_can_mutate_flow_draft(container, access_context)
 
     published = await _get_flow_service(container).publish_flow(flow_id=id)
     user = container.user()
@@ -439,7 +565,10 @@ async def publish_flow(
     status_code=status.HTTP_200_OK,
     operation_id="unpublish_flow",
     summary="Unpublish Flow",
-    description="Remove the active published revision while keeping the draft definition available for editing.",
+    description=(
+        "Remove the active published revision while keeping the draft definition "
+        f"available for editing. {_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
+    ),
     responses={
         400: error_response(
             description="The flow cannot be unpublished in its current state.",
@@ -448,7 +577,7 @@ async def publish_flow(
             code="bad_request",
         ),
         403: error_response(
-            description="Caller lacks permission or API key scope to unpublish this flow.",
+            description=_FLOW_AUTHORING_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             intric_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
@@ -482,6 +611,7 @@ async def unpublish_flow(
             code="insufficient_space_permission",
             context={"auth_layer": "space_membership"},
         )
+    ensure_can_mutate_flow_draft(container, access_context)
 
     unpublished = await _get_flow_service(container).unpublish_flow(flow_id=id)
     user = container.user()
