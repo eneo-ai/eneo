@@ -1,5 +1,4 @@
 <script lang="ts">
-  import * as Breadcrumb from "$lib/components/ui/breadcrumb/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import type { Snippet } from "svelte";
 
@@ -25,6 +24,7 @@
   <div class="flex items-center gap-3 px-4 py-2.5 sm:px-5">
     <!-- Back arrow + flow name -->
     <div class="flex min-w-0 flex-1 items-center gap-2">
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- backHref is a typed prop passed from caller -->
       <a
         href={backHref}
         class="text-muted hover:text-primary hover:bg-hover-dimmer -ml-1 inline-flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors"
@@ -42,6 +42,7 @@
           <path d="M10 3L5 8l5 5" />
         </svg>
       </a>
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
       <h1 class="truncate text-lg leading-tight font-bold tracking-[-0.01em]">
         {flowName}
       </h1>

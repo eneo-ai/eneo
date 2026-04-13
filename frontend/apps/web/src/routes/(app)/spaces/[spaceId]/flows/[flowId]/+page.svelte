@@ -774,9 +774,13 @@
                           bind:selectedModel={transcriptionModel}
                           availableModels={$currentSpace.transcription_models}
                           dropdownLabel={m.flow_transcription_model_label()}
-                          onchange={() => {
-                            if (transcriptionModel?.id) {
-                              setWizardMeta({ transcription_model: { id: transcriptionModel.id } });
+                          on:change={(event) => {
+                            const selected = event.detail.selectedModel;
+                            const newId = selected?.id ?? null;
+                            if (newId !== transcriptionModelId) {
+                              setWizardMeta({
+                                transcription_model: newId ? { id: newId } : null
+                              });
                             }
                           }}
                         />

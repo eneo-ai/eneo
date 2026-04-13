@@ -24,15 +24,26 @@
   import { m } from "$lib/paraglide/messages";
   import ProviderGlyph from "../../../../routes/(app)/admin/models/components/ProviderGlyph.svelte";
 
-  /** An array of models the user can choose from, this component will sort in-place the models by vendor */
-  export let availableModels: T[];
-  sortModels(availableModels);
-  /** Bindable id of the selected model*/
-  export let selectedModel: T | undefined | null;
+  let {
+    availableModels,
+    selectedModel = $bindable(null),
+    aria = { "aria-label": m.select_ai_model() },
+    dropdownLabel = m.select_completion_model()
+  }: {
+    /** An array of models the user can choose from */
+    availableModels: T[];
+    /** Bindable selected model */
+    selectedModel?: T | undefined | null;
+    aria?: AriaProps;
+    /** Optional label for the dropdown menu header */
+    dropdownLabel?: string;
+  } = $props();
 
-  export let aria: AriaProps = { "aria-label": m.select_ai_model() };
-  /** Optional label for the dropdown menu header — defaults to "Select a completion model" */
-  export let dropdownLabel: string = m.select_completion_model();
+  const sortedAvailableModels = $derived.by(() => {
+    const models = [...availableModels];
+    sortModels(models);
+    return models;
+  });
 
   const dispatch = createEventDispatcher<{
     change: { selectedModel: T | undefined | null };
@@ -45,13 +56,14 @@
     return "provider_name" in models[0];
   }
 
-  // Group models by provider if they have provider info
-  $: modelGroups = hasProviderInfo(availableModels)
-    ? groupModelsByProvider(
-        availableModels as unknown as Parameters<typeof groupModelsByProvider>[0],
-        m.model_group_system()
-      )
-    : null;
+  const modelGroups = $derived.by(() =>
+    hasProviderInfo(sortedAvailableModels)
+      ? groupModelsByProvider(
+          sortedAvailableModels as unknown as Parameters<typeof groupModelsByProvider>[0],
+          m.model_group_system()
+        )
+      : null
+  );
 
   const {
     elements: { trigger, menu, option },
@@ -66,13 +78,18 @@
     defaultSelected: selectedModel ? { value: selectedModel } : undefined,
     portal: null,
     onSelectedChange: ({ next }) => {
-      selectedModel = next?.value ?? availableModels[0];
-      dispatch("change", { selectedModel });
+      const newModel = next?.value ?? sortedAvailableModels[0];
+      if (newModel?.id !== selectedModel?.id) {
+        selectedModel = newModel;
+        dispatch("change", { selectedModel });
+      }
       return next;
     }
   });
 
-  $: unsupportedModelSelected = !availableModels.some((model) => model.id === selectedModel?.id);
+  const unsupportedModelSelected = $derived(
+    !sortedAvailableModels.some((model) => model.id === selectedModel?.id)
+  );
 
   function watchChanges(incomingModel: T | null | undefined) {
     // Use ID comparison instead of object reference comparison
@@ -84,8 +101,9 @@
       $selected = incomingModel ? { value: incomingModel } : undefined;
     }
   }
-  // Watch outside changes
-  $: watchChanges(selectedModel);
+  $effect(() => {
+    watchChanges(selectedModel);
+  });
 </script>
 
 <button
@@ -142,7 +160,7 @@
       {/each}
     {/each}
   {:else}
-    {#each availableModels as model (model.id)}
+    {#each sortedAvailableModels as model (model.id)}
       <div
         class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between border-b px-4 hover:cursor-pointer"
         {...$option({ value: model, label: model.nickname ?? undefined })}

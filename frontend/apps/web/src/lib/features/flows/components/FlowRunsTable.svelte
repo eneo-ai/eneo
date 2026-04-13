@@ -91,7 +91,7 @@
   });
 
   // Poll for updates every 5s when there are running runs
-  let pollTimeout: ReturnType<typeof setTimeout> | null = $state(null);
+  let pollTimeout: ReturnType<typeof setTimeout> | null = null;
   let hasActiveRuns = $derived(runs.some((r) => r.status === "queued" || r.status === "running"));
 
   $effect(() => {
