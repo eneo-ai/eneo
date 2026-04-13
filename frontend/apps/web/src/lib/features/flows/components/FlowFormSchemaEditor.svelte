@@ -52,7 +52,7 @@
 
   let localFields: LocalFormField[] = $state([]);
   let nameBeforeEditById: Record<string, string> = $state({});
-  let idCounter = $state(0);
+  let idCounter = 0;
   let localDirty = $state(false);
 
   function uid(): string {
