@@ -374,8 +374,22 @@ class ApiKeyPolicyService:
                         message="Public keys (pk_) do not support fine-grained resource permissions.",
                     )
 
+    async def ensure_ownership_authorized(self, *, key: ApiKeyV2InDB):
+        """Service keys: any scope-authorized user can manage.
+        User keys: only the owner can manage."""
+        if ApiKeyOwnership(key.ownership) == ApiKeyOwnership.SERVICE:
+            return
+        user = self._require_user()
+        if key.owner_user_id == user.id:
+            return
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_permission",
+            message="You do not have permission to manage another user's personal API key.",
+        )
+
     async def ensure_manage_authorized(self, *, key: ApiKeyV2InDB):
-        return await self.ensure_creator_authorized(
+        await self.ensure_creator_authorized(
             scope_type=ApiKeyScopeType(key.scope_type),
             scope_id=key.scope_id,
         )

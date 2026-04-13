@@ -259,6 +259,7 @@
                 await forceRefreshExpiringStore();
               }}
               scopeNames={{ [scopeId]: scopeName }}
+              currentUserId={user.id}
             />
           </div>
         </div>

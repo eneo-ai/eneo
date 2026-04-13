@@ -9,7 +9,8 @@
     onSecret,
     isFollowed = false,
     isFollowedViaScope = false,
-    onFollowChanged
+    onFollowChanged,
+    currentUserId = undefined
   } = $props<{
     apiKey: ApiKeyV2;
     onChanged: () => void;
@@ -17,6 +18,7 @@
     isFollowed?: boolean;
     isFollowedViaScope?: boolean;
     onFollowChanged?: () => void | Promise<void>;
+    currentUserId?: string;
   }>();
 
   let showViewDialog = $state(false);
@@ -30,6 +32,7 @@
   {isFollowed}
   {isFollowedViaScope}
   {onFollowChanged}
+  {currentUserId}
   onViewRequested={() => {
     showViewDialog = true;
   }}

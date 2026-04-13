@@ -57,7 +57,8 @@
     followedKeyIds = new Set<string>(),
     scopeFollowed = false,
     onFollowChanged,
-    scopeNames = {}
+    scopeNames = {},
+    currentUserId = undefined
   } = $props<{
     keys: ApiKeyV2[];
     loading: boolean;
@@ -67,6 +68,7 @@
     scopeFollowed?: boolean;
     onFollowChanged?: () => void | Promise<void>;
     scopeNames?: Record<string, string>;
+    currentUserId?: string;
   }>();
 
   // Track expanded rows (SvelteSet is already reactive — no $state wrapper needed)
@@ -317,6 +319,7 @@
                 isFollowed={followedKeyIds?.has(key.id) ?? false}
                 isFollowedViaScope={scopeFollowed && !(followedKeyIds?.has(key.id) ?? false)}
                 {onFollowChanged}
+                {currentUserId}
               />
             </div>
           </div>

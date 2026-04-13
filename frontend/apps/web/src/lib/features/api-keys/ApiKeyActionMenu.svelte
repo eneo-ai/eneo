@@ -37,7 +37,8 @@
     onViewRequested,
     isFollowed = false,
     isFollowedViaScope = false,
-    onFollowChanged
+    onFollowChanged,
+    currentUserId = undefined
   } = $props<{
     apiKey: ApiKeyV2;
     mode?: "user" | "admin";
@@ -48,6 +49,7 @@
     isFollowed?: boolean;
     isFollowedViaScope?: boolean;
     onFollowChanged?: () => void | Promise<void>;
+    currentUserId?: string;
   }>();
 
   let showRevokeDialog = $state(false);
@@ -64,6 +66,15 @@
   const canRotate = $derived(apiKey.state === "active");
   const isAdmin = $derived(mode === "admin");
   const reasonCode = $derived(isAdmin ? ("admin_action" as const) : ("user_request" as const));
+  // In user mode, personal keys can only be managed by their owner; service keys are
+  // manageable by any scope-authorized user. Admin mode bypasses ownership (scope
+  // authorization is enforced by the backend instead).
+  const canManage = $derived(
+    isAdmin ||
+      !currentUserId ||
+      apiKey.ownership === "service" ||
+      apiKey.owner_user_id === currentUserId
+  );
 
   function formatLastUsed(lastUsedAt: string | null | undefined): string | null {
     if (!lastUsedAt) return null;
@@ -219,7 +230,7 @@
       {/if}
 
       {#if canRotate}
-        <DropdownMenu.Item onclick={openRotateDialog}>
+        <DropdownMenu.Item onclick={openRotateDialog} disabled={!canManage}>
           <RotateCcw />
           {isAdmin ? m.api_keys_admin_action_rotate() : m.api_keys_action_rotate()}
         </DropdownMenu.Item>
@@ -249,6 +260,7 @@
           onclick={() => {
             showSuspendDialog = true;
           }}
+          disabled={!canManage}
         >
           <Ban />
           {isAdmin ? m.api_keys_admin_action_suspend() : m.api_keys_action_suspend()}
@@ -256,7 +268,7 @@
       {/if}
 
       {#if isSuspended}
-        <DropdownMenu.Item onclick={reactivateKey}>
+        <DropdownMenu.Item onclick={reactivateKey} disabled={!canManage}>
           <RefreshCw />
           {isAdmin ? m.api_keys_admin_action_reactivate() : m.api_keys_action_reactivate()}
         </DropdownMenu.Item>
@@ -270,6 +282,7 @@
           onclick={() => {
             showRevokeDialog = true;
           }}
+          disabled={!canManage}
         >
           <Ban />
           {isAdmin ? m.api_keys_admin_action_revoke() : m.api_keys_action_revoke()}
