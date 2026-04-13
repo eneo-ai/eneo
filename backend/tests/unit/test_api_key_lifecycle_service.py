@@ -42,7 +42,9 @@ async def test_suspend_logs_audit(user):
     repo = AsyncMock()
     repo.get.return_value = key
     repo.update.return_value = key
-    policy = SimpleNamespace(ensure_manage_authorized=AsyncMock())
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(), ensure_ownership_authorized=AsyncMock()
+    )
     audit = AsyncMock()
 
     service = ApiKeyLifecycleService(
@@ -69,7 +71,9 @@ async def test_revoke_logs_audit(user):
     repo = AsyncMock()
     repo.get.return_value = key
     repo.update.return_value = key
-    policy = SimpleNamespace(ensure_manage_authorized=AsyncMock())
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(), ensure_ownership_authorized=AsyncMock()
+    )
     audit = AsyncMock()
 
     service = ApiKeyLifecycleService(
@@ -99,7 +103,9 @@ async def test_rotate_logs_audit(user):
     repo.create.return_value = new_key
     repo.update.return_value = key
     policy = SimpleNamespace(
-        ensure_manage_authorized=AsyncMock(), validate_key_state=AsyncMock()
+        ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
+        validate_key_state=AsyncMock(),
     )
     audit = AsyncMock()
 
@@ -136,6 +142,7 @@ async def test_update_revoked_key_allows_metadata_only(user):
     repo.update.return_value = updated_key
     policy = SimpleNamespace(
         ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
         validate_update_request=AsyncMock(),
     )
     audit = AsyncMock()
@@ -166,6 +173,7 @@ async def test_update_revoked_key_rejects_policy_fields(user):
     repo.get.return_value = key
     policy = SimpleNamespace(
         ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
         validate_update_request=AsyncMock(),
     )
     audit = AsyncMock()
@@ -196,7 +204,9 @@ async def test_double_revoke_is_idempotent(user):
     )
     repo = AsyncMock()
     repo.get.return_value = key
-    policy = SimpleNamespace(ensure_manage_authorized=AsyncMock())
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(), ensure_ownership_authorized=AsyncMock()
+    )
     audit = AsyncMock()
 
     service = ApiKeyLifecycleService(
@@ -225,7 +235,9 @@ async def test_rotate_key_with_existing_grace_period(user):
     repo.create.return_value = new_key
     repo.update.return_value = key
     policy = SimpleNamespace(
-        ensure_manage_authorized=AsyncMock(), validate_key_state=AsyncMock()
+        ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
+        validate_key_state=AsyncMock(),
     )
     audit = AsyncMock()
 
@@ -300,7 +312,9 @@ async def test_rotate_serializes_resource_permissions_for_repo_create(user):
     repo.create.return_value = new_key
     repo.update.return_value = key
     policy = SimpleNamespace(
-        ensure_manage_authorized=AsyncMock(), validate_key_state=AsyncMock()
+        ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
+        validate_key_state=AsyncMock(),
     )
     audit = AsyncMock()
 
