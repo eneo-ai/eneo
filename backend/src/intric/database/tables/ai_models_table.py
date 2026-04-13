@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import (
@@ -20,24 +20,9 @@ from intric.database.tables.tenant_table import Tenants
 
 
 class CompletionModels(BasePublic):
-    def __init__(self, *args: Any, **kwargs: Any):
-        token_limit = kwargs.get("token_limit")
-        if token_limit is None and "max_input_tokens" in kwargs:
-            token_limit = kwargs["max_input_tokens"]
-            kwargs["token_limit"] = token_limit
-        token_limit_int = token_limit if isinstance(token_limit, int) else None
-        if "max_input_tokens" not in kwargs:
-            kwargs["max_input_tokens"] = token_limit_int
-        if "max_output_tokens" not in kwargs:
-            kwargs["max_output_tokens"] = (
-                min(token_limit_int // 4, 4096) if token_limit_int is not None else None
-            )
-        super().__init__(*args, **kwargs)
-
     name: Mapped[str] = mapped_column()
     nickname: Mapped[str] = mapped_column()
     open_source: Mapped[Optional[bool]] = mapped_column()
-    token_limit: Mapped[int] = mapped_column()
     max_input_tokens: Mapped[int] = mapped_column()
     max_output_tokens: Mapped[int] = mapped_column()
     is_deprecated: Mapped[bool] = mapped_column(server_default="False")

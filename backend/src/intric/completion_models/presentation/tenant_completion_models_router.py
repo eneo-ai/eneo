@@ -144,7 +144,7 @@ async def create_tenant_completion_model(
         )
         await session.execute(stmt)
 
-    # Create the completion model with settings directly on it
+    # Create the completion model with settings directly on it.
     # Note: litellm_model_name is set to None - TenantModelAdapter constructs it
     # at runtime as f"{provider.provider_type}/{model.name}"
     new_model = CompletionModels()
