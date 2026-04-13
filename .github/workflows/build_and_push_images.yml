@@ -30,6 +30,7 @@ env:
   REGISTRY: ghcr.io
   BACKEND_IMAGE_NAME: eneo-ai/eneo-backend
   FRONTEND_IMAGE_NAME: eneo-ai/eneo-frontend
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   build-and-push:
