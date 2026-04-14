@@ -29,11 +29,13 @@ This directory contains the complete documentation for Eneo, the democratic AI p
 1. Review **[DEPLOYMENT.md](DEPLOYMENT.md)** for production setup
 2. Study **[SECURITY.md](SECURITY.md)** for security requirements
 3. Keep **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** handy for operational issues
+4. Review **[SECURITY.md](SECURITY.md#mcp-security-classification-in-spaces-assistants-and-flows)** if your organization uses MCP servers in classified spaces or flow steps
 
 ### For Developers
 1. Understand **[ARCHITECTURE.md](ARCHITECTURE.md)** for system design
 2. Follow **[CONTRIBUTING.md](CONTRIBUTING.md)** for development workflow
 3. Use **[INSTALLATION.md](INSTALLATION.md)** for local setup
+4. Read **[ARCHITECTURE.md](ARCHITECTURE.md#flow-step-mcp-security-classification)** for the flow-step MCP security-classification model
 
 ### For Public Sector Organizations
 1. **[Project Overview](../README.md)** explains democratic AI mission

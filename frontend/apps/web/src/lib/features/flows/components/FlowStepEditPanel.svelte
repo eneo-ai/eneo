@@ -6,6 +6,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getIntric } from "$lib/core/Intric";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { writable } from "svelte/store";
   import { IconWorkflow } from "@intric/icons/workflow";
   import { MousePointerClick } from "lucide-svelte";
@@ -88,6 +89,8 @@
   import FlowStepDeleteSection from "./FlowStepDeleteSection.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
   import {
+    buildFlowStepMcpCompatibilityMap,
+    hasLoadedFlowStepMcpClassificationInputs,
     shouldShowStepMcpSection,
     summarizeAssistantMcp
   } from "$lib/features/flows/flowStepMcpConfig";
@@ -138,6 +141,7 @@
 
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
+  const assistantRevision = flowEditor.assistantRevision;
   const flowResource = flowEditor.state.resource;
   const currentFlowId = $derived($flowResource?.id ?? "");
   const {
@@ -166,6 +170,9 @@
   });
 
   const templateState = new FlowTemplateState({ intric, flowEditor });
+  let assistantsById = new SvelteMap<string, unknown>();
+  let lastLoadedRevisionByAssistant = new SvelteMap<string, number>();
+  const loadingAssistantIds = new SvelteSet<string>();
 
   // ---------------------------------------------------------------------------
   // Core derived state
@@ -483,6 +490,75 @@
   const showMcpSection = $derived(shouldShowStepMcpSection(activeStep?.output_mode));
   const knowledgeDisabledByMcp = $derived(hasConfiguredMcp && !hasKnowledgeSelections);
   const mcpDisabledByKnowledge = $derived(hasKnowledgeSelections && !hasConfiguredMcp);
+  const flowMcpCompatibilityById = $derived.by(() => {
+    if (!activeStep || !showMcpSection) {
+      return {};
+    }
+    const compatibilityMap = buildFlowStepMcpCompatibilityMap({
+      step: activeStep,
+      steps,
+      assistantsById,
+      availableServers: ($currentSpace.mcp_servers ?? []) as Array<{
+        id: string;
+        security_classification?: { security_level?: number; name?: string } | null;
+      }>,
+      spaceSecurityClassification: $currentSpace.security_classification
+    });
+    return Object.fromEntries(
+      Object.entries(compatibilityMap).map(([serverId, compatibility]) => [
+        serverId,
+        {
+          ...compatibility,
+          reason: compatibility.isCompatible
+            ? undefined
+            : m.flow_step_mcp_server_does_not_meet_security_classification()
+        }
+      ])
+    );
+  });
+  const mcpCompatibilityReady = $derived(
+    hasLoadedFlowStepMcpClassificationInputs({
+      step: activeStep,
+      steps,
+      assistantsById
+    })
+  );
+
+  $effect(() => {
+    const revision = $assistantRevision;
+    if (!showMcpSection) return;
+
+    if (assistantState.assistant && activeStep?.assistant_id) {
+      assistantsById.set(activeStep.assistant_id, assistantState.assistant);
+      lastLoadedRevisionByAssistant.set(activeStep.assistant_id, revision);
+    }
+
+    const assistantIds = steps
+      .map((step) => step.assistant_id)
+      .filter(
+        (assistantId): assistantId is string =>
+          typeof assistantId === "string" && assistantId.length > 0
+      );
+
+    for (const assistantId of assistantIds) {
+      if (
+        lastLoadedRevisionByAssistant.get(assistantId) === revision ||
+        loadingAssistantIds.has(assistantId)
+      ) {
+        continue;
+      }
+      loadingAssistantIds.add(assistantId);
+      void flowEditor
+        .loadAssistant(assistantId)
+        .then((assistant) => {
+          assistantsById.set(assistantId, assistant);
+          lastLoadedRevisionByAssistant.set(assistantId, revision);
+        })
+        .finally(() => {
+          loadingAssistantIds.delete(assistantId);
+        });
+    }
+  });
   const currentStepIssues = $derived(
     activeStep
       ? getFlowStepValidationIssues(steps).filter(
@@ -887,12 +963,25 @@
                   >{m.mcp_disabled_when_knowledge_active()}
                 </p>
               {/if}
-              <div class={mcpDisabledByKnowledge ? "pointer-events-none opacity-50" : ""}>
+              {#if !mcpCompatibilityReady}
+                <p
+                  class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
+                >
+                  <span class="font-bold">{m.hint()}:&nbsp;</span
+                  >{m.flow_step_mcp_security_context_loading()}
+                </p>
+              {/if}
+              <div
+                class={mcpDisabledByKnowledge || !mcpCompatibilityReady
+                  ? "pointer-events-none opacity-50"
+                  : ""}
+              >
                 {#if assistantState.assistant}
                   <SelectMCPServers
                     bind:selectedMCPServers={assistantState.assistant.mcp_servers}
                     bind:selectedMCPTools={assistantState.assistant.mcp_tools}
                     selectedModel={assistantState.assistant.completion_model}
+                    serverCompatibilityById={flowMcpCompatibilityById}
                     on:change={(event) =>
                       assistantState.updateFields(
                         {

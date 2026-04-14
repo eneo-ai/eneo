@@ -60,5 +60,11 @@ describe("flow step translation copy", () => {
     expect(messages.flow_step_input_template_tooltip).toContain("step_1.output.text");
     expect(messages.flow_step_mcp_tools_badge).toBe("{count} tools");
     expect(messages.flow_step_mcp_servers_badge).toBe("{count} servers");
+    expect(messages.flow_step_mcp_server_does_not_meet_security_classification).toBe(
+      "This MCP server does not meet this step's required security classification."
+    );
+    expect(messages.flow_step_mcp_security_context_loading).toBe(
+      "Loading security classification requirements for this step..."
+    );
   });
 });

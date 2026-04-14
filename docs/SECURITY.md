@@ -140,6 +140,67 @@ Eneo implements multi-layered security for complete tenant data isolation:
 
 ---
 
+### MCP Security Classification in Spaces, Assistants, and Flows
+
+MCP servers can carry a tenant-defined security classification. That classification is then enforced progressively as MCP servers move from tenant administration into spaces and finally into flow steps.
+
+#### Source of truth
+
+- MCP server classification is defined in the **admin MCP server editor**
+- it is stored on the MCP server itself
+- spaces, assistants, and flows reuse that value rather than duplicating it elsewhere
+
+#### Enforcement model
+
+**1. Space boundary**
+- a space security classification acts as the first compatibility gate
+- MCP servers that do not meet the space classification must not be enabled in that space
+
+**2. Assistant / flow-managed assistant**
+- assistants can only select MCP servers that are already available in their space
+- flow-managed assistants reuse the same assistant MCP infrastructure as normal assistants
+
+**3. Flow-step boundary**
+- flow steps may require a stricter MCP classification floor than the space baseline
+- that floor is derived from the step input context:
+  - the space classification baseline
+  - the previous step’s effective output classification
+  - the maximum prior effective output classification for `all_previous_steps`
+
+#### Important flow semantics
+
+- the **current step’s** output classification override does **not** affect same-step MCP compatibility
+- **prior steps’** effective outputs do affect downstream MCP compatibility
+- flow-step MCP selection is therefore based on the data the step is about to consume, not on the classification it may emit afterward
+
+#### Validation strategy
+
+Eneo uses defense in depth:
+
+- **UI guidance**
+  - incompatible MCP servers are shown as unavailable in the flow step editor
+- **fail-fast update validation**
+  - invalid MCP changes on a flow-managed assistant are rejected immediately
+- **publish/runtime validation**
+  - flows are re-validated before execution
+
+This reduces the risk of classified data being routed to an MCP server with an insufficient security level.
+
+#### Operational note
+
+If the security-classification selector is missing when adding or editing an MCP server:
+
+- verify that security classifications are enabled for the tenant
+- verify that the tenant has at least one configured classification
+
+Without tenant security classifications, MCP server classification remains unset and downstream space/flow classification gating cannot be fully applied.
+
+#### Design principle
+
+Flows do **not** define their own security-classification hierarchy for MCP. They adapt the existing tenant-admin and space security model to flow-step authoring and execution.
+
+---
+
 ### Infrastructure Security
 
 **Container Security**:

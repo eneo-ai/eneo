@@ -1938,6 +1938,8 @@
   "flow_step_list_empty_hint": "Add a step to get started.",
   "flow_step_mcp_policy": "MCP policy",
   "flow_step_mcp_policy_tooltip": "Controls how this step can use MCP tools.",
+  "flow_step_mcp_server_does_not_meet_security_classification": "This MCP server does not meet this step's required security classification.",
+  "flow_step_mcp_security_context_loading": "Loading security classification requirements for this step...",
   "flow_step_mcp_servers_badge": "{count} servers",
   "flow_step_mcp_tools_badge": "{count} tools",
   "flow_step_move_down": "Move down",

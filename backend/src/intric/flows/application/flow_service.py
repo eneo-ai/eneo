@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID
 
@@ -265,6 +266,11 @@ class FlowService:
         self._ensure_flow_is_mutable(flow)
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
         self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)
+        await self._validate_flow_assistant_security_change(
+            flow=flow,
+            assistant=assistant,
+            changes=changes,
+        )
         assistant_service = cast(Any, self.assistant_service)
         return cast(
             tuple[Assistant, list[ResourcePermission]],
@@ -455,9 +461,26 @@ class FlowService:
             return
 
         space = await self.space_service.get_space(space_id)
-        prior_output_levels: dict[int, int | None] = {}
+        assistants_by_id: dict[UUID, Assistant] = {}
         for step in sorted(steps, key=lambda item: item.step_order):
             assistant, _ = await self.assistant_service.get_assistant(step.assistant_id)
+            assistants_by_id[step.assistant_id] = assistant
+        self._validate_step_security_classification_with_assistants(
+            steps=steps,
+            assistants_by_id=assistants_by_id,
+            space=space,
+        )
+
+    def _validate_step_security_classification_with_assistants(
+        self,
+        *,
+        steps: list[FlowStep],
+        assistants_by_id: dict[UUID, Any],
+        space: Any,
+    ) -> None:
+        prior_output_levels: dict[int, int | None] = {}
+        for step in sorted(steps, key=lambda item: item.step_order):
+            assistant = assistants_by_id[step.assistant_id]
             evaluation = evaluate_step_security_classification(
                 step_order=step.step_order,
                 input_source=str(step.input_source),
@@ -467,6 +490,105 @@ class FlowService:
                 space=space,
             )
             prior_output_levels[step.step_order] = evaluation.effective_output_level
+
+    async def _validate_flow_assistant_security_change(
+        self,
+        *,
+        flow: Flow,
+        assistant: Assistant,
+        changes: dict[str, Any],
+    ) -> None:
+        if self.space_service is None:
+            return
+
+        relevant_fields = {
+            "completion_model_id",
+            "groups",
+            "websites",
+            "integration_knowledge_ids",
+            "mcp_server_ids",
+        }
+        if relevant_fields.isdisjoint(changes.keys()):
+            return
+
+        if not any(step.assistant_id == assistant.id for step in flow.steps):
+            return
+
+        space = await self.space_service.get_space(flow.space_id)
+        candidate_assistant = (
+            self._build_candidate_flow_assistant_for_security_validation(
+                assistant=assistant,
+                space=space,
+                changes=changes,
+            )
+        )
+        assistants_by_id: dict[UUID, Any] = {assistant.id: candidate_assistant}
+        for step in sorted(flow.steps, key=lambda item: item.step_order):
+            if step.assistant_id in assistants_by_id:
+                continue
+            current_assistant, _ = await self.assistant_service.get_assistant(
+                step.assistant_id
+            )
+            assistants_by_id[step.assistant_id] = current_assistant
+
+        self._validate_step_security_classification_with_assistants(
+            steps=flow.steps,
+            assistants_by_id=assistants_by_id,
+            space=space,
+        )
+
+    def _build_candidate_flow_assistant_for_security_validation(
+        self,
+        *,
+        assistant: Assistant,
+        space: Any,
+        changes: dict[str, Any],
+    ) -> Any:
+        completion_model = assistant.completion_model
+        if "completion_model_id" in changes:
+            next_completion_model_id = changes["completion_model_id"]
+            completion_model = (
+                space.get_completion_model(next_completion_model_id)
+                if next_completion_model_id is not None
+                else None
+            )
+
+        collections = assistant.collections
+        if "groups" in changes and changes["groups"] is not None:
+            collections = [
+                space.get_collection(group_id) for group_id in changes["groups"]
+            ]
+
+        websites = assistant.websites
+        if "websites" in changes and changes["websites"] is not None:
+            websites = [
+                space.get_website(website_id) for website_id in changes["websites"]
+            ]
+
+        integration_knowledge_list = assistant.integration_knowledge_list
+        if (
+            "integration_knowledge_ids" in changes
+            and changes["integration_knowledge_ids"] is not None
+        ):
+            integration_knowledge_list = [
+                space.get_integration_knowledge(integration_knowledge_id)
+                for integration_knowledge_id in changes["integration_knowledge_ids"]
+            ]
+
+        mcp_servers = assistant.mcp_servers
+        if "mcp_server_ids" in changes and changes["mcp_server_ids"] is not None:
+            mcp_servers = [
+                space.get_mcp_server(mcp_server_id)
+                for mcp_server_id in changes["mcp_server_ids"]
+            ]
+
+        return SimpleNamespace(
+            completion_model=completion_model,
+            collections=collections,
+            websites=websites,
+            integration_knowledge_list=integration_knowledge_list,
+            mcp_servers=mcp_servers,
+        )
 
     def _normalize_steps_for_tenant(self, steps: list[FlowStep]) -> list[FlowStep]:
         return [
