@@ -9,7 +9,7 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.apps.apps.api.app_models import InputField, InputFieldType
 from intric.apps.apps.app import App
 from intric.database.tables.app_table import Apps
-from intric.files.file_models import FileInfo
+from intric.files.file_models import File
 from intric.prompts.prompt import Prompt
 from intric.prompts.prompt_factory import PromptFactory
 from intric.spaces.space import Space
@@ -99,7 +99,7 @@ class AppFactory:
         input_fields: list[InputField],
         name: str | None = None,
         prompt: Prompt | None = None,
-        attachments: Sequence["FileInfo"] | None = None,
+        attachments: Sequence["File"] | None = None,
         transcription_model: TranscriptionModel | None = None,
     ) -> App:
         space_id = space.id
@@ -155,8 +155,7 @@ class AppFactory:
             for input_field in app_in_db.input_fields
         ]
         attachments = [
-            FileInfo.model_validate(attachment.file)
-            for attachment in app_in_db.attachments
+            File.model_validate(attachment.file) for attachment in app_in_db.attachments
         ]
         model_kwargs = self._create_model_kwargs(completion_model_kwargs)
 
@@ -218,8 +217,7 @@ class AppFactory:
             else None
         )
         attachments = [
-            FileInfo.model_validate(attachment.file)
-            for attachment in app_in_db.attachments
+            File.model_validate(attachment.file) for attachment in app_in_db.attachments
         ]
         model_kwargs = self._create_model_kwargs(completion_model_kwargs)
 

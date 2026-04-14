@@ -140,7 +140,7 @@ class AppService:
         # Validate incoming data
         template.validate_wizard_data(template_data=template_data)
 
-        attachments = await self.file_service.get_file_infos(
+        attachments = await self.file_service.get_files_by_ids(
             file_ids=template_data.get_ids_by_type(wizard_type=WizardType.attachments)
         )
 
@@ -284,7 +284,7 @@ class AppService:
 
         attachments = None
         if attachment_ids is not None:
-            attachments = await self.file_service.get_file_infos(
+            attachments = await self.file_service.get_files_by_ids(
                 [attachment.id for attachment in attachment_ids]
             )
 

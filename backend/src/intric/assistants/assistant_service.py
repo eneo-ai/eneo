@@ -258,7 +258,7 @@ class AssistantService:
         template.validate_assistant_wizard_data(template_data=template_data)
         assert space.id is not None
 
-        attachments = await self.file_service.get_file_infos(
+        attachments = await self.file_service.get_files_by_ids(
             file_ids=template_data.get_ids_by_type(wizard_type=WizardType.attachments)
         )
         collections = [
@@ -385,7 +385,7 @@ class AssistantService:
 
         attachments = None
         if attachment_ids is not None:
-            attachments = await self.file_service.get_file_infos(attachment_ids)
+            attachments = await self.file_service.get_files_by_ids(attachment_ids)
 
         group_entities = None
         if groups is not None:

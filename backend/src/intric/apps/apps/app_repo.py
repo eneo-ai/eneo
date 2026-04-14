@@ -11,7 +11,7 @@ from intric.apps.apps.app import App
 from intric.apps.apps.app_factory import AppFactory
 from intric.database.database import AsyncSession
 from intric.database.tables.app_table import Apps, AppsFiles, AppsPrompts, InputFields
-from intric.files.file_models import FileInfo
+from intric.files.file_models import File
 from intric.prompts.prompt import Prompt
 from intric.prompts.prompt_repo import PromptRepository
 from intric.transcription_models.domain.transcription_model_repo import (
@@ -112,9 +112,7 @@ class AppRepository:
 
         await self.session.execute(stmt)
 
-    async def _set_attachments(
-        self, app_in_db: Apps, attachments: list[FileInfo]
-    ) -> None:
+    async def _set_attachments(self, app_in_db: Apps, attachments: list[File]) -> None:
         # Delete all
         stmt = sa.delete(AppsFiles).where(AppsFiles.app_id == app_in_db.id)
         await self.session.execute(stmt)
