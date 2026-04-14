@@ -559,7 +559,10 @@ def resolve_input_source_text(
         payload = run.input_payload_json or {}
         if isinstance(payload.get("text"), str):
             return payload["text"]
-        return json.dumps(payload, ensure_ascii=False)
+        semantic_payload = _strip_runtime_orchestration_metadata(payload)
+        if not semantic_payload:
+            return ""
+        return json.dumps(semantic_payload, ensure_ascii=False)
     if input_source == "previous_step":
         previous = next(
             (item for item in prior_results if item.step_order == step_order - 1), None
@@ -603,3 +606,12 @@ def resolve_input_source_text(
             f"Input source '{input_source}' is not yet supported in runtime execution."
         )
     raise BadRequestException(f"Unsupported input source '{input_source}'.")
+
+
+def _strip_runtime_orchestration_metadata(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    orchestration_keys = {"expected_flow_version", "step_inputs", "file_ids"}
+    return {
+        key: value for key, value in payload.items() if key not in orchestration_keys
+    }

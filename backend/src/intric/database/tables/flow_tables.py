@@ -181,6 +181,9 @@ class FlowSteps(BasePublic):
 
 
 class FlowStepMCPTools(BaseCrossReference):
+    # Deprecated: flow step MCP configuration is stored on the flow-managed assistant
+    # through assistant_mcp_servers and assistant_mcp_server_tools. Keep this table
+    # until a dedicated cleanup migration removes the obsolete schema surface.
     flow_step_id: Mapped[UUID] = mapped_column(
         ForeignKey(FlowSteps.id, ondelete="CASCADE"),
         primary_key=True,

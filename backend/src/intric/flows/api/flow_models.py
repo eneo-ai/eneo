@@ -705,9 +705,33 @@ class FlowRunDebugOutput(BaseModel):
     config: dict[str, Any] | None = None
 
 
+class FlowRunDebugMcpServer(BaseModel):
+    id: str
+    name: str
+
+
+class FlowRunDebugMcpTool(BaseModel):
+    tool_id: str
+    server_id: str
+    name: str
+
+
+def _empty_flow_run_debug_mcp_servers() -> list[FlowRunDebugMcpServer]:
+    return []
+
+
+def _empty_flow_run_debug_mcp_tools() -> list[FlowRunDebugMcpTool]:
+    return []
+
+
 class FlowRunDebugMcp(BaseModel):
     policy: str | None = None
-    tool_allowlist: list[str] = Field(default_factory=list)
+    servers: list[FlowRunDebugMcpServer] = Field(
+        default_factory=_empty_flow_run_debug_mcp_servers
+    )
+    tools_enabled: list[FlowRunDebugMcpTool] = Field(
+        default_factory=_empty_flow_run_debug_mcp_tools
+    )
 
 
 class FlowRunDebugRagReferenceChunk(BaseModel):

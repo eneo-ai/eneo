@@ -567,6 +567,37 @@ class FlowService:
                 step,
                 flow=flow,
             )
+        assistant_payload: Any = await self.assistant_service.get_assistant(
+            step.assistant_id
+        )
+        assistant = cast(
+            Any | None,
+            assistant_payload[0]
+            if isinstance(assistant_payload, tuple) and assistant_payload
+            else None,
+        )
+        mcp_server_entities: list[Any] = []
+        if assistant is not None:
+            assistant_mcp_servers = assistant.mcp_servers
+            if isinstance(assistant_mcp_servers, list):
+                mcp_server_entities = cast(list[Any], assistant_mcp_servers)
+        mcp_servers: list[dict[str, str]] = [
+            {"id": str(server.id), "name": server.name}
+            for server in mcp_server_entities
+        ]
+        mcp_tools_enabled: list[dict[str, str]] = []
+        for server in mcp_server_entities:
+            server_tools = cast(list[Any], getattr(server, "tools", []) or [])
+            for tool in server_tools:
+                if cast(bool, getattr(tool, "is_enabled", False)) is not True:
+                    continue
+                mcp_tools_enabled.append(
+                    {
+                        "tool_id": str(tool.id),
+                        "server_id": str(server.id),
+                        "name": tool.name,
+                    }
+                )
         return {
             "step_id": str(step.id) if step.id is not None else None,
             "step_order": step.step_order,
@@ -581,6 +612,8 @@ class FlowService:
             "input_bindings": step.input_bindings,
             "output_classification_override": step.output_classification_override,
             "mcp_policy": step.mcp_policy,
+            "mcp_servers": mcp_servers,
+            "mcp_tools_enabled": mcp_tools_enabled,
             "input_config": step.input_config,
             "output_config": output_config,
         }

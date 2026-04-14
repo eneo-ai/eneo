@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
   import { fly, fade, slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { browser } from "$app/environment";
@@ -60,15 +59,34 @@
     return autoExpandedOrders.has(stepOrder);
   }
 
-  onMount(() => {
+  $effect(() => {
+    const shouldTick = Boolean(runStartedAt) && stats.running > 0;
+
+    if (!shouldTick) {
+      if (tickInterval) {
+        clearInterval(tickInterval);
+        tickInterval = null;
+      }
+      return;
+    }
+
+    now = Date.now();
     tickInterval = setInterval(() => {
       now = Date.now();
     }, 1000);
+
+    return () => {
+      if (tickInterval) {
+        clearInterval(tickInterval);
+        tickInterval = null;
+      }
+    };
   });
 
-  onDestroy(() => {
-    if (tickInterval) clearInterval(tickInterval);
-    if (copiedTimer) clearTimeout(copiedTimer);
+  $effect(() => {
+    return () => {
+      if (copiedTimer) clearTimeout(copiedTimer);
+    };
   });
 
   function toggleStep(order: number) {

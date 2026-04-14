@@ -9,9 +9,11 @@
     getTemplateFillReadiness,
     getTemplateFillTemplateName
   } from "$lib/features/flows/templateFillConfig";
+  import type { FlowStepMcpSummary } from "$lib/features/flows/flowStepMcpConfig";
 
   let {
     step,
+    mcpSummary = null,
     isActive,
     isPublished,
     isPowerUser,
@@ -24,6 +26,7 @@
     onRemove
   }: {
     step: FlowStep;
+    mcpSummary?: FlowStepMcpSummary | null;
     isActive: boolean;
     isPublished: boolean;
     isPowerUser: boolean;
@@ -218,9 +221,11 @@
           <span class="text-accent-stronger text-[11px] font-medium">
             {m.flow_step_card_chain_short()}: {nextChannelLabel}
           </span>
-          {#if step.mcp_policy === "restricted"}
+          {#if mcpSummary?.hasConfiguredMcp}
             <Badge variant="secondary" class="bg-warning-dimmer text-warning-stronger text-[11px]"
-              >MCP</Badge
+              >{mcpSummary.enabledToolCount > 0
+                ? m.flow_step_mcp_tools_badge({ count: String(mcpSummary.enabledToolCount) })
+                : m.flow_step_mcp_servers_badge({ count: String(mcpSummary.serverCount) })}</Badge
             >
           {/if}
         </div>

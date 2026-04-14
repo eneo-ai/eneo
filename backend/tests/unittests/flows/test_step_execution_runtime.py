@@ -1,21 +1,32 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import logging
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
-from intric.flows.flow import FlowRun, FlowRunStatus, FlowStepResult, FlowStepResultStatus
-from intric.flows.runtime.models import RunExecutionState, RuntimeStep, StepExecutionOutput, StepInputValue
+from intric.ai_models.completion_models.completion_model import Completion, TokenUsage
+from intric.flows.flow import (
+    FlowRun,
+    FlowRunStatus,
+    FlowStepResult,
+    FlowStepResultStatus,
+)
+from intric.flows.runtime.models import (
+    RunExecutionState,
+    RuntimeStep,
+    StepExecutionOutput,
+    StepInputValue,
+)
 from intric.flows.runtime.step_execution_runtime import (
     PreparedStepExecution,
     StepExecutionRuntimeDeps,
     apply_prompt_context_trace,
     attach_typed_failure_context,
-    augment_prompt_for_json_output,
+    augment_prompt_for_typed_output,
     build_output_payload,
     complete_step_execution,
     detect_native_json_output_support,
@@ -25,8 +36,8 @@ from intric.flows.runtime.step_execution_runtime import (
     json_mode_cache_key,
     prepare_step_execution,
 )
-from intric.main.exceptions import TypedIOValidationException
 from intric.flows.variable_resolver import FlowVariableResolver
+from intric.main.exceptions import TypedIOValidationException
 
 
 def _run() -> FlowRun:
@@ -136,12 +147,15 @@ async def test_prepare_step_execution_interpolates_prompt_and_records_contract_v
         "parse_succeeded": True,
         "candidate_type": "dict",
     }
-    assert prepared.contract_validation == prepared.input_payload_for_result["contract_validation"]
+    assert (
+        prepared.contract_validation
+        == prepared.input_payload_for_result["contract_validation"]
+    )
     assert prepared.llm_files == []
 
 
 def test_augment_prompt_for_json_output_appends_schema_instructions():
-    prompt = augment_prompt_for_json_output(
+    prompt = augment_prompt_for_typed_output(
         output_type="json",
         output_contract={"type": "object", "properties": {"ok": {"type": "boolean"}}},
         prompt="Analyze the text",
@@ -154,7 +168,9 @@ def test_augment_prompt_for_json_output_appends_schema_instructions():
     assert '"ok"' in prompt
 
 
-def test_detect_native_json_output_support_uses_litellm_model_name(monkeypatch: pytest.MonkeyPatch):
+def test_detect_native_json_output_support_uses_litellm_model_name(
+    monkeypatch: pytest.MonkeyPatch,
+):
     captured: list[str] = []
 
     def fake_supported_params(*, model: str):
@@ -337,7 +353,11 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
             input_source="flow_input",
         ),
         effective_prompt="Prompt",
-        input_payload_for_result={"text": "hello", "source_text": "hello", "input_source": "flow_input"},
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
         contract_validation=None,
         diagnostics=[],
         llm_files=[],
@@ -347,7 +367,9 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
         completion_service=object(),
         load_assistant=AsyncMock(),
         resolve_step_input=AsyncMock(),
-        retrieve_rag_chunks=AsyncMock(return_value=([], {"status": "skipped_no_service"}, [])),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
         process_typed_output=AsyncMock(return_value=({"ok": True}, None)),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
@@ -395,7 +417,9 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
         provider_type="openai",
     )
     assistant.completion_model_kwargs = original_kwargs
-    assistant.completion_model_kwargs.model_copy.side_effect = RuntimeError("bad kwargs")
+    assistant.completion_model_kwargs.model_copy.side_effect = RuntimeError(
+        "bad kwargs"
+    )
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(total_token_count=4, completion='{"ok": true}')
     )
@@ -407,7 +431,11 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
             input_source="flow_input",
         ),
         effective_prompt="Prompt",
-        input_payload_for_result={"text": "hello", "source_text": "hello", "input_source": "flow_input"},
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
         contract_validation=None,
         diagnostics=[],
         llm_files=[],
@@ -417,7 +445,9 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
         completion_service=object(),
         load_assistant=AsyncMock(),
         resolve_step_input=AsyncMock(),
-        retrieve_rag_chunks=AsyncMock(return_value=([], {"status": "skipped_no_service"}, [])),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
         process_typed_output=AsyncMock(return_value=({"ok": True}, None)),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
@@ -473,7 +503,11 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
             input_source="flow_input",
         ),
         effective_prompt="Prompt",
-        input_payload_for_result={"text": "hello", "source_text": "hello", "input_source": "flow_input"},
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
         contract_validation=None,
         diagnostics=[],
         llm_files=[],
@@ -483,7 +517,9 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
         completion_service=object(),
         load_assistant=AsyncMock(),
         resolve_step_input=AsyncMock(),
-        retrieve_rag_chunks=AsyncMock(return_value=([], {"status": "skipped_no_service"}, [])),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
         process_typed_output=AsyncMock(return_value=({"ok": True}, None)),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
@@ -509,6 +545,204 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
 
 
 @pytest.mark.asyncio
+async def test_complete_step_execution_prefers_provider_reported_usage() -> None:
+    run = _run()
+    state = _state()
+    step = _step(output_type="text")
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            total_token_count=4,
+            usage=TokenUsage(prompt_tokens=123, completion_tokens=456),
+            completion=Completion(text="Svar", reasoning_token_count=99),
+            model=SimpleNamespace(name="gpt-5.4-nano", provider_type="openai"),
+            knowledge_trace=None,
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=(None, None)),
+        apply_output_cap=AsyncMock(return_value=("Svar", [])),
+        attach_typed_failure_context=lambda exc, **kwargs: exc,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
+        count_tokens=lambda text: len(text) * 10,
+    )
+
+    output = await complete_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        prepared=prepared,
+        deps=deps,
+    )
+
+    assert output.num_tokens_input == 123
+    assert output.num_tokens_output == 456
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_falls_back_to_estimated_usage_when_provider_usage_missing() -> (
+    None
+):
+    run = _run()
+    state = _state()
+    step = _step(output_type="text")
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            total_token_count=41,
+            completion=Completion(text="Svar", reasoning_token_count=7),
+            model=SimpleNamespace(name="gpt-5.4-nano", provider_type="openai"),
+            knowledge_trace=None,
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=(None, None)),
+        apply_output_cap=AsyncMock(return_value=("Svar", [])),
+        attach_typed_failure_context=lambda exc, **kwargs: exc,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
+        count_tokens=lambda text: 19,
+    )
+
+    output = await complete_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        prepared=prepared,
+        deps=deps,
+    )
+
+    assert output.num_tokens_input == 41
+    assert output.num_tokens_output == 26
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("usage", "expected_input_tokens", "expected_output_tokens"),
+    [
+        (TokenUsage(prompt_tokens=None, completion_tokens=222), 31, 222),
+        (TokenUsage(prompt_tokens=111, completion_tokens=None), 111, 26),
+    ],
+)
+async def test_complete_step_execution_falls_back_per_usage_field(
+    usage: TokenUsage,
+    expected_input_tokens: int,
+    expected_output_tokens: int,
+) -> None:
+    run = _run()
+    state = _state()
+    step = _step(output_type="text")
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            total_token_count=31,
+            usage=usage,
+            completion="Svar",
+            model=SimpleNamespace(name="gpt-5.4-nano", provider_type="openai"),
+            knowledge_trace=None,
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=(None, None)),
+        apply_output_cap=AsyncMock(return_value=("Svar", [])),
+        attach_typed_failure_context=lambda exc, **kwargs: exc,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
+        count_tokens=lambda text: 26,
+    )
+
+    output = await complete_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        prepared=prepared,
+        deps=deps,
+    )
+
+    assert output.num_tokens_input == expected_input_tokens
+    assert output.num_tokens_output == expected_output_tokens
+
+
+@pytest.mark.asyncio
 async def test_complete_step_execution_transcribe_only_skips_llm_and_rag():
     run = _run()
     state = _state()
@@ -524,7 +758,11 @@ async def test_complete_step_execution_transcribe_only_skips_llm_and_rag():
             transcription_metadata={"model": "whisper-1"},
         ),
         effective_prompt="unused",
-        input_payload_for_result={"text": "Transcript", "source_text": "Transcript", "input_source": "flow_input"},
+        input_payload_for_result={
+            "text": "Transcript",
+            "source_text": "Transcript",
+            "input_source": "flow_input",
+        },
         contract_validation=None,
         diagnostics=[],
         llm_files=[],
@@ -574,10 +812,14 @@ async def test_complete_step_execution_transcribe_only_skips_llm_and_rag():
         "references_truncated": False,
     }
     assert any(d.code == "audio_transcribe_only_used" for d in output.diagnostics)
+    assert output.num_tokens_input == 0
+    assert output.num_tokens_output == 0
 
 
 @pytest.mark.asyncio
-async def test_complete_step_execution_uses_version_2_and_strips_inline_refs_for_citation_mode() -> None:
+async def test_complete_step_execution_uses_version_2_and_strips_inline_refs_for_citation_mode() -> (
+    None
+):
     run = _run()
     state = _state()
     step = _step(
@@ -589,7 +831,7 @@ async def test_complete_step_execution_uses_version_2_and_strips_inline_refs_for
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
             total_token_count=4,
-            completion="Svar med kallor <inref id=\"11111111\"/><inref id=\"22222222\"/>",
+            completion='Svar med kallor <inref id="11111111"/><inref id="22222222"/>',
             model=SimpleNamespace(name="gpt-5.4-nano", provider_type="openai"),
             knowledge_trace=None,
         )
@@ -602,7 +844,11 @@ async def test_complete_step_execution_uses_version_2_and_strips_inline_refs_for
             input_source="flow_input",
         ),
         effective_prompt="Prompt",
-        input_payload_for_result={"text": "hello", "source_text": "hello", "input_source": "flow_input"},
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
         contract_validation=None,
         diagnostics=[],
         llm_files=[],
@@ -669,13 +915,13 @@ async def test_complete_step_execution_uses_version_2_and_strips_inline_refs_for
         "22222222-2222-2222-2222-222222222222",
     ]
     assert output.raw_completion_text is not None
-    assert output.raw_completion_text.endswith(
-        "<inref id=\"22222222\"/>"
-    )
+    assert output.raw_completion_text.endswith('<inref id="22222222"/>')
 
 
 @pytest.mark.asyncio
-async def test_complete_step_execution_records_missing_citations_without_failing_step() -> None:
+async def test_complete_step_execution_records_missing_citations_without_failing_step() -> (
+    None
+):
     run = _run()
     state = _state()
     step = _step(
@@ -700,7 +946,11 @@ async def test_complete_step_execution_records_missing_citations_without_failing
             input_source="flow_input",
         ),
         effective_prompt="Prompt",
-        input_payload_for_result={"text": "hello", "source_text": "hello", "input_source": "flow_input"},
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
         contract_validation=None,
         diagnostics=[],
         llm_files=[],
@@ -757,7 +1007,9 @@ async def test_complete_step_execution_records_missing_citations_without_failing
 
 
 @pytest.mark.asyncio
-async def test_complete_step_execution_does_not_expect_citations_when_no_knowledge_was_inserted() -> None:
+async def test_complete_step_execution_does_not_expect_citations_when_no_knowledge_was_inserted() -> (
+    None
+):
     run = _run()
     state = _state()
     step = _step(
@@ -782,7 +1034,11 @@ async def test_complete_step_execution_does_not_expect_citations_when_no_knowled
             input_source="flow_input",
         ),
         effective_prompt="Prompt",
-        input_payload_for_result={"text": "hello", "source_text": "hello", "input_source": "flow_input"},
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
         contract_validation=None,
         diagnostics=[],
         llm_files=[],
@@ -833,7 +1089,9 @@ async def test_complete_step_execution_does_not_expect_citations_when_no_knowled
 
 
 @pytest.mark.asyncio
-async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_steps() -> None:
+async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_steps() -> (
+    None
+):
     run = _run()
     source_id = "11111111-1111-1111-1111-111111111111"
     source_title = "Sociologi och sociala institutioner"
@@ -892,7 +1150,9 @@ async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_
     state = RunExecutionState(
         completed_by_order={2: prior_result},
         prior_results=[prior_result],
-        all_previous_segments=["<step_2_output>\nGrounded step output\n</step_2_output>\n"],
+        all_previous_segments=[
+            "<step_2_output>\nGrounded step output\n</step_2_output>\n"
+        ],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -957,7 +1217,10 @@ async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_
     )
 
     assert assistant.get_response.await_args.kwargs["version"] == 2
-    assert "Inherited source catalog" in assistant.get_response.await_args.kwargs["prompt_override"]
+    assert (
+        "Inherited source catalog"
+        in assistant.get_response.await_args.kwargs["prompt_override"]
+    )
     assert output.full_text == "Slutrapport"
     assert output.persisted_text == "Slutrapport"
     assert output.citation_sidecar is not None
@@ -1071,7 +1334,9 @@ def test_build_output_payload_merges_output_payload_extensions():
 
 def test_json_mode_cache_key_uses_provider_name_and_id():
     assistant = SimpleNamespace(
-        completion_model=SimpleNamespace(id=uuid4(), name="gpt-4.1", provider_type="openai")
+        completion_model=SimpleNamespace(
+            id=uuid4(), name="gpt-4.1", provider_type="openai"
+        )
     )
 
     cache_key = json_mode_cache_key(assistant)
@@ -1080,7 +1345,9 @@ def test_json_mode_cache_key_uses_provider_name_and_id():
 
 
 def test_is_json_mode_rejection_matches_supported_error_phrases():
-    assert is_json_mode_rejection(RuntimeError("response_format is unsupported")) is True
+    assert (
+        is_json_mode_rejection(RuntimeError("response_format is unsupported")) is True
+    )
     assert is_json_mode_rejection(RuntimeError("JSON_OBJECT mode unavailable")) is True
     assert is_json_mode_rejection(RuntimeError("some other transport failure")) is False
 
@@ -1110,7 +1377,9 @@ def test_effective_model_parameters_collects_model_metadata():
     kwargs.model_dump.return_value = {"temperature": 0.2}
     assistant = SimpleNamespace(
         completion_model_kwargs=kwargs,
-        completion_model=SimpleNamespace(id=uuid4(), name="gpt-4.1", provider_type="openai"),
+        completion_model=SimpleNamespace(
+            id=uuid4(), name="gpt-4.1", provider_type="openai"
+        ),
     )
 
     params = effective_model_parameters(assistant)

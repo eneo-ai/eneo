@@ -242,7 +242,6 @@
             <div class="flex items-center justify-between">
               <Collapsible.Trigger
                 class="text-muted hover:text-secondary focus-visible:ring-accent-default -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                aria-controls="progress-step-{step.stepOrder}-input-panel"
                 onclick={() => onToggleInput(step.stepOrder)}
               >
                 <IconChevronDown

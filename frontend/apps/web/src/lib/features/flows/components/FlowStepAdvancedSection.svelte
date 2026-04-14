@@ -6,7 +6,6 @@
   import { IconQuestionMark } from "@intric/icons/question-mark";
   import { slide } from "svelte/transition";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { MCP_POLICIES } from "./flowStepEditHelpers";
   import type { AdvancedJsonDrafts, AdvancedJsonErrors } from "./advancedJsonDrafts";
 
   let {
@@ -14,43 +13,18 @@
     isPublished,
     advancedJsonDrafts,
     advancedJsonErrors,
-    onMcpPolicyChange,
     onJsonFieldUpdate
   }: {
     step: FlowStep;
     isPublished: boolean;
     advancedJsonDrafts: AdvancedJsonDrafts;
     advancedJsonErrors: AdvancedJsonErrors;
-    onMcpPolicyChange?: (detail: { value: string }) => void;
     onJsonFieldUpdate?: (detail: { field: string; value: string }) => void;
   } = $props();
 </script>
 
 <div transition:slide={{ duration: 200 }}>
   <Settings.Group title={m.flow_step_advanced()}>
-    <Settings.Row title={m.flow_step_mcp_policy()} description="">
-      <svelte:fragment slot="title">
-        <Tooltip.Provider delayDuration={150}>
-          <Tooltip.Root>
-            <Tooltip.Trigger>
-              <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
-            </Tooltip.Trigger>
-            <Tooltip.Content>{m.flow_step_mcp_policy_tooltip()}</Tooltip.Content>
-          </Tooltip.Root>
-        </Tooltip.Provider>
-      </svelte:fragment>
-      <select
-        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
-        value={step.mcp_policy}
-        disabled={isPublished}
-        onchange={(e) => onMcpPolicyChange?.({ value: e.currentTarget.value })}
-      >
-        {#each MCP_POLICIES as policy (policy.value)}
-          <option value={policy.value}>{policy.label}</option>
-        {/each}
-      </select>
-    </Settings.Row>
-
     <Settings.Row
       title={m.flow_step_input_contract()}
       description={m.flow_step_input_contract_desc()}

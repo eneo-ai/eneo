@@ -26,6 +26,7 @@ const [getFlowEditor, setFlowEditor] =
 
 function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow: Flow) => void }) {
   type LoadedAssistant = Awaited<ReturnType<typeof data.intric.flows.assistants.get>>;
+  const assistantRevision = writable(0);
   const editor = createResourceEditor({
     intric: data.intric,
     resource: data.flow,
@@ -160,20 +161,18 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
       if (step.output_mode === "template_fill") {
         const config = getTemplateFillOutputConfig(step);
         if (!config.template_asset_id && !config.template_file_id) {
-          entries.set(
-            `${stepConfigValidationPrefix}template_fill_no_template:${step.step_order}`,
-            ["template_fill_no_template"]
-          );
+          entries.set(`${stepConfigValidationPrefix}template_fill_no_template:${step.step_order}`, [
+            "template_fill_no_template"
+          ]);
         }
       }
       // HTTP output config: URL required
       if (step.output_mode === "http_post" && step.output_config?.auth) {
         const url = typeof step.output_config.url === "string" ? step.output_config.url : "";
         if (!url.trim()) {
-          entries.set(
-            `${stepConfigValidationPrefix}http_missing_url:${step.step_order}`,
-            ["http_missing_url"]
-          );
+          entries.set(`${stepConfigValidationPrefix}http_missing_url:${step.step_order}`, [
+            "http_missing_url"
+          ]);
         }
       }
       // HTTP input config: URL required
@@ -183,10 +182,9 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
       ) {
         const url = typeof step.input_config.url === "string" ? step.input_config.url : "";
         if (!url.trim()) {
-          entries.set(
-            `${stepConfigValidationPrefix}http_missing_url:${step.step_order}`,
-            ["http_missing_url"]
-          );
+          entries.set(`${stepConfigValidationPrefix}http_missing_url:${step.step_order}`, [
+            "http_missing_url"
+          ]);
         }
       }
     }
@@ -260,6 +258,9 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
     getErrorMessage: (error) =>
       error instanceof IntricError ? error.getReadableMessage() : "assistant_save_failed",
     onValidationError: setAssistantValidationError,
+    onSaved: () => {
+      assistantRevision.update((value) => value + 1);
+    },
     onPromptSaved: () => {
       revalidateDeletedStepReferences();
     }
@@ -800,6 +801,7 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
     addStep,
     insertStepAfter,
     createTemplateFillStarter,
+    assistantRevision,
     loadAssistant,
     saveAssistant,
     updateAssistantImmediately,

@@ -387,7 +387,7 @@ def _build_encryption_service() -> EncryptionService:
     key = settings.encryption_key
     if settings.testing:
         key = None
-    _logger.info(
+    _logger.debug(
         "Container: Initializing EncryptionService",
         extra={
             "encryption_key_present": bool(key),

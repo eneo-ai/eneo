@@ -175,9 +175,15 @@ def normalize_debug_step(
     rag_metadata: dict[str, Any] | None = None,
     attempts: list[DebugAttemptProjection] | None = None,
 ) -> dict[str, Any]:
-    raw_allowlist = step.get("mcp_tool_allowlist")
-    tool_allowlist: list[object] = (
-        cast(list[object], raw_allowlist) if isinstance(raw_allowlist, list) else []
+    raw_servers = step.get("mcp_servers")
+    raw_tools_enabled = step.get("mcp_tools_enabled")
+    mcp_servers: list[object] = (
+        cast(list[object], raw_servers) if isinstance(raw_servers, list) else []
+    )
+    mcp_tools_enabled: list[object] = (
+        cast(list[object], raw_tools_enabled)
+        if isinstance(raw_tools_enabled, list)
+        else []
     )
     input_type = step.get("input_type")
     output_type = step.get("output_type")
@@ -205,7 +211,8 @@ def normalize_debug_step(
         },
         mcp={
             "policy": step.get("mcp_policy"),
-            "tool_allowlist": tool_allowlist,
+            "servers": mcp_servers,
+            "tools_enabled": mcp_tools_enabled,
         },
         rag=_normalize_debug_rag(rag_metadata),
         attempts=list(attempts or []),

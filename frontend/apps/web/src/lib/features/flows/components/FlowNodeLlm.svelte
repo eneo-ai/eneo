@@ -5,6 +5,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
+  import type { FlowStepMcpSummary } from "$lib/features/flows/flowStepMcpConfig";
 
   let {
     data
@@ -28,6 +29,7 @@
       modelName?: string;
       classLevel?: number | null;
       assistantClassLevel?: number | null;
+      mcpSummary?: FlowStepMcpSummary | null;
     };
   } = $props();
 
@@ -156,9 +158,11 @@
           {m.flow_step_card_chain_short()}: {nextChannelLabel}
         </Badge>
       </div>
-      {#if data.step.mcp_policy === "restricted"}
+      {#if data.mcpSummary?.hasConfiguredMcp}
         <div class="text-warning-stronger flex items-center gap-1">
-          {m.flow_step_mcp_policy()}: {m.flow_mcp_policy_restricted()}
+          {data.mcpSummary.enabledToolCount > 0
+            ? m.flow_step_mcp_tools_badge({ count: String(data.mcpSummary.enabledToolCount) })
+            : m.flow_step_mcp_servers_badge({ count: String(data.mcpSummary.serverCount) })}
         </div>
       {/if}
       {#if data.runStatus && (data.numTokensInput || data.numTokensOutput)}

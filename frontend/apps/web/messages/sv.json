@@ -1920,6 +1920,8 @@
   "flow_step_list_empty_hint": "Lägg till ett steg för att komma igång.",
   "flow_step_mcp_policy": "MCP-policy",
   "flow_step_mcp_policy_tooltip": "Styr hur steget får använda MCP-verktyg.",
+  "flow_step_mcp_servers_badge": "{count} servrar",
+  "flow_step_mcp_tools_badge": "{count} verktyg",
   "flow_step_move_down": "Flytta ner",
   "flow_step_move_up": "Flytta upp",
   "flow_step_name": "Stegnamn",

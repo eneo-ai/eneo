@@ -38,12 +38,12 @@
     stepAttempts,
     copiedKey,
     expanded,
-    inputExpanded,
+    inputExpanded: _inputExpanded,
     panelId,
     isPowerUser,
     intric,
     onToggle,
-    onToggleInput,
+    onToggleInput: _onToggleInput,
     onCopyPayload,
     onDownloadArtifact,
     getStatusColor,
@@ -84,6 +84,8 @@
       filesCount: number | undefined
     ) => string;
   } = $props();
+
+  let inputOpen = $state(false);
 </script>
 
 <Card.Root class="overflow-hidden transition-shadow hover:shadow-md">
@@ -222,17 +224,13 @@
         {/if}
 
         {#if result.input_payload_json}
-          <Collapsible.Root open={inputExpanded}>
+          <Collapsible.Root bind:open={inputOpen}>
             <div class="flex items-center justify-between">
               <Collapsible.Trigger
                 class="text-muted hover:text-secondary focus-visible:ring-accent-default -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                aria-controls="step-{result.step_order}-input-panel"
-                onclick={() => onToggleInput(result.step_order)}
               >
                 <IconChevronDown
-                  class="size-3 transition-transform duration-200 {inputExpanded
-                    ? ''
-                    : '-rotate-90'}"
+                  class="size-3 transition-transform duration-200 {inputOpen ? '' : '-rotate-90'}"
                 />
                 {m.flow_run_input()}
               </Collapsible.Trigger>
@@ -254,15 +252,13 @@
               </button>
             </div>
             <Collapsible.Content>
-              {#if inputExpanded}
-                <pre
-                  id="step-{result.step_order}-input-panel"
-                  class="bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
-                    result.input_payload_json,
-                    null,
-                    2
-                  )}</pre>
-              {/if}
+              <pre
+                id="step-{result.step_order}-input-panel"
+                class="bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
+                  result.input_payload_json,
+                  null,
+                  2
+                )}</pre>
             </Collapsible.Content>
           </Collapsible.Root>
         {/if}

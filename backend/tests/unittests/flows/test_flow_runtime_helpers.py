@@ -41,6 +41,54 @@ def test_resolve_input_source_text_serializes_non_text_flow_payload():
     assert resolved == '{"number": 7, "enabled": true}'
 
 
+def test_resolve_input_source_text_skips_runtime_orchestration_metadata_only_payload():
+    run = SimpleNamespace(
+        id=uuid4(),
+        input_payload_json={
+            "expected_flow_version": 9,
+            "step_inputs": {str(uuid4()): {"file_ids": [str(uuid4())]}},
+            "file_ids": [str(uuid4())],
+        },
+    )
+
+    resolved = resolve_input_source_text(
+        input_source="flow_input",
+        run=run,
+        step_order=1,
+        prior_results=[],
+        state=None,
+        logger=MagicMock(),
+    )
+
+    assert resolved == ""
+
+
+def test_resolve_input_source_text_strips_runtime_orchestration_metadata_from_semantic_payload():
+    run = SimpleNamespace(
+        id=uuid4(),
+        input_payload_json={
+            "request_id": "abc-123",
+            "category": "runtime step upload test",
+            "expected_flow_version": 9,
+            "step_inputs": {str(uuid4()): {"file_ids": [str(uuid4())]}},
+            "file_ids": [str(uuid4())],
+        },
+    )
+
+    resolved = resolve_input_source_text(
+        input_source="flow_input",
+        run=run,
+        step_order=1,
+        prior_results=[],
+        state=None,
+        logger=MagicMock(),
+    )
+
+    assert resolved == (
+        '{"request_id": "abc-123", "category": "runtime step upload test"}'
+    )
+
+
 def test_resolve_input_source_text_all_previous_steps_prefers_state_accumulator():
     run = SimpleNamespace(id=uuid4(), input_payload_json=None)
     prior_results = [

@@ -30,7 +30,7 @@ describe("flow step translation copy", () => {
       'Styr uppdraget: vad AI:n ska göra och hur den ska svara. Exempel: "Sammanfatta i tre punkter på svenska". Variabler fungerar här, men blir en del av instruktionen, inte av texten AI:n bearbetar.'
     );
     expect(messages.flow_step_input_template_tooltip).toBe(
-      'Styr vilken text AI:n faktiskt får in. Lämna tomt om steget ska använda sitt vanliga underlag. Samma variabler som i Instruktioner fungerar här, men här bygger du texten AI:n ska bearbeta, t.ex. med titel eller step_1.output.text.'
+      "Styr vilken text AI:n faktiskt får in. Lämna tomt om steget ska använda sitt vanliga underlag. Samma variabler som i Instruktioner fungerar här, men här bygger du texten AI:n ska bearbeta, t.ex. med titel eller step_1.output.text."
     );
     expect(messages.flow_step_input_template_tooltip).toContain("step_1.output.text");
   });
@@ -55,8 +55,10 @@ describe("flow step translation copy", () => {
       'Controls the task: what the AI should do and how it should respond. Example: "Summarize in three bullets in Swedish". Variables work here, but they become part of the instruction, not the text the AI processes.'
     );
     expect(messages.flow_step_input_template_tooltip).toBe(
-      'Controls which text the AI actually receives. Leave this empty if the step should use its normal material. The same variables work here as in Instructions, but here you build the text the AI will process, e.g. with title or step_1.output.text.'
+      "Controls which text the AI actually receives. Leave this empty if the step should use its normal material. The same variables work here as in Instructions, but here you build the text the AI will process, e.g. with title or step_1.output.text."
     );
     expect(messages.flow_step_input_template_tooltip).toContain("step_1.output.text");
+    expect(messages.flow_step_mcp_tools_badge).toBe("{count} tools");
+    expect(messages.flow_step_mcp_servers_badge).toBe("{count} servers");
   });
 });

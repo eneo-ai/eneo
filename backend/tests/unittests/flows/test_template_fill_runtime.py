@@ -9,9 +9,14 @@ from uuid import uuid4
 import pytest
 from docx import Document
 
-from intric.flows.flow import FlowRun, FlowRunStatus, FlowStepResult, FlowStepResultStatus
-from intric.flows.runtime.models import RunExecutionState, RuntimeStep
+from intric.flows.flow import (
+    FlowRun,
+    FlowRunStatus,
+    FlowStepResult,
+    FlowStepResultStatus,
+)
 from intric.flows.runtime import template_fill_runtime as template_fill_runtime_module
+from intric.flows.runtime.models import RunExecutionState, RuntimeStep
 from intric.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
     execute_template_fill_step,
@@ -58,7 +63,10 @@ def _run() -> FlowRun:
         tenant_id=uuid4(),
         trace_id=uuid4(),
         status=FlowRunStatus.RUNNING,
-        input_payload_json={"title": "Social medias påverkan", "author": "Anders Svensson"},
+        input_payload_json={
+            "title": "Social medias påverkan",
+            "author": "Anders Svensson",
+        },
         created_at=now,
         updated_at=now,
     )
@@ -101,7 +109,9 @@ def _state(*, result: FlowStepResult) -> RunExecutionState:
     )
 
 
-def _step(*, template_file_id, template_checksum: str | None = "checksum") -> RuntimeStep:
+def _step(
+    *, template_file_id, template_checksum: str | None = "checksum"
+) -> RuntimeStep:
     return RuntimeStep(
         step_id=uuid4(),
         step_order=2,
@@ -188,6 +198,8 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
             "placeholder_count": 3,
         }
     }
+    assert output.num_tokens_input == 0
+    assert output.num_tokens_output == 0
     assert '"title": "Social medias påverkan"' in output.input_text
     file_repo.add.assert_awaited_once()
     apply_output_cap.assert_not_awaited()
@@ -217,7 +229,9 @@ async def test_execute_template_fill_step_rejects_checksum_drift() -> None:
 
     with pytest.raises(TypedIOValidationException, match="checksum"):
         await execute_template_fill_step(
-            step=_step(template_file_id=template_file_id, template_checksum="expected-checksum"),
+            step=_step(
+                template_file_id=template_file_id, template_checksum="expected-checksum"
+            ),
             run=run,
             state=state,
             deps=deps,
@@ -264,7 +278,9 @@ async def test_execute_template_fill_step_allows_explicit_empty_binding() -> Non
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_strips_duplicate_leading_heading_from_summary_only() -> None:
+async def test_execute_template_fill_step_strips_duplicate_leading_heading_from_summary_only() -> (
+    None
+):
     run = _run()
     now = datetime.now(timezone.utc)
     result = FlowStepResult(
@@ -330,7 +346,9 @@ async def test_execute_template_fill_step_strips_duplicate_leading_heading_from_
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_reports_failed_upstream_step_clearly() -> None:
+async def test_execute_template_fill_step_reports_failed_upstream_step_clearly() -> (
+    None
+):
     run = _run()
     now = datetime.now(timezone.utc)
     failed_result = FlowStepResult(
@@ -390,7 +408,9 @@ async def test_execute_template_fill_step_reports_failed_upstream_step_clearly()
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_reports_missing_template_blob_clearly() -> None:
+async def test_execute_template_fill_step_reports_missing_template_blob_clearly() -> (
+    None
+):
     run = _run()
     result = _completed_result(run=run)
     state = _state(result=result)
@@ -411,7 +431,10 @@ async def test_execute_template_fill_step_reports_missing_template_blob_clearly(
         logger=_logger(),
     )
 
-    with pytest.raises(TypedIOValidationException, match="could not be read because the saved file content is missing"):
+    with pytest.raises(
+        TypedIOValidationException,
+        match="could not be read because the saved file content is missing",
+    ):
         await execute_template_fill_step(
             step=_step(template_file_id=template_file_id),
             run=run,
@@ -421,7 +444,9 @@ async def test_execute_template_fill_step_reports_missing_template_blob_clearly(
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_reports_generated_document_save_failure() -> None:
+async def test_execute_template_fill_step_reports_generated_document_save_failure() -> (
+    None
+):
     run = _run()
     result = _completed_result(run=run)
     state = _state(result=result)
@@ -540,7 +565,9 @@ async def test_execute_template_fill_step_rejects_non_string_binding_values() ->
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_reports_missing_published_template_file() -> None:
+async def test_execute_template_fill_step_reports_missing_published_template_file() -> (
+    None
+):
     run = _run()
     result = _completed_result(run=run)
     state = _state(result=result)
@@ -656,7 +683,9 @@ async def test_execute_template_fill_step_formats_json_binding_in_summary() -> N
     template_file_id = uuid4()
     file_repo = AsyncMock()
     file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(id=template_file_id, checksum="checksum", blob=_build_template_bytes())
+        SimpleNamespace(
+            id=template_file_id, checksum="checksum", blob=_build_template_bytes()
+        )
     ]
     file_repo.add.return_value = SimpleNamespace(id=uuid4())
     deps = TemplateFillRuntimeDeps(
@@ -669,7 +698,9 @@ async def test_execute_template_fill_step_formats_json_binding_in_summary() -> N
     step = _step(template_file_id=template_file_id)
     step.output_config["bindings"]["summary"] = "{{step_1.output.structured}}"
 
-    output = await execute_template_fill_step(step=step, run=run, state=state, deps=deps)
+    output = await execute_template_fill_step(
+        step=step, run=run, state=state, deps=deps
+    )
 
     assert '## summary\n\n{"status": "approved", "score": 5}' in output.persisted_text
 
@@ -682,7 +713,11 @@ async def test_execute_template_fill_step_supports_unicode_placeholder_names() -
     template_file_id = uuid4()
     file_repo = AsyncMock()
     file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(id=template_file_id, checksum="checksum", blob=_build_unicode_template_bytes())
+        SimpleNamespace(
+            id=template_file_id,
+            checksum="checksum",
+            blob=_build_unicode_template_bytes(),
+        )
     ]
     file_repo.add.return_value = SimpleNamespace(id=uuid4())
     deps = TemplateFillRuntimeDeps(
@@ -699,13 +734,19 @@ async def test_execute_template_fill_step_supports_unicode_placeholder_names() -
         "summary": "{{step_1.output.text}}",
     }
 
-    output = await execute_template_fill_step(step=step, run=run, state=state, deps=deps)
+    output = await execute_template_fill_step(
+        step=step, run=run, state=state, deps=deps
+    )
 
-    assert output.persisted_text.startswith("## ämne\n\nSocial medias påverkan\n\n## summary")
+    assert output.persisted_text.startswith(
+        "## ämne\n\nSocial medias påverkan\n\n## summary"
+    )
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_bypasses_output_cap_for_long_summary() -> None:
+async def test_execute_template_fill_step_bypasses_output_cap_for_long_summary() -> (
+    None
+):
     run = _run()
     result = _completed_result(run=run)
     result = result.model_copy(
@@ -716,7 +757,9 @@ async def test_execute_template_fill_step_bypasses_output_cap_for_long_summary()
     template_file_id = uuid4()
     file_repo = AsyncMock()
     file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(id=template_file_id, checksum="checksum", blob=_build_template_bytes())
+        SimpleNamespace(
+            id=template_file_id, checksum="checksum", blob=_build_template_bytes()
+        )
     ]
     file_repo.add.return_value = SimpleNamespace(id=uuid4())
     apply_output_cap = AsyncMock(side_effect=RuntimeError("should not be called"))

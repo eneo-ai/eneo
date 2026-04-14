@@ -1285,6 +1285,11 @@ class FlowRunExecutor:
         if len(encoded) <= self.max_inline_text_bytes:
             return text, []
 
+        try:
+            owner_fields = FlowPrincipal.from_run(run).file_owner_fields()
+        except ValueError:
+            return text[:4096], []
+
         file_row = await self.file_repo.add(
             FileCreate.model_validate(
                 {
@@ -1294,7 +1299,7 @@ class FlowRunExecutor:
                     "mimetype": "text/plain",
                     "file_type": FileType.TEXT,
                     "text": text,
-                    **self.principal.file_owner_fields(),
+                    **owner_fields,
                     "tenant_id": run.tenant_id,
                 }
             )

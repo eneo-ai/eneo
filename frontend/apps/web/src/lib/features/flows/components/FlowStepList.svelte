@@ -8,7 +8,13 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { parseValidationError } from "$lib/features/flows/flowStepValidationMessages";
+  import {
+    createEmptyFlowStepMcpSummary,
+    summarizeAssistantMcp,
+    type FlowStepMcpSummary
+  } from "$lib/features/flows/flowStepMcpConfig";
 
   let {
     steps,
@@ -30,6 +36,10 @@
 
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
+  const assistantRevision = flowEditor.assistantRevision;
+  let mcpSummaryByAssistantId = new SvelteMap<string, FlowStepMcpSummary>();
+  let lastLoadedRevisionByAssistant = new SvelteMap<string, number>();
+  const loadingAssistantIds = new SvelteSet<string>();
 
   let showRemoveConfirm = $state(false);
   let pendingRemoveIndex: number | null = $state(null);
@@ -61,7 +71,7 @@
   }
 
   const stepOrdersWithErrors = $derived.by(() => {
-    const orders = new Set<number>();
+    const orders = new SvelteSet<number>();
     for (const [key, values] of validationErrors.entries()) {
       const parsed = parseValidationError(key, values);
       if (!parsed) continue;
@@ -86,6 +96,39 @@
     pendingRemoveIndex = null;
     pendingRemoveIsAssembly = false;
   }
+
+  $effect(() => {
+    const revision = $assistantRevision;
+    const assistantIds = steps
+      .map((step) => step.assistant_id)
+      .filter(
+        (assistantId): assistantId is string =>
+          typeof assistantId === "string" && assistantId.length > 0
+      );
+
+    for (const assistantId of assistantIds) {
+      if (
+        lastLoadedRevisionByAssistant.get(assistantId) === revision ||
+        loadingAssistantIds.has(assistantId)
+      ) {
+        continue;
+      }
+      loadingAssistantIds.add(assistantId);
+      void flowEditor
+        .loadAssistant(assistantId)
+        .then((assistant) => {
+          mcpSummaryByAssistantId.set(assistantId, summarizeAssistantMcp(assistant));
+          lastLoadedRevisionByAssistant.set(assistantId, revision);
+        })
+        .catch(() => {
+          mcpSummaryByAssistantId.set(assistantId, createEmptyFlowStepMcpSummary());
+          lastLoadedRevisionByAssistant.set(assistantId, revision);
+        })
+        .finally(() => {
+          loadingAssistantIds.delete(assistantId);
+        });
+    }
+  });
 </script>
 
 <div class="flex h-full flex-col">
@@ -131,6 +174,9 @@
       {#each steps as step, index (step.id ?? index)}
         <FlowStepCard
           {step}
+          mcpSummary={step.assistant_id
+            ? (mcpSummaryByAssistantId.get(step.assistant_id) ?? null)
+            : null}
           isActive={activeStepId === step.id}
           {isPublished}
           isPowerUser={$mode === "power_user"}

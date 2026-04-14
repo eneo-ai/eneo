@@ -23,7 +23,13 @@
   import { getEdgePayloadKind } from "$lib/features/flows/flowStepPresentation";
   import { IconDownload } from "@intric/icons/download";
   import { onMount, tick } from "svelte";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";
+  import {
+    createEmptyFlowStepMcpSummary,
+    summarizeAssistantMcp,
+    type FlowStepMcpSummary
+  } from "$lib/features/flows/flowStepMcpConfig";
 
   interface Props {
     flow: Flow;
@@ -34,12 +40,14 @@
 
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
+  const assistantRevision = flowEditor.assistantRevision;
 
   let doFitView = $state(false);
 
   type AssistantFlowMeta = {
     modelName: string | null;
     assistantClassificationLevel: number | null;
+    mcpSummary: FlowStepMcpSummary;
   };
 
   const nodeTypes = {
@@ -54,14 +62,16 @@
 
   let nodes = $state.raw<Node[]>([]);
   let edges = $state.raw<Edge[]>([]);
-  let assistantMetaById = new Map<string, AssistantFlowMeta>();
-  const loadingAssistantIds = new Set<string>();
+  let assistantMetaById = new SvelteMap<string, AssistantFlowMeta>();
+  let lastLoadedRevisionByAssistant = new SvelteMap<string, number>();
+  const loadingAssistantIds = new SvelteSet<string>();
   let inspectedEdge = $state<{
     title: string;
     payload: Record<string, unknown> | null;
   } | null>(null);
 
   $effect(() => {
+    const revision = $assistantRevision;
     const assistantIds = (flow?.steps ?? [])
       .map((step) => step.assistant_id)
       .filter(
@@ -69,7 +79,12 @@
           typeof assistantId === "string" && assistantId.length > 0
       );
     for (const assistantId of assistantIds) {
-      if (assistantMetaById.has(assistantId) || loadingAssistantIds.has(assistantId)) continue;
+      if (
+        lastLoadedRevisionByAssistant.get(assistantId) === revision ||
+        loadingAssistantIds.has(assistantId)
+      ) {
+        continue;
+      }
       void loadAssistantMeta(assistantId);
     }
   });
@@ -77,11 +92,13 @@
   // Memoize layout — only rebuild when step structure or mode changes, not on activeStepId alone
   let lastStepsJson = "";
   let lastMode = "";
+  let lastMetaJson = "";
   let cachedLayout: { nodes: Node[]; edges: Edge[] } = { nodes: [], edges: [] };
 
   $effect(() => {
+    const orderedSteps = flow?.steps ?? [];
     const stepsJson = JSON.stringify(
-      (flow?.steps ?? []).map((s) => ({
+      orderedSteps.map((s) => ({
         id: s.id,
         step_order: s.step_order,
         user_description: s.user_description,
@@ -92,11 +109,18 @@
         assistant_id: s.assistant_id
       }))
     );
+    const metaJson = JSON.stringify(
+      orderedSteps.map((s) => ({
+        assistant_id: s.assistant_id,
+        meta: s.assistant_id ? (assistantMetaById.get(s.assistant_id) ?? null) : null
+      }))
+    );
     const currentMode = $mode;
 
-    if (stepsJson !== lastStepsJson || currentMode !== lastMode) {
+    if (stepsJson !== lastStepsJson || currentMode !== lastMode || metaJson !== lastMetaJson) {
       lastStepsJson = stepsJson;
       lastMode = currentMode;
+      lastMetaJson = metaJson;
       cachedLayout = buildLayout(flow?.steps ?? [], activeStepId, currentMode);
       nodes = cachedLayout.nodes;
       edges = cachedLayout.edges;
@@ -118,11 +142,19 @@
 
   function parseAssistantMeta(assistant: unknown): AssistantFlowMeta {
     if (assistant === null || typeof assistant !== "object") {
-      return { modelName: null, assistantClassificationLevel: null };
+      return {
+        modelName: null,
+        assistantClassificationLevel: null,
+        mcpSummary: createEmptyFlowStepMcpSummary()
+      };
     }
     const completionModel = (assistant as { completion_model?: unknown }).completion_model;
     if (completionModel === null || typeof completionModel !== "object") {
-      return { modelName: null, assistantClassificationLevel: null };
+      return {
+        modelName: null,
+        assistantClassificationLevel: null,
+        mcpSummary: summarizeAssistantMcp(assistant as { mcp_servers?: unknown[] })
+      };
     }
     const modelName =
       typeof (completionModel as { name?: unknown }).name === "string"
@@ -136,20 +168,28 @@
       typeof (securityClassification as { security_level?: unknown }).security_level === "number"
         ? (securityClassification as { security_level: number }).security_level
         : null;
-    return { modelName, assistantClassificationLevel };
+    return {
+      modelName,
+      assistantClassificationLevel,
+      mcpSummary: summarizeAssistantMcp(assistant as { mcp_servers?: unknown[] })
+    };
   }
 
   async function loadAssistantMeta(assistantId: string): Promise<void> {
+    const revision = $assistantRevision;
     loadingAssistantIds.add(assistantId);
     try {
       const assistant = await flowEditor.loadAssistant(assistantId);
       const parsed = parseAssistantMeta(assistant);
-      assistantMetaById = new Map(assistantMetaById).set(assistantId, parsed);
+      assistantMetaById.set(assistantId, parsed);
+      lastLoadedRevisionByAssistant.set(assistantId, revision);
     } catch {
-      assistantMetaById = new Map(assistantMetaById).set(assistantId, {
+      assistantMetaById.set(assistantId, {
         modelName: null,
-        assistantClassificationLevel: null
+        assistantClassificationLevel: null,
+        mcpSummary: createEmptyFlowStepMcpSummary()
       });
+      lastLoadedRevisionByAssistant.set(assistantId, revision);
     } finally {
       loadingAssistantIds.delete(assistantId);
     }
@@ -253,7 +293,9 @@
           modelName: assistantMetaById.get(step.assistant_id)?.modelName ?? null,
           assistantClassLevel:
             assistantMetaById.get(step.assistant_id)?.assistantClassificationLevel ?? null,
-          classLevel: getClassificationLevel(step)
+          classLevel: getClassificationLevel(step),
+          mcpSummary:
+            assistantMetaById.get(step.assistant_id)?.mcpSummary ?? createEmptyFlowStepMcpSummary()
         }
       });
     }
@@ -275,8 +317,8 @@
       targetStepOrder: number | null;
     };
     const edgeSpecs: EdgeSpec[] = [];
-    const stepByOrder = new Map<number, FlowStep>();
-    const stepIdByOrder = new Map<number, string>();
+    const stepByOrder = new SvelteMap<number, FlowStep>();
+    const stepIdByOrder = new SvelteMap<number, string>();
     orderedSteps.forEach((step) => {
       stepByOrder.set(step.step_order, step);
       stepIdByOrder.set(step.step_order, step.id ?? `step-${step.step_order}`);
@@ -332,7 +374,7 @@
     }
 
     if (orderedSteps.length > 0) {
-      const outgoingSteps = new Set<string>();
+      const outgoingSteps = new SvelteSet<string>();
       for (const edge of edgeSpecs) {
         if (edge.source !== "input" && edge.target !== "output") {
           outgoingSteps.add(edge.source);
@@ -375,8 +417,8 @@
       }
     }
 
-    const incomingEdgeCounts = new Map<string, number>();
-    const incomingEdgeLane = new Map<string, number>();
+    const incomingEdgeCounts = new SvelteMap<string, number>();
+    const incomingEdgeLane = new SvelteMap<string, number>();
     for (const edge of edgeSpecs) {
       incomingEdgeCounts.set(edge.target, (incomingEdgeCounts.get(edge.target) ?? 0) + 1);
     }

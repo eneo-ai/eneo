@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Flow, FlowRun, Intric } from "@intric/intric-js";
+  import { untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
@@ -16,6 +17,7 @@
     getFlowRunStatusColor,
     getFlowRunStatusDotColor
   } from "./flowRunStatusPresentation";
+  import { shouldHandleFlowRunsReload } from "./flowRunsReload";
 
   let {
     flow,
@@ -39,6 +41,7 @@
   let selectedRunId: string | null = $state(null);
   let lastLoadedFlowId: string | null = $state(null);
   let isInitialLoad = $state(true);
+  let lastHandledReloadTrigger = $state(0);
   let redispatchingRunId: string | null = $state(null);
   let cancellingRunId: string | null = $state(null);
   let showCancelConfirm = $state(false);
@@ -85,8 +88,11 @@
   });
 
   $effect(() => {
-    if (reloadTrigger) {
-      void loadRuns();
+    if (shouldHandleFlowRunsReload(reloadTrigger, lastHandledReloadTrigger)) {
+      lastHandledReloadTrigger = reloadTrigger;
+      untrack(() => {
+        void loadRuns();
+      });
     }
   });
 

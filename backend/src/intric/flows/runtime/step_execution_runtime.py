@@ -950,6 +950,17 @@ async def complete_step_execution(
         step=step,
     )
     response_model_info = getattr(response, "model", None)
+    response_usage = getattr(response, "usage", None)
+    num_tokens_input = (
+        response_usage.prompt_tokens
+        if response_usage is not None and response_usage.prompt_tokens is not None
+        else response.total_token_count
+    )
+    num_tokens_output = (
+        response_usage.completion_tokens
+        if response_usage is not None and response_usage.completion_tokens is not None
+        else deps.count_tokens(raw_full_text) + reasoning_tokens
+    )
     return StepExecutionOutput(
         input_text=prepared.step_input.text,
         source_text=prepared.step_input.source_text,
@@ -960,8 +971,8 @@ async def complete_step_execution(
         persisted_text=persisted_text,
         generated_file_ids=generated_file_ids,
         tool_calls_metadata=tool_calls,
-        num_tokens_input=response.total_token_count,
-        num_tokens_output=deps.count_tokens(raw_full_text) + reasoning_tokens,
+        num_tokens_input=num_tokens_input,
+        num_tokens_output=num_tokens_output,
         effective_prompt=prompt_override,
         model_parameters_json=deps.effective_model_parameters(prepared.assistant),
         requested_model=requested_model_name(prepared.assistant),

@@ -1248,6 +1248,8 @@ async def test_update_flow_assistant_forwards_payload():
     group_id = uuid4()
     integration_knowledge_id = uuid4()
     completion_model_id = uuid4()
+    mcp_server_id = uuid4()
+    mcp_tool_id = uuid4()
     updated_assistant = SimpleNamespace(
         id=assistant_id,
         name="Updated assistant",
@@ -1276,6 +1278,8 @@ async def test_update_flow_assistant_forwards_payload():
             websites=[{"id": website_id}],
             groups=[{"id": group_id}],
             integration_knowledge_list=[{"id": integration_knowledge_id}],
+            mcp_servers=[{"id": mcp_server_id}],
+            mcp_tools=[{"tool_id": mcp_tool_id, "is_enabled": True}],
             completion_model={"id": completion_model_id},
         ),
         container=container,
@@ -1291,6 +1295,8 @@ async def test_update_flow_assistant_forwards_payload():
     assert kwargs["websites"] == [website_id]
     assert kwargs["groups"] == [group_id]
     assert kwargs["integration_knowledge_ids"] == [integration_knowledge_id]
+    assert kwargs["mcp_server_ids"] == [mcp_server_id]
+    assert kwargs["mcp_tools"] == [(mcp_tool_id, True)]
     assert kwargs["completion_model_id"] == completion_model_id
     audit_service.log_async.assert_awaited_once()
 

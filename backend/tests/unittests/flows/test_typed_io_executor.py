@@ -994,6 +994,41 @@ async def test_resolve_step_input_rejects_literal_step_input_substring_when_runt
 
 
 @pytest.mark.asyncio
+async def test_resolve_step_input_runtime_input_does_not_append_internal_orchestration_metadata():
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4(), active_api_key=None)
+    executor, _, _, _ = _build_executor(user)
+    file = SimpleNamespace(id=uuid4(), text="runtime step upload test")
+    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[file])
+    step = _runtime_step(
+        step_order=1,
+        input_source="flow_input",
+        input_type="document",
+        input_config={"runtime_input": {"enabled": True, "input_format": "document"}},
+    )
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={
+            "expected_flow_version": 9,
+            "step_inputs": {
+                str(step.step_id): {"file_ids": [str(file.id)]},
+            },
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+    )
+
+    assert resolved.source_text == ""
+    assert resolved.text == "runtime step upload test"
+
+
+@pytest.mark.asyncio
 async def test_resolve_step_input_adds_underlag_summary_diagnostic(user):
     executor, _, _, _ = _build_executor(user)
     file = SimpleNamespace(id=uuid4(), text="transkriberat innehåll")

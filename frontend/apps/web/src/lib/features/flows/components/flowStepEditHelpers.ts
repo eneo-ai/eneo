@@ -118,21 +118,6 @@ export const OUTPUT_MODES = [
   }
 ];
 
-export const MCP_POLICIES = [
-  {
-    value: "inherit",
-    get label() {
-      return m.flow_mcp_policy_inherit();
-    }
-  },
-  {
-    value: "restricted",
-    get label() {
-      return m.flow_mcp_policy_restricted();
-    }
-  }
-];
-
 // ---------------------------------------------------------------------------
 // Label lookups
 // ---------------------------------------------------------------------------
@@ -228,7 +213,6 @@ export function hasAdvancedSettingsActive(
     step.output_mode === "template_fill" ||
       step.input_type === "any" ||
       step.input_type === "file" ||
-      step.mcp_policy === "restricted" ||
       step.input_contract ||
       step.output_contract ||
       step.input_config ||

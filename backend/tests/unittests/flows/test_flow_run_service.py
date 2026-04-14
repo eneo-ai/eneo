@@ -2501,7 +2501,8 @@ async def test_get_evidence_redacts_sensitive_values(user):
     assert evidence["debug_export"]["definition"]["checksum"] == "checksum"
     assert evidence["debug_export"]["run"]["status"] == "queued"
     assert evidence["debug_export"]["steps"][0]["input"]["source"] is None
-    assert evidence["debug_export"]["steps"][0]["mcp"]["tool_allowlist"] == []
+    assert evidence["debug_export"]["steps"][0]["mcp"]["servers"] == []
+    assert evidence["debug_export"]["steps"][0]["mcp"]["tools_enabled"] == []
     assert (
         evidence["debug_export"]["definition_snapshot"]["steps"][0]["output_config"][
             "headers"

@@ -47,7 +47,9 @@ def _payload(**overrides: object) -> dict[str, object]:
         ("mcp_policy", "banana"),
     ],
 )
-def test_flow_step_create_request_rejects_invalid_enum_values(field: str, value: str) -> None:
+def test_flow_step_create_request_rejects_invalid_enum_values(
+    field: str, value: str
+) -> None:
     with pytest.raises(ValidationError):
         FlowStepCreateRequest.model_validate(_payload(**{field: value}))
 
@@ -231,7 +233,17 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                             "classification": None,
                             "config": None,
                         },
-                        "mcp": {"policy": "inherit", "tool_allowlist": []},
+                        "mcp": {
+                            "policy": "inherit",
+                            "servers": [{"id": "server-1", "name": "Weather"}],
+                            "tools_enabled": [
+                                {
+                                    "tool_id": "tool-1",
+                                    "server_id": "server-1",
+                                    "name": "forecast_tool",
+                                }
+                            ],
+                        },
                         "rag": {
                             "attempted": True,
                             "status": "success",
@@ -246,7 +258,9 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                                 "tracked": True,
                                 "included_source_ids": ["source-1"],
                                 "included_source_titles": ["Beslut till underlag"],
-                                "included_source_display_names": ["Beslut till underlag"],
+                                "included_source_display_names": [
+                                    "Beslut till underlag"
+                                ],
                                 "summary": {
                                     "total_sources": 1,
                                     "total_chunks": 2,
@@ -311,13 +325,16 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     assert response.debug_export.steps[0].attempts[0].response_model == "gpt-4.1-mini"
     assert response.debug_export.steps[0].rag is not None
     assert response.debug_export.steps[0].rag.prompt_context is not None
-    assert response.debug_export.steps[0].rag.prompt_context.included_source_ids == ["source-1"]
+    assert response.debug_export.steps[0].rag.prompt_context.included_source_ids == [
+        "source-1"
+    ]
     assert response.debug_export.steps[0].rag.prompt_context.summary is not None
-    assert response.debug_export.steps[0].rag.prompt_context.summary["total_sources"] == 1
     assert (
-        response.debug_export.steps[0].rag.prompt_context.included_source_display_names
-        == ["Beslut till underlag"]
+        response.debug_export.steps[0].rag.prompt_context.summary["total_sources"] == 1
     )
+    assert response.debug_export.steps[
+        0
+    ].rag.prompt_context.included_source_display_names == ["Beslut till underlag"]
 
 
 def test_http_test_request_accepts_current_payload_shape() -> None:

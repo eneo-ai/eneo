@@ -2,9 +2,18 @@ import type { FlowStep, UploadedFile } from "@intric/intric-js";
 import type { FlowEditor } from "$lib/features/flows/FlowEditor";
 import type { Intric } from "@intric/intric-js";
 import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
+import { SvelteSet } from "svelte/reactivity";
 import type { Writable } from "svelte/store";
 
 export type LoadedAssistant = NonNullable<Awaited<ReturnType<FlowEditor["loadAssistant"]>>>;
+type PendingUpload = {
+  id: string;
+  file: File;
+  status: string;
+  progress: number;
+  remove: () => void;
+  fileRef?: { id: string };
+};
 
 /**
  * Manages the assistant lifecycle for the active flow step:
@@ -14,16 +23,7 @@ export class FlowStepAssistantState {
   #flowEditor: FlowEditor;
   #intric: Intric;
   #attachmentRules: Writable<Record<string, unknown>>;
-  #newAttachments: Writable<
-    Array<{
-      id: string;
-      file: File;
-      status: string;
-      progress: number;
-      remove: () => void;
-      fileRef?: { id: string };
-    }>
-  >;
+  #newAttachments: Writable<PendingUpload[]>;
   #clearUploads: () => void;
   #getActiveStep: () => FlowStep | null;
 
@@ -32,7 +32,7 @@ export class FlowStepAssistantState {
 
   #lastLoadedId: string | null = null;
   #loadRequestToken = 0;
-  #autoClearedLegacyTemplateByStepId = new Set<string>();
+  #autoClearedLegacyTemplateByStepId = new SvelteSet<string>();
 
   runningUploads = $derived(
     (this.#getNewAttachments() ?? []).filter(
@@ -44,16 +44,7 @@ export class FlowStepAssistantState {
     flowEditor: FlowEditor;
     intric: Intric;
     attachmentRules: Writable<Record<string, unknown>>;
-    newAttachments: Writable<
-      Array<{
-        id: string;
-        file: File;
-        status: string;
-        progress: number;
-        remove: () => void;
-        fileRef?: { id: string };
-      }>
-    >;
+    newAttachments: Writable<PendingUpload[]>;
     clearUploads: () => void;
     getActiveStep: () => FlowStep | null;
   }) {
@@ -66,7 +57,7 @@ export class FlowStepAssistantState {
   }
 
   #getNewAttachments() {
-    let value: any[] = [];
+    let value: PendingUpload[] = [];
     this.#newAttachments.subscribe((v) => (value = v))();
     return value;
   }
@@ -103,12 +94,20 @@ export class FlowStepAssistantState {
   }
 
   updateField(field: string, value: unknown) {
+    this.updateFields({ [field]: value });
+  }
+
+  updateFields(changes: Record<string, unknown>, opts?: { immediate?: boolean }) {
     const activeStep = this.#getActiveStep();
     if (!activeStep?.assistant_id) return;
     if (this.assistant) {
-      this.assistant = { ...this.assistant, [field]: value };
+      this.assistant = { ...this.assistant, ...changes };
     }
-    this.#flowEditor.saveAssistant(activeStep.assistant_id, { [field]: value });
+    if (opts?.immediate) {
+      void this.#flowEditor.updateAssistantImmediately(activeStep.assistant_id, changes);
+      return;
+    }
+    void this.#flowEditor.saveAssistant(activeStep.assistant_id, changes);
   }
 
   onFileUploaded(newFile: UploadedFile) {

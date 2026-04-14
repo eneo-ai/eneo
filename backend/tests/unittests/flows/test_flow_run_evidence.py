@@ -1,21 +1,33 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import datetime, timezone
 import hashlib
 import json
+from dataclasses import replace
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from intric.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
-from intric.flows.flow import FlowRun, FlowRunStatus, FlowStepAttempt, FlowStepResult, FlowVersion
-from intric.flows.flow_run_evidence import build_debug_export, normalize_debug_step, parse_step_order
-from intric.flows.flow_run_export_json import render_evidence_json_export
+from intric.flows.flow import (
+    FlowRun,
+    FlowRunStatus,
+    FlowStepAttempt,
+    FlowStepResult,
+    FlowVersion,
+)
+from intric.flows.flow_run_evidence import (
+    build_debug_export,
+    normalize_debug_step,
+    parse_step_order,
+)
 from intric.flows.flow_run_evidence_bundle import (
     build_evidence_bundle,
     redact_evidence_bundle,
 )
-from intric.flows.flow_run_provenance import normalize_attempt_provenance
-from intric.flows.flow_run_provenance import normalize_rag_payload
+from intric.flows.flow_run_export_json import render_evidence_json_export
+from intric.flows.flow_run_provenance import (
+    normalize_attempt_provenance,
+    normalize_rag_payload,
+)
 
 
 def test_parse_step_order_handles_strings_and_bools():
@@ -26,7 +38,7 @@ def test_parse_step_order_handles_strings_and_bools():
     assert parse_step_order(7.2, default=4) == 4
 
 
-def test_normalize_debug_step_uses_list_allowlist_and_rag_metadata():
+def test_normalize_debug_step_uses_snapshot_mcp_fields_and_rag_metadata():
     step = normalize_debug_step(
         {
             "step_id": "step-1",
@@ -37,12 +49,18 @@ def test_normalize_debug_step_uses_list_allowlist_and_rag_metadata():
             "output_mode": "pass_through",
             "output_type": "json",
             "mcp_policy": "inherit",
-            "mcp_tool_allowlist": "not-a-list",
+            "mcp_servers": [{"id": "server-1", "name": "Weather"}],
+            "mcp_tools_enabled": [
+                {"tool_id": "tool-1", "server_id": "server-1", "name": "forecast_tool"}
+            ],
         },
         rag_metadata={"status": "success"},
     )
 
-    assert step["mcp"]["tool_allowlist"] == []
+    assert step["mcp"]["servers"] == [{"id": "server-1", "name": "Weather"}]
+    assert step["mcp"]["tools_enabled"] == [
+        {"tool_id": "tool-1", "server_id": "server-1", "name": "forecast_tool"}
+    ]
     assert step["rag"]["status"] == "success"
     assert step["rag"]["tracking"]["retrieval_tracked"] is True
 
@@ -269,7 +287,9 @@ def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
     assert export["steps"][0]["rag"]["has_named_sources"] is True
 
 
-def test_normalize_rag_payload_adds_prompt_context_display_names_and_usage_state() -> None:
+def test_normalize_rag_payload_adds_prompt_context_display_names_and_usage_state() -> (
+    None
+):
     normalized = normalize_rag_payload(
         {
             "tracking": {
@@ -355,8 +375,14 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
     assert export["redaction"]["applied"] is True
     assert export["redaction"]["policy_version"] == "flow-evidence-redaction.v3"
     assert export["redaction"]["masked_fields_count"] >= 1
-    assert "bundle.run.input_payload_json.authorization" in export["redaction"]["masked_paths"]
-    assert export["redaction"]["masked_fields"][0]["reason"] in {"sensitive_key", "bearer_token"}
+    assert (
+        "bundle.run.input_payload_json.authorization"
+        in export["redaction"]["masked_paths"]
+    )
+    assert export["redaction"]["masked_fields"][0]["reason"] in {
+        "sensitive_key",
+        "bearer_token",
+    }
 
     serialized_bundle = json.dumps(
         bundle.to_dict(),
@@ -367,7 +393,9 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
     assert export["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
 
 
-def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summaries() -> None:
+def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summaries() -> (
+    None
+):
     now = datetime.now(timezone.utc)
     run = FlowRun(
         id=uuid4(),
@@ -435,7 +463,9 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
                                 "best_score": 0.9,
                             }
                         ],
-                        "source_names": ["https://psykologi.se/psykologilexikon/affekt/"],
+                        "source_names": [
+                            "https://psykologi.se/psykologilexikon/affekt/"
+                        ],
                     }
                 }
             },
@@ -445,11 +475,19 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
     export = render_evidence_json_export(bundle=bundle)
 
     assert export["summary"]["artifact_names"] == ["beslut-underlag.pdf"]
-    assert export["summary"]["rag_source_names"] == ["https://psykologi.se/psykologilexikon/affekt/"]
-    assert export["summary"]["rag_source_display_names"] == ["psykologi.se/psykologilexikon/affekt"]
-    assert export["manifest"]["redaction_policy_version"] == "flow-evidence-redaction.v3"
+    assert export["summary"]["rag_source_names"] == [
+        "https://psykologi.se/psykologilexikon/affekt/"
+    ]
+    assert export["summary"]["rag_source_display_names"] == [
+        "psykologi.se/psykologilexikon/affekt"
+    ]
     assert (
-        export["bundle"]["definition_snapshot"]["metadata_json"]["ai_builder"]["origin"]["builder_session_id"]
+        export["manifest"]["redaction_policy_version"] == "flow-evidence-redaction.v3"
+    )
+    assert (
+        export["bundle"]["definition_snapshot"]["metadata_json"]["ai_builder"][
+            "origin"
+        ]["builder_session_id"]
         == "builder-session-123"
     )
     assert (
@@ -458,7 +496,9 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
     )
 
 
-def test_render_evidence_json_export_adds_rag_source_details_and_step_overview() -> None:
+def test_render_evidence_json_export_adds_rag_source_details_and_step_overview() -> (
+    None
+):
     started_at = datetime.now(timezone.utc)
     finished_at = started_at
     run = FlowRun(
@@ -661,32 +701,70 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
     export = render_evidence_json_export(bundle=bundle)
 
     assert export["summary"]["final_output"]["kind"] == "mixed"
-    assert export["summary"]["final_output"]["artifact_names"] == ["beslut-underlag.pdf"]
-    assert export["summary"]["final_output"]["artifact_details"][0]["checksum"] == "artifact-checksum"
-    assert export["summary"]["final_output"]["text_preview"]["preview"] == "Beslut till underlag klart."
+    assert export["summary"]["final_output"]["artifact_names"] == [
+        "beslut-underlag.pdf"
+    ]
+    assert (
+        export["summary"]["final_output"]["artifact_details"][0]["checksum"]
+        == "artifact-checksum"
+    )
+    assert (
+        export["summary"]["final_output"]["text_preview"]["preview"]
+        == "Beslut till underlag klart."
+    )
     assert export["summary"]["rag_sources"][0]["source_kind"] == "website"
-    assert export["summary"]["rag_sources"][0]["source_container_name"] == "Kunskapsbanken"
-    assert export["summary"]["rag_sources"][0]["source_container_display_name"] == "Kunskapsbanken"
+    assert (
+        export["summary"]["rag_sources"][0]["source_container_name"] == "Kunskapsbanken"
+    )
+    assert (
+        export["summary"]["rag_sources"][0]["source_container_display_name"]
+        == "Kunskapsbanken"
+    )
     assert export["summary"]["rag_sources"][0]["usage_state"] == "inserted_into_prompt"
     assert export["summary"]["rag_usage_tracking"]["retrieval_tracked"] is True
-    assert export["summary"]["rag_usage_tracking"]["prompt_context_inclusion_tracked"] is True
-    assert export["summary"]["rag_usage_tracking"]["citation_tracked"] is False
-    assert export["summary"]["step_overview"][0]["user_description"] == "Sammanfatta underlaget"
-    assert export["summary"]["step_overview"][0]["knowledge_sources_count"] == 1
-    assert export["summary"]["step_overview"][0]["knowledge_retrieval"]["status"] == "success"
-    assert export["summary"]["step_overview"][0]["knowledge_retrieval"]["unique_sources"] == 1
     assert (
-        export["summary"]["step_overview"][0]["knowledge_retrieval"]["prompt_context"]["included_source_display_names"]
-        == ["Beslut till underlag"]
+        export["summary"]["rag_usage_tracking"]["prompt_context_inclusion_tracked"]
+        is True
     )
-    assert export["summary"]["step_overview"][0]["artifact_names"] == ["beslut-underlag.pdf"]
-    assert export["summary"]["step_overview"][0]["artifact_details"][0]["checksum"] == "artifact-checksum"
-    assert export["summary"]["step_overview"][0]["input_lineage"]["runtime_file_names"] == ["underlag.pdf"]
-    assert export["summary"]["step_overview"][0]["input_lineage"]["runtime_file_checksums"] == ["input-checksum"]
-    assert export["summary"]["step_overview"][0]["output_summary"]["preview"] == "Beslut till underlag klart."
+    assert export["summary"]["rag_usage_tracking"]["citation_tracked"] is False
+    assert (
+        export["summary"]["step_overview"][0]["user_description"]
+        == "Sammanfatta underlaget"
+    )
+    assert export["summary"]["step_overview"][0]["knowledge_sources_count"] == 1
+    assert (
+        export["summary"]["step_overview"][0]["knowledge_retrieval"]["status"]
+        == "success"
+    )
+    assert (
+        export["summary"]["step_overview"][0]["knowledge_retrieval"]["unique_sources"]
+        == 1
+    )
+    assert export["summary"]["step_overview"][0]["knowledge_retrieval"][
+        "prompt_context"
+    ]["included_source_display_names"] == ["Beslut till underlag"]
+    assert export["summary"]["step_overview"][0]["artifact_names"] == [
+        "beslut-underlag.pdf"
+    ]
+    assert (
+        export["summary"]["step_overview"][0]["artifact_details"][0]["checksum"]
+        == "artifact-checksum"
+    )
+    assert export["summary"]["step_overview"][0]["input_lineage"][
+        "runtime_file_names"
+    ] == ["underlag.pdf"]
+    assert export["summary"]["step_overview"][0]["input_lineage"][
+        "runtime_file_checksums"
+    ] == ["input-checksum"]
+    assert (
+        export["summary"]["step_overview"][0]["output_summary"]["preview"]
+        == "Beslut till underlag klart."
+    )
 
 
-def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindings() -> None:
+def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindings() -> (
+    None
+):
     now = datetime.now(timezone.utc)
     run = FlowRun(
         id=uuid4(),
@@ -849,10 +927,15 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
     assert lineage["upstream_step_orders"] == [1]
     assert lineage["upstream_step_labels"] == ["Extrahera text"]
     assert lineage["question_binding_references_runtime_input"] is True
-    assert lineage["question_binding_expressions"] == ["step_1.output.text", "step_input.text"]
+    assert lineage["question_binding_expressions"] == [
+        "step_1.output.text",
+        "step_input.text",
+    ]
 
 
-def test_render_evidence_json_export_adds_fallback_container_display_name_and_model_default_semantics() -> None:
+def test_render_evidence_json_export_adds_fallback_container_display_name_and_model_default_semantics() -> (
+    None
+):
     now = datetime.now(timezone.utc)
     run = FlowRun(
         id=uuid4(),
@@ -949,15 +1032,22 @@ def test_render_evidence_json_export_adds_fallback_container_display_name_and_mo
     export = render_evidence_json_export(bundle=bundle)
 
     assert export["summary"]["rag_sources"][0]["source_container_name"] is None
-    assert export["summary"]["rag_sources"][0]["source_container_display_name"] == "psykologi.se"
-    llm = export["bundle"]["step_attempts"][0]["provenance_json"]["llm"]["model_parameters"]
+    assert (
+        export["summary"]["rag_sources"][0]["source_container_display_name"]
+        == "psykologi.se"
+    )
+    llm = export["bundle"]["step_attempts"][0]["provenance_json"]["llm"][
+        "model_parameters"
+    ]
     assert llm["temperature"] is None
     assert llm["reasoning_effort"] is None
     assert llm["verbosity"] is None
     assert llm["parameter_semantics"]["temperature"]["mode"] == "model_default"
 
 
-def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_summary() -> None:
+def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_summary() -> (
+    None
+):
     now = datetime.now(timezone.utc)
     run = FlowRun(
         id=uuid4(),
@@ -970,10 +1060,8 @@ def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_s
         cancelled_at=None,
         input_payload_json=None,
         output_payload_json={
-            "text": "Slutsats med kallor <inref id=\"11111111\"/><inref id=\"aaaaaaaa\"/>",
-            "structured": {
-                "summary": "Detta styrks av kalla <inref id=\"22222222\"/>"
-            },
+            "text": 'Slutsats med kallor <inref id="11111111"/><inref id="aaaaaaaa"/>',
+            "structured": {"summary": 'Detta styrks av kalla <inref id="22222222"/>'},
         },
         error_message=None,
         job_id=None,
@@ -1014,8 +1102,8 @@ def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_s
         input_payload_json={},
         effective_prompt=None,
         output_payload_json={
-            "text": "Stegsvar <inref id=\"11111111\"/>",
-            "structured": {"note": "Komplettering <inref id=\"aaaaaaaa\"/>"},
+            "text": 'Stegsvar <inref id="11111111"/>',
+            "structured": {"note": 'Komplettering <inref id="aaaaaaaa"/>'},
         },
         model_parameters_json=None,
         num_tokens_input=None,
@@ -1124,7 +1212,9 @@ def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_s
     )
     export = render_evidence_json_export(bundle=bundle)
 
-    prompt_context_summary = export["summary"]["step_overview"][0]["knowledge_retrieval"]["prompt_context"]["summary"]
+    prompt_context_summary = export["summary"]["step_overview"][0][
+        "knowledge_retrieval"
+    ]["prompt_context"]["summary"]
     assert prompt_context_summary["total_sources"] == 2
     assert prompt_context_summary["total_chunks"] == 3
     assert prompt_context_summary["truncated_by_token_budget"] is False
@@ -1135,16 +1225,31 @@ def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_s
     assert export["summary"]["citations"]["citation_context_kind"] == "direct"
     assert export["summary"]["citations"]["citation_expected"] is False
     assert export["summary"]["citations"]["citation_observed"] is True
-    assert export["summary"]["citations"]["citation_compliance"] == "unknown_citation_ids_present"
-    assert export["summary"]["citations"]["cited_source_ids"] == [source_one, source_two]
+    assert (
+        export["summary"]["citations"]["citation_compliance"]
+        == "unknown_citation_ids_present"
+    )
+    assert export["summary"]["citations"]["cited_source_ids"] == [
+        source_one,
+        source_two,
+    ]
     assert export["summary"]["citations"]["unknown_citation_ids"] == ["aaaaaaaa"]
     assert export["summary"]["citations"]["uncited_inserted_source_ids"] == []
-    assert export["summary"]["step_overview"][0]["citations"]["cited_source_ids"] == [source_one]
-    assert export["summary"]["step_overview"][0]["citations"]["unknown_citation_ids"] == ["aaaaaaaa"]
-    assert export["summary"]["step_overview"][0]["citations"]["citation_compliance"] == "unknown_citation_ids_present"
+    assert export["summary"]["step_overview"][0]["citations"]["cited_source_ids"] == [
+        source_one
+    ]
+    assert export["summary"]["step_overview"][0]["citations"][
+        "unknown_citation_ids"
+    ] == ["aaaaaaaa"]
+    assert (
+        export["summary"]["step_overview"][0]["citations"]["citation_compliance"]
+        == "unknown_citation_ids_present"
+    )
 
 
-def test_render_evidence_json_export_uses_provenance_citation_compliance_and_run_level_counts() -> None:
+def test_render_evidence_json_export_uses_provenance_citation_compliance_and_run_level_counts() -> (
+    None
+):
     now = datetime.now(timezone.utc)
     run = FlowRun(
         id=uuid4(),
@@ -1301,7 +1406,10 @@ def test_render_evidence_json_export_uses_provenance_citation_compliance_and_run
     assert export["summary"]["citations"]["citation_context_kind"] == "direct"
     assert export["summary"]["citations"]["citation_expected"] is True
     assert export["summary"]["citations"]["citation_observed"] is False
-    assert export["summary"]["citations"]["citation_compliance"] == "missing_required_citations"
+    assert (
+        export["summary"]["citations"]["citation_compliance"]
+        == "missing_required_citations"
+    )
     assert export["summary"]["citations"]["steps_with_citation_mode_requested"] == 1
     assert export["summary"]["citations"]["steps_with_citations_applicable"] == 1
     assert export["summary"]["citations"]["steps_with_direct_citation_context"] == 1
@@ -1310,8 +1418,13 @@ def test_render_evidence_json_export_uses_provenance_citation_compliance_and_run
     assert export["summary"]["citations"]["steps_with_citations_observed"] == 0
     assert export["summary"]["citations"]["steps_missing_required_citations"] == 1
     assert export["summary"]["citations"]["steps_with_unknown_citation_ids"] == 0
-    assert export["summary"]["step_overview"][0]["citations"]["citation_expected"] is True
-    assert export["summary"]["step_overview"][0]["citations"]["citation_compliance"] == "missing_required_citations"
+    assert (
+        export["summary"]["step_overview"][0]["citations"]["citation_expected"] is True
+    )
+    assert (
+        export["summary"]["step_overview"][0]["citations"]["citation_compliance"]
+        == "missing_required_citations"
+    )
 
 
 def test_render_evidence_json_export_surfaces_inherited_citation_context() -> None:
@@ -1449,4 +1562,7 @@ def test_render_evidence_json_export_surfaces_inherited_citation_context() -> No
     assert export["summary"]["citations"]["inherited_cited_source_ids"] == [source_one]
     assert export["summary"]["citations"]["upstream_grounded_step_orders"] == [2]
     assert export["summary"]["citations"]["steps_with_inherited_citation_context"] == 1
-    assert export["summary"]["step_overview"][1]["citations"]["citation_context_kind"] == "inherited"
+    assert (
+        export["summary"]["step_overview"][1]["citations"]["citation_context_kind"]
+        == "inherited"
+    )

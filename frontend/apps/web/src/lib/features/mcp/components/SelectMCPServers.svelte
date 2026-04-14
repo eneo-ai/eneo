@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { createEventDispatcher, onMount } from "svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Input, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
@@ -43,6 +43,13 @@
     selectedModel = null
   }: Props = $props();
 
+  const dispatch = createEventDispatcher<{
+    change: {
+      selectedMCPServers: { [key: string]: unknown }[];
+      selectedMCPTools: Array<{ tool_id: string; is_enabled: boolean }>;
+    };
+  }>();
+
   /** Type-safe view of selectedMCPServers */
   let servers = $derived(selectedMCPServers as unknown as MCPServer[]);
 
@@ -68,6 +75,13 @@
 
   function getServerTools(server: MCPServer): MCPTool[] {
     return server.tools ?? [];
+  }
+
+  function notifySelectionChange() {
+    dispatch("change", {
+      selectedMCPServers,
+      selectedMCPTools
+    });
   }
 
   // Load available MCP servers from space
@@ -177,6 +191,8 @@
         selectedMCPTools = [...selectedMCPTools, ...toolOverrides];
       }
     }
+
+    notifySelectionChange();
   }
 
   function toggleTool(server: MCPServer, tool: MCPTool) {
@@ -205,6 +221,27 @@
         selectedMCPServers = [...servers];
       }
     }
+
+    notifySelectionChange();
+  }
+
+  function setAllTools(server: MCPServer, isEnabled: boolean) {
+    ensureAllSelectedServersToolsTracked();
+
+    const serverToolIds = new Set((server.tools ?? []).map((tool) => tool.id));
+    selectedMCPTools = selectedMCPTools.map((tool) =>
+      serverToolIds.has(tool.tool_id) ? { ...tool, is_enabled: isEnabled } : tool
+    );
+
+    const selectedServerIndex = servers.findIndex((s) => s.id === server.id);
+    if (selectedServerIndex !== -1 && servers[selectedServerIndex].tools) {
+      servers[selectedServerIndex].tools = servers[selectedServerIndex].tools!.map(
+        (tool: MCPTool) => ({ ...tool, is_enabled: isEnabled })
+      );
+      selectedMCPServers = [...servers];
+    }
+
+    notifySelectionChange();
   }
 </script>
 
@@ -327,11 +364,7 @@
                   <button
                     type="button"
                     class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
-                    onclick={() => {
-                      server.tools?.forEach((tool) => {
-                        if (!isToolEnabled(server, tool.id)) toggleTool(server, tool);
-                      });
-                    }}
+                    onclick={() => setAllTools(server, true)}
                   >
                     Alla på
                   </button>
@@ -339,11 +372,7 @@
                   <button
                     type="button"
                     class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
-                    onclick={() => {
-                      server.tools?.forEach((tool) => {
-                        if (isToolEnabled(server, tool.id)) toggleTool(server, tool);
-                      });
-                    }}
+                    onclick={() => setAllTools(server, false)}
                   >
                     Alla av
                   </button>

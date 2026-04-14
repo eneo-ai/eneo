@@ -54,10 +54,6 @@ describe("hasAdvancedSettingsActive", () => {
     expect(hasAdvancedSettingsActive(makeStep({ input_type: "file" }), false)).toBe(true);
   });
 
-  test("returns true when mcp_policy is restricted", () => {
-    expect(hasAdvancedSettingsActive(makeStep({ mcp_policy: "restricted" }), false)).toBe(true);
-  });
-
   test("returns true when input_contract is set", () => {
     expect(hasAdvancedSettingsActive(makeStep({ input_contract: { type: "object" } }), false)).toBe(
       true

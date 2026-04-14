@@ -8,14 +8,20 @@ type AssistantRecord = {
   completion_model?: { id: string };
 };
 
-function createManager(overrides: {
-  loadRemote?: (assistantId: string) => Promise<AssistantRecord | null>;
-  saveRemote?: (assistantId: string, changes: Record<string, unknown>) => Promise<AssistantRecord>;
-  shouldSaveImmediately?: (changes: Record<string, unknown>) => boolean;
-  isDisabled?: () => boolean;
-  onPromptSaved?: () => void;
-  onValidationError?: (assistantId: string, message: string | null) => void;
-} = {}) {
+function createManager(
+  overrides: {
+    loadRemote?: (assistantId: string) => Promise<AssistantRecord | null>;
+    saveRemote?: (
+      assistantId: string,
+      changes: Record<string, unknown>
+    ) => Promise<AssistantRecord>;
+    shouldSaveImmediately?: (changes: Record<string, unknown>) => boolean;
+    isDisabled?: () => boolean;
+    onSaved?: (assistantId: string, assistant: AssistantRecord) => void;
+    onPromptSaved?: () => void;
+    onValidationError?: (assistantId: string, message: string | null) => void;
+  } = {}
+) {
   const loadRemote =
     overrides.loadRemote ??
     vi.fn(async (assistantId: string) => ({
@@ -29,6 +35,7 @@ function createManager(overrides: {
       ...changes
     }));
   const onPromptSaved = overrides.onPromptSaved ?? vi.fn();
+  const onSaved = overrides.onSaved ?? vi.fn();
   const onValidationError = overrides.onValidationError ?? vi.fn();
 
   const manager = new AssistantSaveManager<AssistantRecord>({
@@ -37,6 +44,7 @@ function createManager(overrides: {
     shouldSaveImmediately: overrides.shouldSaveImmediately ?? (() => false),
     isDisabled: overrides.isDisabled ?? (() => false),
     getErrorMessage: () => "assistant_save_failed",
+    onSaved,
     onPromptSaved,
     onValidationError,
     delayMs: 500
@@ -46,6 +54,7 @@ function createManager(overrides: {
     manager,
     loadRemote,
     saveRemote,
+    onSaved,
     onPromptSaved,
     onValidationError
   };
@@ -123,5 +132,21 @@ describe("AssistantSaveManager", () => {
     expect(saveRemote).toHaveBeenCalledTimes(1);
     expect(onPromptSaved).toHaveBeenCalledTimes(1);
     expect(manager.getStatus()).toBe("idle");
+  });
+
+  it("notifies listeners when a save succeeds", async () => {
+    const { manager, onSaved } = createManager({
+      shouldSaveImmediately: (changes) => "completion_model" in changes
+    });
+
+    await manager.save("assistant-1", {
+      completion_model: { id: "model-1" }
+    });
+
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(onSaved).toHaveBeenCalledWith("assistant-1", {
+      id: "assistant-1",
+      completion_model: { id: "model-1" }
+    });
   });
 });

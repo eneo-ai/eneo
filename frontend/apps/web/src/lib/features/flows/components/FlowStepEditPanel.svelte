@@ -86,6 +86,11 @@
   import FlowStepSecuritySection from "./FlowStepSecuritySection.svelte";
   import FlowStepAdvancedSection from "./FlowStepAdvancedSection.svelte";
   import FlowStepDeleteSection from "./FlowStepDeleteSection.svelte";
+  import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
+  import {
+    shouldShowStepMcpSection,
+    summarizeAssistantMcp
+  } from "$lib/features/flows/flowStepMcpConfig";
 
   // ---------------------------------------------------------------------------
   // Props
@@ -473,6 +478,11 @@
         assistantState.assistant.attachments.length > 0
     )
   );
+  const mcpSummary = $derived(summarizeAssistantMcp(assistantState.assistant));
+  const hasConfiguredMcp = $derived(mcpSummary.hasConfiguredMcp);
+  const showMcpSection = $derived(shouldShowStepMcpSection(activeStep?.output_mode));
+  const knowledgeDisabledByMcp = $derived(hasConfiguredMcp && !hasKnowledgeSelections);
+  const mcpDisabledByKnowledge = $derived(hasKnowledgeSelections && !hasConfiguredMcp);
   const currentStepIssues = $derived(
     activeStep
       ? getFlowStepValidationIssues(steps).filter(
@@ -842,18 +852,60 @@
           />
         {/if}
 
-        {#if !isTranscribeOnly && !isTemplateFill}
-          <FlowStepContextSection
-            assistant={assistantState.assistant}
-            assistantLoading={assistantState.loading}
-            runningUploads={assistantState.runningUploads}
-            onKnowledgeChange={(detail) => {
-              updateAssistantField("websites", detail.websites);
-              updateAssistantField("groups", detail.groups);
-              updateAssistantField("integration_knowledge_list", detail.integrationKnowledgeList);
-            }}
-            onRemoveAttachment={(detail) => void assistantState.removeAttachment(detail.file)}
-          />
+        {#if showMcpSection}
+          {#if knowledgeDisabledByMcp}
+            <p
+              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
+            >
+              <span class="font-bold">{m.warning()}:&nbsp;</span
+              >{m.knowledge_disabled_when_mcp_active()}
+            </p>
+          {/if}
+          <div class={knowledgeDisabledByMcp ? "pointer-events-none opacity-50" : ""}>
+            <FlowStepContextSection
+              assistant={assistantState.assistant}
+              assistantLoading={assistantState.loading}
+              runningUploads={assistantState.runningUploads}
+              onKnowledgeChange={(detail) => {
+                updateAssistantField("websites", detail.websites);
+                updateAssistantField("groups", detail.groups);
+                updateAssistantField("integration_knowledge_list", detail.integrationKnowledgeList);
+              }}
+              onRemoveAttachment={(detail) => void assistantState.removeAttachment(detail.file)}
+            />
+          </div>
+        {/if}
+
+        {#if showMcpSection}
+          <Settings.Group title={m.mcp_servers()}>
+            <Settings.Row title={m.mcp_servers()} description={m.select_mcp_servers_description()}>
+              {#if mcpDisabledByKnowledge}
+                <p
+                  class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
+                >
+                  <span class="font-bold">{m.warning()}:&nbsp;</span
+                  >{m.mcp_disabled_when_knowledge_active()}
+                </p>
+              {/if}
+              <div class={mcpDisabledByKnowledge ? "pointer-events-none opacity-50" : ""}>
+                {#if assistantState.assistant}
+                  <SelectMCPServers
+                    bind:selectedMCPServers={assistantState.assistant.mcp_servers}
+                    bind:selectedMCPTools={assistantState.assistant.mcp_tools}
+                    selectedModel={assistantState.assistant.completion_model}
+                    on:change={(event) =>
+                      assistantState.updateFields(
+                        {
+                          mcp_servers: event.detail.selectedMCPServers,
+                          mcp_tools: event.detail.selectedMCPTools
+                        },
+                        { immediate: true }
+                      )}
+                  />
+                {/if}
+              </div>
+            </Settings.Row>
+          </Settings.Group>
         {/if}
 
         {#if !isTranscribeOnly && !isTemplateFill}
@@ -1000,7 +1052,6 @@
             {isPublished}
             {advancedJsonDrafts}
             {advancedJsonErrors}
-            onMcpPolicyChange={(detail) => updateStep("mcp_policy", detail.value)}
             onJsonFieldUpdate={(detail) =>
               handleAdvancedJsonFieldUpdate(detail.field as AdvancedJsonField, detail.value)}
           />

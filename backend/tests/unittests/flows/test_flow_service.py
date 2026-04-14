@@ -114,6 +114,10 @@ def _service(
     )
     if stub_assistant_scope:
         service._validate_assistant_scope_for_steps = AsyncMock()  # type: ignore[method-assign]
+    service.assistant_service.get_assistant.return_value = (
+        SimpleNamespace(mcp_servers=[]),
+        [],
+    )
     return service
 
 
@@ -259,6 +263,86 @@ async def test_publish_flow_creates_version_and_updates_published_version(user):
     assert result.published_version == 1
     version_repo.create.assert_awaited_once()
     flow_repo.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_includes_mcp_snapshot_fields(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    step = _step(step_order=1)
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="MCP flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[step],
+    )
+    flow_repo.get.return_value = flow
+    version_repo.get_latest.return_value = None
+    flow_repo.update.return_value = flow.model_copy(update={"published_version": 1})
+    service.assistant_service.get_assistant.return_value = (
+        SimpleNamespace(
+            id=step.assistant_id,
+            origin=AssistantOrigin.FLOW_MANAGED,
+            managing_flow_id=flow_id,
+            mcp_servers=[
+                SimpleNamespace(
+                    id=uuid4(),
+                    name="Weather Server",
+                    tools=[
+                        SimpleNamespace(
+                            id=uuid4(), name="forecast_tool", is_enabled=True
+                        ),
+                        SimpleNamespace(
+                            id=uuid4(), name="history_tool", is_enabled=False
+                        ),
+                    ],
+                )
+            ],
+        ),
+        [],
+    )
+
+    await service.publish_flow(flow_id=flow_id)
+
+    definition = version_repo.create.await_args.kwargs["definition_json"]
+    assert definition["steps"][0]["mcp_servers"] == [
+        {
+            "id": str(
+                service.assistant_service.get_assistant.return_value[0]
+                .mcp_servers[0]
+                .id
+            ),
+            "name": "Weather Server",
+        }
+    ]
+    assert definition["steps"][0]["mcp_tools_enabled"] == [
+        {
+            "tool_id": str(
+                service.assistant_service.get_assistant.return_value[0]
+                .mcp_servers[0]
+                .tools[0]
+                .id
+            ),
+            "server_id": str(
+                service.assistant_service.get_assistant.return_value[0]
+                .mcp_servers[0]
+                .id
+            ),
+            "name": "forecast_tool",
+        }
+    ]
 
 
 @pytest.mark.asyncio

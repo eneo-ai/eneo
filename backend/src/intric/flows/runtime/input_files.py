@@ -39,7 +39,7 @@ async def load_files_by_requested_ids(
     cache_key = frozenset(requested_ids)
     if file_cache is not None and cache_key in file_cache:
         return file_cache[cache_key]
-    if principal is not None:
+    if principal is not None and principal.is_service_key:
         files = await file_repo.get_list_by_id_for_owner(
             ids=requested_ids,
             owner_type=principal.principal_type.value,

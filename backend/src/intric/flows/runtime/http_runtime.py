@@ -89,7 +89,12 @@ class FlowHttpRuntimeHelper:
                 code="typed_io_http_invalid_config",
             )
         headers: dict[str, str] = {}
-        for key, value in cast(JsonObject, headers_raw).items():
+        for key, value in cast(dict[Any, Any], headers_raw).items():
+            if not isinstance(key, str):
+                raise TypedIOValidationException(
+                    f"Step {step_order}: {config_label}.headers keys must be strings.",
+                    code="typed_io_http_invalid_config",
+                )
             rendered = self.interpolate_value(value, context=context)
             headers[key] = str(rendered)
         return headers

@@ -11,6 +11,7 @@ type AssistantSaveManagerOptions<TAssistant extends object> = {
   isDisabled: () => boolean;
   getErrorMessage: (error: unknown) => string;
   onValidationError: (assistantId: string, message: string | null) => void;
+  onSaved?: (assistantId: string, assistant: TAssistant) => void;
   onPromptSaved?: (assistantId: string) => void;
   delayMs?: number;
 };
@@ -112,7 +113,9 @@ export class AssistantSaveManager<TAssistant extends object> {
       for (const assistantId of ids) {
         this.clearTimer(assistantId);
       }
-      const results = await Promise.allSettled([...ids].map((assistantId) => this.runSaveNow(assistantId)));
+      const results = await Promise.allSettled(
+        [...ids].map((assistantId) => this.runSaveNow(assistantId))
+      );
       const rejected = results.find((result) => result.status === "rejected");
       if (rejected && rejected.status === "rejected") {
         throw rejected.reason;
@@ -188,6 +191,7 @@ export class AssistantSaveManager<TAssistant extends object> {
         const updated = await this.options.saveRemote(assistantId, merged);
         this.cache.set(assistantId, updated);
         this.options.onValidationError(assistantId, null);
+        this.options.onSaved?.(assistantId, updated);
         if ("prompt" in merged) {
           this.options.onPromptSaved?.(assistantId);
         }
