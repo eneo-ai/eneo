@@ -21,7 +21,7 @@ from intric.authentication.api_key_notification_auto_follow import (
     auto_follow_on_publish,
 )
 from intric.authentication.auth_models import ApiKeyNotificationTargetType
-from intric.files.file_models import FileInfo
+from intric.files.file_models import File
 from intric.main.container.container import Container
 from intric.main.models import NOT_PROVIDED, PaginatedResponse, is_provided
 from intric.prompts.api.prompt_models import PromptSparse
@@ -128,8 +128,8 @@ async def update_app(
 
     # Helper function to track attachment changes
     def get_attachment_changes(
-        old_attachments: list[FileInfo] | None,
-        new_attachments: list[FileInfo] | None,
+        old_attachments: list[File] | None,
+        new_attachments: list[File] | None,
     ) -> tuple[list[AttachmentChange], list[AttachmentChange]]:
         """Compare attachment lists and return added/removed items."""
         old_items: dict[str, str] = {

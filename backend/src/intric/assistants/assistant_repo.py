@@ -31,7 +31,7 @@ from intric.database.tables.integration_table import (
 from intric.database.tables.prompts_table import Prompts, PromptsAssistants
 from intric.database.tables.users_table import Users
 from intric.database.tables.websites_table import CrawlRuns, Websites
-from intric.files.file_models import FileInfo
+from intric.files.file_models import File
 from intric.main.exceptions import BadRequestException
 from intric.prompts.prompt import Prompt
 
@@ -155,7 +155,7 @@ class AssistantRepository:
         return await self.session.scalar(stmt)
 
     async def _set_attachments(
-        self, assistant_in_db: Assistants, attachments: list[FileInfo]
+        self, assistant_in_db: Assistants, attachments: list[File]
     ):
         # Delete all
         stmt = sa.delete(AssistantsFiles).where(

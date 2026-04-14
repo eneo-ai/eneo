@@ -35,6 +35,7 @@
   let maxExpirationDays = $state<number | null>(null);
   let autoExpireUnusedDays = $state<number | null>(null);
   let maxRateLimitOverride = $state<number | null>(null);
+  let rotationGraceHours = $state<number | null>(24);
   let requireExpiration = $state(false);
   let revocationCascadeEnabled = $state(false);
 
@@ -43,6 +44,7 @@
     maxExpirationDays = policy.max_expiration_days ?? null;
     autoExpireUnusedDays = policy.auto_expire_unused_days ?? null;
     maxRateLimitOverride = policy.max_rate_limit_override ?? null;
+    rotationGraceHours = policy.rotation_grace_hours ?? 24;
     requireExpiration = policy.require_expiration ?? false;
     revocationCascadeEnabled = policy.revocation_cascade_enabled ?? false;
   }
@@ -53,6 +55,7 @@
       max_expiration_days: maxExpirationDays,
       auto_expire_unused_days: autoExpireUnusedDays,
       max_rate_limit_override: maxRateLimitOverride,
+      rotation_grace_hours: rotationGraceHours,
       require_expiration: requireExpiration,
       revocation_cascade_enabled: revocationCascadeEnabled
     };
@@ -64,6 +67,7 @@
       max_expiration_days: originalPolicy.max_expiration_days ?? null,
       auto_expire_unused_days: originalPolicy.auto_expire_unused_days ?? null,
       max_rate_limit_override: originalPolicy.max_rate_limit_override ?? null,
+      rotation_grace_hours: originalPolicy.rotation_grace_hours ?? 24,
       require_expiration: originalPolicy.require_expiration ?? false,
       revocation_cascade_enabled: originalPolicy.revocation_cascade_enabled ?? false
     };
@@ -104,6 +108,9 @@
     }
     if (current.max_rate_limit_override !== original.max_rate_limit_override) {
       updates.max_rate_limit_override = current.max_rate_limit_override;
+    }
+    if (current.rotation_grace_hours !== original.rotation_grace_hours) {
+      updates.rotation_grace_hours = current.rotation_grace_hours;
     }
     if (current.require_expiration !== original.require_expiration) {
       updates.require_expiration = current.require_expiration;
@@ -172,6 +179,15 @@
       type: "number" as const,
       placeholder: m.api_keys_admin_policy_placeholder_no_limit(),
       suffix: m.api_keys_admin_policy_suffix_req_hr()
+    },
+    {
+      id: "rotationGraceHours",
+      title: m.api_keys_admin_policy_rotation_grace(),
+      description: m.api_keys_admin_policy_rotation_grace_desc(),
+      icon: RotateCcw,
+      type: "number" as const,
+      placeholder: "24",
+      suffix: m.api_keys_admin_policy_suffix_hours()
     },
     {
       id: "maxDelegationDepth",
@@ -304,6 +320,20 @@
                         type="number"
                         min="1"
                         bind:value={maxRateLimitOverride}
+                        placeholder={item.placeholder}
+                        class="h-9 w-24 text-right text-sm"
+                      />
+                    </Field.Field>
+                  {:else if item.id === "rotationGraceHours"}
+                    <Field.Field>
+                      <Field.Label class="sr-only" for={`policy-${item.id}`}>
+                        {item.title}
+                      </Field.Label>
+                      <Input
+                        id={`policy-${item.id}`}
+                        type="number"
+                        min="0"
+                        bind:value={rotationGraceHours}
                         placeholder={item.placeholder}
                         class="h-9 w-24 text-right text-sm"
                       />

@@ -101,7 +101,13 @@ class ResourcePermissionLevel(str, Enum):
 
 
 class ResourcePermissions(BaseModel):
-    """Per-resource-type permission overrides. Each level must not exceed the key's simple permission."""
+    """Per-resource-type permission overrides for sk_ keys.
+
+    For sk_ keys, the top-level ``permission`` field is derived automatically
+    as ``max(assistants, apps, spaces, knowledge)`` by
+    :func:`derive_permission_from_resource_permissions`.  pk_ keys do not
+    support fine-grained permissions.
+    """
 
     flows: ResourcePermissionLevel | None = None
     assistants: ResourcePermissionLevel = ResourcePermissionLevel.NONE
@@ -111,6 +117,31 @@ class ResourcePermissions(BaseModel):
     flow_evidence: ResourcePermissionLevel = ResourcePermissionLevel.NONE
 
     model_config = ConfigDict(extra="forbid")
+
+
+_LEVEL_TO_PERMISSION: dict[int, ApiKeyPermission] = {
+    0: ApiKeyPermission.READ,
+    1: ApiKeyPermission.READ,
+    2: ApiKeyPermission.WRITE,
+    3: ApiKeyPermission.ADMIN,
+}
+
+
+def derive_permission_from_resource_permissions(
+    rp: ResourcePermissions,
+) -> ApiKeyPermission:
+    """Compute the effective permission ceiling from fine-grained resource permissions.
+
+    Returns the highest permission level found across all resource types.
+    If all resource types are ``none``, defaults to ``read``.
+    """
+    max_level = max(
+        PERMISSION_LEVEL_ORDER.get(rp.assistants.value, 0),
+        PERMISSION_LEVEL_ORDER.get(rp.apps.value, 0),
+        PERMISSION_LEVEL_ORDER.get(rp.spaces.value, 0),
+        PERMISSION_LEVEL_ORDER.get(rp.knowledge.value, 0),
+    )
+    return _LEVEL_TO_PERMISSION.get(max_level, ApiKeyPermission.READ)
 
 
 class ApiKeyScopeType(str, Enum):
@@ -277,6 +308,7 @@ class ApiKeyPolicyUpdate(BaseModel):
     max_expiration_days: Optional[int] = None
     auto_expire_unused_days: Optional[int] = None
     max_rate_limit_override: Optional[int] = None
+    rotation_grace_hours: Optional[int] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -296,6 +328,17 @@ class ApiKeyPolicyUpdate(BaseModel):
             raise ValueError(f"{info.field_name} must be a positive integer.")
         return value
 
+    @field_validator("rotation_grace_hours")
+    @classmethod
+    def _validate_non_negative(
+        cls, value: Optional[int], info: ValidationInfo
+    ) -> Optional[int]:
+        if value is None:
+            return value
+        if value < 0:
+            raise ValueError(f"{info.field_name} must be zero or a positive integer.")
+        return value
+
 
 class ApiKeyPolicyResponse(BaseModel):
     max_delegation_depth: Optional[int] = None
@@ -304,6 +347,7 @@ class ApiKeyPolicyResponse(BaseModel):
     max_expiration_days: Optional[int] = None
     auto_expire_unused_days: Optional[int] = None
     max_rate_limit_override: Optional[int] = None
+    rotation_grace_hours: Optional[int] = None
 
     model_config = ConfigDict(extra="ignore")
 
@@ -451,6 +495,7 @@ class ApiKeyCreationConstraints(BaseModel):
     require_expiration: bool = False
     max_expiration_days: Optional[int] = None
     max_rate_limit: Optional[int] = None
+    rotation_grace_hours: int = 24
 
 
 class ExpiringKeySummaryItem(BaseModel):

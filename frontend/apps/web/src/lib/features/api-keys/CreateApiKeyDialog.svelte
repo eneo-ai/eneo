@@ -7,6 +7,8 @@
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyType,
+    ApiKeyUpdateRequest,
+    ApiKeyV2,
     ResourcePermissionLevel,
     SpaceSparse
   } from "@intric/intric-js";
@@ -18,6 +20,7 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { getIntric } from "$lib/core/Intric";
   import { getAppContext } from "$lib/core/AppContext";
+  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { m } from "$lib/paraglide/messages";
   import {
     Key,
@@ -44,32 +47,70 @@
   } from "lucide-svelte";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
-  import ScopeResourceSelector from "./ScopeResourceSelector.svelte";
-  import TagInput from "./TagInput.svelte";
-  import ExpirationPicker from "./ExpirationPicker.svelte";
+  import ScopeResourceSelector from "$lib/features/api-keys/ScopeResourceSelector.svelte";
+  import TagInput from "$lib/features/api-keys/TagInput.svelte";
+  import ExpirationPicker from "$lib/features/api-keys/ExpirationPicker.svelte";
 
   const intric = getIntric();
   const { user } = getAppContext();
   const isAdmin = user.hasPermission("admin");
 
+  type DialogMode = "create" | "edit" | "view";
+
   let {
+    mode = "create",
+    apiKey,
+    open = $bindable(false),
     onCreated,
+    onChanged,
     lockedScopeType,
     lockedScopeId,
     lockedScopeName,
     triggerVariant = "primary"
   }: {
+    mode?: DialogMode;
+    apiKey?: ApiKeyV2;
+    open?: boolean;
     onCreated?: () => void;
+    onChanged?: () => void;
     lockedScopeType?: ApiKeyScopeType;
     lockedScopeId?: string;
     lockedScopeName?: string;
     triggerVariant?: "primary" | "outlined";
   } = $props();
 
-  const scopeLocked = $derived(!!lockedScopeType && !!lockedScopeId);
-  const LockedScopeIcon = $derived(getScopeIcon(lockedScopeType));
+  const isEditMode = $derived(mode === "edit");
+  const isViewMode = $derived(mode === "view");
+  const isCreateMode = $derived(mode === "create");
+  const readonly = $derived(mode === "view");
+  const canEditAccess = $derived(!readonly);
+
+  const scopeLocked = $derived((!!lockedScopeType && !!lockedScopeId) || isEditMode || isViewMode);
+  const lockedDisplayScopeType = $derived(lockedScopeType ?? apiKey?.scope_type);
+  const lockedDisplayScopeName = $derived(
+    lockedScopeName ||
+      getFallbackScopeName(lockedDisplayScopeType, lockedScopeId ?? apiKey?.scope_id)
+  );
+  const LockedScopeIcon = $derived(getScopeIcon(lockedDisplayScopeType));
 
   let showDialog = $state(false);
+
+  // Sync external open prop for edit/view modes
+  $effect(() => {
+    if (!isCreateMode) {
+      showDialog = open;
+    }
+  });
+  $effect(() => {
+    if (!isCreateMode) {
+      open = showDialog;
+    }
+  });
+  $effect(() => {
+    if ((isEditMode || isViewMode) && showDialog && apiKey) {
+      populateFromApiKey(apiKey);
+    }
+  });
   let isSubmitting = $state(false);
   let errorMessage = $state<string | null>(null);
   let createdSecret = $state<string | null>(null);
@@ -165,13 +206,22 @@
     }
   });
 
-  // Effect: Clamp fine-grained permissions when base permission is lowered
+  // When the simple permission level changes, sync all fine-grained
+  // permissions to match — simple mode acts as a "set all" shortcut.
   $effect(() => {
-    if (permissionMode === "fine-grained") {
-      assistantsPermission = clampToPermission(assistantsPermission);
-      appsPermission = clampToPermission(appsPermission);
-      spacesPermission = clampToPermission(spacesPermission);
-      knowledgePermission = clampToPermission(knowledgePermission);
+    if (permissionMode === "simple") {
+      const level =
+        permission === "read"
+          ? "read"
+          : permission === "write"
+            ? "write"
+            : permission === "admin"
+              ? "admin"
+              : "none";
+      assistantsPermission = level as ResourcePermission;
+      appsPermission = level as ResourcePermission;
+      spacesPermission = level as ResourcePermission;
+      knowledgePermission = level as ResourcePermission;
     }
   });
 
@@ -190,13 +240,12 @@
     }
   });
 
+  let scrollAreaRef: HTMLDivElement | undefined = $state();
+
   // Effect: Scroll content area to top when step changes
   $effect(() => {
-    if (currentStep) {
-      const scrollArea = document.querySelector(".step-content-scroll");
-      if (scrollArea) {
-        scrollArea.scrollTop = 0;
-      }
+    if (currentStep && scrollAreaRef) {
+      scrollAreaRef.scrollTop = 0;
     }
   });
 
@@ -300,11 +349,41 @@
     }
   }
 
+  // Pre-populate form from existing key in edit/view mode
+  function populateFromApiKey(key: ApiKeyV2) {
+    name = key.name;
+    description = key.description ?? "";
+    keyType = key.key_type;
+    ownership = key.ownership ?? "user";
+    permission = key.permission;
+    scopeType = key.scope_type;
+    scopeId = key.scope_id ?? null;
+    allowedOrigins = key.allowed_origins ?? [];
+    allowedIps = key.allowed_ips ?? [];
+    expiresAt = key.expires_at ?? null;
+    rateLimit = key.rate_limit?.toString() ?? "";
+    if (key.resource_permissions) {
+      permissionMode = "fine-grained";
+      assistantsPermission = (key.resource_permissions.assistants ?? "none") as ResourcePermission;
+      appsPermission = (key.resource_permissions.apps ?? "none") as ResourcePermission;
+      spacesPermission = (key.resource_permissions.spaces ?? "none") as ResourcePermission;
+      knowledgePermission = (key.resource_permissions.knowledge ?? "none") as ResourcePermission;
+    } else {
+      permissionMode = "simple";
+      assistantsPermission = "none";
+      appsPermission = "none";
+      spacesPermission = "none";
+      knowledgePermission = "none";
+    }
+  }
+
   onMount(() => {
-    if (!scopeLocked) {
+    if (isCreateMode && !scopeLocked) {
       void loadResources();
     }
-    void loadCreationConstraints();
+    if (isCreateMode) {
+      void loadCreationConstraints();
+    }
   });
 
   function validateStep(step: number): string | null {
@@ -331,14 +410,17 @@
   }
 
   function isStepComplete(step: number): boolean {
+    if (!isCreateMode) return true;
     return validateStep(step) === null;
   }
 
   function nextStep() {
-    const error = validateStep(currentStep);
-    if (error) {
-      errorMessage = error;
-      return;
+    if (isCreateMode) {
+      const error = validateStep(currentStep);
+      if (error) {
+        errorMessage = error;
+        return;
+      }
     }
     errorMessage = null;
     stepDirection = "forward";
@@ -356,7 +438,11 @@
   }
 
   function goToStep(step: number) {
-    if (step <= currentStep || (step === currentStep + 1 && isStepComplete(currentStep))) {
+    const canNavigate =
+      !isCreateMode ||
+      step <= currentStep ||
+      (step === currentStep + 1 && isStepComplete(currentStep));
+    if (canNavigate) {
       errorMessage = null;
       stepDirection = step > currentStep ? "forward" : "backward";
       currentStep = step;
@@ -376,6 +462,9 @@
     errorMessage = null;
     isSubmitting = true;
 
+    // For sk_ keys, always send resource_permissions — backend derives
+    // the effective `permission` ceiling from them automatically.
+    // For pk_ keys, resource_permissions must be null.
     const request: ApiKeyCreateRequest = {
       name: name.trim(),
       description: description.trim() || null,
@@ -389,7 +478,7 @@
       expires_at: expiresAt,
       rate_limit: rateLimit ? Number(rateLimit) : null,
       resource_permissions:
-        permissionMode === "fine-grained"
+        keyType === "sk_"
           ? {
               assistants: assistantsPermission as ResourcePermissionLevel,
               apps: appsPermission as ResourcePermissionLevel,
@@ -407,10 +496,79 @@
       currentStep = 4;
     } catch (error: unknown) {
       console.error(error);
-      const err = error as { getReadableMessage?: () => string };
-      errorMessage = err?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     } finally {
       isSubmitting = false;
+    }
+  }
+
+  async function updateKey() {
+    if (!apiKey) return;
+
+    errorMessage = null;
+
+    // For sk_ keys, always send resource_permissions — backend derives
+    // the effective permission ceiling automatically.
+    const nextResourcePermissions =
+      apiKey.key_type === "sk_"
+        ? {
+            assistants: assistantsPermission as ResourcePermissionLevel,
+            apps: appsPermission as ResourcePermissionLevel,
+            spaces: spacesPermission as ResourcePermissionLevel,
+            knowledge: knowledgePermission as ResourcePermissionLevel
+          }
+        : null;
+
+    const updates: ApiKeyUpdateRequest = {};
+    if (name.trim() !== apiKey.name) updates.name = name.trim();
+    const desc = description.trim();
+    if (desc !== (apiKey.description ?? "")) updates.description = desc || null;
+    if (permission !== apiKey.permission) updates.permission = permission;
+    const parsedRate = rateLimit ? Number(rateLimit) : null;
+    if (parsedRate !== (apiKey.rate_limit ?? null)) updates.rate_limit = parsedRate;
+    if (
+      JSON.stringify(nextResourcePermissions) !==
+      JSON.stringify(apiKey.resource_permissions ?? null)
+    ) {
+      updates.resource_permissions = nextResourcePermissions;
+    }
+    if (apiKey.key_type === "pk_") {
+      const origins = allowedOrigins.filter(Boolean);
+      if (JSON.stringify(origins) !== JSON.stringify(apiKey.allowed_origins ?? [])) {
+        updates.allowed_origins = origins.length > 0 ? origins : null;
+      }
+    }
+    if (apiKey.key_type === "sk_") {
+      const ips = allowedIps.filter(Boolean);
+      if (JSON.stringify(ips) !== JSON.stringify(apiKey.allowed_ips ?? [])) {
+        updates.allowed_ips = ips.length > 0 ? ips : null;
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      showDialog = false;
+      return;
+    }
+
+    isSubmitting = true;
+
+    try {
+      await intric.apiKeys.admin.update({ id: apiKey.id, update: updates });
+      onChanged?.();
+      showDialog = false;
+    } catch (error: unknown) {
+      console.error(error);
+      errorMessage = getErrorMessage(error);
+    } finally {
+      isSubmitting = false;
+    }
+  }
+
+  async function handleSubmit() {
+    if (isEditMode) {
+      await updateKey();
+    } else {
+      await createKey();
     }
   }
 
@@ -553,24 +711,13 @@
     }
   }
 
-  // Permission level ordering for ceiling enforcement
-  const permissionOrder: Record<string, number> = {
-    none: 0,
-    read: 1,
-    write: 2,
-    admin: 3
-  };
-
-  function isLevelAllowed(level: ResourcePermission): boolean {
-    return permissionOrder[level] <= permissionOrder[permission];
+  function getFallbackScopeName(type: ApiKeyScopeType | undefined, id: string | null | undefined) {
+    const label = getScopeLabel(type);
+    return id ? `${label} ${id.slice(0, 8)}` : label;
   }
 
-  // Clamp a resource permission to the ceiling
-  function clampToPermission(level: ResourcePermission): ResourcePermission {
-    if (permissionOrder[level] > permissionOrder[permission]) {
-      return permission as ResourcePermission;
-    }
-    return level;
+  function isLevelAllowed(_level: ResourcePermission): boolean {
+    return true;
   }
 </script>
 
@@ -580,14 +727,16 @@
     if (!open) handleOpenChange(false);
   }}
 >
-  <Dialog.Trigger>
-    {#snippet child({ props })}
-      <Button {...props} variant={triggerVariant === "outlined" ? "outline" : "default"}>
-        <Key />
-        {m.generate_api_key()}
-      </Button>
-    {/snippet}
-  </Dialog.Trigger>
+  {#if isCreateMode}
+    <Dialog.Trigger>
+      {#snippet child({ props })}
+        <Button {...props} variant={triggerVariant === "outlined" ? "outline" : "default"}>
+          <Key />
+          {m.generate_api_key()}
+        </Button>
+      {/snippet}
+    </Dialog.Trigger>
+  {/if}
 
   <Dialog.Content
     class="bg-primary !flex max-h-[90vh] !max-w-4xl flex-col overflow-hidden !rounded-2xl !p-0"
@@ -598,14 +747,26 @@
         class="from-subtle to-primary flex-shrink-0 rounded-t-2xl bg-gradient-to-b px-6 pt-6 pb-5"
       >
         <Dialog.Title class="text-default text-2xl font-bold tracking-tight">
-          {scopeLocked && lockedScopeName
-            ? `${m.generate_new_api_key_title()} — ${lockedScopeName}`
-            : m.generate_new_api_key_title()}
+          {#if isViewMode && apiKey}
+            {apiKey.name}
+          {:else if isEditMode && apiKey}
+            {m.api_keys_admin_edit_title()}
+          {:else if scopeLocked && lockedScopeName}
+            {m.generate_new_api_key_title()} — {lockedScopeName}
+          {:else}
+            {m.generate_new_api_key_title()}
+          {/if}
         </Dialog.Title>
         <div class="text-secondary mt-2 max-w-xl text-sm leading-relaxed">
           <Dialog.Description>
-            <!-- eslint-disable-next-line svelte/no-at-html-tags -- localized warning is trusted i18n content -->
-            {@html m.generate_api_key_warning()}
+            {#if isViewMode}
+              {m.api_keys_view_description()}
+            {:else if isEditMode}
+              {m.api_keys_admin_edit_description()}
+            {:else}
+              <!-- eslint-disable-next-line svelte/no-at-html-tags -- localized warning is trusted i18n content -->
+              {@html m.generate_api_key_warning()}
+            {/if}
           </Dialog.Description>
         </div>
 
@@ -717,6 +878,7 @@
 
       <!-- Step content - scrollable area with aria-live for screen reader announcements -->
       <div
+        bind:this={scrollAreaRef}
         class="step-content-scroll min-h-0 flex-1 overflow-y-auto scroll-smooth px-6 pt-4 pb-5"
         aria-live="polite"
         aria-atomic="false"
@@ -751,6 +913,7 @@
                         bind:value={name}
                         placeholder={m.api_keys_name_placeholder()}
                         class="h-12 text-base"
+                        disabled={readonly}
                       />
                       <p class="text-muted mt-2 text-xs">
                         {m.api_keys_name_help()}
@@ -769,19 +932,25 @@
                         bind:value={description}
                         placeholder={m.api_keys_description_placeholder()}
                         rows={3}
+                        disabled={readonly}
                       />
                     </div>
                   </div>
 
                   <!-- Key Type Selection -->
-                  <fieldset>
+                  <fieldset class={!isCreateMode ? "pointer-events-none" : ""}>
                     <legend
                       id="key-type-label"
                       class="text-default mb-3 block text-sm font-semibold tracking-wide"
-                      >{m.api_keys_key_type()}</legend
-                    >
+                      >{m.api_keys_key_type()}
+                      {#if !isCreateMode}
+                        <span class="text-muted ml-2 text-xs font-normal"
+                          >({m.api_keys_admin_edit_immutable_hint()})</span
+                        >
+                      {/if}
+                    </legend>
                     <div
-                      class="grid gap-3 sm:grid-cols-2"
+                      class="grid gap-3 sm:grid-cols-2 {!isCreateMode ? 'opacity-70' : ''}"
                       role="group"
                       aria-labelledby="key-type-label"
                     >
@@ -790,6 +959,7 @@
                         type="button"
                         onclick={() => (keyType = "sk_")}
                         aria-pressed={keyType === "sk_"}
+                        disabled={!isCreateMode}
                         class="group focus-visible:ring-accent-default relative rounded-xl border-2 p-5 text-left transition-all duration-200 hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 active:scale-[0.98]
                         {keyType === 'sk_'
                           ? 'border-accent-default bg-accent-default/10 ring-accent-default/30 ring-2'
@@ -840,6 +1010,7 @@
                         type="button"
                         onclick={() => (keyType = "pk_")}
                         aria-pressed={keyType === "pk_"}
+                        disabled={!isCreateMode}
                         class="label-amethyst group focus-visible:ring-accent-default relative rounded-xl border-2 p-5 text-left transition-all duration-200 hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 active:scale-[0.98]
                         {keyType === 'pk_'
                           ? 'border-label-default bg-label-default/10 ring-label-default/30 ring-2'
@@ -901,11 +1072,14 @@
                       <div
                         role="group"
                         aria-labelledby="permission-type-label"
-                        class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1"
+                        class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1 {readonly
+                          ? 'pointer-events-none opacity-70'
+                          : ''}"
                       >
                         <button
                           type="button"
                           onclick={() => (permissionMode = "simple")}
+                          disabled={readonly}
                           class="rounded-md px-4 py-2 text-sm font-medium transition-all
                                {permissionMode === 'simple'
                             ? 'bg-primary text-default shadow-sm'
@@ -916,6 +1090,7 @@
                         <button
                           type="button"
                           onclick={() => (permissionMode = "fine-grained")}
+                          disabled={readonly}
                           class="rounded-md px-4 py-2 text-sm font-medium transition-all
                                {permissionMode === 'fine-grained'
                             ? 'bg-primary text-default shadow-sm'
@@ -929,45 +1104,56 @@
 
                   <!-- Key Ownership Toggle (admin only) -->
                   {#if isAdmin}
-                    <div class="border-default flex items-center justify-between border-b pb-4">
-                      <div>
-                        <span
-                          id="ownership-label"
-                          class="text-default text-sm font-semibold tracking-wide"
-                          >{m.api_keys_ownership_label()}</span
+                    <div class="border-default border-b pb-4">
+                      <div class="flex items-center justify-between">
+                        <div>
+                          <span
+                            id="ownership-label"
+                            class="text-default text-sm font-semibold tracking-wide"
+                            >{m.api_keys_ownership_label()}</span
+                          >
+                          <p class="text-muted mt-0.5 text-xs">
+                            {ownership === "service"
+                              ? m.api_keys_ownership_service_desc()
+                              : m.api_keys_ownership_user_desc()}
+                          </p>
+                        </div>
+                        <div
+                          role="group"
+                          aria-labelledby="ownership-label"
+                          class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1 {!isCreateMode
+                            ? 'pointer-events-none opacity-70'
+                            : ''}"
                         >
-                        <p class="text-muted mt-0.5 text-xs">
-                          {ownership === "service"
-                            ? m.api_keys_ownership_service_desc()
-                            : m.api_keys_ownership_user_desc()}
+                          <button
+                            type="button"
+                            onclick={() => (ownership = "user")}
+                            disabled={!isCreateMode}
+                            class="rounded-md px-4 py-2 text-sm font-medium transition-all
+                                 {ownership === 'user'
+                              ? 'bg-primary text-default shadow-sm'
+                              : 'text-muted hover:text-secondary'}"
+                          >
+                            {m.api_keys_ownership_user()}
+                          </button>
+                          <button
+                            type="button"
+                            onclick={() => (ownership = "service")}
+                            disabled={!isCreateMode}
+                            class="rounded-md px-4 py-2 text-sm font-medium transition-all
+                                 {ownership === 'service'
+                              ? 'bg-primary text-default shadow-sm'
+                              : 'text-muted hover:text-secondary'}"
+                          >
+                            {m.api_keys_ownership_service()}
+                          </button>
+                        </div>
+                      </div>
+                      {#if !isCreateMode}
+                        <p class="text-muted mt-2 text-xs">
+                          {m.api_keys_admin_edit_immutable_hint()}
                         </p>
-                      </div>
-                      <div
-                        role="group"
-                        aria-labelledby="ownership-label"
-                        class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1"
-                      >
-                        <button
-                          type="button"
-                          onclick={() => (ownership = "user")}
-                          class="rounded-md px-4 py-2 text-sm font-medium transition-all
-                               {ownership === 'user'
-                            ? 'bg-primary text-default shadow-sm'
-                            : 'text-muted hover:text-secondary'}"
-                        >
-                          {m.api_keys_ownership_user()}
-                        </button>
-                        <button
-                          type="button"
-                          onclick={() => (ownership = "service")}
-                          class="rounded-md px-4 py-2 text-sm font-medium transition-all
-                               {ownership === 'service'
-                            ? 'bg-primary text-default shadow-sm'
-                            : 'text-muted hover:text-secondary'}"
-                        >
-                          {m.api_keys_ownership_service()}
-                        </button>
-                      </div>
+                      {/if}
                     </div>
                     {#if ownership === "service" && scopeType === "tenant" && (permission === "write" || permission === "admin")}
                       <div
@@ -996,9 +1182,11 @@
                               <LockedScopeIcon class="text-accent-default h-5 w-5" />
                             </div>
                             <div>
-                              <p class="text-default text-sm font-semibold">{lockedScopeName}</p>
+                              <p class="text-default text-sm font-semibold">
+                                {lockedDisplayScopeName}
+                              </p>
                               <p class="text-muted text-xs">
-                                {getScopeLabel(lockedScopeType)} · {m.api_keys_scope_locked()}
+                                {getScopeLabel(lockedDisplayScopeType)} · {m.api_keys_scope_locked()}
                               </p>
                             </div>
                           </div>
@@ -1123,7 +1311,9 @@
                         >
                           {#each [{ value: "read", label: m.api_keys_permission_read(), icon: Eye, desc: m.api_keys_permission_read_desc() }, { value: "write", label: m.api_keys_permission_write(), icon: Pencil, desc: m.api_keys_permission_write_desc() }, { value: "admin", label: m.api_keys_permission_admin(), icon: ShieldCheck, desc: m.api_keys_permission_admin_desc() }] as opt (opt.value)}
                             {@const isSelected = permission === opt.value}
-                            {@const isDisabled = keyType === "pk_" && opt.value !== "read"}
+                            {@const publicKeyPermissionDisabled =
+                              keyType === "pk_" && opt.value !== "read"}
+                            {@const isDisabled = readonly || publicKeyPermissionDisabled}
                             {@const PermIcon = opt.icon}
                             {@const levelClasses =
                               opt.value === "read"
@@ -1187,7 +1377,7 @@
                                   </div>
                                 </div>
                               {/if}
-                              {#if isDisabled}
+                              {#if publicKeyPermissionDisabled}
                                 <p class="text-warning-stronger mt-2 text-xs font-medium">
                                   {m.api_keys_not_available_public()}
                                 </p>
@@ -1342,11 +1532,13 @@
                               <button
                                 type="button"
                                 onclick={() => setAllPermissions(level as ResourcePermission)}
-                                disabled={!allowed}
+                                disabled={!canEditAccess || !allowed}
                                 class="focus:ring-accent-default/30 rounded-md border px-3 py-1.5 text-xs font-medium transition-all hover:shadow-sm focus:ring-2 focus:outline-none {getLevelClasses(
                                   level as ResourcePermission,
                                   false
-                                )} {!allowed ? 'cursor-not-allowed opacity-40' : ''}"
+                                )} {!canEditAccess || !allowed
+                                  ? 'cursor-not-allowed opacity-40'
+                                  : ''}"
                               >
                                 {getLevelLabel(level as ResourcePermission)}
                               </button>
@@ -1398,11 +1590,13 @@
                                   type="button"
                                   onclick={() =>
                                     (assistantsPermission = level as ResourcePermission)}
-                                  disabled={!allowed}
+                                  disabled={!canEditAccess || !allowed}
                                   class="focus:ring-accent-default/30 flex-1 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
                                     level as ResourcePermission,
                                     assistantsPermission === level
-                                  )} {!allowed ? 'cursor-not-allowed opacity-40' : ''}"
+                                  )} {!canEditAccess || !allowed
+                                    ? 'cursor-not-allowed opacity-40'
+                                    : ''}"
                                 >
                                   {getLevelLabel(level as ResourcePermission)}
                                 </button>
@@ -1450,11 +1644,13 @@
                                 <button
                                   type="button"
                                   onclick={() => (appsPermission = level as ResourcePermission)}
-                                  disabled={!allowed}
+                                  disabled={!canEditAccess || !allowed}
                                   class="focus:ring-accent-default/30 flex-1 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
                                     level as ResourcePermission,
                                     appsPermission === level
-                                  )} {!allowed ? 'cursor-not-allowed opacity-40' : ''}"
+                                  )} {!canEditAccess || !allowed
+                                    ? 'cursor-not-allowed opacity-40'
+                                    : ''}"
                                 >
                                   {getLevelLabel(level as ResourcePermission)}
                                 </button>
@@ -1502,11 +1698,13 @@
                                 <button
                                   type="button"
                                   onclick={() => (spacesPermission = level as ResourcePermission)}
-                                  disabled={!allowed}
+                                  disabled={!canEditAccess || !allowed}
                                   class="focus:ring-accent-default/30 flex-1 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
                                     level as ResourcePermission,
                                     spacesPermission === level
-                                  )} {!allowed ? 'cursor-not-allowed opacity-40' : ''}"
+                                  )} {!canEditAccess || !allowed
+                                    ? 'cursor-not-allowed opacity-40'
+                                    : ''}"
                                 >
                                   {getLevelLabel(level as ResourcePermission)}
                                 </button>
@@ -1555,11 +1753,13 @@
                                   type="button"
                                   onclick={() =>
                                     (knowledgePermission = level as ResourcePermission)}
-                                  disabled={!allowed}
+                                  disabled={!canEditAccess || !allowed}
                                   class="focus:ring-accent-default/30 flex-1 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
                                     level as ResourcePermission,
                                     knowledgePermission === level
-                                  )} {!allowed ? 'cursor-not-allowed opacity-40' : ''}"
+                                  )} {!canEditAccess || !allowed
+                                    ? 'cursor-not-allowed opacity-40'
+                                    : ''}"
                                 >
                                   {getLevelLabel(level as ResourcePermission)}
                                 </button>
@@ -1593,7 +1793,8 @@
                       label={m.api_keys_allowed_origins()}
                       description={m.api_keys_allowed_origins_desc()}
                       placeholder="https://example.com"
-                      required
+                      required={isCreateMode}
+                      disabled={readonly}
                     />
                   {/if}
 
@@ -1604,13 +1805,15 @@
                       label={m.api_keys_allowed_ips()}
                       description={m.api_keys_allowed_ips_desc()}
                       placeholder="192.168.1.0/24"
+                      disabled={readonly}
                     />
                   {/if}
 
                   <ExpirationPicker
                     bind:value={expiresAt}
                     maxDays={maxExpirationDays}
-                    {requireExpiration}
+                    requireExpiration={isCreateMode && requireExpiration}
+                    disabled={!isCreateMode}
                   />
 
                   <div>
@@ -1628,6 +1831,7 @@
                       min="1"
                       max={maxRateLimit ?? undefined}
                       class="h-11"
+                      disabled={readonly}
                     />
                     <p class="text-muted mt-2 text-xs">
                       {m.api_keys_rate_limit_help()}
@@ -1659,42 +1863,64 @@
         </div>
 
         <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-          {#if currentStep <= totalSteps}
-            <Button
-              variant="outline"
-              onclick={() => {
-                showDialog = false;
-                resetForm();
-              }}
-            >
-              {m.cancel()}
-            </Button>
-          {/if}
+          {#if isViewMode}
+            {#if currentStep < totalSteps}
+              <Button variant="default" onclick={nextStep} class="min-w-[80px] sm:min-w-[100px]">
+                {m.api_keys_next()}
+                <ChevronRight />
+              </Button>
+            {:else}
+              <Button
+                variant="outline"
+                onclick={() => {
+                  showDialog = false;
+                }}
+              >
+                {m.close()}
+              </Button>
+            {/if}
+          {:else}
+            {#if currentStep <= totalSteps}
+              <Button
+                variant="outline"
+                onclick={() => {
+                  showDialog = false;
+                  if (isCreateMode) resetForm();
+                }}
+              >
+                {m.cancel()}
+              </Button>
+            {/if}
 
-          {#if currentStep < totalSteps}
-            <Button variant="default" onclick={nextStep} class="min-w-[80px] sm:min-w-[100px]">
-              {m.api_keys_next()}
-              <ChevronRight />
-            </Button>
-          {:else if currentStep === totalSteps}
-            <Button
-              variant="default"
-              onclick={createKey}
-              disabled={isSubmitting}
-              class="min-w-[100px] sm:min-w-[140px] {isSubmitting ? 'submit-pulse' : ''}"
-            >
-              {#if isSubmitting}
-                <div
-                  class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
-                  aria-hidden="true"
-                ></div>
-                <span class="hidden sm:inline">{m.api_keys_creating()}</span>
-              {:else}
-                <Key />
-                <span class="hidden sm:inline">{m.api_keys_create()}</span>
-                <span class="sm:hidden">{m.api_keys_create_short()}</span>
-              {/if}
-            </Button>
+            {#if currentStep < totalSteps}
+              <Button variant="default" onclick={nextStep} class="min-w-[80px] sm:min-w-[100px]">
+                {m.api_keys_next()}
+                <ChevronRight />
+              </Button>
+            {:else if currentStep === totalSteps}
+              <Button
+                variant="default"
+                onclick={handleSubmit}
+                disabled={isSubmitting}
+                class="min-w-[100px] sm:min-w-[140px] {isSubmitting ? 'submit-pulse' : ''}"
+              >
+                {#if isSubmitting}
+                  <div
+                    class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                    aria-hidden="true"
+                  ></div>
+                  <span class="hidden sm:inline"
+                    >{isEditMode ? m.save() : m.api_keys_creating()}</span
+                  >
+                {:else if isEditMode}
+                  {m.save()}
+                {:else}
+                  <Key />
+                  <span class="hidden sm:inline">{m.api_keys_create()}</span>
+                  <span class="sm:hidden">{m.api_keys_create_short()}</span>
+                {/if}
+              </Button>
+            {/if}
           {/if}
         </div>
       </div>

@@ -1,18 +1,17 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { AlertCircle, Check, Copy, Key } from "lucide-svelte";
-  import type { Writable } from "svelte/store";
   import { toast } from "svelte-sonner";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
 
   let {
-    openController,
+    open = $bindable(false),
     secret,
     source = "created"
   } = $props<{
-    openController: Writable<boolean>;
+    open?: boolean;
     secret: string | null;
     source?: "created" | "rotated";
   }>();
@@ -36,7 +35,7 @@
   }
 </script>
 
-<Dialog.Root bind:open={$openController}>
+<Dialog.Root bind:open>
   <Dialog.Content class="sm:max-w-lg">
     <Dialog.Header>
       <Dialog.Title class="flex items-center gap-3">

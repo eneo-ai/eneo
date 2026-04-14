@@ -7860,6 +7860,11 @@ export interface components {
       max_expiration_days?: number | null;
       /** Max Rate Limit */
       max_rate_limit?: number | null;
+      /**
+       * Rotation Grace Hours
+       * @default 24
+       */
+      rotation_grace_hours?: number;
     };
     /** ApiKeyErrorResponse */
     ApiKeyErrorResponse: {
@@ -8008,6 +8013,8 @@ export interface components {
       auto_expire_unused_days?: number | null;
       /** Max Rate Limit Override */
       max_rate_limit_override?: number | null;
+      /** Rotation Grace Hours */
+      rotation_grace_hours?: number | null;
     };
     /** ApiKeyPolicyUpdate */
     ApiKeyPolicyUpdate: {
@@ -8023,6 +8030,8 @@ export interface components {
       auto_expire_unused_days?: number | null;
       /** Max Rate Limit Override */
       max_rate_limit_override?: number | null;
+      /** Rotation Grace Hours */
+      rotation_grace_hours?: number | null;
     };
     /**
      * ApiKeyScopeType

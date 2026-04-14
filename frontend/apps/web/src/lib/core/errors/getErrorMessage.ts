@@ -43,7 +43,8 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
   9011: () => m.eneo_error_9011(), // CLAUDE_ERROR
 
   // --- Internal errors ---
-  9024: () => m.eneo_error_9024() // INTERNAL_SERVER_ERROR
+  9024: () => m.eneo_error_9024(), // INTERNAL_SERVER_ERROR
+  9038: () => m.eneo_error_9038() // RESOURCE_NOT_READY
 };
 
 /**

@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -30,6 +30,7 @@ from intric.authentication.auth_models import (
     ApiKeyV2InDB,
     ResourcePermissions,
     compute_effective_state,
+    derive_permission_from_resource_permissions,
 )
 from intric.main.config import get_settings
 
@@ -73,6 +74,17 @@ class ApiKeyLifecycleService:
             else None
         )
 
+        # For sk_ keys with fine-grained permissions, derive the effective
+        # permission ceiling automatically. pk_ keys always use read.
+        effective_permission = request.permission
+        if (
+            request.key_type == ApiKeyType.SK
+            and request.resource_permissions is not None
+        ):
+            effective_permission = derive_permission_from_resource_permissions(
+                request.resource_permissions
+            )
+
         owner_user_id = (
             None if request.ownership == ApiKeyOwnership.SERVICE else user.id
         )
@@ -84,7 +96,7 @@ class ApiKeyLifecycleService:
             created_by_user_id=user.id,
             scope_type=request.scope_type.value,
             scope_id=request.scope_id,
-            permission=request.permission.value,
+            permission=effective_permission.value,
             key_type=request.key_type.value,
             key_hash=key_hash,
             hash_version=ApiKeyHashVersion.HMAC_SHA256.value,
@@ -150,6 +162,7 @@ class ApiKeyLifecycleService:
             key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
             if not skip_manage_authorization:
                 await self.policy_service.ensure_manage_authorized(key=key)
+                await self.policy_service.ensure_ownership_authorized(key=key)
             await self.policy_service.validate_key_state(key=key)
         except ApiKeyValidationError as exc:
             await self._log_lifecycle_failure(
@@ -176,6 +189,7 @@ class ApiKeyLifecycleService:
 
         record = await self.api_key_repo.create(
             tenant_id=key.tenant_id,
+            ownership=key.ownership,
             owner_user_id=key.owner_user_id,
             created_by_user_id=user.id,
             scope_type=key.scope_type,
@@ -197,7 +211,13 @@ class ApiKeyLifecycleService:
             rotated_from_key_id=key.id,
         )
 
-        grace_hours = self.settings.api_key_rotation_grace_hours
+        tenant = getattr(user, "tenant", None)
+        policy = cast(
+            dict[str, int | None], getattr(tenant, "api_key_policy", None) or {}
+        )
+        grace_hours = policy.get("rotation_grace_hours")
+        if grace_hours is None:
+            grace_hours = self.settings.api_key_rotation_grace_hours
         grace_until = datetime.now(timezone.utc) + timedelta(hours=grace_hours)
         await self.api_key_repo.update(
             key_id=key.id,
@@ -247,6 +267,7 @@ class ApiKeyLifecycleService:
             key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
             if not skip_manage_authorization:
                 await self.policy_service.ensure_manage_authorized(key=key)
+                await self.policy_service.ensure_ownership_authorized(key=key)
         except ApiKeyValidationError as exc:
             await self._log_lifecycle_failure(
                 action=ActionType.API_KEY_UPDATED,
@@ -332,6 +353,18 @@ class ApiKeyLifecycleService:
             )
             raise
 
+        # For sk_ keys: if resource_permissions are being updated, derive
+        # the effective permission ceiling automatically.
+        if (
+            key.key_type == ApiKeyType.SK.value
+            and "resource_permissions" in updates
+            and updates["resource_permissions"] is not None
+        ):
+            rp = ResourcePermissions.model_validate(updates["resource_permissions"])
+            updates["permission"] = derive_permission_from_resource_permissions(
+                rp
+            ).value
+
         updated = await self.api_key_repo.update(
             key_id=key.id,
             tenant_id=key.tenant_id,
@@ -393,6 +426,7 @@ class ApiKeyLifecycleService:
             key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
             if not skip_manage_authorization:
                 await self.policy_service.ensure_manage_authorized(key=key)
+                await self.policy_service.ensure_ownership_authorized(key=key)
         except ApiKeyValidationError as exc:
             await self._log_lifecycle_failure(
                 action=ActionType.API_KEY_SUSPENDED,
@@ -505,6 +539,7 @@ class ApiKeyLifecycleService:
             key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
             if not skip_manage_authorization:
                 await self.policy_service.ensure_manage_authorized(key=key)
+                await self.policy_service.ensure_ownership_authorized(key=key)
         except ApiKeyValidationError as exc:
             await self._log_lifecycle_failure(
                 action=ActionType.API_KEY_REACTIVATED,
@@ -612,6 +647,7 @@ class ApiKeyLifecycleService:
             key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
             if not skip_manage_authorization:
                 await self.policy_service.ensure_manage_authorized(key=key)
+                await self.policy_service.ensure_ownership_authorized(key=key)
         except ApiKeyValidationError as exc:
             await self._log_lifecycle_failure(
                 action=ActionType.API_KEY_REVOKED,

@@ -205,23 +205,18 @@ async def recalculate_tenant_usage_stats(container: Container, tenant_id: UUID):
         )
         return False
 
-    from dependency_injector import providers
-
     user_provider: Any = container.user
     tenant_provider: Any = container.tenant
     user_provider.override(providers.Object(user))
     tenant_provider.override(providers.Object(tenant))
 
-    # Get job service for queuing tasks
     job_service = container.job_service()
 
     try:
-        # Create task parameters
         task_params = UpdateUsageStatsTaskParams(
             user_id=user.id, tenant_id=tenant_id, full_recalc=True
         )
 
-        # Queue the background task
         await job_service.queue_job(
             Task.UPDATE_MODEL_USAGE_STATS,
             name=f"Usage stats recalculation for tenant {tenant_id}",
@@ -245,6 +240,12 @@ async def recalculate_tenant_usage_stats(container: Container, tenant_id: UUID):
             },
         )
         return False
+    finally:
+        try:
+            container.user.reset_override()
+            container.tenant.reset_override()
+        except Exception:
+            pass
 
 
 async def recalculate_tenant_usage_stats_direct(container: Container, tenant_id: UUID):

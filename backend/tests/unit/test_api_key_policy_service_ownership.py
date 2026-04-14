@@ -1,8 +1,9 @@
-import pytest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
+
+import pytest
 
 from intric.authentication.api_key_policy import ApiKeyPolicyService
 from intric.authentication.api_key_resolver import ApiKeyValidationError
@@ -12,6 +13,8 @@ from intric.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyType,
+    ResourcePermissionLevel,
+    ResourcePermissions,
 )
 from intric.roles.permissions import Permission
 
@@ -159,6 +162,34 @@ async def test_service_key_tenant_read_accepted_without_guardrails():
 
     service.ensure_creator_authorized = AsyncMock(return_value=None)
     await service.validate_create_request(request=request)
+
+
+@pytest.mark.asyncio
+async def test_service_key_uses_derived_resource_permission_for_guardrail():
+    """Service keys cannot bypass guardrails with read permission + write/admin resources."""
+    service = _service_with_user([], permissions=[Permission.ADMIN])
+
+    request = ApiKeyCreateRequest(
+        name="Service key derived admin",
+        key_type=ApiKeyType.SK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        ownership=ApiKeyOwnership.SERVICE,
+        resource_permissions=ResourcePermissions(
+            assistants=ResourcePermissionLevel.READ,
+            apps=ResourcePermissionLevel.ADMIN,
+            spaces=ResourcePermissionLevel.NONE,
+            knowledge=ResourcePermissionLevel.NONE,
+        ),
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_create_request(request=request)
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "IP allowlist or expiration" in exc.value.message
 
 
 @pytest.mark.asyncio

@@ -1235,7 +1235,11 @@ async def get_api_key_policy(
     await admin_service.validate_admin_permission()
 
     user = container.user()
-    return ApiKeyPolicyResponse.model_validate(user.tenant.api_key_policy or {})
+    policy = dict(user.tenant.api_key_policy or {})
+    if "rotation_grace_hours" not in policy:
+        settings = get_settings()
+        policy["rotation_grace_hours"] = settings.api_key_rotation_grace_hours
+    return ApiKeyPolicyResponse.model_validate(policy)
 
 
 @router.patch(
@@ -1283,9 +1287,14 @@ async def update_api_key_policy(
 
     await admin_service.validate_admin_permission()
 
+    settings = get_settings()
+
     updates = request.model_dump(exclude_unset=True)
     if not updates:
-        return ApiKeyPolicyResponse.model_validate(user.tenant.api_key_policy or {})
+        policy = dict(user.tenant.api_key_policy or {})
+        if "rotation_grace_hours" not in policy:
+            policy["rotation_grace_hours"] = settings.api_key_rotation_grace_hours
+        return ApiKeyPolicyResponse.model_validate(policy)
 
     tenant_service = container.tenant_service()
     before_policy: dict[str, object] = dict(user.tenant.api_key_policy or {})
@@ -1307,6 +1316,8 @@ async def update_api_key_policy(
         ),
     )
 
+    if "rotation_grace_hours" not in after_policy:
+        after_policy["rotation_grace_hours"] = settings.api_key_rotation_grace_hours
     return ApiKeyPolicyResponse.model_validate(after_policy)
 
 

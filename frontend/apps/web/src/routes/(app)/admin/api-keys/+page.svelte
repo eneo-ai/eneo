@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { writable } from "svelte/store";
   import { resolve } from "$app/paths";
   import { Page, Settings } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -12,13 +11,14 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { IntricError } from "@intric/intric-js";
-  import type { ApiKeyCreatedResponse, ApiKeyV2, SpaceSparse, UserSparse } from "@intric/intric-js";
+  import type { ApiKeyCreatedResponse, SpaceSparse, UserSparse } from "@intric/intric-js";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+  import type { AdminApiKey } from "$lib/features/api-keys/apiKeyTableUtils";
   import AdminApiKeyTable from "./AdminApiKeyTable.svelte";
   import ApiKeyPolicyPanel from "./ApiKeyPolicyPanel.svelte";
   import SuperKeyStatusPanel from "./SuperKeyStatusPanel.svelte";
-  import ScopeResourceSelector from "../../account/api-keys/ScopeResourceSelector.svelte";
-  import ApiKeySecretDialog from "../../account/api-keys/ApiKeySecretDialog.svelte";
+  import ScopeResourceSelector from "$lib/features/api-keys/ScopeResourceSelector.svelte";
+  import ApiKeySecretDialog from "$lib/features/api-keys/ApiKeySecretDialog.svelte";
   import {
     Filter,
     X,
@@ -38,12 +38,6 @@
   } from "$lib/features/api-keys/notificationPreferences";
 
   const intric = getIntric();
-
-  type AdminApiKey = ApiKeyV2 & {
-    owner_user?: { id: string; email?: string | null; username?: string | null } | null;
-    created_by_user?: { id: string; email?: string | null; username?: string | null } | null;
-    search_match_reasons?: string[] | null;
-  };
 
   let keys = $state<AdminApiKey[]>([]);
   let loading = $state(false);
@@ -77,7 +71,7 @@
 
   // UI states
   let showFilters = $state(true);
-  const secretDialogOpen = writable(false);
+  let secretDialogOpen = $state(false);
   let latestSecret = $state<string | null>(null);
   let secretSource = $state<"created" | "rotated">("created");
   let trackingConfigLoading = $state(false);
@@ -457,20 +451,19 @@
     }, 300);
   }
 
+  let searchScopeContainerRef: HTMLDivElement | undefined = $state();
+  let userSearchContainerRef: HTMLDivElement | undefined = $state();
+
   function handleClickOutside(event: MouseEvent) {
     const target = event.target as HTMLElement;
     if (
       showSearchScopeDropdown &&
-      !target.closest(".api-keys-search-scope-container") &&
-      !target.closest(".scope-dropdown-container")
+      searchScopeContainerRef &&
+      !searchScopeContainerRef.contains(target)
     ) {
       showSearchScopeDropdown = false;
     }
-    if (
-      showUserDropdown &&
-      !target.closest(".api-keys-user-search-container") &&
-      !target.closest(".user-dropdown-container")
-    ) {
+    if (showUserDropdown && userSearchContainerRef && !userSearchContainerRef.contains(target)) {
       showUserDropdown = false;
     }
   }
@@ -512,7 +505,7 @@
   ) {
     latestSecret = response.secret;
     secretSource = source;
-    secretDialogOpen.set(true);
+    secretDialogOpen = true;
     void loadKeys({ reset: true });
   }
 
@@ -723,69 +716,69 @@
               class="border-default space-y-5 border-t px-6 py-5"
             >
               <!-- Search -->
-              <div
-                class="api-keys-user-search-container scope-dropdown-container user-dropdown-container relative min-w-[280px] flex-1"
-              >
+              <div bind:this={userSearchContainerRef} class="relative min-w-[280px] flex-1">
                 <div class="absolute top-1/2 left-2 z-10 flex -translate-y-1/2 items-center">
-                  <button
-                    type="button"
-                    onclick={() => (showSearchScopeDropdown = !showSearchScopeDropdown)}
-                    aria-haspopup="listbox"
-                    aria-expanded={showSearchScopeDropdown}
-                    class="text-muted bg-subtle/80 border-default/40 hover:bg-hover hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-all duration-150 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
-                  >
-                    {searchScope === "entity"
-                      ? m.audit_search_scope_entity()
-                      : m.audit_search_scope_user()}
-                    <ChevronDown
-                      class="h-3 w-3 transition-transform duration-150 {showSearchScopeDropdown
-                        ? 'rotate-180'
-                        : ''}"
-                    />
-                  </button>
-
-                  {#if showSearchScopeDropdown}
-                    <div
-                      role="listbox"
-                      class="bg-primary border-default absolute top-full left-0 z-30 mt-1.5 min-w-[140px] overflow-hidden rounded-lg border py-1 shadow-lg"
-                      transition:slide={{ duration: 150 }}
+                  <div bind:this={searchScopeContainerRef} class="relative">
+                    <button
+                      type="button"
+                      onclick={() => (showSearchScopeDropdown = !showSearchScopeDropdown)}
+                      aria-haspopup="listbox"
+                      aria-expanded={showSearchScopeDropdown}
+                      class="text-muted bg-subtle/80 border-default/40 hover:bg-hover hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-all duration-150 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
                     >
-                      <button
-                        role="option"
-                        aria-selected={searchScope === "entity"}
-                        type="button"
-                        onclick={() => handleSearchScopeChange("entity")}
-                        class="w-full px-3 py-2 text-left text-sm transition-colors {searchScope ===
-                        'entity'
-                          ? 'bg-accent-default/5 text-accent-default font-medium'
-                          : 'text-default hover:bg-subtle'}"
+                      {searchScope === "entity"
+                        ? m.audit_search_scope_entity()
+                        : m.audit_search_scope_user()}
+                      <ChevronDown
+                        class="h-3 w-3 transition-transform duration-150 {showSearchScopeDropdown
+                          ? 'rotate-180'
+                          : ''}"
+                      />
+                    </button>
+
+                    {#if showSearchScopeDropdown}
+                      <div
+                        role="listbox"
+                        class="bg-primary border-default absolute top-full left-0 z-30 mt-1.5 min-w-[140px] overflow-hidden rounded-lg border py-1 shadow-lg"
+                        transition:slide={{ duration: 150 }}
                       >
-                        <span class="flex items-center justify-between gap-2">
-                          {m.audit_search_scope_entity()}
-                          {#if searchScope === "entity"}
-                            <Check class="text-accent-default h-4 w-4" />
-                          {/if}
-                        </span>
-                      </button>
-                      <button
-                        role="option"
-                        aria-selected={searchScope === "user"}
-                        type="button"
-                        onclick={() => handleSearchScopeChange("user")}
-                        class="w-full px-3 py-2 text-left text-sm transition-colors {searchScope ===
-                        'user'
-                          ? 'bg-accent-default/5 text-accent-default font-medium'
-                          : 'text-default hover:bg-subtle'}"
-                      >
-                        <span class="flex items-center justify-between gap-2">
-                          {m.audit_search_scope_user()}
-                          {#if searchScope === "user"}
-                            <Check class="text-accent-default h-4 w-4" />
-                          {/if}
-                        </span>
-                      </button>
-                    </div>
-                  {/if}
+                        <button
+                          role="option"
+                          aria-selected={searchScope === "entity"}
+                          type="button"
+                          onclick={() => handleSearchScopeChange("entity")}
+                          class="w-full px-3 py-2 text-left text-sm transition-colors {searchScope ===
+                          'entity'
+                            ? 'bg-accent-default/5 text-accent-default font-medium'
+                            : 'text-default hover:bg-subtle'}"
+                        >
+                          <span class="flex items-center justify-between gap-2">
+                            {m.audit_search_scope_entity()}
+                            {#if searchScope === "entity"}
+                              <Check class="text-accent-default h-4 w-4" />
+                            {/if}
+                          </span>
+                        </button>
+                        <button
+                          role="option"
+                          aria-selected={searchScope === "user"}
+                          type="button"
+                          onclick={() => handleSearchScopeChange("user")}
+                          class="w-full px-3 py-2 text-left text-sm transition-colors {searchScope ===
+                          'user'
+                            ? 'bg-accent-default/5 text-accent-default font-medium'
+                            : 'text-default hover:bg-subtle'}"
+                        >
+                          <span class="flex items-center justify-between gap-2">
+                            {m.audit_search_scope_user()}
+                            {#if searchScope === "user"}
+                              <Check class="text-accent-default h-4 w-4" />
+                            {/if}
+                          </span>
+                        </button>
+                      </div>
+                    {/if}
+                  </div>
 
                   <div class="bg-default/40 ml-2 h-6 w-px"></div>
                 </div>
@@ -1331,6 +1324,10 @@
   </Page.Main>
 </Page.Root>
 
-<svelte:window onclick={handleClickOutside} />
+<svelte:window
+  onclick={(e) => {
+    if (showSearchScopeDropdown || showUserDropdown) handleClickOutside(e);
+  }}
+/>
 
-<ApiKeySecretDialog openController={secretDialogOpen} secret={latestSecret} source={secretSource} />
+<ApiKeySecretDialog bind:open={secretDialogOpen} secret={latestSecret} source={secretSource} />

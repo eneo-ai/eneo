@@ -74,7 +74,7 @@ class App:
         transcription_model: "TranscriptionModel | None",
         completion_model_kwargs: ModelKwargs | None,
         input_fields: list[InputField],
-        attachments: list[FileInfo],
+        attachments: list[File],
         published: bool,
         source_template: AppTemplate | None = None,
         data_retention_days: Optional[int] = None,
@@ -156,11 +156,11 @@ class App:
         self._input_fields = input_fields
 
     @property
-    def attachments(self) -> list[FileInfo]:
+    def attachments(self) -> list[File]:
         return self._attachments
 
     @attachments.setter
-    def attachments(self, attachments: list[FileInfo]):
+    def attachments(self, attachments: list[File]):
         for attachment in attachments:
             if attachment.mimetype is None or not TextMimeTypes.has_value(
                 attachment.mimetype
@@ -181,7 +181,7 @@ class App:
         completion_model: "CompletionModel | CompletionModelSparse | None" = None,
         completion_model_kwargs: ModelKwargs | None = None,
         input_fields: list[InputField] | None = None,
-        attachments: list[FileInfo] | None = None,
+        attachments: list[File] | None = None,
         published: bool | None = None,
         transcription_model: "TranscriptionModel | None" = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
@@ -317,9 +317,6 @@ class App:
             files=image_files + text_files,
             model=cast(AICompletionModel, self.completion_model),
             prompt=self._get_prompt_text(),
-            prompt_files=[
-                File.model_validate(attachment.model_dump())
-                for attachment in self.attachments
-            ],
+            prompt_files=self.attachments,
             model_kwargs=self.completion_model_kwargs,
         )
