@@ -189,6 +189,7 @@ class ApiKeyLifecycleService:
 
         record = await self.api_key_repo.create(
             tenant_id=key.tenant_id,
+            ownership=key.ownership,
             owner_user_id=key.owner_user_id,
             created_by_user_id=user.id,
             scope_type=key.scope_type,
