@@ -269,7 +269,9 @@ async def test_rotate_key_uses_default_when_policy_grace_period_is_null(user):
     repo.create.return_value = new_key
     repo.update.return_value = key
     policy = SimpleNamespace(
-        ensure_manage_authorized=AsyncMock(), validate_key_state=AsyncMock()
+        ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
+        validate_key_state=AsyncMock(),
     )
     audit = AsyncMock()
 
