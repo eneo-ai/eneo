@@ -47,6 +47,13 @@ PY
     exec celery -A src.intric.flows.runtime.celery_app:celery_app worker --loglevel=INFO --queues "${queue}"
 fi
 
+# Check if running as Celery beat (flows reconciliation scheduler)
+if [[ "${RUN_AS_CELERY_BEAT,,}" == "true" ]]; then
+    echo "Starting Celery beat for flow reconciliation scheduling"
+    echo "Launching..."
+    exec celery -A src.intric.flows.runtime.celery_app:celery_app beat --loglevel=INFO --pidfile=
+fi
+
 # Skip Alembic migrations in OpenAPI-only mode
 if [[ "${OPENAPI_ONLY_MODE,,}" != "true" ]]; then
     alembic upgrade head
@@ -60,4 +67,8 @@ fi
 
 echo "Starting Eneo backend with $workers workers"
 
-exec gunicorn src.intric.server.main:app --workers $workers --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+exec gunicorn \
+    src.intric.server.main:app \
+    --workers $workers \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 0.0.0.0:8000

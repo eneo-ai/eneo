@@ -86,6 +86,9 @@ uv run arq src.intric.worker.arq.WorkerSettings
 ## Celery
 uv run celery -A src.intric.flows.runtime.celery_app:celery_app worker --loglevel=INFO --queues flows.execute
 
+## Celery beat
+uv run celery -A src.intric.flows.runtime.celery_app:celery_app beat --loglevel=INFO --pidfile=
+
 ## Verify Installation
 
 1. **Access the Application**

@@ -148,6 +148,24 @@ services:
     depends_on:
       - backend
 
+  celery-beat-flows:
+    # Flow reconciliation scheduler (Celery beat). Required for stale-run reconciliation.
+    image: ghcr.io/eneo-ai/eneo-backend:latest
+    container_name: eneo_celery_beat_flows
+    restart: unless-stopped
+    environment:
+      - RUN_AS_CELERY_BEAT=true
+    env_file:
+      - env_backend.env
+    volumes:
+      - eneo_backend_data:/app/data
+      - eneo_temp_files:/tmp
+    networks:
+      - proxy_tier
+    depends_on:
+      - backend
+      - redis
+
   db:
     image: pgvector/pgvector:pg16
     container_name: eneo_db
