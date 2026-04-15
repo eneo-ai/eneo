@@ -182,7 +182,9 @@
       >
         <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
         <span class="text-[13px] font-medium tracking-[-0.005em]"
-          >{m.flow_dry_run_issues({ count: String(errorCount) })}</span
+          >{errorCount === 1
+            ? m.flow_dry_run_issues({ count: "1" })
+            : m.flow_dry_run_issues_plural({ count: String(errorCount) })}</span
         >
       </div>
     {/if}

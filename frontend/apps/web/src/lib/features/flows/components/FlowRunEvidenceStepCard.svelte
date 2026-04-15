@@ -88,7 +88,7 @@
   let inputOpen = $state(false);
 </script>
 
-<Card.Root class="overflow-hidden transition-shadow hover:shadow-md">
+<Card.Root class="overflow-hidden">
   <button
     class="hover:bg-hover-dimmer flex w-full items-center justify-between px-5 py-3.5 text-left"
     aria-expanded={expanded}
@@ -194,7 +194,7 @@
                       ? artifact.name.split(".").pop()?.toLowerCase()
                       : ""}
                     <button
-                      class="group border-default bg-primary inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition-all hover:-translate-y-px hover:shadow-md"
+                      class="group border-default bg-primary hover:border-stronger hover:bg-hover-dimmer focus-visible:ring-accent-default/30 inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
                       onclick={() => void onDownloadArtifact(artifact.file_id)}
                     >
                       <IconArrowDownToLine class="text-muted group-hover:text-secondary size-4" />

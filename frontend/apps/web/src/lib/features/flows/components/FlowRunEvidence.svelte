@@ -277,22 +277,27 @@
 {:else}
   <div class="flex flex-col gap-4">
     {#if $mode === "power_user"}
+      <!-- Power-user toolbar already includes status + trace + redaction badges, so the
+           summary card is only rendered for Enkel mode to avoid duplication. -->
       <FlowRunEvidenceToolbar
         debugExport={evidence.debug_export}
         {evidence}
         {copiedKey}
+        runStatusLabel={getStatusLabel(runStatus)}
+        statusColorClass={getStatusColor(runStatus)}
+        traceId={evidence.debug_export?.run?.trace_id ?? null}
         onDownloadCanonicalEvidence={downloadCanonicalEvidenceExport}
         onCopyPayload={copyPayload}
         onDownloadJsonArtifact={downloadJsonArtifact}
       />
+    {:else}
+      <FlowRunEvidenceSummary
+        runStatusLabel={getStatusLabel(runStatus)}
+        statusColorClass={getStatusColor(runStatus)}
+        traceId={evidence.debug_export?.run?.trace_id ?? null}
+        redactionApplied={evidence.debug_export?.security?.redaction_applied === true}
+      />
     {/if}
-
-    <FlowRunEvidenceSummary
-      runStatusLabel={getStatusLabel(runStatus)}
-      statusColorClass={getStatusColor(runStatus)}
-      traceId={evidence.debug_export?.run?.trace_id ?? null}
-      redactionApplied={evidence.debug_export?.security?.redaction_applied === true}
-    />
 
     {#each evidence.step_results as result (result.id ?? result.step_order)}
       {@const stepDef = (

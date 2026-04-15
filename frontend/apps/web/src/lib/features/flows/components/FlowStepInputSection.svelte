@@ -183,7 +183,7 @@
 
       {#if runtimeInputConfig.enabled}
         <div
-          class="border-default/40 ml-1 flex flex-col gap-4 border-l-2 pl-3 sm:ml-2 sm:pl-4"
+          class="border-default/40 ml-1 flex flex-col gap-4 border-l pl-3 sm:ml-2 sm:pl-4"
           transition:slide={{ duration: 200 }}
         >
           <label class="flex items-start gap-3">

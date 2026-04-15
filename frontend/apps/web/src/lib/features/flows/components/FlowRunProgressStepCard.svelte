@@ -86,11 +86,9 @@
 </script>
 
 <Card.Root
-  class="overflow-hidden transition-shadow duration-200 {isRunning
+  class="overflow-hidden {isRunning
     ? 'ring-accent-default/40 bg-accent-dimmer/20 ring-2'
-    : ''} {canExpand && !isRunning ? 'hover:shadow-md' : ''} {isFailed
-    ? 'ring-negative-default/30 ring-1'
-    : ''}"
+    : ''} {isFailed ? 'ring-negative-default/30 ring-1' : ''}"
 >
   <button
     type="button"
@@ -196,7 +194,7 @@
                       : ""}
                     <button
                       type="button"
-                      class="group border-default bg-primary inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition-all hover:-translate-y-px hover:shadow-md"
+                      class="group border-default bg-primary hover:border-stronger hover:bg-hover-dimmer focus-visible:ring-accent-default/30 inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
                       onclick={() => void onDownloadArtifact(artifact.file_id)}
                     >
                       <IconArrowDownToLine class="text-muted group-hover:text-secondary size-4" />
