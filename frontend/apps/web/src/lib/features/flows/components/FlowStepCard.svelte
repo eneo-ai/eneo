@@ -20,6 +20,7 @@
     canMoveUp,
     canMoveDown,
     hasValidationError = false,
+    index = 0,
     onClick,
     onMoveUp,
     onMoveDown,
@@ -33,6 +34,7 @@
     canMoveUp: boolean;
     canMoveDown: boolean;
     hasValidationError?: boolean;
+    index?: number;
     onClick?: () => void;
     onMoveUp?: () => void;
     onMoveDown?: () => void;
@@ -147,9 +149,11 @@
 
 <div
   role="listitem"
-  class="group flex w-full items-start gap-2.5 border-b px-3.5 py-3 text-left transition-colors duration-150
+  class="step-card-row group flex w-full items-start gap-2.5 border-b px-3.5 py-3 text-left transition-colors duration-150
     {isActive ? 'border-b-default bg-accent-dimmer/40' : 'border-default hover:bg-hover-dimmer/40'}
     active:bg-hover-default"
+  style:animation-delay="{Math.min(index, 10) * 50}ms"
+  style:animation-fill-mode="both"
 >
   <button
     type="button"
@@ -158,9 +162,9 @@
     onclick={() => onClick?.()}
     onkeydown={handleKeydown}
   >
-    <!-- Step order badge — filled circle -->
+    <!-- Step order tile — rounded square (matches AI Builder rhythm) -->
     <div
-      class="relative flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors duration-150"
+      class="relative flex size-7 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold tabular-nums transition-colors duration-150"
       class:bg-accent-default={isActive}
       class:text-on-fill={isActive}
       class:bg-hover-default={!isActive}
@@ -169,7 +173,7 @@
       <span>{step.step_order}</span>
       {#if hasValidationError}
         <span
-          class="bg-negative-stronger absolute -top-0.5 -right-0.5 size-2 rounded-full"
+          class="bg-negative-stronger absolute -top-0.5 -right-0.5 size-2 rounded-full shadow-[0_0_0_2px_var(--background-primary)]"
           aria-label={m.flow_validation_step_has_error()}
         ></span>
       {/if}
@@ -177,26 +181,29 @@
 
     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
       <span
-        class="truncate text-sm leading-snug"
+        class="truncate text-sm leading-snug tracking-[-0.005em]"
         class:font-semibold={isActive}
         class:font-medium={!isActive}
         title={label}>{label}</span
       >
 
-      <div class="text-secondary truncate text-xs">
+      <div class="text-secondary truncate text-xs leading-snug">
         {sourceSummary}
       </div>
 
       {#if step.output_mode === "template_fill" || step.output_mode === "transcribe_only"}
         <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
           {#if step.output_mode === "template_fill"}
-            <Badge variant="secondary" class="bg-accent-dimmer text-accent-stronger text-[11px]">
+            <Badge
+              variant="secondary"
+              class="bg-accent-dimmer text-accent-stronger h-5 px-1.5 text-[10px] font-semibold tracking-wide uppercase"
+            >
               {m.flow_template_fill_card_badge()}
             </Badge>
             {#if templateReadiness}
               <Badge
                 variant="secondary"
-                class="text-[11px] {templateReadiness.incomplete
+                class="h-5 px-1.5 text-[10px] font-semibold tabular-nums {templateReadiness.incomplete
                   ? 'bg-warning-dimmer text-warning-stronger'
                   : 'bg-positive-dimmer text-positive-stronger'}"
               >
@@ -204,7 +211,10 @@
               </Badge>
             {/if}
           {:else}
-            <Badge variant="secondary" class="bg-accent-dimmer text-accent-stronger text-[11px]">
+            <Badge
+              variant="secondary"
+              class="bg-accent-dimmer text-accent-stronger h-5 px-1.5 text-[10px] font-semibold tracking-wide uppercase"
+            >
               {m.flow_transcribe_only_title()}
             </Badge>
           {/if}
@@ -212,17 +222,26 @@
       {/if}
 
       {#if isPowerUser}
-        <div class="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
-          <Badge variant="secondary" class="text-[11px] {inputBadgeClass}">{inputTypeLabel}</Badge>
-          <span class="text-muted text-[11px]">→</span>
-          <Badge variant="secondary" class="text-[11px] {outputBadgeClass}">{railOutputLabel}</Badge
+        <div class="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          <Badge
+            variant="secondary"
+            class="h-5 px-1.5 text-[10px] font-semibold tracking-wide {inputBadgeClass}"
+            >{inputTypeLabel}</Badge
           >
-          <span class="text-muted text-[11px]">·</span>
-          <span class="text-accent-stronger text-[11px] font-medium">
+          <span class="text-muted text-[10px]" aria-hidden="true">&rarr;</span>
+          <Badge
+            variant="secondary"
+            class="h-5 px-1.5 text-[10px] font-semibold tracking-wide {outputBadgeClass}"
+            >{railOutputLabel}</Badge
+          >
+          <span class="text-muted text-[10px]" aria-hidden="true">&middot;</span>
+          <span class="text-accent-stronger text-[10px] font-medium tabular-nums">
             {m.flow_step_card_chain_short()}: {nextChannelLabel}
           </span>
           {#if mcpSummary?.hasConfiguredMcp}
-            <Badge variant="secondary" class="bg-warning-dimmer text-warning-stronger text-[11px]"
+            <Badge
+              variant="secondary"
+              class="bg-warning-dimmer text-warning-stronger h-5 px-1.5 text-[10px] font-semibold tabular-nums"
               >{mcpSummary.enabledToolCount > 0
                 ? m.flow_step_mcp_tools_badge({ count: String(mcpSummary.enabledToolCount) })
                 : m.flow_step_mcp_servers_badge({ count: String(mcpSummary.serverCount) })}</Badge
@@ -235,12 +254,12 @@
 
   {#if !isPublished}
     <div
-      class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+      class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-focus-within:opacity-100 group-hover:opacity-100"
       class:opacity-100={isActive}
     >
       <button
         type="button"
-        class="text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+        class="text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
         onclick={(e) => {
           e.stopPropagation();
           onMoveUp?.();
@@ -257,13 +276,14 @@
           stroke-width="2.5"
           stroke-linecap="round"
           stroke-linejoin="round"
+          aria-hidden="true"
         >
           <path d="M8 12V4M4 7l4-3 4 3" />
         </svg>
       </button>
       <button
         type="button"
-        class="text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+        class="text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
         onclick={(e) => {
           e.stopPropagation();
           onMoveDown?.();
@@ -280,13 +300,14 @@
           stroke-width="2.5"
           stroke-linecap="round"
           stroke-linejoin="round"
+          aria-hidden="true"
         >
           <path d="M8 4v8M4 9l4 3 4-3" />
         </svg>
       </button>
       <button
         type="button"
-        class="text-secondary hover:bg-hover-dimmer hover:text-negative-stronger focus-visible:ring-accent-default inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:outline-none"
+        class="text-secondary hover:bg-hover-dimmer hover:text-negative-stronger focus-visible:ring-accent-default inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
         onclick={(e) => {
           e.stopPropagation();
           onRemove?.();
@@ -299,3 +320,22 @@
     </div>
   {/if}
 </div>
+
+<style>
+  @media (prefers-reduced-motion: no-preference) {
+    .step-card-row {
+      animation: step-card-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+  }
+
+  @keyframes step-card-in {
+    from {
+      opacity: 0;
+      transform: translateX(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+</style>

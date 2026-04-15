@@ -143,7 +143,7 @@
     >
       {#if data?.dataType && getDataTypeLabel(data.dataType)}
         <button
-          class="rounded px-1.5 py-0.5 text-[10px] font-medium hover:bg-black/5 dark:hover:bg-white/10"
+          class="hover:bg-foreground/5 dark:hover:bg-foreground/10 rounded px-1.5 py-0.5 text-[10px] font-medium"
           onclick={(event) => {
             event.stopPropagation();
             inspectEdge();
@@ -156,7 +156,7 @@
 
       {#if !data?.readOnly && data?.allowInsert !== false}
         <button
-          class="rounded p-0.5 hover:bg-black/5 dark:hover:bg-white/10"
+          class="hover:bg-foreground/5 dark:hover:bg-foreground/10 rounded p-0.5"
           onclick={(event) => {
             event.stopPropagation();
             insertStep();

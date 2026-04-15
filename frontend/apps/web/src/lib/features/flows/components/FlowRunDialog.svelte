@@ -8,7 +8,11 @@
     UploadedFile
   } from "@intric/intric-js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { IntricError } from "@intric/intric-js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { toast } from "$lib/components/toast";
@@ -180,9 +184,6 @@
   );
   const progressLabel = $derived(
     wizardPages.length > 0 ? labels.progress(currentPageIndex + 1, wizardPages.length) : ""
-  );
-  const progressPercent = $derived(
-    wizardPages.length > 0 ? ((currentPageIndex + 1) / wizardPages.length) * 100 : 0
   );
   const canGoNext = $derived(
     currentPageIndex < wizardPages.length - 1 &&
@@ -671,100 +672,111 @@
 
 <Dialog.Root bind:open>
   <Dialog.Content
-    class="!flex max-h-[90vh] min-h-[24rem] !max-w-5xl flex-col !gap-0 overflow-hidden !rounded-2xl !p-0 sm:min-h-[30rem]"
+    class="!flex max-h-[92vh] min-h-[24rem] !max-w-5xl flex-col !gap-0 overflow-hidden !rounded-2xl !p-0 sm:min-h-[30rem]"
     showCloseButton={false}
     interactOutsideBehavior={closeBehavior}
     escapeKeydownBehavior={closeBehavior}
     onInteractOutside={handleInteractOutside}
     onEscapeKeydown={handleEscapeKeydown}
   >
-    <div class="shrink-0 px-4 pt-5 sm:px-6 sm:pt-7 lg:px-8">
-      <div class="flex items-start justify-between">
-        <div>
-          <Dialog.Title class="text-xl font-bold">{m.flow_run_trigger()}</Dialog.Title>
-          <Dialog.Description class="text-secondary mt-1 text-sm">
-            {flow.name}
+    <header class="border-default/60 shrink-0 border-b px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
+      <div class="flex items-start justify-between gap-4">
+        <div class="min-w-0">
+          <Dialog.Title class="text-primary text-lg font-semibold tracking-tight sm:text-xl">
+            {m.flow_run_trigger()}
+          </Dialog.Title>
+          <Dialog.Description
+            class="text-secondary mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+          >
+            <span class="text-primary truncate font-medium">{flow.name}</span>
             {#if stepCount > 0}
-              <span class="text-muted ml-1"
-                >({m.flow_run_step_count({ count: String(stepCount) })})</span
-              >
+              <Badge variant="outline" class="h-5 text-xs font-medium tabular-nums">
+                {m.flow_run_step_count({ count: String(stepCount) })}
+              </Badge>
             {/if}
           </Dialog.Description>
         </div>
-        <button
-          onclick={() => handleCancel()}
-          class="text-muted hover:text-primary -mt-2 -mr-2 flex size-11 shrink-0 items-center justify-center rounded-lg transition-colors"
-          type="button"
-          aria-label={m.cancel()}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          class="text-muted hover:text-primary -mt-1 -mr-1 shrink-0"
+          aria-label={m.flow_run_trigger_close()}
+          onclick={handleCancel}
         >
-          <IconXMark class="size-4" />
-        </button>
+          <IconXMark />
+        </Button>
       </div>
-    </div>
+    </header>
 
     {#if runContract === null && !runContractError}
-      <div class="mt-6 flex flex-col gap-4 px-4 sm:px-6 lg:px-8">
-        <div class="bg-secondary/10 h-[7rem] animate-pulse rounded-2xl"></div>
-        <div class="bg-secondary/10 h-[10rem] animate-pulse rounded-xl"></div>
+      <div class="mt-5 flex flex-col gap-3 px-4 sm:px-6 lg:px-8" aria-busy="true">
+        <div class="bg-secondary/25 h-[6rem] animate-pulse rounded-xl"></div>
+        <div class="bg-secondary/25 h-[8rem] animate-pulse rounded-xl"></div>
       </div>
     {:else if runContractError}
-      <div
-        class="border-negative-default/20 bg-negative-dimmer text-negative-stronger mx-4 mt-6 rounded-lg border px-4 py-3 text-sm sm:mx-6 lg:mx-8"
-        role="alert"
-      >
-        <p>{runContractError}</p>
-        <button
-          class="text-negative-stronger mt-2 text-xs font-medium underline underline-offset-2 hover:no-underline"
-          onclick={() => {
-            runContractLoadedForFlowId = null;
-          }}
-        >
-          {labels.retryUpload}
-        </button>
+      <div class="mx-4 mt-5 sm:mx-6 lg:mx-8">
+        <Alert.Root variant="destructive">
+          <Alert.Description>{runContractError}</Alert.Description>
+          <Alert.Action>
+            <Button
+              variant="outline"
+              size="sm"
+              onclick={() => {
+                runContractLoadedForFlowId = null;
+              }}
+            >
+              {labels.retryUpload}
+            </Button>
+          </Alert.Action>
+        </Alert.Root>
       </div>
     {:else if currentPage}
-      <div class="shrink-0 px-4 sm:px-6 lg:px-8">
-        <div class="bg-secondary/10 mt-5 rounded-2xl px-4 py-4 ring-1 ring-black/[0.04] sm:px-5">
-          <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_18rem] md:items-start">
-            <div class="min-w-0">
-              <p class="sr-only">{progressLabel}</p>
-              <h3 class="mt-0 text-lg font-semibold" data-wizard-heading tabindex="-1">
-                {currentPage.title}
-              </h3>
-              <p class="text-secondary mt-1 text-sm leading-relaxed">
-                {currentPage.description}
-              </p>
-            </div>
-            <nav class="flex items-center gap-1.5 md:pt-3" aria-label={progressLabel}>
-              {#each wizardPages as page, pageIndex (page.id)}
-                {@const isCompleted = pageIndex < currentPageIndex}
-                {@const isCurrent = pageIndex === currentPageIndex}
-                {@const isClickable = isCompleted}
-                <button
-                  type="button"
-                  title={page.title}
-                  class="focus-visible:ring-accent-default relative h-1.5 flex-1 rounded-full transition-all duration-200 before:absolute before:-inset-x-0 before:-inset-y-5 before:content-[''] focus-visible:ring-2 focus-visible:ring-offset-2 {isCompleted
-                    ? 'bg-accent-default'
-                    : isCurrent
-                      ? 'bg-accent-default/60'
-                      : 'bg-hover-dimmer'}"
-                  aria-label="{page.title}{isCompleted ? ' (klar)' : ''}"
-                  aria-current={isCurrent ? "step" : undefined}
-                  disabled={!isClickable}
-                  class:cursor-pointer={isClickable}
-                  class:cursor-default={!isClickable}
-                  onclick={() => {
-                    if (isClickable) goToPageById(page.id);
-                  }}
-                ></button>
-              {/each}
-            </nav>
+      <div class="border-default/60 shrink-0 border-b px-4 py-4 sm:px-6 lg:px-8">
+        <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_17rem] md:items-center">
+          <div class="min-w-0">
+            <p class="text-muted mb-1 text-[0.6875rem] font-medium tracking-[0.08em] uppercase">
+              {progressLabel}
+            </p>
+            <h3
+              class="text-primary text-base font-semibold tracking-tight sm:text-lg"
+              data-wizard-heading
+              tabindex="-1"
+            >
+              {currentPage.title}
+            </h3>
+            <p class="text-secondary mt-1 text-sm leading-relaxed">
+              {currentPage.description}
+            </p>
           </div>
+          <nav class="flex items-center gap-1.5" aria-label={progressLabel}>
+            {#each wizardPages as page, pageIndex (page.id)}
+              {@const isCompleted = pageIndex < currentPageIndex}
+              {@const isCurrent = pageIndex === currentPageIndex}
+              {@const isClickable = isCompleted}
+              <button
+                type="button"
+                title={page.title}
+                class="focus-visible:ring-ring/50 relative h-1.5 flex-1 rounded-full transition-colors duration-200 before:absolute before:-inset-x-0 before:-inset-y-5 before:content-[''] focus-visible:ring-2 focus-visible:ring-offset-2 {isCompleted
+                  ? 'bg-accent-default'
+                  : isCurrent
+                    ? 'bg-accent-default/55'
+                    : 'bg-hover-dimmer'}"
+                aria-label={page.title}
+                aria-current={isCurrent ? "step" : undefined}
+                disabled={!isClickable}
+                class:cursor-pointer={isClickable}
+                class:cursor-default={!isClickable}
+                onclick={() => {
+                  if (isClickable) goToPageById(page.id);
+                }}
+              ></button>
+            {/each}
+          </nav>
         </div>
       </div>
 
       <div
-        class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pr-3 sm:px-6 sm:pr-5 lg:px-8 lg:pr-7"
+        class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6 sm:py-6 lg:px-8"
         bind:this={pageContentEl}
       >
         {#if currentPage.kind === "overview"}
@@ -831,15 +843,18 @@
             onFieldChange={setFieldValue}
           />
         {:else if currentPage.kind === "freeform"}
-          <div class="flex flex-col gap-2">
-            <span class="text-sm font-medium">{m.flow_run_input()}</span>
-            <span class="text-secondary text-sm leading-relaxed">{m.flow_run_input_desc()}</span>
-            <textarea
-              class="border-default bg-primary ring-default min-h-[220px] w-full rounded-xl border px-3 py-2 font-mono text-sm shadow focus-within:ring-2"
+          <Field.Field>
+            <Field.Label for="flow-run-freeform-input" class="text-sm font-medium">
+              {m.flow_run_input()}
+            </Field.Label>
+            <Field.Description>{m.flow_run_input_desc()}</Field.Description>
+            <Textarea
+              id="flow-run-freeform-input"
+              class="min-h-[14rem] font-mono text-[0.8125rem] leading-relaxed"
               bind:value={inputText}
               placeholder={m.flow_run_input_placeholder()}
-            ></textarea>
-          </div>
+            />
+          </Field.Field>
         {:else if currentPage.kind === "runtime-step" && currentRuntimeStep}
           <FlowRunDialogRuntimeStep
             step={currentRuntimeStep}
@@ -876,10 +891,10 @@
     {/if}
 
     <!-- Footer -->
-    <div
-      class="border-default shrink-0 border-t px-4 sm:px-6 {showCloseConfirmation
-        ? 'bg-warning-dimmer/30 py-4'
-        : 'py-3'}"
+    <footer
+      class="border-default shrink-0 border-t px-4 py-3 sm:px-6 sm:py-3.5 lg:px-8 {showCloseConfirmation
+        ? 'bg-warning-dimmer/25'
+        : ''}"
     >
       {#if showCloseConfirmation}
         <div
@@ -889,7 +904,7 @@
           aria-describedby="close-confirm-desc"
         >
           <div class="min-w-0">
-            <p class="text-sm font-medium">{labels.closeConfirmTitle}</p>
+            <p class="text-primary text-sm font-medium">{labels.closeConfirmTitle}</p>
             <p id="close-confirm-desc" class="text-muted mt-0.5 text-sm">
               {labels.closeConfirmMessage}
             </p>
@@ -922,12 +937,12 @@
               <Button
                 onclick={triggerRun}
                 disabled={!canSubmitRun}
-                class="order-1 w-full min-w-[7rem] sm:order-3 sm:w-auto"
+                class="order-1 w-full min-w-[8rem] sm:order-3 sm:w-auto"
               >
                 {#if isSubmitting}
-                  <IconLoadingSpinner class="size-4 animate-spin" />
+                  <IconLoadingSpinner data-icon="inline-start" class="animate-spin" />
                 {/if}
-                {m.flow_run_trigger()}
+                {m.flow_run_trigger_confirm()}
               </Button>
             {:else}
               <Button
@@ -958,6 +973,6 @@
           </div>
         </div>
       {/if}
-    </div>
+    </footer>
   </Dialog.Content>
 </Dialog.Root>

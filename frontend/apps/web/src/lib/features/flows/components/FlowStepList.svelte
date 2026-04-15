@@ -132,17 +132,26 @@
 </script>
 
 <div class="flex h-full flex-col">
-  <div class="border-default border-b px-3 py-2">
-    <h3 class="text-secondary text-sm font-semibold tracking-wider uppercase">
-      {m.flow_steps()} ({steps.length})
+  <div
+    class="border-default bg-secondary/30 flex items-center justify-between border-b px-3.5 py-2.5"
+  >
+    <h3 class="text-secondary text-[11px] leading-none font-semibold tracking-[0.06em] uppercase">
+      {m.flow_steps()}
     </h3>
+    <span
+      class="text-muted bg-primary/70 border-default rounded-full border px-1.5 py-0.5 text-[11px] leading-none font-semibold tabular-nums"
+    >
+      {steps.length}
+    </span>
   </div>
 
   <div class="flex-1 overflow-y-auto" role="list" aria-label={m.flow_steps()}>
     {#if steps.length === 0}
       <div class="flex flex-col items-center gap-3 px-4 py-8 text-center">
         <p class="text-secondary text-sm">{m.flow_steps_empty()}</p>
-        <p class="text-muted max-w-[200px] text-xs">{m.flow_step_list_empty_hint()}</p>
+        <p class="text-muted max-w-[220px] text-xs leading-relaxed">
+          {m.flow_step_list_empty_hint()}
+        </p>
         {#if !isPublished && onBuildWithAI}
           <div class="mt-2 w-full">
             <Button variant="outline" size="sm" onclick={onBuildWithAI}>
@@ -151,11 +160,13 @@
           </div>
         {/if}
         {#if !isPublished && $mode === "power_user"}
-          <div class="bg-secondary/10 mt-2 w-full rounded-xl px-4 py-4 text-left">
-            <p class="text-primary text-sm font-medium">
+          <div
+            class="bg-secondary/15 border-default/60 mt-3 w-full rounded-xl border px-4 py-4 text-left"
+          >
+            <p class="text-primary text-sm font-semibold tracking-[-0.005em]">
               {m.flow_template_fill_empty_state_title()}
             </p>
-            <p class="text-muted mt-1 text-xs leading-relaxed">
+            <p class="text-secondary mt-1 text-xs leading-relaxed">
               {m.flow_template_fill_empty_state_body()}
             </p>
             <div class="mt-3">
@@ -174,6 +185,7 @@
       {#each steps as step, index (step.id ?? index)}
         <FlowStepCard
           {step}
+          {index}
           mcpSummary={step.assistant_id
             ? (mcpSummaryByAssistantId.get(step.assistant_id) ?? null)
             : null}
@@ -193,11 +205,11 @@
   </div>
 
   {#if !isPublished}
-    <div class="p-3">
+    <div class="px-3 pt-2 pb-3">
       <Separator class="mb-3" />
       <button
         type="button"
-        class="border-default text-secondary hover:border-accent-default hover:bg-accent-dimmer hover:text-accent-default flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed py-2.5 text-sm transition-colors"
+        class="border-default text-secondary hover:border-accent-default hover:bg-accent-dimmer/60 hover:text-accent-default focus-visible:ring-accent-default/30 flex min-h-[40px] w-full items-center justify-center gap-2 rounded-xl border border-dashed py-2.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
         onclick={() => flowEditor.addStep()}
       >
         <IconPlus class="size-4" />

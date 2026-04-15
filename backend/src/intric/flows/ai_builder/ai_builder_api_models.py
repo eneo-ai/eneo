@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from intric.files.file_models import FilePublic
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     JsonObject,
@@ -82,7 +83,6 @@ AI_BUILDER_PLAN_RESPONSE_EXAMPLE: JsonObject = {
                         "model_ref": "model:gpt-5.4",
                         "knowledge_refs": [],
                     },
-                    "mcp_policy": "inherit",
                     "input_source": "flow_input",
                     "input_type": "audio",
                     "output_mode": "transcribe_only",
@@ -101,7 +101,6 @@ AI_BUILDER_PLAN_RESPONSE_EXAMPLE: JsonObject = {
                         "model_ref": "model:gpt-5.4",
                         "knowledge_refs": [],
                     },
-                    "mcp_policy": "inherit",
                     "input_source": "previous_step",
                     "input_type": "text",
                     "output_mode": "pass_through",
@@ -177,6 +176,7 @@ class SendMessageRequest(BaseModel):
             "example": {
                 "message": "Build a flow that extracts key dates from uploaded contracts and returns structured JSON.",
                 "model_id": "00000000-0000-0000-0000-000000000010",
+                "file_ids": ["00000000-0000-0000-0000-000000000099"],
                 "question_answer": {
                     "question_id": "final_output_mode",
                     "selected_option_ids": ["structured_json"],
@@ -189,6 +189,7 @@ class SendMessageRequest(BaseModel):
 
     message: str = Field(max_length=50_000)
     model_id: UUID | None = None
+    file_ids: list[UUID] | None = None
     question_answer: JsonObject | None = None
     ui_language: str | None = None
 
@@ -208,14 +209,22 @@ class RevisePlanRequest(BaseModel):
 
 
 class SessionResponse(BaseModel):
-    model_config = ConfigDict(json_schema_extra={"example": AI_BUILDER_SESSION_RESPONSE_EXAMPLE})
+    model_config = ConfigDict(
+        json_schema_extra={"example": AI_BUILDER_SESSION_RESPONSE_EXAMPLE}
+    )
 
     session_id: UUID
     status: SessionStatus
     target_kind: TargetKind
     flow_id: UUID | None = None
     latest_plan_id: UUID | None = None
-    conversation: list[ConversationMessage] = Field(default_factory=_default_conversation)
+    conversation: list[ConversationMessage] = Field(
+        default_factory=_default_conversation
+    )
+    attachments: list[FilePublic] = Field(
+        default_factory=lambda: cast(list[FilePublic], [])
+    )
+    attachment_warnings: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -256,7 +265,9 @@ class SessionModelsResponse(BaseModel):
 
 
 class PlanResponse(BaseModel):
-    model_config = ConfigDict(json_schema_extra={"example": AI_BUILDER_PLAN_RESPONSE_EXAMPLE})
+    model_config = ConfigDict(
+        json_schema_extra={"example": AI_BUILDER_PLAN_RESPONSE_EXAMPLE}
+    )
 
     plan_id: UUID
     session_id: UUID

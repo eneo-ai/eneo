@@ -64,11 +64,7 @@ Exempel:
 | text     | ✓          | ✓          | ✓          |
 | json     | ✓          | ✓          | ✓          |
 | pdf      | ✓          | ✗          | ✓          |
-| docx     | ✓          | ✗          | ✓          |
-
-### MCP-policy (`mcp_policy`)
-- `inherit` — Ärver space-nivåns MCP-konfiguration (standard).
-- `restricted` — Begränsar vilka MCP-verktyg steget kan använda."""
+| docx     | ✓          | ✗          | ✓          |"""
 
 
 _KNOWLEDGE_PACK_VARIABLE_SYSTEM = """\

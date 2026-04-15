@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { getAppContext } from "$lib/core/AppContext";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getFlowsManager } from "$lib/features/flows/FlowsManager";
@@ -9,7 +10,7 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
-  import { Separator } from "@eneo/ui";
+  import { Separator } from "$lib/components/ui/separator/index.js";
   import { m } from "$lib/paraglide/messages";
 
   const {
@@ -46,14 +47,14 @@
   function goToAIBuilder() {
     showDialog = false;
     reset();
-    goto(`/spaces/${$currentSpace.routeId}/flows/ai-builder`);
+    goto(resolve(`/spaces/${$currentSpace.routeId}/flows/ai-builder`));
   }
 
   async function createFlow() {
     try {
       const created = await flowsManager.createFlow(newFlowName);
       if (openAfterCreation && created.id) {
-        goto(`/spaces/${$currentSpace.routeId}/flows/${created.id}`);
+        goto(resolve(`/spaces/${$currentSpace.routeId}/flows/${created.id}`));
       }
       newFlowName = "";
       showDialog = false;
@@ -161,7 +162,7 @@
       </div>
     {/if}
 
-    <Dialog.Footer class="border-default border-t px-6 py-4">
+    <Dialog.Footer class="border-default bg-background !mx-0 !mb-0 rounded-b-xl border-t px-6 py-4">
       {#if mode === "manual"}
         <label class="flex items-center gap-2 text-sm">
           <Switch bind:checked={openAfterCreation} size="sm" />

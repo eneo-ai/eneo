@@ -4,13 +4,6 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
-    ConversationMessage,
-    FlowDraftSpecCore,
-    FormFieldSpec,
-    StepSpec,
-)
 from intric.flows.ai_builder.ai_builder_create_tool_schema import (
     CREATE_FLOW_TOOL_NAME,
 )
@@ -20,11 +13,18 @@ from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 from intric.flows.ai_builder.ai_builder_edit_scope import (
     EditScopeResolution,
 )
+from intric.flows.ai_builder.ai_builder_models import (
+    AssistantSpec,
+    ConversationMessage,
+    FlowDraftSpecCore,
+    FormFieldSpec,
+    StepSpec,
+)
 from intric.flows.ai_builder.ai_builder_prompts import (
     _extract_signals_from_requirements,
     build_available_kbs_context,
-    build_clarification_hints,
     build_available_models_context,
+    build_clarification_hints,
     build_flow_context,
     build_plan_summary,
     build_step_ref_mapping,
@@ -32,7 +32,6 @@ from intric.flows.ai_builder.ai_builder_prompts import (
     trim_conversation_for_context,
 )
 from intric.flows.flow import Flow, FlowStep
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -116,6 +115,19 @@ class TestBuildSystemPrompt:
         assert "Create-läge: kompilerad datamodell" in prompt_confirmed
         assert "Create-läge: vanliga mönster" in prompt_confirmed
 
+    def test_confirmed_prompt_selects_relevant_create_recipes(self) -> None:
+        prompt = build_system_prompt(
+            confirmed_requirements={
+                "summary": "Build a PDF summary from uploaded documents",
+                "key_decisions": [],
+                "input_description": "User uploads PDF documents",
+                "output_description": "Generate a PDF summary",
+            },
+        )
+
+        assert "Dokumentpaket -> JSON -> grounded text -> DOCX/PDF" in prompt
+        assert "Audio -> text -> analys -> rapport" not in prompt
+
     def test_create_mode_prompt_stays_on_ir_surface(self) -> None:
         prompt = build_system_prompt(
             confirmed_requirements={
@@ -188,7 +200,9 @@ class TestBuildSystemPrompt:
             name="Tjänsteskrivelse",
             steps=[
                 _make_step(step_order=1, user_description="Extrahera"),
-                _make_step(step_order=2, user_description="Bedöm", input_source="previous_step"),
+                _make_step(
+                    step_order=2, user_description="Bedöm", input_source="previous_step"
+                ),
             ],
         )
         context = build_flow_context(flow)
@@ -219,7 +233,11 @@ class TestBuildSystemPrompt:
 
     def test_prompt_with_knowledge_bases(self) -> None:
         kbs = [
-            {"ref": "kb_policy", "name": "Policy KB", "description": "Internal policies"},
+            {
+                "ref": "kb_policy",
+                "name": "Policy KB",
+                "description": "Internal policies",
+            },
         ]
         prompt = build_system_prompt(available_knowledge_bases=kbs)
         assert "kb_policy" in prompt
@@ -261,8 +279,10 @@ class TestBuildSystemPrompt:
         """Create mode should understand JSON extraction via output_fields only."""
         prompt = build_system_prompt(
             confirmed_requirements={
-                "summary": "Test", "key_decisions": [],
-                "input_description": "Test", "output_description": "Test",
+                "summary": "Test",
+                "key_decisions": [],
+                "input_description": "Test",
+                "output_description": "Test",
             },
         )
         assert "json" in prompt.lower()
@@ -273,8 +293,10 @@ class TestBuildSystemPrompt:
         """Per user request — AI must write long, detailed instructions."""
         prompt = build_system_prompt(
             confirmed_requirements={
-                "summary": "Test", "key_decisions": [],
-                "input_description": "Test", "output_description": "Test",
+                "summary": "Test",
+                "key_decisions": [],
+                "input_description": "Test",
+                "output_description": "Test",
             },
         )
         assert "LÅNGA" in prompt or "långa" in prompt
@@ -282,13 +304,19 @@ class TestBuildSystemPrompt:
     def test_prompt_contains_validation_repair_examples(self) -> None:
         prompt = build_system_prompt(
             confirmed_requirements={
-                "summary": "Test", "key_decisions": [],
-                "input_description": "Test", "output_description": "Test",
+                "summary": "Test",
+                "key_decisions": [],
+                "input_description": "Test",
+                "output_description": "Test",
             },
         )
         assert "bad draft" in prompt.lower() or "felaktigt utkast" in prompt.lower()
-        assert "validation error" in prompt.lower() or "valideringsfel" in prompt.lower()
-        assert "corrected draft" in prompt.lower() or "korrigerat utkast" in prompt.lower()
+        assert (
+            "validation error" in prompt.lower() or "valideringsfel" in prompt.lower()
+        )
+        assert (
+            "corrected draft" in prompt.lower() or "korrigerat utkast" in prompt.lower()
+        )
 
     def test_prompt_contains_framework_guardrails(self) -> None:
         prompt = build_system_prompt()
@@ -303,8 +331,12 @@ class TestAdditionalClarificationHints:
             name="Bora",
             steps=[
                 _make_step(step_order=1, input_type="audio", output_type="text"),
-                _make_step(step_order=2, input_source="previous_step", output_type="json"),
-                _make_step(step_order=3, input_source="previous_step", output_type="text"),
+                _make_step(
+                    step_order=2, input_source="previous_step", output_type="json"
+                ),
+                _make_step(
+                    step_order=3, input_source="previous_step", output_type="text"
+                ),
             ],
         )
         conversation = [
@@ -325,15 +357,21 @@ class TestAdditionalClarificationHints:
         )
 
         assert hints is not None
-        assert "question_id=\"final_output_mode\"" not in hints
+        assert 'question_id="final_output_mode"' not in hints
 
-    def test_edit_flow_hints_ignore_previous_answer_label_when_output_is_unchanged(self) -> None:
+    def test_edit_flow_hints_ignore_previous_answer_label_when_output_is_unchanged(
+        self,
+    ) -> None:
         flow = _make_flow(
             name="Bora",
             steps=[
                 _make_step(step_order=1, input_type="audio", output_type="text"),
-                _make_step(step_order=2, input_source="previous_step", output_type="json"),
-                _make_step(step_order=3, input_source="previous_step", output_type="text"),
+                _make_step(
+                    step_order=2, input_source="previous_step", output_type="json"
+                ),
+                _make_step(
+                    step_order=3, input_source="previous_step", output_type="text"
+                ),
             ],
         )
         conversation = [
@@ -406,7 +444,9 @@ class TestBuildClarificationHints:
         assert hints is not None
         assert "document_material_scope" in hints
 
-    def test_includes_structured_intermediate_hint_for_complex_analysis_reports(self) -> None:
+    def test_includes_structured_intermediate_hint_for_complex_analysis_reports(
+        self,
+    ) -> None:
         hints = build_clarification_hints(
             conversation=[],
             latest_user_message=(
@@ -419,7 +459,9 @@ class TestBuildClarificationHints:
         assert "mellanliggande" in hints.lower()
         assert "json" in hints.lower()
 
-    def test_does_not_include_structured_intermediate_hint_for_simple_summary(self) -> None:
+    def test_does_not_include_structured_intermediate_hint_for_simple_summary(
+        self,
+    ) -> None:
         hints = build_clarification_hints(
             conversation=[],
             latest_user_message="Bygg ett flöde som sammanfattar ett dokument och genererar en PDF.",
@@ -497,7 +539,9 @@ class TestBuildClarificationHints:
         assert "docx_output_mode" in hints
         assert "terminala dokumentsteget" in hints
 
-    def test_pdf_clarification_does_not_emit_docx_template_hints_from_stale_template_wording(self) -> None:
+    def test_pdf_clarification_does_not_emit_docx_template_hints_from_stale_template_wording(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -524,7 +568,9 @@ class TestBuildClarificationHints:
         assert "docx_output_mode" not in hints
         assert "template_fill" not in hints
 
-    def test_pdf_template_expectation_surfaces_pdf_generation_question_before_docx_hint(self) -> None:
+    def test_pdf_template_expectation_surfaces_pdf_generation_question_before_docx_hint(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -571,7 +617,9 @@ class TestBuildClarificationHints:
         assert signals["input_material_mode"] == {"audio"}
         assert signals["final_output_mode"] == {"pdf_document"}
 
-    def test_includes_form_field_and_contract_hints_for_structured_analysis_flows(self) -> None:
+    def test_includes_form_field_and_contract_hints_for_structured_analysis_flows(
+        self,
+    ) -> None:
         hints = build_clarification_hints(
             conversation=[],
             latest_user_message=(
@@ -584,7 +632,9 @@ class TestBuildClarificationHints:
         assert "form_fields" in hints
         assert "output_fields" in hints
 
-    def test_create_mode_hints_reference_create_flow_instead_of_legacy_submission_tool(self) -> None:
+    def test_create_mode_hints_reference_create_flow_instead_of_legacy_submission_tool(
+        self,
+    ) -> None:
         hints = build_clarification_hints(
             conversation=[],
             latest_user_message="Skapa en färdig DOCX-rapport av analysen.",
@@ -717,7 +767,9 @@ class TestBuildClarificationHints:
         flow = _make_flow(
             name="Rapportflöde",
             steps=[step_one, step_two],
-            metadata_json={"form_schema": {"fields": [{"name": "Ärendenummer", "type": "text"}]}},
+            metadata_json={
+                "form_schema": {"fields": [{"name": "Ärendenummer", "type": "text"}]}
+            },
         )
 
         ctx = build_flow_context(
@@ -926,8 +978,7 @@ class TestTrimConversation:
 
     def test_over_budget_keeps_recent(self) -> None:
         messages = [
-            {"role": "user", "content": f"Message {i}" + "x" * 100}
-            for i in range(20)
+            {"role": "user", "content": f"Message {i}" + "x" * 100} for i in range(20)
         ]
         # Small budget forces trimming to only the most recent messages
         result = trim_conversation_for_context(messages, max_tokens=200)
@@ -952,7 +1003,13 @@ class TestTrimConversation:
             {
                 "role": "assistant",
                 "content": None,
-                "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "create_flow", "arguments": "{}"}}],
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "create_flow", "arguments": "{}"},
+                    }
+                ],
             },
             {"role": "tool", "content": "Plan: Test flow", "tool_call_id": "call_1"},
             {"role": "user", "content": "Change step 2"},
@@ -976,7 +1033,13 @@ class TestTrimConversation:
             {
                 "role": "assistant",
                 "content": None,
-                "tool_calls": [{"id": "call_x", "type": "function", "function": {"name": "create_flow", "arguments": "{}"}}],
+                "tool_calls": [
+                    {
+                        "id": "call_x",
+                        "type": "function",
+                        "function": {"name": "create_flow", "arguments": "{}"},
+                    }
+                ],
             },
             {"role": "tool", "content": "Plan summary", "tool_call_id": "call_x"},
             {"role": "user", "content": "Final msg"},
@@ -1025,9 +1088,6 @@ class TestTrimConversation:
 
     def test_large_budget_keeps_everything(self) -> None:
         """With a budget larger than the conversation, nothing is trimmed."""
-        messages = [
-            {"role": "user", "content": f"Message {i}"}
-            for i in range(50)
-        ]
+        messages = [{"role": "user", "content": f"Message {i}"} for i in range(50)]
         result = trim_conversation_for_context(messages, max_tokens=999_999)
         assert len(result) == 50

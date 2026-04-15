@@ -1,83 +1,167 @@
 <script lang="ts">
-  import { Table } from "@intric/ui";
-  import { createRender } from "svelte-headless-table";
-  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import type { FlowSparse } from "@intric/intric-js";
+  import { resolve } from "$app/paths";
   import { IconWorkflow } from "@intric/icons/workflow";
-  import PublishingStatusChip from "$lib/features/publishing/components/PublishingStatusChip.svelte";
+  import { IconChevronRight } from "@intric/icons/chevron-right";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import * as Table from "$lib/components/ui/table/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import FlowActions from "./FlowActions.svelte";
   import { m } from "$lib/paraglide/messages";
 
-  export let flows: FlowSparse[];
-  const table = Table.createWithResource(flows);
+  let { flows }: { flows: FlowSparse[] } = $props();
 
   const {
     state: { currentSpace }
   } = getSpacesManager();
 
-  const viewModel = table.createViewModel([
-    table.columnPrimary({
-      header: m.name(),
-      value: (item) => item.name,
-      cell: (item) => {
-        return createRender(Table.PrimaryCell, {
-          label: item.value.name,
-          link: `/spaces/${$currentSpace.routeId}/flows/${item.value.id}`,
-          icon: IconWorkflow
-        });
-      }
-    }),
+  function flowPath(flow: FlowSparse): string {
+    return `/spaces/${$currentSpace.routeId}/flows/${flow.id}`;
+  }
 
-    table.column({
-      header: m.flow_steps(),
-      accessor: (item) => item,
-      cell: (item) => {
-        const flow = item.value as FlowSparse;
-        return flow.published_version != null
-          ? `v${flow.published_version}`
-          : m.flow_version_draft();
-      }
-    }),
+  function formatUpdatedAt(value: string | null | undefined): string {
+    if (!value) return "—";
+    try {
+      return new Date(value).toLocaleDateString();
+    } catch {
+      return "—";
+    }
+  }
 
-    table.column({
-      header: m.flow_last_updated(),
-      accessor: (item) => item,
-      cell: (item) => {
-        const flow = item.value as FlowSparse;
-        return flow.updated_at
-          ? new Date(flow.updated_at).toLocaleDateString()
-          : "-";
-      }
-    }),
-
-    table.columnActions({
-      cell: (item) => {
-        return createRender(FlowActions, {
-          flow: item.value
-        });
-      }
-    })
-  ]);
-
-  $: table.update(flows);
+  function getVersionLabel(flow: FlowSparse): string {
+    return flow.published_version != null ? `v${flow.published_version}` : m.flow_version_draft();
+  }
 </script>
 
 {#if flows.length === 0}
   <div class="flex flex-col items-center justify-center gap-5 py-24 text-center">
-    <div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-secondary border border-default text-muted shadow-sm">
-      <IconWorkflow class="size-8" />
+    <div
+      class="bg-secondary/30 border-default text-muted flex h-14 w-14 items-center justify-center rounded-2xl border"
+      aria-hidden="true"
+    >
+      <IconWorkflow class="size-6" />
     </div>
-    <div class="space-y-1.5">
-      <h3 class="text-primary text-xl font-semibold tracking-tight">{m.flow_empty_title()}</h3>
-      <p class="text-secondary max-w-[40ch] text-sm leading-relaxed">{m.flow_empty_description()}</p>
+    <div class="max-w-[44ch] space-y-1.5">
+      <h3 class="text-primary text-lg font-semibold tracking-tight">
+        {m.flow_empty_title()}
+      </h3>
+      <p class="text-secondary text-sm leading-relaxed">
+        {m.flow_empty_description()}
+      </p>
     </div>
   </div>
 {:else}
-  <Table.Root
-    {viewModel}
-    resourceName={m.resource_flows()}
-    emptyMessage={m.flow_empty_title()}
+  <!-- Desktop: Table -->
+  <div
+    class="border-default bg-primary hidden overflow-hidden rounded-xl border shadow-xs md:block"
   >
-    <Table.Group></Table.Group>
-  </Table.Root>
+    <Table.Root class="border-separate border-spacing-0">
+      <Table.Header>
+        <Table.Row class="border-default hover:bg-transparent">
+          <Table.Head
+            class="text-muted border-default h-11 border-b px-4 text-xs font-medium tracking-wide uppercase"
+          >
+            {m.name()}
+          </Table.Head>
+          <Table.Head
+            class="text-muted border-default h-11 border-b px-4 text-xs font-medium tracking-wide uppercase"
+          >
+            {m.version()}
+          </Table.Head>
+          <Table.Head
+            class="text-muted border-default h-11 border-b px-4 text-xs font-medium tracking-wide uppercase"
+          >
+            {m.flow_last_updated()}
+          </Table.Head>
+          <Table.Head
+            class="text-muted border-default h-11 w-[4.5rem] border-b px-4 text-right text-xs font-medium tracking-wide uppercase"
+          >
+            <span class="sr-only">{m.actions()}</span>
+          </Table.Head>
+        </Table.Row>
+      </Table.Header>
+      <Table.Body>
+        {#each flows as flow (flow.id)}
+          <Table.Row class="group border-default hover:bg-muted/40 transition-colors last:border-0">
+            <Table.Cell class="border-default border-b p-0 align-middle">
+              <a
+                href={resolve(flowPath(flow))}
+                class="text-primary focus-visible:ring-ring/40 flex min-h-[3.25rem] items-center gap-3 px-4 py-3 font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset"
+              >
+                <span
+                  class="bg-secondary/60 text-secondary flex size-8 shrink-0 items-center justify-center rounded-lg"
+                  aria-hidden="true"
+                >
+                  <IconWorkflow class="size-4" />
+                </span>
+                <span class="min-w-0 truncate">{flow.name}</span>
+              </a>
+            </Table.Cell>
+            <Table.Cell
+              class="text-secondary border-default border-b px-4 py-3 align-middle tabular-nums"
+            >
+              {#if flow.published_version != null}
+                <Badge variant="secondary" class="h-5 font-medium tabular-nums">
+                  v{flow.published_version}
+                </Badge>
+              {:else}
+                <Badge variant="outline" class="text-muted h-5 font-medium">
+                  {m.flow_version_draft()}
+                </Badge>
+              {/if}
+            </Table.Cell>
+            <Table.Cell
+              class="text-muted border-default border-b px-4 py-3 align-middle tabular-nums"
+            >
+              {formatUpdatedAt(flow.updated_at)}
+            </Table.Cell>
+            <Table.Cell class="border-default border-b px-2 py-2 text-right align-middle">
+              <FlowActions {flow} />
+            </Table.Cell>
+          </Table.Row>
+        {/each}
+      </Table.Body>
+    </Table.Root>
+  </div>
+
+  <!-- Mobile: stacked card list -->
+  <ul class="flex flex-col gap-2 md:hidden" aria-label={m.resource_flows()}>
+    {#each flows as flow (flow.id)}
+      <li class="border-default bg-primary relative rounded-xl border shadow-xs">
+        <div class="flex items-stretch">
+          <a
+            href={resolve(flowPath(flow))}
+            class="focus-visible:ring-ring/40 flex min-h-[4.25rem] flex-1 items-center gap-3 rounded-l-xl px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-inset"
+          >
+            <span
+              class="bg-secondary/60 text-secondary flex size-10 shrink-0 items-center justify-center rounded-lg"
+              aria-hidden="true"
+            >
+              <IconWorkflow class="size-5" />
+            </span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <p class="text-primary truncate font-medium">{flow.name}</p>
+                <Badge
+                  variant={flow.published_version != null ? "secondary" : "outline"}
+                  class="h-5 shrink-0 font-medium tabular-nums"
+                >
+                  {getVersionLabel(flow)}
+                </Badge>
+              </div>
+              <p class="text-muted mt-0.5 truncate text-xs tabular-nums">
+                {m.flow_last_updated()}
+                <span aria-hidden="true" class="mx-1">·</span>
+                {formatUpdatedAt(flow.updated_at)}
+              </p>
+            </div>
+            <IconChevronRight class="text-muted size-4 shrink-0" aria-hidden="true" />
+          </a>
+          <div class="flex items-center pr-2">
+            <FlowActions {flow} />
+          </div>
+        </div>
+      </li>
+    {/each}
+  </ul>
 {/if}

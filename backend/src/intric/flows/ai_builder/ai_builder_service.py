@@ -15,6 +15,7 @@ from uuid import UUID
 
 import litellm
 
+from intric.files.file_models import File
 from intric.flows.ai_builder.ai_builder_context import (
     AIBuilderPlannerContext,
     build_planner_context,
@@ -59,6 +60,7 @@ if TYPE_CHECKING:
     from intric.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
+    from intric.files.file_service import FileService
     from intric.flows.application.flow_service import FlowService
     from intric.flows.domain.flow import Flow
     from intric.spaces.space import Space
@@ -106,6 +108,13 @@ class PreparedMessageContext:
     litellm_kwargs: dict[str, object]
     flow: "Flow | None"
     assistant_snapshots: dict[UUID, dict[str, Any]] | None
+    attachment_files: list[File]
+
+
+@dataclass(frozen=True)
+class SessionAttachmentSnapshot:
+    files: list[File]
+    warnings: list[str]
 
 
 class AIBuilderService:
@@ -117,12 +126,14 @@ class AIBuilderService:
         repo: AIBuilderRepository,
         flow_service: "FlowService",
         completion_service: "CompletionService",
+        file_service: "FileService | None" = None,
         space_service: "SpaceService | None" = None,
     ) -> None:
         self.user = user
         self.repo = repo
         self.flow_service = flow_service
         self.completion_service = completion_service
+        self.file_service = file_service
         self.space_service = space_service
 
     async def create_session(
@@ -252,6 +263,10 @@ class AIBuilderService:
 
     async def cancel_session(self, session_id: UUID) -> BuilderSession:
         await self.get_session(session_id)
+        await self.repo.detach_session_files_for_sessions(
+            session_ids=[session_id],
+            tenant_id=self.user.tenant_id,
+        )
         await self.repo.cancel_session(
             session_id=session_id,
             tenant_id=self.user.tenant_id,
@@ -310,6 +325,7 @@ class AIBuilderService:
         space: "Space",
         model_id: UUID | None,
         tenant_flow_settings: dict[str, Any] | None,
+        message_file_ids: list[UUID] | None = None,
         planner_params_resolver: Callable[
             [Any], Awaitable[tuple[str, dict[str, object]]]
         ]
@@ -335,12 +351,44 @@ class AIBuilderService:
                 flow
             )
 
+        if message_file_ids:
+            if self.file_service is None:
+                raise RuntimeError(
+                    "FileService is required for AI Builder attachments."
+                )
+            validated_files = await self.file_service.get_files_by_ids(message_file_ids)
+            if len({file.id for file in validated_files}) != len(set(message_file_ids)):
+                raise BadRequestException(
+                    "One or more referenced files are unavailable for this AI Builder session.",
+                    code="builder_attachment_unavailable",
+                )
+            await self.repo.attach_session_files(
+                session_id=session.id,
+                tenant_id=self.user.tenant_id,
+                file_ids=[file.id for file in validated_files],
+            )
+
+        session_file_ids = await self.repo.list_session_file_ids(
+            session_id=session.id,
+            tenant_id=self.user.tenant_id,
+        )
+        attachment_files: list[File] = []
+        if session_file_ids:
+            if self.file_service is None:
+                raise RuntimeError(
+                    "FileService is required for AI Builder attachments."
+                )
+            attachment_files = await self.file_service.get_files_by_ids(
+                session_file_ids
+            )
+
         return PreparedMessageContext(
             planner_context=planner_context,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
             flow=flow,
             assistant_snapshots=assistant_snapshots,
+            attachment_files=attachment_files,
         )
 
     @staticmethod
@@ -356,6 +404,7 @@ class AIBuilderService:
         *,
         session_id: UUID,
         message: str,
+        file_ids: list[UUID] | None = None,
         question_answer: dict[str, Any] | None = None,
         ui_language: str | None = None,
         litellm_model: str,
@@ -364,6 +413,7 @@ class AIBuilderService:
         available_kbs: list[dict[str, Any]] | None = None,
         flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        attachment_files: list[File] | None = None,
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
         budget_policy: AIBuilderBudgetPolicy | None = None,
@@ -380,11 +430,51 @@ class AIBuilderService:
             available_kbs=available_kbs,
             flow=flow,
             assistant_snapshots=assistant_snapshots,
+            attachment_files=attachment_files or [],
+            file_ids=file_ids,
             max_input_tokens=max_input_tokens,
             max_output_tokens=max_output_tokens,
             budget_policy=budget_policy,
         ):
             yield event
+
+    async def list_session_attachments(self, *, session_id: UUID) -> list[File]:
+        snapshot = await self.get_session_attachment_snapshot(session_id=session_id)
+        return snapshot.files
+
+    async def get_session_attachment_snapshot(
+        self,
+        *,
+        session_id: UUID,
+    ) -> SessionAttachmentSnapshot:
+        if self.file_service is None:
+            return SessionAttachmentSnapshot(files=[], warnings=[])
+        file_ids = await self.repo.list_session_file_ids(
+            session_id=session_id,
+            tenant_id=self.user.tenant_id,
+        )
+        if not file_ids:
+            return SessionAttachmentSnapshot(files=[], warnings=[])
+
+        files = await self.file_service.get_files_by_ids(file_ids)
+        warnings: list[str] = []
+        if len({file.id for file in files}) != len(set(file_ids)):
+            warnings.append(
+                "One or more previously attached reference files are no longer available to this AI Builder session."
+            )
+        return SessionAttachmentSnapshot(files=files, warnings=warnings)
+
+    async def detach_session_attachment(
+        self,
+        *,
+        session_id: UUID,
+        file_id: UUID,
+    ) -> None:
+        await self.repo.detach_session_file(
+            session_id=session_id,
+            tenant_id=self.user.tenant_id,
+            file_id=file_id,
+        )
 
     async def approve_plan(self, *, plan_id: UUID) -> BuilderPlan:
         return await self._build_plan_lifecycle().approve_plan(plan_id=plan_id)

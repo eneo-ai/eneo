@@ -1,6 +1,9 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { fade } from "svelte/transition";
+  import { SvelteSet } from "svelte/reactivity";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import FlowAIBuilderMessage from "./FlowAIBuilderMessage.svelte";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
   import FlowAIBuilderPhaseIndicator from "./FlowAIBuilderPhaseIndicator.svelte";
@@ -83,7 +86,7 @@
   }
 
   const answeredQuestionCount = $derived.by(() => {
-    const ids = new Set<string>();
+    const ids = new SvelteSet<string>();
     for (const msg of service.messages) {
       const qa =
         msg.metadata && typeof msg.metadata === "object" && "question_answer" in msg.metadata
@@ -110,14 +113,48 @@
 </script>
 
 <div
-  class="flex min-h-0 flex-1 flex-col overflow-hidden"
+  class="flex flex-col md:min-h-0 md:flex-1 md:overflow-hidden"
   class:items-center={showEmptyState}
   class:justify-center={showEmptyState}
-  class:px-6={showEmptyState}
-  class:max-sm:px-4={showEmptyState}
+  class:max-md:min-h-[calc(100dvh-var(--page-header-h,4rem))]={showEmptyState}
 >
+  <!-- Error banner: full-width inline Alert pinned above content, no absolute overlap -->
+  {#if service.error}
+    <div
+      class="w-full shrink-0 px-4 pt-3 max-sm:px-3 max-sm:pt-2"
+      transition:fade={{ duration: 160 }}
+    >
+      <Alert.Root variant="destructive" class="flex items-start gap-3 rounded-lg px-3.5 py-2.5">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          class="mt-0.5 size-4 shrink-0"
+          aria-hidden="true"
+        >
+          <path
+            fill-rule="evenodd"
+            d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 0-2 0v4a1 1 0 1 0 2 0V6Zm-1 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+            clip-rule="evenodd"
+          />
+        </svg>
+        <Alert.Description class="min-w-0 flex-1 text-[0.8125rem] leading-relaxed">
+          {service.error}
+        </Alert.Description>
+        <Button
+          variant="ghost"
+          size="xs"
+          class="text-destructive hover:bg-destructive/10 hover:text-destructive -mt-0.5 -mr-1 shrink-0 self-start"
+          onclick={() => service.clearError()}
+        >
+          {m.ai_builder_dismiss()}
+        </Button>
+      </Alert.Root>
+    </div>
+  {/if}
+
   {#if service.messages.length > 0 || canStartOver}
-    <div class="border-border-default flex w-full shrink-0 items-center border-b backdrop-blur-sm">
+    <div class="border-border-default flex w-full shrink-0 items-center border-b">
       {#if service.messages.length > 0}
         <div class="min-w-0 flex-1">
           <FlowAIBuilderPhaseIndicator
@@ -130,32 +167,50 @@
       {/if}
 
       {#if canStartOver}
-        <button
-          class="bg-primary text-secondary border-border-default hover:bg-secondary hover:text-primary mr-4 shrink-0 cursor-pointer rounded-full border px-3 py-1.5 text-[0.8125rem] leading-none font-medium whitespace-nowrap transition-all duration-150 ease-out"
-          onclick={handleStartOver}
-        >
-          {m.ai_builder_start_fresh()}
-        </button>
+        <div class="shrink-0 pr-4 max-sm:pr-3">
+          <Button variant="outline" size="sm" onclick={handleStartOver}>
+            {m.ai_builder_start_fresh()}
+          </Button>
+        </div>
       {/if}
     </div>
   {/if}
 
   {#if showEmptyState}
-    <!-- Empty state: welcome + input centered -->
-    <div class="flex-1"></div>
-    <div class="empty-welcome mb-6 max-w-md text-center">
-      <h2 class="text-primary text-3xl font-semibold tracking-tighter">
+    <!-- Empty state: guiding welcome + hero input centered -->
+    <div class="flex-1" aria-hidden="true"></div>
+    <div
+      class="empty-welcome relative flex w-full max-w-[32rem] flex-col items-center px-6 pb-6 text-center max-sm:px-4"
+      transition:fade={{ duration: 200 }}
+    >
+      <span class="welcome-glyph" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M12 3.5a1 1 0 0 1 .94.663l1.427 4.002a3 3 0 0 0 1.82 1.82l4.002 1.427a1 1 0 0 1 0 1.884l-4.002 1.427a3 3 0 0 0-1.82 1.82l-1.427 4.002a1 1 0 0 1-1.884 0l-1.427-4.002a3 3 0 0 0-1.82-1.82L3.81 13.296a1 1 0 0 1 0-1.884l4.002-1.427a3 3 0 0 0 1.82-1.82l1.427-4.002A1 1 0 0 1 12 3.5Z"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </span>
+      <h2
+        class="text-primary mt-4 text-[clamp(1.375rem,4vw,1.75rem)] leading-[1.15] font-semibold tracking-[-0.015em] text-balance"
+      >
         {isEditMode ? m.ai_builder_welcome_title_edit() : m.ai_builder_welcome_title()}
       </h2>
-      <p class="text-secondary mt-2 text-base leading-relaxed">
+      <p
+        class="text-secondary mt-2.5 max-w-[28rem] text-[clamp(0.875rem,2.4vw,0.9375rem)] leading-relaxed text-balance"
+      >
         {isEditMode ? m.ai_builder_welcome_description_edit() : m.ai_builder_welcome_description()}
       </p>
     </div>
   {:else}
-    <!-- Messages area -->
-    <div bind:this={scrollContainer} class="flex-1 overflow-y-auto px-4 py-6">
+    <!-- Messages area: scrolls within chat pane on md+, flows naturally on mobile -->
+    <div
+      bind:this={scrollContainer}
+      class="px-4 py-6 max-sm:px-3 max-sm:py-4 md:flex-1 md:overflow-y-auto"
+    >
       <div class="mx-auto max-w-[71ch]">
-        <!-- Message list -->
         {#each service.messages as message, i (`msg-${i}`)}
           <FlowAIBuilderMessage
             role={message.role}
@@ -185,7 +240,6 @@
           />
         {/each}
         {#if service.isStreaming && service.messages[service.messages.length - 1]?.role === "user"}
-          <!-- Thinking indicator — shown while waiting for LLM response -->
           <div class="mt-4 py-2">
             <div class="generating-badge" role="status" aria-label={generatingText}>
               <span class="generating-orb" aria-hidden="true"></span>
@@ -199,59 +253,60 @@
     </div>
   {/if}
 
-  <!-- Error banner -->
-  {#if service.error}
-    <div class="mx-4 mb-2">
-      <Alert.Root
-        variant="destructive"
-        class="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm"
-      >
-        <Alert.Description class="flex-1">{service.error}</Alert.Description>
-        <Alert.Action>
-          <button class="text-negative-default ml-2 underline" onclick={() => service.clearError()}>
-            {m.ai_builder_dismiss()}
-          </button>
-        </Alert.Action>
-      </Alert.Root>
-    </div>
-  {/if}
-
   <!-- Input area -->
   <div
-    class="bg-primary border-border-default border-t px-4 pt-3 pb-4 max-sm:px-2 max-sm:pt-2 max-sm:pb-3"
+    class="bg-primary border-border-default w-full border-t px-4 pt-3 pb-4 max-sm:px-2 max-sm:pt-2 max-sm:pb-3"
     class:input-area-hero={showEmptyState}
   >
     <FlowAIBuilderInput bind:this={inputRef} />
   </div>
   {#if showEmptyState}
-    <div class="flex-1"></div>
+    <div class="flex-1" aria-hidden="true"></div>
   {/if}
 </div>
 
 <style lang="postcss">
   @reference "@intric/ui/styles";
 
-  /* --- Welcome + hero input entrance animation --- */
+  /* --- Welcome hero --- */
 
   .empty-welcome {
     opacity: 0;
     animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
   }
 
+  .welcome-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    height: 3rem;
+    border-radius: 9999px;
+    background: var(--background-secondary);
+    color: var(--accent-default);
+    box-shadow:
+      inset 0 0 0 1px var(--border-dimmer),
+      0 1px 2px oklch(from var(--color-black) l c h / 0.04);
+  }
+
+  .welcome-glyph svg {
+    width: 1.375rem;
+    height: 1.375rem;
+  }
+
   .input-area-hero {
-    width: 100%;
     max-width: 40rem;
     border-top: none;
     padding: 0 0 2rem;
     background: transparent;
     opacity: 0;
-    animation: fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: fade-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   .input-area-hero :global(.input-container) {
     box-shadow:
-      0 1px 3px oklch(0 0 0 / 0.04),
-      inset 0 1px 2px oklch(0 0 0 / 0.03);
+      0 1px 3px oklch(from var(--color-black) l c h / 0.04),
+      inset 0 1px 2px oklch(from var(--color-black) l c h / 0.03);
     min-height: 4.5rem;
   }
 
@@ -266,7 +321,7 @@
     }
   }
 
-  /* --- Generating indicator --- */
+  /* --- Generating indicator (unchanged behavior, aligned tokens) --- */
 
   .generating-badge {
     @apply relative inline-flex items-center gap-2.5 overflow-hidden rounded-full px-4 py-2;
@@ -296,7 +351,6 @@
     }
   }
 
-  /* Flowing gradient underlay */
   .generating-badge::before {
     content: "";
     position: absolute;
@@ -315,7 +369,6 @@
     pointer-events: none;
   }
 
-  /* Subtle border */
   .generating-badge::after {
     content: "";
     position: absolute;

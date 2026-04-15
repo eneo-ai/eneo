@@ -8,13 +8,20 @@ from datetime import datetime, timezone
 from typing import Any, TypedDict, cast
 from uuid import UUID
 
-from sqlalchemy import cast as sql_cast
+import sqlalchemy as sa
 from sqlalchemy import insert, select, update
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.database.tables.flow_tables import BuilderPlans, BuilderSessions
+from intric.database.tables.flow_tables import (
+    BuilderPlans,
+    BuilderSessionFiles,
+    BuilderSessions,
+)
 from intric.database.tables.tenant_table import Tenants
+from intric.flows.ai_builder.ai_builder_conversation_compaction import (
+    compact_ai_builder_conversation,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     BuilderPlan,
     BuilderSession,
@@ -24,6 +31,9 @@ from intric.flows.ai_builder.ai_builder_models import (
     PlanStatus,
     SessionStatus,
     TargetKind,
+)
+from intric.flows.ai_builder.ai_builder_session_transitions import (
+    ensure_valid_session_status_transition,
 )
 from intric.main.exceptions import NotFoundException
 
@@ -148,6 +158,11 @@ class AIBuilderRepository:
         tenant_id: UUID,
     ) -> None:
         async with self._transaction():
+            detach_stmt = sa.delete(BuilderSessionFiles).where(
+                BuilderSessionFiles.session_id == session_id,
+                BuilderSessionFiles.tenant_id == tenant_id,
+            )
+            await self.session.execute(detach_stmt)
             stmt = (
                 update(BuilderSessions)
                 .where(
@@ -156,6 +171,7 @@ class AIBuilderRepository:
                 )
                 .values(
                     status=SessionStatus.CANCELLED.value,
+                    active_request_id=None,
                     updated_at=datetime.now(timezone.utc),
                 )
             )
@@ -171,6 +187,32 @@ class AIBuilderRepository:
         flow_id: UUID | None,
     ) -> list[UUID]:
         async with self._transaction():
+            session_ids_stmt = select(BuilderSessions.id).where(
+                BuilderSessions.tenant_id == tenant_id,
+                BuilderSessions.actor_user_id == actor_user_id,
+                BuilderSessions.space_id == space_id,
+                BuilderSessions.target_kind == target_kind.value,
+                BuilderSessions.status.in_(
+                    [
+                        SessionStatus.CHATTING.value,
+                        SessionStatus.AWAITING_APPROVAL.value,
+                        SessionStatus.APPLYING.value,
+                    ]
+                ),
+                BuilderSessions.flow_id.is_(None)
+                if flow_id is None
+                else BuilderSessions.flow_id == flow_id,
+            )
+            session_ids = list(
+                (await self.session.execute(session_ids_stmt)).scalars().all()
+            )
+            if session_ids:
+                detach_stmt = sa.delete(BuilderSessionFiles).where(
+                    BuilderSessionFiles.session_id.in_(session_ids),
+                    BuilderSessionFiles.tenant_id == tenant_id,
+                )
+                await self.session.execute(detach_stmt)
+
             stmt = (
                 update(BuilderSessions)
                 .where(
@@ -191,6 +233,7 @@ class AIBuilderRepository:
                 )
                 .values(
                     status=SessionStatus.CANCELLED.value,
+                    active_request_id=None,
                     updated_at=datetime.now(timezone.utc),
                 )
                 .returning(BuilderSessions.id)
@@ -214,6 +257,77 @@ class AIBuilderRepository:
                 raise NotFoundException("Builder session not found.")
             return _session_from_row(row)
 
+    async def attach_session_files(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        file_ids: list[UUID],
+    ) -> None:
+        if not file_ids:
+            return
+
+        async with self._transaction():
+            rows = [
+                {
+                    "session_id": session_id,
+                    "file_id": file_id,
+                    "tenant_id": tenant_id,
+                }
+                for file_id in dict.fromkeys(file_ids)
+            ]
+            stmt = pg_insert(BuilderSessionFiles).values(rows)
+            stmt = stmt.on_conflict_do_nothing(index_elements=["session_id", "file_id"])
+            await self.session.execute(stmt)
+
+    async def list_session_file_ids(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+    ) -> list[UUID]:
+        async with self._transaction():
+            stmt = (
+                select(BuilderSessionFiles.file_id)
+                .where(
+                    BuilderSessionFiles.session_id == session_id,
+                    BuilderSessionFiles.tenant_id == tenant_id,
+                )
+                .order_by(BuilderSessionFiles.created_at.asc())
+            )
+            result = await self.session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def detach_session_file(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        file_id: UUID,
+    ) -> None:
+        async with self._transaction():
+            stmt = sa.delete(BuilderSessionFiles).where(
+                BuilderSessionFiles.session_id == session_id,
+                BuilderSessionFiles.tenant_id == tenant_id,
+                BuilderSessionFiles.file_id == file_id,
+            )
+            await self.session.execute(stmt)
+
+    async def detach_session_files_for_sessions(
+        self,
+        *,
+        session_ids: list[UUID],
+        tenant_id: UUID,
+    ) -> None:
+        if not session_ids:
+            return
+        async with self._transaction():
+            stmt = sa.delete(BuilderSessionFiles).where(
+                BuilderSessionFiles.session_id.in_(session_ids),
+                BuilderSessionFiles.tenant_id == tenant_id,
+            )
+            await self.session.execute(stmt)
+
     async def update_session_status(
         self,
         *,
@@ -222,6 +336,19 @@ class AIBuilderRepository:
         status: SessionStatus,
     ) -> None:
         async with self._transaction():
+            current_stmt = select(BuilderSessions.status).where(
+                BuilderSessions.id == session_id,
+                BuilderSessions.tenant_id == tenant_id,
+            )
+            current_value = (
+                await self.session.execute(current_stmt)
+            ).scalar_one_or_none()
+            if current_value is None:
+                raise NotFoundException("Builder session not found.")
+            ensure_valid_session_status_transition(
+                current=SessionStatus(current_value),
+                next_status=status,
+            )
             stmt = (
                 update(BuilderSessions)
                 .where(
@@ -243,7 +370,8 @@ class AIBuilderRepository:
         conversation: list[ConversationMessage],
     ) -> None:
         async with self._transaction():
-            serialized = [msg.model_dump(mode="json") for msg in conversation]
+            compacted = compact_ai_builder_conversation(conversation)
+            serialized = [msg.model_dump(mode="json") for msg in compacted]
             stmt = (
                 update(BuilderSessions)
                 .where(
@@ -268,21 +396,29 @@ class AIBuilderRepository:
             return
 
         async with self._transaction():
-            serialized = [msg.model_dump(mode="json") for msg in conversation]
-            stmt = (
+            stmt = select(BuilderSessions).where(
+                BuilderSessions.id == session_id,
+                BuilderSessions.tenant_id == tenant_id,
+            )
+            row = (await self.session.execute(stmt)).scalar_one_or_none()
+            if row is None:
+                raise NotFoundException("Builder session not found.")
+
+            existing = _session_from_row(row).conversation
+            compacted = compact_ai_builder_conversation([*existing, *conversation])
+            serialized = [msg.model_dump(mode="json") for msg in compacted]
+            update_stmt = (
                 update(BuilderSessions)
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
                 )
                 .values(
-                    conversation=BuilderSessions.conversation.op("||")(
-                        sql_cast(serialized, JSONB)
-                    ),
+                    conversation=serialized,
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            await self.session.execute(stmt)
+            await self.session.execute(update_stmt)
 
     async def update_session_latest_plan(
         self,
@@ -292,6 +428,19 @@ class AIBuilderRepository:
         plan_id: UUID,
     ) -> None:
         async with self._transaction():
+            current_stmt = select(BuilderSessions.status).where(
+                BuilderSessions.id == session_id,
+                BuilderSessions.tenant_id == tenant_id,
+            )
+            current_value = (
+                await self.session.execute(current_stmt)
+            ).scalar_one_or_none()
+            if current_value is None:
+                raise NotFoundException("Builder session not found.")
+            ensure_valid_session_status_transition(
+                current=SessionStatus(current_value),
+                next_status=SessionStatus.AWAITING_APPROVAL,
+            )
             stmt = (
                 update(BuilderSessions)
                 .where(
@@ -324,6 +473,55 @@ class AIBuilderRepository:
                     flow_id=flow_id,
                     updated_at=datetime.now(timezone.utc),
                 )
+            )
+            await self.session.execute(stmt)
+
+    async def claim_session_send(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        request_id: UUID,
+    ) -> bool:
+        async with self._transaction():
+            stmt = (
+                update(BuilderSessions)
+                .where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                    BuilderSessions.active_request_id.is_(None),
+                    BuilderSessions.status.in_(
+                        [
+                            SessionStatus.CHATTING.value,
+                            SessionStatus.AWAITING_APPROVAL.value,
+                        ]
+                    ),
+                )
+                .values(
+                    active_request_id=request_id,
+                    updated_at=datetime.now(timezone.utc),
+                )
+                .returning(BuilderSessions.id)
+            )
+            result = await self.session.execute(stmt)
+            return result.scalar_one_or_none() is not None
+
+    async def release_session_send(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        request_id: UUID,
+    ) -> None:
+        async with self._transaction():
+            stmt = (
+                update(BuilderSessions)
+                .where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                    BuilderSessions.active_request_id == request_id,
+                )
+                .values(active_request_id=None, updated_at=datetime.now(timezone.utc))
             )
             await self.session.execute(stmt)
 
@@ -448,6 +646,7 @@ class _SessionRowData(TypedDict):
     status: str
     actor_user_id: UUID
     conversation: list[object]
+    active_request_id: UUID | None
     latest_plan_id: UUID | None
     created_at: datetime | None
     updated_at: datetime | None
@@ -479,6 +678,7 @@ def _session_row_data(row: Any) -> _SessionRowData:
             "status": cast(str, mapping["status"]),
             "actor_user_id": cast(UUID, mapping["actor_user_id"]),
             "conversation": conversation,
+            "active_request_id": cast(UUID | None, mapping.get("active_request_id")),
             "latest_plan_id": cast(UUID | None, mapping.get("latest_plan_id")),
             "created_at": cast(datetime | None, mapping.get("created_at")),
             "updated_at": cast(datetime | None, mapping.get("updated_at")),
@@ -493,6 +693,7 @@ def _session_row_data(row: Any) -> _SessionRowData:
         "status": cast(str, row.status),
         "actor_user_id": cast(UUID, row.actor_user_id),
         "conversation": cast(list[object], row.conversation or []),
+        "active_request_id": cast(UUID | None, row.active_request_id),
         "latest_plan_id": cast(UUID | None, row.latest_plan_id),
         "created_at": cast(datetime | None, row.created_at),
         "updated_at": cast(datetime | None, row.updated_at),

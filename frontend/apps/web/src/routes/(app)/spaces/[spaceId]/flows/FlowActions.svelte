@@ -36,12 +36,19 @@
 <DropdownMenu.Root>
   <DropdownMenu.Trigger>
     {#snippet child({ props })}
-      <Button {...props} size="icon" variant="ghost">
+      <Button
+        {...props}
+        size="icon-sm"
+        variant="ghost"
+        class="text-muted hover:text-primary"
+        aria-label={m.actions()}
+        title={m.actions()}
+      >
         <IconEllipsis />
       </Button>
     {/snippet}
   </DropdownMenu.Trigger>
-  <DropdownMenu.Content>
+  <DropdownMenu.Content align="end" class="min-w-[10rem]">
     <DropdownMenu.Item
       variant="destructive"
       onclick={() => {
@@ -62,7 +69,7 @@
     </AlertDialog.Header>
     <AlertDialog.Footer>
       <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action variant="destructive" onclick={handleDelete}>
+      <AlertDialog.Action variant="destructive" disabled={isProcessing} onclick={handleDelete}>
         {isProcessing ? m.deleting() : m.delete()}
       </AlertDialog.Action>
     </AlertDialog.Footer>

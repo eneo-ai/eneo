@@ -832,12 +832,12 @@
   {/if}
 {:else}
   <div
-    class="p-4 pb-8 lg:p-6 lg:pb-8"
+    class="p-4 pb-8 sm:p-5 sm:pb-8 lg:p-6 lg:pb-10"
     class:pointer-events-none={isPublished}
     class:opacity-60={isPublished}
   >
     <div
-      class="flow-step-editor [&_section>div:last-child]:gap-6 [&_section>div:last-child]:pb-6 [&_section>h2]:font-sans [&_section>h2]:tracking-[0.04em] [&_section>h2]:uppercase"
+      class="flow-step-editor [&_section>div:last-child]:gap-6 [&_section>div:last-child]:pb-6 [&_section>h2]:font-sans [&_section>h2]:text-[11px] [&_section>h2]:font-semibold [&_section>h2]:tracking-[0.06em] [&_section>h2]:uppercase"
     >
       <Settings.Page>
         {#if stepSummaryModel}

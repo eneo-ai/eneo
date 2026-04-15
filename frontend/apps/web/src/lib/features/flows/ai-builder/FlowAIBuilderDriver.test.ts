@@ -407,6 +407,64 @@ describe("FlowAIBuilderDriver", () => {
     expect(stream).toHaveBeenCalledOnce();
   });
 
+  it("forwards file_ids with AI Builder messages", async () => {
+    const { driver, stream } = makeDriver({
+      streamImpl: vi.fn(async (_path, init, handlers) => {
+        expect(init.requestBody["application/json"].file_ids).toEqual(["file-1", "file-2"]);
+        handlers.onClose();
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow", undefined, ["file-1", "file-2"]);
+
+    expect(stream).toHaveBeenCalledOnce();
+  });
+
+  it("refreshes the session after sending message attachments", async () => {
+    const fetch = vi.fn().mockResolvedValue(makeSession({ attachments: [] }));
+    const { driver, stream } = makeDriver({
+      fetchImpl: fetch,
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onClose();
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow", undefined, ["file-1"]);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/flows/ai-builder/sessions/session-1",
+      expect.objectContaining({ method: "get" })
+    );
+    expect(stream).toHaveBeenCalledOnce();
+  });
+
+  it("removes persisted attachments from the session after detach", async () => {
+    const fetch = vi.fn().mockResolvedValue(undefined);
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({
+        attachments: [
+          {
+            id: "file-1",
+            name: "brief.pdf",
+            mimetype: "application/pdf",
+            size: 123
+          }
+        ]
+      })
+    });
+
+    await driver.removeAttachment("file-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/flows/ai-builder/sessions/session-1/attachments/file-1",
+      expect.objectContaining({ method: "delete" })
+    );
+    expect(driver.state.session?.attachments).toEqual([]);
+  });
+
   it("approves separately from apply and keeps session state aligned with backend refresh", async () => {
     const fetch = vi
       .fn()

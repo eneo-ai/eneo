@@ -9,12 +9,13 @@ from typing import TYPE_CHECKING, Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.files.file_models import FilePublic
 from intric.flows.ai_builder.ai_builder_api_models import (
     ApplyPlanRequest,
     ApplyResultResponse,
@@ -237,6 +238,12 @@ def _to_plan_response(plan: BuilderPlan) -> PlanResponse:
     )
 
 
+def _to_file_public(file: object) -> FilePublic:
+    if isinstance(file, FilePublic):
+        return file
+    return FilePublic(**cast(Any, file).model_dump())
+
+
 def _ai_builder_error_response(
     *,
     description: str,
@@ -305,6 +312,9 @@ async def create_session(
         flow_id=body.flow_id,
         force_new=body.force_new,
     )
+    attachment_snapshot = await service.get_session_attachment_snapshot(
+        session_id=session.id
+    )
 
     # Audit
     user = container.user()
@@ -333,6 +343,8 @@ async def create_session(
         flow_id=session.flow_id,
         latest_plan_id=session.latest_plan_id,
         conversation=session.conversation,
+        attachments=[_to_file_public(file) for file in attachment_snapshot.files],
+        attachment_warnings=list(attachment_snapshot.warnings),
         created_at=session.created_at,
         updated_at=session.updated_at,
     )
@@ -458,6 +470,7 @@ async def send_message(
         space=space,
         model_id=body.model_id,
         tenant_flow_settings=tenant.flow_settings if tenant else None,
+        message_file_ids=body.file_ids,
         planner_params_resolver=lambda model: _resolve_litellm_params(service, model),
     )
 
@@ -467,6 +480,7 @@ async def send_message(
                 service.send_message(
                     session_id=session_id,
                     message=body.message,
+                    file_ids=body.file_ids,
                     question_answer=body.question_answer,
                     ui_language=body.ui_language,
                     litellm_model=prepared_context.litellm_model,
@@ -475,6 +489,7 @@ async def send_message(
                     available_kbs=prepared_context.planner_context.available_kbs,
                     flow=prepared_context.flow,
                     assistant_snapshots=prepared_context.assistant_snapshots,
+                    attachment_files=prepared_context.attachment_files,
                     max_input_tokens=prepared_context.planner_context.max_input_tokens,
                     max_output_tokens=prepared_context.planner_context.max_output_tokens,
                     budget_policy=prepared_context.planner_context.budget_policy,
@@ -540,6 +555,9 @@ async def get_session(
 ):
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
+    attachment_snapshot = await service.get_session_attachment_snapshot(
+        session_id=session.id
+    )
     _require_ai_builder_scope(request, space_id=session.space_id)
     await _require_flow_edit_permission(container, session.space_id)
     _ensure_session_creator(container, session)
@@ -551,9 +569,33 @@ async def get_session(
         flow_id=session.flow_id,
         latest_plan_id=session.latest_plan_id,
         conversation=session.conversation,
+        attachments=[_to_file_public(file) for file in attachment_snapshot.files],
+        attachment_warnings=list(attachment_snapshot.warnings),
         created_at=session.created_at,
         updated_at=session.updated_at,
     )
+
+
+@router.delete(
+    "/sessions/{session_id}/attachments/{file_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="detach_ai_builder_attachment",
+    summary="Detach AI Builder Attachment",
+    description="Remove a previously attached reference file from an AI Builder session without deleting the underlying file globally.",
+)
+async def detach_session_attachment(
+    request: Request,
+    session_id: UUID,
+    file_id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = _get_ai_builder_service(container)
+    session: BuilderSession = await service.get_session(session_id)
+    _require_ai_builder_scope(request, space_id=session.space_id)
+    await _require_flow_edit_permission(container, session.space_id)
+    _ensure_session_creator(container, session)
+    await service.detach_session_attachment(session_id=session.id, file_id=file_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(

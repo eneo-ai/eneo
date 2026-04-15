@@ -1,13 +1,19 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { slide } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { SvelteSet } from "svelte/reactivity";
+  import CheckIcon from "@lucide/svelte/icons/check";
+  import PencilIcon from "@lucide/svelte/icons/pencil-line";
   import {
     buildStructuredQuestionCustomAnswer,
     buildStructuredQuestionSelection,
     getStructuredQuestionOptionKey,
     type StructuredQuestion,
-    type StructuredQuestionAnswerPayload
+    type StructuredQuestionAnswerPayload,
+    type StructuredQuestionOption
   } from "./structuredQuestionAnswer";
 
   interface Props {
@@ -18,244 +24,353 @@
 
   let { question, answered = false, onanswer }: Props = $props();
 
-  const selectedOptionKeys = new SvelteSet<string>();
-  let showCustomInput = $state(false);
-  let customText = $state("");
+  // Generated once per instance so radiogroup + its label can link without colliding.
+  const questionLabelId = `ai-builder-q-${Math.random().toString(36).slice(2, 10)}`;
 
-  function handleOptionClick(option: StructuredQuestion["options"][number]) {
+  const selectedOptionKeys = new SvelteSet<string>();
+  let customSelected = $state(false);
+  let customText = $state("");
+  let textareaRef = $state<HTMLTextAreaElement | null>(null);
+
+  const isSingle = $derived(question.selection_mode === "single");
+
+  const canConfirm = $derived.by(() => {
+    if (answered) return false;
+    if (customSelected) return customText.trim().length > 0;
+    if (!isSingle) return selectedOptionKeys.size > 0;
+    // single-select auto-submits on click, so the Confirm button is only
+    // needed when the user is typing a custom answer.
+    return false;
+  });
+
+  function selectOption(option: StructuredQuestionOption) {
     if (answered) return;
 
-    if (question.selection_mode === "single") {
-      // Single select: immediately send
+    // Leaving the custom-answer lane clears any partial text so stale input
+    // never submits with a different selection.
+    if (customSelected) {
+      customSelected = false;
+      customText = "";
+    }
+
+    if (isSingle) {
       onanswer?.(buildStructuredQuestionSelection(question, [option]));
+      return;
+    }
+
+    const optionKey = getStructuredQuestionOptionKey(option);
+    if (selectedOptionKeys.has(optionKey)) {
+      selectedOptionKeys.delete(optionKey);
     } else {
-      const optionKey = getStructuredQuestionOptionKey(option);
-      if (selectedOptionKeys.has(optionKey)) {
-        selectedOptionKeys.delete(optionKey);
-      } else {
-        selectedOptionKeys.add(optionKey);
-      }
+      selectedOptionKeys.add(optionKey);
     }
   }
 
-  function handleConfirmMulti() {
-    if (selectedOptionKeys.size === 0) return;
+  function selectCustom() {
+    if (answered) return;
+    customSelected = true;
+    // Clearing the list keeps single- and multi-select "custom" paths
+    // consistent — a custom answer never mixes with preset selections.
+    selectedOptionKeys.clear();
+    queueMicrotask(() => textareaRef?.focus());
+  }
+
+  function handleConfirm() {
+    if (!canConfirm) return;
+    if (customSelected) {
+      const trimmed = customText.trim();
+      if (!trimmed) return;
+      onanswer?.(buildStructuredQuestionCustomAnswer(question, trimmed));
+      return;
+    }
     const selectedOptions = question.options.filter((option) =>
       selectedOptionKeys.has(getStructuredQuestionOptionKey(option))
     );
+    if (selectedOptions.length === 0) return;
     onanswer?.(buildStructuredQuestionSelection(question, selectedOptions));
   }
 
-  function handleCustomSubmit() {
-    const trimmed = customText.trim();
-    if (!trimmed) return;
-    onanswer?.(buildStructuredQuestionCustomAnswer(question, trimmed));
+  function handleTextareaKeydown(event: KeyboardEvent) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      handleConfirm();
+    }
   }
 </script>
 
-<div class="question-container mt-2.5 max-w-xl" class:answered>
-  <p class="text-primary mb-2 text-sm leading-snug font-semibold">{question.question}</p>
+<div class="question-panel" class:answered>
+  <p id={questionLabelId} class="question-title">
+    <span class="question-dot" aria-hidden="true"></span>
+    {question.question}
+  </p>
 
   <div
-    class="flex flex-col gap-2"
-    role={question.selection_mode === "single" ? "radiogroup" : "group"}
-    aria-label={question.question}
+    class="options-stack"
+    role={isSingle ? "radiogroup" : "group"}
+    aria-labelledby={questionLabelId}
   >
     {#each question.options as option, i (getStructuredQuestionOptionKey(option))}
       {@const optionKey = getStructuredQuestionOptionKey(option)}
       {@const isSelected = selectedOptionKeys.has(optionKey)}
       <button
-        class="option-card"
-        class:selected={isSelected}
-        class:answered
+        type="button"
+        class="option-row"
+        class:is-selected={isSelected}
+        style="--i: {i}"
         disabled={answered}
-        onclick={() => handleOptionClick(option)}
-        role={question.selection_mode === "single" ? "radio" : "checkbox"}
+        onclick={() => selectOption(option)}
+        role={isSingle ? "radio" : "checkbox"}
         aria-checked={isSelected}
-        aria-label={option.label}
       >
         <span
-          class="select-indicator"
-          class:checked={isSelected}
-          class:is-radio={question.selection_mode === "single"}
+          class="option-indicator"
+          class:is-selected={isSelected}
+          class:is-radio={isSingle}
+          aria-hidden="true"
         >
           {#if isSelected}
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              class="size-3"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
-                clip-rule="evenodd"
-              />
-            </svg>
+            {#if isSingle}
+              <span class="option-indicator-dot"></span>
+            {:else}
+              <CheckIcon class="size-3" />
+            {/if}
           {/if}
         </span>
-        <span class="flex min-w-0 flex-col">
-          <span class="text-primary text-[0.8125rem] leading-snug font-semibold"
-            >{option.label}</span
-          >
+        <span class="option-body">
+          <span class="option-label">{option.label}</span>
           {#if option.description}
-            <span class="text-secondary mt-0.5 text-xs leading-snug">{option.description}</span>
+            <span class="option-description">{option.description}</span>
           {/if}
         </span>
       </button>
     {/each}
+
+    {#if question.allow_custom}
+      <button
+        type="button"
+        class="option-row option-row-custom"
+        class:is-selected={customSelected}
+        style="--i: {question.options.length}"
+        disabled={answered}
+        onclick={selectCustom}
+        role={isSingle ? "radio" : "checkbox"}
+        aria-checked={customSelected}
+        aria-controls="{questionLabelId}-custom"
+      >
+        <span
+          class="option-indicator"
+          class:is-selected={customSelected}
+          class:is-radio={isSingle}
+          aria-hidden="true"
+        >
+          {#if customSelected}
+            {#if isSingle}
+              <span class="option-indicator-dot"></span>
+            {:else}
+              <CheckIcon class="size-3" />
+            {/if}
+          {:else}
+            <PencilIcon class="text-secondary size-3" />
+          {/if}
+        </span>
+        <span class="option-body">
+          <span class="option-label">{m.ai_builder_question_custom()}</span>
+          <span class="option-description">{m.ai_builder_question_custom_helper()}</span>
+        </span>
+      </button>
+
+      {#if customSelected && !answered}
+        <div
+          class="custom-input-wrap"
+          id="{questionLabelId}-custom"
+          transition:slide={{ duration: 180, easing: cubicOut }}
+        >
+          <Textarea
+            bind:ref={textareaRef}
+            bind:value={customText}
+            rows={2}
+            placeholder={m.ai_builder_question_custom_placeholder()}
+            onkeydown={handleTextareaKeydown}
+            class="resize-none"
+            aria-label={m.ai_builder_question_custom()}
+          />
+        </div>
+      {/if}
+    {/if}
   </div>
 
-  {#if question.selection_mode === "multi" && selectedOptionKeys.size > 0 && !answered}
-    <div class="mt-2">
-      <Button variant="default" size="sm" onclick={handleConfirmMulti}>
+  {#if !answered && (!isSingle || customSelected)}
+    <div class="actions-row">
+      <Button variant="default" size="sm" onclick={handleConfirm} disabled={!canConfirm}>
         {m.ai_builder_question_confirm()}
       </Button>
     </div>
-  {/if}
-
-  {#if question.allow_custom && !answered}
-    {#if showCustomInput}
-      <div class="mt-1.5 flex items-center gap-1.5">
-        <input
-          type="text"
-          class="bg-primary text-primary border-border-default focus:border-accent-default flex-1 rounded-md border px-2.5 py-1.5 text-[0.8125rem] transition-shadow outline-none focus:ring-2 focus:ring-[oklch(from_var(--accent-default)_l_c_h_/_0.08)]"
-          placeholder={m.ai_builder_question_custom_placeholder()}
-          bind:value={customText}
-          onkeydown={(e) => {
-            if (e.key === "Enter") handleCustomSubmit();
-          }}
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          onclick={handleCustomSubmit}
-          disabled={!customText.trim()}
-        >
-          {m.ai_builder_question_confirm()}
-        </Button>
-      </div>
-    {:else}
-      <button
-        class="border-border-stronger text-secondary hover:border-accent-default hover:text-accent-default mt-2 flex w-full items-center rounded-[0.625rem] border border-dashed px-4 py-3 text-left text-[0.8125rem] font-medium transition-all duration-150 hover:bg-[oklch(from_var(--accent-default)_l_c_h_/_0.02)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-default)]"
-        onclick={() => (showCustomInput = true)}
-      >
-        {m.ai_builder_question_custom()}
-      </button>
-    {/if}
   {/if}
 </div>
 
 <style lang="postcss">
   @reference "@intric/ui/styles";
 
-  /* --- Answered state --- */
+  /* --- Outer panel: soft card that signals "the assistant is asking" --- */
 
-  .answered {
-    opacity: 0.55;
-    pointer-events: none;
+  .question-panel {
+    @apply mt-3 flex flex-col rounded-xl border;
+    border-color: var(--border-default);
+    background: var(--bg-card, var(--bg-primary));
+    padding: 0.875rem 0.875rem 0.75rem;
+    transition:
+      opacity 0.2s ease,
+      filter 0.2s ease;
   }
 
-  /* --- Option card --- */
+  .question-panel.answered {
+    opacity: 0.6;
+    pointer-events: none;
+    filter: saturate(0.85);
+  }
 
-  .option-card {
-    @apply flex items-start gap-2.5 rounded-[0.625rem] border px-4 py-3.5 text-left;
-    border-color: var(--border-stronger);
+  /* --- Question prompt --- */
+
+  .question-title {
+    @apply mb-3 flex items-start gap-2 text-sm leading-snug font-medium;
+    color: var(--text-primary);
+  }
+
+  .question-dot {
+    @apply mt-[0.5em] size-1.5 shrink-0 rounded-full;
+    background: var(--accent-default);
+    opacity: 0.7;
+  }
+
+  /* --- Option list --- */
+
+  .options-stack {
+    @apply flex flex-col gap-1.5;
+  }
+
+  .option-row {
+    @apply relative flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left;
+    border-color: var(--border-default);
     background: var(--bg-primary);
+    color: var(--text-primary);
     cursor: pointer;
-    min-height: 2.75rem;
     transition:
       border-color 0.15s ease,
       background 0.15s ease,
       box-shadow 0.15s ease;
   }
 
-  .option-card:not(.answered):hover {
-    border-color: var(--border-accent-default);
-    background: oklch(from var(--accent-default) l c h / 0.03);
-    box-shadow: 0 1px 4px oklch(0 0 0 / 0.04);
+  .option-row:not(:disabled):hover {
+    border-color: var(--border-stronger);
+    background: oklch(from var(--bg-secondary) l c h / 0.55);
   }
 
-  .option-card:not(.answered):active {
-    transform: scale(0.995);
+  .option-row:focus-visible {
+    outline: none;
+    border-color: var(--accent-default);
+    box-shadow: 0 0 0 3px oklch(from var(--accent-default) l c h / 0.18);
   }
 
-  .option-card:focus-visible {
-    outline: 2px solid var(--accent-default);
-    outline-offset: 2px;
-  }
-
-  .option-card.selected {
-    border-color: var(--border-accent-default);
-    background: oklch(from var(--accent-default) l c h / 0.05);
-  }
-
-  .option-card.answered {
+  .option-row:disabled {
     cursor: default;
   }
 
-  /* --- Selection indicator (radio circle / checkbox) --- */
-
-  .select-indicator {
-    @apply flex shrink-0 items-center justify-center rounded;
-    width: 1.125rem;
-    height: 1.125rem;
-    margin-top: 0.0625rem;
-    border: 1.5px solid var(--border-strongest);
-    transition:
-      border-color 0.15s ease,
-      background 0.15s ease;
+  .option-row.is-selected {
+    border-color: oklch(from var(--accent-default) l c h / 0.45);
+    background: oklch(from var(--accent-default) l c h / 0.06);
   }
 
-  .select-indicator.is-radio {
+  .option-row.is-selected:hover {
+    background: oklch(from var(--accent-default) l c h / 0.08);
+  }
+
+  .option-row-custom {
+    /* Visually peers with preset options but hints "you write it yourself". */
+    border-style: dashed;
+  }
+
+  .option-row-custom.is-selected {
+    border-style: solid;
+  }
+
+  /* --- Indicator: reuses the shadcn radio visual language without owning state --- */
+
+  .option-indicator {
+    @apply relative mt-[0.1875rem] flex size-[1.125rem] shrink-0 items-center justify-center rounded-md;
+    border: 1.5px solid var(--border-stronger);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    transition:
+      border-color 0.15s ease,
+      background 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .option-indicator.is-radio {
     border-radius: 9999px;
   }
 
-  .option-card:not(.answered):hover .select-indicator {
+  .option-row:not(:disabled):hover .option-indicator {
     border-color: var(--accent-default);
   }
 
-  .select-indicator.checked {
+  .option-indicator.is-selected {
     border-color: var(--accent-default);
     background: var(--accent-default);
     color: var(--text-on-fill);
   }
 
-  /* --- Entrance animations --- */
-
-  .question-container {
-    animation: questionReveal 300ms ease-out;
+  .option-indicator-dot {
+    @apply size-1.5 rounded-full;
+    background: var(--text-on-fill);
   }
 
-  .option-card {
-    animation: optionSlideIn 200ms ease-out both;
+  /* --- Body: label + description --- */
+
+  .option-body {
+    @apply flex min-w-0 flex-col gap-0.5;
   }
 
-  .option-card:nth-child(1) {
-    animation-delay: 80ms;
+  .option-label {
+    @apply text-[0.8125rem] leading-snug font-medium;
+    color: var(--text-primary);
   }
-  .option-card:nth-child(2) {
-    animation-delay: 140ms;
+
+  .option-description {
+    @apply text-xs leading-relaxed;
+    color: var(--text-secondary);
   }
-  .option-card:nth-child(3) {
-    animation-delay: 200ms;
+
+  /* --- Custom text input --- */
+
+  .custom-input-wrap {
+    @apply mt-1 rounded-lg;
+    padding: 0.25rem 0.25rem 0;
   }
-  .option-card:nth-child(4) {
-    animation-delay: 260ms;
+
+  .custom-input-wrap :global([data-slot="textarea"]) {
+    @apply text-[0.8125rem];
+    min-height: 4rem;
+  }
+
+  /* --- Action row --- */
+
+  .actions-row {
+    @apply mt-3 flex items-center justify-end gap-2;
+  }
+
+  /* --- Entrance animation (scales with option count) --- */
+
+  .question-panel {
+    animation: questionReveal 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .option-row {
+    animation: optionSlideIn 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-delay: calc(70ms + var(--i, 0) * 55ms);
   }
 
   @keyframes questionReveal {
-    from {
-      opacity: 0;
-      transform: translateY(8px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  @keyframes optionSlideIn {
     from {
       opacity: 0;
       transform: translateY(4px);
@@ -266,14 +381,21 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .question-container,
-    .option-card {
-      animation: none;
+  @keyframes optionSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(3px);
     }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
 
-    .option-card:not(.answered):active {
-      transform: none;
+  @media (prefers-reduced-motion: reduce) {
+    .question-panel,
+    .option-row {
+      animation: none;
     }
   }
 </style>

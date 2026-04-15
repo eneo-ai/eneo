@@ -719,6 +719,7 @@ class BuilderSessions(BasePublic):
         nullable=False,
         server_default="[]",
     )
+    active_request_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
     latest_plan_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
 
     __table_args__ = (
@@ -730,6 +731,22 @@ class BuilderSessions(BasePublic):
             f"status IN ({','.join(repr(v) for v in BUILDER_SESSION_STATUS_VALUES)})",
             name="ck_builder_sessions_status",
         ),
+    )
+
+
+class BuilderSessionFiles(BaseCrossReference):
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("builder_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    file_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Files.id, ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
 

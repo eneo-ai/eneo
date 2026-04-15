@@ -35,29 +35,39 @@
     requirementsActive = true,
     onQuestionAnswer = undefined,
     onRequirementsConfirm = undefined,
-    onRequirementsChange = undefined,
+    onRequirementsChange = undefined
   }: Props = $props();
 </script>
 
-<div class="message-row" class:is-user={role === "user"} class:is-assistant={role === "assistant"} class:message-enter={isLast}>
+<div
+  class="message-row"
+  class:is-user={role === "user"}
+  class:is-assistant={role === "assistant"}
+  class:message-enter={isLast}
+>
   {#if role === "user"}
-    <!-- User message: right-aligned bubble -->
+    <!-- User message: right-aligned bubble, reads as speech not a chip. -->
     <div class="flex justify-end">
       <div class="user-bubble">
-        <p class="text-sm leading-relaxed whitespace-pre-wrap">{content}</p>
+        <p class="text-[0.9375rem] leading-relaxed whitespace-pre-wrap">{content}</p>
       </div>
     </div>
   {:else}
-    <!-- Assistant message: left-aligned, no bubble -->
+    <!-- Assistant message: left-aligned prose with a subtle thread anchor. -->
     <div class="assistant-message">
-      <div class="text-primary prose-sm text-sm leading-relaxed">
-        {#if content}
-          <Markdown source={content} />
-        {/if}
-        {#if isStreaming && isLast}
-          <span class="streaming-cursor"></span>
-        {/if}
-      </div>
+      {#if content || (isStreaming && isLast)}
+        <div class="assistant-body">
+          <span class="assistant-anchor" aria-hidden="true"></span>
+          <div class="assistant-prose">
+            {#if content}
+              <Markdown source={content} />
+            {/if}
+            {#if isStreaming && isLast}
+              <span class="streaming-cursor"></span>
+            {/if}
+          </div>
+        </div>
+      {/if}
       {#if question}
         <FlowAIBuilderQuestion
           {question}
@@ -81,49 +91,101 @@
 <style lang="postcss">
   @reference "@intric/ui/styles";
 
+  /* --- Row rhythm --- */
+
   .message-row {
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.25rem;
   }
 
   .message-row.is-assistant {
-    margin-top: 0.5rem;
+    margin-top: 0.25rem;
   }
 
+  /* --- User bubble --- */
+
   .user-bubble {
-    max-width: min(85%, 36rem);
-    border-radius: 1.25rem 1.25rem 0.25rem 1.25rem;
-    padding: 0.75rem 1.25rem;
-    background: oklch(from var(--accent-default) l c h / 0.08);
+    max-width: min(72%, 34rem);
+    border-radius: 1rem 1rem 0.375rem 1rem;
+    padding: 0.625rem 0.9375rem;
+    background: var(--bg-secondary);
+    border: 1px solid oklch(from var(--border-default) l c h / 0.6);
     color: var(--text-primary);
-    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.2);
   }
+
+  /* --- Assistant message --- */
 
   .assistant-message {
     max-width: 100%;
   }
 
-  /* Enforce consistent text size on Markdown output */
-  .assistant-message :global(p),
-  .assistant-message :global(li),
-  .assistant-message :global(span) {
-    font-size: 0.875rem;
+  .assistant-body {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.625rem;
+  }
+
+  .assistant-anchor {
+    display: inline-block;
+    flex-shrink: 0;
+    margin-top: 0.6875rem;
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 9999px;
+    background: var(--border-stronger);
+    opacity: 0.7;
+  }
+
+  .assistant-prose {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--text-primary);
+    font-size: 0.9375rem;
     line-height: 1.65;
   }
 
-  /* --- Message entrance animations --- */
+  /* Markdown output: lock consistent size + reading rhythm. */
+  .assistant-prose :global(p),
+  .assistant-prose :global(li),
+  .assistant-prose :global(span) {
+    font-size: 0.9375rem;
+    line-height: 1.65;
+  }
+
+  .assistant-prose :global(p + p) {
+    margin-top: 0.625rem;
+  }
+
+  .assistant-prose :global(ul),
+  .assistant-prose :global(ol) {
+    margin-top: 0.375rem;
+    padding-left: 1.25rem;
+  }
+
+  .assistant-prose :global(li + li) {
+    margin-top: 0.25rem;
+  }
+
+  .assistant-prose :global(code) {
+    font-size: 0.85em;
+    padding: 0.05em 0.3em;
+    border-radius: 0.25rem;
+    background: var(--bg-secondary);
+  }
+
+  /* --- Entrance animation (muted, municipal-calm) --- */
 
   .message-enter.is-user {
-    animation: user-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: user-enter 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   .message-enter.is-assistant {
-    animation: assistant-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: assistant-enter 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   @keyframes user-enter {
     from {
       opacity: 0.6;
-      transform: translateX(0.5rem);
+      transform: translateX(0.375rem);
     }
     to {
       opacity: 1;
@@ -134,7 +196,7 @@
   @keyframes assistant-enter {
     from {
       opacity: 0.6;
-      transform: translateX(-0.5rem);
+      transform: translateX(-0.375rem);
     }
     to {
       opacity: 1;
@@ -142,7 +204,8 @@
     }
   }
 
-  /* Streaming cursor — subtle fading blink */
+  /* --- Streaming cursor --- */
+
   .streaming-cursor {
     display: inline-block;
     width: 2px;

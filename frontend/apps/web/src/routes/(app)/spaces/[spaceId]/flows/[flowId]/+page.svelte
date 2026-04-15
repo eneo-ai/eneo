@@ -16,7 +16,12 @@
   import FlowRunDialog from "$lib/features/flows/components/FlowRunDialog.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
-  import { Badge, Card } from "@eneo/ui";
+  import * as Card from "$lib/components/ui/card/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { CheckCircle2 } from "lucide-svelte";
   import { IntricError, type TranscriptionModel } from "@intric/intric-js";
   import { toast } from "$lib/components/toast";
@@ -181,6 +186,16 @@
     $validationErrors.size === 0 && !hasStepJsonValidationErrors
   );
   const isFlowConfigured = $derived(checklistHasName && checklistHasSteps);
+  const checklistEntries = $derived([
+    { key: "name", label: m.flow_checklist_name(), done: checklistHasName },
+    { key: "steps", label: m.flow_checklist_steps(), done: checklistHasSteps },
+    {
+      key: "instructions",
+      label: m.flow_checklist_instructions(),
+      done: checklistHasSteps
+    },
+    { key: "valid", label: m.flow_checklist_valid(), done: checklistHasNoErrors }
+  ]);
 
   // Auto-select first step when entering stage 4 with no selection
   $effect(() => {
@@ -471,283 +486,248 @@
 
       <div class="flex flex-1 flex-col overflow-hidden p-4 pt-3">
         {#if builderStage === 1}
-          <div class="flex-1 overflow-y-auto p-5 md:p-8">
-            <div class="mx-auto w-full max-w-6xl space-y-6">
-              <div class="grid gap-6 lg:grid-cols-2">
-                <div class="border-default bg-primary rounded-xl border p-6">
-                  <h3 class="text-base font-semibold">{m.flow_basic_settings_title()}</h3>
-                  <p class="text-secondary mt-1.5 text-sm">
-                    {m.flow_basic_settings_desc()}
-                  </p>
-                  <div class="mt-5 flex flex-col gap-5">
-                    <div class="flex flex-col gap-1.5">
-                      <label class="text-secondary text-sm font-medium" for="flow-name-input"
-                        >{m.flow_flow_name()}</label
-                      >
-                      <input
-                        id="flow-name-input"
-                        type="text"
-                        class="border-default bg-primary ring-default w-full rounded-lg border px-3.5 py-2.5 text-sm shadow transition-shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-                        value={$update.name ?? ""}
-                        disabled={$isPublished}
-                        oninput={(event) => {
-                          $update.name = event.currentTarget.value;
-                        }}
-                        placeholder={m.flow_flow_name()}
-                      />
-                    </div>
-                    <div class="flex flex-col gap-1.5">
-                      <label class="text-secondary text-sm font-medium" for="flow-description-input"
-                        >{m.flow_flow_description()}</label
-                      >
-                      <textarea
-                        id="flow-description-input"
-                        class="border-default bg-primary ring-default min-h-[120px] w-full resize-none rounded-lg border px-3.5 py-2.5 text-sm shadow transition-shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-                        value={$update.description ?? ""}
-                        disabled={$isPublished}
-                        oninput={(event) => {
-                          $update.description = event.currentTarget.value;
-                        }}
-                        placeholder={m.flow_description_placeholder()}
-                      ></textarea>
-                    </div>
-                    {#if $userMode === "power_user"}
-                      <div
-                        class="border-default mt-4 border-t pt-4"
-                        transition:slide={{ duration: 200 }}
-                      >
-                        <label
-                          class="text-secondary block text-sm font-medium"
-                          for="flow-retention-input"
+          <div class="flex-1 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
+            <div class="mx-auto w-full max-w-6xl">
+              <div
+                class="grid gap-5 md:gap-6 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]"
+              >
+                <Card.Root class="gap-0 py-0">
+                  <Card.Header class="px-6 pt-6 pb-0">
+                    <Card.Title class="text-base font-semibold tracking-[-0.01em]">
+                      {m.flow_basic_settings_title()}
+                    </Card.Title>
+                    <Card.Description class="text-[0.8125rem] leading-relaxed">
+                      {m.flow_basic_settings_desc()}
+                    </Card.Description>
+                  </Card.Header>
+                  <Card.Content class="px-6 pt-5 pb-6">
+                    <Field.Group class="gap-5">
+                      <Field.Field>
+                        <Field.Label for="flow-name-input">{m.flow_flow_name()}</Field.Label>
+                        <Input
+                          id="flow-name-input"
+                          type="text"
+                          class="h-10"
+                          value={$update.name ?? ""}
+                          disabled={$isPublished}
+                          oninput={(event) => {
+                            $update.name = event.currentTarget.value;
+                          }}
+                          placeholder={m.flow_flow_name()}
+                        />
+                      </Field.Field>
+                      <Field.Field>
+                        <Field.Label for="flow-description-input">
+                          {m.flow_flow_description()}
+                        </Field.Label>
+                        <Textarea
+                          id="flow-description-input"
+                          class="min-h-[120px] resize-none py-2.5"
+                          value={$update.description ?? ""}
+                          disabled={$isPublished}
+                          oninput={(event) => {
+                            $update.description = event.currentTarget.value;
+                          }}
+                          placeholder={m.flow_description_placeholder()}
+                        />
+                      </Field.Field>
+                      {#if $userMode === "power_user"}
+                        <div
+                          class="border-default -mt-1 border-t pt-5"
+                          transition:slide={{ duration: 200 }}
                         >
-                          {m.flow_data_retention_label()}
-                        </label>
-                        <div class="mt-1.5 flex items-center gap-2">
-                          <input
-                            id="flow-retention-input"
-                            type="number"
-                            min="1"
-                            max="365"
-                            class="border-default bg-primary ring-default w-24 rounded-lg border px-3.5 py-2.5 text-sm shadow focus-within:ring-2"
-                            value={$update.data_retention_days ?? ""}
-                            disabled={$isPublished}
-                            placeholder="—"
-                            oninput={(e) => {
-                              const val = e.currentTarget.value
-                                ? parseInt(e.currentTarget.value, 10)
-                                : null;
-                              $update.data_retention_days = val;
-                            }}
-                          />
-                          <span class="text-secondary text-sm">{m.flow_data_retention_unit()}</span>
-                        </div>
-                        <p class="text-muted mt-1.5 text-sm">{m.flow_data_retention_desc()}</p>
-                      </div>
-                    {/if}
-                  </div>
-                </div>
-                {#if isFlowConfigured}
-                  <Card.Root size="sm">
-                    <Card.Header>
-                      <Card.Title class="font-semibold">{m.flow_summary_title()}</Card.Title>
-                      <Card.Description>{m.flow_summary_desc()}</Card.Description>
-                    </Card.Header>
-                    <Card.Content>
-                      <ul class="space-y-3" style="font-variant-numeric: tabular-nums">
-                        <li class="flex items-center justify-between">
-                          <span class="text-secondary text-sm">{m.flow_summary_steps()}</span>
-                          <span class="text-base font-semibold">{stepsCount}</span>
-                        </li>
-                        <li class="flex items-center justify-between">
-                          <span class="text-secondary text-sm">{m.flow_summary_input_fields()}</span
-                          >
-                          <span class="text-base font-semibold">{formSchemaFields.length}</span>
-                        </li>
-                        <li class="flex items-center justify-between">
-                          <span class="text-secondary text-sm"
-                            >{m.flow_summary_transcription()}</span
-                          >
-                          <span class="text-sm font-medium"
-                            >{transcriptionEnabled
-                              ? m.flow_transcription_on()
-                              : m.flow_transcription_off()}</span
-                          >
-                        </li>
-                        <li class="flex items-center justify-between">
-                          <span class="text-secondary text-sm">{m.flow_summary_validation()}</span>
-                          {#if checklistHasNoErrors}
-                            <span class="text-positive-stronger flex items-center gap-1.5">
-                              <svg
-                                class="size-4"
-                                viewBox="0 0 16 16"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2.5"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" /></svg
+                          <Field.Field>
+                            <Field.Label for="flow-retention-input">
+                              {m.flow_data_retention_label()}
+                            </Field.Label>
+                            <div class="flex items-center gap-2.5">
+                              <Input
+                                id="flow-retention-input"
+                                type="number"
+                                min="1"
+                                max="365"
+                                class="h-10 w-24"
+                                value={$update.data_retention_days ?? ""}
+                                disabled={$isPublished}
+                                placeholder="—"
+                                oninput={(e) => {
+                                  const val = e.currentTarget.value
+                                    ? parseInt(e.currentTarget.value, 10)
+                                    : null;
+                                  $update.data_retention_days = val;
+                                }}
+                              />
+                              <span class="text-secondary text-sm"
+                                >{m.flow_data_retention_unit()}</span
                               >
+                            </div>
+                            <Field.Description>
+                              {m.flow_data_retention_desc()}
+                            </Field.Description>
+                          </Field.Field>
+                        </div>
+                      {/if}
+                    </Field.Group>
+                  </Card.Content>
+                </Card.Root>
+                {#if isFlowConfigured}
+                  <Card.Root size="sm" class="gap-0 py-0">
+                    <Card.Header class="px-5 pt-5 pb-0">
+                      <Card.Title class="text-sm font-semibold tracking-[-0.005em]">
+                        {m.flow_summary_title()}
+                      </Card.Title>
+                      <Card.Description class="text-[0.8125rem]">
+                        {m.flow_summary_desc()}
+                      </Card.Description>
+                    </Card.Header>
+                    <Card.Content class="px-5 pt-4 pb-5">
+                      <ul
+                        class="divide-border divide-y text-sm"
+                        style="font-variant-numeric: tabular-nums"
+                      >
+                        <li class="flex items-center justify-between py-2.5 first:pt-0">
+                          <span class="text-secondary">{m.flow_summary_steps()}</span>
+                          <span class="text-primary font-semibold">{stepsCount}</span>
+                        </li>
+                        <li class="flex items-center justify-between py-2.5">
+                          <span class="text-secondary">{m.flow_summary_input_fields()}</span>
+                          <span class="text-primary font-semibold">{formSchemaFields.length}</span>
+                        </li>
+                        <li class="flex items-center justify-between py-2.5">
+                          <span class="text-secondary">{m.flow_summary_transcription()}</span>
+                          <span class="text-primary font-medium">
+                            {transcriptionEnabled
+                              ? m.flow_transcription_on()
+                              : m.flow_transcription_off()}
+                          </span>
+                        </li>
+                        <li class="flex items-center justify-between py-2.5">
+                          <span class="text-secondary">{m.flow_summary_validation()}</span>
+                          {#if checklistHasNoErrors}
+                            <span class="text-positive-stronger inline-flex items-center gap-1.5">
+                              <CheckCircle2 class="size-4" />
                             </span>
                           {:else}
-                            <span class="text-warning-stronger text-sm font-medium"
-                              >{m.flow_validation_errors_count({
+                            <span class="text-warning-stronger font-medium">
+                              {m.flow_validation_errors_count({
                                 count: $validationErrors.size
-                              })}</span
-                            >
+                              })}
+                            </span>
                           {/if}
                         </li>
-                        <li class="flex items-center justify-between">
-                          <span class="text-secondary text-sm">{m.flow_summary_status()}</span>
+                        <li class="flex items-center justify-between py-2.5 last:pb-0">
+                          <span class="text-secondary">{m.flow_summary_status()}</span>
                           {#if $isPublished}
                             <Badge
                               variant="outline"
                               class="border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger"
-                              >{m.flow_status_published_readonly()}</Badge
                             >
+                              {m.flow_status_published_readonly()}
+                            </Badge>
                           {:else}
                             <Badge
                               variant="outline"
                               class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger"
-                              >{m.flow_status_draft()}</Badge
                             >
+                              {m.flow_status_draft()}
+                            </Badge>
                           {/if}
                         </li>
                       </ul>
                     </Card.Content>
                   </Card.Root>
                 {:else}
-                  <div class="border-default bg-primary rounded-xl border p-6">
-                    <h3 class="text-base font-semibold">{m.flow_checklist_title()}</h3>
-                    <p class="text-secondary mt-1.5 text-sm">{m.flow_checklist_desc()}</p>
-                    <ul class="mt-5 space-y-3.5">
-                      <li class="flex items-center gap-3 text-sm">
-                        <span
-                          class="flex size-6 shrink-0 items-center justify-center rounded-full {checklistHasName
-                            ? 'bg-positive-dimmer text-positive-stronger'
-                            : 'border-default bg-hover-dimmer text-secondary border'}"
-                        >
-                          {#if checklistHasName}<svg
-                              class="size-3.5"
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2.5"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" /></svg
-                            >{/if}
-                        </span>
-                        <span class:text-secondary={!checklistHasName}
-                          >{m.flow_checklist_name()}</span
-                        >
-                      </li>
-                      <li class="flex items-center gap-3 text-sm">
-                        <span
-                          class="flex size-6 shrink-0 items-center justify-center rounded-full {checklistHasSteps
-                            ? 'bg-positive-dimmer text-positive-stronger'
-                            : 'border-default bg-hover-dimmer text-secondary border'}"
-                        >
-                          {#if checklistHasSteps}<svg
-                              class="size-3.5"
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2.5"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" /></svg
-                            >{/if}
-                        </span>
-                        <span class:text-secondary={!checklistHasSteps}
-                          >{m.flow_checklist_steps()}</span
-                        >
-                      </li>
-                      <li class="flex items-center gap-3 text-sm">
-                        <span
-                          class="flex size-6 shrink-0 items-center justify-center rounded-full {checklistHasSteps
-                            ? 'bg-positive-dimmer text-positive-stronger'
-                            : 'border-default bg-hover-dimmer text-secondary border'}"
-                        >
-                          {#if checklistHasSteps}<svg
-                              class="size-3.5"
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2.5"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" /></svg
-                            >{/if}
-                        </span>
-                        <span class:text-secondary={!checklistHasSteps}
-                          >{m.flow_checklist_instructions()}</span
-                        >
-                      </li>
-                      <li class="flex items-center gap-3 text-sm">
-                        <span
-                          class="flex size-6 shrink-0 items-center justify-center rounded-full {checklistHasNoErrors
-                            ? 'bg-positive-dimmer text-positive-stronger'
-                            : 'border-default bg-hover-dimmer text-secondary border'}"
-                        >
-                          {#if checklistHasNoErrors}<svg
-                              class="size-3.5"
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2.5"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" /></svg
-                            >{/if}
-                        </span>
-                        <span class:text-secondary={!checklistHasNoErrors}
-                          >{m.flow_checklist_valid()}</span
-                        >
-                      </li>
-                    </ul>
-                    <div class="mt-5">
-                      {#if $isPublished}
-                        <Badge
-                          variant="outline"
-                          class="border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger"
-                          >{m.flow_status_published_readonly()}</Badge
-                        >
-                      {:else}
-                        <Badge
-                          variant="outline"
-                          class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger"
-                          >{m.flow_status_draft()}</Badge
-                        >
-                      {/if}
-                    </div>
-                  </div>
+                  <Card.Root size="sm" class="gap-0 py-0">
+                    <Card.Header class="px-5 pt-5 pb-0">
+                      <Card.Title class="text-sm font-semibold tracking-[-0.005em]">
+                        {m.flow_checklist_title()}
+                      </Card.Title>
+                      <Card.Description class="text-[0.8125rem]">
+                        {m.flow_checklist_desc()}
+                      </Card.Description>
+                    </Card.Header>
+                    <Card.Content class="px-5 pt-4 pb-5">
+                      <ul class="flex flex-col gap-2.5">
+                        {#each checklistEntries as item (item.key)}
+                          <li class="flex items-center gap-2.5 text-sm">
+                            <span
+                              class="flex size-5 shrink-0 items-center justify-center rounded-full transition-colors {item.done
+                                ? 'bg-positive-dimmer text-positive-stronger'
+                                : 'border-default bg-hover-dimmer text-muted border'}"
+                              aria-hidden="true"
+                            >
+                              {#if item.done}
+                                <svg
+                                  class="size-3"
+                                  viewBox="0 0 16 16"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  stroke-width="2.5"
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                >
+                                  <path d="M3.5 8.5L6.5 11.5L12.5 4.5" />
+                                </svg>
+                              {/if}
+                            </span>
+                            <span class={item.done ? "text-primary" : "text-secondary"}>
+                              {item.label}
+                            </span>
+                          </li>
+                        {/each}
+                      </ul>
+                      <div class="mt-5">
+                        {#if $isPublished}
+                          <Badge
+                            variant="outline"
+                            class="border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger"
+                          >
+                            {m.flow_status_published_readonly()}
+                          </Badge>
+                        {:else}
+                          <Badge
+                            variant="outline"
+                            class="border-warning-default/25 bg-warning-dimmer/50 text-warning-stronger"
+                          >
+                            {m.flow_status_draft()}
+                          </Badge>
+                        {/if}
+                      </div>
+                    </Card.Content>
+                  </Card.Root>
                 {/if}
               </div>
             </div>
           </div>
         {:else if builderStage === 2}
-          <div class="flex-1 overflow-y-auto p-4 md:p-6">
-            <div class="mx-auto w-full max-w-2xl space-y-5 pt-4">
+          <div class="flex-1 overflow-y-auto px-4 py-5 sm:px-6 md:px-8">
+            <div class="mx-auto w-full max-w-2xl space-y-4">
               <!-- Main transcription card — single unified card for all states -->
-              <div
-                class="bg-primary rounded-xl border transition-colors duration-300 {transcriptionEnabled
-                  ? 'border-accent-default/30'
-                  : 'border-default'}"
+              <Card.Root
+                class={[
+                  "gap-0 py-0 transition-colors duration-200 ease-out",
+                  transcriptionEnabled && "ring-accent-default/25"
+                ]}
               >
                 <!-- Header: toggle row -->
-                <div class="flex items-center justify-between px-5 py-4">
-                  <div class="min-w-0">
+                <div class="flex items-start justify-between gap-4 px-5 py-4 sm:items-center">
+                  <div class="min-w-0 flex-1">
                     <h3 class="text-[0.9375rem] font-semibold tracking-[-0.01em]">
                       {m.flow_transcription_optional_title()}
                     </h3>
-                    <p class="text-secondary mt-0.5 text-sm leading-relaxed">
+                    <p class="text-secondary mt-1 text-[0.8125rem] leading-relaxed">
                       {m.flow_transcription_optional_desc_simple()}
                     </p>
                   </div>
                   <label
-                    class="flex shrink-0 cursor-pointer items-center gap-2.5 pl-4"
+                    class="flex shrink-0 cursor-pointer items-center gap-2.5"
                     for="transcription-toggle"
                   >
-                    <span class="text-secondary text-sm"
-                      >{transcriptionEnabled
+                    <span class="text-secondary text-sm">
+                      {transcriptionEnabled
                         ? m.flow_transcription_on()
-                        : m.flow_transcription_off()}</span
-                    >
+                        : m.flow_transcription_off()}
+                    </span>
                     <Switch
                       id="transcription-toggle"
                       checked={transcriptionEnabled}
@@ -760,68 +740,89 @@
                 <!-- Settings: shown when enabled -->
                 {#if transcriptionEnabled}
                   <div
-                    class="border-default border-t px-5 py-4"
+                    class="border-default border-t px-5 py-5"
                     transition:slide={{ duration: 200 }}
                   >
-                    <div class="grid gap-4 sm:grid-cols-2">
-                      <div class="flex flex-col gap-1.5">
-                        <label
-                          for="flow-transcription-model"
-                          class="text-secondary text-sm font-medium"
-                          >{m.flow_transcription_model_label()}</label
-                        >
-                        <SelectAIModelV2
-                          bind:selectedModel={transcriptionModel}
-                          availableModels={$currentSpace.transcription_models}
-                          dropdownLabel={m.flow_transcription_model_label()}
-                          on:change={(event) => {
-                            const selected = event.detail.selectedModel;
-                            const newId = selected?.id ?? null;
-                            if (newId !== transcriptionModelId) {
-                              setWizardMeta({
-                                transcription_model: newId ? { id: newId } : null
-                              });
-                            }
-                          }}
-                        />
+                    <Field.Group class="gap-4">
+                      <div class="grid gap-4 sm:grid-cols-2">
+                        <Field.Field>
+                          <Field.Label for="flow-transcription-model">
+                            {m.flow_transcription_model_label()}
+                          </Field.Label>
+                          <SelectAIModelV2
+                            bind:selectedModel={transcriptionModel}
+                            availableModels={$currentSpace.transcription_models}
+                            dropdownLabel={m.flow_transcription_model_label()}
+                            on:change={(event) => {
+                              const selected = event.detail.selectedModel;
+                              const newId = selected?.id ?? null;
+                              if (newId !== transcriptionModelId) {
+                                setWizardMeta({
+                                  transcription_model: newId ? { id: newId } : null
+                                });
+                              }
+                            }}
+                          />
+                        </Field.Field>
+                        <Field.Field>
+                          <Field.Label for="flow-transcription-language">
+                            {m.flow_transcription_language_label()}
+                          </Field.Label>
+                          {@const languageLabel =
+                            transcriptionLanguage === "sv"
+                              ? "Svenska"
+                              : transcriptionLanguage === "en"
+                                ? "English"
+                                : m.flow_transcription_language_auto()}
+                          <Select.Root
+                            type="single"
+                            value={transcriptionLanguage}
+                            disabled={$isPublished}
+                            onValueChange={(value) => {
+                              if (value) setWizardMeta({ transcription_language: value });
+                            }}
+                          >
+                            <Select.Trigger id="flow-transcription-language" class="h-10 w-full">
+                              {languageLabel}
+                            </Select.Trigger>
+                            <Select.Content>
+                              <Select.Item value="sv" label="Svenska">Svenska</Select.Item>
+                              <Select.Item value="en" label="English">English</Select.Item>
+                              <Select.Item
+                                value="auto"
+                                label={m.flow_transcription_language_auto()}
+                              >
+                                {m.flow_transcription_language_auto()}
+                              </Select.Item>
+                            </Select.Content>
+                          </Select.Root>
+                        </Field.Field>
                       </div>
-                      <div class="flex flex-col gap-1.5">
-                        <label
-                          for="flow-transcription-language"
-                          class="text-secondary text-sm font-medium"
-                          >{m.flow_transcription_language_label()}</label
+                      {#if transcriptionModelMissingInSpace}
+                        <div
+                          class="border-warning-default/40 bg-warning-dimmer text-warning-stronger rounded-lg border px-3 py-2 text-sm"
+                          role="status"
                         >
-                        <select
-                          class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2"
-                          id="flow-transcription-language"
-                          value={transcriptionLanguage}
-                          disabled={$isPublished}
-                          onchange={(e) =>
-                            setWizardMeta({ transcription_language: e.currentTarget.value })}
-                        >
-                          <option value="sv">Svenska</option>
-                          <option value="en">English</option>
-                          <option value="auto">{m.flow_transcription_language_auto()}</option>
-                        </select>
-                      </div>
-                    </div>
-                    {#if transcriptionModelMissingInSpace}
-                      <div
-                        class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mt-4 rounded-lg border px-3 py-2 text-sm"
-                      >
-                        {m.flow_transcription_model_unavailable_warning()}
-                      </div>
-                    {/if}
+                          {m.flow_transcription_model_unavailable_warning()}
+                        </div>
+                      {/if}
+                    </Field.Group>
                   </div>
                 {/if}
-              </div>
+              </Card.Root>
 
               <!-- Audio status hint — only when it adds real information -->
               {#if !transcriptionEnabled && hasAudioInputStep}
                 <div
                   class="border-warning-default/30 bg-warning-dimmer/50 text-warning-stronger flex items-start gap-3 rounded-xl border px-4 py-3.5 text-sm leading-relaxed"
+                  role="status"
                 >
-                  <svg class="mt-0.5 size-4 shrink-0" viewBox="0 0 16 16" fill="currentColor">
+                  <svg
+                    class="mt-0.5 size-4 shrink-0"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
                     <path
                       d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"
                     />
@@ -852,7 +853,7 @@
             class="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-3 overflow-hidden lg:flex-row"
           >
             <div
-              class="border-default max-h-[40vh] w-full overflow-hidden rounded-xl border lg:max-h-none lg:w-80 lg:shrink-0 xl:w-[340px]"
+              class="border-default bg-primary max-h-[42vh] w-full overflow-hidden rounded-xl border shadow-[0_1px_2px_rgba(0,0,0,0.02)] sm:max-h-[48vh] lg:max-h-none lg:w-80 lg:shrink-0 xl:w-[340px]"
             >
               <FlowStepList
                 steps={$update.steps}
@@ -892,7 +893,7 @@
             </div>
 
             <div
-              class="border-default flex-1 overflow-hidden rounded-xl border lg:max-w-[900px] 2xl:max-w-[1000px]"
+              class="border-default bg-primary flex-1 overflow-hidden rounded-xl border shadow-[0_1px_2px_rgba(0,0,0,0.02)] lg:max-w-[900px] 2xl:max-w-[1000px]"
             >
               <div class="h-full overflow-y-auto">
                 <FlowStepEditPanel
@@ -954,90 +955,148 @@
             onNodeClick={(stepId) => activeStepId.set(stepId)}
           />
         {:else}
-          <div class="flex-1 overflow-y-auto p-5 md:p-8">
-            <div class="mx-auto w-full max-w-6xl space-y-6">
+          <div class="flex-1 overflow-y-auto p-4 sm:p-5 md:p-8">
+            <div class="mx-auto w-full max-w-6xl space-y-5 md:space-y-6">
               <!-- Pipeline summary -->
-              <div class="border-default bg-primary rounded-xl border p-6">
-                <h3 class="text-base font-semibold">{m.flow_review_pipeline_title()}</h3>
-                <div class="mt-5 flex flex-wrap items-center gap-3">
+              <section
+                class="border-default bg-primary rounded-2xl border p-5 shadow-[0_1px_2px_rgba(0,0,0,0.02)] sm:p-6"
+                aria-labelledby="flow-review-pipeline-heading"
+              >
+                <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                  <h3
+                    id="flow-review-pipeline-heading"
+                    class="text-[0.9375rem] font-semibold tracking-[-0.005em]"
+                  >
+                    {m.flow_review_pipeline_title()}
+                  </h3>
+                  <span
+                    class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase tabular-nums"
+                  >
+                    {($update.steps ?? []).length}&nbsp;&middot;&nbsp;{m.flow_steps()}
+                  </span>
+                </div>
+                <div class="mt-5 flex flex-wrap items-center gap-2.5 sm:gap-3">
                   <div
-                    class="bg-accent-dimmer text-accent-stronger rounded-lg px-4 py-2 text-sm font-medium"
+                    class="bg-accent-dimmer text-accent-stronger rounded-xl px-3.5 py-2 text-[13px] font-medium tracking-[-0.005em]"
                   >
                     {m.flow_review_input_label()}
                   </div>
-                  {#each $update.steps ?? [] as pipeStep (pipeStep.id ?? pipeStep.step_order)}
-                    <span class="text-secondary text-lg">&rarr;</span>
+                  {#each $update.steps ?? [] as pipeStep, stepIdx (pipeStep.id ?? pipeStep.step_order)}
+                    <span class="text-muted text-base" aria-hidden="true">&rarr;</span>
                     {@const completionModel =
                       "completion_model" in pipeStep
                         ? (pipeStep as { completion_model?: { name?: string | null } | null })
                             .completion_model
                         : null}
                     <div
-                      class="border-default bg-primary flex flex-col items-center rounded-lg border px-4 py-2"
+                      class="border-default/80 bg-secondary/20 hover:bg-secondary/35 flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 transition-colors"
                     >
-                      <span class="text-sm font-medium"
-                        >{pipeStep.user_description ||
-                          m.flow_step_fallback_label({ order: String(pipeStep.step_order) })}</span
+                      <span
+                        class="bg-hover-dimmer text-secondary flex size-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold tabular-nums"
+                        aria-hidden="true"
                       >
-                      {#if completionModel?.name}
-                        <span class="text-muted text-xs">{completionModel.name}</span>
-                      {/if}
+                        {stepIdx + 1}
+                      </span>
+                      <div class="flex min-w-0 flex-col">
+                        <span
+                          class="text-primary max-w-[14rem] truncate text-[13px] leading-snug font-medium"
+                          title={pipeStep.user_description ||
+                            m.flow_step_fallback_label({
+                              order: String(pipeStep.step_order)
+                            })}
+                        >
+                          {pipeStep.user_description ||
+                            m.flow_step_fallback_label({ order: String(pipeStep.step_order) })}
+                        </span>
+                        {#if completionModel?.name}
+                          <span
+                            class="text-muted max-w-[14rem] truncate text-[11px] leading-snug tabular-nums"
+                            title={completionModel.name}
+                          >
+                            {completionModel.name}
+                          </span>
+                        {/if}
+                      </div>
                     </div>
                   {/each}
-                  <span class="text-secondary text-lg">&rarr;</span>
+                  <span class="text-muted text-base" aria-hidden="true">&rarr;</span>
                   <div
-                    class="bg-positive-dimmer text-positive-stronger rounded-lg px-4 py-2 text-sm font-medium"
+                    class="bg-positive-dimmer text-positive-stronger rounded-xl px-3.5 py-2 text-[13px] font-medium tracking-[-0.005em]"
                   >
                     {m.flow_review_output_label()}
                   </div>
                 </div>
-              </div>
+              </section>
 
               <!-- Test section -->
-              <div class="border-default bg-primary rounded-xl border p-6">
-                <h4 class="text-base font-semibold">{m.flow_testing()}</h4>
-                {#if $isPublished && $userMode === "power_user"}
-                  <p class="text-secondary mt-1.5 text-sm">{m.flow_export_debug_desc()}</p>
-                {:else if !$isPublished}
-                  <p class="text-secondary mt-1.5 text-sm">{m.flow_dry_run_desc()}</p>
-                {/if}
-                <div class="mt-5 flex flex-col gap-4">
+              <section
+                class="border-default bg-primary rounded-2xl border p-5 shadow-[0_1px_2px_rgba(0,0,0,0.02)] sm:p-6"
+                aria-labelledby="flow-review-testing-heading"
+              >
+                <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                  <div class="min-w-0 flex-1">
+                    <h4
+                      id="flow-review-testing-heading"
+                      class="text-[0.9375rem] font-semibold tracking-[-0.005em]"
+                    >
+                      {m.flow_testing()}
+                    </h4>
+                    {#if $isPublished && $userMode === "power_user"}
+                      <p class="text-secondary mt-1 text-sm leading-relaxed">
+                        {m.flow_export_debug_desc()}
+                      </p>
+                    {:else if !$isPublished}
+                      <p class="text-secondary mt-1 text-sm leading-relaxed">
+                        {m.flow_dry_run_desc()}
+                      </p>
+                    {/if}
+                  </div>
+                  {#if !$isPublished}
+                    {#if $validationErrors.size === 0 && !hasStepJsonValidationErrors}
+                      <span
+                        class="border-positive-default/30 bg-positive-dimmer/70 text-positive-stronger inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-[0.015em]"
+                        role="status"
+                      >
+                        <CheckCircle2 class="size-3" aria-hidden="true" />
+                        {m.flow_publish_status_ready()}
+                      </span>
+                    {:else}
+                      <span
+                        class="border-warning-default/30 bg-warning-dimmer/70 text-warning-stronger inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-[0.015em] tabular-nums"
+                      >
+                        {m.flow_validation_errors_count({
+                          count: $validationErrors.size + (hasStepJsonValidationErrors ? 1 : 0)
+                        })}
+                      </span>
+                    {/if}
+                  {/if}
+                </div>
+
+                <div class="mt-5 flex flex-col gap-3">
                   {#if $isPublished}
-                    <div class="flex flex-wrap items-center gap-3">
+                    <div class="flex flex-wrap items-center gap-2">
                       <Button
                         variant="default"
                         size="default"
+                        class="h-9 gap-2"
                         onclick={() => (showRunDialog = true)}
                       >
                         {m.flow_run_trigger()}
                       </Button>
-                      <Button variant="outline" onclick={() => (activeTab = "history")}>
+                      <Button variant="outline" class="h-9" onclick={() => (activeTab = "history")}>
                         {m.flow_show_history()}
                       </Button>
                     </div>
                   {:else}
-                    <div class="flex flex-wrap items-center gap-x-3 gap-y-4">
+                    <div class="flex flex-wrap items-center gap-2">
                       <FlowDryRun flow={$resource} />
-                      <Button variant="outline" onclick={() => (activeTab = "history")}>
+                      <Button variant="outline" class="h-9" onclick={() => (activeTab = "history")}>
                         {m.flow_show_history()}
                       </Button>
-                      {#if $validationErrors.size === 0}
-                        <Badge
-                          variant="outline"
-                          class="border-positive-default/25 bg-positive-dimmer/50 text-positive-stronger gap-1.5"
-                        >
-                          <CheckCircle2 class="size-3.5" />
-                          {m.flow_publish_status_ready()}
-                        </Badge>
-                      {:else}
-                        <span class="text-muted text-sm">
-                          {m.flow_validation_errors_count({ count: $validationErrors.size })}
-                        </span>
-                      {/if}
                     </div>
                   {/if}
                 </div>
-              </div>
+              </section>
             </div>
           </div>
         {/if}

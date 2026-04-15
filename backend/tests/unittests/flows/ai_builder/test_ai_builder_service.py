@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from intric.files.file_models import File, FileType
 from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_events import SSE_EVENT_REQUIREMENTS_SUMMARY
 from intric.flows.ai_builder.ai_builder_models import (
@@ -127,11 +128,39 @@ def _make_service(
 ) -> AIBuilderService:
     if repo is None:
         repo = AsyncMock()
+    repo.list_session_file_ids.return_value = []
     return AIBuilderService(
         user=user or _make_user(),
         repo=repo,
         flow_service=flow_service or AsyncMock(),
         completion_service=completion_service or AsyncMock(),
+    )
+
+
+def _make_file(
+    *,
+    file_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+    user_id: UUID | None = None,
+    name: str = "reference.txt",
+    text: str = "Reference material",
+) -> File:
+    resolved_user_id = user_id or uuid4()
+    return File(
+        id=file_id or uuid4(),
+        name=name,
+        checksum="checksum",
+        size=len(text.encode("utf-8")),
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        text=text,
+        blob=None,
+        transcription=None,
+        owner_type=None,
+        owner_user_id=resolved_user_id,
+        owner_api_key_id=None,
+        user_id=resolved_user_id,
+        tenant_id=tenant_id or uuid4(),
     )
 
 
@@ -4475,3 +4504,161 @@ class TestReasoningLeakRegression:
         serialized = response.model_dump_json()
         assert "reasoning" not in serialized
         assert "step_count" in serialized
+
+
+@pytest.mark.asyncio
+async def test_prepare_message_context_attaches_new_files_and_builds_attachment_context() -> (
+    None
+):
+    user = _make_user()
+    repo = AsyncMock()
+    completion_service = AsyncMock()
+    file_service = AsyncMock()
+    service = AIBuilderService(
+        user=user,
+        repo=repo,
+        flow_service=AsyncMock(),
+        completion_service=completion_service,
+        file_service=file_service,
+    )
+
+    session = _make_session(actor_user_id=user.id)
+    space = MagicMock()
+    model = MagicMock()
+    model.id = uuid4()
+    model.name = "gpt-5.4"
+    model.max_input_tokens = 8192
+    model.max_output_tokens = 2048
+    model.litellm_model_name = "openai/gpt-5.4"
+    space.get_default_completion_model.return_value = model
+    space.completion_models = [model]
+    space.collections = []
+
+    file_id = uuid4()
+    attached_file = _make_file(
+        file_id=file_id, tenant_id=user.tenant_id, user_id=user.id
+    )
+    file_service.get_files_by_ids.return_value = [attached_file]
+    completion_service.resolve_litellm_params.return_value = (
+        "openai/gpt-5.4",
+        {"api_key": "test"},
+    )
+    repo.list_session_file_ids.return_value = [file_id]
+
+    context = await service.prepare_message_context(
+        session=session,
+        space=space,
+        model_id=None,
+        tenant_flow_settings=None,
+        message_file_ids=[file_id],
+    )
+
+    repo.attach_session_files.assert_awaited_once_with(
+        session_id=session.id,
+        tenant_id=user.tenant_id,
+        file_ids=[file_id],
+    )
+    assert len(context.attachment_files) == 1
+    assert context.attachment_files[0].name == "reference.txt"
+
+
+@pytest.mark.asyncio
+async def test_prepare_message_context_rejects_missing_or_unavailable_file_ids() -> (
+    None
+):
+    user = _make_user()
+    repo = AsyncMock()
+    completion_service = AsyncMock()
+    file_service = AsyncMock()
+    service = AIBuilderService(
+        user=user,
+        repo=repo,
+        flow_service=AsyncMock(),
+        completion_service=completion_service,
+        file_service=file_service,
+    )
+
+    session = _make_session(actor_user_id=user.id)
+    space = MagicMock()
+    model = MagicMock()
+    model.id = uuid4()
+    model.name = "gpt-5.4"
+    model.max_input_tokens = 8192
+    model.max_output_tokens = 2048
+    model.litellm_model_name = "openai/gpt-5.4"
+    space.get_default_completion_model.return_value = model
+    space.completion_models = [model]
+    space.collections = []
+    completion_service.resolve_litellm_params.return_value = ("openai/gpt-5.4", {})
+    file_service.get_files_by_ids.return_value = []
+
+    with pytest.raises(BadRequestException, match="referenced files are unavailable"):
+        await service.prepare_message_context(
+            session=session,
+            space=space,
+            model_id=None,
+            tenant_flow_settings=None,
+            message_file_ids=[uuid4()],
+        )
+
+
+@pytest.mark.asyncio
+async def test_cancel_session_detaches_session_files_before_cancelling() -> None:
+    user = _make_user()
+    repo = AsyncMock()
+    session = _make_session(actor_user_id=user.id)
+    repo.get_session.return_value = session
+    service = _make_service(user=user, repo=repo)
+
+    await service.cancel_session(session.id)
+
+    repo.detach_session_files_for_sessions.assert_awaited_once_with(
+        session_ids=[session.id],
+        tenant_id=user.tenant_id,
+    )
+    repo.cancel_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_session_force_new_relies_on_repo_cancellation_cleanup() -> None:
+    user = _make_user()
+    repo = AsyncMock()
+    cancelled_session_id = uuid4()
+    repo.cancel_matching_active_sessions.return_value = [cancelled_session_id]
+    created_session = _make_session(actor_user_id=user.id)
+    repo.create_session.return_value = created_session
+    service = _make_service(user=user, repo=repo)
+
+    await service.create_session(
+        space_id=created_session.space_id,
+        target_kind=TargetKind.CREATE,
+        force_new=True,
+    )
+
+    repo.detach_session_files_for_sessions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_session_attachment_snapshot_returns_warning_when_some_files_missing() -> (
+    None
+):
+    user = _make_user()
+    repo = AsyncMock()
+    file_service = AsyncMock()
+    available_file = _make_file(
+        file_id=uuid4(), tenant_id=user.tenant_id, user_id=user.id
+    )
+    repo.list_session_file_ids.return_value = [available_file.id, uuid4()]
+    file_service.get_files_by_ids.return_value = [available_file]
+    service = AIBuilderService(
+        user=user,
+        repo=repo,
+        flow_service=AsyncMock(),
+        completion_service=AsyncMock(),
+        file_service=file_service,
+    )
+
+    snapshot = await service.get_session_attachment_snapshot(session_id=uuid4())
+
+    assert snapshot.files == [available_file]
+    assert snapshot.warnings

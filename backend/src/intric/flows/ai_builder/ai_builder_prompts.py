@@ -38,9 +38,15 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
 from intric.flows.ai_builder.ai_builder_knowledge_pack import (
     build_prompt_knowledge_sections,
 )
+from intric.flows.ai_builder.ai_builder_knowledge_pack_create import (
+    KNOWLEDGE_PACK_CREATE_RECIPES,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     ConversationMessage,
     RequirementsSummaryPayload,
+)
+from intric.flows.ai_builder.ai_builder_recipe_selector import (
+    select_relevant_recipes,
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_confirmed_requirements_prompt_block,
@@ -68,6 +74,7 @@ def build_system_prompt(
     flow_context: str | None = None,
     available_models: list[dict[str, str]] | None = None,
     available_knowledge_bases: list[dict[str, str]] | None = None,
+    attachment_context: str | None = None,
     planner_hints: str | None = None,
     ui_language: str | None = None,
     confirmed_requirements: dict[str, Any] | None = None,
@@ -85,6 +92,20 @@ def build_system_prompt(
         has_confirmed_requirements=confirmed_requirements is not None,
     )
     sections.insert(2, build_framework_guardrails_block())
+
+    if confirmed_requirements and not is_edit_mode:
+        selected_recipes = select_relevant_recipes(
+            _extract_signals_from_requirements(confirmed_requirements),
+            freeform_text=" ".join(
+                str(confirmed_requirements.get(key, ""))
+                for key in ("summary", "input_description", "output_description")
+            ),
+            recipe_source=KNOWLEDGE_PACK_CREATE_RECIPES,
+        )
+        sections = [
+            selected_recipes if section == KNOWLEDGE_PACK_CREATE_RECIPES else section
+            for section in sections
+        ]
 
     if confirmed_requirements:
         requirements_payload = RequirementsSummaryPayload.model_validate(
@@ -140,6 +161,9 @@ def build_system_prompt(
             "Använd alltid det exakta `ref`-värdet i tool calls. `name` är bara läsbar etikett.\n\n"
             f"{kb_lines}"
         )
+
+    if attachment_context:
+        sections.append(attachment_context)
 
     if planner_hints:
         sections.append(f"\n## Planeringshintar\n\n{planner_hints}")

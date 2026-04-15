@@ -35,6 +35,15 @@ export interface AIBuilderConversationMessage {
   metadata?: Record<string, unknown> | null;
 }
 
+export interface AIBuilderAttachmentFile {
+  id: string;
+  name: string;
+  mimetype: string;
+  size: number;
+  transcription?: string | null;
+  token_count?: number | null;
+}
+
 export interface AIBuilderSession {
   session_id: string;
   status: SessionStatus;
@@ -42,6 +51,8 @@ export interface AIBuilderSession {
   flow_id: string | null;
   latest_plan_id: string | null;
   conversation?: AIBuilderConversationMessage[];
+  attachments?: AIBuilderAttachmentFile[];
+  attachment_warnings?: string[];
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -60,7 +71,6 @@ export interface StepSpec {
     model_ref: string | null;
     knowledge_refs: string[];
   };
-  mcp_policy: string;
   input_source: string;
   input_type: string;
   output_mode: string;

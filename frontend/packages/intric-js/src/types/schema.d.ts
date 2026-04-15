@@ -827,6 +827,30 @@ export interface paths {
     patch: operations["update_flow_input_limits_api_v1_settings_flow_input_limits_patch"];
     trace?: never;
   };
+  "/api/v1/settings/flow-evidence-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow evidence policy
+     * @description Return the tenant's effective flow evidence export policy, including classification-3 raw export defaults.
+     */
+    get: operations["get_flow_evidence_policy_api_v1_settings_flow_evidence_policy_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update flow evidence policy
+     * @description Update tenant-level policy flags that control raw evidence export behavior for classification-3 spaces.
+     */
+    patch: operations["update_flow_evidence_policy_api_v1_settings_flow_evidence_policy_patch"];
+    trace?: never;
+  };
   "/api/v1/settings/ai-builder-budget": {
     parameters: {
       query?: never;
@@ -982,64 +1006,6 @@ export interface paths {
      *     ```
      */
     patch: operations["update_provisioning_setting_api_v1_settings_provisioning_patch"];
-    trace?: never;
-  };
-  "/api/v1/settings/scope-enforcement": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    /**
-     * Toggle API key scope enforcement
-     * @description Toggle API key scope enforcement for your tenant.
-     *
-     *     **Admin Only:** Requires admin permissions.
-     *
-     *     **Behavior:**
-     *     - Updates the `api_key_scope_enforcement` feature flag for your tenant
-     *     - When enabled: API keys are restricted to resources within their configured scope
-     *     - When disabled: All API keys can access resources beyond their configured scope
-     *     - Disabling scope enforcement also disables strict mode for consistency
-     *     - Change takes effect immediately for all API key requests
-     */
-    patch: operations["update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch"];
-    trace?: never;
-  };
-  "/api/v1/settings/strict-mode": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    /**
-     * Toggle API key strict mode
-     * @description Toggle API key strict mode for your tenant.
-     *
-     *     **Admin Only:** Requires admin permissions.
-     *
-     *     **Behavior:**
-     *     - Updates the `api_key_strict_mode` feature flag for your tenant
-     *     - When enabled: scoped API keys are enforced with strict fail-closed semantics
-     *     - When disabled: default scope enforcement behavior applies
-     *     - Enabling strict mode requires `api_key_scope_enforcement` to be enabled
-     *     - Change takes effect immediately for API key requests
-     */
-    patch: operations["update_strict_mode_setting_api_v1_settings_strict_mode_patch"];
     trace?: never;
   };
   "/api/v1/settings/api-key-expiry-notifications": {
@@ -3579,13 +3545,13 @@ export interface paths {
     };
     /**
      * List Flows
-     * @description List flow definitions in a space with pagination-friendly sparse metadata. The `count` field in the paginated response reports the number of items returned in the current page, not the total number of matching flows across all pages.
+     * @description List flow definitions in a space with pagination-friendly sparse metadata. The `count` field in the paginated response reports the number of items returned in the current page, not the total number of matching flows across all pages. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin. Service-key principals may use this endpoint only for published-flow discovery in their scoped space. Draft authoring and AI Builder still require a user principal.
      */
     get: operations["list_flows"];
     put?: never;
     /**
      * Create Flow
-     * @description Create a new draft flow definition, including its initial ordered steps, inside a space.
+     * @description Create a new draft flow definition, including its initial ordered steps, inside a space. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     post: operations["create_flow"];
     delete?: never;
@@ -3603,23 +3569,43 @@ export interface paths {
     };
     /**
      * Get Flow
-     * @description Return the full draft representation of a flow, including all configured steps and metadata.
+     * @description Return the full draft representation of a flow, including all configured steps and metadata. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin. This endpoint is user-principal-oriented and returns the current draft definition.
      */
     get: operations["get_flow"];
     put?: never;
     post?: never;
     /**
      * Delete Flow
-     * @description Soft-delete a flow definition so it is no longer available for editing or execution.
+     * @description Soft-delete a flow definition so it is no longer available for editing or execution. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     delete: operations["delete_flow"];
     options?: never;
     head?: never;
     /**
      * Update Flow
-     * @description Update a draft flow definition, including steps, metadata, and retention settings.
+     * @description Update a draft flow definition, including steps, metadata, and retention settings. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     patch: operations["update_flow"];
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/published/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Published Flow Runtime View
+     * @description Return the runtime-safe published projection of a flow. This endpoint is intended for runtime consumers, including service-key principals, and does not expose the current draft/current-definition authoring view. Use this endpoint when a client needs one published flow's metadata plus the canonical runtime paths for contract discovery, run creation, polling, and artifact/evidence retrieval.
+     */
+    get: operations["get_published_flow_runtime"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/flows/{id}/publish/": {
@@ -3633,7 +3619,7 @@ export interface paths {
     put?: never;
     /**
      * Publish Flow
-     * @description Publish the current draft revision so new runs use a version-pinned definition.
+     * @description Publish the current draft revision so new runs use a version-pinned definition. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     post: operations["publish_flow"];
     delete?: never;
@@ -3653,7 +3639,7 @@ export interface paths {
     put?: never;
     /**
      * Unpublish Flow
-     * @description Remove the active published revision while keeping the draft definition available for editing.
+     * @description Remove the active published revision while keeping the draft definition available for editing. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     post: operations["unpublish_flow"];
     delete?: never;
@@ -3811,6 +3797,8 @@ export interface paths {
      *     - step-specific runtime input requirements
      *     - aggregate file limits
      *     - published template readiness and capability state
+     *
+     *     Service-key principals may use this endpoint for published-flow runtime only.
      */
     get: operations["get_flow_run_contract"];
     put?: never;
@@ -3838,6 +3826,8 @@ export interface paths {
      *     - the effective max file size limit in bytes
      *     - max files per run (when constrained)
      *     - recommended run payload shape for API consumers
+     *
+     *     Service-key principals may use this endpoint for published-flow runtime only.
      */
     get: operations["get_flow_input_policy"];
     put?: never;
@@ -3912,6 +3902,10 @@ export interface paths {
      *         This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
      *         The `count` field in the paginated response reports the number of items returned in the
      *         current page, not the total number of matching runs across all pages.
+     *
+     *         Current runtime visibility is policy-based: callers always list their own runs, tenant admins
+     *         can list runs across the tenant, same-space admins and owners can list run metadata for flows
+     *         in their space, and service-key principals can list only their own runs.
      */
     get: operations["list_flow_runs_alias"];
     put?: never;
@@ -3925,9 +3919,15 @@ export interface paths {
      *         2. Upload any required files via `POST /api/v1/flows/{id}/files/` or the relevant
      *            `.../steps/{step_id}/runtime-files/` endpoint.
      *         3. Submit the returned uploaded files as `file_ids`, together with any optional `step_inputs`
-     *            and structured
-     *            `input_payload_json` fields in this run request.
+     *            and structured `input_payload_json` fields in this run request.
      *         4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs.
+     *
+     *         `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
+     *         the same request payload returns the existing run payload. Reusing the same key with a
+     *         different payload returns `400` with code `flow_run_idempotency_conflict`.
+     *
+     *         Service-key principals may create published-flow runs in v1. Draft ownership and AI Builder
+     *         flows still require a user principal.
      */
     post: operations["create_flow_run"];
     delete?: never;
@@ -3948,6 +3948,9 @@ export interface paths {
      * @description Get one run for a flow using flow-first routing.
      *
      *         Use this endpoint for run status and top-level output payload when building consumer apps.
+     *         Current runtime visibility is policy-based: callers always see their own runs, tenant admins
+     *         can inspect runs across the tenant, same-space admins and owners can inspect run metadata for
+     *         flows in their space, and service-key principals can inspect only their own runs.
      */
     get: operations["get_flow_run_alias"];
     put?: never;
@@ -3971,7 +3974,10 @@ export interface paths {
      * Cancel flow run (flow-first)
      * @description Cancel a flow run if it is not already terminal.
      *
-     *     This is the canonical run control endpoint for flow consumers.
+     *     This is the canonical run control endpoint for flow consumers. Current runtime lifecycle control
+     *     is policy-based: callers can cancel their own runs, tenant admins can cancel runs across the
+     *     tenant, same-space admins and owners can cancel runs for flows in their space, and service-key
+     *     principals can cancel only their own runs.
      */
     post: operations["cancel_flow_run_alias"];
     delete?: never;
@@ -3995,6 +4001,8 @@ export interface paths {
      *
      *         Returns the refreshed run payload together with `redispatched_count`, which indicates
      *         whether dispatch was re-triggered for this request.
+     *
+     *         Service-key principals may redispatch only their own queued runs in v1.
      */
     post: operations["redispatch_flow_run_alias"];
     delete?: never;
@@ -4016,6 +4024,12 @@ export interface paths {
      *
      *     Use `/steps/` for baseline consumer step inspection and `/evidence/` for rich traceability,
      *     attempt history, and debug-export provenance.
+     *
+     *     Evidence visibility is policy-based:
+     *     - trusted operators (tenant admin, space owner, space admin) may inspect in-scope evidence
+     *     - user-principal run owners may inspect own-run evidence when `FLOWS_TRACE` permits it
+     *     - service keys may inspect only their own-run evidence when explicit machine evidence capability
+     *       allows it
      */
     get: operations["get_flow_run_evidence_alias"];
     put?: never;
@@ -4036,6 +4050,12 @@ export interface paths {
     /**
      * Export flow run evidence bundle
      * @description Export the redacted rich evidence bundle for one flow run as a JSON attachment.
+     *
+     *     Evidence export is policy-based and tiered:
+     *     - redacted/default export is the standard support/compliance export
+     *     - raw/full export is a stricter surface, especially for classification 3 spaces
+     *     - service keys may export only their own-run evidence and only when explicit machine evidence
+     *       capability allows it
      */
     get: operations["export_flow_run_evidence_alias"];
     put?: never;
@@ -4059,6 +4079,11 @@ export interface paths {
      *
      *     Designed for consumer UIs that need to inspect intermediate outputs, diagnostics, and token usage
      *     without relying on debug-export internals.
+     *
+     *     Current content visibility is policy-based: callers can inspect their own runs, tenant admins can
+     *     inspect runs across the tenant, trusted in-space operators (space owner and space admin) can
+     *     inspect content for runs in their space, and service-key principals can inspect only their own
+     *     runs.
      */
     get: operations["list_flow_run_steps"];
     put?: never;
@@ -4082,6 +4107,9 @@ export interface paths {
      *
      *     When `run_id` is provided, the graph is built from the run's published version snapshot and
      *     annotated with run execution results. Otherwise the current live flow definition is used.
+     *
+     *     Service-key principals may use this endpoint for published-flow runtime topology and for
+     *     their own run snapshots. Authoring still requires a user principal.
      */
     get: operations["get_flow_graph"];
     put?: never;
@@ -4105,11 +4133,14 @@ export interface paths {
      * Generate signed URL for a flow run artifact
      * @description Generate a time-limited signed download URL for a file produced by a flow run.
      *
-     *     This endpoint uses tenant-scoped access so that any user with access to the flow
-     *     can download artifacts from any run, regardless of who created the run.
+     *     Artifact visibility is policy-based: callers can download artifacts from their own runs, tenant
+     *     admins can download artifacts across the tenant, trusted in-space operators (space owner and space
+     *     admin) can download artifacts for runs in their space, and service-key principals can download only
+     *     their own run artifacts.
      *
-     *     The file_id must reference an artifact that was actually produced by a step in the
-     *     specified run.
+     *     The file_id must reference an artifact that was actually produced by a step in the specified run.
+     *
+     *     Service-key principals are supported for their own runtime artifacts in v1.
      */
     post: operations["generate_flow_run_artifact_signed_url"];
     delete?: never;
@@ -4177,6 +4208,26 @@ export interface paths {
     put?: never;
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/ai-builder/sessions/{session_id}/attachments/{file_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Detach AI Builder Attachment
+     * @description Remove a previously attached reference file from an AI Builder session without deleting the underlying file globally.
+     */
+    delete: operations["detach_ai_builder_attachment"];
     options?: never;
     head?: never;
     patch?: never;
@@ -11157,7 +11208,8 @@ export interface components {
       | 9034
       | 9035
       | 9036
-      | 9037;
+      | 9037
+      | 9038;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -11502,6 +11554,33 @@ export interface components {
       steps: components["schemas"]["StepSpec"][];
       /** Form Fields */
       form_fields?: components["schemas"]["FormFieldSpec"][] | null;
+    };
+    /** FlowEvidencePolicyPublic */
+    FlowEvidencePolicyPublic: {
+      /**
+       * Allow Space Admin Raw Export Class3
+       * @default false
+       */
+      allow_space_admin_raw_export_class3?: boolean;
+      /**
+       * Allow Run Owner Raw Export Class3
+       * @default false
+       */
+      allow_run_owner_raw_export_class3?: boolean;
+      /**
+       * Allow Service Key Raw Export Class3
+       * @default false
+       */
+      allow_service_key_raw_export_class3?: boolean;
+    };
+    /** FlowEvidencePolicyUpdate */
+    FlowEvidencePolicyUpdate: {
+      /** Allow Space Admin Raw Export Class3 */
+      allow_space_admin_raw_export_class3?: boolean | null;
+      /** Allow Run Owner Raw Export Class3 */
+      allow_run_owner_raw_export_class3?: boolean | null;
+      /** Allow Service Key Raw Export Class3 */
+      allow_service_key_raw_export_class3?: boolean | null;
     };
     /** FlowInputLimitsPublic */
     FlowInputLimitsPublic: {
@@ -11937,8 +12016,26 @@ export interface components {
     FlowRunDebugMcp: {
       /** Policy */
       policy?: string | null;
-      /** Tool Allowlist */
-      tool_allowlist?: string[];
+      /** Servers */
+      servers?: components["schemas"]["FlowRunDebugMcpServer"][];
+      /** Tools Enabled */
+      tools_enabled?: components["schemas"]["FlowRunDebugMcpTool"][];
+    };
+    /** FlowRunDebugMcpServer */
+    FlowRunDebugMcpServer: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+    };
+    /** FlowRunDebugMcpTool */
+    FlowRunDebugMcpTool: {
+      /** Tool Id */
+      tool_id: string;
+      /** Server Id */
+      server_id: string;
+      /** Name */
+      name: string;
     };
     /** FlowRunDebugOutput */
     FlowRunDebugOutput: {
@@ -12286,6 +12383,7 @@ export interface components {
      *                 "message": "Uploaded audio file was used."
      *               }
      *             ],
+     *             "finished_at": "2026-03-17T10:05:30Z",
      *             "id": "00000000-0000-0000-0000-000000000501",
      *             "input_payload_json": {
      *               "diagnostics": [
@@ -12300,6 +12398,7 @@ export interface components {
      *             "output_payload_json": {
      *               "text": "Hello and welcome to the annual review..."
      *             },
+     *             "started_at": "2026-03-17T10:05:05Z",
      *             "status": "completed",
      *             "step_id": "00000000-0000-0000-0000-000000000101",
      *             "step_order": 1,
@@ -12648,6 +12747,7 @@ export interface components {
      *               "message": "Uploaded audio file was used."
      *             }
      *           ],
+     *           "finished_at": "2026-03-17T10:05:30Z",
      *           "id": "00000000-0000-0000-0000-000000000501",
      *           "input_payload_json": {
      *             "diagnostics": [
@@ -12662,6 +12762,7 @@ export interface components {
      *           "output_payload_json": {
      *             "text": "Hello and welcome to the annual review..."
      *           },
+     *           "started_at": "2026-03-17T10:05:05Z",
      *           "status": "completed",
      *           "step_id": "00000000-0000-0000-0000-000000000101",
      *           "step_order": 1,
@@ -12713,6 +12814,7 @@ export interface components {
       flow_id: string;
       /** Flow Version */
       flow_version: number;
+      principal_type?: components["schemas"]["PrincipalType"] | null;
       /** User Id */
       user_id?: string | null;
       /**
@@ -12728,6 +12830,10 @@ export interface components {
       status: components["schemas"]["FlowRunStatus"];
       /** Cancelled At */
       cancelled_at?: string | null;
+      /** Started At */
+      started_at?: string | null;
+      /** Finished At */
+      finished_at?: string | null;
       /** Input Payload Json */
       input_payload_json?: {
         [key: string]: unknown;
@@ -12793,6 +12899,7 @@ export interface components {
      *           "message": "Uploaded audio file was used."
      *         }
      *       ],
+     *       "finished_at": "2026-03-17T10:05:30Z",
      *       "id": "00000000-0000-0000-0000-000000000501",
      *       "input_payload_json": {
      *         "diagnostics": [
@@ -12807,6 +12914,7 @@ export interface components {
      *       "output_payload_json": {
      *         "text": "Hello and welcome to the annual review..."
      *       },
+     *       "started_at": "2026-03-17T10:05:05Z",
      *       "status": "completed",
      *       "step_id": "00000000-0000-0000-0000-000000000101",
      *       "step_order": 1,
@@ -12864,6 +12972,10 @@ export interface components {
       diagnostics?: {
         [key: string]: unknown;
       }[];
+      /** Started At */
+      started_at?: string | null;
+      /** Finished At */
+      finished_at?: string | null;
       /**
        * Created At
        * Format: date-time
@@ -12903,6 +13015,82 @@ export interface components {
      * @enum {string}
      */
     FlowRuntimeInputFormat: "document" | "audio" | "file";
+    /** FlowRuntimePathsPublic */
+    FlowRuntimePathsPublic: {
+      /** Run Contract */
+      run_contract: string;
+      /** Input Policy */
+      input_policy: string;
+      /** Graph */
+      graph: string;
+      /** Upload Flow File */
+      upload_flow_file: string;
+      /** Upload Step Runtime File Template */
+      upload_step_runtime_file_template: string;
+      /** Create Run */
+      create_run: string;
+      /** List Runs */
+      list_runs: string;
+      /** Get Graph For Run Template */
+      get_graph_for_run_template: string;
+      /** Get Run Template */
+      get_run_template: string;
+      /** List Steps Template */
+      list_steps_template: string;
+      /** Evidence Template */
+      evidence_template: string;
+      /** Artifact Signed Url Template */
+      artifact_signed_url_template: string;
+    };
+    /**
+     * FlowRuntimePublic
+     * @example {
+     *       "created_at": "2026-03-17T09:30:00Z",
+     *       "description": "Transcribe a review conversation and return a PDF summary.",
+     *       "id": "00000000-0000-0000-0000-000000000001",
+     *       "name": "Employee Review Summary",
+     *       "published_version": 3,
+     *       "runtime_paths": {
+     *         "artifact_signed_url_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/artifacts/{file_id}/signed-url/",
+     *         "create_run": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
+     *         "evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/",
+     *         "get_graph_for_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/?run_id={run_id}",
+     *         "get_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/",
+     *         "graph": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/",
+     *         "input_policy": "/api/v1/flows/00000000-0000-0000-0000-000000000001/input-policy/",
+     *         "list_runs": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
+     *         "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/",
+     *         "run_contract": "/api/v1/flows/00000000-0000-0000-0000-000000000001/run-contract/",
+     *         "upload_flow_file": "/api/v1/flows/00000000-0000-0000-0000-000000000001/files/",
+     *         "upload_step_runtime_file_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/steps/{step_id}/runtime-files/"
+     *       },
+     *       "space_id": "00000000-0000-0000-0000-000000000020",
+     *       "updated_at": "2026-03-17T10:00:00Z"
+     *     }
+     */
+    FlowRuntimePublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Published Version */
+      published_version: number;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      runtime_paths: components["schemas"]["FlowRuntimePathsPublic"];
+    };
     /**
      * FlowSparsePublic
      * @example {
@@ -16139,7 +16327,6 @@ export interface components {
      *               },
      *               "input_source": "flow_input",
      *               "input_type": "audio",
-     *               "mcp_policy": "inherit",
      *               "name": "Transcribe uploaded audio",
      *               "output_mode": "transcribe_only",
      *               "output_type": "text",
@@ -16156,7 +16343,6 @@ export interface components {
      *               },
      *               "input_source": "previous_step",
      *               "input_type": "text",
-     *               "mcp_policy": "inherit",
      *               "name": "Create PDF summary",
      *               "output_mode": "pass_through",
      *               "output_type": "pdf",
@@ -16250,6 +16436,11 @@ export interface components {
        */
       id: string;
     };
+    /**
+     * PrincipalType
+     * @enum {string}
+     */
+    PrincipalType: "user" | "service_key";
     /** PrivacyPolicy */
     PrivacyPolicy: {
       /** Url */
@@ -16374,9 +16565,15 @@ export interface components {
     ResourcePermissionLevel: "none" | "read" | "write" | "admin";
     /**
      * ResourcePermissions
-     * @description Per-resource-type permission overrides. Each level must not exceed the key's simple permission.
+     * @description Per-resource-type permission overrides for sk_ keys.
+     *
+     *     For sk_ keys, the top-level ``permission`` field is derived automatically
+     *     as ``max(assistants, apps, spaces, knowledge)`` by
+     *     :func:`derive_permission_from_resource_permissions`.  pk_ keys do not
+     *     support fine-grained permissions.
      */
     ResourcePermissions: {
+      flows?: components["schemas"]["ResourcePermissionLevel"] | null;
       /** @default none */
       assistants?: components["schemas"]["ResourcePermissionLevel"];
       /** @default none */
@@ -16385,6 +16582,8 @@ export interface components {
       spaces?: components["schemas"]["ResourcePermissionLevel"];
       /** @default none */
       knowledge?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      flow_evidence?: components["schemas"]["ResourcePermissionLevel"];
     };
     /**
      * RetentionPolicyResponse
@@ -16671,6 +16870,9 @@ export interface components {
     /**
      * SendMessageRequest
      * @example {
+     *       "file_ids": [
+     *         "00000000-0000-0000-0000-000000000099"
+     *       ],
      *       "message": "Build a flow that extracts key dates from uploaded contracts and returns structured JSON.",
      *       "model_id": "00000000-0000-0000-0000-000000000010",
      *       "question_answer": {
@@ -16690,6 +16892,8 @@ export interface components {
       message: string;
       /** Model Id */
       model_id?: string | null;
+      /** File Ids */
+      file_ids?: string[] | null;
       /** Question Answer */
       question_answer?: {
         [key: string]: unknown;
@@ -17021,7 +17225,6 @@ export interface components {
      *                   },
      *                   "input_source": "flow_input",
      *                   "input_type": "audio",
-     *                   "mcp_policy": "inherit",
      *                   "name": "Transcribe uploaded audio",
      *                   "output_mode": "transcribe_only",
      *                   "output_type": "text",
@@ -17038,7 +17241,6 @@ export interface components {
      *                   },
      *                   "input_source": "previous_step",
      *                   "input_type": "text",
-     *                   "mcp_policy": "inherit",
      *                   "name": "Create PDF summary",
      *                   "output_mode": "pass_through",
      *                   "output_type": "pdf",
@@ -17114,6 +17316,10 @@ export interface components {
       latest_plan_id?: string | null;
       /** Conversation */
       conversation?: components["schemas"]["ConversationMessage"][];
+      /** Attachments */
+      attachments?: components["schemas"]["FilePublic"][];
+      /** Attachment Warnings */
+      attachment_warnings?: string[];
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -17223,16 +17429,6 @@ export interface components {
        * @default false
        */
       provisioning?: boolean;
-      /**
-       * Api Key Scope Enforcement
-       * @default true
-       */
-      api_key_scope_enforcement?: boolean;
-      /**
-       * Api Key Strict Mode
-       * @default false
-       */
-      api_key_strict_mode?: boolean;
       /**
        * Api Key Expiry Notifications
        * @default true
@@ -23228,6 +23424,59 @@ export interface operations {
       };
     };
   };
+  get_flow_evidence_policy_api_v1_settings_flow_evidence_policy_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowEvidencePolicyPublic"];
+        };
+      };
+    };
+  };
+  update_flow_evidence_policy_api_v1_settings_flow_evidence_policy_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowEvidencePolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowEvidencePolicyPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_get: {
     parameters: {
       query?: never;
@@ -23348,72 +23597,6 @@ export interface operations {
     };
   };
   update_provisioning_setting_api_v1_settings_provisioning_patch: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ToggleSettingUpdate"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["SettingsPublic"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ToggleSettingUpdate"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["SettingsPublic"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  update_strict_mode_setting_api_v1_settings_strict_mode_patch: {
     parameters: {
       query?: never;
       header?: never;
@@ -31570,7 +31753,7 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_FlowSparsePublic_"];
         };
       };
-      /** @description Caller lacks permission or API key scope to list flows in this space. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, `flow_owner_required` when the caller is not allowed to override another member's draft, and the current fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints before first-class support lands. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -31638,7 +31821,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Caller lacks permission or API key scope to create flows in this space. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, and the fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints that require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -31689,7 +31872,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
-      /** @description Caller lacks permission or API key scope to view this flow. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, `flow_owner_required` when the caller is not allowed to override another member's draft, and the current fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints before first-class support lands. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -31754,7 +31937,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Caller lacks permission or API key scope to delete this flow. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, and the fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints that require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -31841,7 +32024,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Caller lacks permission or API key scope to update this flow. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, `flow_owner_required` when the caller is not allowed to override another member's draft, and the current fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints before first-class support lands. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -31861,6 +32044,73 @@ export interface operations {
         };
       };
       /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_published_flow_runtime: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the published flow to expose as a runtime-safe projection. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRuntimePublic"];
+        };
+      };
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key scope does not match the flow and `insufficient_space_permission` when the caller cannot read the published flow in the space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Published flow not found in tenant scope. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -31924,7 +32174,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Caller lacks permission or API key scope to publish this flow. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, and the fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints that require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -32007,7 +32257,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Caller lacks permission or API key scope to unpublish this flow. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, and the fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints that require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -33149,7 +33399,7 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_FlowRunPublic_"];
         };
       };
-      /** @description Forbidden: API key scope does not match flow space. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to access a run outside the current visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -33198,7 +33448,10 @@ export interface operations {
   create_flow_run: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Optional caller-supplied idempotency key. Reusing the same key with the same request payload returns the existing run payload. Reusing the same key with a different payload returns `400` with code `flow_run_idempotency_conflict`. */
+        "Idempotency-Key"?: string | null;
+      };
       path: {
         /** @description Identifier of the published flow that should be executed. */
         id: string;
@@ -33220,7 +33473,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunPublic"];
         };
       };
-      /** @description Flow cannot be run in its current state or request payload is invalid. Representative machine-readable codes include: flow_not_published, flow_run_input_payload_too_large, flow_run_concurrency_limit_reached, flow_input_required_field_missing, flow_input_invalid_number. */
+      /** @description Flow cannot be run in its current state or request payload is invalid. Representative machine-readable codes include: flow_not_published, flow_run_input_payload_too_large, flow_run_concurrency_limit_reached, flow_input_required_field_missing, flow_input_invalid_number, and flow_run_idempotency_conflict when an Idempotency-Key is replayed with different input. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -33236,7 +33489,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Forbidden: API key scope does not match flow space. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to access a run outside the current visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -33305,7 +33558,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunPublic"];
         };
       };
-      /** @description Forbidden: API key scope does not match flow space. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to access a run outside the current visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -33374,7 +33627,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunPublic"];
         };
       };
-      /** @description Forbidden: API key scope does not match flow space. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to access a run outside the current visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -33443,7 +33696,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunRedispatchResponse"];
         };
       };
-      /** @description Forbidden: API key scope does not match flow space. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to access a run outside the current visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -33512,7 +33765,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunEvidenceResponse"];
         };
       };
-      /** @description Forbidden: API key scope does not match flow space. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` when an ordinary principal lacks trace permission, `flow_run_access_denied` when a caller tries to inspect another principal's run, `flow_run_evidence_forbidden` when a service key lacks explicit own-run evidence capability, and `flow_run_evidence_raw_export_forbidden` when raw export is blocked by classification-aware policy. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -33582,6 +33835,10 @@ export interface operations {
       query?: {
         /** @description Export format. */
         format?: "json";
+        /** @description Export detail. `redacted` is the default support/compliance export; `raw` requests the full unredacted bundle. */
+        detail?: "redacted" | "raw";
+        /** @description Reason or purpose for exporting evidence. */
+        reason?: string;
       };
       header?: never;
       path: {
@@ -33624,7 +33881,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Forbidden: API key scope does not match flow space. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` when an ordinary principal lacks trace permission, `flow_run_access_denied` when a caller tries to inspect another principal's run, `flow_run_evidence_forbidden` when a service key lacks explicit own-run evidence capability, and `flow_run_evidence_raw_export_forbidden` when raw export is blocked by classification-aware policy. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -33712,7 +33969,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunStepPublic"][];
         };
       };
-      /** @description Forbidden: API key scope does not match flow space. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to inspect another user's run, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -33857,7 +34114,7 @@ export interface operations {
           "application/json": components["schemas"]["SignedURLResponse"];
         };
       };
-      /** @description Forbidden: API key scope does not match flow space. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to inspect another user's run, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -34163,6 +34420,36 @@ export interface operations {
            */
           "application/json": components["schemas"]["GeneralError"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  detach_ai_builder_attachment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {

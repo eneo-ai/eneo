@@ -265,17 +265,17 @@
   {#if fallbackSnapshot}
     <FlowRunProgressView snapshot={fallbackSnapshot} loadingTerminalDetails />
   {:else}
-    <div class="text-secondary flex items-center gap-2 text-sm">
+    <div class="text-muted flex items-center justify-center gap-2 py-6 text-sm" aria-busy="true">
       <IconLoadingSpinner class="size-4 animate-spin" />
       {m.flow_run_evidence_loading()}
     </div>
   {/if}
 {:else if loadError || evidence === null}
   <Alert.Root variant="destructive">
-    <Alert.Description class="text-sm">{m.flow_run_evidence_error()}</Alert.Description>
+    <Alert.Description>{m.flow_run_evidence_error()}</Alert.Description>
   </Alert.Root>
 {:else}
-  <div class="flex flex-col gap-3">
+  <div class="flex flex-col gap-4">
     {#if $mode === "power_user"}
       <FlowRunEvidenceToolbar
         debugExport={evidence.debug_export}

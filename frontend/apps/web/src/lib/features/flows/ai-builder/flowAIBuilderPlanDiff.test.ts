@@ -17,7 +17,6 @@ function makeStep(overrides: Partial<StepSpec> = {}): StepSpec {
       model_ref: null,
       knowledge_refs: []
     },
-    mcp_policy: overrides.mcp_policy ?? "inherit",
     input_source: overrides.input_source ?? "previous_step",
     input_type: overrides.input_type ?? "text",
     output_mode: overrides.output_mode ?? "pass_through",

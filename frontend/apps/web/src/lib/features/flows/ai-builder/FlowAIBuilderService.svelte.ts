@@ -143,9 +143,15 @@ export class FlowAIBuilderService {
     return this.#session?.status;
   }
 
-  get phase(): AIBuilderPhase {
+  // Reactive phase: touch reactive state so Svelte recomputes on change.
+  // The driver holds the source-of-truth derivation logic.
+  phase: AIBuilderPhase = $derived.by(() => {
+    void this.#currentPlan;
+    void this.#isStreaming;
+    void this.#statusMessage;
+    void this.#messages;
     return this.#driver.derivePhase();
-  }
+  });
 
   isRequirementsSummaryConfirmed(summary: RequirementsSummary): boolean {
     return this.#driver.isRequirementsSummaryConfirmed(summary);
@@ -193,9 +199,10 @@ export class FlowAIBuilderService {
 
   async sendMessage(
     message: string,
-    questionAnswer?: StructuredQuestionAnswerMetadata
+    questionAnswer?: StructuredQuestionAnswerMetadata,
+    fileIds?: string[]
   ): Promise<void> {
-    await this.#driver.sendMessage(message, questionAnswer);
+    await this.#driver.sendMessage(message, questionAnswer, fileIds);
   }
 
   async approvePlan(): Promise<void> {
@@ -216,6 +223,10 @@ export class FlowAIBuilderService {
 
   async continueEditing(): Promise<void> {
     await this.#driver.continueEditing();
+  }
+
+  async removeAttachment(fileId: string): Promise<void> {
+    await this.#driver.removeAttachment(fileId);
   }
 
   selectModel(modelId: string): void {

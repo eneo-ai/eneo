@@ -5,8 +5,8 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { IconPlay } from "@intric/icons/play";
   import { m } from "$lib/paraglide/messages";
-  import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
+  import { CheckCircle2, AlertCircle, Loader2 } from "lucide-svelte";
 
   let {
     flow
@@ -94,65 +94,116 @@
 </script>
 
 <div class="contents">
-  <Button variant="outline" disabled={isRunning || flow.steps.length === 0} onclick={runDryRun}>
-    <IconPlay class="size-3.5" />
+  <Button
+    variant="default"
+    disabled={isRunning || flow.steps.length === 0}
+    onclick={runDryRun}
+    class="h-9 gap-2"
+  >
+    {#if isRunning}
+      <Loader2 class="size-3.5 animate-spin" aria-hidden="true" />
+    {:else}
+      <IconPlay class="size-3.5" aria-hidden="true" />
+    {/if}
     {m.flow_dry_run()}
   </Button>
 
   {#if hasRun}
-    <Card.Root class="divide-default order-1 w-full divide-y overflow-hidden">
-      {#each dryRunResults as result (result.stepId ?? result.stepOrder)}
+    <Card.Root
+      class="divide-default border-default/80 bg-secondary/20 order-1 w-full divide-y overflow-hidden rounded-xl"
+    >
+      {#each dryRunResults as result, i (result.stepId ?? result.stepOrder)}
         {@const step = getStepByOrder(result.stepOrder)}
-        <div class="flex items-start justify-between gap-3 px-4 py-3">
+        <div
+          class="dry-run-row flex items-start justify-between gap-3 bg-transparent px-4 py-3"
+          style:animation-delay="{i * 35}ms"
+          style:animation-fill-mode="both"
+        >
           <div class="flex min-w-0 items-start gap-3">
             <span
-              class="bg-hover-default mt-0.5 flex size-6 shrink-0 items-center justify-center rounded text-xs font-bold tabular-nums"
+              class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-semibold tabular-nums {result.valid
+                ? 'bg-positive-dimmer text-positive-stronger'
+                : 'bg-negative-dimmer text-negative-stronger'}"
+              aria-hidden="true"
             >
               {result.stepOrder}
             </span>
-            <div class="flex min-w-0 flex-col gap-0.5">
-              <span class="text-sm font-medium">
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="text-primary truncate text-sm leading-snug font-medium">
                 {step?.user_description ||
                   m.flow_step_fallback_label({ order: String(result.stepOrder) })}
               </span>
-              <span class="text-secondary truncate text-xs">
-                {step?.input_type ?? "text"} &rarr; {step?.output_type ?? "text"}
-                <span class="text-tertiary">&middot;</span>
-                {INPUT_SOURCE_LABELS[step?.input_source ?? ""]?.() ?? step?.input_source ?? ""}
+              <span
+                class="text-secondary flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] tracking-[0.015em]"
+              >
+                <span class="truncate">{step?.input_type ?? "text"}</span>
+                <span class="text-muted" aria-hidden="true">&rarr;</span>
+                <span class="truncate">{step?.output_type ?? "text"}</span>
+                <span class="text-muted" aria-hidden="true">&middot;</span>
+                <span class="truncate">
+                  {INPUT_SOURCE_LABELS[step?.input_source ?? ""]?.() ?? step?.input_source ?? ""}
+                </span>
               </span>
               {#if !result.valid && $mode === "power_user"}
                 {#each result.errors as error (`${result.stepOrder}:${error}`)}
-                  <span class="text-negative-stronger text-xs">{error}</span>
+                  <span class="text-negative-stronger mt-0.5 text-xs leading-snug">{error}</span>
                 {/each}
               {/if}
             </div>
           </div>
           <span
-            class="mt-1 shrink-0 text-sm font-medium"
-            class:text-positive-stronger={result.valid}
-            class:text-negative-stronger={!result.valid}
+            class="mt-0.5 flex size-6 shrink-0 items-center justify-center"
+            aria-label={result.valid
+              ? m.flow_dry_run_ready()
+              : m.flow_dry_run_issues({ count: "1" })}
           >
-            {#if result.valid}&#10003;{:else}&#10007;{/if}
+            {#if result.valid}
+              <CheckCircle2 class="text-positive-stronger size-4" aria-hidden="true" />
+            {:else}
+              <AlertCircle class="text-negative-stronger size-4" aria-hidden="true" />
+            {/if}
           </span>
         </div>
       {/each}
     </Card.Root>
 
     {#if errorCount === 0}
-      <Alert.Root class="bg-positive-dimmer text-positive-stronger order-2 w-full">
-        <Alert.Description class="text-xs font-medium">
-          &#10003; {m.flow_dry_run_ready()}
-        </Alert.Description>
-      </Alert.Root>
-    {:else}
-      <Alert.Root
-        variant="destructive"
-        class="bg-negative-dimmer text-negative-stronger order-2 w-full"
+      <div
+        class="border-positive-default/30 bg-positive-dimmer/70 text-positive-stronger order-2 flex w-full items-center gap-2 rounded-xl border px-3.5 py-2.5"
+        role="status"
       >
-        <Alert.Description class="text-xs font-medium">
-          &#10007; {m.flow_dry_run_issues({ count: String(errorCount) })}
-        </Alert.Description>
-      </Alert.Root>
+        <CheckCircle2 class="size-4 shrink-0" aria-hidden="true" />
+        <span class="text-[13px] font-medium tracking-[-0.005em]">{m.flow_dry_run_ready()}</span>
+      </div>
+    {:else}
+      <div
+        class="border-negative-default/30 bg-negative-dimmer/70 text-negative-stronger order-2 flex w-full items-center gap-2 rounded-xl border px-3.5 py-2.5"
+        role="alert"
+      >
+        <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
+        <span class="text-[13px] font-medium tracking-[-0.005em]"
+          >{m.flow_dry_run_issues({ count: String(errorCount) })}</span
+        >
+      </div>
     {/if}
   {/if}
 </div>
+
+<style>
+  @media (prefers-reduced-motion: no-preference) {
+    .dry-run-row {
+      animation: dry-run-row-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+  }
+
+  @keyframes dry-run-row-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+</style>

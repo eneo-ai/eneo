@@ -2,10 +2,13 @@
   import type { Flow, FlowRun, Intric } from "@intric/intric-js";
   import { untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import * as Table from "$lib/components/ui/table/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
-  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { IconChevronDown } from "@intric/icons/chevron-down";
   import FlowRunEvidence from "./FlowRunEvidence.svelte";
   import FlowRunProgressPanel from "./FlowRunProgressPanel.svelte";
   import { toast } from "$lib/components/toast";
@@ -48,6 +51,7 @@
   let pendingCancelRunId: string | null = $state(null);
   let progressSnapshotsByRunId = $state<Record<string, FlowRunProgressSnapshot>>({});
   let isRunListPolling = $state(false);
+
   async function loadRuns() {
     if (isRunListPolling) return;
     isRunListPolling = true;
@@ -209,6 +213,10 @@
     return `flow-run-evidence-${runId}`;
   }
 
+  function toggleRunDetails(runId: string) {
+    selectedRunId = selectedRunId === runId ? null : runId;
+  }
+
   function updateProgressSnapshot(runId: string, snapshot: FlowRunProgressSnapshot) {
     progressSnapshotsByRunId = {
       ...progressSnapshotsByRunId,
@@ -217,265 +225,376 @@
   }
 </script>
 
-<div class="mx-auto flex w-full max-w-[1400px] flex-col gap-4 p-4 md:p-6">
-  <div class="flex items-center justify-between">
-    <h2 class="text-lg font-semibold">{m.flow_history()}</h2>
-    <div class="flex items-center gap-2"></div>
-  </div>
+<section class="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6">
+  <header class="flex items-center justify-between gap-3">
+    <h2 class="text-primary text-base font-semibold tracking-tight sm:text-lg">
+      {m.flow_history()}
+    </h2>
+    {#if runs.length > 0}
+      <p class="text-muted text-xs tabular-nums">
+        {runs.length}
+      </p>
+    {/if}
+  </header>
 
   {#if loading}
-    <div class="text-secondary flex items-center justify-center gap-2 py-8 text-sm">
+    <div class="text-muted flex items-center justify-center gap-2 py-10 text-sm">
       <IconLoadingSpinner class="size-4 animate-spin" />
       {m.flow_loading()}
     </div>
   {:else if loadError}
-    <Alert.Root variant="destructive" class="flex items-center gap-3 px-5 py-4">
-      <Alert.Description class="flex-1 text-sm">{loadError}</Alert.Description>
+    <Alert.Root variant="destructive">
+      <Alert.Description>{loadError}</Alert.Description>
       <Alert.Action>
-        <Button variant="outline" size="sm" onclick={loadRuns} class="gap-1.5 text-xs">
+        <Button variant="outline" size="sm" onclick={loadRuns}>
           {m.flow_retry()}
         </Button>
       </Alert.Action>
     </Alert.Root>
   {:else if runs.length === 0}
-    <p class="text-secondary py-8 text-center text-sm">{m.flow_no_runs_yet()}</p>
+    <div
+      class="border-default bg-primary rounded-xl border py-14 text-center"
+      aria-label={m.flow_no_runs_yet()}
+    >
+      <p class="text-muted text-sm">{m.flow_no_runs_yet()}</p>
+    </div>
   {:else}
-    <div class="border-default overflow-hidden rounded-lg border">
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm" aria-label={m.flow_history()}>
-          <thead>
-            <tr class="border-default border-b text-left">
-              <th scope="col" class="text-muted px-3 py-2.5 text-xs font-medium sm:px-4"
-                >{m.status()}</th
-              >
-              <th
-                scope="col"
-                class="text-muted hidden px-4 py-2.5 text-xs font-medium sm:table-cell"
-                >{m.version()}</th
-              >
-              <th scope="col" class="text-muted px-3 py-2.5 text-xs font-medium sm:px-4"
-                >{m.flow_run_started()}</th
-              >
-              <th
-                scope="col"
-                class="text-muted hidden px-4 py-2.5 text-xs font-medium md:table-cell"
-                >{m.duration()}</th
-              >
-              <th scope="col" class="text-muted px-3 py-2.5 text-xs font-medium sm:px-4"
-                >{m.actions()}</th
-              >
-            </tr>
-          </thead>
-          <tbody>
-            {#each runs as run (run.id)}
-              <tr
-                class={[
-                  "border-dimmer hover:bg-hover-dimmer cursor-pointer border-b transition-colors last:border-b-0",
-                  selectedRunId === run.id && "bg-accent-dimmer/30"
-                ]}
-                tabindex="0"
-                onclick={() => (selectedRunId = selectedRunId === run.id ? null : run.id)}
-                onkeydown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    selectedRunId = selectedRunId === run.id ? null : run.id;
-                  }
-                }}
-              >
-                <td class="px-3 py-3 sm:px-4">
-                  <span
-                    class="{getStatusColor(
-                      run.status
-                    )} inline-flex items-center gap-1.5 text-xs font-medium"
-                  >
-                    <span class="{getStatusDotColor(run.status)} size-1.5 shrink-0 rounded-full"
-                    ></span>
-                    {getStatusLabel(run.status)}
-                  </span>
-                </td>
-                <td class="text-secondary hidden px-4 py-3 tabular-nums sm:table-cell"
-                  >v{run.flow_version}</td
+    <!-- Desktop: Table -->
+    <div
+      class="border-default bg-primary hidden overflow-hidden rounded-xl border shadow-xs md:block"
+    >
+      <Table.Root>
+        <Table.Header>
+          <Table.Row class="border-default hover:bg-transparent">
+            <Table.Head class="text-muted h-11 px-4 text-xs font-medium tracking-wide uppercase">
+              {m.status()}
+            </Table.Head>
+            <Table.Head
+              class="text-muted hidden h-11 px-4 text-xs font-medium tracking-wide uppercase lg:table-cell"
+            >
+              {m.version()}
+            </Table.Head>
+            <Table.Head class="text-muted h-11 px-4 text-xs font-medium tracking-wide uppercase">
+              {m.flow_run_started()}
+            </Table.Head>
+            <Table.Head
+              class="text-muted hidden h-11 px-4 text-xs font-medium tracking-wide uppercase lg:table-cell"
+            >
+              {m.duration()}
+            </Table.Head>
+            <Table.Head
+              class="text-muted h-11 px-4 text-right text-xs font-medium tracking-wide uppercase"
+            >
+              <span class="sr-only">{m.actions()}</span>
+            </Table.Head>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
+          {#each runs as run (run.id)}
+            {@const isExpanded = selectedRunId === run.id}
+            <Table.Row
+              class="border-default hover:bg-muted/40 cursor-pointer transition-colors {isExpanded
+                ? 'bg-muted/50'
+                : ''}"
+              tabindex="0"
+              onclick={() => toggleRunDetails(run.id)}
+              onkeydown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleRunDetails(run.id);
+                }
+              }}
+            >
+              <Table.Cell class="px-4 py-3 align-middle">
+                <span
+                  class="{getStatusColor(
+                    run.status
+                  )} inline-flex items-center gap-2 text-xs font-medium"
                 >
-                <td class="text-secondary px-3 py-3 sm:px-4">
-                  {new Date(run.created_at).toLocaleString()}
-                </td>
-                <td class="text-secondary hidden px-4 py-3 tabular-nums md:table-cell">
-                  {#if run.status === "completed" || run.status === "failed"}
-                    {formatDuration(run.created_at, run.updated_at)}
-                  {:else if run.status === "running"}
-                    <span class="text-accent-stronger">{m.flow_run_running()}</span>
-                  {:else}
-                    -
-                  {/if}
-                </td>
-                <td class="px-3 py-2 sm:px-4" onclick={(e) => e.stopPropagation()}>
-                  <div class="flex items-center gap-1">
+                  <span
+                    class="{getStatusDotColor(run.status)} size-1.5 shrink-0 rounded-full"
+                    aria-hidden="true"
+                  ></span>
+                  {getStatusLabel(run.status)}
+                </span>
+              </Table.Cell>
+              <Table.Cell
+                class="text-secondary hidden px-4 py-3 align-middle tabular-nums lg:table-cell"
+              >
+                v{run.flow_version}
+              </Table.Cell>
+              <Table.Cell class="text-secondary px-4 py-3 align-middle tabular-nums">
+                {new Date(run.created_at).toLocaleString()}
+              </Table.Cell>
+              <Table.Cell
+                class="text-secondary hidden px-4 py-3 align-middle tabular-nums lg:table-cell"
+              >
+                {#if run.status === "completed" || run.status === "failed"}
+                  {formatDuration(run.created_at, run.updated_at)}
+                {:else if run.status === "running"}
+                  <span class="text-accent-stronger">{m.flow_run_running()}</span>
+                {:else}
+                  —
+                {/if}
+              </Table.Cell>
+              <!-- eslint-disable-next-line a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+              <Table.Cell
+                class="px-2 py-2 text-right align-middle"
+                onclick={(e: MouseEvent) => e.stopPropagation()}
+              >
+                <div class="inline-flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-expanded={isExpanded}
+                    aria-controls={getEvidenceRowId(run.id)}
+                    onclick={() => toggleRunDetails(run.id)}
+                  >
+                    {m.flow_run_evidence()}
+                    <IconChevronDown
+                      data-icon="inline-end"
+                      class="transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}"
+                    />
+                  </Button>
+                  {#if run.status === "queued"}
                     <Button
                       variant="outline"
                       size="sm"
-                      aria-expanded={selectedRunId === run.id}
-                      aria-controls={getEvidenceRowId(run.id)}
-                      onclick={() => (selectedRunId = selectedRunId === run.id ? null : run.id)}
+                      disabled={redispatchingRunId === run.id}
+                      onclick={() => void redispatchRun(run.id)}
                     >
-                      {m.flow_run_evidence()}
+                      {redispatchingRunId === run.id
+                        ? m.flow_run_redispatching()
+                        : m.flow_run_redispatch()}
                     </Button>
-                    {#if run.status === "queued"}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={redispatchingRunId === run.id}
-                        onclick={() => void redispatchRun(run.id)}
-                      >
-                        {redispatchingRunId === run.id
-                          ? m.flow_run_redispatching()
-                          : m.flow_run_redispatch()}
-                      </Button>
+                  {/if}
+                  {#if run.status === "queued" || run.status === "running"}
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={cancellingRunId === run.id}
+                      onclick={() => requestCancelRun(run.id)}
+                    >
+                      {cancellingRunId === run.id ? m.flow_run_cancelling() : m.cancel()}
+                    </Button>
+                  {/if}
+                </div>
+              </Table.Cell>
+            </Table.Row>
+            {#if run.status === "failed" && run.error_message}
+              <Table.Row class="border-default hover:bg-transparent">
+                <Table.Cell colspan={5} class="px-4 py-2">
+                  <Alert.Root variant="destructive">
+                    <Alert.Title class="text-xs font-semibold">{m.flow_run_error()}</Alert.Title>
+                    <Alert.Description class="text-xs break-words">
+                      {run.error_message}
+                    </Alert.Description>
+                  </Alert.Root>
+                </Table.Cell>
+              </Table.Row>
+            {/if}
+            {#if run.status === "completed" && run.output_payload_json}
+              <Table.Row class="border-default hover:bg-transparent">
+                <Table.Cell colspan={5} class="px-4 py-2">
+                  <div
+                    class="bg-positive-dimmer/25 border-positive-default/20 flex flex-col gap-1.5 rounded-lg border px-3 py-2.5 text-xs"
+                  >
+                    {#if run.output_payload_json.structured}
+                      {@const structured = run.output_payload_json.structured}
+                      {#if Array.isArray(structured)}
+                        <div class="text-secondary flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                          <span class="text-positive-stronger font-semibold">
+                            {m.flow_run_output()}:
+                          </span>
+                          {#each structured.slice(0, 3) as item, i (i)}
+                            <span class="font-mono">
+                              #{i + 1}: {JSON.stringify(item).slice(0, 80)}{JSON.stringify(item)
+                                .length > 80
+                                ? "\u2026"
+                                : ""}
+                            </span>
+                          {/each}
+                          {#if structured.length > 3}
+                            <span class="text-muted">+{structured.length - 3} more</span>
+                          {/if}
+                        </div>
+                      {:else}
+                        {@const entries = Object.entries(structured).slice(0, 4)}
+                        <div class="text-secondary flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                          <span class="text-positive-stronger font-semibold">
+                            {m.flow_run_output()}:
+                          </span>
+                          {#each entries as [key, val] (key)}
+                            <span>
+                              <span class="text-positive-stronger font-semibold">{key}:</span>
+                              <span class="text-secondary">
+                                {String(val).slice(0, 80)}{String(val).length > 80 ? "\u2026" : ""}
+                              </span>
+                            </span>
+                          {/each}
+                          {#if Object.keys(structured).length > 4}
+                            <span class="text-muted">
+                              +{Object.keys(structured).length - 4} more
+                            </span>
+                          {/if}
+                        </div>
+                      {/if}
+                    {:else if run.output_payload_json.text && !run.output_payload_json.artifacts?.length}
+                      <div class="text-secondary truncate">
+                        <span class="text-positive-stronger font-semibold">
+                          {m.flow_run_output()}:
+                        </span>
+                        {String(run.output_payload_json.text).slice(0, 200)}{String(
+                          run.output_payload_json.text
+                        ).length > 200
+                          ? "\u2026"
+                          : ""}
+                      </div>
                     {/if}
-                    {#if run.status === "queued" || run.status === "running"}
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        disabled={cancellingRunId === run.id}
-                        onclick={() => requestCancelRun(run.id)}
-                      >
-                        {cancellingRunId === run.id ? m.flow_run_cancelling() : m.cancel()}
-                      </Button>
+                    {#if run.output_payload_json.artifacts?.length}
+                      <div class="flex flex-wrap items-center gap-2">
+                        {#each run.output_payload_json.artifacts as artifact (artifact.file_id)}
+                          <button
+                            type="button"
+                            class="border-default bg-primary hover:border-dimmer hover:bg-hover-default text-secondary inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
+                            onclick={() => downloadArtifact(run.id, artifact.file_id)}
+                          >
+                            <IconArrowDownToLine class="size-3" />
+                            {artifact.name}
+                          </button>
+                        {/each}
+                      </div>
                     {/if}
                   </div>
-                </td>
-              </tr>
-              {#if run.status === "failed" && run.error_message}
-                <tr>
-                  <td colspan="5" class="border-default border-b px-4 py-2">
-                    <Alert.Root
-                      variant="destructive"
-                      class="flex min-w-0 items-start gap-2 text-xs"
-                    >
-                      <Alert.Title class="shrink-0 text-xs font-semibold"
-                        >{m.flow_run_error()}:</Alert.Title
-                      >
-                      <Alert.Description class="min-w-0 text-xs break-words"
-                        >{run.error_message}</Alert.Description
-                      >
-                    </Alert.Root>
-                  </td>
-                </tr>
-              {/if}
-              {#if run.status === "completed" && run.output_payload_json}
-                <tr>
-                  <td colspan="5" class="border-default border-b px-4 py-2">
-                    <div
-                      class="bg-positive-dimmer/30 flex flex-col gap-1.5 rounded-md px-3 py-2 text-xs"
-                    >
-                      {#if run.output_payload_json.structured}
-                        {@const structured = run.output_payload_json.structured}
-                        {#if Array.isArray(structured)}
-                          <div class="text-secondary flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                            <span class="text-positive-stronger font-semibold"
-                              >{m.flow_run_output()}:</span
-                            >
-                            {#each structured.slice(0, 3) as item, i (i)}
-                              <span class="font-mono">
-                                #{i + 1}: {JSON.stringify(item).slice(0, 80)}{JSON.stringify(item)
-                                  .length > 80
-                                  ? "\u2026"
-                                  : ""}
-                              </span>
-                            {/each}
-                            {#if structured.length > 3}
-                              <span class="text-muted">+{structured.length - 3} more</span>
-                            {/if}
-                          </div>
-                        {:else}
-                          {@const entries = Object.entries(structured).slice(0, 4)}
-                          <div class="text-secondary flex flex-wrap items-baseline gap-x-4 gap-y-1">
-                            <span class="text-positive-stronger font-semibold"
-                              >{m.flow_run_output()}:</span
-                            >
-                            {#each entries as [key, val] (key)}
-                              <span>
-                                <span class="text-positive-stronger font-semibold">{key}:</span>
-                                <span class="text-secondary"
-                                  >{String(val).slice(0, 80)}{String(val).length > 80
-                                    ? "\u2026"
-                                    : ""}</span
-                                >
-                              </span>
-                            {/each}
-                            {#if Object.keys(structured).length > 4}
-                              <span class="text-muted"
-                                >+{Object.keys(structured).length - 4} more</span
-                              >
-                            {/if}
-                          </div>
-                        {/if}
-                      {:else if run.output_payload_json.text && !run.output_payload_json.artifacts?.length}
-                        <div class="text-secondary truncate">
-                          <span class="text-positive-stronger font-semibold"
-                            >{m.flow_run_output()}:</span
-                          >
-                          {String(run.output_payload_json.text).slice(0, 200)}{String(
-                            run.output_payload_json.text
-                          ).length > 200
-                            ? "\u2026"
-                            : ""}
-                        </div>
-                      {/if}
-                      {#if run.output_payload_json.artifacts?.length}
-                        <div class="flex flex-wrap items-center gap-2">
-                          {#each run.output_payload_json.artifacts as artifact (artifact.file_id)}
-                            <button
-                              class="group border-default bg-primary inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium shadow-sm transition-all hover:shadow"
-                              onclick={() => downloadArtifact(run.id, artifact.file_id)}
-                            >
-                              <IconArrowDownToLine
-                                class="text-muted group-hover:text-secondary size-3"
-                              />
-                              {artifact.name}
-                            </button>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  </td>
-                </tr>
-              {/if}
-              {#if selectedRunId === run.id}
-                <tr>
-                  <td
-                    id={getEvidenceRowId(run.id)}
-                    colspan="5"
-                    class="border-default bg-hover-dimmer/50 border-b px-2 py-3"
-                  >
-                    {#if isFlowRunActive(run.status)}
-                      <FlowRunProgressPanel
-                        runId={run.id}
-                        flowId={flow.id}
-                        {eneo}
-                        runStatus={run.status}
-                        runStartedAt={run.started_at ?? run.created_at}
-                        initialSnapshot={progressSnapshotsByRunId[run.id] ?? null}
-                        onSnapshotUpdate={(snapshot) => updateProgressSnapshot(run.id, snapshot)}
-                      />
-                    {:else}
-                      <FlowRunEvidence
-                        runId={run.id}
-                        flowId={flow.id}
-                        {eneo}
-                        runStatus={run.status}
-                        fallbackSnapshot={progressSnapshotsByRunId[run.id] ?? null}
-                      />
-                    {/if}
-                  </td>
-                </tr>
-              {/if}
-            {/each}
-          </tbody>
-        </table>
-      </div>
+                </Table.Cell>
+              </Table.Row>
+            {/if}
+            {#if isExpanded}
+              <Table.Row class="border-default hover:bg-transparent">
+                <Table.Cell id={getEvidenceRowId(run.id)} colspan={5} class="bg-muted/30 px-3 py-4">
+                  {#if isFlowRunActive(run.status)}
+                    <FlowRunProgressPanel
+                      runId={run.id}
+                      flowId={flow.id}
+                      {eneo}
+                      runStatus={run.status}
+                      runStartedAt={run.started_at ?? run.created_at}
+                      initialSnapshot={progressSnapshotsByRunId[run.id] ?? null}
+                      onSnapshotUpdate={(snapshot) => updateProgressSnapshot(run.id, snapshot)}
+                    />
+                  {:else}
+                    <FlowRunEvidence
+                      runId={run.id}
+                      flowId={flow.id}
+                      {eneo}
+                      runStatus={run.status}
+                      fallbackSnapshot={progressSnapshotsByRunId[run.id] ?? null}
+                    />
+                  {/if}
+                </Table.Cell>
+              </Table.Row>
+            {/if}
+          {/each}
+        </Table.Body>
+      </Table.Root>
     </div>
+
+    <!-- Mobile: stacked card list -->
+    <ul class="flex flex-col gap-2 md:hidden" aria-label={m.flow_history()}>
+      {#each runs as run (run.id)}
+        {@const isExpanded = selectedRunId === run.id}
+        <li class="border-default bg-primary rounded-xl border">
+          <button
+            type="button"
+            class="focus-visible:ring-ring/40 flex w-full flex-col gap-2 rounded-xl px-4 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset"
+            aria-expanded={isExpanded}
+            aria-controls={getEvidenceRowId(run.id)}
+            onclick={() => toggleRunDetails(run.id)}
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span
+                class="{getStatusColor(
+                  run.status
+                )} inline-flex items-center gap-2 text-xs font-medium"
+              >
+                <span
+                  class="{getStatusDotColor(run.status)} size-1.5 shrink-0 rounded-full"
+                  aria-hidden="true"
+                ></span>
+                {getStatusLabel(run.status)}
+              </span>
+              <Badge variant="outline" class="h-5 shrink-0 text-xs font-medium tabular-nums">
+                v{run.flow_version}
+              </Badge>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-secondary truncate text-sm tabular-nums">
+                {new Date(run.created_at).toLocaleString()}
+              </p>
+              {#if run.status === "completed" || run.status === "failed"}
+                <p class="text-muted shrink-0 text-xs tabular-nums">
+                  {formatDuration(run.created_at, run.updated_at)}
+                </p>
+              {/if}
+            </div>
+          </button>
+          {#if run.status === "queued" || run.status === "running"}
+            <div class="border-default flex items-center gap-2 border-t px-4 py-2">
+              {#if run.status === "queued"}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="flex-1"
+                  disabled={redispatchingRunId === run.id}
+                  onclick={() => void redispatchRun(run.id)}
+                >
+                  {redispatchingRunId === run.id
+                    ? m.flow_run_redispatching()
+                    : m.flow_run_redispatch()}
+                </Button>
+              {/if}
+              <Button
+                variant="destructive"
+                size="sm"
+                class="flex-1"
+                disabled={cancellingRunId === run.id}
+                onclick={() => requestCancelRun(run.id)}
+              >
+                {cancellingRunId === run.id ? m.flow_run_cancelling() : m.cancel()}
+              </Button>
+            </div>
+          {/if}
+          {#if isExpanded}
+            <div
+              id={getEvidenceRowId(run.id)}
+              class="border-default bg-muted/30 border-t px-3 py-3"
+            >
+              {#if isFlowRunActive(run.status)}
+                <FlowRunProgressPanel
+                  runId={run.id}
+                  flowId={flow.id}
+                  {eneo}
+                  runStatus={run.status}
+                  runStartedAt={run.started_at ?? run.created_at}
+                  initialSnapshot={progressSnapshotsByRunId[run.id] ?? null}
+                  onSnapshotUpdate={(snapshot) => updateProgressSnapshot(run.id, snapshot)}
+                />
+              {:else}
+                <FlowRunEvidence
+                  runId={run.id}
+                  flowId={flow.id}
+                  {eneo}
+                  runStatus={run.status}
+                  fallbackSnapshot={progressSnapshotsByRunId[run.id] ?? null}
+                />
+              {/if}
+            </div>
+          {/if}
+        </li>
+      {/each}
+    </ul>
   {/if}
-</div>
+</section>
 
 <AlertDialog.Root bind:open={showCancelConfirm}>
   <AlertDialog.Content>
@@ -485,7 +604,9 @@
     </AlertDialog.Header>
     <AlertDialog.Footer>
       <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action onclick={confirmCancelRun}>{m.cancel()}</AlertDialog.Action>
+      <AlertDialog.Action variant="destructive" onclick={confirmCancelRun}>
+        {m.cancel()}
+      </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>

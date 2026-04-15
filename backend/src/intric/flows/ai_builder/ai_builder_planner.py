@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, cast
 from uuid import UUID, uuid4
 
+from intric.files.file_models import File
+from intric.flows.ai_builder.ai_builder_attachment_context import (
+    build_ai_builder_attachment_context,
+)
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
@@ -79,6 +83,7 @@ logger = get_logger(__name__)
 class PlannerMetadataResolution:
     metadata: dict[str, Any] | None
     is_requirements_confirmation: bool
+    used_auxiliary_llm: bool
 
 
 @dataclass(frozen=True)
@@ -209,6 +214,7 @@ class AIBuilderPlanner:
         elif question_answer:
             metadata = {"question_answer": normalize_question_answer(question_answer)}
 
+        used_auxiliary_llm = False
         if metadata is None and not is_requirements_confirmation:
             inferred_answer = infer_question_answer_from_freeform(conversation, message)
             if inferred_answer is not None:
@@ -223,6 +229,7 @@ class AIBuilderPlanner:
                 )
                 if adjudicated_answer is not None:
                     metadata = {"question_answer": adjudicated_answer}
+                used_auxiliary_llm = True
 
         if ui_language is not None:
             metadata = {
@@ -233,6 +240,7 @@ class AIBuilderPlanner:
         return PlannerMetadataResolution(
             metadata=metadata,
             is_requirements_confirmation=is_requirements_confirmation,
+            used_auxiliary_llm=used_auxiliary_llm,
         )
 
     def _select_tool_schemas(
@@ -303,10 +311,12 @@ class AIBuilderPlanner:
         available_kbs: list[dict[str, Any]] | None,
         flow: "Flow | None",
         assistant_snapshots: dict[UUID, dict[str, Any]] | None,
+        attachment_files: list[File] | None = None,
         max_input_tokens: int,
         max_output_tokens: int,
         budget_policy: AIBuilderBudgetPolicy,
         is_requirements_confirmation: bool,
+        allow_discovery_semantic_adjudication: bool = True,
     ) -> PlannerPreparedRequest:
         requirements_state = resolve_requirements_state(conversation)
         has_requirements_summary = requirements_state.latest_summary is not None
@@ -321,6 +331,7 @@ class AIBuilderPlanner:
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
             ui_language=ui_language,
+            allow_semantic_adjudication=allow_discovery_semantic_adjudication,
         )
 
         is_edit_mode = flow is not None
@@ -351,10 +362,18 @@ class AIBuilderPlanner:
             flow=flow,
         )
         confirmed_requirements = latest_confirmed_requirements(conversation)
+        attachment_context_result = build_ai_builder_attachment_context(
+            attachment_files or []
+        )
         system_prompt = build_system_prompt(
             flow_context=flow_context,
             available_models=models_ctx,
             available_knowledge_bases=kbs_ctx,
+            attachment_context=(
+                attachment_context_result.context
+                if attachment_context_result is not None
+                else None
+            ),
             planner_hints=clarification_hints,
             ui_language=ui_language,
             confirmed_requirements=(
@@ -395,6 +414,27 @@ class AIBuilderPlanner:
         )
         available_kb_refs = {kb["ref"] for kb in kbs_ctx} if kbs_ctx else None
 
+        logger.info(
+            "AI Builder planner prompt metrics",
+            extra={
+                "system_prompt_chars": len(system_prompt),
+                "flow_context_chars": len(flow_context or ""),
+                "attachment_context_chars": len(
+                    attachment_context_result.context
+                    if attachment_context_result is not None
+                    else ""
+                ),
+                "available_models_count": len(models_ctx or []),
+                "available_kbs_count": len(kbs_ctx or []),
+                "conversation_budget_tokens": conversation_budget,
+                "conversation_message_count": len(conversation),
+                "trimmed_message_count": len(trimmed),
+                "attachment_file_count": len(attachment_files or []),
+                "discovery_semantic_enabled": allow_discovery_semantic_adjudication,
+                "confirmed_requirements_present": confirmed_requirements is not None,
+            },
+        )
+
         if (
             not has_requirements_summary
             and not requirements_state.confirmed
@@ -429,6 +469,7 @@ class AIBuilderPlanner:
         *,
         session_id: UUID,
         message: str,
+        file_ids: list[UUID] | None = None,
         question_answer: dict[str, Any] | None = None,
         ui_language: str | None = None,
         litellm_model: str,
@@ -437,6 +478,7 @@ class AIBuilderPlanner:
         available_kbs: list[dict[str, Any]] | None = None,
         flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        attachment_files: list[File] | None = None,
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
         budget_policy: AIBuilderBudgetPolicy | None = None,
@@ -465,225 +507,278 @@ class AIBuilderPlanner:
             tenant_id=self.user.tenant_id,
         )
         request_id = str(uuid4())
+        request_uuid = UUID(request_id)
 
-        if session.status not in (
-            SessionStatus.CHATTING,
-            SessionStatus.AWAITING_APPROVAL,
-        ):
+        claimed = await self.repo.claim_session_send(
+            session_id=session_id,
+            tenant_id=self.user.tenant_id,
+            request_id=request_uuid,
+        )
+        if not claimed:
             raise BadRequestException(
-                f"Cannot send messages in session status '{session.status.value}'."
+                "Another AI Builder message is already being processed for this session.",
+                code="session_message_in_progress",
             )
-
-        if session.status == SessionStatus.AWAITING_APPROVAL:
-            await self.repo.update_session_status(
-                session_id=session_id,
-                tenant_id=self.user.tenant_id,
-                status=SessionStatus.CHATTING,
-            )
-
-        conversation = list(session.conversation)
-        metadata_resolution = await self._resolve_message_metadata(
-            conversation=conversation,
-            message=message,
-            question_answer=question_answer,
-            ui_language=ui_language,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-        )
-        metadata = metadata_resolution.metadata
-        is_requirements_confirmation = metadata_resolution.is_requirements_confirmation
-
-        user_message = ConversationMessage(
-            role="user",
-            content=message,
-            metadata=metadata,
-        )
-        new_messages_start = len(conversation)
-        conversation.append(user_message)
-        prepared_request = await self._prepare_planner_request(
-            conversation=conversation,
-            message=message,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            available_models=available_models,
-            available_kbs=available_kbs,
-            flow=flow,
-            assistant_snapshots=assistant_snapshots,
-            max_input_tokens=max_input_tokens,
-            max_output_tokens=max_output_tokens,
-            budget_policy=budget_policy,
-            is_requirements_confirmation=is_requirements_confirmation,
-        )
-        requirements_state = prepared_request.requirements_state
-        ui_language = prepared_request.ui_language
-
-        if (
-            not prepared_request.llm_messages
-            and prepared_request.discovery_block_message is not None
-        ):
-            for (
-                event
-            ) in await self.proposal_processor.emit_discovery_followup_if_needed(
-                session_id=session_id,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
-                flow=flow,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                ui_language=ui_language,
-            ):
-                yield event
-            yield {"event": SSE_EVENT_DONE, "data": ""}
-            return
-
-        llm_messages = prepared_request.llm_messages
-        tool_selection = prepared_request.tool_selection
-        if tool_selection.should_emit_forced_followup:
-            for (
-                event
-            ) in await self.proposal_processor.emit_discovery_followup_if_needed(
-                session_id=session_id,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
-                flow=flow,
-            ):
-                yield event
-            yield {"event": SSE_EVENT_DONE, "data": ""}
-            return
-        tool_schemas = tool_selection.tool_schemas
-        should_force_requirements_summary = (
-            tool_selection.should_force_requirements_summary
-        )
 
         try:
-            response = await self.litellm_client.acompletion(
-                model=litellm_model,
-                messages=llm_messages,
-                tools=tool_schemas,
-                tool_choice=(
-                    {
-                        "type": "function",
-                        "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME},
-                    }
-                    if should_force_requirements_summary
-                    else None
-                ),
-                stream=False,
-                drop_params=True,
-                max_tokens=max_output_tokens,
-                temperature=(
-                    self.discovery_temperature
-                    if not requirements_state.confirmed
-                    else self.planner_temperature
-                ),
-                **litellm_kwargs,
-            )
-        except Exception as error:
-            logger.error(
-                "LLM call failed",
-                exc_info=error,
-                extra={"request_id": request_id},
-            )
-            yield build_error_event(
-                message="The AI planner failed. Please try again.",
-                code="planner_upstream_error",
-                phase="planner",
-                request_id=request_id,
-            )
-            yield {"event": SSE_EVENT_DONE, "data": ""}
-            return
+            if session.status not in (
+                SessionStatus.CHATTING,
+                SessionStatus.AWAITING_APPROVAL,
+            ):
+                raise BadRequestException(
+                    f"Cannot send messages in session status '{session.status.value}'."
+                )
 
-        choice = response.choices[0]
-        assistant_message = choice.message
+            if session.status == SessionStatus.AWAITING_APPROVAL:
+                await self.repo.update_session_status(
+                    session_id=session_id,
+                    tenant_id=self.user.tenant_id,
+                    status=SessionStatus.CHATTING,
+                )
 
-        if getattr(choice, "finish_reason", None) == "length":
-            logger.warning(
-                "LLM response truncated (finish_reason=length) — "
-                f"max_tokens={max_output_tokens} may be too low for this model"
-            )
-            yield {
-                "event": SSE_EVENT_ERROR,
-                "data": error_payload(
-                    message=(
-                        "The flow was too complex for the current model's output limit. "
-                        "Try simplifying the flow or using a more capable model."
-                    ),
-                    code="planner_output_too_long",
-                    phase="planner",
-                    request_id=request_id,
-                ),
-            }
-            yield {"event": SSE_EVENT_DONE, "data": ""}
-            return
-
-        if hasattr(assistant_message, "tool_calls") and assistant_message.tool_calls:
-            async for event in self.proposal_processor.handle_tool_call(
-                session_id=session_id,
+            conversation = list(session.conversation)
+            metadata_resolution = await self._resolve_message_metadata(
                 conversation=conversation,
-                new_messages_start=new_messages_start,
-                tool_calls=assistant_message.tool_calls,
-                text_content=assistant_message.content,
-                llm_messages=llm_messages,
-                tool_schemas=tool_schemas,
+                message=message,
+                question_answer=question_answer,
+                ui_language=ui_language,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
-                available_model_refs=prepared_request.available_model_refs,
-                available_kb_refs=prepared_request.available_kb_refs,
-                resource_catalog=prepared_request.resource_catalog,
-                max_output_tokens=max_output_tokens,
-                request_id=request_id,
+            )
+            metadata = metadata_resolution.metadata
+            is_requirements_confirmation = (
+                metadata_resolution.is_requirements_confirmation
+            )
+
+            user_message = ConversationMessage(
+                role="user",
+                content=message,
+                metadata=(
+                    {
+                        **(metadata or {}),
+                        **(
+                            {"file_ids": [str(file_id) for file_id in file_ids]}
+                            if file_ids
+                            else {}
+                        ),
+                    }
+                    if metadata or file_ids
+                    else None
+                ),
+            )
+            new_messages_start = len(conversation)
+            conversation.append(user_message)
+            prepared_request = await self._prepare_planner_request(
+                conversation=conversation,
+                message=message,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                available_models=available_models,
+                available_kbs=available_kbs,
                 flow=flow,
                 assistant_snapshots=assistant_snapshots,
-            ):
-                yield event
-        elif assistant_message.content:
-            # During discovery (before requirements confirmed), don't force proposals —
-            # let the LLM ask questions freely in text form.
-            requirements_confirmed = requirements_state.confirmed
-            should_force_proposal = (
-                requirements_confirmed
-                and not looks_like_information_request(assistant_message.content)
+                attachment_files=attachment_files or [],
+                max_input_tokens=max_input_tokens,
+                max_output_tokens=max_output_tokens,
+                budget_policy=budget_policy,
+                is_requirements_confirmation=is_requirements_confirmation,
+                allow_discovery_semantic_adjudication=not metadata_resolution.used_auxiliary_llm,
             )
-            if should_force_proposal:
-                yield build_status_event("finalizing_plan")
-                forced_plan = (
-                    await self.proposal_processor.retry_forced_proposal_after_text(
-                        correction_messages=llm_messages,
-                        assistant_text=assistant_message.content,
-                        tool_schemas=tool_schemas,
-                        litellm_model=litellm_model,
-                        litellm_kwargs=litellm_kwargs,
-                        session_id=session_id,
-                        conversation=conversation,
-                        new_messages_start=new_messages_start,
-                        available_model_refs=prepared_request.available_model_refs,
-                        available_kb_refs=prepared_request.available_kb_refs,
-                        resource_catalog=prepared_request.resource_catalog,
-                        max_output_tokens=max_output_tokens,
-                        flow=flow,
-                        assistant_snapshots=assistant_snapshots,
+            requirements_state = prepared_request.requirements_state
+            ui_language = prepared_request.ui_language
+
+            if (
+                not prepared_request.llm_messages
+                and prepared_request.discovery_block_message is not None
+            ):
+                for (
+                    event
+                ) in await self.proposal_processor.emit_discovery_followup_if_needed(
+                    session_id=session_id,
+                    conversation=conversation,
+                    new_messages_start=new_messages_start,
+                    flow=flow,
+                    litellm_model=litellm_model,
+                    litellm_kwargs=litellm_kwargs,
+                    ui_language=ui_language,
+                ):
+                    yield event
+                yield {"event": SSE_EVENT_DONE, "data": ""}
+                return
+
+            llm_messages = prepared_request.llm_messages
+            tool_selection = prepared_request.tool_selection
+            if tool_selection.should_emit_forced_followup:
+                for (
+                    event
+                ) in await self.proposal_processor.emit_discovery_followup_if_needed(
+                    session_id=session_id,
+                    conversation=conversation,
+                    new_messages_start=new_messages_start,
+                    flow=flow,
+                ):
+                    yield event
+                yield {"event": SSE_EVENT_DONE, "data": ""}
+                return
+            tool_schemas = tool_selection.tool_schemas
+            should_force_requirements_summary = (
+                tool_selection.should_force_requirements_summary
+            )
+
+            try:
+                response = await self.litellm_client.acompletion(
+                    model=litellm_model,
+                    messages=llm_messages,
+                    tools=tool_schemas,
+                    tool_choice=(
+                        {
+                            "type": "function",
+                            "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME},
+                        }
+                        if should_force_requirements_summary
+                        else None
+                    ),
+                    stream=False,
+                    drop_params=True,
+                    max_tokens=max_output_tokens,
+                    temperature=(
+                        self.discovery_temperature
+                        if not requirements_state.confirmed
+                        else self.planner_temperature
+                    ),
+                    **litellm_kwargs,
+                )
+            except Exception as error:
+                logger.error(
+                    "LLM call failed",
+                    exc_info=error,
+                    extra={"request_id": request_id},
+                )
+                yield build_error_event(
+                    message="The AI planner failed. Please try again.",
+                    code="planner_upstream_error",
+                    phase="planner",
+                    request_id=request_id,
+                )
+                yield {"event": SSE_EVENT_DONE, "data": ""}
+                return
+
+            choice = response.choices[0]
+            assistant_message = choice.message
+            usage = getattr(response, "usage", None)
+            logger.info(
+                "AI Builder planner completion metrics",
+                extra={
+                    "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                    "completion_tokens": getattr(usage, "completion_tokens", None),
+                    "total_tokens": getattr(usage, "total_tokens", None),
+                    "finish_reason": getattr(choice, "finish_reason", None),
+                    "tool_call_count": (
+                        len(assistant_message.tool_calls)
+                        if hasattr(assistant_message, "tool_calls")
+                        and assistant_message.tool_calls
+                        else 0
+                    ),
+                },
+            )
+
+            if getattr(choice, "finish_reason", None) == "length":
+                logger.warning(
+                    "LLM response truncated (finish_reason=length) — "
+                    f"max_tokens={max_output_tokens} may be too low for this model"
+                )
+                yield {
+                    "event": SSE_EVENT_ERROR,
+                    "data": error_payload(
+                        message=(
+                            "The flow was too complex for the current model's output limit. "
+                            "Try simplifying the flow or using a more capable model."
+                        ),
+                        code="planner_output_too_long",
+                        phase="planner",
+                        request_id=request_id,
+                    ),
+                }
+                yield {"event": SSE_EVENT_DONE, "data": ""}
+                return
+
+            if (
+                hasattr(assistant_message, "tool_calls")
+                and assistant_message.tool_calls
+            ):
+                async for event in self.proposal_processor.handle_tool_call(
+                    session_id=session_id,
+                    conversation=conversation,
+                    new_messages_start=new_messages_start,
+                    tool_calls=assistant_message.tool_calls,
+                    text_content=assistant_message.content,
+                    llm_messages=llm_messages,
+                    tool_schemas=tool_schemas,
+                    litellm_model=litellm_model,
+                    litellm_kwargs=litellm_kwargs,
+                    available_model_refs=prepared_request.available_model_refs,
+                    available_kb_refs=prepared_request.available_kb_refs,
+                    resource_catalog=prepared_request.resource_catalog,
+                    max_output_tokens=max_output_tokens,
+                    request_id=request_id,
+                    flow=flow,
+                    assistant_snapshots=assistant_snapshots,
+                ):
+                    yield event
+            elif assistant_message.content:
+                # During discovery (before requirements confirmed), don't force proposals —
+                # let the LLM ask questions freely in text form.
+                requirements_confirmed = requirements_state.confirmed
+                should_force_proposal = (
+                    requirements_confirmed
+                    and not looks_like_information_request(assistant_message.content)
+                )
+                if should_force_proposal:
+                    yield build_status_event("finalizing_plan")
+                    forced_plan = (
+                        await self.proposal_processor.retry_forced_proposal_after_text(
+                            correction_messages=llm_messages,
+                            assistant_text=assistant_message.content,
+                            tool_schemas=tool_schemas,
+                            litellm_model=litellm_model,
+                            litellm_kwargs=litellm_kwargs,
+                            session_id=session_id,
+                            conversation=conversation,
+                            new_messages_start=new_messages_start,
+                            available_model_refs=prepared_request.available_model_refs,
+                            available_kb_refs=prepared_request.available_kb_refs,
+                            resource_catalog=prepared_request.resource_catalog,
+                            max_output_tokens=max_output_tokens,
+                            flow=flow,
+                            assistant_snapshots=assistant_snapshots,
+                        )
+                    )
+                    if forced_plan is not None:
+                        yield build_text_event(assistant_message.content)
+                        yield forced_plan
+                        yield {"event": SSE_EVENT_DONE, "data": ""}
+                        return
+
+                conversation.append(
+                    ConversationMessage(
+                        role="assistant",
+                        content=assistant_message.content,
                     )
                 )
-                if forced_plan is not None:
-                    yield build_text_event(assistant_message.content)
-                    yield forced_plan
-                    yield {"event": SSE_EVENT_DONE, "data": ""}
-                    return
-
-            conversation.append(
-                ConversationMessage(
-                    role="assistant",
-                    content=assistant_message.content,
+                await self.repo.append_session_messages(
+                    session_id=session_id,
+                    tenant_id=self.user.tenant_id,
+                    conversation=conversation[new_messages_start:],
                 )
-            )
-            await self.repo.append_session_messages(
+                yield build_text_event(assistant_message.content)
+
+            yield {"event": SSE_EVENT_DONE, "data": ""}
+        finally:
+            await self.repo.release_session_send(
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,
-                conversation=conversation[new_messages_start:],
+                request_id=request_uuid,
             )
-            yield build_text_event(assistant_message.content)
-
-        yield {"event": SSE_EVENT_DONE, "data": ""}
 
 
 def _resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:

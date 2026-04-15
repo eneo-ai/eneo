@@ -13,11 +13,14 @@ from intric.flows.ai_builder.ai_builder_knowledge_pack import (
 
 # Recipe section markers — these map to section headers in the recipes block
 RECIPE_SECTIONS: dict[str, tuple[str, ...]] = {
-    "transcription": ("Transkribering",),
-    "document_analysis": ("Dokumentanalys",),
-    "golden_example": ("GULDEXEMPEL",),
+    "transcription": ("Transkribering", "Audio -> text -> analys -> rapport"),
+    "document_analysis": (
+        "Dokumentanalys",
+        "Dokumentpaket -> JSON -> grounded text -> DOCX/PDF",
+    ),
+    "golden_example": ("GULDEXEMPEL", "Guldexempel"),
     "docx_template": ("DOCX",),
-    "json_pipeline": ("JSON",),
+    "json_pipeline": ("JSON", "JSON-steg"),
     "comparison": ("Jämför",),
 }
 
@@ -36,6 +39,7 @@ SIGNAL_TO_RECIPES: dict[str, list[str]] = {
 def select_relevant_recipes(
     answer_signals: dict[str, set[str]],
     freeform_text: str = "",
+    recipe_source: str | None = None,
 ) -> str:
     """Select and return only the recipe sections relevant to the user's flow.
 
@@ -68,14 +72,15 @@ def select_relevant_recipes(
         needed.update(SIGNAL_TO_RECIPES.get("structured_json", []))
 
     # If no signals detected, return full recipes (safe fallback)
+    source = recipe_source or KNOWLEDGE_PACK_RECIPES
     if not needed:
-        return KNOWLEDGE_PACK_RECIPES
+        return source
 
     # Always include golden example when we have any signal
     needed.add("golden_example")
 
     # Filter recipe sections
-    return _filter_recipe_sections(KNOWLEDGE_PACK_RECIPES, needed)
+    return _filter_recipe_sections(source, needed)
 
 
 def _filter_recipe_sections(full_recipes: str, needed: set[str]) -> str:

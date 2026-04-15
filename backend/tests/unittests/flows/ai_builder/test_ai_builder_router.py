@@ -11,6 +11,7 @@ import pytest
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.files.file_models import FilePublic
 from intric.flows.ai_builder.ai_builder_models import (
     ApplyPlanRequest,
     ApplyResultResponse,
@@ -37,6 +38,7 @@ from intric.flows.ai_builder.ai_builder_router import (
     approve_plan,
     cancel_session,
     create_session,
+    detach_session_attachment,
     get_plan,
     get_session,
     get_session_models,
@@ -90,6 +92,11 @@ def _make_container(
 
     # Services
     service = AsyncMock()
+    service.list_session_attachments.return_value = []
+    service.get_session_attachment_snapshot.return_value = SimpleNamespace(
+        files=[],
+        warnings=[],
+    )
     service.prepare_message_context.return_value = SimpleNamespace(
         planner_context=SimpleNamespace(
             available_models=[],
@@ -102,6 +109,7 @@ def _make_container(
         litellm_kwargs={"api_key": "sk-test"},
         flow=None,
         assistant_snapshots=None,
+        attachment_files=[],
     )
     container.ai_builder_service.return_value = service
     container.audit_service.return_value = AsyncMock()
@@ -549,6 +557,7 @@ class TestGetSessionEndpoint:
         session = _make_session_domain(actor_user_id=container.user.return_value.id)
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
+        service.list_session_attachments.return_value = []
 
         result = await get_session(
             request=MagicMock(),
@@ -559,6 +568,70 @@ class TestGetSessionEndpoint:
         assert result.session_id == session.id
         assert result.status == session.status
         assert result.target_kind == session.target_kind
+
+    @pytest.mark.anyio
+    async def test_returns_session_attachments(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        service.get_session_attachment_snapshot.return_value = SimpleNamespace(
+            files=[
+                FilePublic(
+                    id=uuid4(), name="brief.pdf", mimetype="application/pdf", size=1234
+                )
+            ],
+            warnings=[],
+        )
+
+        result = await get_session(
+            request=MagicMock(),
+            session_id=session.id,
+            container=container,
+        )
+
+        assert result.attachments is not None
+        assert result.attachments[0].name == "brief.pdf"
+
+    @pytest.mark.anyio
+    async def test_returns_session_attachment_warnings(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        service.get_session_attachment_snapshot.return_value = SimpleNamespace(
+            files=[],
+            warnings=["One or more files are unavailable."],
+        )
+
+        result = await get_session(
+            request=MagicMock(),
+            session_id=session.id,
+            container=container,
+        )
+
+        assert result.attachment_warnings == ["One or more files are unavailable."]
+
+    @pytest.mark.anyio
+    async def test_detach_session_attachment_calls_service(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        file_id = uuid4()
+
+        response = await detach_session_attachment(
+            request=MagicMock(),
+            session_id=session.id,
+            file_id=file_id,
+            container=container,
+        )
+
+        assert response.status_code == 204
+        service.detach_session_attachment.assert_awaited_once_with(
+            session_id=session.id,
+            file_id=file_id,
+        )
 
     @pytest.mark.anyio
     async def test_checks_flow_edit_permission(self):
@@ -1012,6 +1085,33 @@ class TestSendMessageEndpoint:
         assert isinstance(result, EventSourceResponse)
 
     @pytest.mark.anyio
+    async def test_forwards_file_ids_to_prepare_context_and_send_message(self):
+        container = _make_container()
+        _configure_space_with_planner_model(container)
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        async def mock_events(*args, **kwargs):
+            yield {"event": "done", "data": ""}
+
+        service.send_message.return_value = mock_events()
+        file_id = uuid4()
+
+        response = await send_message(
+            request=MagicMock(),
+            session_id=session.id,
+            body=SendMessageRequest(message="Build a flow", file_ids=[file_id]),
+            container=container,
+        )
+        await _read_sse_events(response)
+
+        assert service.prepare_message_context.await_args.kwargs[
+            "message_file_ids"
+        ] == [file_id]
+        assert service.send_message.call_args.kwargs["file_ids"] == [file_id]
+
+    @pytest.mark.anyio
     async def test_checks_flow_edit_permission(self):
         container = _make_container(can_edit_flows=False)
         session = _make_session_domain()
@@ -1095,6 +1195,7 @@ class TestSendMessageEndpoint:
             litellm_kwargs={"api_key": "sk-test"},
             flow=flow,
             assistant_snapshots={},
+            attachment_files=[],
         )
 
         async def mock_events(*args, **kwargs):
@@ -1157,6 +1258,7 @@ class TestSendMessageEndpoint:
             },
             flow=None,
             assistant_snapshots=None,
+            attachment_files=[],
         )
 
         captured: dict = {}

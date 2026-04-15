@@ -1,6 +1,9 @@
 <script lang="ts">
   import type { NormalizedFlowFormField } from "$lib/features/flows/flowFormSchema";
   import { getFlowFormFieldRuntimeKey } from "$lib/features/flows/flowFormSchema";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
 
@@ -39,60 +42,53 @@
     return [];
   }
 
-  const missingRequiredFieldNames = $derived(
-    missingRequiredFields.map((field) => field.name.trim()).filter((name) => name.length > 0)
-  );
+  function isFieldMissing(field: NormalizedFlowFormField): boolean {
+    return missingRequiredFields.includes(field);
+  }
+
+  function getRequiredErrorMessage(field: NormalizedFlowFormField): string {
+    const trimmed = field.name.trim();
+    return trimmed.length > 0
+      ? m.flow_run_trigger_field_required({ name: trimmed })
+      : m.flow_run_trigger_field_required_generic();
+  }
+
+  function fieldErrorId(fieldIndex: number): string {
+    return `flow-input-error-${fieldIndex}`;
+  }
 </script>
 
-<div class="flex flex-col gap-5">
+<Field.Group>
   <div class="px-1">
-    <p class="text-sm font-semibold">{labels.formIntroTitle}</p>
-    <div class="mt-1.5 space-y-1">
-      <p class="text-secondary text-sm leading-relaxed">
-        {labels.formIntroDescription}
-      </p>
-      {#if hasRequiredFormFields}
-        <p class="text-muted text-sm">{m.flow_run_required_hint()}</p>
-      {/if}
-    </div>
+    <p class="text-primary text-sm font-semibold">{labels.formIntroTitle}</p>
+    <p class="text-secondary mt-1 text-sm leading-relaxed">{labels.formIntroDescription}</p>
+    {#if hasRequiredFormFields}
+      <p class="text-muted mt-1.5 text-xs">{m.flow_run_required_hint()}</p>
+    {/if}
   </div>
 
-  {#if missingRequiredFields.length > 0}
-    <div
-      id="form-validation-banner"
-      class="border-accent-default/20 bg-accent-dimmer/30 text-accent-stronger rounded-lg border px-3.5 py-2.5 text-sm"
-      role="status"
-      aria-live="polite"
-    >
-      {#if missingRequiredFieldNames.length > 0}
-        {m.flow_run_missing_required_named({
-          fields: missingRequiredFieldNames.join(", ")
-        })}
-      {:else}
-        {m.flow_run_missing_required()}
-      {/if}
-    </div>
-  {/if}
-
   {#each formFields as field, fieldIndex (field.name)}
-    <div class="flex flex-col gap-1.5">
-      <label class="text-sm font-medium" for={`flow-input-${fieldIndex}`}>
+    {@const inputId = `flow-input-${fieldIndex}`}
+    {@const invalid = isFieldMissing(field)}
+    {@const describedBy = invalid ? fieldErrorId(fieldIndex) : undefined}
+    <Field.Field data-invalid={invalid ? "true" : undefined}>
+      <Field.Label for={inputId} class="flex items-center gap-1 text-sm font-medium">
         {field.name}
         {#if field.required}
-          <span class="text-negative-default" aria-hidden="true">*</span>
+          <span class="text-destructive" aria-hidden="true">*</span>
           <span class="sr-only">({labels.requiredBadge})</span>
         {/if}
-      </label>
+      </Field.Label>
+
       {#if field.type === "multiselect"}
         <select
-          id={`flow-input-${fieldIndex}`}
-          class="border-default bg-primary ring-default focus-visible:ring-accent-default min-h-[120px] w-full rounded-lg border px-3 py-2 shadow focus-visible:ring-2"
+          id={inputId}
+          class="border-input dark:bg-input/30 focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive min-h-[7.5rem] w-full rounded-lg border bg-transparent px-2.5 py-1.5 text-sm transition-colors outline-none focus-visible:ring-3 aria-invalid:ring-3"
           multiple
           required={field.required}
           aria-required={field.required}
-          aria-describedby={missingRequiredFields.includes(field)
-            ? "form-validation-banner"
-            : undefined}
+          aria-invalid={invalid}
+          aria-describedby={describedBy}
           onchange={(event) => {
             const selected = Array.from(event.currentTarget.selectedOptions).map(
               (option) => option.value
@@ -107,37 +103,45 @@
           {/each}
         </select>
       {:else if field.type === "select"}
-        <select
-          id={`flow-input-${fieldIndex}`}
-          class="border-default bg-primary ring-default focus-visible:ring-accent-default w-full rounded-lg border px-3 py-2 shadow focus-visible:ring-2"
+        <Select.Root
+          type="single"
           value={getFieldValue(field)}
-          required={field.required}
-          aria-required={field.required}
-          aria-describedby={missingRequiredFields.includes(field)
-            ? "form-validation-banner"
-            : undefined}
-          onchange={(event) => onFieldChange(field, event.currentTarget.value)}
+          onValueChange={(value) => onFieldChange(field, value ?? "")}
         >
-          <option value="">{m.flow_select_placeholder()}</option>
-          {#each field.options ?? [] as option (option)}
-            <option value={option}>{option}</option>
-          {/each}
-        </select>
+          <Select.Trigger
+            id={inputId}
+            aria-required={field.required}
+            aria-invalid={invalid}
+            aria-describedby={describedBy}
+            class="w-full"
+          >
+            {getFieldValue(field) || m.flow_select_placeholder()}
+          </Select.Trigger>
+          <Select.Content>
+            {#each field.options ?? [] as option (option)}
+              <Select.Item value={option}>{option}</Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
       {:else}
-        <input
-          id={`flow-input-${fieldIndex}`}
+        <Input
+          id={inputId}
           type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
-          class="border-default bg-primary ring-default focus-visible:ring-accent-default w-full rounded-lg border px-3 py-2 shadow focus-visible:ring-2"
           value={getFieldValue(field)}
           autocomplete="off"
           required={field.required}
           aria-required={field.required}
-          aria-describedby={missingRequiredFields.includes(field)
-            ? "form-validation-banner"
-            : undefined}
+          aria-invalid={invalid}
+          aria-describedby={describedBy}
           oninput={(event) => onFieldChange(field, event.currentTarget.value)}
         />
       {/if}
-    </div>
+
+      {#if invalid}
+        <Field.Error id={fieldErrorId(fieldIndex)}>
+          {getRequiredErrorMessage(field)}
+        </Field.Error>
+      {/if}
+    </Field.Field>
   {/each}
-</div>
+</Field.Group>

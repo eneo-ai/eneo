@@ -1,6 +1,9 @@
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
-import type { StructuredQuestion, StructuredQuestionAnswerMetadata } from "./structuredQuestionAnswer";
+import type {
+  StructuredQuestion,
+  StructuredQuestionAnswerMetadata
+} from "./structuredQuestionAnswer";
 import type {
   AIBuilderConversationMessage,
   AIBuilderDraftSession,
@@ -287,7 +290,8 @@ export class FlowAIBuilderDriver {
 
   async sendMessage(
     message: string,
-    questionAnswer?: StructuredQuestionAnswerMetadata
+    questionAnswer?: StructuredQuestionAnswerMetadata,
+    fileIds?: string[]
   ): Promise<void> {
     if (!this.#state.session || this.#state.isStreaming) return;
 
@@ -328,6 +332,7 @@ export class FlowAIBuilderDriver {
       const requestBody: {
         message: string;
         model_id?: string;
+        file_ids?: string[];
         question_answer?: StructuredQuestionAnswerMetadata;
         ui_language?: string;
       } = { message };
@@ -337,6 +342,9 @@ export class FlowAIBuilderDriver {
       }
       if (questionAnswer) {
         requestBody.question_answer = questionAnswer;
+      }
+      if (fileIds && fileIds.length > 0) {
+        requestBody.file_ids = fileIds;
       }
       requestBody.ui_language = getLocale();
 
@@ -379,12 +387,7 @@ export class FlowAIBuilderDriver {
               }
               case "requirements_summary": {
                 const data = JSON.parse(ev.data) as RequirementsSummary;
-                this.#updateOrAddAssistantMessage(
-                  assistantText,
-                  undefined,
-                  undefined,
-                  data
-                );
+                this.#updateOrAddAssistantMessage(assistantText, undefined, undefined, data);
                 break;
               }
               case "status": {
@@ -422,6 +425,10 @@ export class FlowAIBuilderDriver {
         },
         abortController
       );
+
+      if (fileIds && fileIds.length > 0 && !abortController.signal.aborted) {
+        await this.refreshSession();
+      }
     } catch (e) {
       if (!abortController.signal.aborted) {
         this.#state.error = e instanceof Error ? e.message : "Stream failed";
@@ -508,6 +515,25 @@ export class FlowAIBuilderDriver {
     }
   }
 
+  async removeAttachment(fileId: string): Promise<void> {
+    if (!this.#state.session) return;
+
+    await this.#transport.fetch(
+      `/api/v1/flows/ai-builder/sessions/${this.#state.session.session_id}/attachments/${fileId}`,
+      {
+        method: "delete",
+        params: {}
+      }
+    );
+
+    if (this.#state.session.attachments) {
+      this.#state.session.attachments = this.#state.session.attachments.filter(
+        (attachment) => attachment.id !== fileId
+      );
+      this.#notify();
+    }
+  }
+
   #parseApplyError(e: unknown): ApplyError | null {
     if (typeof e !== "object" || e === null) return null;
 
@@ -519,7 +545,7 @@ export class FlowAIBuilderDriver {
         return {
           code: parsed.code,
           message: parsed.message ?? "Unknown error",
-          context: parsed.context ?? {},
+          context: parsed.context ?? {}
         };
       }
     }
@@ -542,7 +568,7 @@ export class FlowAIBuilderDriver {
         {
           method: "post",
           body: JSON.stringify({ type }),
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json" }
         }
       )) as ProposedPlan;
 
@@ -554,7 +580,7 @@ export class FlowAIBuilderDriver {
         edit_confidence: result.edit_confidence,
         edit_warnings: result.edit_warnings,
         edit_advisories: result.edit_advisories,
-        edit_risk_flags: result.edit_risk_flags,
+        edit_risk_flags: result.edit_risk_flags
       };
       this.#notify();
     } catch (e) {
@@ -793,10 +819,7 @@ export class FlowAIBuilderDriver {
           break;
         }
 
-        if (
-          requirementsToolCall?.id &&
-          toolMessage.tool_call_id === requirementsToolCall.id
-        ) {
+        if (requirementsToolCall?.id && toolMessage.tool_call_id === requirementsToolCall.id) {
           const requirementsSummary = this.#parseRequirementsSummary(
             toolMessage.metadata?.requirements_summary
           );
@@ -831,9 +854,11 @@ export class FlowAIBuilderDriver {
     return {
       question_id: question.question_id,
       question: question.question,
-      options: question.options.filter((option): option is StructuredQuestion["options"][number] => {
-        return typeof option === "object" && option !== null && typeof option.label === "string";
-      }),
+      options: question.options.filter(
+        (option): option is StructuredQuestion["options"][number] => {
+          return typeof option === "object" && option !== null && typeof option.label === "string";
+        }
+      ),
       selection_mode: question.selection_mode,
       allow_custom: question.allow_custom
     };
@@ -856,18 +881,22 @@ export class FlowAIBuilderDriver {
       requirements_version:
         typeof summary.requirements_version === "string" ? summary.requirements_version : null,
       summary: summary.summary,
-      key_decisions: summary.key_decisions.filter((decision): decision is RequirementsSummary["key_decisions"][number] => {
-        return (
-          typeof decision === "object" &&
-          decision !== null &&
-          typeof decision.topic === "string" &&
-          typeof decision.decision === "string"
-        );
-      }),
+      key_decisions: summary.key_decisions.filter(
+        (decision): decision is RequirementsSummary["key_decisions"][number] => {
+          return (
+            typeof decision === "object" &&
+            decision !== null &&
+            typeof decision.topic === "string" &&
+            typeof decision.decision === "string"
+          );
+        }
+      ),
       input_description: summary.input_description,
       output_description: summary.output_description,
       assumptions: Array.isArray(summary.assumptions)
-        ? summary.assumptions.filter((assumption): assumption is string => typeof assumption === "string")
+        ? summary.assumptions.filter(
+            (assumption): assumption is string => typeof assumption === "string"
+          )
         : [],
       manual_setup_notes: Array.isArray(summary.manual_setup_notes)
         ? summary.manual_setup_notes.filter((note): note is string => typeof note === "string")
@@ -899,10 +928,13 @@ export class FlowAIBuilderDriver {
     }
 
     try {
-      const result = (await this.#transport.fetch(`/api/v1/flows/ai-builder/plans/${latestPlanId}`, {
-        method: "get",
-        params: {}
-      })) as ProposedPlan;
+      const result = (await this.#transport.fetch(
+        `/api/v1/flows/ai-builder/plans/${latestPlanId}`,
+        {
+          method: "get",
+          params: {}
+        }
+      )) as ProposedPlan;
       this.#state.currentPlan = this.#normalizePlan(result);
       this.#notify();
     } catch {
