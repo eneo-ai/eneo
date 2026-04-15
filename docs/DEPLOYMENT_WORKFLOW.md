@@ -234,10 +234,15 @@ GitHub Actions builds `v1.7.4` images. The `:latest` tag is NOT overwritten if `
 
 **4. Cherry-pick the fix to develop:**
 
+Use the **squashed commit on the release branch** as the cherry-pick source, not the original commit from your `hotfix/*` branch. Because PRs are squash-merged, the commit on `release/v1.7` is the authoritative one; the hotfix branch's pre-squash SHA won't exist after the branch is deleted.
+
 ```bash
-git checkout develop
-git pull origin develop
-git cherry-pick <commit-hash>
+# Grab the SHA from the release branch (the squashed merge commit)
+git checkout release/v1.7 && git pull
+git log -1 --format=%H  # copy this SHA
+
+git checkout develop && git pull origin develop
+git cherry-pick <sha-from-release-branch>
 git push origin develop
 ```
 
@@ -280,26 +285,34 @@ Order matters: **oldest → newest → develop**. This minimizes merge conflicts
 
 **Example: security fix needed on v1.6, v1.7, and v1.8:**
 
+At each step, the `<commit-hash>` is the SHA of the **squashed merge commit on the branch you just merged into** — re-read it from that branch before cherry-picking forward.
+
 ```bash
 # 1. Fix on oldest affected branch
 git checkout release/v1.6
 git checkout -b hotfix/security-fix
 # ... fix ...
 git push origin hotfix/security-fix
-# PR → release/v1.6, merge
+# PR → release/v1.6, merge (squash)
 
-# 2. Cherry-pick forward
+# Grab the squashed SHA from release/v1.6
+git checkout release/v1.6 && git pull
+SHA=$(git log -1 --format=%H)
+
+# 2. Cherry-pick forward (re-read SHA from each branch after it lands)
 git checkout release/v1.7 && git pull
-git cherry-pick <commit-hash>
+git cherry-pick "$SHA"
 git push origin release/v1.7
+SHA=$(git log -1 --format=%H)  # new SHA on release/v1.7
 
 git checkout release/v1.8 && git pull
-git cherry-pick <commit-hash>
+git cherry-pick "$SHA"
 git push origin release/v1.8
+SHA=$(git log -1 --format=%H)  # new SHA on release/v1.8
 
 # 3. Cherry-pick to develop
 git checkout develop && git pull
-git cherry-pick <commit-hash>
+git cherry-pick "$SHA"
 git push origin develop
 ```
 
@@ -320,11 +333,16 @@ For each: **Releases** → **Draft a new release** → set tag, target, and rele
 After merging a hotfix PR to a release branch:
 
 1. **Immediately cherry-pick** the fix commit to `develop`
-2. If cherry-pick conflicts, create a PR to `develop` with the manual resolution
+2. **Use the squashed commit on the release branch as the source** — not the original commit from your `hotfix/*` branch (which won't survive the branch deletion)
+3. If cherry-pick conflicts, create a PR to `develop` with the manual resolution
 
 ```bash
+# Get the SHA from the release branch
+git checkout release/v1.7 && git pull
+git log -1 --format=%H  # this is the SHA to cherry-pick
+
 git checkout develop && git pull
-git cherry-pick <commit-hash>
+git cherry-pick <sha-from-release-branch>
 git push origin develop
 ```
 
