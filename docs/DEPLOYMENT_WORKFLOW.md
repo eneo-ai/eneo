@@ -346,7 +346,13 @@ This applies to all fixes on release branches — hotfixes, RC stabilization fix
 | `v*-rc/beta` tags | `:v1.8.0-rc.1` (no `:latest`) | Test environment / pre-release testing |
 | `v*` tags (stable) | `:v1.8.0`, `:latest` (if highest version) | Production releases |
 
-**Note:** The `:latest` tag is only applied when the tagged version is the highest semver release. Tagging `v1.7.4` on an older release branch will NOT overwrite `:latest` if `v1.8.0` already exists.
+**How `:latest` is decided:** Evaluated at tag-push time by comparing the new tag against all existing stable tags (`v*` excluding pre-releases like `-rc`, `-beta`) via semver sort. Only the highest stable version wins `:latest`.
+
+Consequences to be aware of:
+- Patching an older release (e.g. tagging `v1.7.4` while `v1.8.0` exists) will NOT overwrite `:latest` — the older patch correctly stays out of `:latest`.
+- If an out-of-order release happens (e.g. `v1.8.0` was tagged first, then later `v1.7.5` on the old branch), `:latest` still points to `v1.8.0` — the comparison is "highest at push time," not "most recently pushed."
+- RC / pre-release tags never receive `:latest`, regardless of version number.
+- If you ever need to move `:latest` to a different version (e.g. after yanking a bad release), you must retag manually in the registry — CI will not do it retroactively.
 
 ### Image Locations
 
