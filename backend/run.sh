@@ -49,9 +49,14 @@ fi
 
 # Check if running as Celery beat (flows reconciliation scheduler)
 if [[ "${RUN_AS_CELERY_BEAT,,}" == "true" ]]; then
+    schedule_file="${CELERYBEAT_SCHEDULE_FILE:-/tmp/celerybeat-schedule}"
     echo "Starting Celery beat for flow reconciliation scheduling"
+    echo "Schedule file: ${schedule_file}"
     echo "Launching..."
-    exec celery -A src.intric.flows.runtime.celery_app:celery_app beat --loglevel=INFO --pidfile=
+    exec celery -A src.intric.flows.runtime.celery_app:celery_app beat \
+        --loglevel=INFO \
+        --pidfile= \
+        --schedule="${schedule_file}"
 fi
 
 # Skip Alembic migrations in OpenAPI-only mode
