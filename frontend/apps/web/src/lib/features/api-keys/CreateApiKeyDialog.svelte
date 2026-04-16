@@ -134,6 +134,11 @@
   let scopeId = $state<string | null>(untrack(() => lockedScopeId ?? null));
   let manualScopeId = $state("");
 
+  // Narrow scopes (assistant/app) can only ever reach one resource type, so
+  // the per-resource-type matrix surfaces dead knobs. Only tenant- and
+  // space-scoped keys expose fine-grained permissions.
+  const scopeAllowsFineGrained = $derived(scopeType === "tenant" || scopeType === "space");
+
   // Fine-grained permissions (HuggingFace-style)
   type ResourcePermission = "none" | "read" | "write" | "admin";
 
@@ -207,9 +212,11 @@
   });
 
   // When the simple permission level changes, sync all fine-grained
-  // permissions to match — simple mode acts as a "set all" shortcut.
+  // permissions to match — simple mode acts as a "set all" shortcut. Only
+  // runs for scopes that expose the fine-grained matrix; narrow scopes
+  // never read the per-resource state.
   $effect(() => {
-    if (permissionMode === "simple") {
+    if (permissionMode === "simple" && scopeAllowsFineGrained) {
       const level =
         permission === "read"
           ? "read"
@@ -230,6 +237,15 @@
     if (scopeType && !scopeLocked) {
       scopeId = null;
       manualScopeId = "";
+    }
+  });
+
+  // Narrow scopes don't support fine-grained mode — snap back to simple so
+  // a user who flipped the toggle under a wide scope and then switched to a
+  // narrow one doesn't end up with a hidden-but-active fine-grained state.
+  $effect(() => {
+    if (!scopeAllowsFineGrained && permissionMode === "fine-grained") {
+      permissionMode = "simple";
     }
   });
 
@@ -362,7 +378,8 @@
     allowedIps = key.allowed_ips ?? [];
     expiresAt = key.expires_at ?? null;
     rateLimit = key.rate_limit?.toString() ?? "";
-    if (key.resource_permissions) {
+    const scopeSupportsFineGrained = key.scope_type === "tenant" || key.scope_type === "space";
+    if (key.resource_permissions && scopeSupportsFineGrained) {
       permissionMode = "fine-grained";
       assistantsPermission = (key.resource_permissions.assistants ?? "none") as ResourcePermission;
       appsPermission = (key.resource_permissions.apps ?? "none") as ResourcePermission;
@@ -478,7 +495,7 @@
       expires_at: expiresAt,
       rate_limit: rateLimit ? Number(rateLimit) : null,
       resource_permissions:
-        keyType === "sk_"
+        keyType === "sk_" && scopeAllowsFineGrained && permissionMode === "fine-grained"
           ? {
               assistants: assistantsPermission as ResourcePermissionLevel,
               apps: appsPermission as ResourcePermissionLevel,
@@ -507,10 +524,14 @@
 
     errorMessage = null;
 
-    // For sk_ keys, always send resource_permissions — backend derives
-    // the effective permission ceiling automatically.
+    // resource_permissions only persists when the user explicitly picked
+    // fine-grained. Simple mode (and narrow scopes, which have no fine-grained
+    // UI) rely on the flat `permission` field — the backend falls back to it
+    // as a uniform ceiling when resource_permissions is null.
+    const editScopeAllowsFineGrained =
+      apiKey.scope_type === "tenant" || apiKey.scope_type === "space";
     const nextResourcePermissions =
-      apiKey.key_type === "sk_"
+      apiKey.key_type === "sk_" && editScopeAllowsFineGrained && permissionMode === "fine-grained"
         ? {
             assistants: assistantsPermission as ResourcePermissionLevel,
             apps: appsPermission as ResourcePermissionLevel,
@@ -1058,7 +1079,10 @@
                 <!-- Step 2: Scope & Permissions -->
                 <div class="space-y-6">
                   <h3 class="sr-only">{m.api_keys_step_scope_sr()}</h3>
-                  <!-- Permission Mode Toggle (hidden for public keys: only simple mode is supported) -->
+                  <!-- Permission Mode Toggle (hidden for public keys; disabled for narrow
+                       scopes since they can only ever reach one resource type and the
+                       per-resource matrix would just surface dead knobs — keeping it
+                       rendered prevents the step from reflowing when scope changes) -->
                   {#if keyType !== "pk_"}
                     <div class="border-default flex items-center justify-between border-b pb-4">
                       <div>
@@ -1067,19 +1091,24 @@
                           class="text-default text-sm font-semibold tracking-wide"
                           >{m.api_keys_permission_type()}</span
                         >
-                        <p class="text-muted mt-0.5 text-xs">{m.api_keys_permission_choose()}</p>
+                        <p class="text-muted mt-0.5 text-xs">
+                          {scopeAllowsFineGrained
+                            ? m.api_keys_permission_choose()
+                            : m.api_keys_permission_narrow_scope_hint()}
+                        </p>
                       </div>
                       <div
                         role="group"
                         aria-labelledby="permission-type-label"
-                        class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1 {readonly
-                          ? 'pointer-events-none opacity-70'
+                        class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1 {readonly ||
+                        !scopeAllowsFineGrained
+                          ? 'pointer-events-none opacity-60'
                           : ''}"
                       >
                         <button
                           type="button"
                           onclick={() => (permissionMode = "simple")}
-                          disabled={readonly}
+                          disabled={readonly || !scopeAllowsFineGrained}
                           class="rounded-md px-4 py-2 text-sm font-medium transition-all
                                {permissionMode === 'simple'
                             ? 'bg-primary text-default shadow-sm'
@@ -1090,7 +1119,7 @@
                         <button
                           type="button"
                           onclick={() => (permissionMode = "fine-grained")}
-                          disabled={readonly}
+                          disabled={readonly || !scopeAllowsFineGrained}
                           class="rounded-md px-4 py-2 text-sm font-medium transition-all
                                {permissionMode === 'fine-grained'
                             ? 'bg-primary text-default shadow-sm'
@@ -1167,7 +1196,7 @@
                     {/if}
                   {/if}
 
-                  {#if permissionMode === "simple"}
+                  {#if permissionMode === "simple" || !scopeAllowsFineGrained}
                     <!-- Simple Mode -->
                     <div class="space-y-6">
                       {#if scopeLocked}

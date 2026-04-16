@@ -179,6 +179,18 @@ class ApiKeyPolicyService:
                     code="invalid_request",
                     message="Public keys (pk_) do not support fine-grained resource permissions.",
                 )
+            if request.scope_type in (
+                ApiKeyScopeType.ASSISTANT,
+                ApiKeyScopeType.APP,
+            ):
+                raise ApiKeyValidationError(
+                    status_code=400,
+                    code="invalid_request",
+                    message=(
+                        "Assistant- and app-scoped keys use a flat permission "
+                        "level; resource_permissions is not supported."
+                    ),
+                )
 
         return await self.ensure_creator_authorized(
             scope_type=request.scope_type, scope_id=request.scope_id
@@ -372,6 +384,18 @@ class ApiKeyPolicyService:
                         status_code=400,
                         code="invalid_request",
                         message="Public keys (pk_) do not support fine-grained resource permissions.",
+                    )
+                if ApiKeyScopeType(key.scope_type) in (
+                    ApiKeyScopeType.ASSISTANT,
+                    ApiKeyScopeType.APP,
+                ):
+                    raise ApiKeyValidationError(
+                        status_code=400,
+                        code="invalid_request",
+                        message=(
+                            "Assistant- and app-scoped keys use a flat permission "
+                            "level; resource_permissions is not supported."
+                        ),
                     )
 
     async def ensure_ownership_authorized(self, *, key: ApiKeyV2InDB):

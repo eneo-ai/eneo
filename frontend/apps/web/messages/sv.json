@@ -2331,6 +2331,7 @@
   "api_keys_public_key_desc": "För klientanvändning. Kräver tillåtna ursprung för säkerhet.",
   "api_keys_permission_type": "Behörighetstyp",
   "api_keys_permission_choose": "Välj hur åtkomst ska konfigureras",
+  "api_keys_permission_narrow_scope_hint": "Detaljerade behörigheter är inte tillgängliga för enskilda resurser",
   "api_keys_simple": "Enkel",
   "api_keys_fine_grained": "Detaljerad",
   "api_keys_scope": "Omfång",

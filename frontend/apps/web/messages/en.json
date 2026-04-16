@@ -2296,6 +2296,7 @@
   "api_keys_public_key_desc": "For client-side use. Requires allowed origins for security.",
   "api_keys_permission_type": "Permission Type",
   "api_keys_permission_choose": "Choose how to configure access",
+  "api_keys_permission_narrow_scope_hint": "Fine-grained permissions are unavailable for single-resource scopes",
   "api_keys_simple": "Simple",
   "api_keys_fine_grained": "Fine-grained",
   "api_keys_scope": "Scope",
