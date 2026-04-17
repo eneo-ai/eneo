@@ -50,6 +50,9 @@ cd backend && uv run arq src.intric.worker.arq.WorkerSettings  # Terminal 3
 # Create feature branch
 git checkout -b feature/your-feature-name
 
+# Install local hooks once per clone
+pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
+
 # Make changes and test
 # ... your development work ...
 

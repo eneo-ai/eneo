@@ -206,6 +206,20 @@ lsof -i :6379   # Redis
 4. **Apply Migrations** - `cd backend && uv run python init_db.py`
 5. **Start Services** - Run the 3 terminal commands
 
+### Install Local Git Hooks
+
+Install the full local hook set once per clone:
+
+```bash
+pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
+```
+
+This enables:
+
+- staged-file preflight checks before commit
+- commit-message validation
+- push-time branch safety and final local checks
+
 ### Testing Your Changes
 
 **Backend Tests:**

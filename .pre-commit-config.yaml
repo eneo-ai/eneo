@@ -1,4 +1,17 @@
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        stages: [pre-commit]
+        args: [--maxkb=750]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+      - id: detect-private-key
+        stages: [pre-commit]
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.3
     hooks:
@@ -21,6 +34,13 @@ repos:
   # Pyright type checking via devcontainer
   - repo: local
     hooks:
+      - id: commit-preflight
+        name: commit-preflight
+        entry: python3 scripts/commit_preflight.py
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
       - id: pyright
         name: pyright
         entry: bash backend/scripts/run_pyright_in_devcontainer.sh
@@ -67,3 +87,17 @@ repos:
         language: system
         files: ^frontend/apps/web/messages/.*\.json$
         pass_filenames: false
+        stages: [pre-commit]
+
+      - id: commit-msg-check
+        name: commit-msg-check
+        entry: python3 scripts/commit_msg_check.py
+        language: system
+        stages: [commit-msg]
+
+      - id: pre-push-check
+        name: pre-push-check
+        entry: python3 scripts/pre_push_check.py
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
