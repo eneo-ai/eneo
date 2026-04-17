@@ -7,19 +7,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-JUNK_RULES = [
-    (re.compile(r"(^|/)\.DS_Store$"), "staged macOS metadata file"),
-    (re.compile(r"(^|/).+\.sw[op]$"), "staged editor swap file"),
-    (re.compile(r"(^|/).+~$"), "staged editor backup file"),
-    (re.compile(r"(^|/)\.pytest_cache(/|$)"), "staged pytest cache"),
-    (re.compile(r"(^|/)\.ruff_cache(/|$)"), "staged ruff cache"),
-    (re.compile(r"(^|/)\.svelte-kit(/|$)"), "staged SvelteKit build artifact"),
-    (re.compile(r"(^|/)node_modules(/|$)"), "staged node_modules artifact"),
-    (re.compile(r"(^|/)(dist|build)(/|$)"), "staged build artifact"),
-    (re.compile(r"(^|/)\.claude/state(/|$)"), "staged Claude runtime state"),
-    (re.compile(r"(^|/)\.claude/stats(/|$)"), "staged Claude runtime stats"),
-    (re.compile(r"(^|/)backend/celerybeat-schedule$"), "staged Celery runtime schedule"),
-]
 ENV_PATH_RE = re.compile(r"(^|/)\.env(\.[^/]+)?$")
 SAFE_ENV_TEMPLATE_RE = re.compile(
     r"(^|/)(\.env\.(example|template)|env_[^/]+\.(template|example))$"
@@ -69,6 +56,23 @@ def staged_diff(repo_root: Path) -> str:
     return run_git(repo_root, "diff", "--cached", "--no-color", "--unified=0")
 
 
+def staged_added_files(repo_root: Path) -> set[str]:
+    output = run_git(repo_root, "diff", "--cached", "--name-only", "--diff-filter=A")
+    return {line for line in output.splitlines() if line.strip()}
+
+
+def ignored_cached_files(repo_root: Path) -> set[str]:
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-files", "-i", "--exclude-standard", "--cached"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return set()
+    return {line for line in result.stdout.splitlines() if line.strip()}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root")
@@ -77,6 +81,8 @@ def main() -> int:
     try:
         repo_root = repo_root_from(args.repo_root)
         paths = staged_files(repo_root)
+        added_paths = staged_added_files(repo_root)
+        ignored_added_paths = ignored_cached_files(repo_root) & added_paths
         diff = staged_diff(repo_root)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
@@ -90,10 +96,11 @@ def main() -> int:
 
     for path in paths:
         normalized = path.replace("\\", "/")
-        for regex, label in JUNK_RULES:
-            if regex.search(normalized):
-                errors.append(f"{normalized}: {label}. Remove it from the commit.")
-                break
+
+        if normalized in ignored_added_paths and not SAFE_ENV_TEMPLATE_RE.search(normalized):
+            errors.append(
+                f"{normalized}: matches .gitignore and should not be committed. Remove it from the commit."
+            )
 
         if ENV_PATH_RE.search(normalized):
             if not SAFE_ENV_TEMPLATE_RE.search(normalized):

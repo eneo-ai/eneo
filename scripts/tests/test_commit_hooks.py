@@ -51,25 +51,34 @@ class CommitHookTests(unittest.TestCase):
 
     def test_commit_preflight_blocks_env_and_junk(self) -> None:
         root = self.make_repo()
+        (root / ".gitignore").write_text(".DS_Store\n.env\n.env.*\n!.env.example\n", encoding="utf-8")
         (root / ".env").write_text("SECRET=1\n", encoding="utf-8")
         (root / ".DS_Store").write_text("junk\n", encoding="utf-8")
-        subprocess.run(["git", "add", ".env", ".DS_Store"], cwd=root, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "add", "-f", ".env", ".DS_Store"], cwd=root, check=True, capture_output=True, text=True)
 
         result = run_script(COMMIT_PREFLIGHT, "--repo-root", str(root))
         self.assertEqual(result.returncode, 2)
         self.assertIn(".env files must not be committed", result.stderr)
-        self.assertIn("staged macOS metadata file", result.stderr)
+        self.assertIn("matches .gitignore and should not be committed", result.stderr)
 
     def test_commit_preflight_allows_env_templates(self) -> None:
         root = self.make_repo()
         backend_template = root / "backend" / ".env.template"
         frontend_example = root / "frontend" / "apps" / "web" / ".env.example"
+        (root / ".gitignore").write_text(".env\n.env.*\n!.env.example\n", encoding="utf-8")
         backend_template.parent.mkdir(parents=True, exist_ok=True)
         frontend_example.parent.mkdir(parents=True, exist_ok=True)
         backend_template.write_text("API_PREFIX=/api/v1\n", encoding="utf-8")
         frontend_example.write_text("PUBLIC_API_URL=http://localhost:8123\n", encoding="utf-8")
         subprocess.run(
-            ["git", "add", str(backend_template.relative_to(root)), str(frontend_example.relative_to(root))],
+            ["git", "add", ".gitignore"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "add", "-f", str(backend_template.relative_to(root)), str(frontend_example.relative_to(root))],
             cwd=root,
             check=True,
             capture_output=True,
@@ -81,6 +90,7 @@ class CommitHookTests(unittest.TestCase):
 
     def test_commit_preflight_flags_high_confidence_secret_pattern(self) -> None:
         root = self.make_repo()
+        (root / ".gitignore").write_text("", encoding="utf-8")
         target = root / "backend" / "src" / "intric" / "secret_demo.py"
         fake_secret = "ghp_" + "abcdefghijklmnopqrstuvwx" + "yz123456"
         target.write_text(f'TOKEN = "{fake_secret}"\n', encoding="utf-8")
