@@ -143,19 +143,30 @@ def _make_file(
     tenant_id: UUID | None = None,
     user_id: UUID | None = None,
     name: str = "reference.txt",
-    text: str = "Reference material",
+    text: str | None = "Reference material",
+    mimetype: str = "text/plain",
+    file_type: FileType = FileType.TEXT,
+    transcription: str | None = None,
+    blob: bytes | None = None,
 ) -> File:
     resolved_user_id = user_id or uuid4()
+    resolved_text = text or ""
+    resolved_blob = blob or None
     return File(
         id=file_id or uuid4(),
         name=name,
         checksum="checksum",
-        size=len(text.encode("utf-8")),
-        mimetype="text/plain",
-        file_type=FileType.TEXT,
+        size=max(
+            1,
+            len(resolved_text.encode("utf-8"))
+            if text is not None
+            else len(resolved_blob or b""),
+        ),
+        mimetype=mimetype,
+        file_type=file_type,
         text=text,
-        blob=None,
-        transcription=None,
+        blob=resolved_blob,
+        transcription=transcription,
         owner_type=None,
         owner_user_id=resolved_user_id,
         owner_api_key_id=None,
@@ -4507,7 +4518,7 @@ class TestReasoningLeakRegression:
 
 
 @pytest.mark.asyncio
-async def test_prepare_message_context_attaches_new_files_and_builds_attachment_context() -> (
+async def test_prepare_message_context_stages_new_files_and_builds_attachment_context() -> (
     None
 ):
     user = _make_user()
@@ -4543,7 +4554,7 @@ async def test_prepare_message_context_attaches_new_files_and_builds_attachment_
         "openai/gpt-5.4",
         {"api_key": "test"},
     )
-    repo.list_session_file_ids.return_value = [file_id]
+    repo.list_session_file_ids.return_value = []
 
     context = await service.prepare_message_context(
         session=session,
@@ -4553,13 +4564,62 @@ async def test_prepare_message_context_attaches_new_files_and_builds_attachment_
         message_file_ids=[file_id],
     )
 
-    repo.attach_session_files.assert_awaited_once_with(
-        session_id=session.id,
-        tenant_id=user.tenant_id,
-        file_ids=[file_id],
-    )
+    repo.attach_session_files.assert_not_awaited()
     assert len(context.attachment_files) == 1
     assert context.attachment_files[0].name == "reference.txt"
+
+
+@pytest.mark.asyncio
+async def test_prepare_message_context_does_not_persist_new_files_before_message_acceptance() -> (
+    None
+):
+    user = _make_user()
+    repo = AsyncMock()
+    completion_service = AsyncMock()
+    file_service = AsyncMock()
+    service = AIBuilderService(
+        user=user,
+        repo=repo,
+        flow_service=AsyncMock(),
+        completion_service=completion_service,
+        file_service=file_service,
+    )
+
+    session = _make_session(actor_user_id=user.id)
+    space = MagicMock()
+    model = MagicMock()
+    model.id = uuid4()
+    model.name = "gpt-5.4"
+    model.max_input_tokens = 8192
+    model.max_output_tokens = 2048
+    model.litellm_model_name = "openai/gpt-5.4"
+    space.get_default_completion_model.return_value = model
+    space.completion_models = [model]
+    space.collections = []
+
+    file_id = uuid4()
+    attached_file = _make_file(
+        file_id=file_id, tenant_id=user.tenant_id, user_id=user.id
+    )
+    file_service.get_files_by_ids.return_value = [attached_file]
+    completion_service.resolve_litellm_params.return_value = (
+        "openai/gpt-5.4",
+        {"api_key": "test"},
+    )
+    repo.list_session_file_ids.return_value = []
+
+    context = await service.prepare_message_context(
+        session=session,
+        space=space,
+        model_id=None,
+        tenant_flow_settings=None,
+        message_file_ids=[file_id],
+    )
+
+    repo.attach_session_files.assert_not_awaited()
+    file_service.get_files_by_ids.assert_awaited_once_with([file_id])
+    assert len(context.attachment_files) == 1
+    assert context.attachment_files[0].id == file_id
 
 
 @pytest.mark.asyncio
@@ -4662,3 +4722,36 @@ async def test_get_session_attachment_snapshot_returns_warning_when_some_files_m
 
     assert snapshot.files == [available_file]
     assert snapshot.warnings
+
+
+@pytest.mark.asyncio
+async def test_get_session_attachment_snapshot_warns_when_attached_file_has_no_readable_content() -> (
+    None
+):
+    user = _make_user()
+    repo = AsyncMock()
+    file_service = AsyncMock()
+    unreadable_file = _make_file(
+        file_id=uuid4(),
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        text=None,
+        blob=b"%PDF-1.7 unreadable",
+        mimetype="application/pdf",
+        file_type=FileType.DOCUMENT,
+    )
+    repo.list_session_file_ids.return_value = [unreadable_file.id]
+    file_service.get_files_by_ids.return_value = [unreadable_file]
+    service = AIBuilderService(
+        user=user,
+        repo=repo,
+        flow_service=AsyncMock(),
+        completion_service=AsyncMock(),
+        file_service=file_service,
+    )
+
+    snapshot = await service.get_session_attachment_snapshot(session_id=uuid4())
+
+    assert snapshot.files == [unreadable_file]
+    assert any("readable" in warning.lower() for warning in snapshot.warnings)
+    assert any(unreadable_file.name in warning for warning in snapshot.warnings)

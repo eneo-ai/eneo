@@ -16,6 +16,9 @@ from uuid import UUID
 import litellm
 
 from intric.files.file_models import File
+from intric.flows.ai_builder.ai_builder_attachment_context import (
+    readable_attachment_text,
+)
 from intric.flows.ai_builder.ai_builder_context import (
     AIBuilderPlannerContext,
     build_planner_context,
@@ -115,6 +118,17 @@ class PreparedMessageContext:
 class SessionAttachmentSnapshot:
     files: list[File]
     warnings: list[str]
+
+
+def _format_attachment_name_list(names: list[str], *, limit: int = 3) -> str:
+    unique_names = list(dict.fromkeys(name for name in names if name))
+    shown = unique_names[:limit]
+    if not shown:
+        return "unknown files"
+    if len(unique_names) <= limit:
+        return ", ".join(shown)
+    remaining = len(unique_names) - limit
+    return f"{', '.join(shown)}, and {remaining} more"
 
 
 class AIBuilderService:
@@ -351,6 +365,7 @@ class AIBuilderService:
                 flow
             )
 
+        validated_files: list[File] = []
         if message_file_ids:
             if self.file_service is None:
                 raise RuntimeError(
@@ -362,11 +377,6 @@ class AIBuilderService:
                     "One or more referenced files are unavailable for this AI Builder session.",
                     code="builder_attachment_unavailable",
                 )
-            await self.repo.attach_session_files(
-                session_id=session.id,
-                tenant_id=self.user.tenant_id,
-                file_ids=[file.id for file in validated_files],
-            )
 
         session_file_ids = await self.repo.list_session_file_ids(
             session_id=session.id,
@@ -381,6 +391,13 @@ class AIBuilderService:
             attachment_files = await self.file_service.get_files_by_ids(
                 session_file_ids
             )
+        if validated_files:
+            merged_files: dict[UUID, File] = {
+                file.id: file for file in attachment_files
+            }
+            for file in validated_files:
+                merged_files[file.id] = file
+            attachment_files = list(merged_files.values())
 
         return PreparedMessageContext(
             planner_context=planner_context,
@@ -461,6 +478,14 @@ class AIBuilderService:
         if len({file.id for file in files}) != len(set(file_ids)):
             warnings.append(
                 "One or more previously attached reference files are no longer available to this AI Builder session."
+            )
+        unreadable_files = [
+            file.name for file in files if readable_attachment_text(file) is None
+        ]
+        if unreadable_files:
+            warnings.append(
+                "Attached reference files do not currently contain readable extracted text or transcription for AI Builder planning: "
+                f"{_format_attachment_name_list(unreadable_files)}."
             )
         return SessionAttachmentSnapshot(files=files, warnings=warnings)
 

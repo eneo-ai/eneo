@@ -396,6 +396,30 @@ class AIBuilderRepository:
             return
 
         async with self._transaction():
+            committed_file_ids: list[UUID] = []
+            for message in conversation:
+                if message.role != "user":
+                    continue
+                metadata = (
+                    message.metadata if isinstance(message.metadata, dict) else None
+                )
+                raw_file_ids = (
+                    cast(list[Any] | None, metadata.get("file_ids"))
+                    if metadata
+                    else None
+                )
+                if not isinstance(raw_file_ids, list):
+                    continue
+                for raw_file_id in raw_file_ids:
+                    try:
+                        committed_file_ids.append(
+                            raw_file_id
+                            if isinstance(raw_file_id, UUID)
+                            else UUID(str(cast(object, raw_file_id)))
+                        )
+                    except (TypeError, ValueError):
+                        continue
+
             stmt = select(BuilderSessions).where(
                 BuilderSessions.id == session_id,
                 BuilderSessions.tenant_id == tenant_id,
@@ -419,6 +443,20 @@ class AIBuilderRepository:
                 )
             )
             await self.session.execute(update_stmt)
+            if committed_file_ids:
+                rows = [
+                    {
+                        "session_id": session_id,
+                        "file_id": file_id,
+                        "tenant_id": tenant_id,
+                    }
+                    for file_id in dict.fromkeys(committed_file_ids)
+                ]
+                stmt = pg_insert(BuilderSessionFiles).values(rows)
+                stmt = stmt.on_conflict_do_nothing(
+                    index_elements=["session_id", "file_id"]
+                )
+                await self.session.execute(stmt)
 
     async def update_session_latest_plan(
         self,

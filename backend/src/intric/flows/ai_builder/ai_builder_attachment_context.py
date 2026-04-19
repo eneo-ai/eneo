@@ -20,7 +20,7 @@ class AIBuilderAttachmentContext:
     truncated: bool
 
 
-def _readable_text(file: File) -> str | None:
+def readable_attachment_text(file: File) -> str | None:
     if isinstance(file.text, str) and file.text.strip():
         return file.text.strip()
     if isinstance(file.transcription, str) and file.transcription.strip():
@@ -43,7 +43,7 @@ def build_ai_builder_attachment_context(
     truncated = False
 
     for file in files:
-        text = _readable_text(file)
+        text = readable_attachment_text(file)
         if text is None:
             continue
 

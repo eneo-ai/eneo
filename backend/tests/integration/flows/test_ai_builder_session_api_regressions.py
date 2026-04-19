@@ -5,11 +5,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
-from intric.ai_models.model_enums import ModelFamily, ModelHostingLocation, ModelOrg, ModelStability
+
+from intric.ai_models.model_enums import (
+    ModelFamily,
+    ModelHostingLocation,
+    ModelOrg,
+    ModelStability,
+)
 from intric.database.tables.ai_models_table import TranscriptionModels
 from intric.database.tables.model_providers_table import ModelProviders
-from intric.database.tables.spaces_table import SpacesCompletionModels
-from intric.database.tables.spaces_table import SpacesTranscriptionModels
+from intric.database.tables.spaces_table import (
+    SpacesCompletionModels,
+    SpacesTranscriptionModels,
+)
 from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
@@ -217,12 +225,15 @@ async def _send_builder_message(
     bearer_token: str,
     session_id: str,
     message: str,
+    file_ids: list[str] | None = None,
     question_answer: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
     payload: dict[str, object] = {
         "message": message,
         "ui_language": "sv",
     }
+    if file_ids is not None:
+        payload["file_ids"] = file_ids
     if question_answer is not None:
         payload["question_answer"] = question_answer
 
@@ -236,6 +247,23 @@ async def _send_builder_message(
     )
     assert response.status_code == 200, response.text
     return _parse_sse_payload(response.text)
+
+
+async def _upload_reference_file(
+    *,
+    client,
+    bearer_token: str,
+    filename: str = "reference.txt",
+    content: bytes = b"hello world",
+    mimetype: str = "text/plain",
+) -> str:
+    response = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": (filename, content, mimetype)},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert response.status_code in (200, 201), response.text
+    return response.json()["id"]
 
 
 def _make_builder_plan_spec(*, existing_step_ref: str | None) -> FlowDraftSpecCore:
@@ -256,6 +284,73 @@ def _make_builder_plan_spec(*, existing_step_ref: str | None) -> FlowDraftSpecCo
             )
         ],
     )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_message_attachments_persist_only_after_accepted_send(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Attachment Persistence",
+    )
+    file_id = await _upload_reference_file(
+        client=client,
+        bearer_token=bearer_token,
+        filename="reference.txt",
+        content=b"reference material",
+    )
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        new=AsyncMock(
+            return_value=_make_llm_response(
+                content="Jag kan använda referensmaterialet."
+            )
+        ),
+    ):
+        with patch(
+            "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+        ):
+            session_id = await _create_ai_builder_session(
+                client=client,
+                bearer_token=bearer_token,
+                space_id=space_id,
+            )
+
+            before_response = await client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert before_response.status_code == 200, before_response.text
+            assert before_response.json()["attachments"] == []
+
+            events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message="Använd det bifogade referensmaterialet.",
+                file_ids=[file_id],
+            )
+            assert any(event["event"] == "text" for event in events)
+
+            after_response = await client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert after_response.status_code == 200, after_response.text
+            attachment_ids = [
+                attachment["id"] for attachment in after_response.json()["attachments"]
+            ]
+            assert attachment_ids == [file_id]
 
 
 def _make_plan_envelope(spec: FlowDraftSpecCore) -> PlannerPlanEnvelope:
@@ -310,12 +405,16 @@ async def _progress_edit_session_to_plan(
             message = "Ja, det stämmer. Bygg planen."
             question_answer = {
                 "requirements_confirmed": True,
-                "requirements_version": requirements_event["data"]["requirements_version"],
+                "requirements_version": requirements_event["data"][
+                    "requirements_version"
+                ],
                 "ui_language": "sv",
             }
             continue
 
-        question_event = next((event for event in events if event["event"] == "question"), None)
+        question_event = next(
+            (event for event in events if event["event"] == "question"), None
+        )
         assert question_event is not None, events
         question_id = question_event["data"]["question_id"]
         selected_option_id = answers.get(question_id)
@@ -339,7 +438,9 @@ async def _progress_edit_session_to_plan(
             "ui_language": "sv",
         }
 
-    raise AssertionError("Edit session did not reach a plan within the expected number of turns.")
+    raise AssertionError(
+        "Edit session did not reach a plan within the expected number of turns."
+    )
 
 
 def _make_flow_step(
@@ -397,7 +498,10 @@ async def test_ai_builder_api_repeated_output_question_after_structured_answer_r
             "question_id": "final_output_mode",
             "question": "Vad ska flödet producera som slutresultat?",
             "options": [
-                {"id": "structured_text", "label": "Strukturerat beslutsunderlag som text"},
+                {
+                    "id": "structured_text",
+                    "label": "Strukturerat beslutsunderlag som text",
+                },
                 {"id": "pdf_document", "label": "PDF-dokument"},
                 {"id": "docx_document", "label": "DOCX-dokument"},
                 {"id": "structured_json", "label": "Strukturerad JSON"},
@@ -434,7 +538,9 @@ async def test_ai_builder_api_repeated_output_question_after_structured_answer_r
         },
     )
 
-    with patch("intric.flows.ai_builder.ai_builder_service.litellm.acompletion") as mock_completion:
+    with patch(
+        "intric.flows.ai_builder.ai_builder_service.litellm.acompletion"
+    ) as mock_completion:
         mock_completion = AsyncMock(
             side_effect=[
                 _make_llm_response(tool_calls=[initial_question]),
@@ -449,7 +555,9 @@ async def test_ai_builder_api_repeated_output_question_after_structured_answer_r
         ):
             with patch(
                 "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-                new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+                new=AsyncMock(
+                    return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})
+                ),
             ):
                 session_id = await _create_ai_builder_session(
                     client=client,
@@ -506,7 +614,10 @@ async def test_ai_builder_api_repeated_output_question_after_freeform_label_reco
             "question_id": "final_output_mode",
             "question": "Vad ska flödet producera som slutresultat?",
             "options": [
-                {"id": "structured_text", "label": "Strukturerat beslutsunderlag som text"},
+                {
+                    "id": "structured_text",
+                    "label": "Strukturerat beslutsunderlag som text",
+                },
                 {"id": "pdf_document", "label": "PDF-dokument"},
                 {"id": "docx_document", "label": "DOCX-dokument"},
                 {"id": "structured_json", "label": "Strukturerad JSON"},
@@ -608,7 +719,10 @@ async def test_ai_builder_api_question_recovery_exhaustion_returns_typed_error_e
             "question_id": "final_output_mode",
             "question": "Vad ska flödet producera som slutresultat?",
             "options": [
-                {"id": "structured_text", "label": "Strukturerat beslutsunderlag som text"},
+                {
+                    "id": "structured_text",
+                    "label": "Strukturerat beslutsunderlag som text",
+                },
                 {"id": "pdf_document", "label": "PDF-dokument"},
                 {"id": "docx_document", "label": "DOCX-dokument"},
                 {"id": "structured_json", "label": "Strukturerad JSON"},
@@ -785,7 +899,10 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
             "question_id": "final_output_mode",
             "question": "Vad ska flödet producera som slutresultat?",
             "options": [
-                {"id": "structured_text", "label": "Strukturerat beslutsunderlag som text"},
+                {
+                    "id": "structured_text",
+                    "label": "Strukturerat beslutsunderlag som text",
+                },
                 {"id": "pdf_document", "label": "PDF-dokument"},
                 {"id": "docx_document", "label": "DOCX-dokument"},
                 {"id": "structured_json", "label": "Strukturerad JSON"},
@@ -885,7 +1002,9 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
                 },
             )
             requirements_event = next(
-                event for event in second_events if event["event"] == "requirements_summary"
+                event
+                for event in second_events
+                if event["event"] == "requirements_summary"
             )
             third_events = await _send_builder_message(
                 client=client,
@@ -894,7 +1013,9 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
                 message="Ja, det stämmer. Bygg planen.",
                 question_answer={
                     "requirements_confirmed": True,
-                    "requirements_version": requirements_event["data"]["requirements_version"],
+                    "requirements_version": requirements_event["data"][
+                        "requirements_version"
+                    ],
                     "ui_language": "sv",
                 },
             )
@@ -1241,7 +1362,10 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
             "summary": "Lägg till transkribering först och låt sedan befintligt steg analysera transkriberingen.",
             "key_decisions": [
                 {"topic": "Input", "decision": "Ljudfil som transkriberas först"},
-                {"topic": "Existing logic", "decision": "Behåll analyssteget men gör det textbaserat"},
+                {
+                    "topic": "Existing logic",
+                    "decision": "Behåll analyssteget men gör det textbaserat",
+                },
             ],
             "input_description": "Användaren laddar upp en ljudfil vid körning.",
             "output_description": "Flödet analyserar först transkriberat innehåll vidare.",
@@ -1255,7 +1379,10 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
             "operations": [
                 {
                     "op": "add",
-                    "placement": {"position": "before", "anchor_ref": "existing_step_1"},
+                    "placement": {
+                        "position": "before",
+                        "anchor_ref": "existing_step_1",
+                    },
                     "add_payload": {
                         "name": "Transkribera ljudfil",
                         "instructions": "Transkribera ljudfilen ordagrant till svensk text.",
@@ -1378,7 +1505,10 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
             "question_id": "final_output_mode",
             "question": "Vad ska flödet producera som slutresultat?",
             "options": [
-                {"id": "structured_text", "label": "Strukturerat beslutsunderlag som text"},
+                {
+                    "id": "structured_text",
+                    "label": "Strukturerat beslutsunderlag som text",
+                },
                 {"id": "pdf_document", "label": "PDF-dokument"},
                 {"id": "docx_document", "label": "DOCX-dokument"},
                 {"id": "structured_json", "label": "Strukturerad JSON"},
@@ -1479,7 +1609,9 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
                 },
             )
             requirements_event = next(
-                event for event in second_events if event["event"] == "requirements_summary"
+                event
+                for event in second_events
+                if event["event"] == "requirements_summary"
             )
             events = await _send_builder_message(
                 client=client,
@@ -1488,7 +1620,9 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
                 message="Ja, det stämmer. Bygg planen.",
                 question_answer={
                     "requirements_confirmed": True,
-                    "requirements_version": requirements_event["data"]["requirements_version"],
+                    "requirements_version": requirements_event["data"][
+                        "requirements_version"
+                    ],
                     "ui_language": "sv",
                 },
             )
@@ -1617,7 +1751,9 @@ async def test_ai_builder_api_audio_report_prompt_reaches_requirements_summary_w
 
     with patch(
         "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
-        new=AsyncMock(return_value=_make_llm_response(tool_calls=[requirements_summary])),
+        new=AsyncMock(
+            return_value=_make_llm_response(tool_calls=[requirements_summary])
+        ),
     ):
         with patch(
             "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
