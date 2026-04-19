@@ -8,9 +8,10 @@
   import { onDestroy, onMount } from "svelte";
   import { browser } from "$app/environment";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import AudioRecorder from "$lib/features/audio/AudioRecorder.svelte";
+  import { buildRecordedAudioFile } from "$lib/features/audio/recordedAudioFile";
   import FileSizeValidationPanel from "$lib/features/attachments/components/FileSizeValidationPanel.svelte";
   import dayjs from "dayjs";
-  import AudioRecorder from "./AudioRecorder.svelte";
   import AttachmentItem from "$lib/features/attachments/components/AttachmentItem.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -171,9 +172,13 @@
       isRecording = active;
     }}
     onRecordingDone={({ blob, mimeType, reason }) => {
-      const extension = mimeType.replaceAll("audio/", "").split(";")[0] ?? "";
-      const fileName = `${m.recording_filename_template({ datetime: dayjs().format("YYYY-MM-DD HH:mm:ss") })}.${extension}`;
-      audioFile = new File([blob], fileName, { type: mimeType });
+      audioFile = buildRecordedAudioFile({
+        blob,
+        mimeType,
+        fileNameBase: m.recording_filename_template({
+          datetime: dayjs().format("YYYY-MM-DD HH:mm:ss")
+        })
+      });
       audioURL = URL.createObjectURL(blob);
       if (reason === "limit") {
         recordingWarning = m.recording_limit_reached();

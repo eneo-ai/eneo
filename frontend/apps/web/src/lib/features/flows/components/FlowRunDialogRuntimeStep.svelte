@@ -10,6 +10,8 @@
     getUploadErrorHint,
     friendlyMimeNames
   } from "$lib/features/flows/flowRuntimeErrorMapping";
+  import AudioRecorder from "$lib/features/audio/AudioRecorder.svelte";
+  import type { RecordingStopReason } from "$lib/features/audio/recordedAudioFile";
   import type { FlowRunBlocker } from "$lib/features/flows/flowRunWizard";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
 
@@ -20,6 +22,7 @@
     remainingSlots,
     isUploading,
     uploadError,
+    recordingNotice,
     skippedMessage,
     blockers,
     dragging,
@@ -28,6 +31,7 @@
     onOpenFilePicker,
     onRemoveFile,
     onRetryUpload,
+    onRecordingDone,
     onDrop,
     onDragOver,
     onDragLeave
@@ -38,6 +42,7 @@
     remainingSlots: number;
     isUploading: boolean;
     uploadError: string | null;
+    recordingNotice: string | null;
     skippedMessage: string | null;
     blockers: FlowRunBlocker[];
     dragging: boolean;
@@ -46,6 +51,11 @@
     onOpenFilePicker: () => void;
     onRemoveFile: (fileId: string) => void;
     onRetryUpload: () => void;
+    onRecordingDone: (params: {
+      blob: Blob;
+      mimeType: string;
+      reason: RecordingStopReason;
+    }) => void;
     onDrop: (event: DragEvent) => void;
     onDragOver: (event: DragEvent) => void;
     onDragLeave: (event: DragEvent) => void;
@@ -77,6 +87,8 @@
     }
     return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
   }
+
+  const supportsAudioRecording = $derived(step.input_format === "audio");
 </script>
 
 <div class="flex flex-col gap-5">
@@ -243,6 +255,29 @@
       >
         {skippedMessage}
       </p>
+    {/if}
+
+    {#if supportsAudioRecording}
+      <div class="border-default bg-secondary/5 mt-4 rounded-xl border p-4">
+        <div class="mb-3 space-y-1">
+          <p class="text-sm font-medium">{m.record_microphone_audio()}</p>
+          <p class="text-muted text-sm">
+            {m.record_audio_device()}
+          </p>
+        </div>
+
+        <AudioRecorder maxBytes={step.max_file_size_bytes ?? null} {onRecordingDone} />
+
+        {#if recordingNotice}
+          <p
+            class="border-warning-default/30 bg-warning-dimmer text-warning-stronger mt-3 rounded-md border px-3.5 py-2.5 text-sm"
+            role="status"
+            aria-live="polite"
+          >
+            {recordingNotice}
+          </p>
+        {/if}
+      </div>
     {/if}
 
     {#if uploadError}

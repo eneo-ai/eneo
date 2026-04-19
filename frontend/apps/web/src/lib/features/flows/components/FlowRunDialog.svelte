@@ -18,6 +18,8 @@
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
+  import { buildRecordedAudioFile } from "$lib/features/audio/recordedAudioFile";
+  import type { RecordingStopReason } from "$lib/features/audio/recordedAudioFile";
   import {
     getFlowFormFieldRuntimeKey,
     normalizeFlowFormFields,
@@ -70,6 +72,7 @@
   let formValues = $state<Record<string, unknown>>({});
   let runtimeFilesByStepId = $state<Record<string, UploadedFile[]>>({});
   let uploadErrorsByStepId = $state<Record<string, string | null>>({});
+  let recordingNoticesByStepId = $state<Record<string, string | null>>({});
   let skippedMessagesByStepId = $state<Record<string, string | null>>({});
   let uploadingStepIds = $state<string[]>([]);
   let draggingStepId = $state<string | null>(null);
@@ -210,6 +213,9 @@
   const currentStepUploadError = $derived(
     currentRuntimeStep ? (uploadErrorsByStepId[currentRuntimeStep.step_id] ?? null) : null
   );
+  const currentStepRecordingNotice = $derived(
+    currentRuntimeStep ? (recordingNoticesByStepId[currentRuntimeStep.step_id] ?? null) : null
+  );
   const currentStepSkippedMessage = $derived(
     currentRuntimeStep ? (skippedMessagesByStepId[currentRuntimeStep.step_id] ?? null) : null
   );
@@ -265,6 +271,7 @@
     runContractError = null;
     runtimeFilesByStepId = {};
     uploadErrorsByStepId = {};
+    recordingNoticesByStepId = {};
     skippedMessagesByStepId = {};
     uploadingStepIds = [];
     draggingStepId = null;
@@ -491,6 +498,7 @@
     if (!flow.id) return;
 
     uploadErrorsByStepId = { ...uploadErrorsByStepId, [step.step_id]: null };
+    recordingNoticesByStepId = { ...recordingNoticesByStepId, [step.step_id]: null };
     skippedMessagesByStepId = { ...skippedMessagesByStepId, [step.step_id]: null };
     uploadingStepIds = [...uploadingStepIds, step.step_id];
 
@@ -548,7 +556,38 @@
       ...runtimeFilesByStepId,
       [stepId]: getUploadedFiles(stepId).filter((file) => file.id !== fileId)
     };
+    recordingNoticesByStepId = { ...recordingNoticesByStepId, [stepId]: null };
     skippedMessagesByStepId = { ...skippedMessagesByStepId, [stepId]: null };
+  }
+
+  function recordingNoticeForReason(reason: RecordingStopReason): string | null {
+    switch (reason) {
+      case "limit":
+        return m.recording_limit_reached();
+      case "stall":
+        return m.recording_stalled();
+      case "error":
+        return m.recording_saved_after_error();
+      default:
+        return null;
+    }
+  }
+
+  async function handleRecordedAudio(
+    step: FlowRunContractStepInput,
+    params: { blob: Blob; mimeType: string; reason: RecordingStopReason }
+  ) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const file = buildRecordedAudioFile({
+      blob: params.blob,
+      mimeType: params.mimeType,
+      fileNameBase: m.recording_filename_template({ datetime: timestamp })
+    });
+    recordingNoticesByStepId = {
+      ...recordingNoticesByStepId,
+      [step.step_id]: recordingNoticeForReason(params.reason)
+    };
+    await uploadFilesForStep(step, [file]);
   }
 
   function focusPageHeading() {
@@ -648,6 +687,7 @@
       formValues = {};
       runtimeFilesByStepId = {};
       uploadErrorsByStepId = {};
+      recordingNoticesByStepId = {};
       skippedMessagesByStepId = {};
     } catch (error) {
       toast.error(
@@ -874,6 +914,7 @@
             remainingSlots={currentStepRemainingSlots}
             isUploading={currentStepIsUploading}
             uploadError={currentStepUploadError}
+            recordingNotice={currentStepRecordingNotice}
             skippedMessage={currentStepSkippedMessage}
             blockers={currentStepBlockers}
             dragging={draggingStepId === currentRuntimeStep.step_id}
@@ -882,6 +923,7 @@
             onOpenFilePicker={() => openFilePicker(currentRuntimeStep)}
             onRemoveFile={(fileId) => removeFile(currentRuntimeStep.step_id, fileId)}
             onRetryUpload={() => retryUpload(currentRuntimeStep)}
+            onRecordingDone={(params) => void handleRecordedAudio(currentRuntimeStep, params)}
             onDrop={(event) => handleDrop(currentRuntimeStep, event)}
             onDragOver={(event) => handleDragOver(currentRuntimeStep.step_id, event)}
             onDragLeave={(event) => handleDragLeave(currentRuntimeStep.step_id, event)}
