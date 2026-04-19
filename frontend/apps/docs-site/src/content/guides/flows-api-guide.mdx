@@ -119,7 +119,7 @@ These are admin surfaces, not end-user runtime endpoints:
 | Setting area          | Endpoint                                           | Purpose                                                                                                                                     |
 | --------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Flow input limits     | `GET/PATCH /api/v1/settings/flow-input-limits`     | Control maximum file/audio sizes and file-count limits                                                                                      |
-| Flow evidence policy  | `GET/PATCH /api/v1/settings/flow-evidence-policy`  | Control stricter raw evidence export behavior, especially for classification-3 spaces                                                       |
+| Flow evidence policy  | `GET/PATCH /api/v1/settings/flow-evidence-policy`  | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces                    |
 | Flow retention policy | `GET/PATCH /api/v1/settings/flow-retention-policy` | Configure shared default retention plus class-specific overrides for source audio, transcripts, generated artifacts, and run/debug evidence |
 | AI Builder budget     | `GET/PATCH /api/v1/settings/ai-builder-budget`     | Tune planner token-budget behavior for AI Builder sessions                                                                                  |
 
@@ -140,6 +140,19 @@ The idea is:
 - send `null` in a PATCH request to clear an override and fall back to the shared/default hierarchy
 
 This is the intended operator-facing seam for care-data workflows such as Tal till resultat. Avoid hardcoding these policies in consumer apps when an admin/operator setting is the more appropriate control point.
+
+### Flow evidence policy shape
+
+`/api/v1/settings/flow-evidence-policy` controls evidence export behavior for Flow runtime.
+
+Key flags currently include:
+
+- `allow_sensitive_flow_exports`
+- `allow_space_admin_raw_export_class3`
+- `allow_run_owner_raw_export_class3`
+- `allow_service_key_raw_export_class3`
+
+For sensitive care-data flows, the intended default is that evidence export stays disabled unless an operator intentionally enables it by policy.
 
 ### 1) Discover what the published flow expects
 

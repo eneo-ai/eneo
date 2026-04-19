@@ -11558,6 +11558,11 @@ export interface components {
     /** FlowEvidencePolicyPublic */
     FlowEvidencePolicyPublic: {
       /**
+       * Allow Sensitive Flow Exports
+       * @default false
+       */
+      allow_sensitive_flow_exports?: boolean;
+      /**
        * Allow Space Admin Raw Export Class3
        * @default false
        */
@@ -11575,6 +11580,8 @@ export interface components {
     };
     /** FlowEvidencePolicyUpdate */
     FlowEvidencePolicyUpdate: {
+      /** Allow Sensitive Flow Exports */
+      allow_sensitive_flow_exports?: boolean | null;
       /** Allow Space Admin Raw Export Class3 */
       allow_space_admin_raw_export_class3?: boolean | null;
       /** Allow Run Owner Raw Export Class3 */

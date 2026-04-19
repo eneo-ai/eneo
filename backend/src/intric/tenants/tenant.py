@@ -329,6 +329,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
                         "flow_settings.evidence_policy.classification_3 must be an object"
                     )
                 for key in (
+                    "allow_sensitive_flow_exports",
                     "allow_space_admin_raw_export",
                     "allow_run_owner_raw_export",
                     "allow_service_key_raw_export",

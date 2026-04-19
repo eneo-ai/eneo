@@ -293,6 +293,7 @@ async def test_get_flow_evidence_policy_reads_tenant_override():
 
     policy = await service.get_flow_evidence_policy()
 
+    assert policy.allow_sensitive_flow_exports is False
     assert policy.allow_space_admin_raw_export_class3 is True
     assert policy.allow_run_owner_raw_export_class3 is False
     assert policy.allow_service_key_raw_export_class3 is True
@@ -319,11 +320,18 @@ async def test_update_flow_evidence_policy_persists_and_audits():
     )
 
     updated = await service.update_flow_evidence_policy(
-        FlowEvidencePolicyUpdate(allow_service_key_raw_export_class3=True)
+        FlowEvidencePolicyUpdate(
+            allow_sensitive_flow_exports=True,
+            allow_service_key_raw_export_class3=True,
+        )
     )
 
+    assert updated.allow_sensitive_flow_exports is True
     assert updated.allow_service_key_raw_export_class3 is True
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert (
+        tenant.flow_settings["evidence_policy"]["allow_sensitive_flow_exports"] is True
+    )
     assert (
         tenant.flow_settings["evidence_policy"]["classification_3"][
             "allow_service_key_raw_export"

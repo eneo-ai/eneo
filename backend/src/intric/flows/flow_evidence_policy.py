@@ -19,6 +19,7 @@ class EvidenceCapabilityLevel(IntEnum):
 
 @dataclass(frozen=True)
 class FlowEvidencePolicy:
+    allow_sensitive_flow_exports: bool = False
     allow_space_admin_raw_export_class3: bool = False
     allow_run_owner_raw_export_class3: bool = False
     allow_service_key_raw_export_class3: bool = False
@@ -37,10 +38,13 @@ def resolve_flow_evidence_policy(
 
     class3 = evidence_policy_dict.get("classification_3")
     if not isinstance(class3, dict):
-        return FlowEvidencePolicy()
+        class3 = {}
     class3_dict = cast(dict[str, Any], class3)
 
     return FlowEvidencePolicy(
+        allow_sensitive_flow_exports=bool(
+            evidence_policy_dict.get("allow_sensitive_flow_exports", False)
+        ),
         allow_space_admin_raw_export_class3=bool(
             class3_dict.get("allow_space_admin_raw_export", False)
         ),
@@ -56,6 +60,7 @@ def resolve_flow_evidence_policy(
 def apply_flow_evidence_policy_patch(
     current_flow_settings: dict[str, Any] | None,
     *,
+    allow_sensitive_flow_exports: bool | None = None,
     allow_space_admin_raw_export_class3: bool | None = None,
     allow_run_owner_raw_export_class3: bool | None = None,
     allow_service_key_raw_export_class3: bool | None = None,
@@ -67,17 +72,33 @@ def apply_flow_evidence_policy_patch(
     class3 = dict(evidence_policy.get("classification_3", {}))
 
     updates = {
+        "allow_sensitive_flow_exports": allow_sensitive_flow_exports,
         "allow_space_admin_raw_export": allow_space_admin_raw_export_class3,
         "allow_run_owner_raw_export": allow_run_owner_raw_export_class3,
         "allow_service_key_raw_export": allow_service_key_raw_export_class3,
     }
     for key, value in updates.items():
         if value is not None:
-            class3[key] = value
+            if key == "allow_sensitive_flow_exports":
+                evidence_policy[key] = value
+            else:
+                class3[key] = value
 
     evidence_policy["classification_3"] = class3
     next_settings["evidence_policy"] = evidence_policy
     return next_settings
+
+
+def flow_metadata_marks_sensitive(metadata_json: dict[str, Any] | None) -> bool:
+    if not isinstance(metadata_json, dict):
+        return False
+    care_data_policy = cast(
+        dict[str, Any] | None, metadata_json.get("care_data_policy")
+    )
+    if not isinstance(care_data_policy, dict):
+        return False
+    sensitive = cast(bool | None, care_data_policy.get("sensitive"))
+    return bool(sensitive)
 
 
 def resolve_service_key_evidence_capability(user: Any) -> EvidenceCapabilityLevel:

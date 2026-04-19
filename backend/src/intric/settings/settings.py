@@ -69,12 +69,14 @@ class AIBuilderBudgetSettingsUpdate(BaseModel):
 
 
 class FlowEvidencePolicyPublic(BaseModel):
+    allow_sensitive_flow_exports: bool = False
     allow_space_admin_raw_export_class3: bool = False
     allow_run_owner_raw_export_class3: bool = False
     allow_service_key_raw_export_class3: bool = False
 
 
 class FlowEvidencePolicyUpdate(BaseModel):
+    allow_sensitive_flow_exports: bool | None = None
     allow_space_admin_raw_export_class3: bool | None = None
     allow_run_owner_raw_export_class3: bool | None = None
     allow_service_key_raw_export_class3: bool | None = None

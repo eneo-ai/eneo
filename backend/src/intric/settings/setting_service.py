@@ -288,6 +288,7 @@ class SettingService:
         tenant = await self._get_tenant_for_flow_settings()
         policy = resolve_flow_evidence_policy(getattr(tenant, "flow_settings", None))
         return FlowEvidencePolicyPublic(
+            allow_sensitive_flow_exports=policy.allow_sensitive_flow_exports,
             allow_space_admin_raw_export_class3=policy.allow_space_admin_raw_export_class3,
             allow_run_owner_raw_export_class3=policy.allow_run_owner_raw_export_class3,
             allow_service_key_raw_export_class3=policy.allow_service_key_raw_export_class3,
