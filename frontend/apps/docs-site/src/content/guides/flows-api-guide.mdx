@@ -154,6 +154,25 @@ Key flags currently include:
 
 For sensitive care-data flows, the intended default is that evidence export stays disabled unless an operator intentionally enables it by policy.
 
+### Sensitive-flow governance in `metadata_json`
+
+For sensitive workflows, the flow definition may carry a `metadata_json.care_data_policy` object.
+
+Current supported fields are:
+
+- `sensitive`
+- `approval_mode`
+- `pre_approval_visibility`
+
+Current approved MVP values are:
+
+- `approval_mode: "single_reviewer_outside_flow"`
+- `pre_approval_visibility: "uploader_and_reviewers"`
+
+This is the intended contract seam for workflows such as Tal till resultat where review happens outside the flow but the workflow still needs explicit governance metadata.
+
+Sensitive flows still deny evidence export by default until tenant flow settings explicitly enable `evidence_policy.allow_sensitive_flow_exports`, even for elevated human roles.
+
 ### 1) Discover what the published flow expects
 
 #### Get the published runtime projection

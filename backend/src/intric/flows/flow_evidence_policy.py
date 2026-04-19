@@ -8,6 +8,7 @@ from intric.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
+from intric.flows.flow_care_data_policy import resolve_flow_care_data_policy
 
 
 class EvidenceCapabilityLevel(IntEnum):
@@ -90,15 +91,7 @@ def apply_flow_evidence_policy_patch(
 
 
 def flow_metadata_marks_sensitive(metadata_json: dict[str, Any] | None) -> bool:
-    if not isinstance(metadata_json, dict):
-        return False
-    care_data_policy = cast(
-        dict[str, Any] | None, metadata_json.get("care_data_policy")
-    )
-    if not isinstance(care_data_policy, dict):
-        return False
-    sensitive = cast(bool | None, care_data_policy.get("sensitive"))
-    return bool(sensitive)
+    return resolve_flow_care_data_policy(metadata_json).sensitive
 
 
 def resolve_service_key_evidence_capability(user: Any) -> EvidenceCapabilityLevel:

@@ -11,6 +11,7 @@ from intric.assistants.assistant_service import AssistantService
 from intric.files.file_models import File
 from intric.files.file_repo import FileRepository
 from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, JsonObject
+from intric.flows.flow_care_data_policy import validate_flow_care_data_policy
 from intric.flows.flow_security_classification import (
     evaluate_step_security_classification,
 )
@@ -392,6 +393,7 @@ class FlowService:
 
     def _validate_form_schema(self, metadata_json: JsonObject | None) -> None:
         validate_form_schema(metadata_json)
+        validate_flow_care_data_policy(metadata_json)
 
     def _normalize_legacy_form_schema(
         self, metadata_json: JsonObject | None

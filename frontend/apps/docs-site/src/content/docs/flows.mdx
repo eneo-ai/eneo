@@ -306,6 +306,19 @@ Tenant flow settings can block raw export for:
 
 Tenant flow settings can also disable evidence export entirely for flows whose metadata marks them as sensitive care-data workflows, unless an operator intentionally enables exports by policy.
 
+For sensitive workflows you can also declare governance metadata in `metadata_json.care_data_policy`, including:
+
+- `sensitive`
+- `approval_mode`
+- `pre_approval_visibility`
+
+For the current Tal till resultat MVP direction, the intended values are:
+
+- `approval_mode = "single_reviewer_outside_flow"`
+- `pre_approval_visibility = "uploader_and_reviewers"`
+
+When `care_data_policy.sensitive = true`, JSON evidence export remains blocked by default for all principals until tenant flow settings explicitly enable `evidence_policy.allow_sensitive_flow_exports`.
+
 Tenant flow settings can also configure a **layered retention policy** for Flow runtime data classes:
 
 - shared default retention

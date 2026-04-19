@@ -18,6 +18,7 @@ from intric.flows.execution_backend import FlowExecutionBackend
 from intric.flows.flow_evidence_policy import (
     EvidenceCapabilityLevel,
     classification_level_for_space,
+    flow_metadata_marks_sensitive,
     resolve_flow_evidence_policy,
     resolve_service_key_evidence_capability,
 )
@@ -146,6 +147,17 @@ class FlowRunService:
         tenant_flow_settings = getattr(tenant, "flow_settings", None)
         return resolve_flow_evidence_policy(tenant_flow_settings)
 
+    async def _ensure_sensitive_flow_export_allowed(self, *, flow_id: UUID) -> None:
+        flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
+        if (
+            flow_metadata_marks_sensitive(flow.metadata_json)
+            and not self._evidence_policy().allow_sensitive_flow_exports
+        ):
+            self._raise_evidence_forbidden(
+                auth_layer="flow_runtime_policy",
+                message="Evidence export is disabled by policy for this sensitive flow.",
+            )
+
     def _service_key_evidence_capability(self) -> EvidenceCapabilityLevel:
         return resolve_service_key_evidence_capability(self.user)
 
@@ -177,6 +189,8 @@ class FlowRunService:
         )
 
     async def _ensure_can_access_run(self, run: FlowRun, *, access_kind: str) -> None:
+        if access_kind in {"evidence_export_redacted", "evidence_export_raw"}:
+            await self._ensure_sensitive_flow_export_allowed(flow_id=run.flow_id)
         if self._is_tenant_admin():
             return
         principal = self._principal()

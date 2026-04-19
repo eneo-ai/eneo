@@ -210,6 +210,29 @@ async def test_create_flow_rejects_invalid_form_schema(user):
 
 
 @pytest.mark.asyncio
+async def test_create_flow_rejects_invalid_care_data_policy(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    with pytest.raises(
+        BadRequestException,
+        match="metadata_json.care_data_policy.pre_approval_visibility",
+    ):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[_step()],
+            metadata_json={
+                "care_data_policy": {
+                    "sensitive": True,
+                    "pre_approval_visibility": "everyone",
+                }
+            },
+        )
+
+
+@pytest.mark.asyncio
 async def test_create_flow_rejects_duplicate_step_order(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
