@@ -331,3 +331,44 @@ def test_compaction_preserves_latest_freeform_request_even_if_question_answer_me
     request_window = build_active_request_window(compacted, flow_defaults={})
 
     assert "mer formellt och lättare att läsa" in request_window.text
+
+
+def test_compaction_deduplicates_structured_answers_by_canonical_question_id() -> None:
+    conversation = [
+        _msg(
+            "user",
+            content="old answer",
+            metadata={
+                "question_answer": {
+                    "question_id": "final_output_format",
+                    "selected_value": "pdf_document",
+                }
+            },
+        ),
+        _msg(
+            "user",
+            content="new answer",
+            metadata={
+                "question_answer": {
+                    "question_id": "final_output_mode",
+                    "selected_value": "docx_document",
+                }
+            },
+        ),
+    ]
+    conversation.extend(_msg("assistant", content=f"tail {i}") for i in range(80))
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=20,
+        tail_messages=10,
+    )
+
+    preserved_answers = [
+        msg
+        for msg in compacted
+        if isinstance(msg.metadata, dict)
+        and isinstance(msg.metadata.get("question_answer"), dict)
+    ]
+    assert len(preserved_answers) == 1
+    assert preserved_answers[0].content == "new answer"

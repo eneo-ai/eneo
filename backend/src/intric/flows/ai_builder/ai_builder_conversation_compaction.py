@@ -4,6 +4,7 @@ from typing import Any, Iterable, cast
 
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_framework_policy import (
+    canonical_question_id,
     extract_freeform_user_messages,
 )
 
@@ -131,7 +132,7 @@ def _latest_structured_answer_indices(
             continue
         question_id = cast(str | None, question_answer.get("question_id"))
         if isinstance(question_id, str) and question_id:
-            latest_by_question[question_id] = index
+            latest_by_question[canonical_question_id(question_id)] = index
     return sorted(latest_by_question.values())
 
 
