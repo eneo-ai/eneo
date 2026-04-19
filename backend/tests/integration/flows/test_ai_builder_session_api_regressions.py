@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -351,6 +352,120 @@ async def test_ai_builder_message_attachments_persist_only_after_accepted_send(
                 attachment["id"] for attachment in after_response.json()["attachments"]
             ]
             assert attachment_ids == [file_id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_claim_session_send_can_reclaim_expired_lease(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Lease Reclaim",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+
+        first_claim = await repo.claim_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            request_id=uuid4(),
+            lock_token=uuid4(),
+            lock_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+        assert first_claim is True
+
+        reclaimed = await repo.claim_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            request_id=uuid4(),
+            lock_token=uuid4(),
+            lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+        )
+        assert reclaimed is True
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_release_session_send_requires_matching_lock_token(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Lease Release",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        request_id = uuid4()
+        lock_token = uuid4()
+        claimed = await repo.claim_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            request_id=request_id,
+            lock_token=lock_token,
+            lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+        )
+        assert claimed is True
+
+        await repo.release_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            request_id=request_id,
+            lock_token=uuid4(),
+        )
+
+        still_locked = await repo.claim_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            request_id=uuid4(),
+            lock_token=uuid4(),
+            lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+        )
+        assert still_locked is False
+
+        await repo.release_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            request_id=request_id,
+            lock_token=lock_token,
+        )
+
+        released = await repo.claim_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            request_id=uuid4(),
+            lock_token=uuid4(),
+            lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+        )
+        assert released is True
 
 
 def _make_plan_envelope(spec: FlowDraftSpecCore) -> PlannerPlanEnvelope:

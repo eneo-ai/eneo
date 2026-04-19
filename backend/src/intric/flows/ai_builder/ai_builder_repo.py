@@ -172,6 +172,9 @@ class AIBuilderRepository:
                 .values(
                     status=SessionStatus.CANCELLED.value,
                     active_request_id=None,
+                    lock_token=None,
+                    locked_at=None,
+                    lock_expires_at=None,
                     updated_at=datetime.now(timezone.utc),
                 )
             )
@@ -234,6 +237,9 @@ class AIBuilderRepository:
                 .values(
                     status=SessionStatus.CANCELLED.value,
                     active_request_id=None,
+                    lock_token=None,
+                    locked_at=None,
+                    lock_expires_at=None,
                     updated_at=datetime.now(timezone.utc),
                 )
                 .returning(BuilderSessions.id)
@@ -520,14 +526,20 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         request_id: UUID,
+        lock_token: UUID,
+        lock_expires_at: datetime,
     ) -> bool:
         async with self._transaction():
+            now = datetime.now(timezone.utc)
             stmt = (
                 update(BuilderSessions)
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
-                    BuilderSessions.active_request_id.is_(None),
+                    sa.or_(
+                        BuilderSessions.active_request_id.is_(None),
+                        BuilderSessions.lock_expires_at <= sa.func.now(),
+                    ),
                     BuilderSessions.status.in_(
                         [
                             SessionStatus.CHATTING.value,
@@ -537,7 +549,39 @@ class AIBuilderRepository:
                 )
                 .values(
                     active_request_id=request_id,
-                    updated_at=datetime.now(timezone.utc),
+                    lock_token=lock_token,
+                    locked_at=now,
+                    lock_expires_at=lock_expires_at,
+                    updated_at=now,
+                )
+                .returning(BuilderSessions.id)
+            )
+            result = await self.session.execute(stmt)
+            return result.scalar_one_or_none() is not None
+
+    async def refresh_session_send_lease(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        request_id: UUID,
+        lock_token: UUID,
+        lock_expires_at: datetime,
+    ) -> bool:
+        async with self._transaction():
+            now = datetime.now(timezone.utc)
+            stmt = (
+                update(BuilderSessions)
+                .where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                    BuilderSessions.active_request_id == request_id,
+                    BuilderSessions.lock_token == lock_token,
+                )
+                .values(
+                    locked_at=now,
+                    lock_expires_at=lock_expires_at,
+                    updated_at=now,
                 )
                 .returning(BuilderSessions.id)
             )
@@ -550,6 +594,7 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         request_id: UUID,
+        lock_token: UUID,
     ) -> None:
         async with self._transaction():
             stmt = (
@@ -558,8 +603,15 @@ class AIBuilderRepository:
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
                     BuilderSessions.active_request_id == request_id,
+                    BuilderSessions.lock_token == lock_token,
                 )
-                .values(active_request_id=None, updated_at=datetime.now(timezone.utc))
+                .values(
+                    active_request_id=None,
+                    lock_token=None,
+                    locked_at=None,
+                    lock_expires_at=None,
+                    updated_at=datetime.now(timezone.utc),
+                )
             )
             await self.session.execute(stmt)
 

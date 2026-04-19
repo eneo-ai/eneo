@@ -307,6 +307,7 @@ class Settings(BaseSettings):
     ai_builder_conversation_safety_buffer_tokens: int = 2_000
     ai_builder_minimum_conversation_budget_tokens: int = 4_000
     ai_builder_unknown_model_context_window_tokens: int | None = None
+    ai_builder_send_lock_lease_seconds: int = 900
 
     # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
     orphan_crawl_run_timeout_hours: int = (

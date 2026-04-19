@@ -720,6 +720,16 @@ class BuilderSessions(BasePublic):
         server_default="[]",
     )
     active_request_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    lock_token: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    locked_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    lock_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
     latest_plan_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
 
     __table_args__ = (

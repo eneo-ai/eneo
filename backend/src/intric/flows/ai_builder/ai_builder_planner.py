@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, AsyncGenerator, cast
 from uuid import UUID, uuid4
 
@@ -68,6 +70,7 @@ from intric.flows.ai_builder.ai_builder_tools import (
     build_discovery_complete_tool_schemas,
     build_free_discovery_tool_schemas,
 )
+from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.model_providers.domain.model_defaults import lookup_model_defaults
@@ -185,6 +188,55 @@ class AIBuilderPlanner:
         if msg.tool_call_id:
             payload["tool_call_id"] = msg.tool_call_id
         return payload
+
+    @staticmethod
+    def _send_lock_lease_seconds() -> int:
+        return max(30, int(get_settings().ai_builder_send_lock_lease_seconds))
+
+    @classmethod
+    def _next_send_lock_expiry(cls) -> datetime:
+        return datetime.now(timezone.utc) + timedelta(
+            seconds=cls._send_lock_lease_seconds()
+        )
+
+    @classmethod
+    def _send_lock_refresh_interval_seconds(cls) -> int:
+        return max(5, cls._send_lock_lease_seconds() // 3)
+
+    async def _maintain_send_lock_lease(
+        self,
+        *,
+        session_id: UUID,
+        request_id: UUID,
+        lock_token: UUID,
+        stop_event: asyncio.Event,
+        lease_lost_event: asyncio.Event,
+    ) -> None:
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=self._send_lock_refresh_interval_seconds(),
+                )
+                return
+            except asyncio.TimeoutError:
+                refreshed = await self.repo.refresh_session_send_lease(
+                    session_id=session_id,
+                    tenant_id=self.user.tenant_id,
+                    request_id=request_id,
+                    lock_token=lock_token,
+                    lock_expires_at=self._next_send_lock_expiry(),
+                )
+                if not refreshed:
+                    logger.warning(
+                        "AI Builder send lease lost while processing.",
+                        extra={
+                            "session_id": str(session_id),
+                            "request_id": str(request_id),
+                        },
+                    )
+                    lease_lost_event.set()
+                    return
 
     async def _resolve_message_metadata(
         self,
@@ -508,17 +560,30 @@ class AIBuilderPlanner:
         )
         request_id = str(uuid4())
         request_uuid = UUID(request_id)
-
+        lock_token = uuid4()
+        lease_stop_event = asyncio.Event()
+        lease_lost_event = asyncio.Event()
         claimed = await self.repo.claim_session_send(
             session_id=session_id,
             tenant_id=self.user.tenant_id,
             request_id=request_uuid,
+            lock_token=lock_token,
+            lock_expires_at=self._next_send_lock_expiry(),
         )
         if not claimed:
             raise BadRequestException(
                 "Another AI Builder message is already being processed for this session.",
                 code="session_message_in_progress",
             )
+        lease_task = asyncio.create_task(
+            self._maintain_send_lock_lease(
+                session_id=session_id,
+                request_id=request_uuid,
+                lock_token=lock_token,
+                stop_event=lease_stop_event,
+                lease_lost_event=lease_lost_event,
+            )
+        )
 
         try:
             if session.status not in (
@@ -648,6 +713,15 @@ class AIBuilderPlanner:
                     ),
                     **litellm_kwargs,
                 )
+                if lease_lost_event.is_set():
+                    yield build_error_event(
+                        message="The AI Builder session lock was lost while the planner was running. Please try again.",
+                        code="session_send_lease_lost",
+                        phase="planner",
+                        request_id=request_id,
+                    )
+                    yield {"event": SSE_EVENT_DONE, "data": ""}
+                    return
             except Exception as error:
                 logger.error(
                     "LLM call failed",
@@ -725,6 +799,15 @@ class AIBuilderPlanner:
                     assistant_snapshots=assistant_snapshots,
                 ):
                     yield event
+                if lease_lost_event.is_set():
+                    yield build_error_event(
+                        message="The AI Builder session lock was lost while tool processing was running. Please try again.",
+                        code="session_send_lease_lost",
+                        phase="planner",
+                        request_id=request_id,
+                    )
+                    yield {"event": SSE_EVENT_DONE, "data": ""}
+                    return
             elif assistant_message.content:
                 # During discovery (before requirements confirmed), don't force proposals —
                 # let the LLM ask questions freely in text form.
@@ -774,10 +857,16 @@ class AIBuilderPlanner:
 
             yield {"event": SSE_EVENT_DONE, "data": ""}
         finally:
+            lease_stop_event.set()
+            try:
+                await lease_task
+            except asyncio.CancelledError:
+                pass
             await self.repo.release_session_send(
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,
                 request_id=request_uuid,
+                lock_token=lock_token,
             )
 
 
