@@ -10,17 +10,16 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     infer_question_answer_from_freeform,
     is_supported_structured_question_id,
     latest_pending_structured_question,
-    question_is_already_resolved,
     needs_structured_extraction,
     normalize_question_answer,
     normalize_structured_question_payload,
-    resolve_output_intent,
+    question_is_already_resolved,
     resolve_docx_output_mode,
     resolve_explicit_output_choice,
+    resolve_output_intent,
 )
 from intric.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_models import OutputType
+from intric.flows.ai_builder.ai_builder_models import ConversationMessage, OutputType
 from intric.flows.flow import Flow, FlowStep
 
 
@@ -33,7 +32,9 @@ def test_resolve_explicit_output_choice_detects_pdf_from_swedish_prompt() -> Non
     assert output == "pdf_document"
 
 
-def test_resolve_explicit_output_choice_prefers_word_target_in_substitution_phrase() -> None:
+def test_resolve_explicit_output_choice_prefers_word_target_in_substitution_phrase() -> (
+    None
+):
     output = resolve_explicit_output_choice(
         "Ändra så att jag får ut ett word dokument istället för en pdf.",
         {},
@@ -42,7 +43,9 @@ def test_resolve_explicit_output_choice_prefers_word_target_in_substitution_phra
     assert output == "docx_document"
 
 
-def test_resolve_explicit_output_choice_respects_existing_flow_default_when_output_not_reopened() -> None:
+def test_resolve_explicit_output_choice_respects_existing_flow_default_when_output_not_reopened() -> (
+    None
+):
     output = resolve_explicit_output_choice(
         "Behåll samma flöde men lägg till makrotrender och geopolitiska signaler.",
         {},
@@ -52,7 +55,9 @@ def test_resolve_explicit_output_choice_respects_existing_flow_default_when_outp
     assert output == "structured_text"
 
 
-def test_resolve_explicit_output_choice_detects_swedish_decision_support_text_output() -> None:
+def test_resolve_explicit_output_choice_detects_swedish_decision_support_text_output() -> (
+    None
+):
     output = resolve_explicit_output_choice(
         "Slutresultatet ska vara ett strukturerat beslutsunderlag som text.",
         {},
@@ -61,7 +66,9 @@ def test_resolve_explicit_output_choice_detects_swedish_decision_support_text_ou
     assert output == "structured_text"
 
 
-def test_resolve_explicit_output_choice_detects_generic_english_decision_support_text() -> None:
+def test_resolve_explicit_output_choice_detects_generic_english_decision_support_text() -> (
+    None
+):
     output = resolve_explicit_output_choice(
         "I want a flow that summarizes uploaded news articles as decision support text.",
         {},
@@ -70,7 +77,9 @@ def test_resolve_explicit_output_choice_detects_generic_english_decision_support
     assert output == "structured_text"
 
 
-def test_resolve_docx_output_mode_ignores_generic_template_wording_when_output_is_pdf() -> None:
+def test_resolve_docx_output_mode_ignores_generic_template_wording_when_output_is_pdf() -> (
+    None
+):
     mode = resolve_docx_output_mode(
         "Jag vill fylla i en mall men slutresultatet ska vara en PDF.",
         {"final_output_mode": {"pdf_document"}},
@@ -80,7 +89,9 @@ def test_resolve_docx_output_mode_ignores_generic_template_wording_when_output_i
     assert mode is None
 
 
-def test_resolve_docx_output_mode_detects_template_fill_for_docx_template_request() -> None:
+def test_resolve_docx_output_mode_detects_template_fill_for_docx_template_request() -> (
+    None
+):
     mode = resolve_docx_output_mode(
         "Skapa ett Word-dokument från en mall.",
         {"final_output_mode": {"docx_document"}},
@@ -90,7 +101,9 @@ def test_resolve_docx_output_mode_detects_template_fill_for_docx_template_reques
     assert mode == "template_fill_docx"
 
 
-def test_resolve_output_intent_detects_pdf_template_expectation_without_docx_mode() -> None:
+def test_resolve_output_intent_detects_pdf_template_expectation_without_docx_mode() -> (
+    None
+):
     intent = resolve_output_intent(
         "Jag vill fylla i en PDF-mall med transkriberingen.",
         {},
@@ -101,7 +114,9 @@ def test_resolve_output_intent_detects_pdf_template_expectation_without_docx_mod
     assert intent.docx_output_mode is None
 
 
-def test_resolve_output_intent_keeps_plain_pdf_when_pdf_generation_mode_is_answered() -> None:
+def test_resolve_output_intent_keeps_plain_pdf_when_pdf_generation_mode_is_answered() -> (
+    None
+):
     intent = resolve_output_intent(
         "Det ska vara en vanlig genererad PDF utan fast mall.",
         {
@@ -161,15 +176,17 @@ def test_framework_guardrails_block_forbids_custom_code_paths() -> None:
 
 
 def test_normalizes_output_question_aliases_to_canonical_mode() -> None:
-    payload = normalize_structured_question_payload({
-        "question_id": "final_output_format",
-        "question": "Vilket slutresultat vill du att flödet ska producera?",
-        "options": [
-            {"id": "text_output", "label": "Text"},
-            {"id": "docx_generated", "label": "DOCX"},
-            {"id": "json_output", "label": "JSON"},
-        ],
-    })
+    payload = normalize_structured_question_payload(
+        {
+            "question_id": "final_output_format",
+            "question": "Vilket slutresultat vill du att flödet ska producera?",
+            "options": [
+                {"id": "text_output", "label": "Text"},
+                {"id": "docx_generated", "label": "DOCX"},
+                {"id": "json_output", "label": "JSON"},
+            ],
+        }
+    )
 
     assert payload["question_id"] == "final_output_mode"
     assert [option["id"] for option in payload["options"]] == [
@@ -188,12 +205,14 @@ def test_output_change_keywords_live_in_keywords_module() -> None:
 
 
 def test_normalizes_output_answer_aliases_to_canonical_mode() -> None:
-    answer = normalize_question_answer({
-        "question_id": "primary_output_format",
-        "selected_option_ids": ["docx_generated"],
-        "selected_values": ["docx_generated"],
-        "answer": "docx_generated",
-    })
+    answer = normalize_question_answer(
+        {
+            "question_id": "primary_output_format",
+            "selected_option_ids": ["docx_generated"],
+            "selected_values": ["docx_generated"],
+            "answer": "docx_generated",
+        }
+    )
 
     assert answer["question_id"] == "final_output_mode"
     assert answer["selected_option_ids"] == ["docx_document"]
@@ -202,19 +221,23 @@ def test_normalizes_output_answer_aliases_to_canonical_mode() -> None:
 
 
 def test_normalizes_upload_and_output_type_aliases_to_framework_ids() -> None:
-    upload_payload = normalize_structured_question_payload({
-        "question_id": "upload_mode",
-        "question": "Hur ska filer laddas upp?",
-        "options": [
-            {"id": "multiple_same_run", "label": "Flera samtidigt"},
-            {"id": "one_per_run", "label": "En åt gången"},
-        ],
-    })
-    output_answer = normalize_question_answer({
-        "question_id": "final_output_type",
-        "selected_option_id": "comparison_matrix_json",
-        "answer": "comparison_matrix_json",
-    })
+    upload_payload = normalize_structured_question_payload(
+        {
+            "question_id": "upload_mode",
+            "question": "Hur ska filer laddas upp?",
+            "options": [
+                {"id": "multiple_same_run", "label": "Flera samtidigt"},
+                {"id": "one_per_run", "label": "En åt gången"},
+            ],
+        }
+    )
+    output_answer = normalize_question_answer(
+        {
+            "question_id": "final_output_type",
+            "selected_option_id": "comparison_matrix_json",
+            "answer": "comparison_matrix_json",
+        }
+    )
 
     assert upload_payload["question_id"] == "document_material_scope"
     assert [option["id"] for option in upload_payload["options"]] == [
@@ -227,96 +250,108 @@ def test_normalizes_upload_and_output_type_aliases_to_framework_ids() -> None:
 
 
 def test_extract_answer_signals_reads_singular_structured_answer_fields() -> None:
-    signals = extract_answer_signals([
-        {
-            "role": "user",
-            "content": "Flera dokument i samma körning",
-            "metadata": {
-                "question_answer": {
-                    "question_id": "comparison_scope",
-                    "selected_option_id": "same_run_multiple_documents",
-                    "answer": "same_run_multiple_documents",
-                }
-            },
-        }
-    ])
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": "Flera dokument i samma körning",
+                "metadata": {
+                    "question_answer": {
+                        "question_id": "comparison_scope",
+                        "selected_option_id": "same_run_multiple_documents",
+                        "answer": "same_run_multiple_documents",
+                    }
+                },
+            }
+        ]
+    )
 
     assert "comparison_scope" in signals
     assert "same_run_multiple_documents" in signals["comparison_scope"]
 
 
-def test_extract_answer_signals_prefers_latest_structured_answer_for_same_question() -> None:
-    signals = extract_answer_signals([
-        {
-            "role": "user",
-            "content": "DOCX document",
-            "metadata": {
-                "question_answer": {
-                    "question_id": "final_output_mode",
-                    "selected_option_id": "docx_document",
-                    "answer": "docx_document",
-                }
+def test_extract_answer_signals_prefers_latest_structured_answer_for_same_question() -> (
+    None
+):
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": "DOCX document",
+                "metadata": {
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_option_id": "docx_document",
+                        "answer": "docx_document",
+                    }
+                },
             },
-        },
-        {
-            "role": "user",
-            "content": "PDF-dokument",
-            "metadata": {
-                "question_answer": {
-                    "question_id": "final_output_mode",
-                    "selected_option_id": "pdf_document",
-                    "answer": "pdf_document",
-                }
+            {
+                "role": "user",
+                "content": "PDF-dokument",
+                "metadata": {
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_option_id": "pdf_document",
+                        "answer": "pdf_document",
+                    }
+                },
             },
-        },
-    ])
+        ]
+    )
 
     assert signals["final_output_mode"] == {"pdf_document", "pdf-dokument"}
 
 
 def test_extract_answer_signals_prefers_latest_input_material_answer() -> None:
-    signals = extract_answer_signals([
-        {
-            "role": "user",
-            "content": "Dokument",
-            "metadata": {
-                "question_answer": {
-                    "question_id": "input_material_mode",
-                    "selected_option_id": "documents",
-                    "answer": "documents",
-                }
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": "Dokument",
+                "metadata": {
+                    "question_answer": {
+                        "question_id": "input_material_mode",
+                        "selected_option_id": "documents",
+                        "answer": "documents",
+                    }
+                },
             },
-        },
-        {
-            "role": "user",
-            "content": "Ljud",
-            "metadata": {
-                "question_answer": {
-                    "question_id": "input_material_mode",
-                    "selected_option_id": "audio",
-                    "answer": "audio",
-                }
+            {
+                "role": "user",
+                "content": "Ljud",
+                "metadata": {
+                    "question_answer": {
+                        "question_id": "input_material_mode",
+                        "selected_option_id": "audio",
+                        "answer": "audio",
+                    }
+                },
             },
-        },
-    ])
+        ]
+    )
 
     assert signals["input_material_mode"] == {"audio", "ljud"}
 
 
-def test_extract_answer_signals_does_not_infer_cross_family_signals_from_structured_answer_labels() -> None:
-    signals = extract_answer_signals([
-        {
-            "role": "user",
-            "content": "DOCX document",
-            "metadata": {
-                "question_answer": {
-                    "question_id": "final_output_mode",
-                    "selected_option_id": "docx_document",
-                    "answer": "docx_document",
-                }
-            },
-        }
-    ])
+def test_extract_answer_signals_does_not_infer_cross_family_signals_from_structured_answer_labels() -> (
+    None
+):
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": "DOCX document",
+                "metadata": {
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_option_id": "docx_document",
+                        "answer": "docx_document",
+                    }
+                },
+            }
+        ]
+    )
 
     assert "input_material_mode" not in signals
     assert signals["final_output_mode"] == {"docx_document", "docx document"}
@@ -328,15 +363,22 @@ def test_latest_pending_structured_question_reads_backend_question_payload() -> 
             ConversationMessage(
                 role="assistant",
                 content="Question",
-                tool_calls=[{
-                    "id": "call_1",
-                    "name": "ask_structured_question",
-                    "arguments": {
-                        "question_id": "final_output_mode",
-                        "question": "Vad ska flödet producera som slutresultat?",
-                        "options": [{"id": "structured_text", "label": "Strukturerat beslutsunderlag som text"}],
-                    },
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": "ask_structured_question",
+                        "arguments": {
+                            "question_id": "final_output_mode",
+                            "question": "Vad ska flödet producera som slutresultat?",
+                            "options": [
+                                {
+                                    "id": "structured_text",
+                                    "label": "Strukturerat beslutsunderlag som text",
+                                }
+                            ],
+                        },
+                    }
+                ],
             )
         ]
     )
@@ -351,18 +393,28 @@ def test_infer_question_answer_from_freeform_matches_exact_option_label() -> Non
             ConversationMessage(
                 role="assistant",
                 content="Question",
-                tool_calls=[{
-                    "id": "call_1",
-                    "name": "ask_structured_question",
-                    "arguments": {
-                        "question_id": "processing_scope",
-                        "question": "Hur ska flödet hantera ärendematerial per körning?",
-                        "options": [
-                            {"id": "single_case", "label": "Ett ärende åt gången", "value": "single_case"},
-                            {"id": "multiple_cases", "label": "Flera ärenden i samma körning", "value": "multiple_cases"},
-                        ],
-                    },
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": "ask_structured_question",
+                        "arguments": {
+                            "question_id": "processing_scope",
+                            "question": "Hur ska flödet hantera ärendematerial per körning?",
+                            "options": [
+                                {
+                                    "id": "single_case",
+                                    "label": "Ett ärende åt gången",
+                                    "value": "single_case",
+                                },
+                                {
+                                    "id": "multiple_cases",
+                                    "label": "Flera ärenden i samma körning",
+                                    "value": "multiple_cases",
+                                },
+                            ],
+                        },
+                    }
+                ],
             )
         ],
         "Ett ärende åt gången.",
@@ -379,28 +431,30 @@ def test_infer_question_answer_from_freeform_matches_option_description() -> Non
             ConversationMessage(
                 role="assistant",
                 content="Question",
-                tool_calls=[{
-                    "id": "call_1",
-                    "name": "ask_structured_question",
-                    "arguments": {
-                        "question_id": "comparison_scope",
-                        "question": "När ska flödet jämföra dokument?",
-                        "options": [
-                            {
-                                "id": "same_run_compare",
-                                "label": "Jämför dokument i samma körning",
-                                "description": "Ladda upp flera dokument tillsammans och jämför dem direkt.",
-                                "value": "same_run_compare",
-                            },
-                            {
-                                "id": "compare_previous_material",
-                                "label": "Jämför mot tidigare sparat material",
-                                "description": "Ladda upp ett dokument och jämför det mot tidigare material.",
-                                "value": "compare_previous_material",
-                            },
-                        ],
-                    },
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": "ask_structured_question",
+                        "arguments": {
+                            "question_id": "comparison_scope",
+                            "question": "När ska flödet jämföra dokument?",
+                            "options": [
+                                {
+                                    "id": "same_run_compare",
+                                    "label": "Jämför dokument i samma körning",
+                                    "description": "Ladda upp flera dokument tillsammans och jämför dem direkt.",
+                                    "value": "same_run_compare",
+                                },
+                                {
+                                    "id": "compare_previous_material",
+                                    "label": "Jämför mot tidigare sparat material",
+                                    "description": "Ladda upp ett dokument och jämför det mot tidigare material.",
+                                    "value": "compare_previous_material",
+                                },
+                            ],
+                        },
+                    }
+                ],
             )
         ],
         "Låt användaren ladda upp flera PDF:er i samma körning.",
@@ -411,32 +465,36 @@ def test_infer_question_answer_from_freeform_matches_option_description() -> Non
     assert answer["selected_option_id"] == "same_run_compare"
 
 
-def test_infer_question_answer_from_freeform_uses_question_family_specific_scope_signals() -> None:
+def test_infer_question_answer_from_freeform_uses_question_family_specific_scope_signals() -> (
+    None
+):
     answer = infer_question_answer_from_freeform(
         [
             ConversationMessage(
                 role="assistant",
                 content="Question",
-                tool_calls=[{
-                    "id": "call_1",
-                    "name": "ask_structured_question",
-                    "arguments": {
-                        "question_id": "document_material_scope",
-                        "question": "Hur brukar underlaget för ett ärende se ut?",
-                        "options": [
-                            {
-                                "id": "single_document_case",
-                                "label": "Ett huvuddokument per ärende",
-                                "value": "single_document_case",
-                            },
-                            {
-                                "id": "multiple_documents_case",
-                                "label": "Flera dokument för samma ärende",
-                                "value": "multiple_documents_case",
-                            },
-                        ],
-                    },
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": "ask_structured_question",
+                        "arguments": {
+                            "question_id": "document_material_scope",
+                            "question": "Hur brukar underlaget för ett ärende se ut?",
+                            "options": [
+                                {
+                                    "id": "single_document_case",
+                                    "label": "Ett huvuddokument per ärende",
+                                    "value": "single_document_case",
+                                },
+                                {
+                                    "id": "multiple_documents_case",
+                                    "label": "Flera dokument för samma ärende",
+                                    "value": "multiple_documents_case",
+                                },
+                            ],
+                        },
+                    }
+                ],
             )
         ],
         "Ett avtal åt gången.",
@@ -447,16 +505,20 @@ def test_infer_question_answer_from_freeform_uses_question_family_specific_scope
     assert answer["selected_option_id"] == "single_document_case"
 
 
-def test_extract_answer_signals_infers_freeform_document_signals_without_metadata() -> None:
-    signals = extract_answer_signals([
-        {
-            "role": "user",
-            "content": (
-                "Det handlar om leverantörsavtal och bilagor, och användaren ska kunna "
-                "ladda upp flera PDF:er i samma körning."
-            ),
-        }
-    ])
+def test_extract_answer_signals_infers_freeform_document_signals_without_metadata() -> (
+    None
+):
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Det handlar om leverantörsavtal och bilagor, och användaren ska kunna "
+                    "ladda upp flera PDF:er i samma körning."
+                ),
+            }
+        ]
+    )
 
     assert "contracts_agreements" in signals["document_kind"]
     assert "multiple_documents_case" in signals["document_material_scope"]
@@ -464,15 +526,17 @@ def test_extract_answer_signals_infers_freeform_document_signals_without_metadat
 
 
 def test_extract_answer_signals_infers_structured_analysis_and_metadata_needs() -> None:
-    signals = extract_answer_signals([
-        {
-            "role": "user",
-            "content": (
-                "Användaren ska ange intern referens, prioritet och ansvarig avdelning, "
-                "och strukturerad data ska användas där det förbättrar kvaliteten."
-            ),
-        }
-    ])
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Användaren ska ange intern referens, prioritet och ansvarig avdelning, "
+                    "och strukturerad data ska användas där det förbättrar kvaliteten."
+                ),
+            }
+        ]
+    )
 
     assert "use_structured_analysis" in signals["structured_analysis_need"]
     assert "detailed_case_metadata" in signals["runtime_metadata_fields"]
@@ -524,7 +588,9 @@ def test_aggregate_freeform_user_text_ignores_structured_answer_messages() -> No
     assert "behåll samma flöde" in text
 
 
-def test_aggregate_freeform_user_text_keeps_messages_when_question_answer_lacks_real_answer() -> None:
+def test_aggregate_freeform_user_text_keeps_messages_when_question_answer_lacks_real_answer() -> (
+    None
+):
     text = aggregate_freeform_user_text(
         [
             ConversationMessage(
@@ -538,7 +604,30 @@ def test_aggregate_freeform_user_text_keeps_messages_when_question_answer_lacks_
     assert "word dokument" in text
 
 
-def test_question_resolution_ignores_prior_answer_labels_when_output_not_changed() -> None:
+def test_aggregate_freeform_user_text_keeps_long_freeform_message_even_with_structured_answer_metadata() -> (
+    None
+):
+    text = aggregate_freeform_user_text(
+        [
+            ConversationMessage(
+                role="user",
+                content="ändra så att jag får ut en word dokument istället för en pdf",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_option_id": "docx_document",
+                    }
+                },
+            ),
+        ]
+    )
+
+    assert "word dokument istället för en pdf" in text
+
+
+def test_question_resolution_ignores_prior_answer_labels_when_output_not_changed() -> (
+    None
+):
     flow = Flow(
         id=uuid4(),
         tenant_id=uuid4(),

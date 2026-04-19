@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable, cast
 
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_framework_policy import (
+    extract_freeform_user_messages,
+)
 
 MAX_SESSION_MESSAGES = 60
 TAIL_SESSION_MESSAGES = 40
@@ -25,6 +28,12 @@ def compact_ai_builder_conversation(
     requirements_index = _latest_requirements_summary_index(conversation)
     if requirements_index is not None:
         group = [requirements_index]
+        previous_request_index = _latest_user_request_before_index(
+            conversation,
+            requirements_index,
+        )
+        if previous_request_index is not None:
+            group.insert(0, previous_request_index)
         confirmation_index = _matching_requirements_confirmation_index(
             conversation, requirements_index
         )
@@ -32,6 +41,11 @@ def compact_ai_builder_conversation(
             group.append(confirmation_index)
         preserved_indices.update(group)
         required_groups.append(group)
+
+    structured_answer_indices = list(_latest_structured_answer_indices(conversation))
+    if structured_answer_indices:
+        preserved_indices.update(structured_answer_indices)
+        required_groups.extend([[index] for index in structured_answer_indices])
 
     tool_trace_group = list(_latest_tool_trace_indices(conversation))
     if tool_trace_group:
@@ -80,6 +94,45 @@ def _matching_requirements_confirmation_index(
         ):
             return index
     return None
+
+
+def _latest_user_request_before_index(
+    conversation: list[ConversationMessage],
+    before_index: int,
+) -> int | None:
+    freeform_messages = extract_freeform_user_messages(conversation[:before_index])
+    for index, _text in reversed(freeform_messages):
+        metadata = (
+            conversation[index].metadata
+            if isinstance(conversation[index].metadata, dict)
+            else None
+        )
+        if (
+            isinstance(metadata, dict)
+            and metadata.get("requirements_confirmed") is True
+        ):
+            continue
+        return index
+    return None
+
+
+def _latest_structured_answer_indices(
+    conversation: list[ConversationMessage],
+) -> Iterable[int]:
+    latest_by_question: dict[str, int] = {}
+    for index, message in enumerate(conversation):
+        if message.role != "user":
+            continue
+        metadata = message.metadata if isinstance(message.metadata, dict) else None
+        if not isinstance(metadata, dict):
+            continue
+        question_answer = cast(dict[str, Any] | None, metadata.get("question_answer"))
+        if not isinstance(question_answer, dict):
+            continue
+        question_id = cast(str | None, question_answer.get("question_id"))
+        if isinstance(question_id, str) and question_id:
+            latest_by_question[question_id] = index
+    return sorted(latest_by_question.values())
 
 
 def _latest_tool_trace_indices(

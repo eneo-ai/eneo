@@ -331,8 +331,10 @@ def _looks_like_structured_answer_echo(
     if normalized_content in candidates:
         return True
 
-    return len(normalized_content) <= 80 and not any(
-        marker in normalized_content for marker in (".", "?", "!", "\n")
+    return (
+        len(normalized_content) <= 80
+        and len(normalized_content.split()) <= 4
+        and not any(marker in normalized_content for marker in (".", "?", "!", "\n"))
     )
 
 
