@@ -19,11 +19,15 @@ SIGNING_KEY = _get_signing_key()
 
 
 def generate_signed_token(
-    file_id: UUID, expires_at: int, content_disposition: ContentDisposition
+    file_id: UUID,
+    expires_at: int,
+    content_disposition: ContentDisposition,
+    tenant_id: UUID,
 ) -> str:
     """Generate a signed token for file access."""
     payload = {
         "file_id": str(file_id),
+        "tenant_id": str(tenant_id),
         "expires_at": expires_at,
         "content_disposition": content_disposition.value,
     }
@@ -39,7 +43,12 @@ def generate_signed_token(
     return f"{message}.{signature_b64}"
 
 
-def verify_signed_token(token: str) -> dict[str, Any] | None:
+def verify_signed_token(
+    token: str,
+    *,
+    expected_file_id: UUID | None = None,
+    expected_tenant_id: UUID | None = None,
+) -> dict[str, Any] | None:
     """Verify a signed token and return the payload if valid."""
     try:
         # Split the token into message and signature parts
@@ -72,6 +81,16 @@ def verify_signed_token(token: str) -> dict[str, Any] | None:
 
         # Check if the URL has expired
         if payload["expires_at"] < int(time.time()):
+            return None
+
+        if expected_file_id is not None and payload.get("file_id") != str(
+            expected_file_id
+        ):
+            return None
+
+        if expected_tenant_id is not None and payload.get("tenant_id") != str(
+            expected_tenant_id
+        ):
             return None
 
         return payload

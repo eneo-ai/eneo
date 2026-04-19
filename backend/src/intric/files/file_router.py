@@ -167,7 +167,7 @@ async def generate_signed_url(
 ):
     # Verify the file exists and the user has access to it
     service = container.file_service()
-    await service.get_file_infos(file_ids=[id])
+    [file_info] = await service.get_file_infos(file_ids=[id])
 
     # Calculate expiration time
     expires_at = int(time.time()) + signed_url_req.expires_in
@@ -177,6 +177,7 @@ async def generate_signed_url(
         file_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
+        tenant_id=file_info.tenant_id,
     )
 
     # Build the full URL
@@ -230,6 +231,15 @@ async def download_file_signed(
     # Get the file without auth
     file_repo = container.file_repo()
     file = await file_repo.get_by_id(file_id=payload["file_id"])
+    if (
+        verify_signed_token(
+            token,
+            expected_file_id=id,
+            expected_tenant_id=file.tenant_id,
+        )
+        is None
+    ):
+        raise UnauthorizedException("Token not valid for this tenant")
 
     if file.text is None and file.blob is None:
         raise NotFoundException("File content not found")

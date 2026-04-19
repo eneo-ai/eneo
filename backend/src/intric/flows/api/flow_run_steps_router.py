@@ -290,6 +290,7 @@ async def generate_flow_run_artifact_signed_url(
         file_id=file_id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
+        tenant_id=file.tenant_id,
     )
     base_url = str(request.base_url).rstrip("/")
     url = f"{base_url}/api/v1/files/{file_id}/download/?token={token}"

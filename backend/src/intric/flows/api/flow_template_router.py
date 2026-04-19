@@ -250,7 +250,7 @@ async def generate_flow_template_signed_url(
     container: Container = Depends(get_container(with_user=True)),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
-    asset, _ = await _get_flow_template_asset_service(container).get_asset_with_file(
+    asset, file = await _get_flow_template_asset_service(container).get_asset_with_file(
         flow_id=id,
         asset_id=file_id,
     )
@@ -259,6 +259,7 @@ async def generate_flow_template_signed_url(
         file_id=asset.file_id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
+        tenant_id=file.tenant_id,
     )
     base_url = str(request.base_url).rstrip("/")
     url = f"{base_url}/api/v1/files/{asset.file_id}/download/?token={token}"

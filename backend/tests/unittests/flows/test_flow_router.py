@@ -18,6 +18,7 @@ from intric.actors.actors.space_actor import SpaceRole
 from intric.assistants.api.assistant_models import AssistantUpdatePublic
 from intric.audit.domain.action_types import ActionType
 from intric.authentication.auth_dependencies import ScopeFilter
+from intric.authentication.signed_urls import verify_signed_token
 from intric.flows.api import flow_router_common as router_common_module
 from intric.flows.api.flow_assistant_router import (
     create_flow_assistant,
@@ -2595,11 +2596,12 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
         id=uuid4(), tenant_id=uuid4(), username="tester", email="t@e.com"
     )
     container.user.return_value = user
+    file_tenant_id = uuid4()
 
     file_obj = SimpleNamespace(
         id=file_id,
         name="report.docx",
-        tenant_id=user.tenant_id,
+        tenant_id=file_tenant_id,
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         size=2048,
     )
@@ -2640,6 +2642,10 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
     assert response.url.startswith("https://app.example.com/api/v1/files/")
     assert str(file_id) in response.url
     assert response.expires_at > 0
+    token = response.url.split("token=", 1)[1]
+    payload = verify_signed_token(token)
+    assert payload is not None
+    assert payload["tenant_id"] == str(file_tenant_id)
 
     audit_service.log_async.assert_awaited_once()
     call_kwargs = audit_service.log_async.call_args[1]
