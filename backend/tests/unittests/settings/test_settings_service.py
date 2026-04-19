@@ -8,6 +8,7 @@ from intric.settings.settings import (
     AIBuilderBudgetSettingsUpdate,
     FlowEvidencePolicyUpdate,
     FlowInputLimitsUpdate,
+    FlowRetentionPolicyUpdate,
     SettingsInDB,
     SettingsPublic,
     SettingsUpsert,
@@ -487,3 +488,123 @@ async def test_update_ai_builder_budget_settings_rejects_empty_patch():
         BadRequestException, match="At least one AI Builder budget field"
     ):
         await service.update_ai_builder_budget_settings(AIBuilderBudgetSettingsUpdate())
+
+
+async def test_get_flow_retention_policy_reads_tenant_override():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "retention_policy": {
+                    "shared_default_days": 30,
+                    "source_audio_days": 3,
+                    "transcript_text_days": 7,
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    policy = await service.get_flow_retention_policy()
+
+    assert policy.shared_default_days == 30
+    assert policy.source_audio_days == 3
+    assert policy.transcript_text_days == 7
+
+
+async def test_update_flow_retention_policy_persists_and_audits():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log_async = _capture
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+    )
+
+    updated = await service.update_flow_retention_policy(
+        FlowRetentionPolicyUpdate(
+            shared_default_days=30,
+            source_audio_days=3,
+            run_debug_evidence_days=14,
+        )
+    )
+
+    assert updated.shared_default_days == 30
+    assert updated.source_audio_days == 3
+    assert updated.run_debug_evidence_days == 14
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["retention_policy"]["source_audio_days"] == 3
+    assert calls[0]["metadata"]["setting"] == "flow_retention_policy"
+
+
+async def test_update_flow_retention_policy_can_clear_override():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "retention_policy": {
+                    "shared_default_days": 30,
+                    "source_audio_days": 3,
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    updated = await service.update_flow_retention_policy(
+        FlowRetentionPolicyUpdate(source_audio_days=None)
+    )
+
+    assert updated.shared_default_days == 30
+    assert updated.source_audio_days is None
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "source_audio_days" not in tenant.flow_settings["retention_policy"]
+
+
+async def test_update_flow_retention_policy_rejects_empty_patch():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    with pytest.raises(
+        BadRequestException, match="At least one flow retention policy field"
+    ):
+        await service.update_flow_retention_policy(FlowRetentionPolicyUpdate())

@@ -13,14 +13,18 @@ from intric.settings.settings import (
     FlowEvidencePolicyUpdate,
     FlowInputLimitsPublic,
     FlowInputLimitsUpdate,
+    FlowRetentionPolicyPublic,
+    FlowRetentionPolicyUpdate,
 )
 from intric.settings.settings_router import (
     get_ai_builder_budget_settings,
     get_flow_evidence_policy,
     get_flow_input_limits,
+    get_flow_retention_policy,
     update_ai_builder_budget_settings,
     update_flow_evidence_policy,
     update_flow_input_limits,
+    update_flow_retention_policy,
 )
 
 
@@ -202,3 +206,47 @@ async def test_patch_flow_evidence_policy_delegates_to_service() -> None:
 
     assert response.allow_service_key_raw_export_class3 is True
     service.update_flow_evidence_policy.assert_awaited_once_with(payload)
+
+
+@pytest.mark.asyncio
+async def test_get_flow_retention_policy_delegates_to_service() -> None:
+    container = MagicMock()
+    service = AsyncMock()
+    service.get_flow_retention_policy.return_value = FlowRetentionPolicyPublic(
+        shared_default_days=30,
+        source_audio_days=3,
+        transcript_text_days=7,
+    )
+    container.settings_service.return_value = service
+    container.user.return_value = SimpleNamespace(
+        id="u", tenant_id="t", permissions=[Permission.ADMIN]
+    )
+
+    response = await get_flow_retention_policy(container=container)
+
+    assert response.shared_default_days == 30
+    service.get_flow_retention_policy.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_patch_flow_retention_policy_delegates_to_service() -> None:
+    container = MagicMock()
+    service = AsyncMock()
+    service.update_flow_retention_policy.return_value = FlowRetentionPolicyPublic(
+        shared_default_days=30,
+        source_audio_days=3,
+        run_debug_evidence_days=14,
+    )
+    container.settings_service.return_value = service
+    container.user.return_value = SimpleNamespace(
+        id="u", tenant_id="t", permissions=[Permission.ADMIN]
+    )
+
+    payload = FlowRetentionPolicyUpdate(
+        shared_default_days=30,
+        source_audio_days=3,
+    )
+    response = await update_flow_retention_policy(payload=payload, container=container)
+
+    assert response.source_audio_days == 3
+    service.update_flow_retention_policy.assert_awaited_once_with(payload)

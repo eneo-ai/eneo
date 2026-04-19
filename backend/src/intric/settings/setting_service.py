@@ -20,6 +20,10 @@ from intric.flows.flow_input_limits import (
     apply_flow_input_limits_patch,
     resolve_flow_input_limits,
 )
+from intric.flows.flow_retention_policy import (
+    apply_flow_retention_policy_patch,
+    resolve_flow_retention_policy,
+)
 from intric.main.config import get_settings as get_app_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
@@ -31,6 +35,8 @@ from intric.settings.settings import (
     FlowEvidencePolicyUpdate,
     FlowInputLimitsPublic,
     FlowInputLimitsUpdate,
+    FlowRetentionPolicyPublic,
+    FlowRetentionPolicyUpdate,
     SettingsInDB,
     SettingsPublic,
     SettingsUpsert,
@@ -313,6 +319,46 @@ class SettingService:
             metadata={"setting": "flow_evidence_policy", "changes": patch},
         )
         return await self.get_flow_evidence_policy()
+
+    @validate_permissions(Permission.ADMIN)
+    async def get_flow_retention_policy(self) -> FlowRetentionPolicyPublic:
+        tenant = await self._get_tenant_for_flow_settings()
+        policy = resolve_flow_retention_policy(getattr(tenant, "flow_settings", None))
+        return FlowRetentionPolicyPublic(
+            shared_default_days=policy.shared_default_days,
+            source_audio_days=policy.source_audio_days,
+            transcript_text_days=policy.transcript_text_days,
+            generated_artifact_days=policy.generated_artifact_days,
+            run_debug_evidence_days=policy.run_debug_evidence_days,
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_flow_retention_policy(
+        self,
+        payload: FlowRetentionPolicyUpdate,
+    ) -> FlowRetentionPolicyPublic:
+        patch = payload.model_dump(exclude_unset=True)
+        if not patch:
+            raise BadRequestException(
+                "At least one flow retention policy field must be provided."
+            )
+        tenant = await self._get_tenant_for_flow_settings()
+        next_flow_settings = apply_flow_retention_policy_patch(
+            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
+            **patch,
+            remove_keys={key for key, value in patch.items() if value is None},
+        )
+        await self._persist_flow_settings(next_flow_settings)
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description="Updated flow retention policy",
+            metadata={"setting": "flow_retention_policy", "changes": patch},
+        )
+        return await self.get_flow_retention_policy()
 
     async def get_available_completion_models(self) -> list[CompletionModelPublic]:
         return await self.ai_models_service.get_completion_models()

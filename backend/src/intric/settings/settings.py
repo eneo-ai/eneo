@@ -78,3 +78,19 @@ class FlowEvidencePolicyUpdate(BaseModel):
     allow_space_admin_raw_export_class3: bool | None = None
     allow_run_owner_raw_export_class3: bool | None = None
     allow_service_key_raw_export_class3: bool | None = None
+
+
+class FlowRetentionPolicyPublic(BaseModel):
+    shared_default_days: int | None = None
+    source_audio_days: int | None = None
+    transcript_text_days: int | None = None
+    generated_artifact_days: int | None = None
+    run_debug_evidence_days: int | None = None
+
+
+class FlowRetentionPolicyUpdate(BaseModel):
+    shared_default_days: int | None = None
+    source_audio_days: int | None = None
+    transcript_text_days: int | None = None
+    generated_artifact_days: int | None = None
+    run_debug_evidence_days: int | None = None

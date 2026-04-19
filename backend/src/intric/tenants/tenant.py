@@ -307,6 +307,17 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             except Exception as error:
                 raise ValueError(str(error))
 
+        retention_policy = v.get("retention_policy")
+        if retention_policy is not None:
+            from intric.flows.flow_retention_policy import (
+                validate_flow_retention_policy_object,
+            )
+
+            try:
+                validate_flow_retention_policy_object(retention_policy)
+            except Exception as error:
+                raise ValueError(str(error))
+
         evidence_policy = v.get("evidence_policy")
         if evidence_policy is not None:
             if not isinstance(evidence_policy, dict):

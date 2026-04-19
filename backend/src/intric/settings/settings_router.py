@@ -21,6 +21,8 @@ from intric.settings.settings import (
     FlowEvidencePolicyUpdate,
     FlowInputLimitsPublic,
     FlowInputLimitsUpdate,
+    FlowRetentionPolicyPublic,
+    FlowRetentionPolicyUpdate,
     GetModelsResponse,
     SettingsPublic,
     ToggleSettingUpdate,
@@ -41,6 +43,10 @@ class _FlowSettingsServiceProtocol(Protocol):
     async def update_flow_evidence_policy(
         self, payload: FlowEvidencePolicyUpdate
     ) -> FlowEvidencePolicyPublic: ...
+    async def get_flow_retention_policy(self) -> FlowRetentionPolicyPublic: ...
+    async def update_flow_retention_policy(
+        self, payload: FlowRetentionPolicyUpdate
+    ) -> FlowRetentionPolicyPublic: ...
     async def get_ai_builder_budget_settings(self) -> AIBuilderBudgetSettingsPublic: ...
     async def update_ai_builder_budget_settings(
         self, payload: AIBuilderBudgetSettingsUpdate
@@ -159,6 +165,35 @@ async def update_flow_evidence_policy(
     validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_evidence_policy(payload)
+
+
+@settings_admin_router.get(
+    "/flow-retention-policy",
+    response_model=FlowRetentionPolicyPublic,
+    summary="Get flow retention policy",
+    description="Return the tenant's effective layered flow retention policy defaults and class-specific overrides.",
+)
+async def get_flow_retention_policy(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowRetentionPolicyPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.get_flow_retention_policy()
+
+
+@settings_admin_router.patch(
+    "/flow-retention-policy",
+    response_model=FlowRetentionPolicyPublic,
+    summary="Update flow retention policy",
+    description="Update tenant-level layered flow retention defaults and class-specific overrides used by Flow runtime data classes.",
+)
+async def update_flow_retention_policy(
+    payload: FlowRetentionPolicyUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowRetentionPolicyPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.update_flow_retention_policy(payload)
 
 
 @settings_admin_router.get(
