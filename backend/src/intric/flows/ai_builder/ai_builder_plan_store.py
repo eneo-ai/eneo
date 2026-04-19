@@ -71,7 +71,9 @@ def warnings_for_quality_retry(
 def format_revision_feedback(title: str, issues: list[str]) -> str:
     if not issues:
         return title
-    numbered = "\n".join(f"{index}. {issue}" for index, issue in enumerate(issues, start=1))
+    numbered = "\n".join(
+        f"{index}. {issue}" for index, issue in enumerate(issues, start=1)
+    )
     return f"{title}:\n{numbered}"
 
 
@@ -88,14 +90,18 @@ def format_validation_feedback(
     if not any(_requires_reference_guidance(error) for error in errors):
         return feedback
 
-    declared_refs = ", ".join(step.plan_step_ref for step in spec.steps if step.plan_step_ref)
+    declared_refs = ", ".join(
+        step.plan_step_ref for step in spec.steps if step.plan_step_ref
+    )
     reference_guidance = [
         "Step reference rules:",
         "- Use the exact plan_step_ref values declared in steps[*].plan_step_ref inside all template bindings.",
         "- In AI Builder drafts, step_a / step_b style refs are authoring aliases. Do not switch to runtime aliases like step_1.",
     ]
     if declared_refs:
-        reference_guidance.append(f"- Declared step refs in this draft: {declared_refs}")
+        reference_guidance.append(
+            f"- Declared step refs in this draft: {declared_refs}"
+        )
     reference_guidance.append(
         "- If you rename a plan_step_ref, update every {{ ref.output.* }} binding that points to it."
     )
@@ -142,6 +148,8 @@ async def store_plan_and_update_conversation(
     reasoning: str | None,
     validation: Any,
     edit_result_json: dict[str, Any] | None = None,
+    lease_request_id: UUID | None = None,
+    lease_lock_token: UUID | None = None,
 ) -> tuple[BuilderPlan, PlannerPlanEnvelope]:
     envelope = build_plan_envelope(
         spec=spec,
@@ -157,6 +165,8 @@ async def store_plan_and_update_conversation(
         spec=spec,
         envelope=envelope,
         edit_result_json=edit_result_json,
+        lease_request_id=lease_request_id,
+        lease_lock_token=lease_lock_token,
     )
     append_plan_messages(
         conversation=conversation,
@@ -173,6 +183,8 @@ async def store_plan_and_update_conversation(
         session_id=session_id,
         conversation=conversation,
         start_index=new_messages_start,
+        lease_request_id=lease_request_id,
+        lease_lock_token=lease_lock_token,
     )
     return plan, envelope
 
@@ -185,6 +197,8 @@ async def persist_plan(
     spec: FlowDraftSpecCore,
     envelope: PlannerPlanEnvelope,
     edit_result_json: dict[str, Any] | None = None,
+    lease_request_id: UUID | None = None,
+    lease_lock_token: UUID | None = None,
 ) -> BuilderPlan:
     await repo.supersede_existing_plans(
         session_id=session_id,
@@ -201,6 +215,8 @@ async def persist_plan(
         session_id=session_id,
         tenant_id=tenant_id,
         plan_id=plan.id,
+        request_id=lease_request_id,
+        lock_token=lease_lock_token,
     )
     return plan
 
@@ -212,11 +228,15 @@ async def append_session_messages(
     session_id: UUID,
     conversation: list[ConversationMessage],
     start_index: int,
+    lease_request_id: UUID | None = None,
+    lease_lock_token: UUID | None = None,
 ) -> None:
     await repo.append_session_messages(
         session_id=session_id,
         tenant_id=tenant_id,
         conversation=conversation[start_index:],
+        request_id=lease_request_id,
+        lock_token=lease_lock_token,
     )
 
 
@@ -243,11 +263,13 @@ def append_plan_messages(
         ConversationMessage(
             role="assistant",
             content=assistant_content,
-            tool_calls=[{
-                "id": tool_call_id,
-                "name": tool_name,
-                "arguments": compact_arguments,
-            }],
+            tool_calls=[
+                {
+                    "id": tool_call_id,
+                    "name": tool_name,
+                    "arguments": compact_arguments,
+                }
+            ],
         )
     )
     conversation.append(

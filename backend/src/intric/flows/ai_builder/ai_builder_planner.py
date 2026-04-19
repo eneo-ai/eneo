@@ -220,13 +220,26 @@ class AIBuilderPlanner:
                 )
                 return
             except asyncio.TimeoutError:
-                refreshed = await self.repo.refresh_session_send_lease(
-                    session_id=session_id,
-                    tenant_id=self.user.tenant_id,
-                    request_id=request_id,
-                    lock_token=lock_token,
-                    lock_expires_at=self._next_send_lock_expiry(),
-                )
+                try:
+                    refreshed = await self.repo.refresh_session_send_lease(
+                        session_id=session_id,
+                        tenant_id=self.user.tenant_id,
+                        request_id=request_id,
+                        lock_token=lock_token,
+                        lock_expires_at=self._next_send_lock_expiry(),
+                    )
+                except Exception as error:
+                    logger.warning(
+                        "AI Builder send lease refresh failed.",
+                        exc_info=error,
+                        extra={
+                            "session_id": str(session_id),
+                            "request_id": str(request_id),
+                        },
+                    )
+                    lease_lost_event.set()
+                    return
+
                 if not refreshed:
                     logger.warning(
                         "AI Builder send lease lost while processing.",
@@ -666,6 +679,8 @@ class AIBuilderPlanner:
                     litellm_model=litellm_model,
                     litellm_kwargs=litellm_kwargs,
                     ui_language=ui_language,
+                    lease_request_id=request_uuid,
+                    lease_lock_token=lock_token,
                 ):
                     yield event
                 yield {"event": SSE_EVENT_DONE, "data": ""}
@@ -681,6 +696,8 @@ class AIBuilderPlanner:
                     conversation=conversation,
                     new_messages_start=new_messages_start,
                     flow=flow,
+                    lease_request_id=request_uuid,
+                    lease_lock_token=lock_token,
                 ):
                     yield event
                 yield {"event": SSE_EVENT_DONE, "data": ""}
@@ -795,6 +812,8 @@ class AIBuilderPlanner:
                     resource_catalog=prepared_request.resource_catalog,
                     max_output_tokens=max_output_tokens,
                     request_id=request_id,
+                    lease_request_id=request_uuid,
+                    lease_lock_token=lock_token,
                     flow=flow,
                     assistant_snapshots=assistant_snapshots,
                 ):
@@ -834,6 +853,8 @@ class AIBuilderPlanner:
                             max_output_tokens=max_output_tokens,
                             flow=flow,
                             assistant_snapshots=assistant_snapshots,
+                            lease_request_id=request_uuid,
+                            lease_lock_token=lock_token,
                         )
                     )
                     if forced_plan is not None:
@@ -862,6 +883,12 @@ class AIBuilderPlanner:
                 await lease_task
             except asyncio.CancelledError:
                 pass
+            except Exception as error:
+                logger.warning(
+                    "AI Builder lease task exited with an unexpected error.",
+                    exc_info=error,
+                    extra={"session_id": str(session_id), "request_id": request_id},
+                )
             await self.repo.release_session_send(
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,

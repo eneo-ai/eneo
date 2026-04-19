@@ -133,6 +133,8 @@ class ProposalContext:
     resource_catalog: AIBuilderResourceCatalog | None
     max_output_tokens: int
     request_id: str
+    lease_request_id: UUID | None = None
+    lease_lock_token: UUID | None = None
     flow: "Flow | None" = None
     assistant_snapshots: dict[UUID, dict[str, Any]] | None = None
     text_content: str | None = None
@@ -213,6 +215,8 @@ class AIBuilderProposalProcessor:
         available_kb_refs: set[str] | None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
+        lease_request_id: UUID | None = None,
+        lease_lock_token: UUID | None = None,
     ) -> ToolProcessingResult:
         try:
             draft = parse_create_flow_arguments(arguments)
@@ -331,6 +335,8 @@ class AIBuilderProposalProcessor:
             plan_rationale=draft.plan_rationale,
             reasoning=None,
             validation=validation,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
         )
         return ToolProcessingResult(
             event=build_plan_event(plan_id=plan.id, envelope=envelope)
@@ -378,6 +384,8 @@ class AIBuilderProposalProcessor:
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
         request_id: str,
+        lease_request_id: UUID | None = None,
+        lease_lock_token: UUID | None = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
@@ -395,6 +403,8 @@ class AIBuilderProposalProcessor:
             resource_catalog=resource_catalog,
             max_output_tokens=max_output_tokens,
             request_id=request_id,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             text_content=text_content,
@@ -455,6 +465,8 @@ class AIBuilderProposalProcessor:
             flow=ctx.flow,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
+            lease_request_id=ctx.lease_request_id,
+            lease_lock_token=ctx.lease_lock_token,
         )
         if followup_events:
             return True, followup_events
@@ -522,6 +534,8 @@ class AIBuilderProposalProcessor:
             resource_catalog=ctx.resource_catalog,
             flow=ctx.flow,
             include_flow_context=config.include_flow_context,
+            lease_request_id=ctx.lease_request_id,
+            lease_lock_token=ctx.lease_lock_token,
         )
         submission_result = await config.process_tool_arguments(**submission_kwargs)
         logger.info(
@@ -563,6 +577,8 @@ class AIBuilderProposalProcessor:
         resource_catalog: AIBuilderResourceCatalog | None,
         flow: "Flow | None",
         include_flow_context: bool,
+        lease_request_id: UUID | None,
+        lease_lock_token: UUID | None,
     ) -> dict[str, Any]:
         processing_kwargs: dict[str, Any] = {
             "session_id": session_id,
@@ -574,6 +590,8 @@ class AIBuilderProposalProcessor:
             "available_model_refs": available_model_refs,
             "available_kb_refs": available_kb_refs,
             "resource_catalog": resource_catalog,
+            "lease_request_id": lease_request_id,
+            "lease_lock_token": lease_lock_token,
         }
         if include_flow_context:
             processing_kwargs["flow"] = flow
@@ -774,6 +792,8 @@ class AIBuilderProposalProcessor:
         max_output_tokens: int,
         flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        lease_request_id: UUID | None = None,
+        lease_lock_token: UUID | None = None,
     ) -> dict[str, str] | None:
         retry_config = self._submission_retry_config(
             flow=flow,
@@ -838,6 +858,8 @@ class AIBuilderProposalProcessor:
                 flow=flow,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
+                lease_request_id=None,
+                lease_lock_token=None,
             )
             if followup_events:
                 for event in followup_events:
@@ -976,6 +998,8 @@ class AIBuilderProposalProcessor:
             flow=ctx.flow,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
+            lease_request_id=ctx.lease_request_id,
+            lease_lock_token=ctx.lease_lock_token,
         )
         if followup_events:
             for event in followup_events:
@@ -1018,6 +1042,8 @@ class AIBuilderProposalProcessor:
                 tool_content=(
                     "Structured question payload was invalid; rendered fallback text question."
                 ),
+                lease_request_id=ctx.lease_request_id,
+                lease_lock_token=ctx.lease_lock_token,
             )
             yield build_text_event(fallback_text)
             return
@@ -1046,6 +1072,8 @@ class AIBuilderProposalProcessor:
                 tool_content=(
                     "Backend-owned discovery question presented to user after model signal."
                 ),
+                lease_request_id=ctx.lease_request_id,
+                lease_lock_token=ctx.lease_lock_token,
             ):
                 yield event
             return
@@ -1083,6 +1111,8 @@ class AIBuilderProposalProcessor:
         flow: "Flow | None" = None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
+        lease_request_id: UUID | None = None,
+        lease_lock_token: UUID | None = None,
     ) -> ToolProcessingResult:
         del assistant_content, available_model_refs, available_kb_refs
 
@@ -1146,6 +1176,8 @@ class AIBuilderProposalProcessor:
                 "requirements_summary": requirements_payload,
                 "requirements_version": requirements_version,
             },
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
         )
         return ToolProcessingResult(
             event=build_requirements_summary_event(requirements_payload)
@@ -1168,6 +1200,8 @@ class AIBuilderProposalProcessor:
         litellm_kwargs: dict[str, Any],
         max_output_tokens: int,
         resource_catalog: AIBuilderResourceCatalog | None = None,
+        lease_request_id: UUID | None = None,
+        lease_lock_token: UUID | None = None,
     ) -> ToolProcessingResult:
         if flow is None:
             return ToolProcessingResult(
@@ -1312,6 +1346,8 @@ class AIBuilderProposalProcessor:
             reasoning=None,
             validation=validation,
             edit_result_json=serialized_edit_result,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
         )
         return ToolProcessingResult(
             event=build_plan_event(
@@ -1361,6 +1397,8 @@ class AIBuilderProposalProcessor:
                     flow=ctx.flow,
                     litellm_model=ctx.litellm_model,
                     litellm_kwargs=ctx.litellm_kwargs,
+                    lease_request_id=ctx.lease_request_id,
+                    lease_lock_token=ctx.lease_lock_token,
                 ):
                     yield event
                 return
@@ -1488,6 +1526,8 @@ class AIBuilderProposalProcessor:
         litellm_kwargs: dict[str, Any] | None = None,
         ui_language: str | None = None,
         flow: "Flow | None" = None,
+        lease_request_id: UUID | None = None,
+        lease_lock_token: UUID | None = None,
     ) -> list[dict[str, str]]:
         return await emit_discovery_followup_if_needed(
             repo=self.repo,
@@ -1500,6 +1540,8 @@ class AIBuilderProposalProcessor:
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
             ui_language=ui_language,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
         )
 
     def _submission_retry_config(

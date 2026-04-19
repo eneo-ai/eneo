@@ -29,6 +29,13 @@ def upgrade() -> None:
         "builder_sessions",
         sa.Column("lock_expires_at", sa.DateTime(timezone=True), nullable=True),
     )
+    op.execute(
+        sa.text(
+            "UPDATE builder_sessions "
+            "SET active_request_id = NULL "
+            "WHERE active_request_id IS NOT NULL AND lock_expires_at IS NULL"
+        )
+    )
     op.create_index(
         "ix_builder_sessions_lock_expires_at",
         "builder_sessions",

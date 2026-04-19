@@ -35,7 +35,7 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_session_transitions import (
     ensure_valid_session_status_transition,
 )
-from intric.main.exceptions import NotFoundException
+from intric.main.exceptions import BadRequestException, NotFoundException
 
 
 class AIBuilderRepository:
@@ -340,6 +340,8 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         status: SessionStatus,
+        request_id: UUID | None = None,
+        lock_token: UUID | None = None,
     ) -> None:
         async with self._transaction():
             current_stmt = select(BuilderSessions.status).where(
@@ -360,13 +362,30 @@ class AIBuilderRepository:
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
+                    *(
+                        (
+                            BuilderSessions.active_request_id == request_id,
+                            BuilderSessions.lock_token == lock_token,
+                        )
+                        if request_id is not None and lock_token is not None
+                        else ()
+                    ),
                 )
                 .values(
                     status=status.value,
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            await self.session.execute(stmt)
+            result = await self.session.execute(stmt)
+            if (
+                request_id is not None
+                and lock_token is not None
+                and result.rowcount == 0
+            ):
+                raise BadRequestException(
+                    "The AI Builder session lease was lost while updating session status.",
+                    code="session_send_lease_lost",
+                )
 
     async def update_session_conversation(
         self,
@@ -374,6 +393,8 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         conversation: list[ConversationMessage],
+        request_id: UUID | None = None,
+        lock_token: UUID | None = None,
     ) -> None:
         async with self._transaction():
             compacted = compact_ai_builder_conversation(conversation)
@@ -383,13 +404,30 @@ class AIBuilderRepository:
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
+                    *(
+                        (
+                            BuilderSessions.active_request_id == request_id,
+                            BuilderSessions.lock_token == lock_token,
+                        )
+                        if request_id is not None and lock_token is not None
+                        else ()
+                    ),
                 )
                 .values(
                     conversation=serialized,
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            await self.session.execute(stmt)
+            result = await self.session.execute(stmt)
+            if (
+                request_id is not None
+                and lock_token is not None
+                and result.rowcount == 0
+            ):
+                raise BadRequestException(
+                    "The AI Builder session lease was lost while updating conversation state.",
+                    code="session_send_lease_lost",
+                )
 
     async def append_session_messages(
         self,
@@ -397,6 +435,8 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         conversation: list[ConversationMessage],
+        request_id: UUID | None = None,
+        lock_token: UUID | None = None,
     ) -> None:
         if not conversation:
             return
@@ -429,9 +469,22 @@ class AIBuilderRepository:
             stmt = select(BuilderSessions).where(
                 BuilderSessions.id == session_id,
                 BuilderSessions.tenant_id == tenant_id,
+                *(
+                    (
+                        BuilderSessions.active_request_id == request_id,
+                        BuilderSessions.lock_token == lock_token,
+                    )
+                    if request_id is not None and lock_token is not None
+                    else ()
+                ),
             )
             row = (await self.session.execute(stmt)).scalar_one_or_none()
             if row is None:
+                if request_id is not None and lock_token is not None:
+                    raise BadRequestException(
+                        "The AI Builder session lease was lost while appending conversation messages.",
+                        code="session_send_lease_lost",
+                    )
                 raise NotFoundException("Builder session not found.")
 
             existing = _session_from_row(row).conversation
@@ -442,13 +495,30 @@ class AIBuilderRepository:
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
+                    *(
+                        (
+                            BuilderSessions.active_request_id == request_id,
+                            BuilderSessions.lock_token == lock_token,
+                        )
+                        if request_id is not None and lock_token is not None
+                        else ()
+                    ),
                 )
                 .values(
                     conversation=serialized,
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            await self.session.execute(update_stmt)
+            result = await self.session.execute(update_stmt)
+            if (
+                request_id is not None
+                and lock_token is not None
+                and result.rowcount == 0
+            ):
+                raise BadRequestException(
+                    "The AI Builder session lease was lost while saving conversation messages.",
+                    code="session_send_lease_lost",
+                )
             if committed_file_ids:
                 rows = [
                     {
@@ -470,6 +540,8 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         plan_id: UUID,
+        request_id: UUID | None = None,
+        lock_token: UUID | None = None,
     ) -> None:
         async with self._transaction():
             current_stmt = select(BuilderSessions.status).where(
@@ -490,6 +562,14 @@ class AIBuilderRepository:
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
+                    *(
+                        (
+                            BuilderSessions.active_request_id == request_id,
+                            BuilderSessions.lock_token == lock_token,
+                        )
+                        if request_id is not None and lock_token is not None
+                        else ()
+                    ),
                 )
                 .values(
                     latest_plan_id=plan_id,
@@ -497,7 +577,16 @@ class AIBuilderRepository:
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            await self.session.execute(stmt)
+            result = await self.session.execute(stmt)
+            if (
+                request_id is not None
+                and lock_token is not None
+                and result.rowcount == 0
+            ):
+                raise BadRequestException(
+                    "The AI Builder session lease was lost while recording the latest plan.",
+                    code="session_send_lease_lost",
+                )
 
     async def update_session_flow_id(
         self,

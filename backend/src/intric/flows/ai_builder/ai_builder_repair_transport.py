@@ -7,6 +7,8 @@ from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_plan_store import append_session_messages
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     append_retry_feedback_turn,
+)
+from intric.flows.ai_builder.ai_builder_proposal_repair import (
     build_tool_retry_messages as build_proposal_tool_retry_messages,
 )
 
@@ -53,16 +55,20 @@ async def persist_tool_turn(
     tool_content: str,
     metadata: dict[str, Any] | None = None,
     assistant_content: str | None = None,
+    lease_request_id: UUID | None = None,
+    lease_lock_token: UUID | None = None,
 ) -> None:
     conversation.append(
         ConversationMessage(
             role="assistant",
             content=assistant_content,
-            tool_calls=[{
-                "id": tool_call.id,
-                "name": tool_call.function.name,
-                "arguments": arguments,
-            }],
+            tool_calls=[
+                {
+                    "id": tool_call.id,
+                    "name": tool_call.function.name,
+                    "arguments": arguments,
+                }
+            ],
         )
     )
     conversation.append(
@@ -79,6 +85,8 @@ async def persist_tool_turn(
         session_id=session_id,
         conversation=conversation,
         start_index=new_messages_start,
+        lease_request_id=lease_request_id,
+        lease_lock_token=lease_lock_token,
     )
 
 
