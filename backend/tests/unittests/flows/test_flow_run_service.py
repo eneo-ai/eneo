@@ -1523,6 +1523,73 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_t
 
 
 @pytest.mark.asyncio
+async def test_export_evidence_json_rechecks_sensitive_policy_when_run_is_injected(
+    user,
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    sensitive_flow = _flow(
+        user=user,
+        metadata_json={"care_data_policy": {"sensitive": True}},
+    )
+    run = _run(user=user, flow_id=sensitive_flow.id)
+    version = _version(user=user, flow=sensitive_flow, version=1)
+    flow_repo.get.return_value = sensitive_flow
+    flow_version_repo.get.return_value = version
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = []
+    service = FlowRunService(
+        user=_trace_user(user),
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await service.export_evidence_json(
+            run_id=run.id,
+            detail="redacted",
+            run=run,
+        )
+
+    assert exc_info.value.code == "flow_run_evidence_forbidden"
+
+
+@pytest.mark.asyncio
+async def test_export_evidence_json_rejects_cross_tenant_injected_run_for_tenant_admin(
+    user,
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    admin_user = user.model_copy(
+        update={"roles": [SimpleNamespace(permissions=[Permission.ADMIN])]}
+    )
+    flow = _flow(user=user)
+    run = _run(user=user, flow_id=flow.id).model_copy(update={"tenant_id": uuid4()})
+    version = _version(user=user, flow=flow, version=1)
+    flow_version_repo.get.return_value = version
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = []
+    service = FlowRunService(
+        user=admin_user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await service.export_evidence_json(
+            run_id=run.id,
+            detail="redacted",
+            run=run,
+        )
+
+    assert exc_info.value.code == "flow_run_access_denied"
+
+
+@pytest.mark.asyncio
 async def test_service_key_unknown_access_kind_fails_closed(user):
     service_user = _service_key_user(user)
     service_user.active_api_key.resource_permissions = ResourcePermissions(

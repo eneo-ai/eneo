@@ -189,6 +189,8 @@ class FlowRunService:
         )
 
     async def _ensure_can_access_run(self, run: FlowRun, *, access_kind: str) -> None:
+        if run.tenant_id != self.user.tenant_id:
+            self._raise_run_access_denied(auth_layer="tenant_isolation")
         if access_kind in {"evidence_export_redacted", "evidence_export_raw"}:
             await self._ensure_sensitive_flow_export_allowed(flow_id=run.flow_id)
         if self._is_tenant_admin():
@@ -807,7 +809,15 @@ class FlowRunService:
         access_kind: FlowRunAccessKind,
         run: FlowRun | None = None,
     ) -> EvidenceBundle:
-        resolved_run = run or await self.get_run(run_id=run_id, access_kind=access_kind)
+        resolved_run = (
+            run
+            if run is not None
+            else await self.get_run(run_id=run_id, access_kind=access_kind)
+        )
+        if run is not None:
+            if resolved_run.id != run_id:
+                self._raise_run_access_denied(auth_layer="flow_run_argument")
+            await self._ensure_can_access_run(resolved_run, access_kind=access_kind)
         version = await self.flow_version_repo.get(
             flow_id=resolved_run.flow_id,
             version=resolved_run.flow_version,
