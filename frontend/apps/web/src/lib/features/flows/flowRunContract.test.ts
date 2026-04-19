@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildFlowRunIntent,
   buildStepInputsPayload,
   getBlockingTemplateReadinessItems,
   normalizeTemplateReadiness
@@ -15,6 +16,24 @@ describe("flowRunContract helpers", () => {
       })
     ).toEqual({
       "step-1": { file_ids: ["file-1", "file-2"] }
+    });
+  });
+
+  it("builds a canonical flow run intent payload", () => {
+    expect(
+      buildFlowRunIntent({
+        publishedFlowVersion: 7,
+        inputPayloadJson: { text: "hello" },
+        stepInputs: {
+          "step-1": { file_ids: ["file-1"] }
+        }
+      })
+    ).toEqual({
+      expected_flow_version: 7,
+      input_payload_json: { text: "hello" },
+      step_inputs: {
+        "step-1": { file_ids: ["file-1"] }
+      }
     });
   });
 

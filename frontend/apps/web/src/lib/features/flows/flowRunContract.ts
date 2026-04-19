@@ -6,6 +6,12 @@ import type {
 
 type FileLike = { id: string };
 
+type FlowRunIntentParams = {
+  publishedFlowVersion: number;
+  inputPayloadJson: Record<string, unknown>;
+  stepInputs?: FlowRunStepInputs;
+};
+
 export function normalizeTemplateReadiness(
   templateReadiness:
     | FlowRunContract["template_readiness"]
@@ -44,4 +50,20 @@ export function buildStepInputsPayload(
   }
 
   return Object.fromEntries(payloadEntries);
+}
+
+export function buildFlowRunIntent({
+  publishedFlowVersion,
+  inputPayloadJson,
+  stepInputs
+}: FlowRunIntentParams): {
+  expected_flow_version: number;
+  input_payload_json: Record<string, unknown>;
+  step_inputs?: FlowRunStepInputs;
+} {
+  return {
+    expected_flow_version: publishedFlowVersion,
+    input_payload_json: inputPayloadJson,
+    ...(stepInputs ? { step_inputs: stepInputs } : {})
+  };
 }

@@ -25,6 +25,7 @@
     type NormalizedFlowFormField
   } from "$lib/features/flows/flowFormSchema";
   import {
+    buildFlowRunIntent,
     buildStepInputsPayload,
     normalizeTemplateReadiness
   } from "$lib/features/flows/flowRunContract";
@@ -623,11 +624,21 @@
       }
 
       const stepInputs = buildStepInputsPayload(runtimeFilesByStepId);
+      const runIntent = buildFlowRunIntent({
+        publishedFlowVersion: runContract.published_flow_version,
+        inputPayloadJson: payload,
+        stepInputs
+      });
+      const idempotencyKey = await intric.flows.runs.deriveUploadIntentIdempotencyKey({
+        flowId: flow.id,
+        expectedFlowVersion: runIntent.expected_flow_version,
+        input_payload_json: runIntent.input_payload_json,
+        ...(runIntent.step_inputs ? { step_inputs: runIntent.step_inputs } : {})
+      });
       const createdRun = await intric.flows.runs.create({
         flow: { id: flow.id },
-        expected_flow_version: runContract.published_flow_version,
-        input_payload_json: payload,
-        ...(stepInputs ? { step_inputs: stepInputs } : {})
+        ...runIntent,
+        idempotencyKey
       });
 
       onRunCreated?.({ runId: createdRun.id });
