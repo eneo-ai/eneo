@@ -10,6 +10,8 @@ from intric.flows.ai_builder.ai_builder_discovery_families import (
 from intric.flows.ai_builder.ai_builder_step_capabilities import (
     is_citation_capable_step,
     resolve_document_generation_mode,
+    resolve_final_output_artifact,
+    resolve_runtime_input_mode,
 )
 from intric.flows.domain.flow import Flow, FlowStep, JsonObject
 
@@ -106,7 +108,9 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
         flow_input_steps
     )
     document_material_scope, upload_pattern = _derive_document_scope(flow_input_steps)
-    final_output_mode = _map_output_type(_enum_value(last_step.output_type))
+    final_output_mode = resolve_final_output_artifact(
+        _enum_value(last_step.output_type)
+    )
     final_output_generation_mode = resolve_document_generation_mode(
         output_type=_enum_value(last_step.output_type),
         output_mode=_enum_value(last_step.output_mode),
@@ -172,18 +176,6 @@ def _runtime_input_max_files(input_config: JsonObject | None) -> int | None:
     return max_files if isinstance(max_files, int) else None
 
 
-def _map_output_type(output_type: str | None) -> str | None:
-    if output_type == "text":
-        return "structured_text"
-    if output_type == "pdf":
-        return "pdf_document"
-    if output_type == "docx":
-        return "docx_document"
-    if output_type == "json":
-        return "structured_json"
-    return None
-
-
 def _derive_runtime_input_mode(
     flow_input_steps: tuple[FlowInputStepSignature, ...],
 ) -> tuple[str | None, bool]:
@@ -191,7 +183,8 @@ def _derive_runtime_input_mode(
         return None, False
 
     modes = {
-        _map_runtime_input_type(signature.input_type) for signature in flow_input_steps
+        resolve_runtime_input_mode(signature.input_type)
+        for signature in flow_input_steps
     }
     modes.discard(None)
     if not modes:
@@ -209,7 +202,7 @@ def _derive_document_scope(
     document_steps = tuple(
         signature
         for signature in flow_input_steps
-        if _map_runtime_input_type(signature.input_type) == "documents"
+        if resolve_runtime_input_mode(signature.input_type) == "documents"
     )
     if len(document_steps) != 1:
         return None, None
@@ -226,16 +219,6 @@ def _derive_runtime_metadata_state(flow: Flow) -> str | None:
         return "basic_case_metadata"
     if flow.metadata_json is not None:
         return "no_extra_metadata"
-    return None
-
-
-def _map_runtime_input_type(input_type: str | None) -> str | None:
-    if input_type in {"document", "file"}:
-        return "documents"
-    if input_type == "audio":
-        return "audio"
-    if input_type in {"text", "json"}:
-        return "text"
     return None
 
 
