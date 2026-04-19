@@ -733,6 +733,13 @@ class BuilderSessions(BasePublic):
     latest_plan_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
 
     __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_builder_sessions_id_tenant_id"),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_builder_sessions_flow_tenant",
+        ),
         CheckConstraint(
             f"target_kind IN ({','.join(repr(v) for v in BUILDER_TARGET_KIND_VALUES)})",
             name="ck_builder_sessions_target_kind",
@@ -757,6 +764,15 @@ class BuilderSessionFiles(BaseCrossReference):
         ForeignKey(Tenants.id, ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["session_id", "tenant_id"],
+            ["builder_sessions.id", "builder_sessions.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_builder_session_files_session_tenant",
+        ),
     )
 
 
@@ -784,6 +800,13 @@ class BuilderPlans(BasePublic):
     )
 
     __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_builder_plans_id_tenant_id"),
+        ForeignKeyConstraint(
+            ["session_id", "tenant_id"],
+            ["builder_sessions.id", "builder_sessions.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_builder_plans_session_tenant",
+        ),
         CheckConstraint(
             f"status IN ({','.join(repr(v) for v in BUILDER_PLAN_STATUS_VALUES)})",
             name="ck_builder_plans_status",

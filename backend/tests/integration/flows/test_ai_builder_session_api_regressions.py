@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from intric.ai_models.model_enums import (
     ModelFamily,
@@ -14,11 +15,14 @@ from intric.ai_models.model_enums import (
     ModelStability,
 )
 from intric.database.tables.ai_models_table import TranscriptionModels
+from intric.database.tables.flow_tables import Flows
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.spaces_table import (
+    Spaces,
     SpacesCompletionModels,
     SpacesTranscriptionModels,
 )
+from intric.database.tables.tenant_table import Tenants
 from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
@@ -267,6 +271,47 @@ async def _upload_reference_file(
     return response.json()["id"]
 
 
+async def _create_extra_tenant(*, db_container, name: str) -> UUID:
+    async with db_container() as container:
+        session = container.session()
+        tenant = Tenants(
+            name=name,
+            quota_limit=1_000_000,
+            state="active",
+        )
+        session.add(tenant)
+        await session.flush()
+        return tenant.id
+
+
+async def _create_space_and_flow_for_tenant(
+    *,
+    db_container,
+    tenant_id: UUID,
+    owner_user_id: UUID | None,
+    name_prefix: str,
+) -> tuple[UUID, UUID]:
+    async with db_container() as container:
+        session = container.session()
+        space = Spaces(
+            tenant_id=tenant_id,
+            user_id=None,
+            name=f"{name_prefix}-space",
+        )
+        session.add(space)
+        await session.flush()
+        flow = Flows(
+            tenant_id=tenant_id,
+            space_id=space.id,
+            name=f"{name_prefix}-flow",
+            created_by_user_id=owner_user_id,
+            owner_user_id=owner_user_id,
+        )
+        session.add(flow)
+        await session.flush()
+        return space.id, flow.id
+
+
 def _make_builder_plan_spec(*, existing_step_ref: str | None) -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Testplan",
@@ -466,6 +511,132 @@ async def test_ai_builder_repo_release_session_send_requires_matching_lock_token
             lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
         assert released is True
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_create_plan_rejects_cross_tenant_session_reference(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Cross Tenant Plan",
+    )
+    other_tenant_id = await _create_extra_tenant(
+        db_container=db_container,
+        name=f"other-tenant-{uuid4()}",
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        spec = _make_builder_plan_spec(existing_step_ref=None)
+
+        with pytest.raises(IntegrityError):
+            await repo.create_plan(
+                session_id=session.id,
+                tenant_id=other_tenant_id,
+                spec=spec,
+                envelope=_make_plan_envelope(spec),
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_attach_session_files_rejects_cross_tenant_session_reference(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Cross Tenant Attach",
+    )
+    file_id = await _upload_reference_file(
+        client=client,
+        bearer_token=bearer_token,
+        filename="cross-tenant.txt",
+        content=b"reference material",
+    )
+    other_tenant_id = await _create_extra_tenant(
+        db_container=db_container,
+        name=f"other-tenant-{uuid4()}",
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+
+        with pytest.raises(IntegrityError):
+            await repo.attach_session_files(
+                session_id=session.id,
+                tenant_id=other_tenant_id,
+                file_ids=[UUID(file_id)],
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_create_session_rejects_cross_tenant_flow_reference(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Cross Tenant Flow",
+    )
+    other_tenant_id = await _create_extra_tenant(
+        db_container=db_container,
+        name=f"other-tenant-{uuid4()}",
+    )
+    _other_space_id, other_flow_id = await _create_space_and_flow_for_tenant(
+        db_container=db_container,
+        tenant_id=other_tenant_id,
+        owner_user_id=None,
+        name_prefix=f"other-{uuid4()}",
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+
+        with pytest.raises(IntegrityError):
+            await repo.create_session(
+                tenant_id=user.tenant_id,
+                space_id=UUID(space_id),
+                actor_user_id=user.id,
+                target_kind=TargetKind.EDIT,
+                flow_id=other_flow_id,
+            )
 
 
 def _make_plan_envelope(spec: FlowDraftSpecCore) -> PlannerPlanEnvelope:
