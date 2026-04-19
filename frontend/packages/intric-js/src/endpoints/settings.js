@@ -97,6 +97,84 @@ export function initSettings(client) {
         requestBody: { "application/json": patch }
       });
       return res;
+    },
+
+    /**
+     * Get flow evidence export policy for the current tenant.
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').FlowEvidencePolicy>}
+     */
+    getFlowEvidencePolicy: async () => {
+      const res = await client.fetch("/api/v1/settings/flow-evidence-policy", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Update flow evidence export policy for the current tenant.
+     * @param {Partial<import('../types/resources').FlowEvidencePolicy>} patch
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').FlowEvidencePolicy>}
+     */
+    updateFlowEvidencePolicy: async (patch) => {
+      const res = await client.fetch("/api/v1/settings/flow-evidence-policy", {
+        method: "patch",
+        requestBody: { "application/json": patch }
+      });
+      return res;
+    },
+
+    /**
+     * Get layered flow retention policy for the current tenant.
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').FlowRetentionPolicy>}
+     */
+    getFlowRetentionPolicy: async () => {
+      const res = await client.fetch("/api/v1/settings/flow-retention-policy", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Update layered flow retention policy for the current tenant.
+     * @param {Partial<import('../types/resources').FlowRetentionPolicy>} patch
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').FlowRetentionPolicy>}
+     */
+    updateFlowRetentionPolicy: async (patch) => {
+      const res = await client.fetch("/api/v1/settings/flow-retention-policy", {
+        method: "patch",
+        requestBody: { "application/json": patch }
+      });
+      return res;
+    },
+
+    /**
+     * Get AI Builder budget settings for the current tenant.
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').AIBuilderBudgetSettings>}
+     */
+    getAIBuilderBudgetSettings: async () => {
+      const res = await client.fetch("/api/v1/settings/ai-builder-budget", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Update AI Builder budget settings for the current tenant.
+     * @param {Partial<import('../types/resources').AIBuilderBudgetSettings>} patch
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').AIBuilderBudgetSettings>}
+     */
+    updateAIBuilderBudgetSettings: async (patch) => {
+      const res = await client.fetch("/api/v1/settings/ai-builder-budget", {
+        method: "patch",
+        requestBody: { "application/json": patch }
+      });
+      return res;
     }
   };
 }

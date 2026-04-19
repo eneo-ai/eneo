@@ -75,6 +75,9 @@ export type FlowInputLimits = {
   max_files_per_run: number | null;
   audio_max_files_per_run: number | null;
 };
+export type FlowEvidencePolicy = components["schemas"]["FlowEvidencePolicyPublic"];
+export type FlowRetentionPolicy = components["schemas"]["FlowRetentionPolicyPublic"];
+export type AIBuilderBudgetSettings = components["schemas"]["AIBuilderBudgetSettingsPublic"];
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
 export type Space = components["schemas"]["SpacePublic"];
 export type SpaceSparse = components["schemas"]["SpaceSparse"];

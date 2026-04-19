@@ -1,4 +1,4 @@
-import { Callout } from 'nextra/components'
+import { Callout } from "nextra/components";
 
 # Flows API Guide
 
@@ -28,7 +28,9 @@ For the underlying auth model, see:
 - <a href="/guides/authentication">Authentication & OIDC</a>
 
 <Callout type="warning">
-Service keys do not get broad operator access. If a service key needs access to its own run evidence, it must have explicit <code>flow_evidence</code> capability on the key.
+  Service keys do not get broad operator access. If a service key needs access
+  to its own run evidence, it must have explicit <code>flow_evidence</code>{" "}
+  capability on the key.
 </Callout>
 
 ## Authentication and principal model
@@ -50,33 +52,33 @@ That distinction matters because service keys and ordinary human members are int
 
 ### Endpoint families that require a user principal
 
-| Endpoint family | Why it requires a user principal |
-| --- | --- |
-| Draft CRUD (`POST/PATCH/DELETE /flows/…`) | Drafts are user-principal-owned authoring objects |
-| Publish / unpublish | Publishing is part of authoring governance |
-| Template management and inspection | Template configuration belongs to draft authoring |
-| Flow-assistant authoring | Step-assistant configuration belongs to draft authoring |
-| AI Builder | Session-based user-principal drafting workflow |
-| `GET /api/v1/flows/{id}/` | Returns the current draft/current-definition view, not a service-key runtime projection |
+| Endpoint family                           | Why it requires a user principal                                                        |
+| ----------------------------------------- | --------------------------------------------------------------------------------------- |
+| Draft CRUD (`POST/PATCH/DELETE /flows/…`) | Drafts are user-principal-owned authoring objects                                       |
+| Publish / unpublish                       | Publishing is part of authoring governance                                              |
+| Template management and inspection        | Template configuration belongs to draft authoring                                       |
+| Flow-assistant authoring                  | Step-assistant configuration belongs to draft authoring                                 |
+| AI Builder                                | Session-based user-principal drafting workflow                                          |
+| `GET /api/v1/flows/{id}/`                 | Returns the current draft/current-definition view, not a service-key runtime projection |
 
 ### Service-key runtime endpoint families
 
-| Endpoint family | Current service-key rule |
-| --- | --- |
-| `GET /api/v1/flows/?space_id=...` | Allowed for published-flow discovery in the key's scoped space |
-| `GET /api/v1/flows/{id}/published/` | Allowed for a runtime-safe single-flow published projection |
-| `GET /run-contract/` and `GET /input-policy/` | Allowed for published-flow runtime discovery |
-| `GET /graph/` | Allowed for published/runtime-safe topology and own-run snapshots |
-| Runtime uploads | Allowed for published flows |
-| Run creation | Allowed for published flows |
-| List / get / cancel / redispatch runs | Own runs only |
-| Step outputs | Own runs only |
-| Artifact downloads | Own runs only |
-| Evidence | Own runs only, and only when explicit evidence capability allows it |
+| Endpoint family                               | Current service-key rule                                            |
+| --------------------------------------------- | ------------------------------------------------------------------- |
+| `GET /api/v1/flows/?space_id=...`             | Allowed for published-flow discovery in the key's scoped space      |
+| `GET /api/v1/flows/{id}/published/`           | Allowed for a runtime-safe single-flow published projection         |
+| `GET /run-contract/` and `GET /input-policy/` | Allowed for published-flow runtime discovery                        |
+| `GET /graph/`                                 | Allowed for published/runtime-safe topology and own-run snapshots   |
+| Runtime uploads                               | Allowed for published flows                                         |
+| Run creation                                  | Allowed for published flows                                         |
+| List / get / cancel / redispatch runs         | Own runs only                                                       |
+| Step outputs                                  | Own runs only                                                       |
+| Artifact downloads                            | Own runs only                                                       |
+| Evidence                                      | Own runs only, and only when explicit evidence capability allows it |
 
 ![High-level Flows lifecycle diagram showing user-principal-only authoring, publishing to a versioned definition, and runtime execution with outputs, artifacts, and evidence](/diagrams/flows-overview.svg)
 
-*Flows at a glance: user principals author and publish drafts, API consumers run published versions, and completed runs produce outputs, artifacts, and evidence.*
+_Flows at a glance: user principals author and publish drafts, API consumers run published versions, and completed runs produce outputs, artifacts, and evidence._
 
 ## Common application patterns
 
@@ -107,6 +109,37 @@ For most consumer apps, the safest order is:
 6. create a run with an optional `Idempotency-Key`
 7. poll the run and step endpoints
 8. fetch artifacts or evidence if your principal is allowed to
+
+## Tenant flow settings for runtime operators
+
+Eneo also exposes **tenant-level Flow runtime settings** for operators and platform owners.
+
+These are admin surfaces, not end-user runtime endpoints:
+
+| Setting area          | Endpoint                                           | Purpose                                                                                                                                     |
+| --------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Flow input limits     | `GET/PATCH /api/v1/settings/flow-input-limits`     | Control maximum file/audio sizes and file-count limits                                                                                      |
+| Flow evidence policy  | `GET/PATCH /api/v1/settings/flow-evidence-policy`  | Control stricter raw evidence export behavior, especially for classification-3 spaces                                                       |
+| Flow retention policy | `GET/PATCH /api/v1/settings/flow-retention-policy` | Configure shared default retention plus class-specific overrides for source audio, transcripts, generated artifacts, and run/debug evidence |
+| AI Builder budget     | `GET/PATCH /api/v1/settings/ai-builder-budget`     | Tune planner token-budget behavior for AI Builder sessions                                                                                  |
+
+### Flow retention policy shape
+
+`/api/v1/settings/flow-retention-policy` uses a **layered** model:
+
+- `shared_default_days`
+- `source_audio_days`
+- `transcript_text_days`
+- `generated_artifact_days`
+- `run_debug_evidence_days`
+
+The idea is:
+
+- use `shared_default_days` as the baseline
+- override only the sensitive classes that need stricter handling
+- send `null` in a PATCH request to clear an override and fall back to the shared/default hierarchy
+
+This is the intended operator-facing seam for care-data workflows such as Tal till resultat. Avoid hardcoding these policies in consumer apps when an admin/operator setting is the more appropriate control point.
 
 ### 1) Discover what the published flow expects
 
@@ -144,7 +177,11 @@ Example response:
 ```
 
 <Callout type="info">
-The example above shows a representative subset of <code>runtime_paths</code> for readability. In the real response, the server returns the full runtime path set. These paths are <strong>server-relative</strong> (for example <code>/api/v1/...</code>), so callers should prepend their API base URL when needed.
+  The example above shows a representative subset of <code>runtime_paths</code>{" "}
+  for readability. In the real response, the server returns the full runtime
+  path set. These paths are <strong>server-relative</strong> (for example{" "}
+  <code>/api/v1/...</code>), so callers should prepend their API base URL when
+  needed.
 </Callout>
 
 #### Get the run contract
@@ -154,7 +191,11 @@ GET /api/v1/flows/{flow_id}/run-contract/
 ```
 
 <Callout type="info">
-If you are integrating with a service key, the recommended discovery path is: list published flows in the scoped space, fetch <code>GET /api/v1/flows/{'{flow_id}'}/published/</code>, then call <code>run-contract</code> and <code>input-policy</code>. Do not build service-key discovery around <code>GET /api/v1/flows/{'{flow_id}'}/</code>.
+  If you are integrating with a service key, the recommended discovery path is:
+  list published flows in the scoped space, fetch{" "}
+  <code>GET /api/v1/flows/{"{flow_id}"}/published/</code>, then call{" "}
+  <code>run-contract</code> and <code>input-policy</code>. Do not build
+  service-key discovery around <code>GET /api/v1/flows/{"{flow_id}"}/</code>.
 </Callout>
 
 This endpoint is the canonical published runtime contract. It includes:
@@ -204,7 +245,8 @@ Response shape:
 ```
 
 <Callout type="info">
-If your UI caches flow configuration, pass <code>published_flow_version</code> back into run creation so the server can reject stale submissions cleanly.
+  If your UI caches flow configuration, pass <code>published_flow_version</code>{" "}
+  back into run creation so the server can reject stale submissions cleanly.
 </Callout>
 
 #### Get the input policy
@@ -317,12 +359,12 @@ This is especially useful for browser retries, webhook retries, and unreliable n
 
 Key endpoints:
 
-| Purpose | Endpoint |
-| --- | --- |
-| List runs for a flow | `GET /api/v1/flows/{flow_id}/runs/` |
-| Get one run | `GET /api/v1/flows/{flow_id}/runs/{run_id}/` |
-| Cancel a run | `POST /api/v1/flows/{flow_id}/runs/{run_id}/cancel/` |
-| Redispatch a run | `POST /api/v1/flows/{flow_id}/runs/{run_id}/redispatch/` |
+| Purpose              | Endpoint                                                 |
+| -------------------- | -------------------------------------------------------- |
+| List runs for a flow | `GET /api/v1/flows/{flow_id}/runs/`                      |
+| Get one run          | `GET /api/v1/flows/{flow_id}/runs/{run_id}/`             |
+| Cancel a run         | `POST /api/v1/flows/{flow_id}/runs/{run_id}/cancel/`     |
+| Redispatch a run     | `POST /api/v1/flows/{flow_id}/runs/{run_id}/redispatch/` |
 
 Typical polling loop:
 
@@ -352,7 +394,7 @@ Example run response:
   "tenant_id": "00000000-0000-0000-0000-000000000010",
   "trace_id": "00000000-0000-0000-0000-000000000302",
   "status": "queued",
-  "input_payload_json": {"employee_name": "Alex Example"},
+  "input_payload_json": { "employee_name": "Alex Example" },
   "output_payload_json": null,
   "error_message": null,
   "job_id": "00000000-0000-0000-0000-000000000401",
@@ -458,20 +500,20 @@ In the web UI, that same trace can open the source document and highlight the ma
 
 Use this table as the canonical quick-reference for runtime access decisions.
 
-| Endpoint family | Service key | Editor | Viewer | Space owner / admin | Tenant admin |
-| --- | --- | --- | --- | --- | --- |
-| Draft CRUD | No | Per user-principal authoring policy | No | Yes | Yes |
-| Publish / unpublish | No | No | No | Yes | Yes |
-| Template management / flow-assistant authoring | No | Per user-principal authoring policy | No | Yes | Yes |
-| AI Builder | No | Per user-principal authoring policy | No | Yes | Yes |
-| List published flows in a space | Yes, published only in scoped space | Yes | Yes | Yes | Yes |
-| `GET /api/v1/flows/{id}/published/` | Yes | Yes | Yes | Yes | Yes |
-| `GET /api/v1/flows/{id}/` | No | Yes | Read-only if visible by human policy | Yes | Yes |
-| Run-contract / input-policy / runtime-safe graph | Yes | Yes | Yes | Yes | Yes |
-| Create run | Yes | Yes | No | Yes | Yes |
-| List / get / cancel / redispatch runs | Own runs only | Own runs only | No | In-scope runs | Tenant-wide runs |
-| Step outputs / artifacts | Own runs only | Own runs only | No | In-scope runs | Tenant-wide runs |
-| Evidence view / export | Own runs only, explicit `flow_evidence` capability required | Own runs, policy-gated | No | In-scope runs, policy-gated | Tenant-wide, policy-gated |
+| Endpoint family                                  | Service key                                                 | Editor                              | Viewer                               | Space owner / admin         | Tenant admin              |
+| ------------------------------------------------ | ----------------------------------------------------------- | ----------------------------------- | ------------------------------------ | --------------------------- | ------------------------- |
+| Draft CRUD                                       | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
+| Publish / unpublish                              | No                                                          | No                                  | No                                   | Yes                         | Yes                       |
+| Template management / flow-assistant authoring   | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
+| AI Builder                                       | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
+| List published flows in a space                  | Yes, published only in scoped space                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| `GET /api/v1/flows/{id}/published/`              | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| `GET /api/v1/flows/{id}/`                        | No                                                          | Yes                                 | Read-only if visible by human policy | Yes                         | Yes                       |
+| Run-contract / input-policy / runtime-safe graph | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| Create run                                       | Yes                                                         | Yes                                 | No                                   | Yes                         | Yes                       |
+| List / get / cancel / redispatch runs            | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| Step outputs / artifacts                         | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| Evidence view / export                           | Own runs only, explicit `flow_evidence` capability required | Own runs, policy-gated              | No                                   | In-scope runs, policy-gated | Tenant-wide, policy-gated |
 
 ### Principal visibility rules
 
@@ -523,16 +565,16 @@ If your application also needs to create or maintain flows, there are two user-p
 
 #### Direct flow authoring
 
-| Purpose | Endpoint |
-| --- | --- |
-| Create draft | `POST /api/v1/flows/` |
-| List drafts / published flows | `GET /api/v1/flows/?space_id=...` |
-| Get draft | `GET /api/v1/flows/{flow_id}/` |
-| Update draft | `PATCH /api/v1/flows/{flow_id}/` |
-| Publish | `POST /api/v1/flows/{flow_id}/publish/` |
-| Unpublish | `POST /api/v1/flows/{flow_id}/unpublish/` |
-| Delete draft | `DELETE /api/v1/flows/{flow_id}/` |
-| Upload DOCX template asset | `POST /api/v1/flows/{flow_id}/template-files/` |
+| Purpose                       | Endpoint                                       |
+| ----------------------------- | ---------------------------------------------- |
+| Create draft                  | `POST /api/v1/flows/`                          |
+| List drafts / published flows | `GET /api/v1/flows/?space_id=...`              |
+| Get draft                     | `GET /api/v1/flows/{flow_id}/`                 |
+| Update draft                  | `PATCH /api/v1/flows/{flow_id}/`               |
+| Publish                       | `POST /api/v1/flows/{flow_id}/publish/`        |
+| Unpublish                     | `POST /api/v1/flows/{flow_id}/unpublish/`      |
+| Delete draft                  | `DELETE /api/v1/flows/{flow_id}/`              |
+| Upload DOCX template asset    | `POST /api/v1/flows/{flow_id}/template-files/` |
 
 #### AI Builder
 
@@ -547,14 +589,14 @@ Important current behavior:
 
 ## Troubleshooting
 
-| Status | Scenario | Typical machine-readable code | What to do |
-| --- | --- | --- | --- |
-| `400` | Caller tries to run a draft flow | `flow_not_published` | Publish the draft first |
-| `400` | Reused idempotency key with a different payload | `flow_run_idempotency_conflict` | Generate a new idempotency key for the new payload |
-| `403` | Wrong space scope on API key | `insufficient_scope` | Use a key scoped to the flow's space or a broader valid scope |
-| `403` | Caller tries to inspect someone else's run | `flow_run_access_denied` | Fetch only runs visible to the current principal |
-| `403` | Service key lacks evidence capability | `flow_run_evidence_forbidden` | Add the right `flow_evidence` resource permission |
-| `403` | Raw export blocked by policy | `flow_run_evidence_raw_export_forbidden` | Fall back to redacted export or adjust tenant policy intentionally |
+| Status | Scenario                                        | Typical machine-readable code            | What to do                                                         |
+| ------ | ----------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------ |
+| `400`  | Caller tries to run a draft flow                | `flow_not_published`                     | Publish the draft first                                            |
+| `400`  | Reused idempotency key with a different payload | `flow_run_idempotency_conflict`          | Generate a new idempotency key for the new payload                 |
+| `403`  | Wrong space scope on API key                    | `insufficient_scope`                     | Use a key scoped to the flow's space or a broader valid scope      |
+| `403`  | Caller tries to inspect someone else's run      | `flow_run_access_denied`                 | Fetch only runs visible to the current principal                   |
+| `403`  | Service key lacks evidence capability           | `flow_run_evidence_forbidden`            | Add the right `flow_evidence` resource permission                  |
+| `403`  | Raw export blocked by policy                    | `flow_run_evidence_raw_export_forbidden` | Fall back to redacted export or adjust tenant policy intentionally |
 
 ## Practical takeaway
 

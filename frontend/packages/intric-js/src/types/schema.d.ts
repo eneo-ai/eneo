@@ -11582,6 +11582,32 @@ export interface components {
       /** Allow Service Key Raw Export Class3 */
       allow_service_key_raw_export_class3?: boolean | null;
     };
+    /** FlowRetentionPolicyPublic */
+    FlowRetentionPolicyPublic: {
+      /** Shared Default Days */
+      shared_default_days?: number | null;
+      /** Source Audio Days */
+      source_audio_days?: number | null;
+      /** Transcript Text Days */
+      transcript_text_days?: number | null;
+      /** Generated Artifact Days */
+      generated_artifact_days?: number | null;
+      /** Run Debug Evidence Days */
+      run_debug_evidence_days?: number | null;
+    };
+    /** FlowRetentionPolicyUpdate */
+    FlowRetentionPolicyUpdate: {
+      /** Shared Default Days */
+      shared_default_days?: number | null;
+      /** Source Audio Days */
+      source_audio_days?: number | null;
+      /** Transcript Text Days */
+      transcript_text_days?: number | null;
+      /** Generated Artifact Days */
+      generated_artifact_days?: number | null;
+      /** Run Debug Evidence Days */
+      run_debug_evidence_days?: number | null;
+    };
     /** FlowInputLimitsPublic */
     FlowInputLimitsPublic: {
       /** File Max Size Bytes */
@@ -23464,6 +23490,59 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FlowEvidencePolicyPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_flow_retention_policy_api_v1_settings_flow_retention_policy_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRetentionPolicyPublic"];
+        };
+      };
+    };
+  };
+  update_flow_retention_policy_api_v1_settings_flow_retention_policy_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRetentionPolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRetentionPolicyPublic"];
         };
       };
       /** @description Validation Error */
