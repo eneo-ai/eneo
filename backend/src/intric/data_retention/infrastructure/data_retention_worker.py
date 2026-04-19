@@ -16,6 +16,11 @@ class DeletedCounts(TypedDict):
     questions: int
     app_runs: int
     sessions: int
+    flow_debug_rows: int
+    flow_attempt_provenance: int
+    flow_artifact_rows: int
+    flow_artifact_files: int
+    flow_artifact_reconciliations: int
     total: int
 
 
@@ -50,6 +55,11 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             "questions": 0,
             "app_runs": 0,
             "sessions": 0,
+            "flow_debug_rows": 0,
+            "flow_attempt_provenance": 0,
+            "flow_artifact_rows": 0,
+            "flow_artifact_files": 0,
+            "flow_artifact_reconciliations": 0,
             "total": 0,
         },
         "errors": [],
@@ -110,6 +120,32 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
                 logger.error(error_msg, exc_info=True)
                 results["errors"].append(error_msg)
                 results["success"] = False
+
+            try:
+                async with session.begin():
+                    flow_runtime_counts = (
+                        await data_retention_service.cleanup_old_flow_runtime_data()
+                    )
+                    results["deleted"]["flow_debug_rows"] = flow_runtime_counts[
+                        "debug_step_results"
+                    ]
+                    results["deleted"]["flow_attempt_provenance"] = flow_runtime_counts[
+                        "debug_step_attempts"
+                    ]
+                    results["deleted"]["flow_artifact_rows"] = flow_runtime_counts[
+                        "generated_artifact_rows"
+                    ]
+                    results["deleted"]["flow_artifact_files"] = flow_runtime_counts[
+                        "generated_artifact_files"
+                    ]
+                    results["deleted"]["flow_artifact_reconciliations"] = (
+                        flow_runtime_counts["reconciled_artifact_references"]
+                    )
+            except Exception as e:
+                error_msg = f"Failed to clean old flow runtime data: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                results["errors"].append(error_msg)
+                results["success"] = False
         finally:
             # Always reset override, even on exception
             container.session.reset_override()
@@ -124,6 +160,11 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         results["deleted"]["questions"]
         + results["deleted"]["app_runs"]
         + results["deleted"]["sessions"]
+        + results["deleted"]["flow_debug_rows"]
+        + results["deleted"]["flow_attempt_provenance"]
+        + results["deleted"]["flow_artifact_rows"]
+        + results["deleted"]["flow_artifact_files"]
+        + results["deleted"]["flow_artifact_reconciliations"]
     )
 
     # Log summary
@@ -133,7 +174,12 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             f"deleted {results['deleted']['total']} records in {duration:.2f}s "
             f"(questions: {results['deleted']['questions']}, "
             f"app_runs: {results['deleted']['app_runs']}, "
-            f"sessions: {results['deleted']['sessions']})"
+            f"sessions: {results['deleted']['sessions']}, "
+            f"flow_debug_rows: {results['deleted']['flow_debug_rows']}, "
+            f"flow_attempt_provenance: {results['deleted']['flow_attempt_provenance']}, "
+            f"flow_artifact_rows: {results['deleted']['flow_artifact_rows']}, "
+            f"flow_artifact_files: {results['deleted']['flow_artifact_files']}, "
+            f"flow_artifact_reconciliations: {results['deleted']['flow_artifact_reconciliations']})"
         )
     else:
         logger.warning(
