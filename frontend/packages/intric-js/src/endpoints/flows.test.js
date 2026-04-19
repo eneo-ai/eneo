@@ -116,4 +116,89 @@ describe("flows templates endpoint", () => {
       }
     });
   });
+
+  it("normalizes file id ordering before creating flow runs", async () => {
+    const fetch = vi.fn(async () => ({ id: "run-1" }));
+    const flows = initFlows({ fetch });
+
+    await flows.runs.create({
+      flow: { id: "flow-1" },
+      file_ids: ["file-3", "file-1", "file-2"],
+      step_inputs: {
+        "step-b": { file_ids: ["file-5", "file-4"] },
+        "step-a": { file_ids: ["file-9"] }
+      }
+    });
+
+    expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
+      file_ids: ["file-1", "file-2", "file-3"],
+      step_inputs: {
+        "step-a": { file_ids: ["file-9"] },
+        "step-b": { file_ids: ["file-4", "file-5"] }
+      }
+    });
+  });
+
+  it("forwards flow run idempotency header when provided", async () => {
+    const fetch = vi.fn(async () => ({ id: "run-1" }));
+    const flows = initFlows({ fetch });
+
+    await flows.runs.create({
+      flow: { id: "flow-1" },
+      idempotencyKey: "flow-run:test-key",
+      file_ids: ["file-1"]
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1].headers).toEqual({
+      "Idempotency-Key": "flow-run:test-key"
+    });
+  });
+
+  it("derives a stable upload-intent idempotency key", async () => {
+    const flows = initFlows({ fetch: vi.fn() });
+
+    const keyA = await flows.runs.deriveUploadIntentIdempotencyKey({
+      flowId: "flow-1",
+      expectedFlowVersion: 7,
+      input_payload_json: { b: 2, a: 1, nested: { y: 2, x: 1 } },
+      step_inputs: {
+        "step-b": { file_ids: ["file-3", "file-2"] },
+        "step-a": { file_ids: ["file-1"] }
+      },
+      file_ids: ["file-9", "file-4"]
+    });
+    const keyB = await flows.runs.deriveUploadIntentIdempotencyKey({
+      flowId: "flow-1",
+      expectedFlowVersion: 7,
+      input_payload_json: { nested: { x: 1, y: 2 }, a: 1, b: 2 },
+      step_inputs: {
+        "step-a": { file_ids: ["file-1"] },
+        "step-b": { file_ids: ["file-2", "file-3"] }
+      },
+      file_ids: ["file-4", "file-9"]
+    });
+
+    expect(keyA).toBe(keyB);
+    expect(keyA).toMatch(/^flow-run:[a-f0-9]{64}$/);
+  });
+
+  it("derives different upload-intent idempotency keys when the run intent changes", async () => {
+    const flows = initFlows({ fetch: vi.fn() });
+
+    const keyA = await flows.runs.deriveUploadIntentIdempotencyKey({
+      flowId: "flow-1",
+      file_ids: ["file-1"]
+    });
+    const keyB = await flows.runs.deriveUploadIntentIdempotencyKey({
+      flowId: "flow-1",
+      file_ids: ["file-2"]
+    });
+    const keyC = await flows.runs.deriveUploadIntentIdempotencyKey({
+      flowId: "flow-2",
+      file_ids: ["file-1"]
+    });
+
+    expect(new Set([keyA, keyB, keyC]).size).toBe(3);
+  });
 });

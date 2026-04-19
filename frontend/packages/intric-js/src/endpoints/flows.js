@@ -6,6 +6,117 @@
 export function initFlows(client) {
   /** @param {string} path @param {object} options */
   const _fetch = (path, options) => /** @type {any} */ (client).fetch(path, options);
+  const _textEncoder = new TextEncoder();
+
+  /**
+   * @param {any} value
+   * @returns {any}
+   */
+  const _stableSortObjectKeys = (value) => {
+    if (Array.isArray(value)) {
+      return value.map(_stableSortObjectKeys);
+    }
+    if (
+      value &&
+      typeof value === "object" &&
+      !(value instanceof Date) &&
+      !(value instanceof File)
+    ) {
+      return Object.keys(value)
+        .sort()
+        .reduce((acc, key) => {
+          acc[key] = _stableSortObjectKeys(value[key]);
+          return acc;
+        }, /** @type {Record<string, any>} */ ({}));
+    }
+    return value;
+  };
+
+  /**
+   * @param {ArrayBuffer} buffer
+   * @returns {string}
+   */
+  const _hexFromBuffer = (buffer) =>
+    Array.from(new Uint8Array(buffer))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+
+  /**
+   * @param {Record<string, {file_ids?: string[]}> | undefined} step_inputs
+   * @returns {Record<string, {file_ids?: string[]}> | undefined}
+   */
+  const _normalizeStepInputs = (step_inputs) =>
+    step_inputs == null
+      ? undefined
+      : Object.keys(step_inputs)
+          .sort()
+          .reduce((acc, stepId) => {
+            const stepInput = step_inputs[stepId] ?? {};
+            acc[stepId] = {
+              ..._stableSortObjectKeys(stepInput),
+              ...(stepInput.file_ids ? { file_ids: [...stepInput.file_ids].sort() } : {})
+            };
+            return acc;
+          }, /** @type {Record<string, any>} */ ({}));
+
+  /**
+   * @param {{
+   *   flowId: string,
+   *   expectedFlowVersion?: number,
+   *   input_payload_json?: any,
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   file_ids?: string[]
+   * }} params
+   * @returns {{
+   *   flow_id: string,
+   *   expected_flow_version?: number,
+   *   input_payload_json?: any,
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   file_ids?: string[]
+   * }}
+   */
+  const _normalizeRunIntent = ({
+    flowId,
+    expectedFlowVersion,
+    input_payload_json,
+    step_inputs,
+    file_ids
+  }) => {
+    const normalizedStepInputs = _normalizeStepInputs(step_inputs);
+    return {
+      flow_id: flowId,
+      ...(expectedFlowVersion != null ? { expected_flow_version: expectedFlowVersion } : {}),
+      ...(input_payload_json !== undefined
+        ? { input_payload_json: _stableSortObjectKeys(input_payload_json) }
+        : {}),
+      ...(normalizedStepInputs ? { step_inputs: normalizedStepInputs } : {}),
+      ...(file_ids?.length ? { file_ids: [...file_ids].sort() } : {})
+    };
+  };
+
+  /**
+   * @param {{
+   *   flowId: string,
+   *   expectedFlowVersion?: number,
+   *   input_payload_json?: any,
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   file_ids?: string[]
+   * }} params
+   * @returns {Promise<string>}
+   */
+  const _deriveUploadIntentIdempotencyKey = async (params) => {
+    if (!globalThis.crypto?.subtle) {
+      throw new Error("Web Crypto is required to derive Flow run idempotency keys.");
+    }
+
+    const normalizedPayload = _normalizeRunIntent(params);
+    const digest = await globalThis.crypto.subtle.digest(
+      "SHA-256",
+      _textEncoder.encode(JSON.stringify(normalizedPayload))
+    );
+    return `flow-run:${_hexFromBuffer(digest)}`;
+  };
+
   /**
    * @param {{flowId?: string, flow_id?: string}} run
    * @param {string} operation
@@ -304,6 +415,7 @@ export function initFlows(client) {
        * @param {{
        *  flow: {id: string},
        *  expected_flow_version?: number,
+       *  idempotencyKey?: string,
        *  input_payload_json?: any,
        *  step_inputs?: Record<string, {file_ids: string[]}>,
        *  file_ids?: string[]
@@ -313,21 +425,40 @@ export function initFlows(client) {
       create: async ({
         flow,
         expected_flow_version,
+        idempotencyKey,
         input_payload_json,
         step_inputs,
         file_ids
       }) => {
+        const { flow_id: _ignoredFlowId, ...normalizedRequest } = _normalizeRunIntent({
+          flowId: flow.id,
+          expectedFlowVersion: expected_flow_version,
+          input_payload_json,
+          step_inputs,
+          file_ids
+        });
         return _fetch(`/api/v1/flows/${flow.id}/runs/`, {
           method: "post",
+          headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
           requestBody: {
-            "application/json": {
-              ...(expected_flow_version != null ? { expected_flow_version } : {}),
-              ...(input_payload_json !== undefined ? { input_payload_json } : {}),
-              ...(step_inputs ? { step_inputs } : {}),
-              ...(file_ids?.length ? { file_ids } : {})
-            }
+            "application/json": normalizedRequest
           }
         });
+      },
+
+      /**
+       * Derive a stable Idempotency-Key value for upload-driven Flow runs.
+       * @param {{
+       *  flowId: string,
+       *  expectedFlowVersion?: number,
+       *  input_payload_json?: any,
+       *  step_inputs?: Record<string, {file_ids?: string[]}>,
+       *  file_ids?: string[]
+       * }} params
+       * @returns {Promise<string>}
+       */
+      deriveUploadIntentIdempotencyKey: async (params) => {
+        return _deriveUploadIntentIdempotencyKey(params);
       },
 
       /**

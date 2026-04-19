@@ -387,6 +387,33 @@ Run creation supports caller-supplied idempotency. Reusing the same key with the
 
 This is especially useful for browser retries, webhook retries, and unreliable networks.
 
+If you use `frontend/packages/intric-js`, the Flow client now accepts `idempotencyKey` on `flows.runs.create(...)` and exposes `flows.runs.deriveUploadIntentIdempotencyKey(...)` to build a stable key from the published flow id/version plus uploaded file ids and step input attachments.
+
+Example:
+
+```js
+const idempotencyKey = await client.flows.runs.deriveUploadIntentIdempotencyKey(
+  {
+    flowId,
+    expectedFlowVersion: runContract.published_flow_version,
+    file_ids: [uploadedFile.id],
+    step_inputs: {
+      [stepId]: { file_ids: [runtimeUpload.id] },
+    },
+  },
+);
+
+await client.flows.runs.create({
+  flow: { id: flowId },
+  expected_flow_version: runContract.published_flow_version,
+  file_ids: [uploadedFile.id],
+  step_inputs: {
+    [stepId]: { file_ids: [runtimeUpload.id] },
+  },
+  idempotencyKey,
+});
+```
+
 ### 4) Monitor and control the run
 
 Key endpoints:

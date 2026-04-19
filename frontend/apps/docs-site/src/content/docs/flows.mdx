@@ -108,6 +108,8 @@ The runtime API exposes this through:
 
 Those endpoints are the canonical way for a client to discover what a published flow expects before starting a run.
 
+For API consumers using `frontend/packages/intric-js`, the Flow SDK also supports caller-supplied run idempotency headers and a helper for deriving stable upload-intent idempotency keys after runtime files have been uploaded but before the published run is created.
+
 ### How form fields map to runtime payloads
 
 If a published flow exposes form fields, the client sends those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field types and required flags.
