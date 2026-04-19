@@ -20,11 +20,11 @@ declare -a EXPECT_PATHS=(
 )
 declare -a EXPECT_PATTERNS=(
   "backend/tests/unit/test_ai_builder_openapi_contract.py::/api/v1/flows/ai-builder/sessions"
-  "frontend/packages/intric-js/src/intric.js::flows: initFlows(client)"
-  "frontend/apps/docs-site/src/content/docs/flows.mdx::### AI Builder"
-  "frontend/apps/docs-site/src/content/guides/flows-api-guide.mdx::#### AI Builder"
+  "frontend/packages/intric-js/src/intric.js::flows\\s*:\\s*initFlows\\("
+  "frontend/apps/docs-site/src/content/docs/flows.mdx::^### AI Builder$"
+  "frontend/apps/docs-site/src/content/guides/flows-api-guide.mdx::^#### AI Builder$"
   "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.ts::/api/v1/flows/ai-builder/sessions"
-  "frontend/apps/web/src/lib/features/flows/ai-builder/protocol.ts::requirements_summary"
+  "frontend/apps/web/src/lib/features/flows/ai-builder/protocol.ts::\\|\\s*\"requirements_summary\""
 )
 declare -a REJECT_PATTERNS=()
 
@@ -36,8 +36,8 @@ Usage:
 Options:
   --backend-openapi-test       Run backend/tests/unit/test_ai_builder_openapi_contract.py
   --expect-path <path>         Add another required file path
-  --expect-pattern <spec>      Require FILE::PATTERN to match (repeatable)
-  --reject-pattern <spec>      Require FILE::PATTERN to be absent (repeatable)
+  --expect-pattern <spec>      Require FILE::REGEX to match (repeatable)
+  --reject-pattern <spec>      Require FILE::REGEX to be absent (repeatable)
   --container <name>           Override docker container name (default: eneo-41ae93-eneo-1)
   --allow-local                Allow host pytest fallback when container is unavailable
   --verbose                    Print successful checks too
@@ -118,7 +118,7 @@ if [[ "${#EXPECT_PATTERNS[@]}" -gt 0 ]]; then
       failures=$((failures + 1))
       continue
     fi
-    if ! rg -n --fixed-strings "$pattern" "$file" >/dev/null 2>&1; then
+    if ! rg -n -e "$pattern" "$file" >/dev/null 2>&1; then
       echo "[pattern-missing] $file :: $pattern" >&2
       failures=$((failures + 1))
     elif [[ "$VERBOSE" -eq 1 ]]; then
@@ -141,7 +141,7 @@ if [[ "${#REJECT_PATTERNS[@]}" -gt 0 ]]; then
       failures=$((failures + 1))
       continue
     fi
-    if rg -n --fixed-strings "$pattern" "$file" >/dev/null 2>&1; then
+    if rg -n -e "$pattern" "$file" >/dev/null 2>&1; then
       echo "[reject-pattern-hit] $file :: $pattern" >&2
       failures=$((failures + 1))
     elif [[ "$VERBOSE" -eq 1 ]]; then
@@ -151,12 +151,22 @@ if [[ "${#REJECT_PATTERNS[@]}" -gt 0 ]]; then
 fi
 
 if [[ "$RUN_BACKEND_TEST" -eq 1 ]]; then
+  run_local_backend_test() {
+    echo "[run-local-fallback] uv run --python 3.11 --directory backend pytest tests/unit/test_ai_builder_openapi_contract.py"
+    uv run --python 3.11 --directory backend pytest tests/unit/test_ai_builder_openapi_contract.py
+  }
   if docker ps --format '{{.Names}}' | rg -x "$CONTAINER_NAME" >/dev/null 2>&1; then
     echo "[run] docker exec $CONTAINER_NAME /workspace/.venv/bin/pytest backend/tests/unit/test_ai_builder_openapi_contract.py"
-    docker exec "$CONTAINER_NAME" sh -lc 'cd /workspace && /workspace/.venv/bin/pytest backend/tests/unit/test_ai_builder_openapi_contract.py'
+    if ! docker exec "$CONTAINER_NAME" sh -lc 'cd /workspace && /workspace/.venv/bin/pytest backend/tests/unit/test_ai_builder_openapi_contract.py'; then
+      if [[ "$ALLOW_LOCAL" -eq 1 ]]; then
+        echo "[docker-test-failed] falling back to local uv-based backend test run"
+        run_local_backend_test
+      else
+        exit 1
+      fi
+    fi
   elif [[ "$ALLOW_LOCAL" -eq 1 ]]; then
-    echo "[run-local-fallback] pytest backend/tests/unit/test_ai_builder_openapi_contract.py"
-    pytest backend/tests/unit/test_ai_builder_openapi_contract.py
+    run_local_backend_test
   else
     echo "[container-missing] requested backend OpenAPI test but container '$CONTAINER_NAME' is unavailable; rerun with --allow-local to permit host fallback" >&2
     exit 1
