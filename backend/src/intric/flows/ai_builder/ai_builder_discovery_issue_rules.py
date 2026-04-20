@@ -119,7 +119,11 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
     )
     if not output_intent and not profile.final_output_text_or_docx:
         return False
-    if profile.document_like_input or profile.audio_like_input or profile.case_like_flow:
+    if (
+        profile.document_like_input
+        or profile.audio_like_input
+        or profile.case_like_flow
+    ):
         return True
     return output_intent
 
@@ -171,6 +175,12 @@ def comparison_architecture_is_clear(text: str, answers: dict[str, set[str]]) ->
             "upload multiple pdf",
             "upload several pdf",
             "upload multiple documents",
+            "dokumentpaket",
+            "document package",
+            "flera relaterade pdf",
+            "multiple related pdf",
+            "flera dokument i samma ärende",
+            "multiple documents for the same case",
         ),
     ):
         return True
@@ -248,7 +258,9 @@ def document_cardinality_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if "document_material_scope" in profile.flow_defaults:
         return False
-    if "input_material_mode" in answers and "text" in " ".join(answers["input_material_mode"]):
+    if "input_material_mode" in answers and "text" in " ".join(
+        answers["input_material_mode"]
+    ):
         return False
     if "comparison_scope" in answers:
         return False
@@ -312,6 +324,12 @@ def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
     if mentions_any(
         text,
         (
+            "dokumentpaket",
+            "document package",
+            "flera relaterade pdf",
+            "multiple related pdf",
+            "flera dokument i samma ärende",
+            "multiple documents for the same case",
             "kommunärende",
             "municipal case",
             "case material",
@@ -331,13 +349,23 @@ def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
         ),
     ):
         return False
-    document_scope = answers.get("document_material_scope", set()) or profile.flow_defaults.get(
+    if (
+        profile.output_intent.terminal_output == "structured_text"
+        and not profile.comparison_requested
+    ):
+        return False
+    document_scope = answers.get(
+        "document_material_scope", set()
+    ) or profile.flow_defaults.get(
         "document_material_scope",
         set(),
     )
     if "single_document_case" in document_scope and not profile.comparison_requested:
         return False
-    return mentions_any(text, ("pdf", "document", "documents", "dokument", "files", "filer"))
+    return mentions_any(
+        text,
+        ("pdf", "document", "documents", "dokument", "files", "filer"),
+    )
 
 
 def reader_and_style_is_vague(profile: DiscoveryProfile) -> bool:
@@ -379,7 +407,9 @@ def reader_and_style_is_vague(profile: DiscoveryProfile) -> bool:
         ),
     ):
         return False
-    return mentions_any(text, ("decision support", "beslutsstöd", "report", "rapport", "memo"))
+    return mentions_any(
+        text, ("decision support", "beslutsstöd", "report", "rapport", "memo")
+    )
 
 
 def decision_support_scope_is_vague(profile: DiscoveryProfile) -> bool:
@@ -432,7 +462,9 @@ def decision_support_scope_is_vague(profile: DiscoveryProfile) -> bool:
         ),
     ):
         return False
-    return mentions_any(text, ("decision support", "beslutsstöd", "report", "rapport", "memo"))
+    return mentions_any(
+        text, ("decision support", "beslutsstöd", "report", "rapport", "memo")
+    )
 
 
 def final_pdf_type_is_vague(profile: DiscoveryProfile) -> bool:
@@ -500,7 +532,10 @@ def runtime_metadata_is_vague(profile: DiscoveryProfile) -> bool:
     text = profile.text
     if "runtime_metadata_fields" in answers:
         return False
-    if "runtime_metadata_fields" in profile.flow_defaults and not mentions_runtime_metadata(text):
+    if (
+        "runtime_metadata_fields" in profile.flow_defaults
+        and not mentions_runtime_metadata(text)
+    ):
         return False
     if mentions_runtime_metadata(text):
         return False

@@ -77,6 +77,21 @@ _OUTPUT_REPLACEMENT_PHRASES: tuple[str, ...] = (
     "instead of",
 )
 
+_EXPLICIT_PDF_OUTPUT_REQUEST_MARKERS: tuple[str, ...] = (
+    "skapa en pdf",
+    "skapa pdf",
+    "generera en pdf",
+    "generera pdf",
+    "pdf-rapport",
+    "pdf rapport",
+    "rapport som pdf",
+    "report as pdf",
+    "slutrapport som pdf",
+    "slutresultat som pdf",
+    "resultat som pdf",
+    "output as pdf",
+)
+
 
 def latest_pending_structured_question(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
@@ -619,10 +634,6 @@ def _resolve_direct_output_choice(
         return "structured_json"
     if "structured_text" in output_values:
         return "structured_text"
-    if pdf_generation_values.intersection(
-        {"generated_pdf", "pdf_template_requested"}
-    ) or contains_any_phrase(text, PDF_OUTPUT_CONTEXT_MARKERS):
-        return "pdf_document"
     if contains_any_phrase(
         text,
         (
@@ -633,10 +644,15 @@ def _resolve_direct_output_choice(
             "decision-support text",
             "text summary",
             "textsammanfattning",
+            "kort textsammanfattning",
             "sammanfattning som text",
         ),
-    ):
+    ) and not contains_any_phrase(text, _EXPLICIT_PDF_OUTPUT_REQUEST_MARKERS):
         return "structured_text"
+    if pdf_generation_values.intersection(
+        {"generated_pdf", "pdf_template_requested"}
+    ) or contains_any_phrase(text, PDF_OUTPUT_CONTEXT_MARKERS):
+        return "pdf_document"
     if contains_any_phrase(text, DOCX_CONTEXT_MARKERS):
         return "docx_document"
     return None

@@ -608,6 +608,28 @@ def test_resolve_output_intent_prefers_confirmed_docx_summary_over_pdf_input_ref
     assert intent.terminal_output == "docx_document"
 
 
+def test_resolve_output_intent_prefers_text_summary_over_pdf_input_reference() -> None:
+    prompt = "Bygg ett enkelt flöde som tar ett uppladdat PDF-dokument och returnerar en kort textsammanfattning på svenska."
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "structured_text"
+
+
+def test_resolve_output_intent_keeps_pdf_when_summary_phrase_describes_pdf_content() -> (
+    None
+):
+    prompt = "Bygg ett flöde som skapar en PDF-rapport som innehåller en kort textsammanfattning på svenska."
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "pdf_document"
+
+
 def test_aggregate_freeform_user_text_ignores_structured_answer_messages() -> None:
     text = aggregate_freeform_user_text(
         [

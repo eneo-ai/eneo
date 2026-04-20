@@ -10,25 +10,25 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_models import (
-    ConversationMessage,
-    SessionStatus,
-    RequirementsSummaryPayload,
-)
-from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
     build_discovery_block_message,
     build_discovery_followup,
     build_discovery_followup_text,
 )
-from intric.flows.ai_builder.ai_builder_proposal_processor import (
-    AIBuilderProposalProcessor,
+from intric.flows.ai_builder.ai_builder_models import (
+    ConversationMessage,
+    RequirementsSummaryPayload,
+    SessionStatus,
 )
+from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_prompts import (
     build_clarification_hints,
     build_system_prompt,
     has_confirmed_requirements,
+)
+from intric.flows.ai_builder.ai_builder_proposal_processor import (
+    AIBuilderProposalProcessor,
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
@@ -38,7 +38,6 @@ from intric.flows.ai_builder.ai_builder_tools import (
     CREATE_FLOW_TOOL_NAME,
 )
 from intric.flows.flow import Flow, FlowStep
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -75,7 +74,9 @@ def _make_tool_call(
 
 class TestHandleConfirmRequirements:
     @pytest.mark.asyncio
-    async def test_converts_incomplete_confirmation_into_next_discovery_question(self) -> None:
+    async def test_converts_incomplete_confirmation_into_next_discovery_question(
+        self,
+    ) -> None:
         processor = _make_processor()
         # Short prompt (vague complexity) with document+case signals but
         # unresolved output → triggers final_output_mode (blocking level)
@@ -117,7 +118,9 @@ class TestHandleConfirmRequirements:
         payload = json.loads(events[1]["data"])
         # Vague prompt → both blocking and high_value pass through budget
         assert payload["question_id"] in (
-            "processing_scope", "final_output_mode", "input_material_mode",
+            "processing_scope",
+            "final_output_mode",
+            "input_material_mode",
         )
         assert len(conversation) == 3
         assert conversation[-2].role == "assistant"
@@ -234,17 +237,21 @@ class TestHandleConfirmRequirements:
 
 class TestProposalGating:
     @pytest.mark.asyncio
-    async def test_create_flow_is_rejected_until_latest_requirements_are_confirmed(self) -> None:
+    async def test_create_flow_is_rejected_until_latest_requirements_are_confirmed(
+        self,
+    ) -> None:
         processor = _make_processor()
         conversation = [
             ConversationMessage(
                 role="assistant",
                 content=None,
-                tool_calls=[{
-                    "id": "call_requirements",
-                    "name": CONFIRM_REQUIREMENTS_TOOL_NAME,
-                    "arguments": {"summary": "A document flow"},
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_requirements",
+                        "name": CONFIRM_REQUIREMENTS_TOOL_NAME,
+                        "arguments": {"summary": "A document flow"},
+                    }
+                ],
             ),
             ConversationMessage(
                 role="tool",
@@ -322,11 +329,13 @@ class TestHasConfirmedRequirements:
             ConversationMessage(
                 role="assistant",
                 content=None,
-                tool_calls=[{
-                    "id": "call_1",
-                    "name": "ask_structured_question",
-                    "arguments": {"question": "Which format?"},
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": "ask_structured_question",
+                        "arguments": {"question": "Which format?"},
+                    }
+                ],
             ),
             ConversationMessage(
                 role="tool",
@@ -350,16 +359,18 @@ class TestHasConfirmedRequirements:
             ConversationMessage(
                 role="assistant",
                 content=None,
-                tool_calls=[{
-                    "id": "call_1",
-                    "name": CONFIRM_REQUIREMENTS_TOOL_NAME,
-                    "arguments": {
-                        "summary": "A flow.",
-                        "key_decisions": [{"topic": "Input", "decision": "PDF"}],
-                        "input_description": "PDF upload",
-                        "output_description": "DOCX report",
-                    },
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": CONFIRM_REQUIREMENTS_TOOL_NAME,
+                        "arguments": {
+                            "summary": "A flow.",
+                            "key_decisions": [{"topic": "Input", "decision": "PDF"}],
+                            "input_description": "PDF upload",
+                            "output_description": "DOCX report",
+                        },
+                    }
+                ],
             ),
             ConversationMessage(
                 role="tool",
@@ -401,16 +412,18 @@ class TestHasConfirmedRequirements:
             ConversationMessage(
                 role="assistant",
                 content=None,
-                tool_calls=[{
-                    "id": "call_1",
-                    "name": CONFIRM_REQUIREMENTS_TOOL_NAME,
-                    "arguments": {
-                        "summary": "A flow.",
-                        "key_decisions": [{"topic": "Input", "decision": "PDF"}],
-                        "input_description": "PDF upload",
-                        "output_description": "DOCX report",
-                    },
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": CONFIRM_REQUIREMENTS_TOOL_NAME,
+                        "arguments": {
+                            "summary": "A flow.",
+                            "key_decisions": [{"topic": "Input", "decision": "PDF"}],
+                            "input_description": "PDF upload",
+                            "output_description": "DOCX report",
+                        },
+                    }
+                ],
             ),
             ConversationMessage(
                 role="tool",
@@ -430,7 +443,9 @@ class TestHasConfirmedRequirements:
         ]
         assert has_confirmed_requirements(conversation) is False
 
-    def test_returns_false_when_user_changes_requirements_after_confirmation(self) -> None:
+    def test_returns_false_when_user_changes_requirements_after_confirmation(
+        self,
+    ) -> None:
         requirements_version = build_requirements_version(
             RequirementsSummaryPayload(
                 summary="A flow.",
@@ -444,11 +459,13 @@ class TestHasConfirmedRequirements:
             ConversationMessage(
                 role="assistant",
                 content=None,
-                tool_calls=[{
-                    "id": "call_1",
-                    "name": CONFIRM_REQUIREMENTS_TOOL_NAME,
-                    "arguments": {"summary": "A flow."},
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": CONFIRM_REQUIREMENTS_TOOL_NAME,
+                        "arguments": {"summary": "A flow."},
+                    }
+                ],
             ),
             ConversationMessage(
                 role="tool",
@@ -480,7 +497,9 @@ class TestHasConfirmedRequirements:
         ]
         assert has_confirmed_requirements(conversation) is False
 
-    def test_returns_false_when_stored_requirements_version_does_not_match_summary(self) -> None:
+    def test_returns_false_when_stored_requirements_version_does_not_match_summary(
+        self,
+    ) -> None:
         valid_version = build_requirements_version(
             RequirementsSummaryPayload(
                 summary="A flow.",
@@ -519,7 +538,9 @@ class TestHasConfirmedRequirements:
 
 
 class TestPinnedRequirementsPrompt:
-    def test_build_system_prompt_can_render_confirmed_requirements_summary(self) -> None:
+    def test_build_system_prompt_can_render_confirmed_requirements_summary(
+        self,
+    ) -> None:
         prompt = build_system_prompt(
             confirmed_requirements={
                 "summary": "Analysera en PDF och skapa DOCX-rapport.",
@@ -561,7 +582,9 @@ class TestExtendedClarificationHints:
         assert hints is not None
         assert "Ask exactly ONE structured question now" in hints
 
-    def test_conflicting_single_file_and_same_run_compare_resolved_by_answer(self) -> None:
+    def test_conflicting_single_file_and_same_run_compare_resolved_by_answer(
+        self,
+    ) -> None:
         """When the user explicitly answers comparison_scope with
         same_run_multiple_documents, the contradiction is considered resolved
         and confirmation is no longer blocked.
@@ -585,7 +608,9 @@ class TestExtendedClarificationHints:
         block_message = build_discovery_block_message(conversation)
         assert block_message is None
 
-    def test_conflicting_single_pdf_and_same_run_compare_blocks_confirmation_in_swedish(self) -> None:
+    def test_conflicting_single_pdf_and_same_run_compare_blocks_confirmation_in_swedish(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -598,7 +623,10 @@ class TestExtendedClarificationHints:
 
         block_message = build_discovery_block_message(conversation)
         assert block_message is not None
-        assert "motsättning" in block_message.lower() or "jämförelse" in block_message.lower()
+        assert (
+            "motsättning" in block_message.lower()
+            or "jämförelse" in block_message.lower()
+        )
 
     def test_conflict_and_generic_compare_do_not_duplicate_same_question(self) -> None:
         conversation = [
@@ -690,7 +718,9 @@ class TestExtendedClarificationHints:
 
         assert "comparison_scope_conflict" not in issue_ids
 
-    def test_freeform_multiple_upload_answer_clears_same_run_contradiction(self) -> None:
+    def test_freeform_multiple_upload_answer_clears_same_run_contradiction(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -728,15 +758,17 @@ class TestExtendedClarificationHints:
             ConversationMessage(
                 role="assistant",
                 content="Jag behöver förstå slutresultatet lite bättre innan jag kan bekräfta lösningen.",
-                tool_calls=[{
-                    "id": "call_output",
-                    "name": "ask_structured_question",
-                    "arguments": {
-                        "question_id": "final_output_mode",
-                        "question": "Vad ska flödet producera som slutresultat?",
-                        "options": [],
-                    },
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_output",
+                        "name": "ask_structured_question",
+                        "arguments": {
+                            "question_id": "final_output_mode",
+                            "question": "Vad ska flödet producera som slutresultat?",
+                            "options": [],
+                        },
+                    }
+                ],
             ),
             ConversationMessage(
                 role="tool",
@@ -755,7 +787,9 @@ class TestExtendedClarificationHints:
         _, question_data, _assistant_text = followup
         assert question_data["question_id"] == "final_output_mode"
 
-    def test_municipal_case_prompt_suppresses_high_value_questions_for_medium_complexity(self) -> None:
+    def test_municipal_case_prompt_suppresses_high_value_questions_for_medium_complexity(
+        self,
+    ) -> None:
         """Medium-complexity prompt (48 words) with 2 answers already given.
 
         document_material_scope is high_value, which the budget filter correctly
@@ -875,7 +909,10 @@ class TestExtendedClarificationHints:
         followup = build_discovery_followup(conversation)
         assert followup is not None
         _issue, question, _text = followup
-        assert question["question"] == "Vilken typ av dokument ska flödet främst arbeta med?"
+        assert (
+            question["question"]
+            == "Vilken typ av dokument ska flödet främst arbeta med?"
+        )
         first_option = question["options"][0]
         assert first_option["label"] == "Ärendedokument och officiellt underlag"
         assert all(
@@ -910,7 +947,9 @@ class TestExtendedClarificationHints:
         ]
         assert "final_output_mode" not in question_ids
 
-    def test_pdf_template_expectation_asks_pdf_generation_mode_before_docx_mode(self) -> None:
+    def test_pdf_template_expectation_asks_pdf_generation_mode_before_docx_mode(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -957,7 +996,9 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue.suggestion is not None
         assert analysis.next_issue.suggestion.question_id == "pdf_generation_mode"
 
-    def test_transcribe_conversation_with_pdf_output_does_not_trigger_mixed_input_question(self) -> None:
+    def test_transcribe_conversation_with_pdf_output_does_not_trigger_mixed_input_question(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -981,7 +1022,9 @@ class TestExtendedClarificationHints:
         assert "flow_input_architecture" not in question_ids
         assert "input_material_mode" not in question_ids
 
-    def test_audio_report_prompt_with_keywords_does_not_reopen_input_or_output_questions(self) -> None:
+    def test_audio_report_prompt_with_keywords_does_not_reopen_input_or_output_questions(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -1006,7 +1049,9 @@ class TestExtendedClarificationHints:
         assert "flow_input_architecture" not in question_ids
         assert "final_output_mode" not in question_ids
 
-    def test_edit_flow_uses_existing_flow_defaults_before_reasking_output_or_metadata(self) -> None:
+    def test_edit_flow_uses_existing_flow_defaults_before_reasking_output_or_metadata(
+        self,
+    ) -> None:
         flow = Flow(
             id=uuid4(),
             tenant_id=uuid4(),
@@ -1072,7 +1117,9 @@ class TestExtendedClarificationHints:
         assert "output_reader" not in question_ids
         assert "decision_support_scope" not in question_ids
 
-    def test_edit_flow_blocks_on_mixed_audio_and_document_input_architecture(self) -> None:
+    def test_edit_flow_blocks_on_mixed_audio_and_document_input_architecture(
+        self,
+    ) -> None:
         flow = Flow(
             id=uuid4(),
             tenant_id=uuid4(),
@@ -1187,7 +1234,57 @@ class TestExtendedClarificationHints:
 
         assert "document_kind" not in question_ids
 
-    def test_explicit_english_text_output_does_not_reopen_final_output_mode(self) -> None:
+    def test_specific_uploaded_pdf_text_summary_prompt_skips_document_kind_and_pdf_type(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett enkelt flöde som tar ett uppladdat PDF-dokument och returnerar en kort textsammanfattning på svenska."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "document_kind" not in question_ids
+        assert "final_pdf_type" not in question_ids
+
+    def test_complex_multi_document_compare_prompt_skips_document_kind_and_comparison_scope(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som tar ett dokumentpaket med flera relaterade PDF:er i samma ärende, "
+                    "jämför uppgifterna mellan dokumenten, extraherar strukturerad JSON med avvikelser, risker "
+                    "och rekommenderade åtgärder, och genererar en DOCX-rapport."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "document_kind" not in question_ids
+        assert "comparison_scope" not in question_ids
+
+    def test_explicit_english_text_output_does_not_reopen_final_output_mode(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -1205,7 +1302,9 @@ class TestExtendedClarificationHints:
 
         assert "final_output_mode" not in question_ids
 
-    def test_contract_heavy_prompt_infers_output_from_detailed_description(self) -> None:
+    def test_contract_heavy_prompt_infers_output_from_detailed_description(
+        self,
+    ) -> None:
         """A 45-word prompt describing contract analysis with extraction of
         specific fields and structured data implies structured text output.
         The auto-inference resolves final_output_mode so it is not raised as
@@ -1235,7 +1334,9 @@ class TestExtendedClarificationHints:
 
         assert "final_output_mode" not in question_ids
 
-    def test_contract_flow_freeform_case_scope_resolves_document_material_scope(self) -> None:
+    def test_contract_flow_freeform_case_scope_resolves_document_material_scope(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -1271,7 +1372,9 @@ class TestExtendedClarificationHints:
         assert "structured_analysis_need" not in question_ids
         assert "runtime_metadata_fields" not in question_ids
 
-    def test_complex_pdf_analysis_prompt_does_not_surface_structured_analysis_question(self) -> None:
+    def test_complex_pdf_analysis_prompt_does_not_surface_structured_analysis_question(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -1293,7 +1396,9 @@ class TestExtendedClarificationHints:
 
         assert "structured_analysis_need" not in question_ids
 
-    def test_complex_pdf_analysis_prompt_records_structured_intermediate_assumption(self) -> None:
+    def test_complex_pdf_analysis_prompt_records_structured_intermediate_assumption(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -1308,11 +1413,14 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(conversation)
 
         assert any(
-            "strukturerad" in assumption.lower() and "mellanliggande" in assumption.lower()
+            "strukturerad" in assumption.lower()
+            and "mellanliggande" in assumption.lower()
             for assumption in analysis.assumptions
         )
 
-    def test_docx_create_prompt_with_pdf_input_does_not_emit_pdf_assumption(self) -> None:
+    def test_docx_create_prompt_with_pdf_input_does_not_emit_pdf_assumption(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -1336,10 +1444,17 @@ class TestExtendedClarificationHints:
         ]
 
         assert "final_pdf_type" not in question_ids
-        assert all(candidate.issue_id != "final_pdf_type" for candidate in analysis.candidates)
-        assert all("slut-pdf" not in assumption.casefold() for assumption in analysis.assumptions)
+        assert all(
+            candidate.issue_id != "final_pdf_type" for candidate in analysis.candidates
+        )
+        assert all(
+            "slut-pdf" not in assumption.casefold()
+            for assumption in analysis.assumptions
+        )
 
-    def test_explicit_plain_text_preference_disables_structured_intermediate_assumption(self) -> None:
+    def test_explicit_plain_text_preference_disables_structured_intermediate_assumption(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -1358,7 +1473,9 @@ class TestExtendedClarificationHints:
             for assumption in analysis.assumptions
         )
 
-    def test_simple_single_verb_summary_prompt_does_not_assume_structured_intermediate(self) -> None:
+    def test_simple_single_verb_summary_prompt_does_not_assume_structured_intermediate(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -1417,7 +1534,9 @@ class TestExtendedClarificationHints:
         _, question_data, _ = followup
         assert question_data["question_id"] == "docx_output_mode"
 
-    def test_pdf_output_with_explicit_answer_resolves_without_pdf_type_question(self) -> None:
+    def test_pdf_output_with_explicit_answer_resolves_without_pdf_type_question(
+        self,
+    ) -> None:
         """When the user explicitly selects pdf_document as output mode, the
         auto-inference resolves enough context that final_pdf_type (high_value)
         is not raised as a blocking issue.
@@ -1493,7 +1612,9 @@ class TestPlannerConversationEncoding:
 
 class TestPlannerDiscoveryShortCircuit:
     @pytest.mark.asyncio
-    async def test_uses_backend_followup_without_llm_for_blocking_discovery(self) -> None:
+    async def test_uses_backend_followup_without_llm_for_blocking_discovery(
+        self,
+    ) -> None:
         repo = AsyncMock()
         session_id = uuid4()
         repo.get_session.return_value = MagicMock(
@@ -1550,12 +1671,14 @@ class TestPlannerDiscoveryShortCircuit:
         tool_call = MagicMock()
         tool_call.id = "call_requirements"
         tool_call.function.name = "confirm_requirements"
-        tool_call.function.arguments = json.dumps({
-            "summary": "Ett enkelt sammanfattningsflöde för PDF-dokument.",
-            "key_decisions": [{"topic": "Output", "decision": "Strukturerad text"}],
-            "input_description": "Ett uppladdat PDF-dokument per körning.",
-            "output_description": "En kort engelsk textsammanfattning.",
-        })
+        tool_call.function.arguments = json.dumps(
+            {
+                "summary": "Ett enkelt sammanfattningsflöde för PDF-dokument.",
+                "key_decisions": [{"topic": "Output", "decision": "Strukturerad text"}],
+                "input_description": "Ett uppladdat PDF-dokument per körning.",
+                "output_description": "En kort engelsk textsammanfattning.",
+            }
+        )
         assistant_message = MagicMock(content=None, tool_calls=[tool_call])
         litellm_client.acompletion.return_value = MagicMock(
             choices=[MagicMock(message=assistant_message, finish_reason="tool_calls")]
@@ -1588,7 +1711,13 @@ class TestPlannerDiscoveryShortCircuit:
                     output_mode="pass_through",
                     output_type="text",
                     mcp_policy="inherit",
-                    input_config={"runtime_input": {"enabled": True, "required": True, "max_files": 1}},
+                    input_config={
+                        "runtime_input": {
+                            "enabled": True,
+                            "required": True,
+                            "max_files": 1,
+                        }
+                    },
                 )
             ],
         )
