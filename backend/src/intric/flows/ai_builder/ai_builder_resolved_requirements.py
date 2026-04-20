@@ -220,13 +220,6 @@ def _resolve_slot_origin(
             "high",
         )
 
-    if answer_signals.get(question_id):
-        return (
-            "structured_answer",
-            (f"answer_signal:{question_id}",),
-            "high",
-        )
-
     heuristic_evidence = (
         "heuristic:role-aware freeform analysis"
         if freeform_text

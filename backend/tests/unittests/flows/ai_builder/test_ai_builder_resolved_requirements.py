@@ -54,6 +54,26 @@ def test_resolved_requirements_state_prefers_confirmed_summary_as_output_source(
     assert terminal_output.source == "requirements_summary"
 
 
+def test_resolved_requirements_state_keeps_freeform_inference_as_heuristic_source() -> (
+    None
+):
+    state = build_resolved_requirements_state(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en DOCX-rapport."
+                ),
+            )
+        ]
+    )
+
+    terminal_output = state.slot("terminal_output")
+    assert terminal_output is not None
+    assert terminal_output.source == "heuristic"
+    assert terminal_output.confidence == "medium"
+
+
 def test_build_resolved_requirements_prompt_block_includes_sources_and_evidence() -> (
     None
 ):
