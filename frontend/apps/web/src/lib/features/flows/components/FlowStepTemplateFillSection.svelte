@@ -1,11 +1,22 @@
 <script lang="ts">
   import type { FlowStep } from "@intric/intric-js";
+  import { SvelteSet } from "svelte/reactivity";
   import { Settings } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import { IconInfo } from "@intric/icons/info";
   import { IconLockClosed } from "@intric/icons/lock-closed";
   import { IconDownload } from "@intric/icons/download";
   import { m } from "$lib/paraglide/messages";
+  import { shouldShowTemplateAccessibilityHint } from "$lib/features/flows/templateFillAuthoringHints";
+  import type {
+    FlowTemplateAssetOption,
+    FlowTemplateInspection,
+    TemplateBindingRow,
+    TemplateBindingSuggestionGroup,
+    TemplateFillOutputConfig,
+    TemplateFillReadiness
+  } from "$lib/features/flows/templateFillConfig";
   import {
     getTemplateAssetStatusLabel,
     getTemplateAssetStatusClass,
@@ -17,7 +28,6 @@
   import * as Card from "$lib/components/ui/card/index.js";
 
   let {
-    step,
     isPublished,
     isAdvancedMode,
     templateFillConfig,
@@ -45,38 +55,25 @@
     onBindingChange,
     onApplyAllSuggestions
   }: {
-    step: FlowStep;
     isPublished: boolean;
     isAdvancedMode: boolean;
-    templateFillConfig: any;
-    templateInspection: any | null;
+    templateFillConfig: TemplateFillOutputConfig;
+    templateInspection: FlowTemplateInspection | null;
     templateInspecting: boolean;
     templateConfigError: string | null;
     templateFilesLoading: boolean;
     templatePlaceholders: Array<{ name: string }>;
-    templateBindingRows: Array<{
-      key: string;
-      placeholderName: string;
-      status: "matched" | "missing" | "invalid" | "orphaned";
-      binding?: string | null;
-      preview?: string | null;
-      autoSuggested?: boolean;
-      sourceOutputType?: string | null;
-    }>;
-    templateBindingSuggestionGroups: Array<{
-      key: string;
-      label: string;
-      options: Array<{ value: string; label: string }>;
-    }>;
+    templateBindingRows: TemplateBindingRow[];
+    templateBindingSuggestionGroups: TemplateBindingSuggestionGroup[];
     templateAutoBindings: Record<string, string>;
-    templateReadiness: { total: number; matched: number; incomplete: boolean };
-    templateOrphanedRows: Array<any>;
+    templateReadiness: TemplateFillReadiness;
+    templateOrphanedRows: TemplateBindingRow[];
     templateHasSelection: boolean;
     resolvedTemplateAssetId: string | null;
-    selectedTemplateAsset: any | null;
+    selectedTemplateAsset: FlowTemplateAssetOption | null;
     templateUnnamedStepWarning: boolean;
     templateAutoMatchableCount: number;
-    availableTemplateFiles: Array<{ id: string; name: string; status?: string | null }>;
+    availableTemplateFiles: FlowTemplateAssetOption[];
     onOutputModeChange?: (detail: { value: FlowStep["output_mode"] }) => void;
     onTemplateFileSelect?: (detail: { assetId: string }) => void;
     onTemplateUpload?: (detail: { event: Event }) => void;
@@ -86,17 +83,15 @@
     onApplyAllSuggestions?: () => void;
   } = $props();
 
-  let expandedTemplateExpressions = $state(new Set<string>());
+  const expandedTemplateExpressions = new SvelteSet<string>();
   let templateUploadInput: HTMLInputElement | null = $state(null);
 
   function toggleTemplateExpressionEditor(key: string) {
-    const next = new Set(expandedTemplateExpressions);
-    if (next.has(key)) {
-      next.delete(key);
+    if (expandedTemplateExpressions.has(key)) {
+      expandedTemplateExpressions.delete(key);
     } else {
-      next.add(key);
+      expandedTemplateExpressions.add(key);
     }
-    expandedTemplateExpressions = next;
   }
 
   function readinessPillClass(): string {
@@ -137,6 +132,13 @@
         </p>
       </div>
       <div class="flex flex-col gap-3">
+        {#if shouldShowTemplateAccessibilityHint({ isAdvancedMode, isTemplateFill: true })}
+          <Alert.Root class="border-accent-default/15 bg-accent-default/5">
+            <IconInfo />
+            <Alert.Title>{m.flow_template_fill_accessibility_title()}</Alert.Title>
+            <Alert.Description>{m.flow_template_fill_accessibility_body()}</Alert.Description>
+          </Alert.Root>
+        {/if}
         {#if templateHasSelection || templateReadiness.total > 0}
           <Card.Root class="bg-secondary/10">
             <Card.Content class="flex items-center justify-between gap-3 px-3 py-3">

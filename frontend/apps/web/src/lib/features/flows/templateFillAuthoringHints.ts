@@ -16,3 +16,10 @@ export function shouldShowTemplateBodyTextHint(params: {
     (step) => step.output_mode === "template_fill" && step.step_order > activeStep.step_order
   );
 }
+
+export function shouldShowTemplateAccessibilityHint(params: {
+  isAdvancedMode: boolean;
+  isTemplateFill: boolean;
+}): boolean {
+  return params.isAdvancedMode && params.isTemplateFill;
+}

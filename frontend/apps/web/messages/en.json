@@ -2078,7 +2078,7 @@
   "flow_template_fill_step_name_hint": "Name this step to make placeholder mapping easier.",
   "flow_template_fill_summary": "This step generates a document based on a Word template.",
   "flow_template_fill_switch_back": "Switch back",
-  "flow_template_fill_template_help": "Upload a .docx file with placeholders in the format {{name}}.",
+  "flow_template_fill_template_help": "Upload a .docx file that already contains placeholder tags for the fields you want to fill, for example a field name wrapped in double braces.",
   "flow_template_fill_template_label": "Template",
   "flow_template_fill_template_section": "Template settings",
   "flow_template_fill_title": "Fill template",
@@ -3524,5 +3524,7 @@
   "flow_sensitive_review_boundary_title": "Sensitive workflow review boundary",
   "flow_sensitive_review_boundary_body": "Before final approval, generated output and run evidence should only be handled by the uploader and explicitly authorized reviewers. Evidence export stays disabled by default for this workflow.",
   "flow_sensitive_evidence_export_disabled": "Evidence export disabled",
-  "flow_sensitive_artifact_access_notice": "Sensitive workflow: share generated artifacts only with the uploader and explicitly authorized reviewers until final approval."
+  "flow_sensitive_artifact_access_notice": "Sensitive workflow: share generated artifacts only with the uploader and explicitly authorized reviewers until final approval.",
+  "flow_template_fill_accessibility_title": "Use an accessibility-reviewed DOCX template",
+  "flow_template_fill_accessibility_body": "Choose a DOCX template that has already been reviewed for headings, reading order, table structure, and other accessibility requirements before you publish this flow."
 }

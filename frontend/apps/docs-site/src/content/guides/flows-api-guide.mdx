@@ -670,6 +670,12 @@ Important current behavior:
 - service keys are not supported on this surface
 - planner interaction happens over SSE on `POST /api/v1/flows/ai-builder/sessions/{session_id}/messages`
 
+For template-fill document output, treat the DOCX template asset path as an **accessibility-reviewed template path**. For Tal till resultat-style flows this is especially important:
+
+- upload reusable DOCX templates through the template asset route
+- verify placeholders and mappings before publish
+- prefer templates that have already been reviewed for heading structure, reading order, and table semantics
+
 ## Troubleshooting
 
 | Status | Scenario                                        | Typical machine-readable code            | What to do                                                         |

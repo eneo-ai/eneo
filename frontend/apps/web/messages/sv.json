@@ -2078,7 +2078,7 @@
   "flow_template_fill_step_name_hint": "Namnge steget för att koppla platshållare enklare.",
   "flow_template_fill_summary": "Steget genererar ett dokument baserat på en Word-mall.",
   "flow_template_fill_switch_back": "Byt tillbaka",
-  "flow_template_fill_template_help": "Ladda upp en .docx-fil med platshållare i formatet {{namn}}.",
+  "flow_template_fill_template_help": "Ladda upp en .docx-fil som redan innehåller platshållartaggar för de fält du vill fylla, till exempel ett fältnamn omslutet av dubbla klamrar.",
   "flow_template_fill_template_label": "Mall",
   "flow_template_fill_template_section": "Mallinställningar",
   "flow_template_fill_title": "Fyll i mall",
@@ -3526,5 +3526,7 @@
   "flow_sensitive_review_boundary_title": "Gräns för granskning av känsligt flöde",
   "flow_sensitive_review_boundary_body": "Före slutligt godkännande ska genererat innehåll och körningsbevis bara hanteras av uppladdaren och uttryckligen behöriga granskare. Export av bevisunderlag är avstängd som standard för det här flödet.",
   "flow_sensitive_evidence_export_disabled": "Export av bevisunderlag är avstängd",
-  "flow_sensitive_artifact_access_notice": "Känsligt flöde: dela genererade artefakter bara med uppladdaren och uttryckligen behöriga granskare tills slutligt godkännande finns."
+  "flow_sensitive_artifact_access_notice": "Känsligt flöde: dela genererade artefakter bara med uppladdaren och uttryckligen behöriga granskare tills slutligt godkännande finns.",
+  "flow_template_fill_accessibility_title": "Använd en tillgänglighetsgranskad DOCX-mall",
+  "flow_template_fill_accessibility_body": "Välj en DOCX-mall som redan har granskats för rubriknivåer, läsordning, tabellstruktur och andra tillgänglighetskrav innan du publicerar flödet."
 }
