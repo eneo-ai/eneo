@@ -1322,6 +1322,22 @@ class TestExtendedClarificationHints:
         assert "document_kind" not in question_ids
         assert "comparison_scope" not in question_ids
 
+    def test_ambiguous_compare_prompt_prioritizes_comparison_scope(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som jämför flera dokument och genererar en DOCX-rapport."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "comparison_scope"
+
     def test_explicit_english_text_output_does_not_reopen_final_output_mode(
         self,
     ) -> None:

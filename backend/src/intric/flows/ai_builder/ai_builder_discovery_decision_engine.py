@@ -12,7 +12,9 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryResolvedBy,
     SemanticAdjudicationResult,
 )
-from intric.flows.ai_builder.ai_builder_discovery_priority import sort_discovery_issues
+from intric.flows.ai_builder.ai_builder_discovery_priority import (
+    DISCOVERY_ISSUE_PRIORITY,
+)
 from intric.flows.ai_builder.ai_builder_discovery_questions import (
     localized_text,
     question_exposure_for_id,
@@ -75,7 +77,7 @@ def apply_discovery_decision_engine(
     candidates: list[DiscoveryCandidate] = []
     family_used: set[str] = set()
 
-    for issue in issues:
+    for issue in _rank_issues_for_profile(issues, profile):
         candidate = build_candidate(
             issue=issue,
             profile=profile,
@@ -148,12 +150,58 @@ def apply_discovery_decision_engine(
         family_used.add(candidate.family)
 
     return (
-        sort_discovery_issues(selected),
+        _rank_issues_for_profile(selected, profile),
         assumptions,
         selected_question_ids,
         suppressed,
         candidates,
     )
+
+
+def _rank_issues_for_profile(
+    issues: list[DiscoveryIssue],
+    profile: DiscoveryProfile,
+) -> list[DiscoveryIssue]:
+    return sorted(
+        issues,
+        key=lambda issue: (
+            0 if issue.severity == "blocking" else 1,
+            DISCOVERY_ISSUE_PRIORITY.get(issue.issue_id, 999)
+            + _dynamic_issue_priority_offset(issue, profile),
+        ),
+    )
+
+
+def _dynamic_issue_priority_offset(
+    issue: DiscoveryIssue,
+    profile: DiscoveryProfile,
+) -> int:
+    if issue.issue_id == "comparison_scope" and profile.comparison_requested:
+        return -25
+    if (
+        issue.issue_id == "docx_output_mode"
+        and profile.output_intent.terminal_output == "docx_document"
+    ):
+        return -20
+    if (
+        issue.issue_id == "pdf_generation_mode"
+        and profile.output_intent.terminal_output == "pdf_document"
+    ):
+        return -20
+    if (
+        issue.issue_id == "final_output_mode"
+        and profile.output_intent.terminal_output is None
+        and not profile.case_like_flow
+        and not profile.comparison_requested
+        and len(profile.text.split()) <= 7
+    ):
+        return -20
+    if issue.issue_id == "document_kind" and (
+        profile.output_intent.terminal_output is not None
+        or profile.comparison_requested
+    ):
+        return 20
+    return 0
 
 
 def build_candidate(
