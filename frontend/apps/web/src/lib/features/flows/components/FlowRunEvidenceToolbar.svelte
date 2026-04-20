@@ -9,6 +9,7 @@
     debugExport,
     evidence,
     copiedKey,
+    sensitiveCareDataFlow = false,
     runStatusLabel,
     statusColorClass,
     traceId = null,
@@ -19,6 +20,7 @@
     debugExport: FlowRunDebugExport | null;
     evidence: Record<string, unknown>;
     copiedKey: string | null;
+    sensitiveCareDataFlow?: boolean;
     runStatusLabel: string;
     statusColorClass: string;
     traceId?: string | null;
@@ -28,6 +30,7 @@
   } = $props();
 
   let redactionApplied = $derived(debugExport?.security?.redaction_applied === true);
+  let hideExportActions = $derived(sensitiveCareDataFlow);
 </script>
 
 <!--
@@ -69,13 +72,21 @@
       {/if}
     </div>
 
-    <Button size="sm" onclick={() => void onDownloadCanonicalEvidence()}>
-      {m.flow_run_download_evidence_export()}
-    </Button>
+    {#if hideExportActions}
+      <Badge variant="outline" class="bg-primary text-muted text-[11px]">
+        {m.flow_sensitive_evidence_export_disabled()}
+      </Badge>
+    {:else}
+      <Button size="sm" onclick={() => void onDownloadCanonicalEvidence()}>
+        {m.flow_run_download_evidence_export()}
+      </Button>
+    {/if}
   </div>
 
   <div class="flex flex-wrap gap-2">
-    {#if debugExport}
+    {#if hideExportActions}
+      <span class="text-muted text-sm">{m.flow_sensitive_artifact_access_notice()}</span>
+    {:else if debugExport}
       <Button
         variant="outline"
         size="sm"

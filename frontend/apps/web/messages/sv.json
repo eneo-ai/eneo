@@ -3522,5 +3522,9 @@
   "api_keys_grace_tooltip": "Gammal nyckel giltig till {date}",
   "api_keys_admin_policy_rotation_grace": "Grace-period vid rotation",
   "api_keys_admin_policy_rotation_grace_desc": "Hur länge den gamla nyckeln förblir giltig efter rotation. Sätt till 0 för att inaktivera direkt.",
-  "api_keys_admin_policy_suffix_hours": "timmar"
+  "api_keys_admin_policy_suffix_hours": "timmar",
+  "flow_sensitive_review_boundary_title": "Gräns för granskning av känsligt flöde",
+  "flow_sensitive_review_boundary_body": "Före slutligt godkännande ska genererat innehåll och körningsbevis bara hanteras av uppladdaren och uttryckligen behöriga granskare. Export av bevisunderlag är avstängd som standard för det här flödet.",
+  "flow_sensitive_evidence_export_disabled": "Export av bevisunderlag är avstängd",
+  "flow_sensitive_artifact_access_notice": "Känsligt flöde: dela genererade artefakter bara med uppladdaren och uttryckligen behöriga granskare tills slutligt godkännande finns."
 }

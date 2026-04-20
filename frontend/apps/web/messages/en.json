@@ -3520,5 +3520,9 @@
   "api_keys_grace_tooltip": "Old key valid until {date}",
   "api_keys_admin_policy_rotation_grace": "Rotation grace period",
   "api_keys_admin_policy_rotation_grace_desc": "How long the old key remains valid after rotation. Set to 0 to deactivate immediately.",
-  "api_keys_admin_policy_suffix_hours": "hours"
+  "api_keys_admin_policy_suffix_hours": "hours",
+  "flow_sensitive_review_boundary_title": "Sensitive workflow review boundary",
+  "flow_sensitive_review_boundary_body": "Before final approval, generated output and run evidence should only be handled by the uploader and explicitly authorized reviewers. Evidence export stays disabled by default for this workflow.",
+  "flow_sensitive_evidence_export_disabled": "Evidence export disabled",
+  "flow_sensitive_artifact_access_notice": "Sensitive workflow: share generated artifacts only with the uploader and explicitly authorized reviewers until final approval."
 }

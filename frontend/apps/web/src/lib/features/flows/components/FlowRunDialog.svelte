@@ -20,6 +20,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { buildRecordedAudioFile } from "$lib/features/audio/recordedAudioFile";
   import type { RecordingStopReason } from "$lib/features/audio/recordedAudioFile";
+  import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
   import {
     getFlowFormFieldRuntimeKey,
     normalizeFlowFormFields,
@@ -52,12 +53,14 @@
   let {
     open = $bindable(false),
     flow,
+    careDataPolicy = undefined,
     intric,
     lastInputPayload,
     onRunCreated
   }: {
     open: boolean;
     flow: Flow;
+    careDataPolicy?: FlowCareDataPolicy;
     intric: Intric;
     lastInputPayload: Record<string, unknown> | null;
     onRunCreated?: (detail: { runId: string }) => void;
@@ -933,6 +936,7 @@
             {runBlockers}
             {reviewSummaryItems}
             {completedFormFieldSummaries}
+            {careDataPolicy}
             {inputText}
             {showFreeformTextInput}
             {reviewFileGroups}

@@ -18,9 +18,11 @@
   import { isFlowRunActive, type FlowRunProgressSnapshot } from "./flowRunProgress";
   import { shouldHandleFlowRunsReload } from "./flowRunsReload";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
+  import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
 
   let {
     flow,
+    careDataPolicy = undefined,
     eneo,
     visible = true,
     reloadTrigger = 0,
@@ -28,6 +30,7 @@
     pendingHighlightRunId = $bindable(null)
   }: {
     flow: Flow;
+    careDataPolicy?: FlowCareDataPolicy;
     eneo: Intric;
     visible?: boolean;
     reloadTrigger?: number;
@@ -449,7 +452,7 @@
                 class="border-default hover:bg-muted/40 cursor-pointer transition-colors {isExpanded
                   ? 'bg-muted/50'
                   : ''}"
-                tabindex="0"
+                tabindex={0}
                 onclick={() => toggleRunDetails(run.id)}
                 onkeydown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
@@ -594,6 +597,7 @@
                       <FlowRunEvidence
                         runId={run.id}
                         flowId={flow.id}
+                        sensitiveCareDataFlow={careDataPolicy?.sensitive === true}
                         {eneo}
                         runStatus={run.status}
                         fallbackSnapshot={progressSnapshotsByRunId[run.id] ?? null}

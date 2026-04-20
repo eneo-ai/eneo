@@ -32,6 +32,7 @@
   import FlowPageHeader from "$lib/features/flows/components/FlowPageHeader.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import FlowAIBuilderEditHost from "$lib/features/flows/ai-builder/FlowAIBuilderEditHost.svelte";
+  import { resolveFlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
   import {
     resolveAIBuilderApplyNavigation,
     resolveApplyFocusedStepId
@@ -81,6 +82,7 @@
   const {
     state: { resource, update, activeStepId, isPublished, saveStatus, validationErrors }
   } = flowEditor;
+  const careDataPolicy = $derived(resolveFlowCareDataPolicy($resource.metadata_json));
 
   const STEP_JSON_FIELD_LABELS: Record<string, () => string> = {
     input_contract: () => m.flow_step_input_contract(),
@@ -1147,6 +1149,7 @@
     >
       <FlowRunsTable
         flow={$resource}
+        {careDataPolicy}
         eneo={data.intric}
         visible={activeTab === "history"}
         reloadTrigger={runsReloadTrigger}
@@ -1160,6 +1163,7 @@
 <FlowRunDialog
   bind:open={showRunDialog}
   flow={$resource}
+  {careDataPolicy}
   intric={data.intric}
   lastInputPayload={latestHistoryPayload}
   onRunCreated={(detail) => {

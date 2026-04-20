@@ -110,6 +110,15 @@ Those endpoints are the canonical way for a client to discover what a published 
 
 For API consumers using `frontend/packages/intric-js`, the Flow SDK also supports caller-supplied run idempotency headers and a helper for deriving stable upload-intent idempotency keys after runtime files have been uploaded but before the published run is created.
 
+For audio-first workflows such as Tal till resultat, the intended MVP path is still **completed upload first, then one published Flow run**:
+
+- record in the browser or pick an audio file
+- upload the completed file through the published Flow runtime contract
+- create one run with a stable `Idempotency-Key`
+- let the Flow steps handle transcription and final output generation
+
+The Flow runtime does **not** require browser-side streaming transcription for this MVP.
+
 ### How form fields map to runtime payloads
 
 If a published flow exposes form fields, the client sends those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field types and required flags.

@@ -29,12 +29,14 @@
   let {
     runId,
     flowId,
+    sensitiveCareDataFlow = false,
     eneo,
     runStatus,
     fallbackSnapshot = null
   }: {
     runId: string;
     flowId: string;
+    sensitiveCareDataFlow?: boolean;
     eneo: Intric;
     runStatus: string;
     fallbackSnapshot?: FlowRunProgressSnapshot | null;
@@ -68,7 +70,7 @@
   let copiedKey: string | null = $state(null);
   let copiedTimer: ReturnType<typeof setTimeout> | null = $state(null);
   const mode = getFlowUserMode();
-  let stepAttemptsByOrder: Record<number, Record<string, unknown>[]> = $derived(
+  let stepAttemptsByOrder: Record<number, Record<string, unknown>[]> = $derived.by(() =>
     groupStepAttemptsByOrder(evidence?.step_attempts ?? [])
   );
 
@@ -283,6 +285,7 @@
         debugExport={evidence.debug_export}
         {evidence}
         {copiedKey}
+        {sensitiveCareDataFlow}
         runStatusLabel={getStatusLabel(runStatus)}
         statusColorClass={getStatusColor(runStatus)}
         traceId={evidence.debug_export?.run?.trace_id ?? null}

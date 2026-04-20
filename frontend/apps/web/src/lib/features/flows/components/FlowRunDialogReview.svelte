@@ -5,6 +5,8 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { IconCheck } from "@intric/icons/check";
   import { IconInfo } from "@intric/icons/info";
+  import { m } from "$lib/paraglide/messages";
+  import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
   import type { NormalizedFlowFormField } from "$lib/features/flows/flowFormSchema";
   import type { FlowRunBlocker, FlowRunReviewSummaryItem } from "$lib/features/flows/flowRunWizard";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
@@ -13,6 +15,7 @@
     runBlockers,
     reviewSummaryItems,
     completedFormFieldSummaries,
+    careDataPolicy = undefined,
     inputText,
     showFreeformTextInput,
     reviewFileGroups,
@@ -22,6 +25,7 @@
     runBlockers: FlowRunBlocker[];
     reviewSummaryItems: FlowRunReviewSummaryItem[];
     completedFormFieldSummaries: Array<{ field: NormalizedFlowFormField; value: string }>;
+    careDataPolicy?: FlowCareDataPolicy;
     inputText: string;
     showFreeformTextInput: boolean;
     reviewFileGroups: Array<{ step: FlowRunContractStepInput; files: UploadedFile[] }>;
@@ -47,6 +51,14 @@
 </script>
 
 <div class="flex flex-col gap-5">
+  {#if careDataPolicy?.sensitive && careDataPolicy.preApprovalVisibility === "uploader_and_reviewers"}
+    <Alert.Root class="border-warning-default/30 bg-warning-dimmer text-warning-stronger">
+      <IconInfo />
+      <Alert.Title>{m.flow_sensitive_review_boundary_title()}</Alert.Title>
+      <Alert.Description>{m.flow_sensitive_review_boundary_body()}</Alert.Description>
+    </Alert.Root>
+  {/if}
+
   {#if runBlockers.length > 0}
     <Alert.Root
       variant="destructive"

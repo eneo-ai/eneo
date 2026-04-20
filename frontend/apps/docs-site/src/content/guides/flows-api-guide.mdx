@@ -414,6 +414,30 @@ await client.flows.runs.create({
 });
 ```
 
+### Tal till resultat MVP runtime pattern
+
+For the current Tal till resultat MVP, the recommended runtime shape is:
+
+1. record audio in the browser **or** select an audio file
+2. upload the completed audio file through the published Flow runtime upload contract
+3. derive a stable `Idempotency-Key` from the uploaded file ids and current run payload
+4. create one published Flow run
+5. let the first step transcribe and the later steps produce the final structured output / DOCX artifact
+
+Important non-goals for this MVP:
+
+- no live transcription streaming while the browser is still recording
+- no frontend chunk orchestration for oversized files
+- no separate browser-only retry protocol outside the shared `Idempotency-Key` contract
+
+Approval and visibility boundary for sensitive Tal till resultat flows:
+
+- final approval is a **single authorized reviewer outside the flow**
+- before final approval, generated output and run evidence should be treated as visible only to the uploader and explicitly authorized reviewers
+- evidence export stays disabled by default unless policy explicitly enables it
+
+This keeps the published Flow runtime aligned with the same enterprise seams used elsewhere: typed policy metadata, admin-configurable retention/export controls, and idempotent completed-upload execution.
+
 ### 4) Monitor and control the run
 
 Key endpoints:
