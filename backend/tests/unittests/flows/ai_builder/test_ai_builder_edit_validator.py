@@ -7,6 +7,8 @@ from uuid import uuid4
 from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
     FlowEditDraft,
+    FormFieldOperation,
+    FormFieldSpec,
     StepEditOperation,
     StepPatch,
     StepPlacement,
@@ -272,6 +274,103 @@ class TestValidAddOperations:
         )
         assert result.valid
 
+    def test_add_uses_form_fields_rejects_unknown_form_field(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(position="append"),
+                    add_payload=AddStepPayload(
+                        name="Nytt steg",
+                        instructions="Bygg nytt steg.",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        uses_form_fields=["saknas"],
+                    ),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+            current_metadata_json={
+                "form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}
+            },
+        )
+        assert not result.valid
+        assert "unknown_form_field_reference" in _error_codes(result)
+
+    def test_add_uses_form_fields_accepts_existing_form_field(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(position="append"),
+                    add_payload=AddStepPayload(
+                        name="Nytt steg",
+                        instructions="Bygg nytt steg.",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        uses_form_fields=["ärendenummer"],
+                    ),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+            current_metadata_json={
+                "form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}
+            },
+        )
+        assert result.valid
+
+    def test_add_uses_form_fields_accepts_fields_added_by_form_operations(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(position="append"),
+                    add_payload=AddStepPayload(
+                        name="Nytt steg",
+                        instructions="Bygg nytt steg.",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        uses_form_fields=["uppföljningsperiod"],
+                    ),
+                )
+            ],
+            form_operations=[
+                FormFieldOperation(
+                    op="add",
+                    field_name="uppföljningsperiod",
+                    field_payload=FormFieldSpec(
+                        label="Uppföljningsperiod",
+                        field_type="date",
+                        required=True,
+                    ),
+                )
+            ],
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+            current_metadata_json=None,
+        )
+        assert result.valid
+
 
 class TestValidModifyOperations:
     def test_modify_valid(self):
@@ -341,6 +440,83 @@ class TestValidModifyOperations:
         )
         assert not result.valid
         assert "invalid_previous_field_source" in _error_codes(result)
+
+    def test_modify_uses_form_fields_rejects_unknown_form_field(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(uses_form_fields=["saknas"]),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+            current_metadata_json={
+                "form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}
+            },
+        )
+        assert not result.valid
+        assert "unknown_form_field_reference" in _error_codes(result)
+
+    def test_modify_uses_form_fields_accepts_existing_form_field(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(uses_form_fields=["ärendenummer"]),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+            current_metadata_json={
+                "form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}
+            },
+        )
+        assert result.valid
+
+    def test_modify_uses_form_fields_rejects_fields_removed_in_same_draft(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(uses_form_fields=["ärendenummer"]),
+                )
+            ],
+            form_operations=[
+                FormFieldOperation(op="remove", field_name="ärendenummer"),
+            ],
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+            current_metadata_json={
+                "form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}
+            },
+        )
+        assert not result.valid
+        assert "unknown_form_field_reference" in _error_codes(result)
 
     def test_modify_previous_field_reference_must_point_to_earlier_step(self):
         draft = FlowEditDraft(

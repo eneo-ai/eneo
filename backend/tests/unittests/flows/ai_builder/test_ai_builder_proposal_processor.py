@@ -6,19 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
-from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
-from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_tools import (
-    ASK_STRUCTURED_QUESTION_TOOL_NAME,
-    CONFIRM_REQUIREMENTS_TOOL_NAME,
-)
+from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
+from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
+    ConversationMessage,
     FlowDraftSpecCore,
     InputSource,
     InputType,
@@ -31,12 +26,17 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
     ProposalContext,
     SubmissionToolHandlerConfig,
-    ToolRetryConfig,
     ToolProcessingResult,
+    ToolRetryConfig,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
+from intric.flows.ai_builder.ai_builder_tools import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
+    CONFIRM_REQUIREMENTS_TOOL_NAME,
+)
+from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 
 
 def _make_processor(**overrides) -> AIBuilderProposalProcessor:
@@ -97,7 +97,9 @@ def _make_tool_call(
     return tool_call
 
 
-def _make_flow_spec(*, model_ref: str | None, knowledge_refs: list[str]) -> FlowDraftSpecCore:
+def _make_flow_spec(
+    *, model_ref: str | None, knowledge_refs: list[str]
+) -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Grounded flow",
         flow_description="Desc",
@@ -179,7 +181,9 @@ async def test_process_create_arguments_returns_parse_feedback() -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_create_arguments_returns_quality_feedback_without_storing() -> None:
+async def test_process_create_arguments_returns_quality_feedback_without_storing() -> (
+    None
+):
     processor = _make_processor()
     draft = _make_create_draft()
     spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
@@ -206,11 +210,16 @@ async def test_process_create_arguments_returns_quality_feedback_without_storing
                 failure_feedback=None,
             ),
         ),
-        patch.object(processor, "_format_quality_feedback", return_value="Quality issue"),
-        patch.object(processor, "_format_contextual_quality_feedback", return_value=None),
+        patch.object(
+            processor, "_format_quality_feedback", return_value="Quality issue"
+        ),
+        patch.object(
+            processor, "_format_contextual_quality_feedback", return_value=None
+        ),
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
             new_callable=AsyncMock,
+            return_value=(MagicMock(), MagicMock()),
         ) as store_plan,
     ):
         result = await processor._process_create_arguments(
@@ -232,7 +241,9 @@ async def test_process_create_arguments_returns_quality_feedback_without_storing
 
 
 @pytest.mark.asyncio
-async def test_process_create_arguments_canonicalizes_unique_resource_aliases_before_store() -> None:
+async def test_process_create_arguments_canonicalizes_unique_resource_aliases_before_store() -> (
+    None
+):
     processor = _make_processor()
     draft = _make_create_draft(
         model_ref="gpt-5.4-nano",
@@ -263,7 +274,9 @@ async def test_process_create_arguments_canonicalizes_unique_resource_aliases_be
             ),
         ),
         patch.object(processor, "_format_quality_feedback", return_value=None),
-        patch.object(processor, "_format_contextual_quality_feedback", return_value=None),
+        patch.object(
+            processor, "_format_contextual_quality_feedback", return_value=None
+        ),
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_processor.build_plan_event",
             return_value={"event": "plan", "data": "{}"},
@@ -294,7 +307,9 @@ async def test_process_create_arguments_canonicalizes_unique_resource_aliases_be
 
 
 @pytest.mark.asyncio
-async def test_process_create_arguments_returns_validation_feedback_for_ambiguous_kb_alias() -> None:
+async def test_process_create_arguments_returns_validation_feedback_for_ambiguous_kb_alias() -> (
+    None
+):
     processor = _make_processor()
     draft = _make_create_draft(knowledge_refs=["socio"])
     resource_catalog = build_ai_builder_resource_catalog(
@@ -329,7 +344,9 @@ async def test_process_create_arguments_returns_validation_feedback_for_ambiguou
 
 
 @pytest.mark.asyncio
-async def test_request_non_question_continuation_uses_backend_followup_when_only_question_tool_available() -> None:
+async def test_request_non_question_continuation_uses_backend_followup_when_only_question_tool_available() -> (
+    None
+):
     repo = AsyncMock()
     processor = _make_processor(repo=repo)
     repeated_question = _make_tool_call(
@@ -388,7 +405,9 @@ async def test_request_non_question_continuation_uses_backend_followup_when_only
                 new_messages_start=2,
                 llm_messages=[],
                 tool_call=repeated_question,
-                tool_schemas=[{"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}}],
+                tool_schemas=[
+                    {"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}}
+                ],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
                 available_model_refs=None,
@@ -406,7 +425,9 @@ async def test_request_non_question_continuation_uses_backend_followup_when_only
 
 
 @pytest.mark.asyncio
-async def test_request_non_question_continuation_recovers_with_requirements_summary_when_discovery_ready() -> None:
+async def test_request_non_question_continuation_recovers_with_requirements_summary_when_discovery_ready() -> (
+    None
+):
     processor = _make_processor()
     repeated_question = _make_tool_call(
         ASK_STRUCTURED_QUESTION_TOOL_NAME,
@@ -480,7 +501,9 @@ async def test_request_non_question_continuation_recovers_with_requirements_summ
                 new_messages_start=2,
                 llm_messages=[],
                 tool_call=repeated_question,
-                tool_schemas=[{"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}}],
+                tool_schemas=[
+                    {"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}}
+                ],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
                 available_model_refs=None,
@@ -501,12 +524,15 @@ async def test_request_non_question_continuation_recovers_with_requirements_summ
         "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME},
     }
     assert [
-        schema["function"]["name"] for schema in repair_completion.await_args.kwargs["tool_schemas"]
+        schema["function"]["name"]
+        for schema in repair_completion.await_args.kwargs["tool_schemas"]
     ] == [CONFIRM_REQUIREMENTS_TOOL_NAME]
 
 
 @pytest.mark.asyncio
-async def test_request_non_question_continuation_returns_typed_error_when_no_followup_exists() -> None:
+async def test_request_non_question_continuation_returns_typed_error_when_no_followup_exists() -> (
+    None
+):
     processor = _make_processor()
     repeated_question = _make_tool_call(
         ASK_STRUCTURED_QUESTION_TOOL_NAME,
@@ -542,11 +568,15 @@ async def test_request_non_question_continuation_returns_typed_error_when_no_fol
             event
             async for event in processor.request_non_question_continuation(
                 session_id=uuid4(),
-                conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+                conversation=[
+                    ConversationMessage(role="user", content="Bygg ett flöde")
+                ],
                 new_messages_start=1,
                 llm_messages=[],
                 tool_call=repeated_question,
-                tool_schemas=[{"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}}],
+                tool_schemas=[
+                    {"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}}
+                ],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
                 available_model_refs=None,
@@ -612,7 +642,9 @@ async def test_dispatch_known_tool_call_routes_create_flow_handler() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_create_flow_tool_call_returns_requirements_not_confirmed_error() -> None:
+async def test_handle_create_flow_tool_call_returns_requirements_not_confirmed_error() -> (
+    None
+):
     processor = _make_processor()
     tool_call = MagicMock()
     tool_call.function.arguments = "{}"
@@ -647,7 +679,9 @@ async def test_handle_create_flow_tool_call_returns_requirements_not_confirmed_e
 
 
 @pytest.mark.asyncio
-async def test_handle_create_flow_tool_call_invalid_json_requests_self_correction() -> None:
+async def test_handle_create_flow_tool_call_invalid_json_requests_self_correction() -> (
+    None
+):
     processor = _make_processor()
     tool_call = MagicMock()
     tool_call.function.arguments = "{broken"
@@ -687,7 +721,9 @@ async def test_handle_create_flow_tool_call_invalid_json_requests_self_correctio
 
 
 @pytest.mark.asyncio
-async def test_handle_submission_tool_call_runs_processor_once_with_flow_context() -> None:
+async def test_handle_submission_tool_call_runs_processor_once_with_flow_context() -> (
+    None
+):
     processor = _make_processor()
     tool_call = MagicMock()
     tool_call.id = "call-edit"
@@ -801,7 +837,9 @@ async def test_process_create_arguments_compiles_and_stores_plan() -> None:
             ),
         ),
         patch.object(processor, "_format_quality_feedback", return_value=None),
-        patch.object(processor, "_format_contextual_quality_feedback", return_value=None),
+        patch.object(
+            processor, "_format_contextual_quality_feedback", return_value=None
+        ),
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_processor.build_plan_event",
             return_value={"event": "plan", "data": "{}"},
@@ -830,7 +868,9 @@ async def test_process_create_arguments_compiles_and_stores_plan() -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_create_arguments_formats_structured_field_depth_errors_actionably() -> None:
+async def test_process_create_arguments_formats_structured_field_depth_errors_actionably() -> (
+    None
+):
     processor = _make_processor()
 
     with patch(
@@ -862,7 +902,9 @@ async def test_process_create_arguments_formats_structured_field_depth_errors_ac
 
 
 @pytest.mark.asyncio
-async def test_process_create_arguments_formats_structured_field_entries_in_steps_actionably() -> None:
+async def test_process_create_arguments_formats_structured_field_entries_in_steps_actionably() -> (
+    None
+):
     processor = _make_processor()
 
     result = await processor._process_create_arguments(
@@ -914,7 +956,9 @@ async def test_process_create_arguments_formats_structured_field_entries_in_step
 
 
 @pytest.mark.asyncio
-async def test_process_create_arguments_formats_first_step_source_errors_actionably() -> None:
+async def test_process_create_arguments_formats_first_step_source_errors_actionably() -> (
+    None
+):
     processor = _make_processor()
     invalid_draft = FlowCreateDraft.model_validate(
         {
@@ -953,11 +997,16 @@ async def test_process_create_arguments_formats_first_step_source_errors_actiona
     assert result.feedback is not None
     assert "steps[0].input_source" in result.feedback
     assert "flow_input" in result.feedback
-    assert "Only later steps may use previous_step or all_previous_steps" in result.feedback
+    assert (
+        "Only later steps may use previous_step or all_previous_steps"
+        in result.feedback
+    )
 
 
 @pytest.mark.asyncio
-async def test_process_create_arguments_appends_actionable_quality_repair_rules() -> None:
+async def test_process_create_arguments_appends_actionable_quality_repair_rules() -> (
+    None
+):
     processor = _make_processor()
     draft = _make_create_draft()
     compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
@@ -993,7 +1042,7 @@ async def test_process_create_arguments_appends_actionable_quality_repair_rules(
                 "1. Användaren har valt DOCX som slutartefakt men sista steget producerar inte DOCX. "
                 "Justera slutstegets output_type så att det matchar användarens val.\n"
                 "2. Konversationen beskriver jämförelse eller samlad analys av flera dokument, men inget steg använder "
-                "`input_source=\"all_previous_steps\"`. Använd en aggregerande eller jämförande koppling när flera dokument ska behandlas tillsammans."
+                '`input_source="all_previous_steps"`. Använd en aggregerande eller jämförande koppling när flera dokument ska behandlas tillsammans.'
             ),
         ),
     ):
@@ -1039,7 +1088,9 @@ async def test_process_edit_arguments_retries_on_contextual_quality_feedback() -
             ],
         }
     )
-    edit_result = MagicMock(compiled_spec=_make_flow_spec(model_ref=None, knowledge_refs=[]))
+    edit_result = MagicMock(
+        compiled_spec=_make_flow_spec(model_ref=None, knowledge_refs=[])
+    )
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
@@ -1065,12 +1116,13 @@ async def test_process_edit_arguments_retries_on_contextual_quality_feedback() -
             return_value=(
                 "Quality issues:\n"
                 "Konversationen efterfrågar genererad DOCX utan mall, men planen använder fortfarande "
-                "`output_mode=\"template_fill\"`."
+                '`output_mode="template_fill"`.'
             ),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
             new_callable=AsyncMock,
+            return_value=(MagicMock(), MagicMock()),
         ) as store_plan,
     ):
         result = await processor._process_edit_arguments(
@@ -1095,6 +1147,91 @@ async def test_process_edit_arguments_retries_on_contextual_quality_feedback() -
     assert result.feedback is not None
     assert "template_fill" in result.feedback
     store_plan.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_edit_arguments_passes_metadata_to_edit_validator() -> None:
+    processor = _make_processor()
+    flow = MagicMock()
+    flow.steps = []
+    flow.draft_revision = 7
+    flow.name = "Rapportflöde"
+    flow.description = "Skapar PDF idag."
+    flow.metadata_json = {
+        "form_schema": {
+            "fields": [{"name": "ärendenummer", "type": "text"}],
+        }
+    }
+
+    draft = FlowEditDraft.model_validate(
+        {
+            "plan_rationale": "Byt bara slutformatet.",
+            "operations": [
+                {
+                    "op": "modify",
+                    "target_ref": "existing_step_1",
+                    "patch": {"output_type": "docx"},
+                }
+            ],
+        }
+    )
+    edit_result = MagicMock(
+        compiled_spec=_make_flow_spec(model_ref=None, knowledge_refs=[])
+    )
+    compiled_validation = MagicMock(valid=True, errors=[])
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
+            return_value=SimpleNamespace(
+                spec=edit_result.compiled_spec,
+                validation=compiled_validation,
+                failure_feedback=None,
+            ),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_edit_draft",
+            return_value=edit_result,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_edit_draft",
+            return_value=SpecValidationResult(),
+        ) as validate_edit,
+        patch.object(
+            processor,
+            "_format_contextual_quality_feedback",
+            return_value=None,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.build_plan_event",
+            return_value={"event": "plan", "data": "{}"},
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(), MagicMock()),
+        ) as store_plan,
+    ):
+        await processor._process_edit_arguments(
+            session_id=uuid4(),
+            conversation=[],
+            new_messages_start=0,
+            arguments=draft.model_dump(mode="json"),
+            assistant_content="Här är mitt förslag:",
+            tool_call_id="call_edit",
+            available_model_refs=None,
+            available_kb_refs=None,
+            flow=flow,
+            assistant_snapshots=None,
+            litellm_model="openai/gpt-4",
+            litellm_kwargs={"api_key": "sk-test"},
+            max_output_tokens=1024,
+            resource_catalog=None,
+        )
+
+    assert validate_edit.call_args is not None
+    assert validate_edit.call_args.kwargs["current_metadata_json"] == flow.metadata_json
+    store_plan.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1146,7 +1283,10 @@ async def test_handle_tool_call_builds_proposal_context_for_edit_handler() -> No
             )
         ]
 
-    assert events == [{"event": "text", "data": '{"text":"draft"}'}, {"event": "done", "data": ""}]
+    assert events == [
+        {"event": "text", "data": '{"text":"draft"}'},
+        {"event": "done", "data": ""},
+    ]
     assert captured_ctx is not None
     assert captured_ctx.request_id == "req-ctx"
     assert captured_ctx.text_content == "draft"
@@ -1156,7 +1296,9 @@ async def test_handle_tool_call_builds_proposal_context_for_edit_handler() -> No
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_returns_typed_error_when_repair_completion_raises() -> None:
+async def test_request_self_correction_returns_typed_error_when_repair_completion_raises() -> (
+    None
+):
     processor = _make_processor()
     tool_call = _make_tool_call(
         CREATE_FLOW_TOOL_NAME,
@@ -1177,7 +1319,9 @@ async def test_request_self_correction_returns_typed_error_when_repair_completio
             event
             async for event in processor.request_self_correction(
                 session_id=uuid4(),
-                conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+                conversation=[
+                    ConversationMessage(role="user", content="Bygg ett flöde")
+                ],
                 new_messages_start=1,
                 error_message="Invalid flow specification: missing steps",
                 llm_messages=[{"role": "system", "content": "Prompt"}],
@@ -1246,7 +1390,9 @@ async def test_submission_retry_config_returns_typed_edit_retry_config() -> None
 
 
 @pytest.mark.asyncio
-async def test_retry_forced_proposal_after_text_uses_create_flow_for_create_mode() -> None:
+async def test_retry_forced_proposal_after_text_uses_create_flow_for_create_mode() -> (
+    None
+):
     processor = _make_processor()
 
     with patch(
@@ -1291,7 +1437,7 @@ async def test_handle_edit_flow_parse_failure_triggers_self_correction() -> None
                     "target_ref": "existing_step_1",
                     "patch": {"output_type": "text"},
                 },
-                "assumptions:[\"trasig\"]",
+                'assumptions:["trasig"]',
             ],
         }
     )
@@ -1305,20 +1451,29 @@ async def test_handle_edit_flow_parse_failure_triggers_self_correction() -> None
         "_request_tool_self_correction",
         return_value=_events(),
     ) as repair:
-        events = [event async for event in processor._handle_edit_flow(ctx=ctx, tool_call=tool_call)]
+        events = [
+            event
+            async for event in processor._handle_edit_flow(ctx=ctx, tool_call=tool_call)
+        ]
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     assert "StepEditOperation" in repair.call_args.kwargs["error_message"]
-    assert repair.call_args.kwargs["retry_config"].target_tool_name == EDIT_FLOW_TOOL_NAME
+    assert (
+        repair.call_args.kwargs["retry_config"].target_tool_name == EDIT_FLOW_TOOL_NAME
+    )
 
 
 @pytest.mark.asyncio
-async def test_handle_confirm_requirements_parse_failure_triggers_self_correction() -> None:
+async def test_handle_confirm_requirements_parse_failure_triggers_self_correction() -> (
+    None
+):
     processor = _make_processor()
     tool_call = MagicMock()
     tool_call.id = "call_confirm"
     tool_call.function.name = CONFIRM_REQUIREMENTS_TOOL_NAME
-    tool_call.function.arguments = json.dumps({"summary": "Kort", "key_decisions": "inte-en-lista"})
+    tool_call.function.arguments = json.dumps(
+        {"summary": "Kort", "key_decisions": "inte-en-lista"}
+    )
     ctx = _make_context()
 
     async def _events():
@@ -1331,7 +1486,9 @@ async def test_handle_confirm_requirements_parse_failure_triggers_self_correctio
     ) as repair:
         events = [
             event
-            async for event in processor._handle_confirm_requirements(ctx=ctx, tool_call=tool_call)
+            async for event in processor._handle_confirm_requirements(
+                ctx=ctx, tool_call=tool_call
+            )
         ]
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]

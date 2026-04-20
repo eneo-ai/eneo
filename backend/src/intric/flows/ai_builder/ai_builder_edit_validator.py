@@ -12,6 +12,9 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepEditOperation,
     StepPatch,
 )
+from intric.flows.ai_builder.ai_builder_form_fields import (
+    effective_form_field_names,
+)
 from intric.flows.ai_builder.ai_builder_models import OutputType
 from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
@@ -27,6 +30,7 @@ def validate_edit_draft(
     draft: FlowEditDraft,
     valid_step_refs: list[str],
     current_steps: list[FlowStep] | None = None,
+    current_metadata_json: dict[str, object] | None = None,
 ) -> SpecValidationResult:
     """Validate edit draft operations before compilation.
 
@@ -39,6 +43,10 @@ def validate_edit_draft(
     """
     result = SpecValidationResult()
     seen_targets: set[str] = set()
+    available_form_fields = effective_form_field_names(
+        current_metadata_json,
+        draft.form_operations,
+    )
     removed_step_orders = {
         _step_order_from_ref(op.target_ref)
         for op in draft.operations
@@ -58,6 +66,7 @@ def validate_edit_draft(
                 result,
                 current_steps,
                 removed_step_orders,
+                available_form_fields,
             )
         elif op.op == "modify":
             _validate_modify_op(
@@ -67,6 +76,7 @@ def validate_edit_draft(
                 result,
                 current_steps,
                 removed_step_orders,
+                available_form_fields,
             )
         elif op.op == "remove":
             _validate_remove_op(op, valid_step_refs, op_label, result)
@@ -94,6 +104,7 @@ def _validate_add_op(
     result: SpecValidationResult,
     current_steps: list[FlowStep] | None,
     removed_step_orders: set[int],
+    available_form_fields: set[str],
 ) -> None:
     if op.target_ref is not None:
         result.add_error(
@@ -133,6 +144,12 @@ def _validate_add_op(
             )
 
     if op.add_payload is not None and current_steps is not None:
+        _validate_form_field_references(
+            uses_form_fields=op.add_payload.uses_form_fields,
+            available_form_fields=available_form_fields,
+            step_ref=None,
+            result=result,
+        )
         placement = op.placement.position if op.placement is not None else "append"
         anchor_ref = op.placement.anchor_ref if op.placement is not None else None
         max_prior_order = len(current_steps)
@@ -157,6 +174,7 @@ def _validate_modify_op(
     result: SpecValidationResult,
     current_steps: list[FlowStep] | None,
     removed_step_orders: set[int],
+    available_form_fields: set[str],
 ) -> None:
     if op.target_ref is None:
         result.add_error(
@@ -182,6 +200,14 @@ def _validate_modify_op(
             step_ref=op.target_ref,
             code="modify_missing_patch",
             message=f"{label}: 'modify' operations require a patch with at least one field.",
+        )
+
+    if op.patch is not None:
+        _validate_form_field_references(
+            uses_form_fields=op.patch.uses_form_fields,
+            available_form_fields=available_form_fields,
+            step_ref=op.target_ref,
+            result=result,
         )
 
     # Warn on type downgrades
@@ -232,6 +258,32 @@ def _validate_remove_op(
             message=(
                 f"{label}: target_ref '{op.target_ref}' does not match any "
                 f"existing step. Valid refs: {valid_refs}"
+            ),
+        )
+
+
+def _validate_form_field_references(
+    *,
+    uses_form_fields: list[str] | None,
+    available_form_fields: set[str],
+    step_ref: str | None,
+    result: SpecValidationResult,
+) -> None:
+    if not uses_form_fields:
+        return
+    missing_fields = [
+        field_name
+        for field_name in uses_form_fields
+        if field_name not in available_form_fields
+    ]
+    if missing_fields:
+        result.add_error(
+            step_ref=step_ref,
+            code="unknown_form_field_reference",
+            message=(
+                "uses_form_fields references unknown form fields: "
+                + ", ".join(missing_fields)
+                + "."
             ),
         )
 

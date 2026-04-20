@@ -1234,6 +1234,7 @@ class AIBuilderProposalProcessor:
             draft,
             valid_step_refs,
             current_steps=list(flow.steps),
+            current_metadata_json=flow.metadata_json,
         )
         if edit_validation.errors:
             error_messages = [err.message for err in edit_validation.errors]

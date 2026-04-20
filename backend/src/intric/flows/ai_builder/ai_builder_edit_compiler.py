@@ -28,6 +28,9 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepPatch,
 )
 from intric.flows.ai_builder.ai_builder_flow_name import normalize_flow_name
+from intric.flows.ai_builder.ai_builder_form_fields import (
+    extract_form_fields_from_metadata,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -615,7 +618,7 @@ def _compile_form_fields(
     *,
     current_metadata_json: dict[str, Any] | None,
 ) -> tuple[list[FormFieldSpec] | None, list[FormFieldChange]]:
-    current_fields = _extract_form_fields_from_metadata(current_metadata_json)
+    current_fields = extract_form_fields_from_metadata(current_metadata_json)
     if not edit_draft.form_operations:
         return (deepcopy(current_fields) if current_fields is not None else None, [])
 
@@ -684,51 +687,6 @@ def _compile_form_fields(
         form_changes.append(FormFieldChange(kind="modified", field_name=op.field_name))
 
     return (working_fields or None, form_changes)
-
-
-def _extract_form_fields_from_metadata(
-    metadata_json: dict[str, Any] | None,
-) -> list[FormFieldSpec] | None:
-    if not isinstance(metadata_json, dict):
-        return None
-    form_schema = metadata_json.get("form_schema")
-    if not isinstance(form_schema, dict):
-        return None
-    form_schema_dict = cast(dict[str, Any], form_schema)
-    raw_fields_value = form_schema_dict.get("fields")
-    if not isinstance(raw_fields_value, list):
-        return None
-    raw_fields = cast(list[object], raw_fields_value)
-
-    fields: list[FormFieldSpec] = []
-    for raw_field in raw_fields:
-        if not isinstance(raw_field, dict):
-            continue
-        raw_field_dict = cast(dict[str, Any], raw_field)
-        name = str(raw_field_dict.get("name", "")).strip()
-        if not name:
-            continue
-        label = str(raw_field_dict.get("label", name)).strip() or name
-        field_type = str(raw_field_dict.get("type", "text")).strip() or "text"
-        options = raw_field_dict.get("options")
-        normalized_option_values = (
-            cast(list[object], options) if isinstance(options, list) else []
-        )
-        normalized_options = (
-            [str(option) for option in normalized_option_values]
-            if isinstance(options, list)
-            else None
-        )
-        fields.append(
-            FormFieldSpec(
-                name=name,
-                type=field_type,
-                label=label,
-                required=bool(raw_field_dict.get("required", False)),
-                options=normalized_options,
-            )
-        )
-    return fields or None
 
 
 def _canonicalize_existing_runtime_aliases(
