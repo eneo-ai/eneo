@@ -5,11 +5,11 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.flow import FlowStep
+from intric.flows.flow_validators import validate_form_schema, validate_steps
 from intric.flows.flow_validators_form import (
     normalize_legacy_form_schema,
     validate_variable_alias_collisions,
 )
-from intric.flows.flow_validators import validate_form_schema, validate_steps
 from intric.main.exceptions import BadRequestException
 
 
@@ -34,19 +34,28 @@ def test_validate_steps_rejects_unsupported_enum_values():
 
 
 def test_validate_steps_rejects_output_contract_for_text_output():
-    with pytest.raises(BadRequestException, match="output_contract is not supported for output_type 'text'"):
+    with pytest.raises(
+        BadRequestException,
+        match="output_contract is not supported for output_type 'text'",
+    ):
         validate_steps(
             [
                 _step(
                     output_type="text",
-                    output_contract={"type": "object", "properties": {"value": {"type": "string"}}},
+                    output_contract={
+                        "type": "object",
+                        "properties": {"value": {"type": "string"}},
+                    },
                 )
             ]
         )
 
 
 def test_validate_steps_rejects_http_get_body_fields():
-    with pytest.raises(BadRequestException, match="body fields are only allowed for input_source 'http_post'"):
+    with pytest.raises(
+        BadRequestException,
+        match="body fields are only allowed for input_source 'http_post'",
+    ):
         validate_steps(
             [
                 _step(
@@ -58,7 +67,10 @@ def test_validate_steps_rejects_http_get_body_fields():
 
 
 def test_validate_steps_rejects_file_like_input_types_for_http_sources():
-    with pytest.raises(BadRequestException, match="input_type 'image' is not supported with input_source 'http_get'"):
+    with pytest.raises(
+        BadRequestException,
+        match="input_type 'image' is not supported with input_source 'http_get'",
+    ):
         validate_steps(
             [
                 _step(
@@ -71,7 +83,9 @@ def test_validate_steps_rejects_file_like_input_types_for_http_sources():
 
 
 def test_validate_form_schema_options_error_mentions_select_and_multiselect():
-    with pytest.raises(BadRequestException, match="only valid for select or multiselect"):
+    with pytest.raises(
+        BadRequestException, match="only valid for select or multiselect"
+    ):
         validate_form_schema(
             {
                 "form_schema": {
@@ -84,7 +98,9 @@ def test_validate_form_schema_options_error_mentions_select_and_multiselect():
 
 
 def test_validate_steps_rejects_http_body_template_and_body_json_together():
-    with pytest.raises(BadRequestException, match="cannot define both body_template and body_json"):
+    with pytest.raises(
+        BadRequestException, match="cannot define both body_template and body_json"
+    ):
         validate_steps(
             [
                 _step(
@@ -100,7 +116,9 @@ def test_validate_steps_rejects_http_body_template_and_body_json_together():
 
 
 def test_validate_steps_rejects_invalid_http_response_format():
-    with pytest.raises(BadRequestException, match="response_format must be 'text' or 'json'"):
+    with pytest.raises(
+        BadRequestException, match="response_format must be 'text' or 'json'"
+    ):
         validate_steps(
             [
                 _step(
@@ -115,13 +133,29 @@ def test_validate_steps_rejects_invalid_http_response_format():
 
 
 def test_validate_steps_rejects_forward_binding_reference_directly():
-    with pytest.raises(BadRequestException, match="only reference outputs from earlier steps"):
+    with pytest.raises(
+        BadRequestException, match="only reference outputs from earlier steps"
+    ):
         validate_steps(
             [
                 _step(1, input_bindings={"value": "{{step_2.output.text}}"}),
                 _step(2),
             ]
         )
+
+
+def test_validate_steps_allows_runtime_step_input_reference_in_bindings():
+    validate_steps(
+        [
+            _step(
+                input_type="document",
+                input_config={
+                    "runtime_input": {"enabled": True, "input_format": "document"}
+                },
+                input_bindings={"value": "{{step_input.text}}"},
+            )
+        ]
+    )
 
 
 def test_validate_form_schema_rejects_duplicate_field_names_case_insensitive():
@@ -139,7 +173,9 @@ def test_validate_form_schema_rejects_duplicate_field_names_case_insensitive():
 
 
 def test_validate_steps_rejects_template_fill_for_non_docx_output():
-    with pytest.raises(BadRequestException, match="template_fill requires output_type 'docx'"):
+    with pytest.raises(
+        BadRequestException, match="template_fill requires output_type 'docx'"
+    ):
         validate_steps(
             [
                 _step(
@@ -201,7 +237,10 @@ def test_validate_steps_allows_explicit_empty_template_bindings_for_publish():
 
 
 def test_validate_steps_rejects_inline_citation_mode_for_non_text_output() -> None:
-    with pytest.raises(BadRequestException, match="citation_mode 'inline_inref_sidecar' requires output_type 'text'"):
+    with pytest.raises(
+        BadRequestException,
+        match="citation_mode 'inline_inref_sidecar' requires output_type 'text'",
+    ):
         validate_steps(
             [
                 _step(
@@ -212,8 +251,13 @@ def test_validate_steps_rejects_inline_citation_mode_for_non_text_output() -> No
         )
 
 
-def test_validate_steps_rejects_inline_citation_mode_for_transcribe_only_output() -> None:
-    with pytest.raises(BadRequestException, match="citation_mode 'inline_inref_sidecar' requires an LLM-backed text step"):
+def test_validate_steps_rejects_inline_citation_mode_for_transcribe_only_output() -> (
+    None
+):
+    with pytest.raises(
+        BadRequestException,
+        match="citation_mode 'inline_inref_sidecar' requires an LLM-backed text step",
+    ):
         validate_steps(
             [
                 _step(

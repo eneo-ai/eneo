@@ -1,16 +1,49 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from intric.flows.ai_builder.ai_builder_models import InputSource, InputType, OutputType
 from intric.flows.ai_builder.ai_builder_domain_models import AssistantSpec
+from intric.flows.ai_builder.ai_builder_models import InputSource, InputType, OutputType
 
 DocumentDeliveryMode = Literal["not_applicable", "generated", "template_fill"]
 StructuredFieldType = Literal["string", "number", "boolean", "object", "array"]
 
 MAX_STRUCTURED_FIELD_DEPTH = 3
+
+
+class PreviousFieldRef(BaseModel):
+    from_step: int
+    field_path: str
+    label: str | None = None
+
+    @field_validator("from_step")
+    @classmethod
+    def _validate_from_step(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("uses_previous_fields.from_step must be at least 1.")
+        return value
+
+    @field_validator("field_path")
+    @classmethod
+    def _normalize_field_path(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("uses_previous_fields.field_path must not be empty.")
+        if any(not segment.strip() for segment in normalized.split(".")):
+            raise ValueError(
+                "uses_previous_fields.field_path must not contain empty path segments."
+            )
+        return normalized
+
+    @field_validator("label")
+    @classmethod
+    def _normalize_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
 
 class StructuredFieldDraft(BaseModel):
@@ -57,6 +90,9 @@ class NewStepDraft(BaseModel):
     runtime_required: bool = False
     runtime_max_files: int | None = None
     uses_form_fields: list[str] = Field(default_factory=list)
+    uses_previous_fields: list[PreviousFieldRef] = Field(
+        default_factory=lambda: cast(list[PreviousFieldRef], [])
+    )
     document_delivery_mode: DocumentDeliveryMode = "not_applicable"
     citations_requested: bool = False
     output_fields: list[StructuredFieldDraft] | None = None

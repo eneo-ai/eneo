@@ -192,6 +192,11 @@ def _missing_contract_path(contract: dict[str, Any], path: list[str]) -> str | N
         current_schema = cast(JsonObject, current)
         schema_type = current_schema.get("type")
         if schema_type == "array":
+            if part.isdigit():
+                current = current_schema.get("items")
+                if not isinstance(current, dict):
+                    return ".".join(traversed)
+                continue
             current = current_schema.get("items")
             if not isinstance(current, dict):
                 return ".".join(traversed)

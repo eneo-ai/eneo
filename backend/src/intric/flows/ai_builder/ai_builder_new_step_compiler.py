@@ -100,16 +100,25 @@ def compile_input_bindings(
     prior_steps: list[StepSpec],
 ) -> dict[str, Any] | None:
     source_reference = _resolve_source_reference(step_draft, prior_steps)
-    if source_reference is None:
+    explicit_previous_fields = _compile_previous_field_sections(step_draft, prior_steps)
+
+    if source_reference is None and not explicit_previous_fields:
         return None
 
-    sections: list[str] = [source_reference]
+    sections: list[str] = []
+    if source_reference is not None and not (
+        explicit_previous_fields and source_reference.endswith(".output.structured }}")
+    ):
+        sections.append(source_reference)
+    sections.extend(explicit_previous_fields)
     if step_draft.uses_form_fields:
         form_field_lines = [
             f"{field_name}: {{{{ {field_name} }}}}"
             for field_name in step_draft.uses_form_fields
         ]
         sections.append("\n".join(form_field_lines))
+    if not sections:
+        return None
     return {"question": "\n\n".join(sections)}
 
 
@@ -166,7 +175,7 @@ def _resolve_source_reference(
         if input_type == "json":
             return "{{ indata_json }}"
         if input_type in {"document", "file", "audio"}:
-            return None
+            return "{{ step_input.text }}"
         return "{{ indata_text }}"
 
     if input_source == "previous_step":
@@ -183,6 +192,29 @@ def _resolve_source_reference(
         return "\n\n".join(references) if references else None
 
     return None
+
+
+def _compile_previous_field_sections(
+    step_draft: NewStepDraft,
+    prior_steps: list[StepSpec],
+) -> list[str]:
+    sections: list[str] = []
+    for field_ref in step_draft.uses_previous_fields:
+        if field_ref.from_step < 1 or field_ref.from_step > len(prior_steps):
+            continue
+        source_step = prior_steps[field_ref.from_step - 1]
+        label = field_ref.label or _default_previous_field_label(field_ref.field_path)
+        sections.append(
+            f"{label}: {{{{ {source_step.plan_step_ref}.output.structured.{field_ref.field_path} }}}}"
+        )
+    return sections
+
+
+def _default_previous_field_label(field_path: str) -> str:
+    tokens = [token for token in field_path.split(".") if token and not token.isdigit()]
+    if not tokens:
+        return field_path
+    return tokens[-1].replace("_", " ")
 
 
 def _compile_object_schema(fields: list[StructuredFieldDraft]) -> dict[str, Any]:

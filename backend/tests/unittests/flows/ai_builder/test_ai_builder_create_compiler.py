@@ -36,7 +36,9 @@ def _field(
     )
 
 
-def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields() -> None:
+def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields() -> (
+    None
+):
     draft = FlowCreateDraft(
         flow_name="Kommunärendeanalys",
         flow_description="Analyserar dokumentpaket.",
@@ -83,7 +85,11 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
                         "array",
                         description="Ekonomiska effekter.",
                         item_fields=[
-                            _field("sammanfattning", "string", description="Kort summering."),
+                            _field(
+                                "sammanfattning",
+                                "string",
+                                description="Kort summering.",
+                            ),
                         ],
                     ),
                 ],
@@ -115,16 +121,18 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
     assert runtime_input["required"] is True
     assert runtime_input["max_files"] == 5
     assert runtime_input["input_format"] == "document"
-    assert first_step.input_bindings is None
-    assert "{{ ärendenummer }}" in first_step.assistant_spec.instructions
-    assert "{{ ansvarig_nämnd }}" in first_step.assistant_spec.instructions
+    assert first_step.input_bindings == {
+        "question": "{{ step_input.text }}\n\närendenummer: {{ ärendenummer }}\nansvarig_nämnd: {{ ansvarig_nämnd }}"
+    }
     assert "Required JSON fields:" in first_step.assistant_spec.instructions
     assert "risker" in first_step.assistant_spec.instructions
     assert "ekonomiska_konsekvenser" in first_step.assistant_spec.instructions
     assert first_step.output_contract is not None
     assert first_step.output_contract["properties"]["risker"]["type"] == "array"
     assert (
-        first_step.output_contract["properties"]["risker"]["items"]["properties"]["titel"]["type"]
+        first_step.output_contract["properties"]["risker"]["items"]["properties"][
+            "titel"
+        ]["type"]
         == "string"
     )
 
@@ -135,7 +143,81 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
 
     validation = validate_spec(compiled)
     assert validation.valid
-    assert not any(warning.code == "contract_instruction_mismatch" for warning in validation.warnings)
+    assert not any(
+        warning.code == "contract_instruction_mismatch"
+        for warning in validation.warnings
+    )
+
+
+def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindings() -> (
+    None
+):
+    draft = FlowCreateDraft(
+        flow_name="Kommunärendeanalys",
+        plan_rationale="Återanvänd specifika fält i steg 3.",
+        form_fields=[
+            CreateFormFieldDraft(
+                variable_name="ärendenummer",
+                label="Ärendenummer",
+                field_type="text",
+                required=True,
+            )
+        ],
+        steps=[
+            CreateStepDraft(
+                name="Extrahera risker",
+                instructions="Extrahera risker och rekommendationer.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="json",
+                runtime_upload=True,
+                runtime_required=True,
+                output_fields=[
+                    _field(
+                        "sammanfattning", "string", description="Kort sammanfattning."
+                    ),
+                    _field(
+                        "risker",
+                        "array",
+                        description="Identifierade risker.",
+                        item_fields=[
+                            _field("rubrik", "string", description="Riskrubrik.")
+                        ],
+                    ),
+                ],
+            ),
+            CreateStepDraft(
+                name="Skriv beslutsunderlag",
+                instructions="Skriv beslutsunderlag med specifika datapunkter.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+                uses_form_fields=["ärendenummer"],
+                uses_previous_fields=[
+                    {
+                        "from_step": 1,
+                        "field_path": "sammanfattning",
+                        "label": "Sammanfattning",
+                    },
+                    {
+                        "from_step": 1,
+                        "field_path": "risker.0.rubrik",
+                        "label": "Första riskrubrik",
+                    },
+                ],
+            ),
+        ],
+    )
+
+    compiled = compile_create_draft(draft)
+
+    second_step = compiled.steps[1]
+    assert second_step.input_bindings is not None
+    assert second_step.input_bindings["question"] == (
+        "Sammanfattning: {{ step_a.output.structured.sammanfattning }}\n\n"
+        "Första riskrubrik: {{ step_a.output.structured.risker.0.rubrik }}\n\n"
+        "ärendenummer: {{ ärendenummer }}"
+    )
 
 
 def test_compile_create_draft_derives_transcribe_only_for_audio_upload() -> None:
@@ -159,7 +241,7 @@ def test_compile_create_draft_derives_transcribe_only_for_audio_upload() -> None
 
     step = compiled.steps[0]
     assert step.output_mode.value == "transcribe_only"
-    assert step.input_bindings is None
+    assert step.input_bindings == {"question": "{{ step_input.text }}"}
     assert step.input_config is not None
     assert step.input_config["runtime_input"]["input_format"] == "audio"
 
@@ -204,7 +286,133 @@ def test_validate_create_draft_rejects_template_fill_on_non_docx() -> None:
     validation = validate_create_draft(draft)
 
     assert not validation.valid
-    assert any(error.code == "template_fill_requires_docx" for error in validation.errors)
+    assert any(
+        error.code == "template_fill_requires_docx" for error in validation.errors
+    )
+
+
+def test_validate_create_draft_rejects_unknown_previous_field_reference() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Ogiltig fältreferens",
+        plan_rationale="Testar fältvalidering.",
+        steps=[
+            CreateStepDraft(
+                name="Extrahera risker",
+                instructions="Extrahera risker.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="json",
+                runtime_upload=True,
+                output_fields=[_field("sammanfattning", "string")],
+            ),
+            CreateStepDraft(
+                name="Sammanfatta",
+                instructions="Skriv sammanfattning.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+                uses_previous_fields=[{"from_step": 1, "field_path": "okänd"}],
+            ),
+        ],
+    )
+
+    validation = validate_create_draft(draft)
+
+    assert not validation.valid
+    assert any(
+        error.code == "unknown_previous_field_reference" for error in validation.errors
+    )
+
+
+def test_validate_create_draft_rejects_non_json_previous_field_source() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Ogiltig fältkälla",
+        plan_rationale="Testar icke-json källa.",
+        steps=[
+            CreateStepDraft(
+                name="Skriv text",
+                instructions="Skriv text.",
+                input_source="flow_input",
+                input_type="text",
+                output_type="text",
+            ),
+            CreateStepDraft(
+                name="Sammanfatta",
+                instructions="Sammanfatta.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+                uses_previous_fields=[{"from_step": 1, "field_path": "titel"}],
+            ),
+        ],
+    )
+
+    validation = validate_create_draft(draft)
+
+    assert not validation.valid
+    assert any(
+        error.code == "previous_field_source_requires_json_output"
+        for error in validation.errors
+    )
+
+
+def test_validate_create_draft_rejects_file_flow_input_without_runtime_upload() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Ogiltig filindata",
+        plan_rationale="Testar runtime upload-krav.",
+        steps=[
+            CreateStepDraft(
+                name="Analysera dokument",
+                instructions="Analysera dokumentet.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="json",
+                runtime_upload=False,
+                output_fields=[_field("sammanfattning", "string")],
+            )
+        ],
+    )
+
+    validation = validate_create_draft(draft)
+
+    assert not validation.valid
+    assert any(
+        error.code == "file_flow_input_requires_runtime_upload"
+        for error in validation.errors
+    )
+
+
+def test_validate_create_draft_rejects_future_previous_field_source() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Ogiltig stegref",
+        plan_rationale="Testar framtida stegref.",
+        steps=[
+            CreateStepDraft(
+                name="Steg 1",
+                instructions="Steg 1.",
+                input_source="flow_input",
+                input_type="document",
+                output_type="json",
+                runtime_upload=True,
+                output_fields=[_field("titel", "string")],
+            ),
+            CreateStepDraft(
+                name="Steg 2",
+                instructions="Steg 2.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+                uses_previous_fields=[{"from_step": 2, "field_path": "titel"}],
+            ),
+        ],
+    )
+
+    validation = validate_create_draft(draft)
+
+    assert not validation.valid
+    assert any(
+        error.code == "invalid_previous_field_source" for error in validation.errors
+    )
 
 
 def test_structured_field_depth_above_three_is_rejected() -> None:

@@ -14,6 +14,8 @@ CREATE_FLOW_TOOL_DESCRIPTION = (
     "Submit a typed create-flow draft for a brand new flow. "
     "Describe the intended flow shape only. Do not write raw JSON Schema, raw config dicts, "
     "plan_step_ref values, input_bindings, or template variables like {{ ... }}. "
+    "Use typed intent fields such as uses_form_fields and uses_previous_fields when downstream steps "
+    "should reuse specific runtime or structured inputs. "
     "The backend compiles this draft into the canonical flow spec shown to the user for approval."
 )
 

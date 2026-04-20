@@ -11,6 +11,7 @@ utkastet till den kanoniska flödesspecifikationen.
 - `input_source`, `input_type`, `output_type`
 - `runtime_upload`, `runtime_required`, `runtime_max_files` för första uppladdningssteget
 - `uses_form_fields` när senare steg behöver formulärvärden
+- `uses_previous_fields` när senare steg behöver specifika strukturerade fält från tidigare JSON-steg
 - `document_delivery_mode` för PDF/DOCX-leverans
 - `citations_requested` för textsteg som ska ha källhänvisningar
 - `output_fields` för JSON-steg
@@ -43,6 +44,7 @@ _KNOWLEDGE_PACK_CREATE_STEP_DESIGN = """\
 - `instructions` ska vara ren uppgiftsbeskrivning — inga `{{ ... }}`-variabler
 - Beskriv roll, krav, format och begränsningar tydligt
 - Backend kompilerar underlaget från `input_source`, tidigare steg och formulärfält
+- Backend kompilerar även explicita fältbindningar från `uses_previous_fields`
 - Instruktioner får gärna vara LÅNGA och detaljerade när uppgiften kräver flera regler, formatkrav eller beslutslogik
 
 ## JSON-utdata via `output_fields`
@@ -57,6 +59,7 @@ _KNOWLEDGE_PACK_CREATE_STEP_DESIGN = """\
 ## Formulär och runtime
 - Modellera användarens körningsdata som `form_fields` i stället för dold prompttext
 - Referera till dessa med `uses_form_fields`
+- När ett senare steg bara behöver vissa JSON-fält från ett tidigare steg: använd `uses_previous_fields`
 - Om användaren måste ladda upp filer vid körning: sätt `runtime_upload=true`
 
 ## Dokumentleverans
@@ -71,7 +74,7 @@ _KNOWLEDGE_PACK_CREATE_RECIPES = """\
 ## Dokumentpaket -> JSON -> grounded text -> DOCX/PDF
 1. Steg 1: `flow_input` + `input_type=\"document\"` + `runtime_upload=true`
 2. Steg 2: extrahera strukturerad JSON via `output_fields`
-3. Steg 3: analysera eller resonera vidare från JSON eller text
+3. Steg 3: analysera eller resonera vidare från JSON eller text, och använd `uses_previous_fields` när bara vissa datapunkter ska följa med
 4. Steg 4: skriv grounded text med `citations_requested=true` om spårbarhet behövs
 5. Sista steget: generera dokumentet som `pdf` eller `docx`
 
@@ -125,6 +128,10 @@ _KNOWLEDGE_PACK_CREATE_RECIPES = """\
       "input_type": "json",
       "output_type": "text",
       "uses_form_fields": ["arendenummer", "ansvarig_namnd"],
+      "uses_previous_fields": [
+        {"from_step": 1, "field_path": "sammanfattning", "label": "Ärendesammanfattning"},
+        {"from_step": 1, "field_path": "risker.0.rubrik", "label": "Första riskrubrik"}
+      ],
       "document_delivery_mode": "not_applicable",
       "citations_requested": true
     },

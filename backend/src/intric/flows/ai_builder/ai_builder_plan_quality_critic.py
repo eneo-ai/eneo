@@ -106,12 +106,18 @@ def build_conversation_aware_quality_feedback(
         )
 
     explicit_output = output_intent.terminal_output
-    if explicit_output == "pdf_document" and spec.steps[-1].output_type != OutputType.PDF:
+    if (
+        explicit_output == "pdf_document"
+        and spec.steps[-1].output_type != OutputType.PDF
+    ):
         issues.append(
             "Användaren har valt PDF som slutartefakt men sista steget producerar inte PDF. "
             "Justera slutstegets output_type så att det matchar användarens val."
         )
-    if explicit_output == "docx_document" and spec.steps[-1].output_type != OutputType.DOCX:
+    if (
+        explicit_output == "docx_document"
+        and spec.steps[-1].output_type != OutputType.DOCX
+    ):
         issues.append(
             "Användaren har valt DOCX som slutartefakt men sista steget producerar inte DOCX. "
             "Justera slutstegets output_type så att det matchar användarens val."
@@ -132,7 +138,7 @@ def build_conversation_aware_quality_feedback(
     ) and not _has_json_contract_step(spec):
         issues.append(
             "Planen verkar behöva strukturerad extraktion för vidare återanvändning, men saknar ett "
-            "`output_type=\"json\"`-steg med `output_contract`. Lägg till ett tydligt JSON-extraktionssteg "
+            '`output_type="json"`-steg med `output_contract`. Lägg till ett tydligt JSON-extraktionssteg '
             "innan den slutliga text- eller dokumentproduktionen."
         )
 
@@ -143,7 +149,7 @@ def build_conversation_aware_quality_feedback(
         if not _terminal_step_is_human_readable_only(text, spec):
             issues.append(
                 "Konversationen nämner strukturerad extraktion (JSON, fält, kontrakt) men inget steg "
-                "använder `output_type=\"json\"` med `output_contract`. Lägg till ett JSON-extraktionssteg "
+                'använder `output_type="json"` med `output_contract`. Lägg till ett JSON-extraktionssteg '
                 "om data ska återanvändas i nästa steg eller av ett externt system."
             )
 
@@ -151,20 +157,26 @@ def build_conversation_aware_quality_feedback(
     if _conversation_mentions_audio(text) and not _spec_handles_audio(spec):
         if not mixed_audio_document_input_requested(text, flow=flow):
             issues.append(
-                "Konversationen nämner ljud/transkribering men inget steg har `input_type=\"audio\"` "
-                "eller `output_mode=\"transcribe_only\"`. Lägg till ett dedikerat transkriberingssteg."
+                'Konversationen nämner ljud/transkribering men inget steg har `input_type="audio"` '
+                'eller `output_mode="transcribe_only"`. Lägg till ett dedikerat transkriberingssteg.'
             )
 
-    if _conversation_requests_field_reuse(text) and _has_json_contract_step(spec) and not _spec_uses_input_bindings(spec):
+    if (
+        _conversation_requests_field_reuse(text)
+        and _has_json_contract_step(spec)
+        and not _spec_uses_input_bindings(spec)
+    ):
         issues.append(
             "Konversationen antyder återanvändning av specifika fält från strukturerad extraktion, men planen saknar "
-            "`input_bindings` i efterföljande steg. Bind explicita JSON-fält vidare när nästa steg behöver utvalda datapunkter."
+            "`uses_previous_fields` i efterföljande steg. Deklarera explicita JSON-fält vidare när nästa steg behöver utvalda datapunkter."
         )
 
-    if _conversation_requests_multi_document_compare(text) and not _spec_uses_all_previous_steps(spec):
+    if _conversation_requests_multi_document_compare(
+        text
+    ) and not _spec_uses_all_previous_steps(spec):
         issues.append(
             "Konversationen beskriver jämförelse eller samlad analys av flera dokument, men inget steg använder "
-            "`input_source=\"all_previous_steps\"`. Använd en aggregerande eller jämförande koppling när flera dokument ska behandlas tillsammans."
+            '`input_source="all_previous_steps"`. Använd en aggregerande eller jämförande koppling när flera dokument ska behandlas tillsammans.'
         )
 
     if (
@@ -173,16 +185,15 @@ def build_conversation_aware_quality_feedback(
     ):
         issues.append(
             "Konversationen efterfrågar mallbaserad DOCX-generering men planen saknar ett steg med "
-            "`output_mode=\"template_fill\"`. Använd template_fill när ett Word-dokument ska fyllas från en mall."
+            '`output_mode="template_fill"`. Använd template_fill när ett Word-dokument ska fyllas från en mall.'
         )
 
-    if (
-        output_intent.docx_output_mode == "generated_docx"
-        and _spec_uses_template_fill(spec)
+    if output_intent.docx_output_mode == "generated_docx" and _spec_uses_template_fill(
+        spec
     ):
         issues.append(
             "Konversationen efterfrågar genererad DOCX utan mall, men planen använder fortfarande "
-            "`output_mode=\"template_fill\"`. Använd inte template_fill när användaren uttryckligen "
+            '`output_mode="template_fill"`. Använd inte template_fill när användaren uttryckligen '
             "valt genererad DOCX utan mall."
         )
 
@@ -190,14 +201,14 @@ def build_conversation_aware_quality_feedback(
         if degrades_document_entry_to_generic_file(spec, flow=flow):
             issues.append(
                 "Användaren verkar vilja lägga till ljud/transkribering ovanpå ett befintligt dokumentflöde, "
-                "men planen degraderar den dokumentbaserade ingången till generisk `input_type=\"file\"`. "
+                'men planen degraderar den dokumentbaserade ingången till generisk `input_type="file"`. '
                 "Gör inte om ett dokumentflöde till allmän filinput bara för att få plats med ljud."
             )
         if uses_pseudo_transcription_without_audio_step(spec):
             issues.append(
                 "Planen beskriver transkribering i instruktionerna men saknar ett riktigt "
-                "transkriberingssteg (`input_type=\"audio\"`, `output_mode=\"transcribe_only\"`, "
-                "`output_type=\"text\"`). Faka inte transkribering inne i ett dokument- eller JSON-steg."
+                'transkriberingssteg (`input_type="audio"`, `output_mode="transcribe_only"`, '
+                '`output_type="text"`). Faka inte transkribering inne i ett dokument- eller JSON-steg.'
             )
         if not has_real_audio_transcription_step(spec):
             issues.append(
@@ -242,7 +253,14 @@ def _terminal_step_is_human_readable_only(text: str, spec: FlowDraftSpecCore) ->
     if terminal.output_type not in {OutputType.TEXT, OutputType.DOCX, OutputType.PDF}:
         return False
     # If the conversation explicitly mentions downstream reuse, don't suppress.
-    downstream_markers = ("downstream", "vidare", "reuse", "återanvänd", "next step", "nästa steg")
+    downstream_markers = (
+        "downstream",
+        "vidare",
+        "reuse",
+        "återanvänd",
+        "next step",
+        "nästa steg",
+    )
     if any(marker in text for marker in downstream_markers):
         return False
     return any(marker in text for marker in _HUMAN_READABLE_TERMINAL_MARKERS)
@@ -256,7 +274,8 @@ def _conversation_mentions_audio(text: str) -> bool:
 def _spec_handles_audio(spec: FlowDraftSpecCore) -> bool:
     """True when at least one step accepts audio input or uses transcribe_only mode."""
     return any(
-        step.input_type == InputType.AUDIO or step.output_mode == OutputMode.TRANSCRIBE_ONLY
+        step.input_type == InputType.AUDIO
+        or step.output_mode == OutputMode.TRANSCRIBE_ONLY
         for step in spec.steps
     )
 
@@ -274,7 +293,9 @@ def _spec_uses_input_bindings(spec: FlowDraftSpecCore) -> bool:
 
 
 def _spec_uses_all_previous_steps(spec: FlowDraftSpecCore) -> bool:
-    return any(step.input_source == InputSource.ALL_PREVIOUS_STEPS for step in spec.steps)
+    return any(
+        step.input_source == InputSource.ALL_PREVIOUS_STEPS for step in spec.steps
+    )
 
 
 def _spec_uses_template_fill(spec: FlowDraftSpecCore) -> bool:
@@ -301,7 +322,9 @@ def _non_terminal_document_output_feedback(
 
     converted_non_terminal_steps: list[str] = []
     template_fill_steps: list[str] = []
-    for original_step, planned_step in zip(original_steps[:-1], spec.steps[:-1], strict=False):
+    for original_step, planned_step in zip(
+        original_steps[:-1], spec.steps[:-1], strict=False
+    ):
         original_is_document_output = original_step.output_type in {"pdf", "docx"}
         planned_is_document_output = planned_step.output_type in {
             OutputType.PDF,

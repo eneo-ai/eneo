@@ -261,6 +261,7 @@ class TestBuildSystemPrompt:
         )
         assert "backend kompilerar underlaget" in prompt.lower()
         assert "uses_form_fields" in prompt
+        assert "uses_previous_fields" in prompt
         assert "input_bindings.question" not in prompt
 
     def test_prompt_demotes_runtime_only_aliases_and_raw_json_blobs(self) -> None:

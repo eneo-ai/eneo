@@ -34,123 +34,100 @@ class TestBuildToolSchema:
         assert "instructions" in step_schema["properties"]
         assert "document_delivery_mode" in step_schema["properties"]
         assert "output_fields" in step_schema["properties"]
+        assert "uses_previous_fields" in step_schema["properties"]
 
     def test_create_schema_requires_first_step_to_use_flow_input(self) -> None:
         schema = build_create_flow_tool_schema()
-        steps_description = schema["function"]["parameters"]["properties"]["steps"]["description"]
-        input_source_description = schema["function"]["parameters"]["properties"]["steps"]["items"][
-            "properties"
-        ]["input_source"]["description"]
-        output_fields_description = schema["function"]["parameters"]["properties"]["steps"][
-            "items"
-        ]["properties"]["output_fields"]["description"]
+        steps_description = schema["function"]["parameters"]["properties"]["steps"][
+            "description"
+        ]
+        input_source_description = schema["function"]["parameters"]["properties"][
+            "steps"
+        ]["items"]["properties"]["input_source"]["description"]
+        output_fields_description = schema["function"]["parameters"]["properties"][
+            "steps"
+        ]["items"]["properties"]["output_fields"]["description"]
 
         assert "First step must use 'flow_input'" in steps_description
         assert "never directly in steps[]" in steps_description
-        assert "Only later steps may use 'previous_step' or 'all_previous_steps'" in input_source_description
+        assert (
+            "Only later steps may use 'previous_step' or 'all_previous_steps'"
+            in input_source_description
+        )
         assert "never directly in steps[]" in output_fields_description
 
     def test_create_schema_limits_structured_field_depth_and_leaf_shape(self) -> None:
         schema = build_create_flow_tool_schema()
-        output_fields = schema["function"]["parameters"]["properties"]["steps"]["items"][
-            "properties"
-        ]["output_fields"]
+        output_fields = schema["function"]["parameters"]["properties"]["steps"][
+            "items"
+        ]["properties"]["output_fields"]
         top_level = output_fields["items"]
         level_2 = top_level["properties"]["fields"]["items"]
         level_3 = level_2["properties"]["fields"]["items"]
 
         assert "max nesting depth 3" in output_fields["description"]
-        assert level_3["properties"]["field_type"]["enum"] == ["string", "number", "boolean"]
+        assert level_3["properties"]["field_type"]["enum"] == [
+            "string",
+            "number",
+            "boolean",
+        ]
         assert level_3["properties"]["fields"] is False
         assert level_3["properties"]["item_fields"] is False
 
 
 class TestParseArguments:
     def test_parse_create_flow_arguments_returns_typed_draft(self) -> None:
-        draft = parse_create_flow_arguments({
-            "flow_name": "Kommunärende",
-            "plan_rationale": "Struktur först.",
-            "steps": [
-                {
-                    "name": "Extrahera",
-                    "instructions": "Extrahera juridiska risker.",
-                    "input_source": "flow_input",
-                    "input_type": "document",
-                    "output_type": "json",
-                    "runtime_upload": True,
-                    "runtime_required": True,
-                    "output_fields": [
-                        {
-                            "name": "risknivå",
-                            "field_type": "string",
-                            "description": "Risknivå.",
-                            "required": True,
-                        }
-                    ],
-                }
-            ],
-        })
+        draft = parse_create_flow_arguments(
+            {
+                "flow_name": "Kommunärende",
+                "plan_rationale": "Struktur först.",
+                "steps": [
+                    {
+                        "name": "Extrahera",
+                        "instructions": "Extrahera juridiska risker.",
+                        "input_source": "flow_input",
+                        "input_type": "document",
+                        "output_type": "json",
+                        "runtime_upload": True,
+                        "runtime_required": True,
+                        "output_fields": [
+                            {
+                                "name": "risknivå",
+                                "field_type": "string",
+                                "description": "Risknivå.",
+                                "required": True,
+                            }
+                        ],
+                    },
+                    {
+                        "name": "Skriv beslutsunderlag",
+                        "instructions": "Skriv beslutsunderlag.",
+                        "input_source": "previous_step",
+                        "input_type": "json",
+                        "output_type": "text",
+                        "uses_previous_fields": [
+                            {
+                                "from_step": 1,
+                                "field_path": "risknivå",
+                                "label": "Risknivå",
+                            }
+                        ],
+                    },
+                ],
+            }
+        )
 
         assert draft.flow_name == "Kommunärende"
         assert draft.steps[0].runtime_upload is True
         assert draft.steps[0].output_fields is not None
         assert draft.steps[0].output_fields[0].name == "risknivå"
+        assert draft.steps[1].uses_previous_fields[0].field_path == "risknivå"
 
-    def test_parse_create_flow_arguments_allows_three_level_structured_fields(self) -> None:
-        draft = parse_create_flow_arguments({
-            "flow_name": "Kommunärende",
-            "plan_rationale": "Struktur först.",
-            "steps": [
-                {
-                    "name": "Extrahera risker",
-                    "instructions": "Extrahera risker som strukturerad JSON.",
-                    "input_source": "flow_input",
-                    "input_type": "document",
-                    "output_type": "json",
-                    "runtime_upload": True,
-                    "runtime_required": True,
-                    "output_fields": [
-                        {
-                            "name": "risker",
-                            "field_type": "array",
-                            "description": "Identifierade risker.",
-                            "required": True,
-                            "item_fields": [
-                                {
-                                    "name": "rubrik",
-                                    "field_type": "string",
-                                    "description": "Riskrubrik.",
-                                    "required": True,
-                                },
-                                {
-                                    "name": "ekonomisk_konsekvens",
-                                    "field_type": "object",
-                                    "description": "Ekonomisk konsekvens.",
-                                    "required": False,
-                                    "fields": [
-                                        {
-                                            "name": "kort_sikt",
-                                            "field_type": "string",
-                                            "description": "Kort sikt.",
-                                            "required": False,
-                                        }
-                                    ],
-                                },
-                            ],
-                        }
-                    ],
-                }
-            ],
-        })
-
-        risk_field = draft.steps[0].output_fields[0]
-        assert risk_field.item_fields is not None
-        assert risk_field.item_fields[1].fields is not None
-        assert risk_field.item_fields[1].fields[0].name == "kort_sikt"
-
-    def test_parse_create_flow_arguments_rejects_fourth_level_structured_fields(self) -> None:
-        with pytest.raises(Exception, match="nesting depth cannot exceed 3"):
-            parse_create_flow_arguments({
+    def test_parse_create_flow_arguments_allows_three_level_structured_fields(
+        self,
+    ) -> None:
+        draft = parse_create_flow_arguments(
+            {
                 "flow_name": "Kommunärende",
                 "plan_rationale": "Struktur först.",
                 "steps": [
@@ -170,6 +147,12 @@ class TestParseArguments:
                                 "required": True,
                                 "item_fields": [
                                     {
+                                        "name": "rubrik",
+                                        "field_type": "string",
+                                        "description": "Riskrubrik.",
+                                        "required": True,
+                                    },
+                                    {
                                         "name": "ekonomisk_konsekvens",
                                         "field_type": "object",
                                         "description": "Ekonomisk konsekvens.",
@@ -177,61 +160,117 @@ class TestParseArguments:
                                         "fields": [
                                             {
                                                 "name": "kort_sikt",
-                                                "field_type": "object",
+                                                "field_type": "string",
                                                 "description": "Kort sikt.",
                                                 "required": False,
-                                                "fields": [
-                                                    {
-                                                        "name": "belopp",
-                                                        "field_type": "number",
-                                                        "description": "Belopp.",
-                                                        "required": False,
-                                                    }
-                                                ],
                                             }
                                         ],
-                                    }
+                                    },
                                 ],
                             }
                         ],
                     }
                 ],
-            })
+            }
+        )
 
-    def test_parse_create_flow_arguments_rejects_structured_field_entries_in_steps_array(self) -> None:
+        risk_field = draft.steps[0].output_fields[0]
+        assert risk_field.item_fields is not None
+        assert risk_field.item_fields[1].fields is not None
+        assert risk_field.item_fields[1].fields[0].name == "kort_sikt"
+
+    def test_parse_create_flow_arguments_rejects_fourth_level_structured_fields(
+        self,
+    ) -> None:
+        with pytest.raises(Exception, match="nesting depth cannot exceed 3"):
+            parse_create_flow_arguments(
+                {
+                    "flow_name": "Kommunärende",
+                    "plan_rationale": "Struktur först.",
+                    "steps": [
+                        {
+                            "name": "Extrahera risker",
+                            "instructions": "Extrahera risker som strukturerad JSON.",
+                            "input_source": "flow_input",
+                            "input_type": "document",
+                            "output_type": "json",
+                            "runtime_upload": True,
+                            "runtime_required": True,
+                            "output_fields": [
+                                {
+                                    "name": "risker",
+                                    "field_type": "array",
+                                    "description": "Identifierade risker.",
+                                    "required": True,
+                                    "item_fields": [
+                                        {
+                                            "name": "ekonomisk_konsekvens",
+                                            "field_type": "object",
+                                            "description": "Ekonomisk konsekvens.",
+                                            "required": False,
+                                            "fields": [
+                                                {
+                                                    "name": "kort_sikt",
+                                                    "field_type": "object",
+                                                    "description": "Kort sikt.",
+                                                    "required": False,
+                                                    "fields": [
+                                                        {
+                                                            "name": "belopp",
+                                                            "field_type": "number",
+                                                            "description": "Belopp.",
+                                                            "required": False,
+                                                        }
+                                                    ],
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+
+    def test_parse_create_flow_arguments_rejects_structured_field_entries_in_steps_array(
+        self,
+    ) -> None:
         with pytest.raises(
             Exception,
             match=r"steps\[1\] looks like a structured output field, not a step",
         ):
-            parse_create_flow_arguments({
-                "flow_name": "Kommunärende",
-                "plan_rationale": "Struktur först.",
-                "steps": [
-                    {
-                        "name": "Extrahera risker",
-                        "instructions": "Extrahera risker som strukturerad JSON.",
-                        "input_source": "flow_input",
-                        "input_type": "document",
-                        "output_type": "json",
-                        "runtime_upload": True,
-                        "runtime_required": True,
-                        "output_fields": [
-                            {
-                                "name": "risker",
-                                "field_type": "string",
-                                "description": "Identifierade risker.",
-                                "required": True,
-                            }
-                        ],
-                    },
-                    {
-                        "name": "osakerheter_och_risker",
-                        "field_type": "string",
-                        "description": "Osäkerheter och risker.",
-                        "required": True,
-                    },
-                ],
-            })
+            parse_create_flow_arguments(
+                {
+                    "flow_name": "Kommunärende",
+                    "plan_rationale": "Struktur först.",
+                    "steps": [
+                        {
+                            "name": "Extrahera risker",
+                            "instructions": "Extrahera risker som strukturerad JSON.",
+                            "input_source": "flow_input",
+                            "input_type": "document",
+                            "output_type": "json",
+                            "runtime_upload": True,
+                            "runtime_required": True,
+                            "output_fields": [
+                                {
+                                    "name": "risker",
+                                    "field_type": "string",
+                                    "description": "Identifierade risker.",
+                                    "required": True,
+                                }
+                            ],
+                        },
+                        {
+                            "name": "osakerheter_och_risker",
+                            "field_type": "string",
+                            "description": "Osäkerheter och risker.",
+                            "required": True,
+                        },
+                    ],
+                }
+            )
 
 
 class TestExtractAssumptions:
@@ -398,45 +437,55 @@ class TestParseStructuredQuestion:
             )
 
     def test_strips_whitespace_from_question(self) -> None:
-        result = parse_structured_question({
-            "question_id": "final_output_mode",
-            "question": "  Which?  ",
-            "options": [{"label": "A"}, {"label": "B"}],
-        })
+        result = parse_structured_question(
+            {
+                "question_id": "final_output_mode",
+                "question": "  Which?  ",
+                "options": [{"label": "A"}, {"label": "B"}],
+            }
+        )
         assert result["question"] == "Which?"
 
     def test_missing_question_id_raises(self) -> None:
         with pytest.raises(ValueError, match="question_id"):
-            parse_structured_question({
-                "question": "Which?",
-                "options": [{"label": "A"}, {"label": "B"}],
-            })
+            parse_structured_question(
+                {
+                    "question": "Which?",
+                    "options": [{"label": "A"}, {"label": "B"}],
+                }
+            )
 
     def test_unsupported_question_id_raises(self) -> None:
         with pytest.raises(ValueError, match="supported canonical AI Builder ids"):
-            parse_structured_question({
-                "question_id": "custom_question_branch",
-                "question": "Which?",
-                "options": [{"label": "A"}, {"label": "B"}],
-            })
+            parse_structured_question(
+                {
+                    "question_id": "custom_question_branch",
+                    "question": "Which?",
+                    "options": [{"label": "A"}, {"label": "B"}],
+                }
+            )
 
     def test_invalid_selection_mode_raises(self) -> None:
         with pytest.raises(ValueError, match="selection_mode"):
-            parse_structured_question({
-                "question_id": "final_output_mode",
-                "question": "Which?",
-                "options": [{"label": "A"}, {"label": "B"}],
-                "selection_mode": "many",
-            })
+            parse_structured_question(
+                {
+                    "question_id": "final_output_mode",
+                    "question": "Which?",
+                    "options": [{"label": "A"}, {"label": "B"}],
+                    "selection_mode": "many",
+                }
+            )
 
     def test_non_boolean_allow_custom_raises(self) -> None:
         with pytest.raises(ValueError, match="allow_custom"):
-            parse_structured_question({
-                "question_id": "final_output_mode",
-                "question": "Which?",
-                "options": [{"label": "A"}, {"label": "B"}],
-                "allow_custom": "yes",
-            })
+            parse_structured_question(
+                {
+                    "question_id": "final_output_mode",
+                    "question": "Which?",
+                    "options": [{"label": "A"}, {"label": "B"}],
+                    "allow_custom": "yes",
+                }
+            )
 
 
 class TestBuildAllToolSchemas:
@@ -451,7 +500,9 @@ class TestBuildAllToolSchemas:
 
 class TestExtractPlanRationale:
     def test_extracts_string(self) -> None:
-        args = {"plan_rationale": "Use JSON extraction first for safer downstream bindings."}
+        args = {
+            "plan_rationale": "Use JSON extraction first for safer downstream bindings."
+        }
         assert extract_plan_rationale(args) == (
             "Use JSON extraction first for safer downstream bindings."
         )

@@ -284,6 +284,8 @@ def _validate_binding_references(
 ) -> None:
     binding_payload = json.dumps(input_bindings)
     for expression in iter_template_expressions(binding_payload):
+        if expression.startswith("step_input"):
+            continue
         if not expression.startswith("step_"):
             continue
 

@@ -71,6 +71,36 @@ def build_new_step_draft_schema(
             "items": {"type": "string"},
             "description": "Form field variable names this step needs in its compiled underlag.",
         },
+        "uses_previous_fields": {
+            "type": "array",
+            "description": (
+                "Optional field-level reuse intent for earlier JSON-producing steps. "
+                "The backend compiles these into explicit underlag bindings."
+            ),
+            "items": {
+                "type": "object",
+                "required": ["from_step", "field_path"],
+                "properties": {
+                    "from_step": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "1-based earlier step number to reuse structured fields from.",
+                    },
+                    "field_path": {
+                        "type": "string",
+                        "description": (
+                            "Dot path inside the earlier step's structured JSON output, "
+                            "for example `sammanfattning` or `risker.0.rubrik`."
+                        ),
+                    },
+                    "label": {
+                        "type": ["string", "null"],
+                        "description": "Optional human-readable label to use in the compiled underlag.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
         "document_delivery_mode": {
             "type": "string",
             "enum": ["not_applicable", "generated", "template_fill"],
@@ -118,7 +148,10 @@ def build_new_step_draft_schema(
 
     return {
         "type": "object",
-        "description": description,
+        "description": (
+            f"{description} Use `uses_previous_fields` instead of raw `input_bindings` "
+            "when a downstream step should reuse specific structured fields."
+        ),
         "required": ["name", "instructions", "input_source"],
         "properties": properties,
         "additionalProperties": False,

@@ -3,9 +3,9 @@ from __future__ import annotations
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
-    OutputMode,
     InputSource,
     InputType,
+    OutputMode,
     OutputType,
     StepSpec,
 )
@@ -38,16 +38,18 @@ def _step(
 
 
 def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None:
-    conversation = [{
-        "role": "user",
-        "content": "Add basic metadata",
-        "metadata": {
-            "question_answer": {
-                "question_id": "runtime_metadata_fields",
-                "selected_values": ["basic_case_metadata"],
-            }
-        },
-    }]
+    conversation = [
+        {
+            "role": "user",
+            "content": "Add basic metadata",
+            "metadata": {
+                "question_answer": {
+                    "question_id": "runtime_metadata_fields",
+                    "selected_values": ["basic_case_metadata"],
+                }
+            },
+        }
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Kommunanalys",
         steps=[
@@ -66,19 +68,28 @@ def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None
 
 
 def test_flags_output_mismatch_against_explicit_pdf_choice() -> None:
-    conversation = [{
-        "role": "user",
-        "content": "PDF document",
-        "metadata": {
-            "question_answer": {
-                "question_id": "final_output_mode",
-                "selected_values": ["pdf_document"],
-            }
-        },
-    }]
+    conversation = [
+        {
+            "role": "user",
+            "content": "PDF document",
+            "metadata": {
+                "question_answer": {
+                    "question_id": "final_output_mode",
+                    "selected_values": ["pdf_document"],
+                }
+            },
+        }
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Rapport",
-        steps=[_step("step_a", "Skriv rapport", "Skriv en rapport.", output_type=OutputType.TEXT)],
+        steps=[
+            _step(
+                "step_a",
+                "Skriv rapport",
+                "Skriv en rapport.",
+                output_type=OutputType.TEXT,
+            )
+        ],
     )
 
     feedback = build_conversation_aware_quality_feedback(conversation, spec)
@@ -102,7 +113,7 @@ def test_flags_template_fill_when_generated_docx_was_explicitly_selected() -> No
                     "selected_value": "generated_docx",
                     "answer": "generated_docx",
                 }
-            }
+            },
         },
     ]
     spec = FlowDraftSpecCore(
@@ -124,14 +135,18 @@ def test_flags_template_fill_when_generated_docx_was_explicitly_selected() -> No
     assert "template_fill" in feedback
 
 
-def test_flags_missing_structured_extraction_when_user_asked_for_structured_fields() -> None:
-    conversation = [{
-        "role": "user",
-        "content": (
-            "Flödet ska extrahera viktiga fakta, risker, möjligheter och rekommendationer "
-            "och använda strukturerad data där det förbättrar kvaliteten."
-        ),
-    }]
+def test_flags_missing_structured_extraction_when_user_asked_for_structured_fields() -> (
+    None
+):
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Flödet ska extrahera viktiga fakta, risker, möjligheter och rekommendationer "
+                "och använda strukturerad data där det förbättrar kvaliteten."
+            ),
+        }
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Kommunanalys",
         steps=[
@@ -157,7 +172,9 @@ def test_flags_missing_structured_extraction_when_user_asked_for_structured_fiel
 
 
 def test_does_not_overstructure_simple_single_step_summary() -> None:
-    conversation = [{"role": "user", "content": "Summarize one uploaded document as plain text."}]
+    conversation = [
+        {"role": "user", "content": "Summarize one uploaded document as plain text."}
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Kort sammanfattning",
         steps=[_step("step_a", "Sammanfatta", "Skriv en kort sammanfattning.")],
@@ -166,9 +183,12 @@ def test_does_not_overstructure_simple_single_step_summary() -> None:
     assert build_conversation_aware_quality_feedback(conversation, spec) is None
 
 
-def test_flags_edit_plan_that_fakes_audio_transcription_by_downgrading_to_generic_file() -> None:
-    from intric.flows.flow import Flow, FlowStep
+def test_flags_edit_plan_that_fakes_audio_transcription_by_downgrading_to_generic_file() -> (
+    None
+):
     from uuid import uuid4
+
+    from intric.flows.flow import Flow, FlowStep
 
     flow = Flow(
         id=uuid4(),
@@ -198,13 +218,15 @@ def test_flags_edit_plan_that_fakes_audio_transcription_by_downgrading_to_generi
             ),
         ],
     )
-    conversation = [{
-        "role": "user",
-        "content": (
-            "Behåll samma flöde men lägg till ljudfiler och transkribera samtalet först, "
-            "och skicka sedan in dokument som vanligt. Jag vill fortfarande ha PDF ut."
-        ),
-    }]
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Behåll samma flöde men lägg till ljudfiler och transkribera samtalet först, "
+                "och skicka sedan in dokument som vanligt. Jag vill fortfarande ha PDF ut."
+            ),
+        }
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Kommunanalys",
         steps=[
@@ -237,14 +259,15 @@ def test_flags_edit_plan_that_fakes_audio_transcription_by_downgrading_to_generi
     feedback = build_conversation_aware_quality_feedback(conversation, spec, flow=flow)
 
     assert feedback is not None
-    assert "input_type=\"file\"" in feedback
+    assert 'input_type="file"' in feedback
     assert "transkriberingssteg" in feedback
     assert "flow_input" in feedback
 
 
 def test_allows_audio_first_edit_when_plan_uses_real_transcription_step() -> None:
-    from intric.flows.flow import Flow, FlowStep
     from uuid import uuid4
+
+    from intric.flows.flow import Flow, FlowStep
 
     flow = Flow(
         id=uuid4(),
@@ -274,16 +297,18 @@ def test_allows_audio_first_edit_when_plan_uses_real_transcription_step() -> Non
             ),
         ],
     )
-    conversation = [{
-        "role": "user",
-        "content": "Byt till ljud som primär indata och transkribera först. Behåll PDF ut.",
-        "metadata": {
-            "question_answer": {
-                "question_id": "flow_input_architecture",
-                "selected_value": "audio_primary_input",
-            }
-        },
-    }]
+    conversation = [
+        {
+            "role": "user",
+            "content": "Byt till ljud som primär indata och transkribera först. Behåll PDF ut.",
+            "metadata": {
+                "question_answer": {
+                    "question_id": "flow_input_architecture",
+                    "selected_value": "audio_primary_input",
+                }
+            },
+        }
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Kommunanalys",
         steps=[
@@ -299,7 +324,9 @@ def test_allows_audio_first_edit_when_plan_uses_real_transcription_step() -> Non
             StepSpec(
                 plan_step_ref="step_b",
                 name="Analysera samtalet",
-                assistant_spec=AssistantSpec(instructions="Analysera transkriberingen."),
+                assistant_spec=AssistantSpec(
+                    instructions="Analysera transkriberingen."
+                ),
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_type=OutputType.PDF,
@@ -307,7 +334,9 @@ def test_allows_audio_first_edit_when_plan_uses_real_transcription_step() -> Non
         ],
     )
 
-    assert build_conversation_aware_quality_feedback(conversation, spec, flow=flow) is None
+    assert (
+        build_conversation_aware_quality_feedback(conversation, spec, flow=flow) is None
+    )
 
 
 # ── R7: Anti-over-structuring guardrail ──────────────────────────────────
@@ -318,19 +347,38 @@ def test_anti_over_structuring_simple_summary_no_json_warning() -> None:
     conversation = [{"role": "user", "content": "Sammanfatta dokument som text."}]
     spec = FlowDraftSpecCore(
         flow_name="Sammanfattning",
-        steps=[_step("step_a", "Sammanfatta", "Skriv en kort sammanfattning.", output_type=OutputType.TEXT)],
+        steps=[
+            _step(
+                "step_a",
+                "Sammanfatta",
+                "Skriv en kort sammanfattning.",
+                output_type=OutputType.TEXT,
+            )
+        ],
     )
     assert build_conversation_aware_quality_feedback(conversation, spec) is None
 
 
 def test_flags_missing_json_contract_when_user_wants_structured_extraction() -> None:
     """Warns when conversation explicitly asks for JSON extraction but spec has none."""
-    conversation = [{"role": "user", "content": "Extrahera fält som JSON och skicka vidare till nästa steg."}]
+    conversation = [
+        {
+            "role": "user",
+            "content": "Extrahera fält som JSON och skicka vidare till nästa steg.",
+        }
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Extraktion",
         steps=[
-            _step("step_a", "Extrahera", "Extrahera data.", input_type=InputType.DOCUMENT),
-            _step("step_b", "Rapport", "Skriv rapport.", input_source=InputSource.PREVIOUS_STEP),
+            _step(
+                "step_a", "Extrahera", "Extrahera data.", input_type=InputType.DOCUMENT
+            ),
+            _step(
+                "step_b",
+                "Rapport",
+                "Skriv rapport.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
         ],
     )
     feedback = build_conversation_aware_quality_feedback(conversation, spec)
@@ -340,27 +388,41 @@ def test_flags_missing_json_contract_when_user_wants_structured_extraction() -> 
 
 def test_no_json_warning_when_spec_already_has_json_step() -> None:
     """No warning when the spec already has a JSON contract step."""
-    conversation = [{"role": "user", "content": "Extrahera fält som JSON och skicka vidare."}]
+    conversation = [
+        {"role": "user", "content": "Extrahera fält som JSON och skicka vidare."}
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Extraktion",
         steps=[
             _step(
-                "step_a", "Extrahera", "Extrahera.",
+                "step_a",
+                "Extrahera",
+                "Extrahera.",
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.JSON,
-                output_contract={"type": "object", "properties": {"risk": {"type": "string"}}},
+                output_contract={
+                    "type": "object",
+                    "properties": {"risk": {"type": "string"}},
+                },
             ),
-            _step("step_b", "Rapport", "Skriv rapport.", input_source=InputSource.PREVIOUS_STEP),
+            _step(
+                "step_b",
+                "Rapport",
+                "Skriv rapport.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
         ],
     )
     assert build_conversation_aware_quality_feedback(conversation, spec) is None
 
 
 def test_flags_missing_input_bindings_for_field_reuse() -> None:
-    conversation = [{
-        "role": "user",
-        "content": "Extrahera fält som JSON och använd de specifika fälten i nästa steg.",
-    }]
+    conversation = [
+        {
+            "role": "user",
+            "content": "Extrahera fält som JSON och använd de specifika fälten i nästa steg.",
+        }
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Fältåteranvändning",
         steps=[
@@ -370,7 +432,10 @@ def test_flags_missing_input_bindings_for_field_reuse() -> None:
                 "Extrahera.",
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.JSON,
-                output_contract={"type": "object", "properties": {"risk": {"type": "string"}}},
+                output_contract={
+                    "type": "object",
+                    "properties": {"risk": {"type": "string"}},
+                },
             ),
             _step(
                 "step_b",
@@ -383,19 +448,31 @@ def test_flags_missing_input_bindings_for_field_reuse() -> None:
     )
     feedback = build_conversation_aware_quality_feedback(conversation, spec)
     assert feedback is not None
-    assert "input_bindings" in feedback
+    assert "uses_previous_fields" in feedback
 
 
 def test_flags_missing_all_previous_steps_for_multi_document_compare() -> None:
-    conversation = [{
-        "role": "user",
-        "content": "Jämför flera dokument i samma körning och skriv en sammanfattning.",
-    }]
+    conversation = [
+        {
+            "role": "user",
+            "content": "Jämför flera dokument i samma körning och skriv en sammanfattning.",
+        }
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Jämförelse",
         steps=[
-            _step("step_a", "Analysera", "Analysera dokument.", input_type=InputType.DOCUMENT),
-            _step("step_b", "Sammanfatta", "Skriv sammanfattning.", input_source=InputSource.PREVIOUS_STEP),
+            _step(
+                "step_a",
+                "Analysera",
+                "Analysera dokument.",
+                input_type=InputType.DOCUMENT,
+            ),
+            _step(
+                "step_b",
+                "Sammanfatta",
+                "Skriv sammanfattning.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
         ],
     )
     feedback = build_conversation_aware_quality_feedback(conversation, spec)
@@ -405,7 +482,9 @@ def test_flags_missing_all_previous_steps_for_multi_document_compare() -> None:
 
 def test_flags_missing_audio_step_when_conversation_mentions_transcription() -> None:
     """Warns when audio/transcription is mentioned but no step handles audio."""
-    conversation = [{"role": "user", "content": "Transkribera ljudinspelningen och sammanfatta."}]
+    conversation = [
+        {"role": "user", "content": "Transkribera ljudinspelningen och sammanfatta."}
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Transkribering",
         steps=[_step("step_a", "Sammanfatta", "Sammanfatta texten.")],
@@ -417,7 +496,9 @@ def test_flags_missing_audio_step_when_conversation_mentions_transcription() -> 
 
 def test_no_audio_warning_when_spec_has_transcription_step() -> None:
     """No warning when the spec already has a proper audio step."""
-    conversation = [{"role": "user", "content": "Transkribera ljudinspelningen och sammanfatta."}]
+    conversation = [
+        {"role": "user", "content": "Transkribera ljudinspelningen och sammanfatta."}
+    ]
     spec = FlowDraftSpecCore(
         flow_name="Transkribering",
         steps=[
@@ -430,13 +511,20 @@ def test_no_audio_warning_when_spec_has_transcription_step() -> None:
                 output_mode=OutputMode.TRANSCRIBE_ONLY,
                 output_type=OutputType.TEXT,
             ),
-            _step("step_b", "Sammanfatta", "Sammanfatta.", input_source=InputSource.PREVIOUS_STEP),
+            _step(
+                "step_b",
+                "Sammanfatta",
+                "Sammanfatta.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
         ],
     )
     assert build_conversation_aware_quality_feedback(conversation, spec) is None
 
 
-def test_does_not_require_template_fill_after_conversation_shifts_to_pdf_summary() -> None:
+def test_does_not_require_template_fill_after_conversation_shifts_to_pdf_summary() -> (
+    None
+):
     conversation = [
         {
             "role": "user",
@@ -471,7 +559,9 @@ def test_does_not_require_template_fill_after_conversation_shifts_to_pdf_summary
             StepSpec(
                 plan_step_ref="step_b",
                 name="Skapa PDF-sammanfattning",
-                assistant_spec=AssistantSpec(instructions="Skriv en strukturerad PDF-sammanfattning."),
+                assistant_spec=AssistantSpec(
+                    instructions="Skriv en strukturerad PDF-sammanfattning."
+                ),
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_type=OutputType.PDF,
@@ -506,7 +596,10 @@ def test_still_requires_template_fill_for_explicit_docx_template_request() -> No
                 "Analysera underlaget.",
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.JSON,
-                output_contract={"type": "object", "properties": {"summary": {"type": "string"}}},
+                output_contract={
+                    "type": "object",
+                    "properties": {"summary": {"type": "string"}},
+                },
             ),
             _step(
                 "step_b",
@@ -590,7 +683,9 @@ def test_flags_non_terminal_docx_conversion_for_output_only_edit() -> None:
                 plan_step_ref="step_b",
                 existing_step_ref="existing_step_2",
                 name="Tematisk sammanfattning",
-                assistant_spec=AssistantSpec(instructions="Sammanfatta transkriptionen."),
+                assistant_spec=AssistantSpec(
+                    instructions="Sammanfatta transkriptionen."
+                ),
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.TEMPLATE_FILL,
