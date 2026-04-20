@@ -5,9 +5,11 @@ from intric.flows.ai_builder.ai_builder_models import InputSource, InputType, Ou
 from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     derive_new_step_output_mode,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from intric.flows.ai_builder.ai_builder_step_capabilities import (
     supports_step_io_mode_combo,
+)
+from intric.flows.ai_builder.ai_builder_structured_field_paths import (
+    missing_draft_field_path,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 
@@ -224,11 +226,8 @@ def _validate_previous_field_references(
             )
             continue
         if (
-            _resolve_structured_field_path(
-                target_step.output_fields,
-                field_ref.field_path,
-            )
-            is None
+            missing_draft_field_path(target_step.output_fields, field_ref.field_path)
+            is not None
         ):
             result.add_error(
                 step_ref=step_ref,
@@ -238,35 +237,3 @@ def _validate_previous_field_references(
                     f"on step {field_ref.from_step}."
                 ),
             )
-
-
-def _resolve_structured_field_path(
-    fields: list[StructuredFieldDraft],
-    field_path: str,
-) -> StructuredFieldDraft | None:
-    current_fields = fields
-    current_field: StructuredFieldDraft | None = None
-    expecting_index = False
-    for segment in field_path.split("."):
-        if expecting_index:
-            if not segment.isdigit():
-                return None
-            if current_field is None or current_field.item_fields is None:
-                return None
-            current_fields = current_field.item_fields
-            expecting_index = False
-            continue
-
-        current_field = next(
-            (field for field in current_fields if field.name == segment), None
-        )
-        if current_field is None:
-            return None
-        if current_field.field_type == "array":
-            expecting_index = True
-        elif current_field.fields is not None:
-            current_fields = current_field.fields
-        else:
-            current_fields = []
-
-    return None if expecting_index else current_field

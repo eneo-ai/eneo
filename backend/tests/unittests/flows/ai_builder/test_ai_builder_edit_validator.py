@@ -163,6 +163,115 @@ class TestValidAddOperations:
         assert not result.valid
         assert "invalid_previous_field_source" in _error_codes(result)
 
+    def test_add_previous_fields_reject_removed_source_steps(self):
+        draft = FlowEditDraft(
+            operations=[
+                _remove_op("existing_step_1"),
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(
+                        position="after", anchor_ref="existing_step_2"
+                    ),
+                    add_payload=AddStepPayload(
+                        name="Nytt steg",
+                        instructions="Bygg nytt steg.",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        uses_previous_fields=[{"from_step": 1, "field_path": "risk"}],
+                    ),
+                ),
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(
+                    step_order=1,
+                    output_type="json",
+                    output_contract={
+                        "type": "object",
+                        "properties": {"risk": {"type": "string"}},
+                    },
+                ),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert not result.valid
+        assert "removed_previous_field_source" in _error_codes(result)
+
+    def test_add_previous_fields_with_invalid_anchor_does_not_crash(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(
+                        position="after", anchor_ref="existing_step_99"
+                    ),
+                    add_payload=AddStepPayload(
+                        name="Nytt steg",
+                        instructions="Bygg nytt steg.",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        uses_previous_fields=[{"from_step": 99, "field_path": "risk"}],
+                    ),
+                ),
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(
+                    step_order=1,
+                    output_type="json",
+                    output_contract={
+                        "type": "object",
+                        "properties": {"risk": {"type": "string"}},
+                    },
+                ),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert not result.valid
+        assert "invalid_placement_anchor" in _error_codes(result)
+        assert "invalid_previous_field_source" in _error_codes(result)
+
+    def test_add_previous_fields_accept_valid_json_source(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(
+                        position="after", anchor_ref="existing_step_1"
+                    ),
+                    add_payload=AddStepPayload(
+                        name="Nytt steg",
+                        instructions="Bygg nytt steg.",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        uses_previous_fields=[{"from_step": 1, "field_path": "risk"}],
+                    ),
+                ),
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(
+                    step_order=1,
+                    output_type="json",
+                    output_contract={
+                        "type": "object",
+                        "properties": {"risk": {"type": "string"}},
+                    },
+                ),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert result.valid
+
 
 class TestValidModifyOperations:
     def test_modify_valid(self):
@@ -202,7 +311,7 @@ class TestValidModifyOperations:
         assert result.valid  # warning, not error
         assert "type_downgrade_risk" in _warning_codes(result)
 
-    def test_modify_previous_field_reference_requires_known_target(self):
+    def test_modify_previous_field_reference_requires_earlier_target(self):
         draft = FlowEditDraft(
             operations=[
                 StepEditOperation(
@@ -231,7 +340,118 @@ class TestValidModifyOperations:
             ],
         )
         assert not result.valid
-        assert "previous_field_source_requires_json_output" in _error_codes(result)
+        assert "invalid_previous_field_source" in _error_codes(result)
+
+    def test_modify_previous_field_reference_must_point_to_earlier_step(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(
+                        uses_previous_fields=[{"from_step": 3, "field_path": "risk"}]
+                    ),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(
+                    step_order=1,
+                    output_type="json",
+                    output_contract={
+                        "type": "object",
+                        "properties": {"risk": {"type": "string"}},
+                    },
+                ),
+                _existing_step(step_order=2),
+                _existing_step(
+                    step_order=3,
+                    output_type="json",
+                    output_contract={
+                        "type": "object",
+                        "properties": {"risk": {"type": "string"}},
+                    },
+                ),
+            ],
+        )
+        assert not result.valid
+        assert "invalid_previous_field_source" in _error_codes(result)
+
+    def test_modify_previous_field_reference_rejects_removed_source_steps(self):
+        draft = FlowEditDraft(
+            operations=[
+                _remove_op("existing_step_1"),
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_3",
+                    patch=StepPatch(
+                        uses_previous_fields=[{"from_step": 1, "field_path": "risk"}]
+                    ),
+                ),
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(
+                    step_order=1,
+                    output_type="json",
+                    output_contract={
+                        "type": "object",
+                        "properties": {"risk": {"type": "string"}},
+                    },
+                ),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert not result.valid
+        assert "removed_previous_field_source" in _error_codes(result)
+
+    def test_modify_previous_field_reference_requires_numeric_array_index(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(
+                        uses_previous_fields=[
+                            {"from_step": 1, "field_path": "risker.rubrik"}
+                        ]
+                    ),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(
+                    step_order=1,
+                    output_type="json",
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "risker": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {"rubrik": {"type": "string"}},
+                                },
+                            }
+                        },
+                    },
+                ),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert not result.valid
+        assert "unknown_previous_field_reference" in _error_codes(result)
 
 
 class TestValidRemoveOperations:

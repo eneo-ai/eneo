@@ -509,6 +509,84 @@ class TestSemanticVariableValidation:
         )
         assert result.valid
 
+    def test_structured_access_keeps_lenient_array_property_fallback_for_runtime_templates(
+        self,
+    ) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Extract JSON",
+                        output_type=OutputType.JSON,
+                        output_contract={
+                            "type": "object",
+                            "properties": {
+                                "risker": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "rubrik": {"type": "string"},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    ),
+                    _step(
+                        ref="step_b",
+                        name="Summarize",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_bindings={
+                            "question": "{{ step_1.output.structured.risker.rubrik }}"
+                        },
+                    ),
+                ]
+            )
+        )
+        assert result.valid
+
+    def test_structured_access_accepts_fields_from_composite_output_contracts(
+        self,
+    ) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Extract JSON",
+                        output_type=OutputType.JSON,
+                        output_contract={
+                            "allOf": [
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "summary": {"type": "string"},
+                                    },
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "risk": {"type": "string"},
+                                    },
+                                },
+                            ]
+                        },
+                    ),
+                    _step(
+                        ref="step_b",
+                        name="Summarize",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_bindings={
+                            "question": "{{ step_1.output.structured.risk }}"
+                        },
+                    ),
+                ]
+            )
+        )
+        assert result.valid
+
 
 class TestProductionParityValidation:
     def test_reserved_form_field_alias_rejected(self) -> None:

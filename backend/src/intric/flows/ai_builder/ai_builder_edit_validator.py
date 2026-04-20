@@ -6,8 +6,6 @@ errors early and provide clear feedback to the LLM for self-correction.
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
     FlowEditDraft,
@@ -15,6 +13,10 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepPatch,
 )
 from intric.flows.ai_builder.ai_builder_models import OutputType
+from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
+from intric.flows.ai_builder.ai_builder_structured_field_paths import (
+    missing_structured_output_path,
+)
 from intric.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
@@ -37,14 +39,35 @@ def validate_edit_draft(
     """
     result = SpecValidationResult()
     seen_targets: set[str] = set()
+    removed_step_orders = {
+        _step_order_from_ref(op.target_ref)
+        for op in draft.operations
+        if op.op == "remove"
+        and op.target_ref in valid_step_refs
+        and _step_order_from_ref(op.target_ref) > 0
+    }
 
     for i, op in enumerate(draft.operations):
         op_label = f"operations[{i}]"
 
         if op.op == "add":
-            _validate_add_op(op, valid_step_refs, op_label, result, current_steps)
+            _validate_add_op(
+                op,
+                valid_step_refs,
+                op_label,
+                result,
+                current_steps,
+                removed_step_orders,
+            )
         elif op.op == "modify":
-            _validate_modify_op(op, valid_step_refs, op_label, result, current_steps)
+            _validate_modify_op(
+                op,
+                valid_step_refs,
+                op_label,
+                result,
+                current_steps,
+                removed_step_orders,
+            )
         elif op.op == "remove":
             _validate_remove_op(op, valid_step_refs, op_label, result)
 
@@ -70,6 +93,7 @@ def _validate_add_op(
     label: str,
     result: SpecValidationResult,
     current_steps: list[FlowStep] | None,
+    removed_step_orders: set[int],
 ) -> None:
     if op.target_ref is not None:
         result.add_error(
@@ -122,6 +146,7 @@ def _validate_add_op(
             current_steps=current_steps,
             step_ref=None,
             result=result,
+            removed_step_orders=removed_step_orders,
         )
 
 
@@ -131,6 +156,7 @@ def _validate_modify_op(
     label: str,
     result: SpecValidationResult,
     current_steps: list[FlowStep] | None,
+    removed_step_orders: set[int],
 ) -> None:
     if op.target_ref is None:
         result.add_error(
@@ -172,12 +198,16 @@ def _validate_modify_op(
                 ),
             )
     if op.patch is not None and current_steps is not None:
-        _validate_patch_previous_field_references(
-            patch=op.patch,
-            current_steps=current_steps,
-            step_ref=op.target_ref,
-            result=result,
-        )
+        target_step_order = _step_order_from_ref(op.target_ref) if op.target_ref else 0
+        if target_step_order > 0 and op.target_ref in valid_refs:
+            _validate_patch_previous_field_references(
+                patch=op.patch,
+                current_steps=current_steps,
+                step_ref=op.target_ref,
+                result=result,
+                target_step_order=target_step_order,
+                removed_step_orders=removed_step_orders,
+            )
 
 
 def _validate_remove_op(
@@ -212,54 +242,22 @@ def _validate_patch_previous_field_references(
     current_steps: list[FlowStep],
     step_ref: str | None,
     result: SpecValidationResult,
+    target_step_order: int,
+    removed_step_orders: set[int],
 ) -> None:
     if not patch.uses_previous_fields:
         return
-    for field_ref in patch.uses_previous_fields:
-        target_index = field_ref.from_step - 1
-        if target_index < 0 or target_index >= len(current_steps):
-            result.add_error(
-                step_ref=step_ref,
-                code="invalid_previous_field_source",
-                message="uses_previous_fields must point at an earlier step in the current flow.",
-            )
-            continue
-        target_step = current_steps[target_index]
-        if target_step.output_type != OutputType.JSON.value:
-            result.add_error(
-                step_ref=step_ref,
-                code="previous_field_source_requires_json_output",
-                message=(
-                    "uses_previous_fields can only reference earlier steps that produce JSON output."
-                ),
-            )
-            continue
-        output_contract = (
-            target_step.output_contract
-            if isinstance(target_step.output_contract, dict)
-            else None
-        )
-        if output_contract is None:
-            result.add_error(
-                step_ref=step_ref,
-                code="previous_field_source_missing_output_fields",
-                message=(
-                    "uses_previous_fields requires the referenced earlier step to declare structured output fields."
-                ),
-            )
-            continue
-        if (
-            _missing_output_contract_path(output_contract, field_ref.field_path)
-            is not None
-        ):
-            result.add_error(
-                step_ref=step_ref,
-                code="unknown_previous_field_reference",
-                message=(
-                    f"uses_previous_fields references unknown structured field path '{field_ref.field_path}' "
-                    f"on step {field_ref.from_step}."
-                ),
-            )
+    _validate_previous_field_references(
+        field_refs=patch.uses_previous_fields,
+        max_prior_order=target_step_order - 1,
+        current_steps=current_steps,
+        step_ref=step_ref,
+        result=result,
+        removed_step_orders=removed_step_orders,
+        earlier_step_message=(
+            "uses_previous_fields must point at an earlier step in the current flow."
+        ),
+    )
 
 
 def _validate_add_previous_field_references(
@@ -269,15 +267,48 @@ def _validate_add_previous_field_references(
     current_steps: list[FlowStep],
     step_ref: str | None,
     result: SpecValidationResult,
+    removed_step_orders: set[int],
 ) -> None:
-    if not getattr(step, "uses_previous_fields", None):
+    if not step.uses_previous_fields:
         return
-    for field_ref in step.uses_previous_fields:
+    _validate_previous_field_references(
+        field_refs=step.uses_previous_fields,
+        max_prior_order=min(max_prior_order, len(current_steps)),
+        current_steps=current_steps,
+        step_ref=step_ref,
+        result=result,
+        removed_step_orders=removed_step_orders,
+        earlier_step_message=(
+            "uses_previous_fields must point at an earlier step in the edited flow order."
+        ),
+    )
+
+
+def _validate_previous_field_references(
+    *,
+    field_refs: list[PreviousFieldRef],
+    max_prior_order: int,
+    current_steps: list[FlowStep],
+    step_ref: str | None,
+    result: SpecValidationResult,
+    removed_step_orders: set[int],
+    earlier_step_message: str,
+) -> None:
+    for field_ref in field_refs:
         if field_ref.from_step < 1 or field_ref.from_step > max_prior_order:
             result.add_error(
                 step_ref=step_ref,
                 code="invalid_previous_field_source",
-                message="uses_previous_fields must point at an earlier step in the edited flow order.",
+                message=earlier_step_message,
+            )
+            continue
+        if field_ref.from_step in removed_step_orders:
+            result.add_error(
+                step_ref=step_ref,
+                code="removed_previous_field_source",
+                message=(
+                    "uses_previous_fields cannot reference a step that is being removed in the same edit draft."
+                ),
             )
             continue
         target_step: FlowStep = current_steps[field_ref.from_step - 1]
@@ -305,7 +336,11 @@ def _validate_add_previous_field_references(
             )
             continue
         if (
-            _missing_output_contract_path(output_contract, field_ref.field_path)
+            missing_structured_output_path(
+                output_contract,
+                field_ref.field_path,
+                require_array_index=True,
+            )
             is not None
         ):
             result.add_error(
@@ -316,39 +351,6 @@ def _validate_add_previous_field_references(
                     f"on step {field_ref.from_step}."
                 ),
             )
-
-
-def _missing_output_contract_path(
-    contract: dict[str, Any], field_path: str
-) -> str | None:
-    current: dict[str, Any] | None = contract
-    traversed: list[str] = []
-    for part in field_path.split("."):
-        traversed.append(part)
-        if not isinstance(current, dict):
-            return ".".join(traversed)
-        current_dict = current
-        schema_type = current_dict.get("type")
-        if schema_type == "array":
-            if part.isdigit():
-                current = current_dict.get("items")
-                if not isinstance(current, dict):
-                    return ".".join(traversed)
-                continue
-            current = current_dict.get("items")
-            if not isinstance(current, dict):
-                return ".".join(traversed)
-        properties = current.get("properties")
-        if not isinstance(properties, dict) or part not in properties:
-            return ".".join(traversed)
-        properties_dict = cast(dict[str, Any], properties)
-        next_current: Any = properties_dict[part]
-        current = (
-            cast(dict[str, Any], next_current)
-            if isinstance(next_current, dict)
-            else None
-        )
-    return None
 
 
 def _step_order_from_ref(step_ref: str) -> int:

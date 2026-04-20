@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 from difflib import get_close_matches
-from typing import Any, cast
+from typing import Any
 
-from intric.flows.ai_builder.ai_builder_domain_models import JsonObject
 from intric.flows.ai_builder.ai_builder_models import (
     FlowDraftSpecCore,
     OutputType,
     StepSpec,
+)
+from intric.flows.ai_builder.ai_builder_structured_field_paths import (
+    missing_structured_output_path,
+    schema_property_names,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.flow_variable_definitions import RESERVED_RUNTIME_VARIABLES
@@ -123,12 +126,12 @@ def validate_variable_references(
             if referenced_step.output_contract is None:
                 continue
 
-            missing_path = _missing_contract_path(
+            missing_path = missing_structured_output_path(
                 referenced_step.output_contract,
-                list(reference.structured_path),
+                ".".join(reference.structured_path),
             )
             if missing_path is not None:
-                properties = _schema_property_names(referenced_step.output_contract)
+                properties = schema_property_names(referenced_step.output_contract)
                 suggestion = _suggest_similar(
                     missing_path.rsplit(".", maxsplit=1)[-1], properties
                 )
@@ -179,64 +182,6 @@ def _parse_reference_expression(
         step_refs={root: order for root, (order, _) in steps_by_plan_ref.items()},
         form_field_names=form_field_names,
     )[0]
-
-
-def _missing_contract_path(contract: dict[str, Any], path: list[str]) -> str | None:
-    current: Any = contract
-    traversed: list[str] = []
-    for part in path:
-        traversed.append(part)
-        if not isinstance(current, dict):
-            return ".".join(traversed)
-
-        current_schema = cast(JsonObject, current)
-        schema_type = current_schema.get("type")
-        if schema_type == "array":
-            if part.isdigit():
-                current = current_schema.get("items")
-                if not isinstance(current, dict):
-                    return ".".join(traversed)
-                continue
-            current = current_schema.get("items")
-            if not isinstance(current, dict):
-                return ".".join(traversed)
-
-        properties = _resolve_schema_properties(cast(dict[str, Any], current))
-        if part not in properties:
-            return ".".join(traversed)
-        current = properties[part]
-
-    return None
-
-
-def _resolve_schema_properties(schema: dict[str, Any]) -> dict[str, Any]:
-    properties: dict[str, Any] = {}
-    direct = schema.get("properties")
-    if isinstance(direct, dict):
-        properties.update(cast(dict[str, Any], direct))
-    for keyword in ("allOf", "anyOf", "oneOf"):
-        subschemas = schema.get(keyword)
-        if not isinstance(subschemas, list):
-            continue
-        for subschema in cast(list[object], subschemas):
-            if not isinstance(subschema, dict):
-                continue
-            nested = cast(dict[str, Any], subschema).get("properties")
-            if isinstance(nested, dict):
-                properties.update(cast(dict[str, Any], nested))
-    return properties
-
-
-def _schema_property_names(schema: dict[str, Any]) -> set[str]:
-    names: set[str] = set()
-    properties = _resolve_schema_properties(schema)
-    names.update(properties.keys())
-    for value in properties.values():
-        if not isinstance(value, dict):
-            continue
-        child_properties = _resolve_schema_properties(cast(dict[str, Any], value))
-        names.update(child_properties.keys())
-    return names
 
 
 def _runtime_path_error_message(reference: TemplateReference) -> str:
