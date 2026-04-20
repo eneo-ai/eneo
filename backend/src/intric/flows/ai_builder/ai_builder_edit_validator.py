@@ -6,6 +6,14 @@ errors early and provide clear feedback to the LLM for self-correction.
 
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_edit_effective_steps import (
+    EffectiveStepState,
+    apply_effective_step_operation,
+    build_effective_step_states,
+    effective_step_index,
+    output_type_is_json,
+    resolve_insert_index,
+)
 from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
     FlowEditDraft,
@@ -15,7 +23,6 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
 from intric.flows.ai_builder.ai_builder_form_fields import (
     effective_form_field_names,
 )
-from intric.flows.ai_builder.ai_builder_models import OutputType
 from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_structured_output_path,
@@ -43,6 +50,7 @@ def validate_edit_draft(
     """
     result = SpecValidationResult()
     seen_targets: set[str] = set()
+    effective_steps = build_effective_step_states(current_steps or [])
     available_form_fields = effective_form_field_names(
         current_metadata_json,
         draft.form_operations,
@@ -67,6 +75,7 @@ def validate_edit_draft(
                 current_steps,
                 removed_step_orders,
                 available_form_fields,
+                effective_steps,
             )
         elif op.op == "modify":
             _validate_modify_op(
@@ -77,9 +86,12 @@ def validate_edit_draft(
                 current_steps,
                 removed_step_orders,
                 available_form_fields,
+                effective_steps,
             )
         elif op.op == "remove":
             _validate_remove_op(op, valid_step_refs, op_label, result)
+
+        apply_effective_step_operation(op=op, working_steps=effective_steps)
 
         # Check duplicate target_ref
         if op.target_ref is not None:
@@ -105,6 +117,7 @@ def _validate_add_op(
     current_steps: list[FlowStep] | None,
     removed_step_orders: set[int],
     available_form_fields: set[str],
+    effective_steps: list[EffectiveStepState],
 ) -> None:
     if op.target_ref is not None:
         result.add_error(
@@ -150,17 +163,10 @@ def _validate_add_op(
             step_ref=None,
             result=result,
         )
-        placement = op.placement.position if op.placement is not None else "append"
-        anchor_ref = op.placement.anchor_ref if op.placement is not None else None
-        max_prior_order = len(current_steps)
-        if placement == "before" and anchor_ref is not None:
-            max_prior_order = max(0, _step_order_from_ref(anchor_ref) - 1)
-        elif placement == "after" and anchor_ref is not None:
-            max_prior_order = _step_order_from_ref(anchor_ref)
         _validate_add_previous_field_references(
             step=op.add_payload,
-            max_prior_order=max_prior_order,
-            current_steps=current_steps,
+            max_prior_order=resolve_insert_index(op=op, working_steps=effective_steps),
+            effective_steps=effective_steps,
             step_ref=None,
             result=result,
             removed_step_orders=removed_step_orders,
@@ -175,6 +181,7 @@ def _validate_modify_op(
     current_steps: list[FlowStep] | None,
     removed_step_orders: set[int],
     available_form_fields: set[str],
+    effective_steps: list[EffectiveStepState],
 ) -> None:
     if op.target_ref is None:
         result.add_error(
@@ -224,14 +231,18 @@ def _validate_modify_op(
                 ),
             )
     if op.patch is not None and current_steps is not None:
-        target_step_order = _step_order_from_ref(op.target_ref) if op.target_ref else 0
-        if target_step_order > 0 and op.target_ref in valid_refs:
+        target_step_index = (
+            effective_step_index(effective_steps, op.target_ref)
+            if op.target_ref is not None
+            else None
+        )
+        if target_step_index is not None and op.target_ref in valid_refs:
             _validate_patch_previous_field_references(
                 patch=op.patch,
-                current_steps=current_steps,
+                effective_steps=effective_steps,
                 step_ref=op.target_ref,
                 result=result,
-                target_step_order=target_step_order,
+                target_step_order=target_step_index + 1,
                 removed_step_orders=removed_step_orders,
             )
 
@@ -291,7 +302,7 @@ def _validate_form_field_references(
 def _validate_patch_previous_field_references(
     *,
     patch: StepPatch,
-    current_steps: list[FlowStep],
+    effective_steps: list[EffectiveStepState],
     step_ref: str | None,
     result: SpecValidationResult,
     target_step_order: int,
@@ -302,7 +313,7 @@ def _validate_patch_previous_field_references(
     _validate_previous_field_references(
         field_refs=patch.uses_previous_fields,
         max_prior_order=target_step_order - 1,
-        current_steps=current_steps,
+        effective_steps=effective_steps,
         step_ref=step_ref,
         result=result,
         removed_step_orders=removed_step_orders,
@@ -316,7 +327,7 @@ def _validate_add_previous_field_references(
     *,
     step: AddStepPayload,
     max_prior_order: int,
-    current_steps: list[FlowStep],
+    effective_steps: list[EffectiveStepState],
     step_ref: str | None,
     result: SpecValidationResult,
     removed_step_orders: set[int],
@@ -325,8 +336,8 @@ def _validate_add_previous_field_references(
         return
     _validate_previous_field_references(
         field_refs=step.uses_previous_fields,
-        max_prior_order=min(max_prior_order, len(current_steps)),
-        current_steps=current_steps,
+        max_prior_order=min(max_prior_order, len(effective_steps)),
+        effective_steps=effective_steps,
         step_ref=step_ref,
         result=result,
         removed_step_orders=removed_step_orders,
@@ -340,7 +351,7 @@ def _validate_previous_field_references(
     *,
     field_refs: list[PreviousFieldRef],
     max_prior_order: int,
-    current_steps: list[FlowStep],
+    effective_steps: list[EffectiveStepState],
     step_ref: str | None,
     result: SpecValidationResult,
     removed_step_orders: set[int],
@@ -363,8 +374,8 @@ def _validate_previous_field_references(
                 ),
             )
             continue
-        target_step: FlowStep = current_steps[field_ref.from_step - 1]
-        if target_step.output_type != OutputType.JSON.value:
+        target_step = effective_steps[field_ref.from_step - 1]
+        if not output_type_is_json(target_step.output_type):
             result.add_error(
                 step_ref=step_ref,
                 code="previous_field_source_requires_json_output",
@@ -373,11 +384,7 @@ def _validate_previous_field_references(
                 ),
             )
             continue
-        output_contract = (
-            target_step.output_contract
-            if isinstance(target_step.output_contract, dict)
-            else None
-        )
+        output_contract = target_step.output_contract
         if output_contract is None:
             result.add_error(
                 step_ref=step_ref,

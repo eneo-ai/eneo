@@ -518,6 +518,233 @@ class TestValidModifyOperations:
         assert not result.valid
         assert "unknown_form_field_reference" in _error_codes(result)
 
+    def test_modify_upstream_output_contract_then_reference_new_field(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(
+                        output_type="json",
+                        output_contract={
+                            "type": "object",
+                            "properties": {"risk": {"type": "string"}},
+                        },
+                    ),
+                ),
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(
+                        uses_previous_fields=[{"from_step": 1, "field_path": "risk"}]
+                    ),
+                ),
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1, output_type="text"),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert result.valid
+
+    def test_modify_upstream_output_contract_ordering_is_honored(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(
+                        uses_previous_fields=[{"from_step": 1, "field_path": "risk"}]
+                    ),
+                ),
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(
+                        output_type="json",
+                        output_contract={
+                            "type": "object",
+                            "properties": {"risk": {"type": "string"}},
+                        },
+                    ),
+                ),
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1, output_type="text"),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert not result.valid
+        assert "previous_field_source_requires_json_output" in _error_codes(result)
+
+    def test_modify_upstream_output_contract_narrowing_rejects_removed_field(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(
+                        output_contract={
+                            "type": "object",
+                            "properties": {"summary": {"type": "string"}},
+                        },
+                    ),
+                ),
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(
+                        uses_previous_fields=[{"from_step": 1, "field_path": "risk"}]
+                    ),
+                ),
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(
+                    step_order=1,
+                    output_type="json",
+                    output_contract={
+                        "type": "object",
+                        "properties": {"risk": {"type": "string"}},
+                    },
+                ),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert not result.valid
+        assert "unknown_previous_field_reference" in _error_codes(result)
+
+    def test_add_json_step_can_become_previous_field_source_for_later_modify(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(
+                        position="before", anchor_ref="existing_step_1"
+                    ),
+                    add_payload=AddStepPayload(
+                        name="Extrahera risk",
+                        instructions="Extrahera risk.",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type="text",
+                        output_type="json",
+                        output_fields=[
+                            {
+                                "name": "risk",
+                                "field_type": "string",
+                                "description": "Risk",
+                            }
+                        ],
+                    ),
+                ),
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(
+                        uses_previous_fields=[{"from_step": 1, "field_path": "risk"}]
+                    ),
+                ),
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1, output_type="text"),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert result.valid
+
+    def test_modify_upstream_output_contract_handles_composite_schema(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(
+                        output_type="json",
+                        output_contract={
+                            "allOf": [
+                                {
+                                    "type": "object",
+                                    "properties": {"summary": {"type": "string"}},
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {"risk": {"type": "string"}},
+                                },
+                            ]
+                        },
+                    ),
+                ),
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(
+                        uses_previous_fields=[{"from_step": 1, "field_path": "risk"}]
+                    ),
+                ),
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1, output_type="text"),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert result.valid
+
+    def test_modify_previous_field_resolution_sorts_unsafely_ordered_current_steps(
+        self,
+    ):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_3",
+                    patch=StepPatch(
+                        uses_previous_fields=[{"from_step": 2, "field_path": "risk"}]
+                    ),
+                ),
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=3),
+                _existing_step(
+                    step_order=2,
+                    output_type="json",
+                    output_contract={
+                        "type": "object",
+                        "properties": {"risk": {"type": "string"}},
+                    },
+                ),
+                _existing_step(step_order=1),
+            ],
+        )
+        assert result.valid
+
     def test_modify_previous_field_reference_must_point_to_earlier_step(self):
         draft = FlowEditDraft(
             operations=[
