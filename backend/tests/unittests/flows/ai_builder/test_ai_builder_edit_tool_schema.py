@@ -58,7 +58,9 @@ class TestBuildEditFlowToolSchema:
         models = [{"ref": "model_a"}, {"ref": "model_b"}]
         schema = build_edit_flow_tool_schema([_make_step(1)], available_models=models)
 
-        add_payload = schema["function"]["parameters"]["properties"]["operations"]["items"]["properties"]["add_payload"]
+        add_payload = schema["function"]["parameters"]["properties"]["operations"][
+            "items"
+        ]["properties"]["add_payload"]
         model_ref = add_payload["properties"]["model_ref"]
         assert "enum" in model_ref
         assert "model_a" in model_ref["enum"]
@@ -67,7 +69,9 @@ class TestBuildEditFlowToolSchema:
         models = [{"ref": f"model_{i}"} for i in range(20)]
         schema = build_edit_flow_tool_schema([_make_step(1)], available_models=models)
 
-        add_payload = schema["function"]["parameters"]["properties"]["operations"]["items"]["properties"]["add_payload"]
+        add_payload = schema["function"]["parameters"]["properties"]["operations"][
+            "items"
+        ]["properties"]["add_payload"]
         model_ref = add_payload["properties"]["model_ref"]
         assert "enum" not in model_ref
 
@@ -80,9 +84,9 @@ class TestBuildEditFlowToolSchema:
     def test_add_payload_uses_shared_new_step_authoring_shape(self):
         schema = build_edit_flow_tool_schema([_make_step(1)])
 
-        add_payload = schema["function"]["parameters"]["properties"]["operations"]["items"][
-            "properties"
-        ]["add_payload"]
+        add_payload = schema["function"]["parameters"]["properties"]["operations"][
+            "items"
+        ]["properties"]["add_payload"]
 
         assert "assistant_spec" not in add_payload["properties"]
         assert "output_mode" not in add_payload["properties"]
@@ -92,6 +96,16 @@ class TestBuildEditFlowToolSchema:
         assert "instructions" in add_payload["properties"]
         assert "document_delivery_mode" in add_payload["properties"]
         assert "output_fields" in add_payload["properties"]
+
+    def test_patch_schema_exposes_typed_previous_field_reuse(self):
+        schema = build_edit_flow_tool_schema([_make_step(1), _make_step(2)])
+        patch = schema["function"]["parameters"]["properties"]["operations"]["items"][
+            "properties"
+        ]["patch"]
+
+        assert "uses_previous_fields" in patch["properties"]
+        uses_previous_fields = patch["properties"]["uses_previous_fields"]
+        assert uses_previous_fields["items"]["required"] == ["from_step", "field_path"]
 
 
 class TestBuildEditModeToolSchemas:

@@ -203,14 +203,14 @@ def _compile_previous_field_sections(
         if field_ref.from_step < 1 or field_ref.from_step > len(prior_steps):
             continue
         source_step = prior_steps[field_ref.from_step - 1]
-        label = field_ref.label or _default_previous_field_label(field_ref.field_path)
+        label = field_ref.label or default_previous_field_label(field_ref.field_path)
         sections.append(
             f"{label}: {{{{ {source_step.plan_step_ref}.output.structured.{field_ref.field_path} }}}}"
         )
     return sections
 
 
-def _default_previous_field_label(field_path: str) -> str:
+def default_previous_field_label(field_path: str) -> str:
     tokens = [token for token in field_path.split(".") if token and not token.isdigit()]
     if not tokens:
         return field_path

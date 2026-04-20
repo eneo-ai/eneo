@@ -9,10 +9,12 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
     FlowEditDraft,
     FormFieldOperation,
-    FormFieldSpec as EditFormFieldSpec,
     StepEditOperation,
     StepPatch,
     StepPlacement,
+)
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    FormFieldSpec as EditFormFieldSpec,
 )
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
@@ -110,7 +112,9 @@ class TestAddBeforeExistingStep:
             operations=[
                 StepEditOperation(
                     op="add",
-                    placement=StepPlacement(position="before", anchor_ref="existing_step_1"),
+                    placement=StepPlacement(
+                        position="before", anchor_ref="existing_step_1"
+                    ),
                     add_payload=_make_add_payload(
                         name="Transkribera ljud",
                         instructions="Transkribera ljudfilen.",
@@ -123,7 +127,10 @@ class TestAddBeforeExistingStep:
         )
 
         result = compile_edit_draft(
-            draft, existing, base_flow_revision=1, flow_name="Test Flow",
+            draft,
+            existing,
+            base_flow_revision=1,
+            flow_name="Test Flow",
         )
 
         assert len(result.compiled_spec.steps) == 2
@@ -254,12 +261,65 @@ class TestUntouchedStepsPreserved:
 
         result = compile_edit_draft(draft, existing, base_flow_revision=2)
 
-        assert [change.kind for change in result.diff.step_changes] == ["unchanged", "unchanged"]
+        assert [change.kind for change in result.diff.step_changes] == [
+            "unchanged",
+            "unchanged",
+        ]
         assert all(change.details is None for change in result.diff.step_changes)
+
+    def test_modify_step_can_rebuild_input_bindings_from_typed_previous_fields(self):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Extrahera JSON",
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "sammanfattning": {"type": "string"},
+                    },
+                },
+            ),
+            _make_flow_step(
+                step_order=2,
+                user_description="Skriv beslutsunderlag",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+                input_bindings={"question": "{{ föregående_steg }}"},
+            ),
+        ]
+
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(
+                        uses_previous_fields=[
+                            {
+                                "from_step": 1,
+                                "field_path": "sammanfattning",
+                                "label": "Sammanfattning",
+                            }
+                        ]
+                    ),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(draft, existing, base_flow_revision=2)
+
+        assert (
+            result.compiled_spec.steps[1].input_bindings["question"]
+            == "Sammanfattning: {{ step_a.output.structured.sammanfattning }}"
+        )
 
 
 class TestTransitionNormalization:
-    def test_text_to_pdf_edit_clears_incompatible_citation_mode_and_emits_advisory(self):
+    def test_text_to_pdf_edit_clears_incompatible_citation_mode_and_emits_advisory(
+        self,
+    ):
         existing = [
             _make_flow_step(
                 step_order=1,
@@ -292,7 +352,9 @@ class TestTransitionNormalization:
             for advisory in result.advisories
         )
 
-    def test_output_only_edit_does_not_flag_downstream_steps_modified_for_alias_rewrites(self):
+    def test_output_only_edit_does_not_flag_downstream_steps_modified_for_alias_rewrites(
+        self,
+    ):
         existing = [
             _make_flow_step(
                 step_order=1,
@@ -373,7 +435,9 @@ class TestTransitionNormalization:
 
         result = compile_edit_draft(draft, existing, base_flow_revision=3)
 
-        assert [(change.step_ref, change.kind) for change in result.diff.step_changes] == [
+        assert [
+            (change.step_ref, change.kind) for change in result.diff.step_changes
+        ] == [
             ("existing_step_1", "unchanged"),
             ("existing_step_2", "unchanged"),
             ("existing_step_3", "unchanged"),
@@ -381,7 +445,6 @@ class TestTransitionNormalization:
             ("existing_step_5", "modified"),
         ]
         assert result.diff.step_changes[-1].details == "output_type → pdf"
-
 
 
 class TestRemoveStep:
@@ -432,10 +495,16 @@ class TestCompiledResultApproval:
         )
 
         result1 = compile_edit_draft(
-            draft, existing, base_flow_revision=5, flow_name="Old Name",
+            draft,
+            existing,
+            base_flow_revision=5,
+            flow_name="Old Name",
         )
         result2 = compile_edit_draft(
-            draft, existing, base_flow_revision=5, flow_name="Old Name",
+            draft,
+            existing,
+            base_flow_revision=5,
+            flow_name="Old Name",
         )
 
         # Deterministic compilation
@@ -486,7 +555,9 @@ class TestCompiledResultApproval:
         # Description is NOT mutated — advisory instead
         assert result.compiled_spec.flow_description == original_desc
         assert "flow_description" not in result.diff.flow_property_changes
-        assert any(a.code == "flow_description_update_required" for a in result.advisories)
+        assert any(
+            a.code == "flow_description_update_required" for a in result.advisories
+        )
 
     def test_preserves_existing_form_fields_in_compiled_preview(self):
         existing = [
@@ -545,7 +616,9 @@ class TestCompiledResultApproval:
                 FormFieldOperation(
                     op="modify",
                     field_name="Brukarens namn",
-                    field_payload=EditFormFieldSpec(required=False, label="Brukarens fullständiga namn"),
+                    field_payload=EditFormFieldSpec(
+                        required=False, label="Brukarens fullständiga namn"
+                    ),
                 ),
                 FormFieldOperation(
                     op="add",
@@ -591,12 +664,16 @@ class TestCompiledResultApproval:
                 required=True,
             ),
         ]
-        assert [(change.kind, change.field_name) for change in result.diff.form_changes] == [
+        assert [
+            (change.kind, change.field_name) for change in result.diff.form_changes
+        ] == [
             ("modified", "Brukarens namn"),
             ("added", "Uppföljningsperiod"),
         ]
 
-    def test_canonicalizes_existing_runtime_aliases_when_inserting_before_first_step(self):
+    def test_canonicalizes_existing_runtime_aliases_when_inserting_before_first_step(
+        self,
+    ):
         existing = [
             _make_flow_step(
                 step_order=1,
@@ -636,7 +713,9 @@ class TestCompiledResultApproval:
             operations=[
                 StepEditOperation(
                     op="add",
-                    placement=StepPlacement(position="before", anchor_ref="existing_step_1"),
+                    placement=StepPlacement(
+                        position="before", anchor_ref="existing_step_1"
+                    ),
                     add_payload=_make_add_payload(
                         name="Transkribera ljud",
                         instructions="Transkribera ljud.",
@@ -696,8 +775,7 @@ class TestCompiledResultApproval:
         )
         assert rewritten.input_bindings is not None
         assert (
-            rewritten.input_bindings["question"]
-            == "Brukare: {{ Brukarens namn }}\n"
+            rewritten.input_bindings["question"] == "Brukare: {{ Brukarens namn }}\n"
             "Kontext: {{ Handläggningskontext }}\n"
             "Behov: {{ step_2.output.structured.brukare.kan_uttrycka_behov_sjalv }}"
         )
@@ -722,7 +800,10 @@ class TestConfidence:
         assert result.confidence == "ready"
 
     def test_many_operations_needs_review(self):
-        existing = [_make_flow_step(step_order=i, user_description=f"Step {i}") for i in range(1, 8)]
+        existing = [
+            _make_flow_step(step_order=i, user_description=f"Step {i}")
+            for i in range(1, 8)
+        ]
         ops = [
             StepEditOperation(
                 op="modify",
@@ -739,16 +820,27 @@ class TestConfidence:
 class TestMixedOperations:
     def test_add_modify_remove_combined(self):
         existing = [
-            _make_flow_step(step_order=1, user_description="Transcribe", input_source="flow_input", input_type="audio"),
-            _make_flow_step(step_order=2, user_description="Analyze", input_source="previous_step"),
-            _make_flow_step(step_order=3, user_description="Format", input_source="previous_step"),
+            _make_flow_step(
+                step_order=1,
+                user_description="Transcribe",
+                input_source="flow_input",
+                input_type="audio",
+            ),
+            _make_flow_step(
+                step_order=2, user_description="Analyze", input_source="previous_step"
+            ),
+            _make_flow_step(
+                step_order=3, user_description="Format", input_source="previous_step"
+            ),
         ]
 
         draft = FlowEditDraft(
             operations=[
                 StepEditOperation(
                     op="add",
-                    placement=StepPlacement(position="after", anchor_ref="existing_step_2"),
+                    placement=StepPlacement(
+                        position="after", anchor_ref="existing_step_2"
+                    ),
                     add_payload=_make_add_payload(
                         name="Classify",
                         instructions="Classify the analysis.",
@@ -805,7 +897,10 @@ class TestAssistantSnapshotPreservation:
 
         assistant_spec = result.compiled_spec.steps[0].assistant_spec
         assert assistant_spec.instructions == "Original prompt 1"
-        assert assistant_spec.model_ref == assistant_snapshots[existing[0].assistant_id]["model_ref"]
+        assert (
+            assistant_spec.model_ref
+            == assistant_snapshots[existing[0].assistant_id]["model_ref"]
+        )
         assert assistant_spec.knowledge_refs == ["kb-1"]
 
     def test_partial_assistant_patch_merges_with_existing_snapshot(self):
@@ -837,7 +932,10 @@ class TestAssistantSnapshotPreservation:
 
         assistant_spec = result.compiled_spec.steps[0].assistant_spec
         assert assistant_spec.instructions == "Uppdaterad prompt för IBIC-analys."
-        assert assistant_spec.model_ref == assistant_snapshots[existing[0].assistant_id]["model_ref"]
+        assert (
+            assistant_spec.model_ref
+            == assistant_snapshots[existing[0].assistant_id]["model_ref"]
+        )
         assert assistant_spec.knowledge_refs == ["kb-1"]
 
 
@@ -877,9 +975,14 @@ class TestFlowDescriptionSemantics:
         )
 
         # Description is NOT mutated — no regex replacement
-        assert result.compiled_spec.flow_description == "Tar emot ljudfiler och transkriberar dem till text."
+        assert (
+            result.compiled_spec.flow_description
+            == "Tar emot ljudfiler och transkriberar dem till text."
+        )
         # Advisory tells the user the description may be stale
-        assert any(a.code == "flow_description_update_required" for a in result.advisories)
+        assert any(
+            a.code == "flow_description_update_required" for a in result.advisories
+        )
 
     def test_semantic_change_with_description_no_advisory(self):
         """When the LLM provides a new description, no advisory needed."""
@@ -909,8 +1012,13 @@ class TestFlowDescriptionSemantics:
             flow_description="Tar emot ljudfiler och transkriberar dem till text.",
         )
 
-        assert result.compiled_spec.flow_description == "Tar emot dokument och analyserar dem."
-        assert not any(a.code == "flow_description_update_required" for a in result.advisories)
+        assert (
+            result.compiled_spec.flow_description
+            == "Tar emot dokument och analyserar dem."
+        )
+        assert not any(
+            a.code == "flow_description_update_required" for a in result.advisories
+        )
 
     def test_preserves_description_when_no_semantic_change(self):
         existing = [
@@ -941,7 +1049,9 @@ class TestFlowDescriptionSemantics:
         )
 
         assert result.compiled_spec.flow_description == original_desc
-        assert not any(a.code == "flow_description_update_required" for a in result.advisories)
+        assert not any(
+            a.code == "flow_description_update_required" for a in result.advisories
+        )
 
     def test_explicit_flow_description_in_draft_takes_precedence(self):
         existing = [
@@ -1001,6 +1111,11 @@ class TestFlowDescriptionSemantics:
         )
 
         # Description NOT mutated
-        assert result.compiled_spec.flow_description == "Skapar beslutsunderlag i textformat."
+        assert (
+            result.compiled_spec.flow_description
+            == "Skapar beslutsunderlag i textformat."
+        )
         # Advisory present
-        assert any(a.code == "flow_description_update_required" for a in result.advisories)
+        assert any(
+            a.code == "flow_description_update_required" for a in result.advisories
+        )

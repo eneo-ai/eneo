@@ -10,6 +10,7 @@ Du redigerar ett befintligt flöde. Beskriv BARA ändringarna — backend bevara
 - I `add_payload` beskriver du bara det nya stegets avsikt: `name`, `instructions`, input/output-typ, eventuella kunskapsbaser, formfält och strukturerade `output_fields`
 - Backend härleder `output_mode`, `input_bindings`, kontrakt och låg-nivå-konfiguration för nya steg
 - Använd `op: "modify"` med `target_ref` för att ändra befintliga steg
+- När ett befintligt steg ska återanvända specifika JSON-fält från tidigare steg: använd `uses_previous_fields` i patchen i stället för råa `input_bindings`
 - Använd `op: "remove"` med `target_ref` för att ta bort steg
 - Steg du inte nämner bevaras automatiskt oförändrade
 - Ändra bara de steg som faktiskt påverkas av användarens begäran

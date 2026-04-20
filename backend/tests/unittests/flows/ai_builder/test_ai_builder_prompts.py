@@ -153,6 +153,7 @@ class TestBuildSystemPrompt:
         assert "{{ step_a.output.text }}" in prompt
         assert "{{ föregående_steg }}" in prompt
         assert "{{ step_input.text }}" in prompt
+        assert "uses_previous_fields" in prompt
         assert "input_bindings" in prompt
         assert "question" in prompt
         assert "plan_step_ref" in prompt

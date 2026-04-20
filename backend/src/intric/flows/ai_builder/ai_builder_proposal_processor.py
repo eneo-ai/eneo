@@ -1230,7 +1230,11 @@ class AIBuilderProposalProcessor:
                 )
 
         valid_step_refs = [f"existing_step_{step.step_order}" for step in flow.steps]
-        edit_validation = validate_edit_draft(draft, valid_step_refs)
+        edit_validation = validate_edit_draft(
+            draft,
+            valid_step_refs,
+            current_steps=list(flow.steps),
+        )
         if edit_validation.errors:
             error_messages = [err.message for err in edit_validation.errors]
             logger.info("Edit draft validation failed: %s", error_messages)

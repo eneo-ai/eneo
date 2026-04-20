@@ -39,7 +39,10 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputType,
     StepSpec,
 )
-from intric.flows.ai_builder.ai_builder_new_step_compiler import compile_new_step_draft
+from intric.flows.ai_builder.ai_builder_new_step_compiler import (
+    compile_new_step_draft,
+    default_previous_field_label,
+)
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     StepNormalizationChange,
@@ -113,6 +116,7 @@ def compile_edit_draft(
                     plan_ref,
                     patch,
                     assistant_snapshots=assistant_snapshots,
+                    current_steps=current_steps,
                 )
             )
 
@@ -270,6 +274,7 @@ def _flow_step_to_spec(
     patch: StepPatch | None = None,
     *,
     assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+    current_steps: list[FlowStep] | None = None,
 ) -> StepSpec:
     """Convert an existing FlowStep to a StepSpec, applying patch if present."""
     name = step.user_description or f"Step {step.step_order}"
@@ -314,6 +319,15 @@ def _flow_step_to_spec(
             updates["assistant_spec"] = _merge_assistant_specs(
                 base_assistant_spec,
                 patch.assistant_spec,
+            )
+        if (
+            "uses_previous_fields" in patch.model_fields_set
+            or "uses_form_fields" in patch.model_fields_set
+        ):
+            updates["input_bindings"] = _compile_patch_input_bindings(
+                uses_previous_fields=patch.uses_previous_fields or [],
+                uses_form_fields=patch.uses_form_fields or [],
+                current_steps=current_steps or [],
             )
         if "input_bindings" in patch.model_fields_set:
             updates["input_bindings"] = patch.input_bindings
@@ -422,6 +436,7 @@ def _build_step_changes(
             step,
             ref,
             assistant_snapshots=assistant_snapshots,
+            current_steps=current_steps,
         )
         baseline_specs[ref] = _canonicalize_step_for_diff(
             baseline_spec,
@@ -738,6 +753,43 @@ def _existing_step_order(existing_step_ref: str | None) -> int | None:
         return None
     raw_order = existing_step_ref.removeprefix("existing_step_")
     return int(raw_order) if raw_order.isdigit() else None
+
+
+def _compile_patch_input_bindings(
+    *,
+    uses_previous_fields: list[Any],
+    uses_form_fields: list[str],
+    current_steps: list[FlowStep],
+) -> dict[str, Any] | None:
+    sections: list[str] = []
+    for field_ref in uses_previous_fields:
+        from_step = getattr(field_ref, "from_step", None)
+        field_path = getattr(field_ref, "field_path", None)
+        if (
+            not isinstance(from_step, int)
+            or from_step < 1
+            or from_step > len(current_steps)
+            or not isinstance(field_path, str)
+        ):
+            continue
+        label = getattr(field_ref, "label", None) or default_previous_field_label(
+            field_path
+        )
+        sections.append(
+            f"{label}: {{{{ step_{from_step}.output.structured.{field_path} }}}}"
+        )
+
+    if uses_form_fields:
+        sections.append(
+            "\n".join(
+                f"{field_name}: {{{{ {field_name} }}}}"
+                for field_name in uses_form_fields
+            )
+        )
+
+    if not sections:
+        return None
+    return {"question": "\n\n".join(sections)}
 
 
 def _rewrite_runtime_aliases_for_existing_step(

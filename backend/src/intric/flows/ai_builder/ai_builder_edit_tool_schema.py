@@ -191,7 +191,8 @@ def _build_patch_schema(
         "type": "object",
         "description": (
             "Partial update for existing steps (modify operations). "
-            "Only include fields you want to change."
+            "Only include fields you want to change. "
+            "Use `uses_previous_fields` instead of raw `input_bindings` when the edited step should reuse specific structured JSON fields from earlier steps."
         ),
         "properties": {
             "name": {"type": "string"},
@@ -203,6 +204,35 @@ def _build_patch_schema(
             "input_type": {
                 "type": "string",
                 "enum": ["text", "json", "audio", "document", "file", "any"],
+            },
+            "uses_form_fields": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional form field variable names this existing step should reuse in its compiled underlag.",
+            },
+            "uses_previous_fields": {
+                "type": "array",
+                "description": "Optional typed field reuse intent for earlier JSON-producing steps in the current flow.",
+                "items": {
+                    "type": "object",
+                    "required": ["from_step", "field_path"],
+                    "properties": {
+                        "from_step": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "1-based earlier step number in the current flow.",
+                        },
+                        "field_path": {
+                            "type": "string",
+                            "description": "Dot path inside the earlier step's structured JSON output.",
+                        },
+                        "label": {
+                            "type": ["string", "null"],
+                            "description": "Optional human-readable label to use in the compiled underlag.",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
             },
             "output_mode": {
                 "type": "string",
