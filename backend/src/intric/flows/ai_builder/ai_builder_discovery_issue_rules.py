@@ -17,6 +17,15 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 
+_DOCUMENT_PACKAGE_PHRASES: tuple[str, ...] = (
+    "dokumentpaket",
+    "document package",
+    "flera relaterade pdf",
+    "multiple related pdf",
+    "flera dokument i samma ärende",
+    "multiple documents for the same case",
+)
+
 
 def question_category(question_id: str) -> str:
     return {
@@ -128,6 +137,53 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
     return output_intent
 
 
+def ultra_vague_output_choice_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "final_output_mode"):
+        return False
+    if profile.output_intent.terminal_output is not None:
+        return False
+    if "final_output_mode" in profile.answers:
+        return False
+    if profile.flow_defaults.get("final_output_mode"):
+        return False
+    if profile.case_like_flow or profile.comparison_requested:
+        return False
+    if len(profile.text.split()) > 7:
+        return False
+    if mentions_any(
+        profile.text,
+        (
+            "pdf",
+            "docx",
+            "word",
+            "json",
+            "rapport",
+            "report",
+            "text summary",
+            "textsammanfattning",
+            "sammanfattning som text",
+            "beslutsunderlag",
+            "decision support",
+        ),
+    ):
+        return False
+    if not mentions_any(
+        profile.text,
+        (
+            "sammanfatt",
+            "summarize",
+            "analysera",
+            "analyze",
+            "extrahera",
+            "extract",
+            "process",
+            "bearbeta",
+        ),
+    ):
+        return False
+    return profile.document_like_input or profile.audio_like_input
+
+
 def needs_docx_mode_choice(profile: DiscoveryProfile) -> bool:
     if _family_inactive(profile, "docx_output_mode"):
         return False
@@ -175,12 +231,7 @@ def comparison_architecture_is_clear(text: str, answers: dict[str, set[str]]) ->
             "upload multiple pdf",
             "upload several pdf",
             "upload multiple documents",
-            "dokumentpaket",
-            "document package",
-            "flera relaterade pdf",
-            "multiple related pdf",
-            "flera dokument i samma ärende",
-            "multiple documents for the same case",
+            *_DOCUMENT_PACKAGE_PHRASES,
         ),
     ):
         return True
@@ -321,15 +372,16 @@ def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if "runtime_metadata_fields" in answers and "input_material_mode" in answers:
         return False
+    if (
+        profile.output_intent.terminal_output is not None
+        and not profile.case_like_flow
+        and not profile.comparison_requested
+    ):
+        return False
     if mentions_any(
         text,
         (
-            "dokumentpaket",
-            "document package",
-            "flera relaterade pdf",
-            "multiple related pdf",
-            "flera dokument i samma ärende",
-            "multiple documents for the same case",
+            *_DOCUMENT_PACKAGE_PHRASES,
             "kommunärende",
             "municipal case",
             "case material",

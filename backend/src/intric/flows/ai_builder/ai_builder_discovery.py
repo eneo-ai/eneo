@@ -54,6 +54,9 @@ from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     structured_analysis_need_is_vague as _structured_analysis_need_is_vague,
 )
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
+    ultra_vague_output_choice_is_vague as _ultra_vague_output_choice_is_vague,
+)
 from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryAnalysis,
     DiscoveryCandidate,
@@ -263,6 +266,21 @@ def analyze_discovery(
                     profile.language,
                     "Slutresultatet är fortfarande för vagt för att flödet ska kunna designas säkert.",
                     "The final output format is still too vague to design the flow confidently.",
+                ),
+                suggestion=final_output_mode_question(profile.language),
+                question_level="blocking",
+            )
+        )
+    elif _ultra_vague_output_choice_is_vague(profile):
+        raw_issues.append(
+            DiscoveryIssue(
+                issue_id="final_output_mode",
+                category="output",
+                severity="blocking",
+                message=localized_text(
+                    profile.language,
+                    "Det är fortfarande oklart vilket slutresultat flödet ska leverera.",
+                    "The final output is still too vague to summarize safely.",
                 ),
                 suggestion=final_output_mode_question(profile.language),
                 question_level="blocking",

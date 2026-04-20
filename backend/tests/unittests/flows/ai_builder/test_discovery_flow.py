@@ -582,6 +582,22 @@ class TestExtendedClarificationHints:
         assert hints is not None
         assert "Ask exactly ONE structured question now" in hints
 
+    def test_ultra_vague_summary_prompt_blocks_on_final_output_mode(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Bygg ett flöde som sammanfattar ett dokument.",
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "final_output_mode"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "final_output_mode"
+
     def test_conflicting_single_file_and_same_run_compare_resolved_by_answer(
         self,
     ) -> None:
@@ -1256,6 +1272,30 @@ class TestExtendedClarificationHints:
 
         assert "document_kind" not in question_ids
         assert "final_pdf_type" not in question_ids
+
+    def test_generic_uploaded_pdf_docx_prompt_prioritizes_docx_mode_over_document_kind(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en DOCX-rapport."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "docx_output_mode"
+        assert "document_kind" not in question_ids
 
     def test_complex_multi_document_compare_prompt_skips_document_kind_and_comparison_scope(
         self,
