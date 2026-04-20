@@ -203,6 +203,81 @@
     ).length
   );
 
+  // Scope-aware capability preview rows for the "What this key can do" box.
+  // Each row is rendered with a check (allow) or ban (deny) icon.
+  type CapabilityRow = { kind: "allow" | "deny"; msg: string };
+  const capabilityRows: CapabilityRow[] = $derived.by(() => {
+    if (scopeType === "tenant" || scopeType === "space") {
+      const isSpace = scopeType === "space";
+      if (permission === "read") {
+        return [
+          { kind: "allow", msg: m.api_keys_capability_read_resources() },
+          { kind: "deny", msg: m.api_keys_capability_no_create() },
+          ...(isSpace
+            ? [{ kind: "deny" as const, msg: m.api_keys_capability_no_space_settings() }]
+            : [])
+        ];
+      }
+      if (permission === "write") {
+        return [
+          { kind: "allow", msg: m.api_keys_capability_read_resources() },
+          { kind: "allow", msg: m.api_keys_capability_write_resources() },
+          { kind: "deny", msg: m.api_keys_capability_no_delete() },
+          ...(isSpace
+            ? [{ kind: "deny" as const, msg: m.api_keys_capability_no_space_settings() }]
+            : [])
+        ];
+      }
+      return [
+        { kind: "allow", msg: m.api_keys_capability_read_resources() },
+        { kind: "allow", msg: m.api_keys_capability_write_resources() },
+        { kind: "allow", msg: m.api_keys_capability_delete_resources() },
+        ...(isSpace ? [{ kind: "allow" as const, msg: m.api_keys_capability_admin_space() }] : [])
+      ];
+    }
+    if (scopeType === "assistant") {
+      if (permission === "read") {
+        return [
+          { kind: "allow", msg: m.api_keys_capability_assistant_call_read() },
+          { kind: "deny", msg: m.api_keys_capability_no_edit_assistant() }
+        ];
+      }
+      if (permission === "write") {
+        return [
+          { kind: "allow", msg: m.api_keys_capability_assistant_call_read() },
+          { kind: "allow", msg: m.api_keys_capability_assistant_edit() },
+          { kind: "deny", msg: m.api_keys_capability_no_delete_assistant() }
+        ];
+      }
+      return [
+        { kind: "allow", msg: m.api_keys_capability_assistant_call_read() },
+        { kind: "allow", msg: m.api_keys_capability_assistant_edit() },
+        { kind: "allow", msg: m.api_keys_capability_assistant_delete() }
+      ];
+    }
+    if (scopeType === "app") {
+      if (permission === "read") {
+        return [
+          { kind: "allow", msg: m.api_keys_capability_app_run_read() },
+          { kind: "deny", msg: m.api_keys_capability_no_edit_app() }
+        ];
+      }
+      if (permission === "write") {
+        return [
+          { kind: "allow", msg: m.api_keys_capability_app_run_read() },
+          { kind: "allow", msg: m.api_keys_capability_app_edit() },
+          { kind: "deny", msg: m.api_keys_capability_no_delete_app() }
+        ];
+      }
+      return [
+        { kind: "allow", msg: m.api_keys_capability_app_run_read() },
+        { kind: "allow", msg: m.api_keys_capability_app_edit() },
+        { kind: "allow", msg: m.api_keys_capability_app_delete() }
+      ];
+    }
+    return [];
+  });
+
   // Effect: Reset permission to read for public keys
   $effect(() => {
     if (keyType === "pk_" && permission !== "read") {
@@ -1422,100 +1497,29 @@
                           {m.api_keys_capability_summary_title()}
                         </p>
                         <div class="space-y-2">
-                          {#if permission === "read"}
+                          {#each capabilityRows as row (row.msg)}
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full {row.kind ===
+                                'allow'
+                                  ? 'bg-positive-default/15'
+                                  : 'bg-negative-default/10'}"
                               >
-                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
+                                {#if row.kind === "allow"}
+                                  <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
+                                {:else}
+                                  <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
+                                {/if}
                               </div>
-                              <span class="text-default text-sm"
-                                >{m.api_keys_capability_read_resources()}</span
+                              <span
+                                class="text-sm {row.kind === 'allow'
+                                  ? 'text-default'
+                                  : 'text-muted'}"
                               >
+                                {row.msg}
+                              </span>
                             </div>
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-negative-default/10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
-                              </div>
-                              <span class="text-muted text-sm"
-                                >{m.api_keys_capability_no_create()}</span
-                              >
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-negative-default/10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
-                              </div>
-                              <span class="text-muted text-sm"
-                                >{m.api_keys_capability_no_space_settings()}</span
-                              >
-                            </div>
-                          {:else if permission === "write"}
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
-                              </div>
-                              <span class="text-default text-sm"
-                                >{m.api_keys_capability_read_resources()}</span
-                              >
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
-                              </div>
-                              <span class="text-default text-sm"
-                                >{m.api_keys_capability_write_resources()}</span
-                              >
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-negative-default/10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
-                              </div>
-                              <span class="text-muted text-sm"
-                                >{m.api_keys_capability_no_space_settings()}</span
-                              >
-                            </div>
-                          {:else if permission === "admin"}
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
-                              </div>
-                              <span class="text-default text-sm"
-                                >{m.api_keys_capability_read_resources()}</span
-                              >
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
-                              </div>
-                              <span class="text-default text-sm"
-                                >{m.api_keys_capability_write_resources()}</span
-                              >
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
-                              </div>
-                              <span class="text-default text-sm"
-                                >{m.api_keys_capability_admin_space()}</span
-                              >
-                            </div>
-                          {/if}
+                          {/each}
 
                           <div class="border-default mt-2 border-t pt-2">
                             <div class="flex items-center gap-2.5">
