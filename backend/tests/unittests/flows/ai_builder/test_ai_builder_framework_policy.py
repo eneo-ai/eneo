@@ -608,6 +608,16 @@ def test_resolve_output_intent_prefers_confirmed_docx_summary_over_pdf_input_ref
     assert intent.terminal_output == "docx_document"
 
 
+def test_resolve_output_intent_uses_role_scoped_pdf_input_vs_docx_output() -> None:
+    prompt = "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en DOCX-rapport."
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "docx_document"
+
+
 def test_resolve_output_intent_prefers_text_summary_over_pdf_input_reference() -> None:
     prompt = "Bygg ett enkelt flöde som tar ett uppladdat PDF-dokument och returnerar en kort textsammanfattning på svenska."
 

@@ -1,0 +1,56 @@
+from __future__ import annotations
+
+INPUT_ROLE_MARKERS: tuple[str, ...] = (
+    "ladda upp",
+    "upload",
+    "skicka in",
+    "send in",
+    "ta emot",
+    "tar emot",
+    "receive",
+    "attach",
+    "bifoga",
+    "bifogade",
+    "uppladdad",
+    "uppladdat",
+    "uppladdade",
+    "uploaded",
+    "vid körning",
+    "runtime input",
+)
+
+OUTPUT_ROLE_MARKERS: tuple[str, ...] = (
+    "generera",
+    "genererar",
+    "generate",
+    "returnera",
+    "returnerar",
+    "return",
+    "leverera",
+    "levererar",
+    "deliver",
+    "skapa",
+    "skapar",
+    "create",
+    "producera",
+    "producerar",
+    "produce",
+    "få tillbaka",
+    "få ut",
+    "få en",
+    "få ett",
+    "get a",
+    "get an",
+    "get back",
+    "skriv",
+    "skriver",
+    "write",
+    "slutresultatet",
+    "final output",
+)
+
+REPLACEMENT_PHRASES: tuple[str, ...] = (
+    "i stället för",
+    "istället för",
+    "instead of",
+)

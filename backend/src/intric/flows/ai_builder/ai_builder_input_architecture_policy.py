@@ -3,13 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from intric.flows.ai_builder.ai_builder_clause_segmenter import (
+    build_role_scoped_text,
+)
+from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
+    build_flow_discovery_defaults,
+)
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
     contains_any_token_prefix,
     normalize_discovery_text,
-)
-from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
-    build_flow_discovery_defaults,
 )
 from intric.flows.ai_builder.ai_builder_models import (
     FlowDraftSpecCore,
@@ -22,7 +25,9 @@ from intric.flows.ai_builder.ai_builder_models import (
 if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
 
-PrimaryRuntimeInput = Literal["audio", "documents", "text", "text_and_documents", "unknown"]
+PrimaryRuntimeInput = Literal[
+    "audio", "documents", "text", "text_and_documents", "unknown"
+]
 
 _AUDIO_PREFIX_MARKERS: tuple[str, ...] = (
     "audio",
@@ -101,21 +106,27 @@ _TEXT_INPUT_MARKERS: tuple[str, ...] = (
 )
 
 _OUTPUT_ONLY_EDIT_INPUT_CHANGE_MARKERS: tuple[str, ...] = (
-    "ändra indata",
-    "change input",
-    "ny indata",
-    "new input",
-    "input architecture",
-    "indataarkitektur",
-    "flow_input",
-    "upload",
-    "ladda upp",
-    "runtime input",
-    "filtyp",
-    "file type",
-    "document package",
-    "dokumentpaket",
-) + _AUDIO_PREFIX_MARKERS + _DOCUMENT_INPUT_MARKERS + _DOCUMENT_UPLOAD_MARKERS + _TEXT_INPUT_MARKERS
+    (
+        "ändra indata",
+        "change input",
+        "ny indata",
+        "new input",
+        "input architecture",
+        "indataarkitektur",
+        "flow_input",
+        "upload",
+        "ladda upp",
+        "runtime input",
+        "filtyp",
+        "file type",
+        "document package",
+        "dokumentpaket",
+    )
+    + _AUDIO_PREFIX_MARKERS
+    + _DOCUMENT_INPUT_MARKERS
+    + _DOCUMENT_UPLOAD_MARKERS
+    + _TEXT_INPUT_MARKERS
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,13 +153,20 @@ def resolve_input_intent(
     explicit_question_ids: set[str] | None = None,
 ) -> InputIntentResolution:
     normalized = _normalize_signal_text(text)
+    scoped_text = build_role_scoped_text(normalized)
+    input_text = (
+        " ".join(
+            part for part in (scoped_text.input_text, scoped_text.neutral_text) if part
+        ).strip()
+        or scoped_text.full_text
+    )
     defaults = build_flow_discovery_defaults(flow)
     explicit_primary = _resolve_primary_from_answers(answer_signals)
     default_primary = _resolve_primary_from_defaults(defaults)
-    inferred_primary = _infer_primary_runtime_input(normalized)
+    inferred_primary = _infer_primary_runtime_input(input_text)
 
-    audio_requested = _audio_requested(answer_signals, defaults, normalized)
-    document_requested = _document_requested(answer_signals, defaults, normalized)
+    audio_requested = _audio_requested(answer_signals, defaults, input_text)
+    document_requested = _document_requested(answer_signals, defaults, input_text)
 
     if explicit_primary != "unknown":
         primary = explicit_primary
@@ -233,7 +251,9 @@ def degrades_document_entry_to_generic_file(
     if flow is None or not spec.steps:
         return False
 
-    first_existing = next(iter(sorted(flow.steps, key=lambda step: step.step_order)), None)
+    first_existing = next(
+        iter(sorted(flow.steps, key=lambda step: step.step_order)), None
+    )
     if first_existing is None or first_existing.input_type != "document":
         return False
 
@@ -251,7 +271,9 @@ def uses_pseudo_transcription_without_audio_step(spec: FlowDraftSpecCore) -> boo
 
     for step in spec.steps:
         instructions = step.assistant_spec.instructions.casefold()
-        if _contains_any(instructions, ("transkrib", "transcrib", "samtal", "discussion")):
+        if _contains_any(
+            instructions, ("transkrib", "transcrib", "samtal", "discussion")
+        ):
             return True
     return False
 
@@ -276,7 +298,11 @@ def is_narrow_output_edit_request(
     if mentions_runtime_metadata(normalized):
         return False
 
-    defaults = flow_defaults if flow_defaults is not None else build_flow_discovery_defaults(flow)
+    defaults = (
+        flow_defaults
+        if flow_defaults is not None
+        else build_flow_discovery_defaults(flow)
+    )
     if not _flow_has_defined_input_architecture(defaults):
         return False
 
@@ -379,7 +405,9 @@ def _document_requested(
         {"documents", "text_and_documents"}
     ):
         return True
-    if defaults.get("input_material_mode", set()).intersection({"documents", "text_and_documents"}):
+    if defaults.get("input_material_mode", set()).intersection(
+        {"documents", "text_and_documents"}
+    ):
         return True
     return _document_runtime_input_requested(text)
 
@@ -392,7 +420,9 @@ def _audio_runtime_input_requested(text: str) -> bool:
         ("transkrib", "transcrib"),
     ) or _contains_any(text, ("speech to text", "tal till text"))
     if not has_transcription_semantics:
-        return _contains_any(text, ("ljudfil", "audio file", "upload audio", "ladda upp ljud"))
+        return _contains_any(
+            text, ("ljudfil", "audio file", "upload audio", "ladda upp ljud")
+        )
     return contains_any_token_prefix(text, _AUDIO_PREFIX_MARKERS) or _contains_any(
         text,
         ("one on one",),

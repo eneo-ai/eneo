@@ -5,7 +5,9 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
 )
 
 
-def test_resolve_input_intent_prefers_audio_for_transcribe_conversation_with_pdf_output() -> None:
+def test_resolve_input_intent_prefers_audio_for_transcribe_conversation_with_pdf_output() -> (
+    None
+):
     intent = resolve_input_intent(
         (
             "Jag vill bygga ett flöde som hjälper till att transkribera ett "
@@ -22,7 +24,9 @@ def test_resolve_input_intent_prefers_audio_for_transcribe_conversation_with_pdf
     assert intent.needs_architecture_clarification is False
 
 
-def test_resolve_input_intent_requires_architecture_for_audio_and_document_upload() -> None:
+def test_resolve_input_intent_requires_architecture_for_audio_and_document_upload() -> (
+    None
+):
     intent = resolve_input_intent(
         "Jag vill transkribera ljud och samtidigt ladda upp dokument i samma körning.",
         {},
@@ -59,3 +63,14 @@ def test_resolve_input_intent_does_not_treat_keywords_as_word_document_signal() 
     assert intent.audio_requested is True
     assert intent.document_runtime_input_requested is False
     assert intent.needs_architecture_clarification is False
+
+
+def test_resolve_input_intent_uses_role_scoped_input_clause_for_uploaded_pdf() -> None:
+    intent = resolve_input_intent(
+        "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en DOCX-rapport.",
+        {},
+    )
+
+    assert intent.primary_runtime_input == "documents"
+    assert intent.document_runtime_input_requested is True
+    assert intent.audio_requested is False
