@@ -6,7 +6,7 @@ import json
 import logging
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -1566,6 +1566,8 @@ class TestSendMessageToolCall:
             session_id=session.id,
             tenant_id=user.tenant_id,
             plan_id=plan.id,
+            request_id=ANY,
+            lock_token=ANY,
         )
 
     @pytest.mark.anyio
