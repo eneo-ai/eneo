@@ -53,6 +53,9 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
     latest_confirmed_requirements,
     resolve_requirements_state,
 )
+from intric.flows.ai_builder.ai_builder_resolved_requirements import (
+    build_resolved_requirements_prompt_block,
+)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
@@ -426,6 +429,10 @@ class AIBuilderPlanner:
             latest_user_message=message,
             flow=flow,
         )
+        resolved_requirements_block = build_resolved_requirements_prompt_block(
+            conversation,
+            flow=flow,
+        )
         confirmed_requirements = latest_confirmed_requirements(conversation)
         attachment_context_result = build_ai_builder_attachment_context(
             attachment_files or []
@@ -440,6 +447,7 @@ class AIBuilderPlanner:
                 else None
             ),
             planner_hints=clarification_hints,
+            resolved_requirements_block=resolved_requirements_block,
             ui_language=ui_language,
             confirmed_requirements=(
                 confirmed_requirements.model_dump(mode="json")
