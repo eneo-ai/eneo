@@ -24,6 +24,7 @@ from intric.database.tables.spaces_table import (
 )
 from intric.database.tables.tenant_table import Tenants
 from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_domain_models import SessionStatus
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     ConversationMessage,
@@ -1979,6 +1980,11 @@ async def test_ai_builder_api_create_mode_strips_invalid_existing_step_ref_and_a
             plan_id=plan.id,
             tenant_id=user.tenant_id,
             status=PlanStatus.APPROVED,
+        )
+        await repo.update_session_status(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=SessionStatus.AWAITING_APPROVAL,
         )
 
     apply_response = await client.post(
