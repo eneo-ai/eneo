@@ -288,24 +288,16 @@ async def test_dual_credentials_invalid_bearer_does_not_silently_escalate(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Tracked in issue #347: a space-scoped key can transfer an "
-        "assistant into a space outside its scope via the target_space_id "
-        "in the request body. The router's require_api_key_scope_check "
-        "inspects the source assistant (path param), but the target space "
-        "comes from the body and is authorised by the owning user's space "
-        "membership rather than the key's scope. Flip this xfail to "
-        "passing once cross-space transfer requires a tenant-scoped key."
-    ),
-)
 async def test_transfer_assistant_to_other_space_denied_for_space_scoped_key(
     client, bearer_token
 ):
     """A space-scoped key transferring an assistant into a different space
     must be denied. API-key v2 scopes are single-space, so any operation
-    that affects a space outside the key's scope requires a tenant key."""
+    that affects a space outside the key's scope requires a tenant key.
+
+    Denial happens at the service layer: resource_mover_service calls
+    actor.can_create_assistants() on the target space, and the actor returns
+    no role because the key's scope does not cover that space."""
     space_a = await _create_space(client, token=bearer_token, name="xfer-A")
     space_b = await _create_space(client, token=bearer_token, name="xfer-B")
     asst = await _create_assistant(client, token=bearer_token, space_id=space_a)
