@@ -564,6 +564,50 @@ def test_extract_answer_signals_does_not_treat_input_pdfs_as_pdf_output_mode() -
     assert intent.docx_output_mode == "generated_docx"
 
 
+def test_extract_answer_signals_reads_confirmed_requirements_summary_output_mode() -> (
+    None
+):
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "tool",
+                "content": "Requirements presented to user.",
+                "metadata": {
+                    "requirements_summary": {
+                        "output_description": "En genererad DOCX-rapport baserad på PDF-underlaget."
+                    }
+                },
+            }
+        ]
+    )
+
+    assert signals["final_output_mode"] == {"docx_document"}
+
+
+def test_resolve_output_intent_prefers_confirmed_docx_summary_over_pdf_input_reference() -> (
+    None
+):
+    prompt = "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en DOCX-rapport."
+    signals = extract_answer_signals(
+        [
+            {"role": "user", "content": prompt},
+            {
+                "role": "tool",
+                "content": "Requirements presented to user.",
+                "metadata": {
+                    "requirements_summary": {
+                        "output_description": "En genererad DOCX-rapport baserad på PDF-underlaget."
+                    }
+                },
+            },
+        ]
+    )
+
+    intent = resolve_output_intent(prompt, signals)
+
+    assert intent.terminal_output == "docx_document"
+
+
 def test_aggregate_freeform_user_text_ignores_structured_answer_messages() -> None:
     text = aggregate_freeform_user_text(
         [

@@ -617,6 +617,53 @@ def test_still_requires_template_fill_for_explicit_docx_template_request() -> No
     assert "template_fill" in feedback
 
 
+def test_quality_feedback_prefers_confirmed_docx_output_over_pdf_input_mentions() -> (
+    None
+):
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en DOCX-rapport."
+            ),
+        },
+        {
+            "role": "tool",
+            "content": "Requirements presented to user. Awaiting confirmation.",
+            "metadata": {
+                "requirements_summary": {
+                    "output_description": "En genererad DOCX-rapport baserad på PDF-underlaget."
+                }
+            },
+        },
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Felaktig PDF-plan",
+        steps=[
+            _step(
+                "step_a",
+                "Läs PDF",
+                "Läs PDF-underlaget.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.TEXT,
+            ),
+            _step(
+                "step_b",
+                "Skriv rapport",
+                "Skriv rapporten.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.PDF,
+            ),
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+
+    assert feedback is not None
+    assert "DOCX" in feedback
+    assert "PDF som slutartefakt" not in feedback
+
+
 def test_flags_non_terminal_docx_conversion_for_output_only_edit() -> None:
     from uuid import uuid4
 

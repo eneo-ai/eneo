@@ -430,6 +430,16 @@ def extract_answer_signals(
             else message.get("content")
         )
         if role != "user":
+            if role == "tool" and isinstance(metadata, dict):
+                requirements_summary = cast(JsonObject, metadata).get(
+                    "requirements_summary"
+                )
+                if isinstance(requirements_summary, Mapping):
+                    signals.update(
+                        _extract_requirements_summary_signals(
+                            cast(Mapping[str, Any], requirements_summary)
+                        )
+                    )
             continue
 
         answer = (
@@ -484,6 +494,24 @@ def extract_answer_signals(
         if isinstance(content, str) and content.strip():
             values.add(content.casefold())
         signals[question_id] = values
+    return signals
+
+
+def _extract_requirements_summary_signals(
+    requirements_summary: Mapping[str, Any],
+) -> dict[str, set[str]]:
+    signals: dict[str, set[str]] = {}
+    output_description = str(
+        requirements_summary.get("output_description") or ""
+    ).casefold()
+    if "docx" in output_description or "word" in output_description:
+        signals["final_output_mode"] = {"docx_document"}
+    elif "pdf" in output_description:
+        signals["final_output_mode"] = {"pdf_document"}
+    elif "json" in output_description:
+        signals["final_output_mode"] = {"structured_json"}
+    elif "text" in output_description:
+        signals["final_output_mode"] = {"structured_text"}
     return signals
 
 
@@ -583,13 +611,17 @@ def _resolve_direct_output_choice(
 ) -> str | None:
     output_values = answer_signals.get("final_output_mode", set())
     pdf_generation_values = answer_signals.get("pdf_generation_mode", set())
-    if (
-        "pdf_document" in output_values
-        or pdf_generation_values.intersection(
-            {"generated_pdf", "pdf_template_requested"}
-        )
-        or contains_any_phrase(text, PDF_OUTPUT_CONTEXT_MARKERS)
-    ):
+    if "docx_document" in output_values:
+        return "docx_document"
+    if "pdf_document" in output_values:
+        return "pdf_document"
+    if "structured_json" in output_values:
+        return "structured_json"
+    if "structured_text" in output_values:
+        return "structured_text"
+    if pdf_generation_values.intersection(
+        {"generated_pdf", "pdf_template_requested"}
+    ) or contains_any_phrase(text, PDF_OUTPUT_CONTEXT_MARKERS):
         return "pdf_document"
     if contains_any_phrase(
         text,
@@ -605,14 +637,8 @@ def _resolve_direct_output_choice(
         ),
     ):
         return "structured_text"
-    if "docx_document" in output_values or contains_any_phrase(
-        text, DOCX_CONTEXT_MARKERS
-    ):
+    if contains_any_phrase(text, DOCX_CONTEXT_MARKERS):
         return "docx_document"
-    if "structured_json" in output_values:
-        return "structured_json"
-    if "structured_text" in output_values:
-        return "structured_text"
     return None
 
 
