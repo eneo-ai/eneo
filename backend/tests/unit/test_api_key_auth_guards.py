@@ -9,8 +9,13 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
-from intric.audit.domain.action_types import ActionType
+from starlette.requests import Request
 
+from intric.audit.domain.action_types import ActionType
+from intric.authentication.api_key_resolver import (
+    ApiKeyValidationError,
+    check_resource_permission,
+)
 from intric.authentication.auth_dependencies import (
     APPS_READ_OVERRIDES,
     ASSISTANTS_READ_OVERRIDES,
@@ -20,20 +25,14 @@ from intric.authentication.auth_dependencies import (
     require_api_key_permission,
     require_resource_permission_for_method,
 )
-from intric.authentication.api_key_resolver import (
-    ApiKeyValidationError,
-    check_resource_permission,
-)
 from intric.authentication.auth_models import (
-    ApiKeyPermission,
-    ApiKeyV2InDB,
     METHOD_PERMISSION_MAP,
     PERMISSION_LEVEL_ORDER,
+    ApiKeyPermission,
+    ApiKeyV2InDB,
     ResourcePermissionLevel,
     ResourcePermissions,
 )
-from starlette.requests import Request
-
 from intric.users.user_service import (
     UserService,
     _check_basic_method_permission,
@@ -42,7 +41,6 @@ from intric.users.user_service import (
     _permission_allows,
 )
 from tests.unit.api_key_test_utils import make_api_key
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -532,12 +530,12 @@ class TestOverrideNameValidation:
 
     def test_override_names_match_registered_routes(self):
         """Import the routers, iterate all registered routes, assert overrides match."""
+        from intric.apps.apps.api.app_router import router as apps_router
         from intric.assistants.api.assistant_router import router as assistants_router
-        from intric.groups_legacy.api.group_router import router as groups_router
         from intric.conversations.conversations_router import (
             router as conversations_router,
         )
-        from intric.apps.apps.api.app_router import router as apps_router
+        from intric.groups_legacy.api.group_router import router as groups_router
         from intric.services.service_router import router as services_router
 
         assistant_names = self._collect_endpoint_names(assistants_router)
@@ -1173,67 +1171,14 @@ class TestPrimaryBugScenario:
 # Full permission matrix (Phase 7K)
 # ---------------------------------------------------------------------------
 
+
 # Expected outcomes: True = passes, False = 403
 # Permission hierarchy: read(1) < write(2) < admin(3)
-# Method map: GET/HEAD/OPTIONS→read, POST/PUT/PATCH→write, DELETE→admin
-_MATRIX_CASES = []
-for _perm, _perm_level in [("read", 1), ("write", 2), ("admin", 3)]:
-    for _method, _required in [
-        ("GET", "read"),
-        ("HEAD", "read"),
-        ("OPTIONS", "read"),
-        ("POST", "write"),
-        ("PUT", "write"),
-        ("PATCH", "write"),
-        ("DELETE", "admin"),
-    ]:
-        _required_level = PERMISSION_LEVEL_ORDER[_required]
-        _should_pass = _perm_level >= _required_level
-        _MATRIX_CASES.append((_perm, _method, _should_pass))
-
-
 class TestPermissionMatrix:
-    """Phase 7K: 3 permissions × 7 methods × 2 modes (fine-grained + null fallback)."""
-
-    @pytest.mark.parametrize("perm,method,should_pass", _MATRIX_CASES)
-    def test_fine_grained_mode(self, monkeypatch, perm, method, should_pass):
-        """Fine-grained mode: resource_permissions set, permission matches basic level."""
-        monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        key = _make_key(
-            permission=ApiKeyPermission(perm),
-            resource_permissions=ResourcePermissions(
-                apps=ResourcePermissionLevel(perm),
-            ),
-        )
-        request = _fake_request(method)
-        if should_pass:
-            _check_method_resource_permission(request, key, _config("apps"))
-        else:
-            with pytest.raises(ApiKeyValidationError) as exc_info:
-                _check_method_resource_permission(request, key, _config("apps"))
-            assert exc_info.value.status_code == 403
-
-    @pytest.mark.parametrize("perm,method,should_pass", _MATRIX_CASES)
-    def test_null_fallback_mode(self, monkeypatch, perm, method, should_pass):
-        """Null fallback mode: resource_permissions=None, falls back to basic permission."""
-        monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        key = _make_key(
-            permission=ApiKeyPermission(perm),
-            resource_permissions=None,
-        )
-        request = _fake_request(method)
-        if should_pass:
-            _check_method_resource_permission(request, key, _config("apps"))
-        else:
-            with pytest.raises(ApiKeyValidationError) as exc_info:
-                _check_method_resource_permission(request, key, _config("apps"))
-            assert exc_info.value.status_code == 403
+    """Read-override parametrisation: read key + POST to an override endpoint
+    must pass. Override handling sits in ``_check_method_resource_permission``;
+    the 3×7 permission × method matrix is covered by the property oracle in
+    tests/unit/test_api_key_property.py."""
 
     @pytest.mark.parametrize(
         "override_endpoint,override_set,resource_type",

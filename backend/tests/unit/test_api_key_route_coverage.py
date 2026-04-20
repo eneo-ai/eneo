@@ -11,7 +11,6 @@ import importlib
 import pathlib
 
 import pytest
-from intric.main.config import get_settings
 
 from intric.authentication.auth_dependencies import (
     APPS_READ_OVERRIDES,
@@ -20,7 +19,8 @@ from intric.authentication.auth_dependencies import (
     FILES_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
 )
-
+from intric.main.config import get_settings
+from tests.unit.api_key_test_utils import walk_routes
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -649,8 +649,8 @@ class TestFeatureFlagContract:
 
     def test_flag_true_layer2_enforces(self):
         """flag=True: read key + DELETE on unguarded route → 403."""
-        from intric.users.user_service import _check_basic_method_permission
         from intric.authentication.api_key_resolver import ApiKeyValidationError
+        from intric.users.user_service import _check_basic_method_permission
 
         key = self._make_key("read")
         request = self._make_request("DELETE")
@@ -661,11 +661,12 @@ class TestFeatureFlagContract:
 
     def test_flag_true_layer1_enforces(self):
         """flag=True: read key + DELETE on guarded route → 403 (resource check)."""
+        from unittest.mock import patch
+
         from intric.authentication.api_key_resolver import (
             ApiKeyValidationError,
             check_resource_permission,
         )
-        from unittest.mock import patch
 
         key = self._make_key("read")
 
@@ -678,8 +679,9 @@ class TestFeatureFlagContract:
 
     def test_flag_false_layer1_skips(self):
         """flag=False: Layer 1 skipped (no exception)."""
-        from intric.authentication.api_key_resolver import check_resource_permission
         from unittest.mock import patch
+
+        from intric.authentication.api_key_resolver import check_resource_permission
 
         key = self._make_key("read")
 
@@ -692,8 +694,8 @@ class TestFeatureFlagContract:
 
     def test_phase4_management_guard_always_enforces(self):
         """Phase 4 management guards enforce regardless of feature flag."""
-        from intric.users.user_service import _check_management_permission
         from intric.authentication.api_key_resolver import ApiKeyValidationError
+        from intric.users.user_service import _check_management_permission
 
         key = self._make_key("write")
 
@@ -765,4 +767,348 @@ class TestNoEndpointLevelStashDependencies:
         assert not hits, (
             "settings/settings_router.py contains endpoint-level stash dependencies. "
             f"Move to router mount level: {hits}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Per-route, per-method structural guards
+#
+# Walk every (path, method) pair and assert that each mutating route carries
+# at least one API-key authorization dependency, or is explicitly acknowledged
+# in an allowlist with a reason.
+# ---------------------------------------------------------------------------
+
+
+MUTATING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+# Prefixes whose mutating routes are gated by a **different** auth mechanism
+# than the user API-key v2 layer (super API key, OIDC, external webhooks).
+# Listed here so the walker does not flag them as missing v2 guards.
+MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
+    "/sysadmin/": "Gated by the separate super-admin API key dependency, not user API keys",
+    "/modules/": "Gated by the separate super-duper module key dependency",
+    "/auth/callback": "Public OIDC federation callback — no API key context",
+    "/users/login/": "Public login endpoints — no API key context",
+    "/users/provision/": "Public provisioning endpoint guarded by its own flow",
+    "/integrations/auth/": "External OAuth callback endpoints — no API key context",
+    "/integrations/sharepoint/": "External SharePoint webhook — verified by signature, not API key",
+}
+
+# Specific (method, path) pairs without resource_permission / api_key_permission
+# deps that have been reviewed and found acceptable.  Every entry MUST have a
+# reason and a rationale for why the basic method→permission + scope check is
+# sufficient for this endpoint.
+MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
+    (
+        "POST",
+        "/icons/",
+    ): "Tenant-wide icon upload; service layer enforces tenant scope via user.tenant_id. "
+    "Basic method check (POST→write) blocks read keys.",
+    (
+        "DELETE",
+        "/icons/{id}/",
+    ): "Tenant-wide icon delete; service layer enforces tenant via user.tenant_id. "
+    "Basic method check (DELETE→admin) blocks non-admin keys.",
+    (
+        "POST",
+        "/analysis/assistants/{assistant_id}/",
+    ): "Admin scope check rejects non-tenant keys; basic method check requires write.",
+    (
+        "POST",
+        "/analysis/conversation-insights/",
+    ): "Admin scope check rejects non-tenant keys; basic method check requires write.",
+    (
+        "PATCH",
+        "/prompts/{id}/",
+    ): "Scope=prompt gates which prompt the key can reach; basic PATCH→write blocks read keys. "
+    "Prompts are intentionally outside the fine-grained resource_permissions vocabulary.",
+    (
+        "DELETE",
+        "/prompts/{id}/",
+    ): "Scope=prompt gates which prompt the key can reach; basic DELETE→admin blocks non-admin keys. "
+    "Prompts are intentionally outside the fine-grained resource_permissions vocabulary.",
+}
+
+
+class TestMutatingRoutesArePerRouteGuarded:
+    """Every mutating route must carry an API-key authorization dep at the
+    exact (path, method) level. Accepts any of:
+
+      - ``_resource_permission_dep`` (router-level fine-grained check)
+      - ``_api_key_permission_dep`` (endpoint- or router-level admin assertion)
+      - Membership in MUTATING_ALLOWLIST_PREFIXES or MUTATING_ALLOWLIST_EXACT
+
+    These deps wire scope filtering and resource-type granularity on top of
+    the basic method→permission check in ``_resolve_api_key``.
+    """
+
+    def test_every_mutating_route_is_guarded_or_allowlisted(self):
+        unguarded: list[str] = []
+        for info in walk_routes():
+            if info.method not in MUTATING_METHODS:
+                continue
+            if info.has_resource_perm_dep or info.has_api_key_permission_dep:
+                continue
+            if any(info.path.startswith(p) for p in MUTATING_ALLOWLIST_PREFIXES):
+                continue
+            if (info.method, info.path) in MUTATING_ALLOWLIST_EXACT:
+                continue
+            unguarded.append(
+                f"{info.method} {info.path} (endpoint={info.endpoint_name})"
+            )
+
+        assert not unguarded, (
+            "Mutating routes without resource_permission_dep / api_key_permission_dep. "
+            "Either add require_resource_permission_for_method() OR "
+            "require_api_key_permission() OR add an entry to "
+            "MUTATING_ALLOWLIST_EXACT with a reason (or MUTATING_ALLOWLIST_PREFIXES "
+            "if a whole router uses separate auth):\n  - "
+            + "\n  - ".join(sorted(unguarded))
+        )
+
+    def test_no_stale_exact_allowlist_entries(self):
+        """Remove entries from MUTATING_ALLOWLIST_EXACT when the route goes away."""
+        live = {(info.method, info.path) for info in walk_routes()}
+        stale = [key for key in MUTATING_ALLOWLIST_EXACT if key not in live]
+        assert not stale, (
+            f"MUTATING_ALLOWLIST_EXACT contains entries that no longer match a live "
+            f"route — remove them: {stale}"
+        )
+
+
+# Closed vocabularies for resource_type values.
+# Fine-grained resource permissions map to Pydantic ResourcePermissions fields.
+RESOURCE_PERM_VOCABULARY: frozenset[str] = frozenset(
+    {"assistants", "apps", "spaces", "knowledge"}
+)
+
+# Scope-check vocabulary is different — it names specific resource kinds used
+# by _enforce_api_key_scope to look up the owning space_id.
+SCOPE_CHECK_VOCABULARY: frozenset[str] = frozenset(
+    {
+        "admin",
+        "app",
+        "app_run",
+        "assistant",
+        "collection",
+        "conversation",
+        "crawl_run",
+        "file",
+        "group_chat",
+        "info_blob",
+        "prompt",
+        "service",
+        "space",
+        "website",
+    }
+)
+
+
+class TestResourceTypeVocabularyIsClosed:
+    """Prevents typos and silently unhandled resource_type values.
+
+    `check_resource_permission` returns granted_level=0 (fail-closed) for
+    unknown resource_types, but that means the endpoint is inaccessible to
+    every key — which is a *denial*, not a bug per se, but almost certainly
+    a mistake.  `_enforce_api_key_scope` likewise has an "unhandled" branch
+    that logs a warning and denies; same logic.
+    """
+
+    def test_all_resource_perm_resource_types_are_in_vocabulary(self):
+        bad: list[str] = []
+        for info in walk_routes():
+            cfg = info.resource_perm_config
+            if cfg is None:
+                continue
+            if cfg.resource_type not in RESOURCE_PERM_VOCABULARY:
+                bad.append(
+                    f"{info.method} {info.path}: resource_type={cfg.resource_type!r}"
+                )
+        assert not bad, (
+            f"require_resource_permission_for_method() called with resource_type "
+            f"outside the closed vocabulary {sorted(RESOURCE_PERM_VOCABULARY)}. "
+            f"Either add the new type to ResourcePermissions and this vocabulary, "
+            f"or fix the typo:\n  - " + "\n  - ".join(bad)
+        )
+
+    def test_all_scope_check_resource_types_are_in_vocabulary(self):
+        bad: list[str] = []
+        for info in walk_routes():
+            cfg = info.scope_check_config
+            if cfg is None:
+                continue
+            if cfg.resource_type not in SCOPE_CHECK_VOCABULARY:
+                bad.append(
+                    f"{info.method} {info.path}: resource_type={cfg.resource_type!r}"
+                )
+        assert not bad, (
+            f"require_api_key_scope_check() called with resource_type outside the "
+            f"closed vocabulary {sorted(SCOPE_CHECK_VOCABULARY)}. Add a handler in "
+            f"_enforce_api_key_scope and add the value here, or fix the typo:\n  - "
+            + "\n  - ".join(bad)
+        )
+
+
+class TestScopeCheckPathParamSafety:
+    """`path_param=None` means the scope check does not look at any path ID.
+
+    For list endpoints (GET /assistants/) this is fine — the service layer
+    filters by scope. For **mutating** routes it is dangerous unless either:
+      - the scope is "admin" (the check categorically denies non-tenant keys), or
+      - self_filtering=True (the endpoint extracts the target from the body/query
+        and runs its own scope check), or
+      - the route is explicitly listed below.
+    """
+
+    PATH_PARAM_NONE_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
+        (
+            "POST",
+            "/files/",
+        ): "File upload; service layer associates the new file with user.tenant_id. "
+        "scope=file + basic POST→write is sufficient.",
+        (
+            "DELETE",
+            "/files/{id}/",
+        ): "Files are owner-scoped: file_service.delete_file() calls "
+        "repo.delete_by_owner(id, user_id=self.user.id). The require_tenant_scope_for_delete "
+        "dep also blocks DELETE for non-tenant-scoped keys.",
+        (
+            "POST",
+            "/files/{id}/signed-url/",
+        ): "file_service.get_file_infos() performs the access check against user context "
+        "before a signed URL is minted.",
+        (
+            "POST",
+            "/info-blobs/{id}/",
+        ): "info_blob_service.update_info_blob() performs space-membership authorization "
+        "via the actor-based space authorization layer; scope=info_blob limits which blobs "
+        "a scoped key can resolve.",
+        (
+            "DELETE",
+            "/info-blobs/{id}/",
+        ): "info_blob_service.delete() performs space-membership authorization via the "
+        "actor-based space authorization layer; scope=info_blob limits which blobs a "
+        "scoped key can resolve.",
+    }
+
+    def test_path_param_none_mutating_routes_are_safe(self):
+        risky: list[str] = []
+        for info in walk_routes():
+            if info.method not in MUTATING_METHODS:
+                continue
+            cfg = info.scope_check_config
+            if cfg is None:
+                continue
+            if cfg.path_param is not None:
+                continue
+            if cfg.self_filtering:
+                continue
+            if cfg.resource_type == "admin":
+                continue
+            if (info.method, info.path) in self.PATH_PARAM_NONE_ALLOWLIST_EXACT:
+                continue
+            risky.append(
+                f"{info.method} {info.path} (scope={cfg.resource_type}, "
+                f"endpoint={info.endpoint_name})"
+            )
+        assert not risky, (
+            "Mutating routes with scope_check path_param=None and no self_filtering "
+            "flag — the scope check cannot gate them by ID. Either set path_param, "
+            "set self_filtering=True (and document the filter), use resource_type="
+            "'admin', or add to PATH_PARAM_NONE_ALLOWLIST_EXACT with a reason:\n  - "
+            + "\n  - ".join(sorted(risky))
+        )
+
+
+class TestReadOverrideUniqueness:
+    """Read-overrides match endpoint **names** (route.endpoint.__name__).
+
+    The downgrade is applied per-router: each router-level dep captures one
+    override frozenset and consults only that set. The danger is **within a
+    single override frozenset's scope**: if two routes in the same router
+    share an endpoint name, adding that name to the override set downgrades
+    both. Cross-router name reuse (e.g. ``leave_feedback`` in both the
+    assistants and conversations routers, each with its own override set
+    containing the name) is fine.
+    """
+
+    def test_read_override_names_map_to_exactly_one_route_path_per_override_set(self):
+        override_sets: list[tuple[str, frozenset[str]]] = [
+            ("ASSISTANTS_READ_OVERRIDES", ASSISTANTS_READ_OVERRIDES),
+            ("CONVERSATIONS_READ_OVERRIDES", CONVERSATIONS_READ_OVERRIDES),
+            ("APPS_READ_OVERRIDES", APPS_READ_OVERRIDES),
+            ("FILES_READ_OVERRIDES", FILES_READ_OVERRIDES),
+            ("KNOWLEDGE_READ_OVERRIDES", KNOWLEDGE_READ_OVERRIDES),
+        ]
+
+        collisions: list[str] = []
+        for set_name, override_set in override_sets:
+            from collections import defaultdict
+
+            paths_by_name: dict[str, set[str]] = defaultdict(set)
+            for info in walk_routes():
+                cfg = info.resource_perm_config
+                if cfg is None:
+                    continue
+                if cfg.read_override_endpoints != override_set:
+                    continue
+                paths_by_name[info.endpoint_name].add(info.path)
+
+            for name in override_set:
+                paths = paths_by_name.get(name, set())
+                if len(paths) > 1:
+                    collisions.append(f"{set_name}: '{name}' matches {sorted(paths)}")
+
+        assert not collisions, (
+            "Within a single read-override frozenset's router(s), the override "
+            "name is bound to more than one route path. Adding the name to the "
+            "set downgrades ALL of those routes to read-level. Rename one of "
+            "the handlers so each override name resolves to a single route:\n  - "
+            + "\n  - ".join(sorted(collisions))
+        )
+
+
+class TestReadOverrideSnapshot:
+    """Frozen snapshot of read-override contents.
+
+    A read-override silently turns a POST into a read-level operation — the
+    most dangerous kind of permission drift. Any change to these sets must
+    update the snapshot, forcing a reviewer to think about the implication.
+    """
+
+    EXPECTED_READ_OVERRIDES: dict[str, list[str]] = {
+        "ASSISTANTS_READ_OVERRIDES": [
+            "ask_assistant",
+            "ask_followup",
+            "leave_feedback",
+        ],
+        "CONVERSATIONS_READ_OVERRIDES": [
+            "chat",
+            "leave_feedback",
+        ],
+        "APPS_READ_OVERRIDES": [
+            "run_app",
+            "run_service",
+        ],
+        "FILES_READ_OVERRIDES": [
+            "generate_signed_url",
+        ],
+        "KNOWLEDGE_READ_OVERRIDES": [
+            "run_semantic_search",
+        ],
+    }
+
+    def test_read_override_contents_match_snapshot(self):
+        actual = {
+            "ASSISTANTS_READ_OVERRIDES": sorted(ASSISTANTS_READ_OVERRIDES),
+            "CONVERSATIONS_READ_OVERRIDES": sorted(CONVERSATIONS_READ_OVERRIDES),
+            "APPS_READ_OVERRIDES": sorted(APPS_READ_OVERRIDES),
+            "FILES_READ_OVERRIDES": sorted(FILES_READ_OVERRIDES),
+            "KNOWLEDGE_READ_OVERRIDES": sorted(KNOWLEDGE_READ_OVERRIDES),
+        }
+        assert actual == self.EXPECTED_READ_OVERRIDES, (
+            "Read-override frozenset contents changed. Adding a name downgrades "
+            "that POST endpoint to read-level for any scoped key — confirm the "
+            "handler is genuinely side-effect-free (or explicitly safe for "
+            "read-permission callers) and update EXPECTED_READ_OVERRIDES."
         )

@@ -25,7 +25,6 @@ from intric.authentication.api_key_resolver import (
     check_resource_permission,
 )
 from intric.authentication.auth_models import (
-    METHOD_PERMISSION_MAP,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyV2InDB,
@@ -273,94 +272,21 @@ class TestAuthPrecedence:
         svc._resolve_api_key.assert_not_called()
 
 
-class TestCorsOptionsBypass:
-    """OPTIONS requests use read permission — always allowed for CORS preflight."""
-
-    def test_options_mapped_to_read_permission(self):
-        """OPTIONS in METHOD_PERMISSION_MAP → 'read' (lowest level, always passes)."""
-        assert METHOD_PERMISSION_MAP.get("OPTIONS") == "read"
-
-    def test_options_request_passes_for_read_key(self):
-        """Read key + OPTIONS → pass (CORS preflight must not require credentials)."""
-        key = _make_key(permission=ApiKeyPermission.READ)
-        request = _fake_request("OPTIONS")
-        # Should not raise
-        _check_basic_method_permission(request, key)
-
-
 # ---------------------------------------------------------------------------
-# Part 2D: Contract Matrix — Permission × Scope × Method Boundaries
+# Part 2D: Contract Matrix — Scope and Management Boundaries
+#
+# Layer-1 and layer-2 (permission × method) enumeration is covered by
+# tests/unit/test_api_key_property.py and tests/unit/test_api_key_auth_guards.py
+# (TestMethodAwarePermissionCheck). What lives here are the layers the oracle
+# does not reach.
 # ---------------------------------------------------------------------------
 
 
 class TestContractMatrixBoundaries:
-    """Boundary tests for the 4 enforcement layers:
-    Layer 1: Resource permission (check_resource_permission)
-    Layer 2: Basic method permission (_check_basic_method_permission)
+    """Boundary tests for:
     Layer 3: Scope enforcement (_enforce_api_key_scope)
     Layer 4: Management guards (_check_management_permission)
     """
-
-    # -- Layer 1 + 2: Permission enforcement --
-
-    def test_read_key_get_resource_guarded_passes(self, monkeypatch):
-        """1. read key + GET resource-guarded → 200."""
-        monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        key = _make_key(permission=ApiKeyPermission.READ)
-        request = _fake_request("GET")
-        # No resource_permissions → falls back to basic permission ceiling
-        _check_method_resource_permission(request, key, _config("assistants"))
-
-    def test_read_key_post_resource_guarded_blocked(self, monkeypatch):
-        """2. read key + POST resource-guarded (non-override) → 403."""
-        monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        key = _make_key(permission=ApiKeyPermission.READ)
-        request = _fake_request("POST")
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            _check_method_resource_permission(request, key, _config("assistants"))
-        # Method-level permission is always enforced before fine-grained resource checks.
-        assert exc_info.value.code == "insufficient_permission"
-
-    def test_read_key_post_override_endpoint_passes(self, monkeypatch):
-        """3. read key + POST on override endpoint → 200 (read-override)."""
-        monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        from intric.authentication.auth_dependencies import ASSISTANTS_READ_OVERRIDES
-
-        key = _make_key(permission=ApiKeyPermission.READ)
-        request = _fake_request("POST", endpoint_name="ask_assistant")
-        _check_method_resource_permission(
-            request, key, _config("assistants", ASSISTANTS_READ_OVERRIDES)
-        )
-
-    def test_write_key_delete_resource_guarded_blocked(self, monkeypatch):
-        """4. write key + DELETE resource-guarded → 403."""
-        monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        key = _make_key(permission=ApiKeyPermission.WRITE)
-        request = _fake_request("DELETE")
-        with pytest.raises(ApiKeyValidationError):
-            _check_method_resource_permission(request, key, _config("assistants"))
-
-    def test_admin_key_delete_resource_guarded_passes(self, monkeypatch):
-        """5. admin key + DELETE resource-guarded → 200."""
-        monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        key = _make_key(permission=ApiKeyPermission.ADMIN)
-        request = _fake_request("DELETE")
-        _check_method_resource_permission(request, key, _config("assistants"))
 
     # -- Layer 4: Management guards --
 
@@ -427,16 +353,6 @@ class TestContractMatrixBoundaries:
         with pytest.raises(ApiKeyValidationError) as exc_info:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
-
-    # -- Layer 2: Basic method permission (no resource guard) --
-
-    def test_read_key_basic_delete_blocked(self):
-        """11. read key + DELETE on unguarded route → 403."""
-        key = _make_key(permission=ApiKeyPermission.READ)
-        request = _fake_request("DELETE")
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            _check_basic_method_permission(request, key)
-        assert exc_info.value.code == "insufficient_permission"
 
 
 # ---------------------------------------------------------------------------
