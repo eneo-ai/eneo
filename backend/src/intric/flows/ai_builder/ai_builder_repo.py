@@ -923,7 +923,7 @@ def _session_from_row(row: Any) -> BuilderSession:
             conversation.append(msg)
         else:
             conversation.append(
-                ConversationMessage.model_validate(cast(dict[str, object], msg))
+                ConversationMessage.from_persisted(cast(dict[str, object], msg))
             )
 
     return BuilderSession(

@@ -12,10 +12,12 @@ from __future__ import annotations
 import enum
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+import uuid_utils
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from intric.flows.enums import (
@@ -311,9 +313,21 @@ class FlowChangeSet(BaseModel):
     metadata_json: JsonObject | None = None
 
 
+def _new_message_id() -> str:
+    """UUIDv7 message id (time-sortable, stable across DB round-trips)."""
+    return str(uuid_utils.uuid7())
+
+
 class ConversationMessage(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    message_id: str = Field(
+        default_factory=_new_message_id,
+        description=(
+            "Stable id for this conversation turn. Used by Phase C evidence refs "
+            "which must survive conversation compaction (positional indices do not)."
+        ),
+    )
     role: str
     content: str | None = None
     tool_call_id: str | None = Field(
@@ -330,6 +344,23 @@ class ConversationMessage(BaseModel):
     )
     metadata: JsonObject | None = None
     timestamp: datetime | None = None
+
+    @classmethod
+    def from_persisted(cls, data: Mapping[str, Any]) -> "ConversationMessage":
+        """Hydrate a ConversationMessage from a DB/JSONB row.
+
+        Refuses rows missing `message_id` — migration
+        `20260421_builder_conv_msg_id` backfills every existing row. No
+        rescue-logic: if we see a row without it post-migration, something
+        is wrong and we want to fail loud instead of silently minting a
+        fresh (and therefore not actually stable) id.
+        """
+        if "message_id" not in data:
+            raise ValueError(
+                "Persisted ConversationMessage is missing `message_id` — run "
+                "alembic migration `20260421_builder_conv_msg_id` to backfill."
+            )
+        return cls.model_validate(data)
 
 
 class BuilderSession(BaseModel):

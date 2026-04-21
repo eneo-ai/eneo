@@ -1225,6 +1225,7 @@ dependencies = [
     { name = "tenacity" },
     { name = "tiktoken" },
     { name = "typing-extensions" },
+    { name = "uuid-utils" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "wrapt" },
 ]
@@ -1307,6 +1308,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=8.2.1,<9" },
     { name = "tiktoken", specifier = ">=0,<1" },
     { name = "typing-extensions", specifier = ">=4.12.0,<5" },
+    { name = "uuid-utils", specifier = ">=0.9,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0,<1" },
     { name = "wrapt", specifier = ">=1.16.0,<2" },
 ]

@@ -36,11 +36,13 @@ AI_BUILDER_SESSION_RESPONSE_EXAMPLE: JsonObject = {
     },
     "conversation": [
         {
+            "message_id": "019db164-9eab-7843-baa1-229e595cde04",
             "role": "user",
             "content": "Build a flow that transcribes uploaded audio and returns a PDF summary.",
             "timestamp": "2026-03-17T10:00:00Z",
         },
         {
+            "message_id": "019db164-9ec0-7f11-8b2e-2a1cd92f6a3f",
             "role": "assistant",
             "content": "I need one more detail about the final PDF format.",
             "timestamp": "2026-03-17T10:00:03Z",

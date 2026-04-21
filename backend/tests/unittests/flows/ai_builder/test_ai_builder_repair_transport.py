@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+
 from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_repair_transport import (
@@ -73,15 +74,16 @@ async def test_persist_tool_turn_appends_messages_and_persists_new_slice() -> No
 
     assert len(conversation) == 3
     assert conversation[1].role == "assistant"
-    assert conversation[1].tool_calls == [{
-        "id": "call_2",
-        "name": "confirm_requirements",
-        "arguments": {"summary": "Kort sammanfattning"},
-    }]
-    assert conversation[2] == ConversationMessage(
-        role="tool",
-        content="saved",
-        tool_call_id="call_2",
-        metadata={"requirements_version": "req-v1"},
-    )
+    assert conversation[1].tool_calls == [
+        {
+            "id": "call_2",
+            "name": "confirm_requirements",
+            "arguments": {"summary": "Kort sammanfattning"},
+        }
+    ]
+    tool_message = conversation[2]
+    assert tool_message.role == "tool"
+    assert tool_message.content == "saved"
+    assert tool_message.tool_call_id == "call_2"
+    assert tool_message.metadata == {"requirements_version": "req-v1"}
     repo.append_session_messages.assert_awaited_once()
