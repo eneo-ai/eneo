@@ -54,6 +54,19 @@ class ResolvedRequirementsState:
         return None
 
 
+KNOWN_REQUIREMENT_SLOT_NAMES: frozenset[str] = frozenset(
+    {
+        "primary_runtime_input",
+        "terminal_output",
+        "docx_output_mode",
+        "pdf_generation_mode",
+        "document_material_scope",
+        "structured_analysis_need",
+        "runtime_metadata_fields",
+    }
+)
+
+
 @dataclass(frozen=True, slots=True)
 class PolicyDefaultRule:
     default_value: str
