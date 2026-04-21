@@ -48,6 +48,10 @@ CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
 Exposure = Literal["builder", "engine_only", "not_exposed"]
 Channel = Literal["text_only", "files_only"]
+RuntimeInputMode = Literal["documents", "audio", "text"]
+OutputArtifact = Literal[
+    "structured_text", "structured_json", "pdf_document", "docx_document"
+]
 
 
 @dataclass(frozen=True)
@@ -94,6 +98,7 @@ class FlowCapability:
     exposure: Exposure
     not_exposed_reason: str | None
     channel: Channel | None = None
+    runtime_input_mode: RuntimeInputMode | None = None
 
     def __post_init__(self) -> None:
         has_reason = bool(self.not_exposed_reason and self.not_exposed_reason.strip())
@@ -120,6 +125,22 @@ _UNSUPPORTED_REASONS: dict[str, str] = {
         "Image input is declared unsupported by `INPUT_TYPE_POLICIES['image']` — "
         "no runtime backend accepts raw image bytes for a flow step."
     ),
+}
+
+
+# Mirrors `BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE` in
+# `ai_builder/ai_builder_step_capabilities.py`. Engine-truth cannot import
+# from `ai_builder` (P0.7 boundary), so the mapping is duplicated here and
+# held in lockstep by a parity test until Phase G deletes the ai_builder
+# copy. `image` and `any` are intentionally absent — the runtime has no
+# input_mode for those keys, and a capability without a runtime_input_mode
+# simply carries `None`.
+_RUNTIME_INPUT_MODE_BY_KEY: dict[str, RuntimeInputMode] = {
+    "document": "documents",
+    "file": "documents",
+    "audio": "audio",
+    "text": "text",
+    "json": "text",
 }
 
 
@@ -208,6 +229,7 @@ def _seed_input_type_capability(key: str, policy: InputTypePolicy) -> FlowCapabi
         exposure=exposure,
         not_exposed_reason=reason,
         channel=_narrow_channel(key, policy.channel),
+        runtime_input_mode=_RUNTIME_INPUT_MODE_BY_KEY.get(key),
     )
 
 
@@ -242,4 +264,21 @@ CHAIN_COMPATIBILITY: frozenset[tuple[FlowOutputType, FlowInputType]] = frozenset
         (FlowOutputType.DOCX, FlowInputType.TEXT),
         (FlowOutputType.DOCX, FlowInputType.ANY),
     }
+)
+
+
+# Engine-truth mapping from output type to the artifact the runtime produces.
+# Mirrors `BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE` in
+# `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a parity
+# test until Phase G deletes the ai_builder copy. Covers every
+# `FlowOutputType` — there is no runtime output type without an artifact.
+FINAL_OUTPUT_ARTIFACT_BY_TYPE: Mapping[FlowOutputType, OutputArtifact] = (
+    MappingProxyType(
+        {
+            FlowOutputType.TEXT: "structured_text",
+            FlowOutputType.JSON: "structured_json",
+            FlowOutputType.PDF: "pdf_document",
+            FlowOutputType.DOCX: "docx_document",
+        }
+    )
 )

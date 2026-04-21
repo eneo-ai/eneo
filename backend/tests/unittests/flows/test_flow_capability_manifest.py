@@ -14,11 +14,16 @@ from pathlib import Path
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_step_capabilities import (
+    BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE,
+    BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE,
+)
 from intric.flows.enums import FlowInputType, FlowOutputType
 from intric.flows.flow_capability_manifest import (
     CAPABILITY_REGISTRY,
     CHAIN_COMPATIBILITY,
     FCM_VERSION,
+    FINAL_OUTPUT_ARTIFACT_BY_TYPE,
     FlowCapability,
 )
 from intric.flows.step_chain_rules import COMPATIBLE_TYPE_COERCIONS
@@ -233,6 +238,47 @@ def test_input_text_has_no_absorbed_invariants() -> None:
     capability = CAPABILITY_REGISTRY["input_text"]
     assert capability.invariants == ()
     assert capability.channel == "text_only"
+
+
+@pytest.mark.parametrize("input_key", sorted(INPUT_TYPE_POLICIES.keys()))
+def test_capability_runtime_input_mode_mirrors_builder_map(input_key: str) -> None:
+    """A.1c: every seeded `input_*` capability carries `runtime_input_mode`
+    matching `BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE.get(key)`. The legacy
+    map covers 5 of 7 input types (image/any are absent) — the capability
+    field must be `None` for those so the typed mirror doesn't invent
+    behaviour the runtime doesn't support."""
+    capability = CAPABILITY_REGISTRY[f"input_{input_key}"]
+    expected = BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE.get(input_key)
+    assert capability.runtime_input_mode == expected
+
+
+def test_final_output_artifact_by_type_mirrors_legacy() -> None:
+    """A.1c parity: `FINAL_OUTPUT_ARTIFACT_BY_TYPE` (typed with `FlowOutputType`
+    keys + `OutputArtifact` literal values) must stay in lockstep with the
+    legacy `BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE` string-dict until
+    Phase G deletes the legacy source. Drift is a bug."""
+    fcm_as_strings = {
+        out_type.value: artifact
+        for out_type, artifact in FINAL_OUTPUT_ARTIFACT_BY_TYPE.items()
+    }
+    assert fcm_as_strings == BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE, (
+        "FINAL_OUTPUT_ARTIFACT_BY_TYPE has drifted from "
+        "BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE."
+    )
+
+
+def test_final_output_artifact_by_type_is_frozen_and_typed_with_enums() -> None:
+    """A.1c: the FCM mirror must be an immutable `Mapping` keyed by
+    `FlowOutputType` enums — consumers rely on typed dispatch, not string
+    lookups. Also covers every enum member so no output type is orphaned."""
+    assert set(FINAL_OUTPUT_ARTIFACT_BY_TYPE.keys()) == set(FlowOutputType)
+    for out_type in FINAL_OUTPUT_ARTIFACT_BY_TYPE:
+        assert isinstance(out_type, FlowOutputType), (
+            f"FINAL_OUTPUT_ARTIFACT_BY_TYPE key {out_type!r} must be a "
+            "FlowOutputType enum, not a bare string."
+        )
+    with pytest.raises(TypeError):
+        FINAL_OUTPUT_ARTIFACT_BY_TYPE[FlowOutputType.TEXT] = "mutated"  # type: ignore[index]
 
 
 def test_fcm_module_has_no_ai_builder_imports() -> None:
