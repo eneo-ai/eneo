@@ -28,13 +28,21 @@ from intric.flows.ai_builder.ai_builder_step_capabilities import (
     supports_step_io_mode_combo as _legacy_supports_step_io_mode_combo,
 )
 from intric.flows.citation_sidecar import CITATION_MODE_INLINE_INREF_SIDECAR
-from intric.flows.enums import FlowInputType, FlowOutputMode, FlowOutputType
+from intric.flows.enums import (
+    FlowInputSource,
+    FlowInputType,
+    FlowOutputMode,
+    FlowOutputType,
+)
 from intric.flows.flow_capability_manifest import (
+    ALLOWED_MCP_POLICIES,
     CAPABILITY_REGISTRY,
     CHAIN_COMPATIBILITY,
     FCM_VERSION,
     FINAL_OUTPUT_ARTIFACT_BY_TYPE,
+    ConfigRequirement,
     FlowCapability,
+    InvariantSpec,
     is_citation_capable_step,
     resolve_document_generation_mode,
     supports_step_io_tuple,
@@ -731,3 +739,552 @@ def test_fcm_module_has_no_ai_builder_imports() -> None:
                 assert "ai_builder" not in alias.name.split("."), (
                     f"forbidden import from ai_builder: {alias.name}"
                 )
+
+
+# ---------------------------------------------------------------------
+# A.3 — FCM CI coverage test.
+#
+# Walk the full enum cartesian product and classify each cell. Outcomes:
+#   - "illegal_io_triple":        `supports_step_io_tuple(it, ot, om) is False`
+#   - "illegal_source_type_pair": (input_source, input_type) violates a
+#                                  single-cell rule mirrored from
+#                                  `step_chain_rules.py` /
+#                                  `flow_validators_http.py`
+#   - "not_exposed":              owning capability has
+#                                 `exposure="not_exposed"` with a permanent
+#                                 reason (plan §A 1004-1005)
+#   - "exposed":                  owning capabilities are all
+#                                 `exposure="builder"`
+#
+# Temporary reasons (substring match on "temporary") fail CI.
+# Unclassified cells fail CI.
+# ---------------------------------------------------------------------
+
+
+_TEMPORARY_REASON_MARKER = "temporary"
+
+
+def _enumerate_enum_tuples() -> list[
+    tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
+]:
+    return [
+        (is_, it, ot, om)
+        for is_ in FlowInputSource
+        for it in FlowInputType
+        for ot in FlowOutputType
+        for om in FlowOutputMode
+    ]
+
+
+# Source-type legality rules mirrored from `step_chain_rules.py` and
+# `flow_validators_http.py`. Single-cell in scope — step-order-dependent
+# rules (e.g. step 1 cannot use `previous_step`) belong to a flow-level
+# validator, not a 4-tuple classifier. `previous_step` chain-compatibility
+# also depends on the prior step's `output_type` and cannot be answered
+# from a single cell; that rule is enforced elsewhere and CHAIN_COMPATIBILITY
+# is already guarded by its own parity test.
+_HTTP_INPUT_SOURCES: frozenset[FlowInputSource] = frozenset(
+    {FlowInputSource.HTTP_GET, FlowInputSource.HTTP_POST}
+)
+_FILE_INPUT_TYPES_BANNED_OVER_HTTP: frozenset[FlowInputType] = frozenset(
+    {
+        FlowInputType.DOCUMENT,
+        FlowInputType.FILE,
+        FlowInputType.IMAGE,
+        FlowInputType.AUDIO,
+    }
+)
+_FLOW_INPUT_ONLY_TYPES: frozenset[FlowInputType] = frozenset(
+    {FlowInputType.DOCUMENT, FlowInputType.AUDIO, FlowInputType.FILE}
+)
+
+
+def _source_type_illegality(
+    input_source: FlowInputSource, input_type: FlowInputType
+) -> str | None:
+    """Return a diagnostic string when `(input_source, input_type)` is
+    illegal, else `None`. Mirrors the three single-cell rules in the
+    flows engine; full set lives in `step_chain_rules.py` and
+    `flow_validators_http.py`."""
+    if (
+        input_source in _HTTP_INPUT_SOURCES
+        and input_type in _FILE_INPUT_TYPES_BANNED_OVER_HTTP
+    ):
+        return (
+            f"input_type {input_type.value!r} is not supported with "
+            f"input_source {input_source.value!r} "
+            "(flow_validators_http.validate_http_input_config)."
+        )
+    if (
+        input_type in _FLOW_INPUT_ONLY_TYPES
+        and input_source is not FlowInputSource.FLOW_INPUT
+    ):
+        return (
+            f"input_type {input_type.value!r} only accepts input_source "
+            "'flow_input' (step_chain_rules.find_first_step_chain_violation)."
+        )
+    if (
+        input_type is FlowInputType.JSON
+        and input_source is FlowInputSource.ALL_PREVIOUS_STEPS
+    ):
+        return (
+            "input_type 'json' is incompatible with input_source "
+            "'all_previous_steps' — concatenated text is not valid JSON."
+        )
+    return None
+
+
+def _classify_cell(
+    input_source: FlowInputSource,
+    input_type: FlowInputType,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+) -> tuple[str, str | None]:
+    """Classify an FCM surface cell.
+
+    Returns ``(classification, diagnostic_or_reason)``. Classification is
+    one of: ``"illegal_io_triple"``, ``"illegal_source_type_pair"``,
+    ``"not_exposed"``, ``"exposed"``. Every legal path terminates in one
+    of those four; there is no "unclassified" fallthrough.
+
+    The classifier is source-aware: `input_source` participates in the
+    source-type legality check mirrored from `step_chain_rules.py` and
+    `flow_validators_http.py` (three single-cell rules; step-order- and
+    chain-compatibility-dependent rules live elsewhere)."""
+    if not supports_step_io_tuple(
+        input_type=input_type, output_type=output_type, output_mode=output_mode
+    ):
+        return "illegal_io_triple", None
+    source_type_issue = _source_type_illegality(input_source, input_type)
+    if source_type_issue is not None:
+        return "illegal_source_type_pair", source_type_issue
+    input_cap = CAPABILITY_REGISTRY[f"input_{input_type.value}"]
+    if input_cap.exposure == "not_exposed":
+        return "not_exposed", input_cap.not_exposed_reason
+    mode_cap = CAPABILITY_REGISTRY[f"output_mode_{output_mode.value}"]
+    if mode_cap.exposure == "not_exposed":
+        return "not_exposed", mode_cap.not_exposed_reason
+    return "exposed", None
+
+
+def test_every_enum_tuple_is_classified() -> None:
+    """A.3 coverage guard. Every 4-tuple in `FlowInputSource × FlowInputType
+    × FlowOutputType × FlowOutputMode` must land in one of four buckets:
+    exposed, illegal_io_triple, illegal_source_type_pair, or not_exposed
+    with a permanent reason.
+
+    A reason containing the literal word "temporary" fails CI — the plan
+    rejects temporary exclusions so nothing can drift into the registry
+    under cover of a placeholder reason."""
+    cells = _enumerate_enum_tuples()
+    total_expected = (
+        len(FlowInputSource)
+        * len(FlowInputType)
+        * len(FlowOutputType)
+        * len(FlowOutputMode)
+    )
+    assert len(cells) == total_expected, (
+        f"Cartesian walker missed cells: got {len(cells)} expected {total_expected}"
+    )
+
+    classified = {
+        "exposed": 0,
+        "illegal_io_triple": 0,
+        "illegal_source_type_pair": 0,
+        "not_exposed": 0,
+    }
+    temporary_violations: list[str] = []
+
+    for cell in cells:
+        outcome, reason = _classify_cell(*cell)
+        assert outcome in classified, f"Unknown classification {outcome!r} for {cell}"
+        if outcome == "not_exposed":
+            if _TEMPORARY_REASON_MARKER in (reason or "").lower():
+                temporary_violations.append(
+                    f"{cell}: not_exposed_reason contains "
+                    f"{_TEMPORARY_REASON_MARKER!r} — plan §A 1004-1005 "
+                    f"rejects temporary exclusions "
+                    f"(reason={reason!r})"
+                )
+                continue
+        classified[outcome] += 1
+
+    assert not temporary_violations, (
+        "Cells with temporary not_exposed_reason:\n" + "\n".join(temporary_violations)
+    )
+    assert sum(classified.values()) == total_expected, (
+        f"Classification counts do not sum to matrix size: {classified} "
+        f"(expected total={total_expected})"
+    )
+    # Sanity floors: each bucket holds at least one cell today. If a
+    # bucket empties, that's a structural surface shift worth surfacing.
+    assert classified["exposed"] > 0
+    assert classified["illegal_io_triple"] > 0
+    assert classified["illegal_source_type_pair"] > 0
+    assert classified["not_exposed"] > 0
+
+
+# ---------------------------------------------------------------------
+# A.3 — widened FCM_VERSION bump-discipline.
+#
+# Compute a structural fingerprint over the bump-relevant fields per
+# plan §A 1052-1058 (keys, applies_to_tuples, FlowCapability / nested
+# fields, invariants, required_config, CHAIN_COMPATIBILITY,
+# FINAL_OUTPUT_ARTIFACT_BY_TYPE, ALLOWED_MCP_POLICIES). Excludes UI
+# prose (label, description, not_exposed_reason body) — rewording
+# permanent reasons or labels must not bump the version.
+#
+# Phase A epoch: Phase A tasks update the fingerprint without bumping
+# FCM_VERSION. Post-Phase-A: any fingerprint drift requires BOTH a
+# version bump AND a fingerprint update. The failure message spells
+# both paths out so future authors pick the right one.
+# ---------------------------------------------------------------------
+
+
+def _capability_fingerprint(
+    capability: FlowCapability,
+) -> tuple[object, ...]:
+    """Per-capability bump-relevant fields. `capability.id` is omitted —
+    the enclosing registry-key tuple already carries identity. `label` and
+    `FlowCapability.description` are also omitted (UI copy; a pure
+    rewording must not bump the version). `InvariantSpec.description` IS
+    included — it is the rule text itself, not UI copy, so a wording
+    change there is a semantic change."""
+    return (
+        capability.exposure,
+        capability.channel,
+        capability.runtime_input_mode,
+        tuple(
+            sorted(
+                (is_.value, it.value, ot.value, om.value)
+                for is_, it, ot, om in capability.applies_to_tuples
+            )
+        ),
+        tuple(sorted((inv.id, inv.description) for inv in capability.invariants)),
+        tuple(sorted(req.key for req in capability.required_config)),
+    )
+
+
+def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
+    """Top-level fingerprint. The first three entries are the dataclass
+    field-name tuples for `FlowCapability`, `InvariantSpec`, and
+    `ConfigRequirement` — adding/removing/renaming a field on any of the
+    three is a bump-relevant schema change per plan §A 1052-1058 ("added/
+    changed `FlowCapability` / nested-type fields")."""
+    return (
+        tuple(sorted(FlowCapability.__dataclass_fields__.keys())),
+        tuple(sorted(InvariantSpec.__dataclass_fields__.keys())),
+        tuple(sorted(ConfigRequirement.__dataclass_fields__.keys())),
+        tuple(sorted(CAPABILITY_REGISTRY.keys())),
+        tuple(
+            _capability_fingerprint(CAPABILITY_REGISTRY[key])
+            for key in sorted(CAPABILITY_REGISTRY.keys())
+        ),
+        tuple(sorted((ot.value, it.value) for ot, it in CHAIN_COMPATIBILITY)),
+        tuple(
+            sorted(
+                (ot.value, artifact)
+                for ot, artifact in FINAL_OUTPUT_ARTIFACT_BY_TYPE.items()
+            )
+        ),
+        tuple(sorted(policy.value for policy in ALLOWED_MCP_POLICIES)),
+    )
+
+
+_FCM_SURFACE_FINGERPRINT_V1: tuple[object, ...] = (
+    (
+        "applies_to_tuples",
+        "channel",
+        "description",
+        "exposure",
+        "id",
+        "invariants",
+        "label",
+        "not_exposed_reason",
+        "required_config",
+        "runtime_input_mode",
+    ),
+    ("description", "id"),
+    ("key",),
+    (
+        "citation_sidecar",
+        "input_any",
+        "input_audio",
+        "input_document",
+        "input_file",
+        "input_image",
+        "input_json",
+        "input_text",
+        "mcp_policy",
+        "output_mode_http_post",
+        "output_mode_pass_through",
+        "output_mode_template_fill",
+        "output_mode_transcribe_only",
+    ),
+    (
+        (
+            "builder",
+            None,
+            None,
+            (),
+            (
+                (
+                    "forbids_template_fill_or_transcribe_only",
+                    "Citation capability is disabled when `output_mode` is "
+                    "`template_fill` (a docx-artefact pathway) or `transcribe_only` "
+                    "(a non-LLM pathway). Any other output_mode preserves capability "
+                    "when the rest holds.",
+                ),
+                (
+                    "requires_citation_capable_output_config",
+                    "Citation capability requires `resolve_citation_mode(output_config) "
+                    "== 'inline_inref_sidecar'`; any other resolved mode (including "
+                    "`off`, missing keys, non-dict payloads) collapses capability to "
+                    "`False`.",
+                ),
+                (
+                    "requires_text_output_type",
+                    "Citation capability holds only when `output_type=TEXT`; "
+                    "`is_citation_capable_step` returns `False` for JSON/PDF/DOCX "
+                    "outputs regardless of citation_mode.",
+                ),
+            ),
+            (),
+        ),
+        (
+            "builder",
+            "text_only",
+            None,
+            (),
+            (
+                (
+                    "input_contract_forbidden",
+                    "Steps using the `any` input capability must not set "
+                    "`input_contract`; the runtime rejects contract on "
+                    "non-contract-allowed capabilities.",
+                ),
+            ),
+            (),
+        ),
+        (
+            "builder",
+            "text_only",
+            "audio",
+            (),
+            (
+                (
+                    "input_contract_forbidden",
+                    "Steps using the `audio` input capability must not set "
+                    "`input_contract`; the runtime rejects contract on "
+                    "non-contract-allowed capabilities.",
+                ),
+                (
+                    "requires_enabled_flow_transcription_config",
+                    "Flows containing any `AUDIO`-input step require "
+                    "`metadata_json.transcription.enabled=True` and a non-null "
+                    "`model_id`; `_validate_audio_transcription_settings` rejects "
+                    "missing config for every audio step regardless of `output_mode`.",
+                ),
+            ),
+            (),
+        ),
+        (
+            "builder",
+            "text_only",
+            "documents",
+            (),
+            (
+                (
+                    "input_contract_forbidden",
+                    "Steps using the `document` input capability must not set "
+                    "`input_contract`; the runtime rejects contract on "
+                    "non-contract-allowed capabilities.",
+                ),
+                (
+                    "requires_non_empty_extraction",
+                    "Steps using the `document` input capability must produce "
+                    "non-empty extracted text at runtime; empty extraction is "
+                    "rejected by `validate_runtime_input_policy`.",
+                ),
+            ),
+            (),
+        ),
+        (
+            "builder",
+            "text_only",
+            "documents",
+            (),
+            (
+                (
+                    "input_contract_forbidden",
+                    "Steps using the `file` input capability must not set "
+                    "`input_contract`; the runtime rejects contract on "
+                    "non-contract-allowed capabilities.",
+                ),
+                (
+                    "requires_non_empty_extraction",
+                    "Steps using the `file` input capability must produce non-empty "
+                    "extracted text at runtime; empty extraction is rejected by "
+                    "`validate_runtime_input_policy`.",
+                ),
+            ),
+            (),
+        ),
+        (
+            "not_exposed",
+            "files_only",
+            None,
+            (),
+            (
+                (
+                    "input_contract_forbidden",
+                    "Steps using the `image` input capability must not set "
+                    "`input_contract`; the runtime rejects contract on "
+                    "non-contract-allowed capabilities.",
+                ),
+                (
+                    "requires_at_least_one_file",
+                    "Steps using the `image` input capability must present at least "
+                    "one compatible file at runtime.",
+                ),
+            ),
+            (),
+        ),
+        ("builder", "text_only", "text", (), (), ()),
+        ("builder", "text_only", "text", (), (), ()),
+        (
+            "builder",
+            None,
+            None,
+            (),
+            (
+                (
+                    "forbids_unsupported_mcp_policy",
+                    "Steps must declare `mcp_policy` as one of the values in "
+                    "`ALLOWED_MCP_POLICIES` (i.e. every `FlowMcpPolicy` member). "
+                    '`flow_validators.py:183` raises `"Step {order}: unsupported '
+                    "mcp_policy '{value}'.\"` when the policy falls outside this set.",
+                ),
+            ),
+            (),
+        ),
+        (
+            "builder",
+            None,
+            None,
+            (),
+            (
+                (
+                    "requires_http_output_config",
+                    "Steps using `http_post` output mode must declare an "
+                    "`output_config` object that passes `validate_http_output_config`; "
+                    "both the authored (`http_transport.validator`) and legacy "
+                    "(`flow_validators_http.validate_http_config_common`) shapes are "
+                    "acceptable. The capability does not pin per-field rules — see "
+                    "the transport validators for URL scheme, body-mode, and timeout "
+                    "constraints.",
+                ),
+            ),
+            (),
+        ),
+        ("builder", None, None, (), (), ()),
+        (
+            "builder",
+            None,
+            None,
+            (),
+            (
+                (
+                    "forbids_output_contract",
+                    "Steps using `template_fill` must not declare an "
+                    "`output_contract`; `_validate_output_contract_compatibility` "
+                    "raises when the mode and contract coexist.",
+                ),
+                (
+                    "requires_docx_output_type",
+                    "Steps using `template_fill` must have `output_type=DOCX`; "
+                    "`supports_step_io_tuple` rejects other output types.",
+                ),
+                (
+                    "requires_template_fill_output_config",
+                    "Publishable flows with a `template_fill` step require a "
+                    "complete `output_config` template block; "
+                    "`validate_template_fill_output_config` enforces this when "
+                    "`require_complete_template_fill_config=True`.",
+                ),
+            ),
+            (),
+        ),
+        (
+            "builder",
+            None,
+            None,
+            (),
+            (
+                (
+                    "requires_audio_input_text_output",
+                    "Steps using `transcribe_only` must have `input_type=AUDIO` and "
+                    "`output_type=TEXT`; any other IO pair is rejected by "
+                    "`supports_step_io_tuple`.",
+                ),
+                (
+                    "requires_audio_runtime_input_format",
+                    "Steps using `transcribe_only` with runtime_input enabled must "
+                    "declare `input_format='audio'`; "
+                    "`_validate_runtime_input_publish_rules` rejects other formats.",
+                ),
+            ),
+            (),
+        ),
+    ),
+    (
+        ("docx", "any"),
+        ("docx", "text"),
+        ("json", "any"),
+        ("json", "json"),
+        ("json", "text"),
+        ("pdf", "any"),
+        ("pdf", "text"),
+        ("text", "any"),
+        ("text", "json"),
+        ("text", "text"),
+    ),
+    (
+        ("docx", "docx_document"),
+        ("json", "structured_json"),
+        ("pdf", "pdf_document"),
+        ("text", "structured_text"),
+    ),
+    ("inherit", "restricted"),
+)
+
+
+def test_fcm_surface_fingerprint_is_stable() -> None:
+    """A.3 bump-discipline guard (plan §A 1052-1058).
+
+    The fingerprint captures bump-relevant fields: dataclass field
+    sets for `FlowCapability`, `InvariantSpec`, and `ConfigRequirement`
+    (so adding/removing a field on any of those shows up), capability
+    keys, exposure, channel, runtime_input_mode, applies_to_tuples,
+    `(invariant_id, invariant_description)` pairs, required_config
+    keys, CHAIN_COMPATIBILITY, FINAL_OUTPUT_ARTIFACT_BY_TYPE,
+    ALLOWED_MCP_POLICIES. It intentionally excludes `FlowCapability.label`,
+    `FlowCapability.description`, and `not_exposed_reason` bodies so
+    rewording UI copy does not force a bump.
+
+    If this test fails with an actual != expected diff:
+    - **Phase A (A.0–A.6)**: copy `actual` into
+      `_FCM_SURFACE_FINGERPRINT_V1` above. `FCM_VERSION` stays at 1;
+      no bump required (Phase A epoch rule).
+    - **Phase B and later**: bump `FCM_VERSION` to the next integer AND
+      update the fingerprint constant. Rename the constant to
+      `_FCM_SURFACE_FINGERPRINT_V<N>` so the history reads cleanly.
+    """
+    actual = _compute_fcm_surface_fingerprint()
+    assert actual == _FCM_SURFACE_FINGERPRINT_V1, (
+        "FCM surface fingerprint drifted. Update the expected constant "
+        "in this test (Phase A epoch: no version bump; Phase B+: bump "
+        f"FCM_VERSION to {FCM_VERSION + 1} too).\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V1}\n\n"
+        f"Actual:   {actual}"
+    )
