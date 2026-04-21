@@ -209,6 +209,20 @@ def _absorbed_invariants(
                 ),
             )
         )
+    if key == "audio":
+        invariants.append(
+            InvariantSpec(
+                id="requires_enabled_flow_transcription_config",
+                description=(
+                    "Flows containing any `AUDIO`-input step require "
+                    "`metadata_json.transcription.enabled=True` and a "
+                    "non-null `model_id`; "
+                    "`_validate_audio_transcription_settings` rejects "
+                    "missing config for every audio step regardless of "
+                    "`output_mode`."
+                ),
+            )
+        )
     return tuple(invariants)
 
 
@@ -238,10 +252,190 @@ def _seed_input_type_capability(key: str, policy: InputTypePolicy) -> FlowCapabi
     )
 
 
+_OUTPUT_MODE_CAPABILITY_SEED: Mapping[
+    FlowOutputMode, tuple[str, str, tuple[InvariantSpec, ...]]
+] = MappingProxyType(
+    {
+        FlowOutputMode.PASS_THROUGH: (
+            "Pass-through output",
+            (
+                "Default output pathway; the step's raw LLM output is forwarded "
+                "to the next step or persisted as the flow's final artefact. "
+                "No additional runtime constraints beyond the step chain."
+            ),
+            (),
+        ),
+        FlowOutputMode.HTTP_POST: (
+            "HTTP POST output",
+            (
+                "Final output is delivered by POSTing to a configured URL. "
+                "`output_config` must pass `validate_http_output_config`, "
+                "which dispatches to the authored or legacy HTTP config "
+                "validator as appropriate. Concrete shape rules (URL, body, "
+                "auth, timeout) live in the transport validators — this "
+                "capability only asserts that a valid config exists."
+            ),
+            (
+                InvariantSpec(
+                    id="requires_http_output_config",
+                    description=(
+                        "Steps using `http_post` output mode must declare an "
+                        "`output_config` object that passes "
+                        "`validate_http_output_config`; both the authored "
+                        "(`http_transport.validator`) and legacy "
+                        "(`flow_validators_http.validate_http_config_common`) "
+                        "shapes are acceptable. The capability does not pin "
+                        "per-field rules — see the transport validators for "
+                        "URL scheme, body-mode, and timeout constraints."
+                    ),
+                ),
+            ),
+        ),
+        FlowOutputMode.TRANSCRIBE_ONLY: (
+            "Audio transcription (transcribe-only)",
+            (
+                "Non-LLM transcription pathway: audio input is transcribed to "
+                "text by the flow's transcription backend. The step must be "
+                "`AUDIO` input → `TEXT` output and, when runtime input is "
+                "enabled, must declare `input_format='audio'`. The "
+                "flow-level transcription-config rule is owned by the "
+                "`input_audio` capability since it fires for every audio "
+                "step, not only transcribe-only."
+            ),
+            (
+                InvariantSpec(
+                    id="requires_audio_input_text_output",
+                    description=(
+                        "Steps using `transcribe_only` must have `input_type="
+                        "AUDIO` and `output_type=TEXT`; any other IO pair is "
+                        "rejected by `supports_step_io_tuple`."
+                    ),
+                ),
+                InvariantSpec(
+                    id="requires_audio_runtime_input_format",
+                    description=(
+                        "Steps using `transcribe_only` with runtime_input "
+                        "enabled must declare `input_format='audio'`; "
+                        "`_validate_runtime_input_publish_rules` rejects "
+                        "other formats."
+                    ),
+                ),
+            ),
+        ),
+        FlowOutputMode.TEMPLATE_FILL: (
+            "DOCX template fill",
+            (
+                "Final output is rendered by filling a DOCX template with "
+                "step-scoped values. Constrained to DOCX output, incompatible "
+                "with `output_contract`, and requires a concrete "
+                "`template_fill` config block at publish time."
+            ),
+            (
+                InvariantSpec(
+                    id="requires_docx_output_type",
+                    description=(
+                        "Steps using `template_fill` must have "
+                        "`output_type=DOCX`; `supports_step_io_tuple` rejects "
+                        "other output types."
+                    ),
+                ),
+                InvariantSpec(
+                    id="forbids_output_contract",
+                    description=(
+                        "Steps using `template_fill` must not declare an "
+                        "`output_contract`; "
+                        "`_validate_output_contract_compatibility` raises when "
+                        "the mode and contract coexist."
+                    ),
+                ),
+                InvariantSpec(
+                    id="requires_template_fill_output_config",
+                    description=(
+                        "Publishable flows with a `template_fill` step require "
+                        "a complete `output_config` template block; "
+                        "`validate_template_fill_output_config` enforces this "
+                        "when `require_complete_template_fill_config=True`."
+                    ),
+                ),
+            ),
+        ),
+    }
+)
+
+
+def _seed_output_mode_capability(mode: FlowOutputMode) -> FlowCapability:
+    label, description, invariants = _OUTPUT_MODE_CAPABILITY_SEED[mode]
+    return FlowCapability(
+        id=f"output_mode_{mode.value}",
+        label=label,
+        description=description,
+        applies_to_tuples=(),
+        required_config=(),
+        invariants=invariants,
+        exposure="builder",
+        not_exposed_reason=None,
+    )
+
+
+def _seed_citation_sidecar_capability() -> FlowCapability:
+    return FlowCapability(
+        id="citation_sidecar",
+        label="Inline-inref citation sidecar",
+        description=(
+            "Attaches an engine-managed citation sidecar to the step's TEXT "
+            "output, tracking which context sources were cited via inline "
+            "`[[inref:...]]` tags. Activated by `output_config.citation_mode="
+            "'inline_inref_sidecar'`; compatible only with TEXT-output LLM "
+            "steps that are not running in template-fill or transcribe-only "
+            "mode."
+        ),
+        applies_to_tuples=(),
+        required_config=(),
+        invariants=(
+            InvariantSpec(
+                id="requires_text_output_type",
+                description=(
+                    "Citation capability holds only when `output_type=TEXT`; "
+                    "`is_citation_capable_step` returns `False` for JSON/PDF/"
+                    "DOCX outputs regardless of citation_mode."
+                ),
+            ),
+            InvariantSpec(
+                id="forbids_template_fill_or_transcribe_only",
+                description=(
+                    "Citation capability is disabled when `output_mode` is "
+                    "`template_fill` (a docx-artefact pathway) or "
+                    "`transcribe_only` (a non-LLM pathway). Any other "
+                    "output_mode preserves capability when the rest holds."
+                ),
+            ),
+            InvariantSpec(
+                id="requires_citation_capable_output_config",
+                description=(
+                    "Citation capability requires "
+                    "`resolve_citation_mode(output_config) == "
+                    "'inline_inref_sidecar'`; any other resolved mode "
+                    "(including `off`, missing keys, non-dict payloads) "
+                    "collapses capability to `False`."
+                ),
+            ),
+        ),
+        exposure="builder",
+        not_exposed_reason=None,
+    )
+
+
 CAPABILITY_REGISTRY: Mapping[CapabilityId, FlowCapability] = MappingProxyType(
     {
-        f"input_{key}": _seed_input_type_capability(key, policy)
-        for key, policy in INPUT_TYPE_POLICIES.items()
+        **{
+            f"input_{key}": _seed_input_type_capability(key, policy)
+            for key, policy in INPUT_TYPE_POLICIES.items()
+        },
+        **{
+            f"output_mode_{mode.value}": _seed_output_mode_capability(mode)
+            for mode in FlowOutputMode
+        },
+        "citation_sidecar": _seed_citation_sidecar_capability(),
     }
 )
 

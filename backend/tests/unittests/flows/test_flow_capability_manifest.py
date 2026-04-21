@@ -497,6 +497,158 @@ def test_is_citation_capable_step_treats_non_dict_config_as_off(
     )
 
 
+# A.1f — output-mode + citation capability registry entries -------------
+#
+# These tests pin the capability IDs and invariant-ID sets that FCM must
+# declare for each `FlowOutputMode` + the citation sidecar. The invariant
+# IDs are grep-matched against the legacy error phrases in
+# `flow_validators.py:validate_steps` so A.2's un-invert knows which
+# capability carries each rule.
+
+
+_EXPECTED_OUTPUT_MODE_CAPABILITIES: dict[FlowOutputMode, tuple[str, frozenset[str]]] = {
+    FlowOutputMode.PASS_THROUGH: ("output_mode_pass_through", frozenset()),
+    FlowOutputMode.HTTP_POST: (
+        "output_mode_http_post",
+        frozenset({"requires_http_output_config"}),
+    ),
+    FlowOutputMode.TRANSCRIBE_ONLY: (
+        "output_mode_transcribe_only",
+        frozenset(
+            {
+                "requires_audio_input_text_output",
+                "requires_audio_runtime_input_format",
+            }
+        ),
+    ),
+    FlowOutputMode.TEMPLATE_FILL: (
+        "output_mode_template_fill",
+        frozenset(
+            {
+                "requires_docx_output_type",
+                "forbids_output_contract",
+                "requires_template_fill_output_config",
+            }
+        ),
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    "output_mode,expected",
+    list(_EXPECTED_OUTPUT_MODE_CAPABILITIES.items()),
+    ids=[mode.value for mode in _EXPECTED_OUTPUT_MODE_CAPABILITIES],
+)
+def test_registry_has_output_mode_capability(
+    output_mode: FlowOutputMode, expected: tuple[str, frozenset[str]]
+) -> None:
+    """Every `FlowOutputMode` must have a capability entry whose `id`
+    matches the `output_mode_<value>` convention and whose invariant IDs
+    match the lifted rule set from `flow_validators.py:66`."""
+    capability_id, expected_invariant_ids = expected
+    capability = CAPABILITY_REGISTRY.get(capability_id)
+    assert capability is not None, (
+        f"CAPABILITY_REGISTRY missing entry for {output_mode} — "
+        f"expected id {capability_id!r}"
+    )
+    assert capability.exposure == "builder", (
+        f"{capability_id} must be exposure='builder' — output modes are "
+        "user-facing via the flow publish API"
+    )
+    invariant_ids = frozenset(inv.id for inv in capability.invariants)
+    assert invariant_ids == expected_invariant_ids, (
+        f"{capability_id} invariant drift: expected {expected_invariant_ids}, "
+        f"got {invariant_ids}"
+    )
+
+
+def test_registry_has_citation_sidecar_capability() -> None:
+    """Citation capability must be a first-class registry entry carrying
+    the three lifted invariants from the legacy `is_citation_capable_step`
+    predicate + `_validate_citation_mode` validator: TEXT output required,
+    TEMPLATE_FILL / TRANSCRIBE_ONLY forbidden, and the output_config must
+    be citation-capable. Separate from the `is_citation_capable_step` FCM
+    function (A.1e) which is a step-level predicate."""
+    capability = CAPABILITY_REGISTRY.get("citation_sidecar")
+    assert capability is not None, "citation_sidecar capability missing"
+    assert capability.exposure == "builder", (
+        "citation_sidecar is builder-addressable via output_config.citation_mode"
+    )
+    expected_invariant_ids = frozenset(
+        {
+            "requires_text_output_type",
+            "forbids_template_fill_or_transcribe_only",
+            "requires_citation_capable_output_config",
+        }
+    )
+    invariant_ids = frozenset(inv.id for inv in capability.invariants)
+    assert invariant_ids == expected_invariant_ids, (
+        f"citation_sidecar invariant drift: expected {expected_invariant_ids}, "
+        f"got {invariant_ids}"
+    )
+
+
+def test_input_audio_owns_transcription_config_invariant() -> None:
+    """`_validate_audio_transcription_settings` fires for every audio-input
+    step, not just transcribe-only ones (see `flow_validators.py:261` — the
+    guard is `any(step.input_type == "audio" ...)`), so the
+    `requires_enabled_flow_transcription_config` invariant belongs on the
+    `input_audio` capability. A.2 consumers that apply invariants by
+    capability ownership must reject pass-through audio steps with
+    disabled transcription just like transcribe-only ones."""
+    capability = CAPABILITY_REGISTRY["input_audio"]
+    invariant_ids = {inv.id for inv in capability.invariants}
+    assert "requires_enabled_flow_transcription_config" in invariant_ids, (
+        "input_audio must carry the transcription-config invariant — the "
+        "legacy rule fires for every audio step regardless of output_mode"
+    )
+
+    transcribe_ids = {
+        inv.id for inv in CAPABILITY_REGISTRY["output_mode_transcribe_only"].invariants
+    }
+    assert "requires_enabled_flow_transcription_config" not in transcribe_ids, (
+        "requires_enabled_flow_transcription_config must NOT be on "
+        "output_mode_transcribe_only; pass-through audio steps would lose "
+        "the rule under capability-ownership lookup"
+    )
+
+
+def test_registry_output_mode_coverage_is_exhaustive() -> None:
+    """Every `FlowOutputMode` value must appear in the registry with an
+    `output_mode_<value>` key. Catches a future enum addition that forgets
+    to register a capability entry."""
+    registered_ids = {
+        cap.id
+        for cap in CAPABILITY_REGISTRY.values()
+        if cap.id.startswith("output_mode_")
+    }
+    expected_ids = {f"output_mode_{mode.value}" for mode in FlowOutputMode}
+    assert registered_ids == expected_ids, (
+        f"output_mode coverage drift: missing {expected_ids - registered_ids}, "
+        f"extra {registered_ids - expected_ids}"
+    )
+
+
+def test_output_mode_and_citation_capabilities_are_non_input() -> None:
+    """Output-mode + citation capabilities are not input capabilities, so
+    they must carry `channel=None` and `runtime_input_mode=None` — the
+    `input_*` post_init guard does not apply to them."""
+    non_input_ids = {
+        cap.id
+        for cap in CAPABILITY_REGISTRY.values()
+        if not cap.id.startswith("input_")
+    }
+    assert non_input_ids  # sanity: A.1f actually added entries
+    for cap_id in non_input_ids:
+        capability = CAPABILITY_REGISTRY[cap_id]
+        assert capability.channel is None, (
+            f"{cap_id} is not an input capability; channel must be None"
+        )
+        assert capability.runtime_input_mode is None, (
+            f"{cap_id} is not an input capability; runtime_input_mode must be None"
+        )
+
+
 def test_fcm_module_has_no_ai_builder_imports() -> None:
     """Redundant with the P0.7 `importlinter` contract but keeps the invariant
     obvious in this test module: engine capability truth must not depend on
