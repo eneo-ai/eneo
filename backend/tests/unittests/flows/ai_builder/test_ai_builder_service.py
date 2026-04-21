@@ -2322,6 +2322,8 @@ class TestSendMessageToolCall:
         bad_tc1 = _make_tool_call(tool_call_id="call_1", arguments=bad_args)
         bad_tc2 = _make_tool_call(tool_call_id="call_2", arguments=bad_args)
         bad_tc3 = _make_tool_call(tool_call_id="call_3", arguments=bad_args)
+        bad_tc4 = _make_tool_call(tool_call_id="call_4", arguments=bad_args)
+        bad_tc5 = _make_tool_call(tool_call_id="call_5", arguments=bad_args)
 
         service = _make_service(
             user=user,
@@ -2337,6 +2339,8 @@ class TestSendMessageToolCall:
                     _make_llm_response(content=None, tool_calls=[bad_tc1]),
                     _make_llm_response(content=None, tool_calls=[bad_tc2]),
                     _make_llm_response(content=None, tool_calls=[bad_tc3]),
+                    _make_llm_response(content=None, tool_calls=[bad_tc4]),
+                    _make_llm_response(content=None, tool_calls=[bad_tc5]),
                 ]
             )
             events = await _collect_events(
@@ -2352,6 +2356,9 @@ class TestSendMessageToolCall:
         error_events = [e for e in events if e["event"] == SSE_EVENT_ERROR]
         assert len(error_events) >= 1
         assert "still invalid" in json.loads(error_events[0]["data"])["error"]
+        # 1 planner call + 1 initial correction + 3 retries = 5 LLM calls total.
+        # Pin the exact count so MAX_SELF_CORRECTION_RETRIES changes cannot slip.
+        assert mock_litellm.acompletion.call_count == 5
 
     @pytest.mark.anyio
     async def test_self_correction_retries_once_more_before_erroring(self):

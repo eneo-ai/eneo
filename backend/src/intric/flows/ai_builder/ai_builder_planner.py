@@ -126,6 +126,7 @@ class AIBuilderPlanner:
         discovery_temperature: float = 0.6,
         planner_temperature: float = 0.4,
         self_correction_temperature: float = 0.35,
+        self_correction_bumped_temperature: float = 0.6,
         forced_proposal_temperature: float = 0.1,
         quality_retry_warning_codes: set[str],
     ) -> None:
@@ -139,6 +140,7 @@ class AIBuilderPlanner:
             repo=repo,
             litellm_client=litellm_client,
             self_correction_temperature=self_correction_temperature,
+            self_correction_bumped_temperature=self_correction_bumped_temperature,
             forced_proposal_temperature=forced_proposal_temperature,
             quality_retry_warning_codes=quality_retry_warning_codes,
         )

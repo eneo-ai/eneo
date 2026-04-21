@@ -112,7 +112,7 @@ if TYPE_CHECKING:
     from intric.users.user import UserInDB
 
 logger = get_logger(__name__)
-MAX_SELF_CORRECTION_RETRIES = 1
+MAX_SELF_CORRECTION_RETRIES = 3
 
 
 @dataclass(frozen=True)
@@ -171,6 +171,7 @@ class AIBuilderProposalProcessor:
         repo: AIBuilderRepository,
         litellm_client: Any,
         self_correction_temperature: float,
+        self_correction_bumped_temperature: float,
         forced_proposal_temperature: float,
         quality_retry_warning_codes: set[str],
     ) -> None:
@@ -178,6 +179,7 @@ class AIBuilderProposalProcessor:
         self.repo = repo
         self.litellm_client = litellm_client
         self.self_correction_temperature = self_correction_temperature
+        self.self_correction_bumped_temperature = self_correction_bumped_temperature
         self.forced_proposal_temperature = forced_proposal_temperature
         self.quality_retry_warning_codes = quality_retry_warning_codes
 
@@ -734,6 +736,7 @@ class AIBuilderProposalProcessor:
             available_kb_refs=ctx.available_kb_refs,
             max_output_tokens=ctx.max_output_tokens,
             self_correction_temperature=self.self_correction_temperature,
+            self_correction_bumped_temperature=self.self_correction_bumped_temperature,
             max_self_correction_retries=MAX_SELF_CORRECTION_RETRIES,
             call_repair_completion=self._call_repair_completion,
             process_tool_arguments=retry_config.process_tool_arguments,

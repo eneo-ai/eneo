@@ -73,6 +73,7 @@ if TYPE_CHECKING:
 DISCOVERY_TEMPERATURE = 0.6  # Higher for creative question-asking
 PLANNER_TEMPERATURE = 0.4  # Lower for precise proposal generation
 SELF_CORRECTION_TEMPERATURE = 0.35
+SELF_CORRECTION_BUMPED_TEMPERATURE = 0.6
 FORCED_PROPOSAL_TEMPERATURE = 0.1
 QUALITY_RETRY_WARNING_CODES = {
     "json_output_no_contract",
@@ -588,6 +589,7 @@ class AIBuilderService:
             discovery_temperature=DISCOVERY_TEMPERATURE,
             planner_temperature=PLANNER_TEMPERATURE,
             self_correction_temperature=SELF_CORRECTION_TEMPERATURE,
+            self_correction_bumped_temperature=SELF_CORRECTION_BUMPED_TEMPERATURE,
             forced_proposal_temperature=FORCED_PROPOSAL_TEMPERATURE,
             quality_retry_warning_codes=QUALITY_RETRY_WARNING_CODES,
         )

@@ -55,14 +55,16 @@ def build_tool_retry_messages(
         {
             "role": "assistant",
             "content": assistant_content,
-            "tool_calls": [{
-                "id": tool_call.id,
-                "type": "function",
-                "function": {
-                    "name": tool_call.function.name,
-                    "arguments": tool_call.function.arguments,
-                },
-            }],
+            "tool_calls": [
+                {
+                    "id": tool_call.id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_call.function.name,
+                        "arguments": tool_call.function.arguments,
+                    },
+                }
+            ],
         },
         {
             "role": "tool",
@@ -116,10 +118,9 @@ def _build_retry_feedback(
     target_tool_name: str,
     feedback: str,
     failure_kind: str | None,
+    retry_count: int = 1,
 ) -> str:
-    suffix = (
-        f"Keep valid parts and fix only the listed issues. Return one complete {target_tool_name} call."
-    )
+    suffix = f"Keep valid parts and fix only the listed issues. Return one complete {target_tool_name} call."
     if failure_kind in _EXTRA_RETRY_FAILURE_KINDS:
         suffix = (
             "Arrays like steps[] and form_fields[] must contain only complete JSON objects. "
@@ -132,7 +133,15 @@ def _build_retry_feedback(
             "Structured field definitions belong only in output_fields on a JSON step, and runtime form fields belong only in form_fields[]. "
             "Keep valid parts and fix only the listed issues. Return one complete create_flow call."
         )
-    return f"CORRECTION STILL INVALID: {feedback}\n{suffix}"
+    if retry_count >= 2:
+        preamble = (
+            "FINAL CORRECTION ATTEMPT — earlier repairs have failed. "
+            "Before responding, identify the exact field or rule named in the failure below "
+            "and fix only that. Do not rewrite unrelated parts"
+        )
+    else:
+        preamble = "CORRECTION STILL INVALID"
+    return f"{preamble}: {feedback}\n{suffix}"
 
 
 async def request_self_correction(
@@ -150,6 +159,7 @@ async def request_self_correction(
     available_kb_refs: set[str] | None,
     max_output_tokens: int,
     self_correction_temperature: float,
+    self_correction_bumped_temperature: float,
     max_self_correction_retries: int,
     call_repair_completion: Callable[..., Awaitable[Any]],
     process_tool_arguments: Callable[..., Awaitable[Any]],
@@ -171,6 +181,7 @@ async def request_self_correction(
 
     attempts_remaining = max_self_correction_retries
     extra_retry_available = True
+    retry_count = 0  # 0 = initial correction, 1 = first retry, 2 = second retry, …
     while True:
         try:
             response = await call_repair_completion(
@@ -179,7 +190,11 @@ async def request_self_correction(
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
                 max_output_tokens=max_output_tokens,
-                temperature=self_correction_temperature,
+                temperature=(
+                    self_correction_bumped_temperature
+                    if retry_count >= 1
+                    else self_correction_temperature
+                ),
             )
         except Exception as error:
             logger.error("Self-correction LLM call failed", exc_info=error)
@@ -213,6 +228,7 @@ async def request_self_correction(
                                 target_tool_name=target_tool_name,
                                 feedback=_invalid_tool_arguments_message(error),
                                 failure_kind="parse",
+                                retry_count=retry_count + 1,
                             ),
                             "parse",
                         )
@@ -233,7 +249,8 @@ async def request_self_correction(
                     conversation=conversation,
                     new_messages_start=new_messages_start,
                     arguments=arguments,
-                    assistant_content=assistant_text or "Här är mitt korrigerade förslag:",
+                    assistant_content=assistant_text
+                    or "Här är mitt korrigerade förslag:",
                     tool_call_id=correction_tool_call.id,
                     available_model_refs=available_model_refs,
                     available_kb_refs=available_kb_refs,
@@ -249,8 +266,10 @@ async def request_self_correction(
                             correction_tool_call,
                             _build_retry_feedback(
                                 target_tool_name=target_tool_name,
-                                feedback=tool_result.feedback or "Invalid tool payload.",
+                                feedback=tool_result.feedback
+                                or "Invalid tool payload.",
                                 failure_kind=tool_result.failure_kind,
+                                retry_count=retry_count + 1,
                             ),
                             tool_result.failure_kind,
                         )
@@ -271,6 +290,7 @@ async def request_self_correction(
                     failure_kind=failure_kind,
                     extra_retry_available=extra_retry_available,
                 )
+                retry_count += 1
                 correction_messages = append_retry_feedback_turn(
                     llm_messages=correction_messages,
                     tool_call=correction_tool_call,
