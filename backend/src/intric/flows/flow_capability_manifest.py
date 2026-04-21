@@ -52,6 +52,7 @@ RuntimeInputMode = Literal["documents", "audio", "text"]
 OutputArtifact = Literal[
     "structured_text", "structured_json", "pdf_document", "docx_document"
 ]
+DocumentGenerationMode = Literal["generated", "template_fill"]
 
 
 @dataclass(frozen=True)
@@ -282,3 +283,56 @@ FINAL_OUTPUT_ARTIFACT_BY_TYPE: Mapping[FlowOutputType, OutputArtifact] = (
         }
     )
 )
+
+
+def supports_step_io_tuple(
+    *,
+    input_type: FlowInputType | None,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+) -> bool:
+    """Engine-truth: is `(input_type, output_type, output_mode)` a legal
+    combination at step level?
+
+    Mirrors `supports_step_io_mode_combo` in
+    `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a
+    parity test until Phase G deletes the ai_builder copy. Rules:
+
+    - `TEMPLATE_FILL` is legal only when `output_type` is `DOCX`.
+    - `TRANSCRIBE_ONLY` is legal only for `AUDIO` input → `TEXT` output.
+    - Every other combination is legal (the runtime pass-through default).
+
+    `input_type` is optional because `TEMPLATE_FILL` and the pass-through
+    default do not depend on it, so callers can answer output-mode legality
+    before `input_type` has been decided. A `TRANSCRIBE_ONLY` query with
+    `input_type=None` still returns `False` — transcription requires
+    `AUDIO` input, never an unknown one.
+    """
+    if output_mode is FlowOutputMode.TEMPLATE_FILL:
+        return output_type is FlowOutputType.DOCX
+    if output_mode is FlowOutputMode.TRANSCRIBE_ONLY:
+        return input_type is FlowInputType.AUDIO and output_type is FlowOutputType.TEXT
+    return True
+
+
+def resolve_document_generation_mode(
+    *,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+) -> DocumentGenerationMode | None:
+    """Engine-truth: which document-generation pathway a `(output_type,
+    output_mode)` pair triggers at runtime, if any.
+
+    Mirrors `resolve_document_generation_mode` in
+    `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a
+    parity test until Phase G deletes the ai_builder copy.
+    """
+    if output_type is FlowOutputType.DOCX:
+        return (
+            "template_fill"
+            if output_mode is FlowOutputMode.TEMPLATE_FILL
+            else "generated"
+        )
+    if output_type is FlowOutputType.PDF:
+        return "generated"
+    return None

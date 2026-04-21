@@ -18,13 +18,21 @@ from intric.flows.ai_builder.ai_builder_step_capabilities import (
     BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE,
     BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE,
 )
-from intric.flows.enums import FlowInputType, FlowOutputType
+from intric.flows.ai_builder.ai_builder_step_capabilities import (
+    resolve_document_generation_mode as _legacy_resolve_document_generation_mode,
+)
+from intric.flows.ai_builder.ai_builder_step_capabilities import (
+    supports_step_io_mode_combo as _legacy_supports_step_io_mode_combo,
+)
+from intric.flows.enums import FlowInputType, FlowOutputMode, FlowOutputType
 from intric.flows.flow_capability_manifest import (
     CAPABILITY_REGISTRY,
     CHAIN_COMPATIBILITY,
     FCM_VERSION,
     FINAL_OUTPUT_ARTIFACT_BY_TYPE,
     FlowCapability,
+    resolve_document_generation_mode,
+    supports_step_io_tuple,
 )
 from intric.flows.step_chain_rules import COMPATIBLE_TYPE_COERCIONS
 from intric.flows.type_policies import INPUT_TYPE_POLICIES
@@ -279,6 +287,83 @@ def test_final_output_artifact_by_type_is_frozen_and_typed_with_enums() -> None:
         )
     with pytest.raises(TypeError):
         FINAL_OUTPUT_ARTIFACT_BY_TYPE[FlowOutputType.TEXT] = "mutated"  # type: ignore[index]
+
+
+@pytest.mark.parametrize("input_type", [None, *list(FlowInputType)])
+@pytest.mark.parametrize("output_type", list(FlowOutputType))
+@pytest.mark.parametrize("output_mode", list(FlowOutputMode))
+def test_supports_step_io_tuple_parity_with_legacy(
+    input_type: FlowInputType | None,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+) -> None:
+    """A.1d parity: `supports_step_io_tuple` (enum-typed, engine-side) must
+    agree with legacy `supports_step_io_mode_combo` (string-typed, ai_builder)
+    on every (input_type, output_type, output_mode) triple. Covers None for
+    input_type — the legacy signature allows it, and the FCM must too."""
+    fcm_result = supports_step_io_tuple(
+        input_type=input_type, output_type=output_type, output_mode=output_mode
+    )
+    legacy_result = _legacy_supports_step_io_mode_combo(
+        input_type=input_type.value if input_type is not None else None,
+        output_type=output_type.value,
+        output_mode=output_mode.value,
+    )
+    assert fcm_result is legacy_result, (
+        f"supports_step_io_tuple drift: "
+        f"input={input_type} output={output_type} mode={output_mode} "
+        f"fcm={fcm_result} legacy={legacy_result}"
+    )
+
+
+@pytest.mark.parametrize("output_type", list(FlowOutputType))
+@pytest.mark.parametrize("output_mode", list(FlowOutputMode))
+def test_resolve_document_generation_mode_parity_with_legacy(
+    output_type: FlowOutputType, output_mode: FlowOutputMode
+) -> None:
+    """A.1d parity: FCM `resolve_document_generation_mode` returns the same
+    `DocumentGenerationMode | None` as the legacy ai_builder version for every
+    (output_type, output_mode) pair."""
+    fcm_result = resolve_document_generation_mode(
+        output_type=output_type, output_mode=output_mode
+    )
+    legacy_result = _legacy_resolve_document_generation_mode(
+        output_type=output_type.value, output_mode=output_mode.value
+    )
+    assert fcm_result == legacy_result, (
+        f"resolve_document_generation_mode drift: "
+        f"output={output_type} mode={output_mode} "
+        f"fcm={fcm_result} legacy={legacy_result}"
+    )
+
+
+def test_supports_step_io_tuple_rejects_template_fill_for_non_docx() -> None:
+    """Explicit rule guardrail (not just parity): template_fill is only legal
+    when output_type is docx. Catches a regression that silently drops the
+    restriction."""
+    for output_type in FlowOutputType:
+        legal = supports_step_io_tuple(
+            input_type=FlowInputType.TEXT,
+            output_type=output_type,
+            output_mode=FlowOutputMode.TEMPLATE_FILL,
+        )
+        assert legal is (output_type is FlowOutputType.DOCX)
+
+
+def test_supports_step_io_tuple_rejects_transcribe_only_for_non_audio_text() -> None:
+    """Explicit rule guardrail: transcribe_only is only legal for
+    audio-in → text-out. Any other combination must be rejected."""
+    for input_type in FlowInputType:
+        for output_type in FlowOutputType:
+            legal = supports_step_io_tuple(
+                input_type=input_type,
+                output_type=output_type,
+                output_mode=FlowOutputMode.TRANSCRIBE_ONLY,
+            )
+            expected = (
+                input_type is FlowInputType.AUDIO and output_type is FlowOutputType.TEXT
+            )
+            assert legal is expected
 
 
 def test_fcm_module_has_no_ai_builder_imports() -> None:
