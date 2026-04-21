@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_knowledge_pack_create import (
+    KNOWLEDGE_PACK_CREATE_RECIPES,
+)
 from intric.flows.ai_builder.ai_builder_recipe_selector import select_relevant_recipes
 
 
@@ -52,3 +55,15 @@ class TestRecipeSelection:
     def test_freeform_text_triggers_docx_recipes(self):
         result = select_relevant_recipes({}, "output should be a DOCX file")
         assert "DOCX" in result or "GULDEXEMPEL" in result
+
+    def test_sectioned_form_intake_text_selects_dedicated_recipe(self):
+        result = select_relevant_recipes(
+            {},
+            (
+                "Visa en sektion i taget och be användaren om fritext för varje sektion. "
+                "Skapa sedan ett DOCX-dokument."
+            ),
+            recipe_source=KNOWLEDGE_PACK_CREATE_RECIPES,
+        )
+
+        assert "Sektionerad insamling via formulärfält" in result

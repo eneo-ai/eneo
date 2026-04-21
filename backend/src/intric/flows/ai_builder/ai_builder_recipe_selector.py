@@ -7,6 +7,9 @@ that match the user's flow requirements.
 
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_form_intake_signals import (
+    extract_form_intake_recipe_signals,
+)
 from intric.flows.ai_builder.ai_builder_knowledge_pack import (
     KNOWLEDGE_PACK_RECIPES,
 )
@@ -22,6 +25,7 @@ RECIPE_SECTIONS: dict[str, tuple[str, ...]] = {
     "docx_template": ("DOCX",),
     "json_pipeline": ("JSON", "JSON-steg"),
     "comparison": ("Jämför",),
+    "sectioned_form_intake": ("Sektionerad insamling via formulärfält",),
 }
 
 # Signal → required recipe sections
@@ -33,6 +37,7 @@ SIGNAL_TO_RECIPES: dict[str, list[str]] = {
     "structured_json": ["json_pipeline", "golden_example"],
     "structured_text": ["document_analysis", "golden_example"],
     "comparison": ["comparison", "golden_example"],
+    "sectioned_form_intake": ["sectioned_form_intake", "golden_example"],
 }
 
 
@@ -70,6 +75,8 @@ def select_relevant_recipes(
         needed.update(SIGNAL_TO_RECIPES.get("comparison", []))
     if "json" in lowered:
         needed.update(SIGNAL_TO_RECIPES.get("structured_json", []))
+    for signal in extract_form_intake_recipe_signals(lowered):
+        needed.update(SIGNAL_TO_RECIPES.get(signal, []))
 
     # If no signals detected, return full recipes (safe fallback)
     source = recipe_source or KNOWLEDGE_PACK_RECIPES

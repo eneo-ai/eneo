@@ -88,6 +88,13 @@ _KNOWLEDGE_PACK_CREATE_RECIPES = """\
 - Håll strukturen stabil och återanvändbar för nästa steg
 - Om nästa steg bara behöver några datapunkter, gör JSON-steget tydligt och smalt
 
+## Sektionerad insamling via formulärfält
+- När användaren beskriver ett fast set rubriker/sektioner där användaren ska lämna fritext per sektion ska du modellera detta som `form_fields`, inte som ett eget insamlingssteg per rubrik
+- Skapa ett textfält per rubrik/sektion
+- Låt senare steg använda `uses_form_fields` för att sammanställa och skriva sluttexten
+- Om användaren vill kunna hoppa över eller gå tillbaka, modellera detta som separata styrfält eller interaktionslogik runt samma formulärdata — inte som sju separata JSON-insamlingssteg
+- Slutsteget ska använda de insamlade formulärfälten för att skapa sammanställningen med samma rubriker
+
 ## Guldexempel: dokumentpaket med riskanalys
 ```json
 {

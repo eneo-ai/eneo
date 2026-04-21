@@ -623,6 +623,21 @@ class TestBuildClarificationHints:
         assert signals["input_material_mode"] == {"audio"}
         assert signals["final_output_mode"] == {"pdf_document"}
 
+    def test_requirements_summary_triggers_sectioned_form_intake_recipe_signal(
+        self,
+    ) -> None:
+        signals = _extract_signals_from_requirements(
+            {
+                "summary": (
+                    "Guida användaren sektion för sektion och samla in fritext under varje rubrik."
+                ),
+                "input_description": "Användaren matar in fritext per rubrik.",
+                "output_description": "Skapa ett DOCX-dokument med samma rubriker.",
+            }
+        )
+
+        assert signals["planner_pattern"] == {"sectioned_form_intake"}
+
     def test_includes_form_field_and_contract_hints_for_structured_analysis_flows(
         self,
     ) -> None:

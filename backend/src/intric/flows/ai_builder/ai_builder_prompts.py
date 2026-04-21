@@ -23,6 +23,7 @@ from intric.flows.ai_builder.ai_builder_flow_context import (
     build_step_ref_mapping,
 )
 from intric.flows.ai_builder.ai_builder_form_intake_signals import (
+    extract_form_intake_recipe_signals,
     mentions_form_field_needs,
     mentions_sectioned_form_intake,
 )
@@ -619,6 +620,18 @@ def _extract_signals_from_requirements(
         signals.setdefault("final_output_mode", set()).add("structured_json")
     if "jämför" in combined or "compar" in combined:
         signals.setdefault("comparison_scope", set()).add("comparison")
+    for signal in extract_form_intake_recipe_signals(
+        " ".join(
+            value
+            for value in (
+                confirmed_requirements.get("summary", ""),
+                input_desc,
+                output_desc,
+            )
+            if isinstance(value, str)
+        ).casefold()
+    ):
+        signals.setdefault("planner_pattern", set()).add(signal)
     return signals
 
 
