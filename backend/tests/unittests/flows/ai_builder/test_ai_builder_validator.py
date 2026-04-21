@@ -689,6 +689,35 @@ class TestProductionParityValidation:
         assert not result.valid
         assert any("output_contract" in e.message for e in result.errors)
 
+    def test_citation_mode_rejected_on_transcribe_only_audio_step(self) -> None:
+        # Transcribe-only audio steps are not LLM-backed text steps, so the
+        # citation sidecar cannot attach. The parity layer previously
+        # swallowed this exact message as a "false negative" caused by a
+        # str(enum) bug in the legacy capability caller. With the FCM-backed
+        # caller, the rejection is genuine — the parity filter is gone and
+        # the error must surface to builder users.
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Transkribera",
+                        input_type=InputType.AUDIO,
+                        output_mode=OutputMode.TRANSCRIBE_ONLY,
+                        output_type=OutputType.TEXT,
+                        output_config={"citation_mode": "inline_inref_sidecar"},
+                    ),
+                ]
+            )
+        )
+        assert not result.valid
+        assert any(
+            e.code == "flow_step_invalid"
+            and "citation_mode 'inline_inref_sidecar'" in e.message
+            and "LLM-backed text step" in e.message
+            for e in result.errors
+        )
+
 
 class TestContractInstructionLint:
     def test_warns_when_output_contract_fields_missing_from_instructions(self) -> None:

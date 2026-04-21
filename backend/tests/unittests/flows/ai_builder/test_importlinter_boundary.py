@@ -14,6 +14,7 @@ here. They are legitimate sibling reuse, not an engine-layer coupling.
 
 from __future__ import annotations
 
+import ast
 import subprocess
 from pathlib import Path
 
@@ -69,6 +70,62 @@ def test_source_modules_cover_every_flows_sibling() -> None:
         "`.importlinter` `source_modules` is out of sync with the filesystem.\n"
         f"Missing from config (add these): {sorted(missing)}\n"
         f"No longer present on disk (remove these): {sorted(stale)}"
+    )
+
+
+def test_flow_validators_is_not_coupled_to_ai_builder() -> None:
+    """After A.2's un-inversion, `flow_validators.py` is pure engine code
+    and must not reach into `intric.flows.ai_builder.*`. The FCM's mirror
+    of `is_citation_capable_step` (A.1e) replaces the legacy builder
+    import. This test AST-scans the module so a regression fails at unit
+    test time, not via the slower lint-imports subprocess.
+    """
+    module_path = _backend_root() / "src" / "intric" / "flows" / "flow_validators.py"
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    offenders: list[str] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module.startswith("intric.flows.ai_builder"):
+                names = ", ".join(alias.name for alias in node.names)
+                offenders.append(f"from {module} import {names}")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.startswith("intric.flows.ai_builder"):
+                    offenders.append(f"import {alias.name}")
+
+    assert not offenders, (
+        "flow_validators.py must not import from intric.flows.ai_builder.*; "
+        "A.2 un-inverted this boundary. Use FCM primitives instead "
+        "(see flow_capability_manifest.py).\n"
+        f"Offending imports: {offenders}"
+    )
+
+
+def test_flow_validators_ignore_line_removed_from_importlinter() -> None:
+    """Lock-step assertion for A.2: the `.importlinter` ignore carve-out for
+    `flow_validators -> ai_builder.ai_builder_step_capabilities` must be
+    gone. If someone re-adds it to silence a regressed import, this test
+    fires before CI.
+    """
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.read(_backend_root() / ".importlinter", encoding="utf-8")
+    raw = parser.get(
+        "importlinter:contract:flows-engine-no-ai-builder",
+        "ignore_imports",
+        fallback="",
+    )
+    lines = {line.strip() for line in raw.splitlines() if line.strip()}
+    forbidden = (
+        "intric.flows.flow_validators -> "
+        "intric.flows.ai_builder.ai_builder_step_capabilities"
+    )
+    assert forbidden not in lines, (
+        "`.importlinter` still carves out "
+        f"`{forbidden}`. Remove the line — A.2 un-inverted this edge."
     )
 
 

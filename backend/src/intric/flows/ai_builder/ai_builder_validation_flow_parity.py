@@ -59,9 +59,7 @@ def validate_flow_service_parity(
             require_complete_template_fill_config=False,
         )
     except BadRequestException as exc:
-        if _is_builder_unsupported_audio_transcription_error(
-            str(exc)
-        ) or _is_builder_citation_capability_false_negative(str(exc)):
+        if _is_builder_unsupported_audio_transcription_error(str(exc)):
             return
         result.add_error(
             step_ref=_infer_step_ref_from_message(spec, str(exc)),
@@ -129,12 +127,5 @@ def _is_builder_unsupported_audio_transcription_error(message: str) -> bool:
     return (
         "Transcription must be enabled when using audio input steps." in message
         or "A transcription model must be selected when using audio input steps."
-        in message
-    )
-
-
-def _is_builder_citation_capability_false_negative(message: str) -> bool:
-    return (
-        "citation_mode 'inline_inref_sidecar' requires an LLM-backed text step."
         in message
     )

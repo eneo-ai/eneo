@@ -66,5 +66,4 @@ source_modules =
 forbidden_modules =
     intric.flows.ai_builder
 ignore_imports =
-    intric.flows.flow_validators -> intric.flows.ai_builder.ai_builder_step_capabilities
     intric.flows.api.flow_router -> intric.flows.ai_builder.ai_builder_router

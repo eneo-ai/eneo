@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.enums import FlowOutputMode, FlowOutputType
 from intric.flows.flow import FlowStep
 from intric.flows.flow_validators import validate_form_schema, validate_steps
 from intric.flows.flow_validators_form import (
@@ -271,11 +272,16 @@ def test_validate_steps_rejects_inline_citation_mode_for_transcribe_only_output(
 
 
 def test_validate_steps_allows_inline_citation_mode_for_text_llm_steps() -> None:
+    # Passing enum members here so `model_copy(update=...)` preserves enum
+    # identity — production `FlowStep` objects carry `FlowOutputType` /
+    # `FlowOutputMode` instances after Pydantic validation, and the FCM's
+    # `is_citation_capable_step` uses `is` identity comparisons that
+    # would silently fail on raw strings.
     validate_steps(
         [
             _step(
-                output_type="text",
-                output_mode="pass_through",
+                output_type=FlowOutputType.TEXT,
+                output_mode=FlowOutputMode.PASS_THROUGH,
                 output_config={"citation_mode": "inline_inref_sidecar"},
             )
         ]
