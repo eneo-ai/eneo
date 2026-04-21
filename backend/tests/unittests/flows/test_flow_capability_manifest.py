@@ -14,11 +14,14 @@ from pathlib import Path
 
 import pytest
 
+from intric.flows.enums import FlowInputType, FlowOutputType
 from intric.flows.flow_capability_manifest import (
     CAPABILITY_REGISTRY,
+    CHAIN_COMPATIBILITY,
     FCM_VERSION,
     FlowCapability,
 )
+from intric.flows.step_chain_rules import COMPATIBLE_TYPE_COERCIONS
 from intric.flows.type_policies import INPUT_TYPE_POLICIES
 
 
@@ -146,6 +149,33 @@ def test_capability_registry_is_immutable() -> None:
         CAPABILITY_REGISTRY["input_new"] = CAPABILITY_REGISTRY["input_text"]  # type: ignore[index]
     with pytest.raises(TypeError):
         del CAPABILITY_REGISTRY["input_text"]  # type: ignore[misc]
+
+
+def test_chain_compatibility_is_frozen_and_typed_with_enums() -> None:
+    """`CHAIN_COMPATIBILITY` must be a frozenset of
+    `(FlowOutputType, FlowInputType)` pairs — i.e. typed, not bare strings."""
+    assert isinstance(CHAIN_COMPATIBILITY, frozenset)
+    for pair in CHAIN_COMPATIBILITY:
+        assert isinstance(pair, tuple) and len(pair) == 2
+        out_type, in_type = pair
+        assert isinstance(out_type, FlowOutputType), (
+            f"CHAIN_COMPATIBILITY key {pair!r} — out-type must be a FlowOutputType"
+        )
+        assert isinstance(in_type, FlowInputType), (
+            f"CHAIN_COMPATIBILITY key {pair!r} — in-type must be a FlowInputType"
+        )
+
+
+def test_chain_compatibility_mirrors_legacy_compatible_type_coercions() -> None:
+    """Parity test. Phase A.1a mirrors `COMPATIBLE_TYPE_COERCIONS` into the
+    FCM without touching consumers; the two sets must stay in lockstep
+    until Phase G deletes the legacy table. A drift here is a bug."""
+    fcm_as_strings = {(out.value, inp.value) for out, inp in CHAIN_COMPATIBILITY}
+    assert fcm_as_strings == COMPATIBLE_TYPE_COERCIONS, (
+        "CHAIN_COMPATIBILITY has drifted from COMPATIBLE_TYPE_COERCIONS.\n"
+        f"Missing from FCM: {COMPATIBLE_TYPE_COERCIONS - fcm_as_strings}\n"
+        f"Extra in FCM:    {fcm_as_strings - COMPATIBLE_TYPE_COERCIONS}"
+    )
 
 
 def test_fcm_module_has_no_ai_builder_imports() -> None:

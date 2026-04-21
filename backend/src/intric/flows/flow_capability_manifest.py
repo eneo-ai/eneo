@@ -131,3 +131,29 @@ CAPABILITY_REGISTRY: Mapping[CapabilityId, FlowCapability] = MappingProxyType(
         for key, policy in INPUT_TYPE_POLICIES.items()
     }
 )
+
+
+# Chain-composition truth: which `(previous_step_output_type, next_step_input_type)`
+# pairs are legal when a step is fed by `input_source='previous_step'`. Only
+# `previous_step` consults this table — `all_previous_steps` has its own rule
+# path in `step_chain_rules.py` (the JSON-over-concatenated-text prohibition)
+# and does not participate in type coercion. A.1a mirrors
+# `COMPATIBLE_TYPE_COERCIONS` from `step_chain_rules.py` into a typed FCM
+# constant so consumers can migrate off the legacy string-tuple table without
+# losing the rule. The legacy table stays in place until Phase G deletes it;
+# a parity test in `test_flow_capability_manifest.py` enforces lockstep until
+# then.
+CHAIN_COMPATIBILITY: frozenset[tuple[FlowOutputType, FlowInputType]] = frozenset(
+    {
+        (FlowOutputType.TEXT, FlowInputType.TEXT),
+        (FlowOutputType.TEXT, FlowInputType.JSON),
+        (FlowOutputType.TEXT, FlowInputType.ANY),
+        (FlowOutputType.JSON, FlowInputType.TEXT),
+        (FlowOutputType.JSON, FlowInputType.JSON),
+        (FlowOutputType.JSON, FlowInputType.ANY),
+        (FlowOutputType.PDF, FlowInputType.TEXT),
+        (FlowOutputType.PDF, FlowInputType.ANY),
+        (FlowOutputType.DOCX, FlowInputType.TEXT),
+        (FlowOutputType.DOCX, FlowInputType.ANY),
+    }
+)
