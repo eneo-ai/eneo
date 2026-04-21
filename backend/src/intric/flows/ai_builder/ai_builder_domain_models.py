@@ -20,12 +20,22 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from intric.flows.enums import (
     AIBuilderInputSource as InputSource,
+)
+from intric.flows.enums import (
     AIBuilderInputType as InputType,
+)
+from intric.flows.enums import (
+    AIBuilderOutputMode as OutputMode,
+)
+from intric.flows.enums import (
     FlowInputSource,
     FlowInputType,
-    AIBuilderOutputMode as OutputMode,
-    FlowMcpPolicy as MCPPolicy,
     FlowOutputMode,
+)
+from intric.flows.enums import (
+    FlowMcpPolicy as MCPPolicy,
+)
+from intric.flows.enums import (
     FlowOutputType as OutputType,
 )
 
@@ -229,7 +239,15 @@ class LintWarning(BaseModel):
 
 
 class PlannerPlanEnvelope(BaseModel):
-    """Wraps FlowDraftSpecCore with AI session metadata."""
+    """Wraps FlowDraftSpecCore with AI session metadata.
+
+    At the consumer / API / frontend layer this envelope carries the full
+    spec. At the storage boundary (`builder_plans.envelope_json`) the spec is
+    stripped before write and re-injected on read from `builder_plans.spec_json`
+    — `spec_json` is the single source of truth, and envelope_json is
+    metadata-only. Alembic migration `20260421_builder_envelope_slim` scrubs
+    the legacy duplicate out of existing rows.
+    """
 
     spec: FlowDraftSpecCore
     assumptions: list[str] = Field(default_factory=list)
@@ -325,7 +343,9 @@ class BuilderSession(BaseModel):
     flow_id: UUID | None = None
     latest_plan_id: UUID | None = None
     status: SessionStatus = SessionStatus.CHATTING
-    conversation: list[ConversationMessage] = Field(default_factory=_default_conversation)
+    conversation: list[ConversationMessage] = Field(
+        default_factory=_default_conversation
+    )
     requirements_version: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

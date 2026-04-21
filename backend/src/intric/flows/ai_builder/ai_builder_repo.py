@@ -725,7 +725,7 @@ class AIBuilderRepository:
                 "status": PlanStatus.PROPOSED.value,
                 "spec_json": spec.model_dump(mode="json"),
                 "spec_hash": spec_hash,
-                "envelope_json": envelope.model_dump(mode="json"),
+                "envelope_json": _envelope_json_for_storage(envelope),
             }
             if edit_result_json is not None:
                 values["edit_result_json"] = edit_result_json
@@ -941,12 +941,23 @@ def _session_from_row(row: Any) -> BuilderSession:
     )
 
 
+def _envelope_json_for_storage(envelope: PlannerPlanEnvelope) -> dict[str, object]:
+    """Serialize envelope for `builder_plans.envelope_json`.
+
+    The spec duplicate is stripped so `spec_json` stays the single source of
+    truth. `_plan_from_row` re-hydrates the spec on read.
+    """
+    return envelope.model_dump(mode="json", exclude={"spec"})
+
+
 def _plan_from_row(row: Any) -> BuilderPlan:
     """Convert a DB row/mapping to a BuilderPlan domain model."""
     data = _plan_row_data(row)
 
     spec = FlowDraftSpecCore.model_validate(data["spec_json"])
-    envelope = PlannerPlanEnvelope.model_validate(data["envelope_json"])
+    envelope_data = {k: v for k, v in data["envelope_json"].items() if k != "spec"}
+    envelope_data["spec"] = data["spec_json"]
+    envelope = PlannerPlanEnvelope.model_validate(envelope_data)
 
     return BuilderPlan(
         id=data["id"],
