@@ -55,6 +55,7 @@ async def persist_tool_turn(
     tool_content: str,
     metadata: dict[str, Any] | None = None,
     assistant_content: str | None = None,
+    assistant_metadata: dict[str, Any] | None = None,
     lease_request_id: UUID | None = None,
     lease_lock_token: UUID | None = None,
 ) -> None:
@@ -62,6 +63,7 @@ async def persist_tool_turn(
         ConversationMessage(
             role="assistant",
             content=assistant_content,
+            metadata=assistant_metadata,
             tool_calls=[
                 {
                     "id": tool_call.id,

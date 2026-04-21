@@ -54,7 +54,9 @@ def _make_flow(*steps: FlowStep) -> Flow:
 
 
 class TestEditScopePolicy:
-    def test_output_only_edit_does_not_reopen_document_scope_for_existing_flow(self) -> None:
+    def test_output_only_edit_does_not_reopen_document_scope_for_existing_flow(
+        self,
+    ) -> None:
         flow = _make_flow(
             _make_flow_step(
                 step_order=1,
@@ -90,7 +92,9 @@ class TestEditScopePolicy:
         assert "document_material_scope" not in question_ids
         assert "input_material_mode" not in question_ids
 
-    def test_output_only_docx_edit_keeps_only_output_family_questions_active(self) -> None:
+    def test_output_only_docx_edit_keeps_only_output_family_questions_active(
+        self,
+    ) -> None:
         flow = _make_flow(
             _make_flow_step(
                 step_order=1,
@@ -124,7 +128,7 @@ class TestEditScopePolicy:
             if issue.suggestion is not None
         }
 
-        assert "docx_output_mode" in question_ids
+        assert "docx_output_mode" not in question_ids
         assert "input_material_mode" not in question_ids
         assert "document_kind" not in question_ids
         assert "document_material_scope" not in question_ids
@@ -134,9 +138,11 @@ class TestEditScopePolicy:
             for candidate in analysis.candidates
             if candidate.question_id is not None
         }
-        assert candidate_question_ids == {"docx_output_mode"}
+        assert candidate_question_ids == set()
 
-    def test_word_instead_of_pdf_edit_reopens_docx_mode_question(self) -> None:
+    def test_word_instead_of_pdf_edit_defaults_generated_docx_without_reopening_question(
+        self,
+    ) -> None:
         flow = _make_flow(
             _make_flow_step(
                 step_order=1,
@@ -180,9 +186,11 @@ class TestEditScopePolicy:
             if issue.suggestion is not None
         }
 
-        assert "docx_output_mode" in question_ids
+        assert "docx_output_mode" not in question_ids
 
-    def test_requirements_confirmation_turn_merges_previous_output_change_request(self) -> None:
+    def test_requirements_confirmation_turn_merges_previous_output_change_request(
+        self,
+    ) -> None:
         flow = _make_flow(
             _make_flow_step(
                 step_order=1,
@@ -247,12 +255,12 @@ class TestEditScopePolicy:
             ).flow_defaults,
         )
 
-        assert (
-            "word dokument istället för en pdf" in request_window.text
-        )
+        assert "word dokument istället för en pdf" in request_window.text
         assert "ja, det stämmer. bygg planen." in request_window.text
 
-    def test_requirements_confirmation_keeps_docx_mode_blocking_issue_active(self) -> None:
+    def test_requirements_confirmation_keeps_docx_mode_blocking_issue_active(
+        self,
+    ) -> None:
         flow = _make_flow(
             _make_flow_step(
                 step_order=1,
@@ -316,7 +324,7 @@ class TestEditScopePolicy:
             if issue.suggestion is not None
         }
 
-        assert "docx_output_mode" in question_ids
+        assert "docx_output_mode" not in question_ids
 
     def test_rename_only_edit_does_not_reopen_input_questions(self) -> None:
         flow = _make_flow(

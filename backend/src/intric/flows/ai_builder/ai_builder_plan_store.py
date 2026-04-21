@@ -139,6 +139,7 @@ async def store_plan_and_update_conversation(
     conversation: list[ConversationMessage],
     new_messages_start: int,
     assistant_content: str,
+    assistant_metadata: dict[str, Any] | None = None,
     tool_call_id: str,
     tool_name: str,
     arguments: dict[str, Any],
@@ -171,6 +172,7 @@ async def store_plan_and_update_conversation(
     append_plan_messages(
         conversation=conversation,
         assistant_content=assistant_content,
+        assistant_metadata=assistant_metadata,
         tool_call_id=tool_call_id,
         tool_name=tool_name,
         arguments=arguments,
@@ -244,6 +246,7 @@ def append_plan_messages(
     *,
     conversation: list[ConversationMessage],
     assistant_content: str,
+    assistant_metadata: dict[str, Any] | None = None,
     tool_call_id: str,
     tool_name: str,
     arguments: dict[str, Any],
@@ -263,6 +266,7 @@ def append_plan_messages(
         ConversationMessage(
             role="assistant",
             content=assistant_content,
+            metadata=assistant_metadata,
             tool_calls=[
                 {
                     "id": tool_call_id,

@@ -17,6 +17,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
     BuilderPlan,
     BuilderSession,
+    ConversationMessage,
     CreateSessionRequest,
     PlanResponse,
     PlanStatus,
@@ -611,6 +612,58 @@ class TestGetSessionEndpoint:
         )
 
         assert result.attachment_warnings == ["One or more files are unavailable."]
+
+    @pytest.mark.anyio
+    async def test_returns_session_telemetry_summary(self):
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        session.conversation = [
+            ConversationMessage(
+                role="assistant",
+                content="Done.",
+                metadata={
+                    "planner_telemetry": {
+                        "request_id": "req-1",
+                        "model": "openai/gpt-4",
+                        "finish_reason": "stop",
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                        "tool_call_count": 0,
+                        "used_auxiliary_llm": False,
+                    },
+                    "session_telemetry": {
+                        "planner_request_count": 1,
+                        "clarification_question_count": 0,
+                        "prompt_tokens_total": 10,
+                        "completion_tokens_total": 4,
+                        "total_tokens_total": 14,
+                        "tool_call_count_total": 0,
+                        "auxiliary_llm_call_count": 0,
+                        "last_request_id": "req-1",
+                        "last_model": "openai/gpt-4",
+                        "last_finish_reason": "stop",
+                    },
+                },
+            )
+        ]
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        service.get_session_attachment_snapshot.return_value = SimpleNamespace(
+            files=[],
+            warnings=[],
+        )
+
+        result = await get_session(
+            request=MagicMock(),
+            session_id=session.id,
+            container=container,
+        )
+
+        assert result.telemetry is not None
+        assert result.telemetry.planner_request_count == 1
+        assert result.telemetry.total_tokens_total == 14
+        assert result.telemetry.last_model == "openai/gpt-4"
 
     @pytest.mark.anyio
     async def test_detach_session_attachment_calls_service(self):

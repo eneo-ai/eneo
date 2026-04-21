@@ -493,16 +493,20 @@ class TestBuildClarificationHints:
         assert hints is not None
         assert "document_material_scope" not in hints
 
-    def test_flags_docx_mode_when_unspecified(self) -> None:
+    def test_generic_docx_prompt_does_not_flag_docx_mode_when_default_is_safe(
+        self,
+    ) -> None:
         hints = build_clarification_hints(
             conversation=[],
             latest_user_message="Skapa en färdig DOCX-rapport av analysen.",
         )
 
         assert hints is not None
-        assert "docx_output_mode" in hints
+        assert "docx_output_mode" not in hints
 
-    def test_flags_docx_mode_for_word_instead_of_pdf_edit(self) -> None:
+    def test_word_instead_of_pdf_edit_does_not_flag_docx_mode_when_default_is_safe(
+        self,
+    ) -> None:
         flow = Flow(
             id=uuid4(),
             name="Ljudrapport",
@@ -538,7 +542,7 @@ class TestBuildClarificationHints:
         )
 
         assert hints is not None
-        assert "docx_output_mode" in hints
+        assert "docx_output_mode" not in hints
         assert "terminala dokumentsteget" in hints
 
     def test_pdf_clarification_does_not_emit_docx_template_hints_from_stale_template_wording(
@@ -639,7 +643,7 @@ class TestBuildClarificationHints:
     ) -> None:
         hints = build_clarification_hints(
             conversation=[],
-            latest_user_message="Skapa en färdig DOCX-rapport av analysen.",
+            latest_user_message="Skapa en PDF från en mall.",
         )
 
         assert hints is not None

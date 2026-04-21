@@ -301,6 +301,8 @@ def has_same_run_comparison_contradiction(
 def document_cardinality_is_vague(profile: DiscoveryProfile) -> bool:
     if _family_inactive(profile, "document_material_scope"):
         return False
+    if profile.resolved_requirements.slot("document_material_scope") is not None:
+        return False
     answers = profile.answers
     text = profile.text
     if not profile.document_like_input or profile.audio_like_input:
@@ -406,13 +408,14 @@ def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
         and not profile.comparison_requested
     ):
         return False
-    document_scope = answers.get(
-        "document_material_scope", set()
-    ) or profile.flow_defaults.get(
-        "document_material_scope",
-        set(),
+    resolved_document_scope = profile.resolved_requirements.slot(
+        "document_material_scope"
     )
-    if "single_document_case" in document_scope and not profile.comparison_requested:
+    if (
+        resolved_document_scope is not None
+        and resolved_document_scope.value == "single_document_case"
+        and not profile.comparison_requested
+    ):
         return False
     return mentions_any(
         text,
@@ -548,6 +551,8 @@ def final_pdf_type_is_vague(profile: DiscoveryProfile) -> bool:
 
 
 def structured_analysis_need_is_vague(profile: DiscoveryProfile) -> bool:
+    if profile.resolved_requirements.slot("structured_analysis_need") is not None:
+        return False
     answers = profile.answers
     text = profile.text
     if "structured_analysis_need" in answers:
@@ -579,6 +584,8 @@ def runtime_metadata_is_vague(profile: DiscoveryProfile) -> bool:
     if _family_inactive(profile, "runtime_metadata_fields"):
         return False
     if not profile.case_like_flow:
+        return False
+    if profile.resolved_requirements.slot("runtime_metadata_fields") is not None:
         return False
     answers = profile.answers
     text = profile.text

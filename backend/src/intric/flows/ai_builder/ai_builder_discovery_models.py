@@ -7,14 +7,18 @@ if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
         FlowCapabilityProfile,
     )
+    from intric.flows.ai_builder.ai_builder_edit_scope import EditScopeResolution
     from intric.flows.ai_builder.ai_builder_framework_policy import (
         OutputIntentResolution,
     )
-    from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
-        InputIntentResolution,
-    )
-    from intric.flows.ai_builder.ai_builder_edit_scope import EditScopeResolution
     from intric.flows.domain.flow import Flow
+
+from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
+    InputIntentResolution,
+)
+from intric.flows.ai_builder.ai_builder_resolved_requirements import (
+    ResolvedRequirementsState,
+)
 
 DiscoverySeverity = Literal["blocking", "info"]
 DiscoveryLanguage = Literal["sv", "en"]
@@ -122,6 +126,7 @@ class DiscoveryProfile:
     edit_scope: "EditScopeResolution"
     input_intent: InputIntentResolution
     output_intent: "OutputIntentResolution"
+    resolved_requirements: ResolvedRequirementsState
     flow: Flow | None
     edit_mode: bool
     comparison_requested: bool

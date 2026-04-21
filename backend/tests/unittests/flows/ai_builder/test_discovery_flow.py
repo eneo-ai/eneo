@@ -1273,7 +1273,7 @@ class TestExtendedClarificationHints:
         assert "document_kind" not in question_ids
         assert "final_pdf_type" not in question_ids
 
-    def test_generic_uploaded_pdf_docx_prompt_prioritizes_docx_mode_over_document_kind(
+    def test_generic_uploaded_pdf_docx_prompt_defaults_generated_docx_without_reasking(
         self,
     ) -> None:
         conversation = [
@@ -1293,9 +1293,9 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "docx_output_mode"
+        assert analysis.next_issue is None
         assert "document_kind" not in question_ids
+        assert "docx_output_mode" not in question_ids
 
     def test_complex_multi_document_compare_prompt_skips_document_kind_and_comparison_scope(
         self,
@@ -1589,6 +1589,34 @@ class TestExtendedClarificationHints:
         assert followup is not None
         _, question_data, _ = followup
         assert question_data["question_id"] == "docx_output_mode"
+
+    def test_structured_docx_output_answer_does_not_reopen_docx_mode_question(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Behåll samma riktning.",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_option_id": "docx_document",
+                        "selected_value": "docx_document",
+                        "answer": "docx_document",
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "docx_output_mode" not in question_ids
 
     def test_pdf_output_with_explicit_answer_resolves_without_pdf_type_question(
         self,

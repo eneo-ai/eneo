@@ -91,6 +91,9 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     canonicalize_edit_draft_resources,
     format_resource_resolution_feedback,
 )
+from intric.flows.ai_builder.ai_builder_telemetry import (
+    build_assistant_message_metadata,
+)
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
@@ -138,6 +141,7 @@ class ProposalContext:
     flow: "Flow | None" = None
     assistant_snapshots: dict[UUID, dict[str, Any]] | None = None
     text_content: str | None = None
+    assistant_metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -213,6 +217,7 @@ class AIBuilderProposalProcessor:
         tool_call_id: str,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
+        assistant_metadata: dict[str, Any] | None = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
         lease_request_id: UUID | None = None,
@@ -327,6 +332,7 @@ class AIBuilderProposalProcessor:
             conversation=conversation,
             new_messages_start=new_messages_start,
             assistant_content=assistant_content,
+            assistant_metadata=assistant_metadata,
             tool_call_id=tool_call_id,
             tool_name=CREATE_FLOW_TOOL_NAME,
             arguments=arguments,
@@ -384,6 +390,7 @@ class AIBuilderProposalProcessor:
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
         request_id: str,
+        assistant_metadata: dict[str, Any] | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
@@ -408,6 +415,7 @@ class AIBuilderProposalProcessor:
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             text_content=text_content,
+            assistant_metadata=assistant_metadata,
         )
         if ctx.text_content:
             yield build_text_event(ctx.text_content)
@@ -465,6 +473,11 @@ class AIBuilderProposalProcessor:
             flow=ctx.flow,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
+            assistant_metadata=build_assistant_message_metadata(
+                ctx.conversation,
+                base_metadata=ctx.assistant_metadata,
+                tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
+            ),
             lease_request_id=ctx.lease_request_id,
             lease_lock_token=ctx.lease_lock_token,
         )
@@ -528,6 +541,7 @@ class AIBuilderProposalProcessor:
             new_messages_start=ctx.new_messages_start,
             arguments=arguments,
             assistant_content=ctx.text_content or "Här är mitt förslag:",
+            assistant_metadata=ctx.assistant_metadata,
             tool_call_id=tool_call.id,
             available_model_refs=ctx.available_model_refs,
             available_kb_refs=ctx.available_kb_refs,
@@ -571,6 +585,7 @@ class AIBuilderProposalProcessor:
         new_messages_start: int,
         arguments: dict[str, Any],
         assistant_content: str,
+        assistant_metadata: dict[str, Any] | None = None,
         tool_call_id: str,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
@@ -586,6 +601,7 @@ class AIBuilderProposalProcessor:
             "new_messages_start": new_messages_start,
             "arguments": arguments,
             "assistant_content": assistant_content,
+            "assistant_metadata": assistant_metadata,
             "tool_call_id": tool_call_id,
             "available_model_refs": available_model_refs,
             "available_kb_refs": available_kb_refs,
@@ -858,6 +874,10 @@ class AIBuilderProposalProcessor:
                 flow=flow,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
+                assistant_metadata=build_assistant_message_metadata(
+                    conversation,
+                    tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
+                ),
                 lease_request_id=None,
                 lease_lock_token=None,
             )
@@ -998,6 +1018,11 @@ class AIBuilderProposalProcessor:
             flow=ctx.flow,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
+            assistant_metadata=build_assistant_message_metadata(
+                ctx.conversation,
+                base_metadata=ctx.assistant_metadata,
+                tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
+            ),
             lease_request_id=ctx.lease_request_id,
             lease_lock_token=ctx.lease_lock_token,
         )
@@ -1042,6 +1067,7 @@ class AIBuilderProposalProcessor:
                 tool_content=(
                     "Structured question payload was invalid; rendered fallback text question."
                 ),
+                assistant_metadata=ctx.assistant_metadata,
                 lease_request_id=ctx.lease_request_id,
                 lease_lock_token=ctx.lease_lock_token,
             )
@@ -1069,6 +1095,7 @@ class AIBuilderProposalProcessor:
                 new_messages_start=ctx.new_messages_start,
                 question_data=backend_question_data,
                 assistant_text=assistant_text,
+                assistant_metadata=ctx.assistant_metadata,
                 tool_content=(
                     "Backend-owned discovery question presented to user after model signal."
                 ),
@@ -1111,6 +1138,7 @@ class AIBuilderProposalProcessor:
         flow: "Flow | None" = None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
+        assistant_metadata: dict[str, Any] | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
     ) -> ToolProcessingResult:
@@ -1176,6 +1204,7 @@ class AIBuilderProposalProcessor:
                 "requirements_summary": requirements_payload,
                 "requirements_version": requirements_version,
             },
+            assistant_metadata=assistant_metadata,
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
         )
@@ -1199,6 +1228,7 @@ class AIBuilderProposalProcessor:
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
         max_output_tokens: int,
+        assistant_metadata: dict[str, Any] | None = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
@@ -1342,6 +1372,7 @@ class AIBuilderProposalProcessor:
             conversation=conversation,
             new_messages_start=new_messages_start,
             assistant_content=assistant_content,
+            assistant_metadata=assistant_metadata,
             tool_call_id=tool_call_id,
             tool_name=EDIT_FLOW_TOOL_NAME,
             arguments=arguments,
@@ -1386,6 +1417,7 @@ class AIBuilderProposalProcessor:
             new_messages_start=ctx.new_messages_start,
             arguments=arguments,
             assistant_content=ctx.text_content or "",
+            assistant_metadata=ctx.assistant_metadata,
             tool_call_id=tool_call.id,
             available_model_refs=ctx.available_model_refs,
             available_kb_refs=ctx.available_kb_refs,
@@ -1402,6 +1434,11 @@ class AIBuilderProposalProcessor:
                     flow=ctx.flow,
                     litellm_model=ctx.litellm_model,
                     litellm_kwargs=ctx.litellm_kwargs,
+                    assistant_metadata=build_assistant_message_metadata(
+                        ctx.conversation,
+                        base_metadata=ctx.assistant_metadata,
+                        tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
+                    ),
                     lease_request_id=ctx.lease_request_id,
                     lease_lock_token=ctx.lease_lock_token,
                 ):
@@ -1531,6 +1568,7 @@ class AIBuilderProposalProcessor:
         litellm_kwargs: dict[str, Any] | None = None,
         ui_language: str | None = None,
         flow: "Flow | None" = None,
+        assistant_metadata: dict[str, Any] | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
     ) -> list[dict[str, str]]:
@@ -1545,6 +1583,7 @@ class AIBuilderProposalProcessor:
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
             ui_language=ui_language,
+            assistant_metadata=assistant_metadata,
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
         )

@@ -67,6 +67,10 @@ from intric.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     resolve_ai_builder_budget_policy,
 )
+from intric.flows.ai_builder.ai_builder_telemetry import (
+    build_assistant_message_metadata,
+    build_planner_telemetry,
+)
 from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
     build_all_tool_schemas,
@@ -687,6 +691,10 @@ class AIBuilderPlanner:
                     litellm_model=litellm_model,
                     litellm_kwargs=litellm_kwargs,
                     ui_language=ui_language,
+                    assistant_metadata=build_assistant_message_metadata(
+                        conversation,
+                        tool_calls=[{"name": "ask_structured_question"}],
+                    ),
                     lease_request_id=request_uuid,
                     lease_lock_token=lock_token,
                 ):
@@ -704,6 +712,10 @@ class AIBuilderPlanner:
                     conversation=conversation,
                     new_messages_start=new_messages_start,
                     flow=flow,
+                    assistant_metadata=build_assistant_message_metadata(
+                        conversation,
+                        tool_calls=[{"name": "ask_structured_question"}],
+                    ),
                     lease_request_id=request_uuid,
                     lease_lock_token=lock_token,
                 ):
@@ -780,6 +792,21 @@ class AIBuilderPlanner:
                     ),
                 },
             )
+            planner_telemetry = build_planner_telemetry(
+                request_id=request_id,
+                model=litellm_model,
+                finish_reason=getattr(choice, "finish_reason", None),
+                prompt_tokens=getattr(usage, "prompt_tokens", None),
+                completion_tokens=getattr(usage, "completion_tokens", None),
+                total_tokens=getattr(usage, "total_tokens", None),
+                tool_call_count=(
+                    len(assistant_message.tool_calls)
+                    if hasattr(assistant_message, "tool_calls")
+                    and assistant_message.tool_calls
+                    else 0
+                ),
+                used_auxiliary_llm=metadata_resolution.used_auxiliary_llm,
+            )
 
             if getattr(choice, "finish_reason", None) == "length":
                 logger.warning(
@@ -811,6 +838,11 @@ class AIBuilderPlanner:
                     new_messages_start=new_messages_start,
                     tool_calls=assistant_message.tool_calls,
                     text_content=assistant_message.content,
+                    assistant_metadata=build_assistant_message_metadata(
+                        conversation,
+                        planner_telemetry=planner_telemetry,
+                        tool_calls=assistant_message.tool_calls,
+                    ),
                     llm_messages=llm_messages,
                     tool_schemas=tool_schemas,
                     litellm_model=litellm_model,
@@ -875,6 +907,10 @@ class AIBuilderPlanner:
                     ConversationMessage(
                         role="assistant",
                         content=assistant_message.content,
+                        metadata=build_assistant_message_metadata(
+                            conversation,
+                            planner_telemetry=planner_telemetry,
+                        ),
                     )
                 )
                 await self.repo.append_session_messages(

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from intric.flows.ai_builder.ai_builder_clause_segmenter import (
+    build_role_scoped_text,
+)
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
     normalize_discovery_text,
@@ -307,12 +310,13 @@ def _infer_structured_analysis_need(text: str) -> str | None:
 
 
 def _infer_pdf_generation_mode(text: str) -> str | None:
-    if "pdf" not in text:
+    output_text = build_role_scoped_text(text).preferred_output_text()
+    if "pdf" not in output_text:
         return None
-    if not _contains_any(text, PDF_OUTPUT_CONTEXT_MARKERS):
+    if not _contains_any(output_text, PDF_OUTPUT_CONTEXT_MARKERS):
         return None
     if _contains_any(
-        text,
+        output_text,
         (
             "generated pdf",
             "vanlig pdf",
@@ -323,7 +327,7 @@ def _infer_pdf_generation_mode(text: str) -> str | None:
     ):
         return "generated_pdf"
     if _contains_any(
-        text,
+        output_text,
         (
             "pdf mall",
             "pdf mallar",
@@ -339,7 +343,7 @@ def _infer_pdf_generation_mode(text: str) -> str | None:
     ):
         return "pdf_template_requested"
     if _contains_any(
-        text,
+        output_text,
         (
             "mall",
             "template",

@@ -1163,6 +1163,62 @@ class TestSendMessage:
         repo.update_session_conversation.assert_not_called()
 
     @pytest.mark.anyio
+    async def test_text_response_persists_planner_telemetry_on_assistant_message(self):
+        user = _make_user()
+        repo = AsyncMock()
+        session = _make_session(
+            status=SessionStatus.CHATTING,
+            tenant_id=user.tenant_id,
+        )
+        repo.get_session.return_value = session
+
+        completion_service = AsyncMock()
+        adapter = _make_adapter()
+        completion_service._get_adapter.return_value = adapter
+
+        service = _make_service(
+            user=user,
+            repo=repo,
+            completion_service=completion_service,
+        )
+
+        response = _make_llm_response(content="I understand.")
+        response.usage = SimpleNamespace(
+            prompt_tokens=12,
+            completion_tokens=5,
+            total_tokens=17,
+        )
+        response.choices[0].finish_reason = "stop"
+
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
+            mock_litellm.acompletion = AsyncMock(return_value=response)
+            await _collect_events(
+                service.send_message(
+                    session_id=session.id,
+                    message="Build a flow",
+                    litellm_model="openai/gpt-4",
+                    litellm_kwargs={"api_key": "sk-test"},
+                )
+            )
+
+        conversation = repo.append_session_messages.call_args.kwargs["conversation"]
+        assistant_message = conversation[1]
+        assert assistant_message.metadata is not None
+        planner_telemetry = assistant_message.metadata["planner_telemetry"]
+        session_telemetry = assistant_message.metadata["session_telemetry"]
+        assert planner_telemetry["prompt_tokens"] == 12
+        assert planner_telemetry["completion_tokens"] == 5
+        assert planner_telemetry["total_tokens"] == 17
+        assert planner_telemetry["finish_reason"] == "stop"
+        assert planner_telemetry["model"] == "openai/gpt-4"
+        assert session_telemetry["planner_request_count"] == 1
+        assert session_telemetry["prompt_tokens_total"] == 12
+        assert session_telemetry["completion_tokens_total"] == 5
+        assert session_telemetry["total_tokens_total"] == 17
+
+    @pytest.mark.anyio
     async def test_llm_error_yields_error_event(self):
         user = _make_user()
         repo = AsyncMock()
@@ -1613,6 +1669,12 @@ class TestSendMessageToolCall:
         assert conversation[0].role == "user"
         assert conversation[1].role == "assistant"
         assert conversation[1].tool_calls is not None
+        assert conversation[1].metadata is not None
+        planner_telemetry = conversation[1].metadata["planner_telemetry"]
+        session_telemetry = conversation[1].metadata["session_telemetry"]
+        assert planner_telemetry["tool_call_count"] == 1
+        assert session_telemetry["planner_request_count"] == 1
+        assert session_telemetry["tool_call_count_total"] == 1
         assert conversation[2].role == "tool"
         assert conversation[2].tool_call_id == tool_call.id
         repo.update_session_conversation.assert_not_called()
@@ -3277,6 +3339,16 @@ class TestSendMessageStructuredQuestion:
 
         repo.append_session_messages.assert_called()
         saved_conversation = repo.append_session_messages.call_args[1]["conversation"]
+        assert saved_conversation[1].metadata is not None
+        assert (
+            saved_conversation[1].metadata["planner_telemetry"]["tool_call_count"] == 1
+        )
+        assert (
+            saved_conversation[1].metadata["session_telemetry"][
+                "clarification_question_count"
+            ]
+            == 1
+        )
         tool_msgs = [m for m in saved_conversation if m.role == "tool"]
         assert len(tool_msgs) >= 1
         assert tool_msgs[-1].tool_call_id.startswith("discovery_")
@@ -3448,7 +3520,7 @@ class TestSendMessageStructuredQuestion:
             events = await _collect_events(
                 service.send_message(
                     session_id=session.id,
-                    message="Jag vill ladda upp flera PDF-filer och få en sammanfattning.",
+                    message="Jag vill ladda upp flera PDF-filer och jämföra innehållet mellan dokumenten.",
                     litellm_model="openai/gpt-4",
                     litellm_kwargs={"api_key": "sk-test"},
                 )
@@ -4352,7 +4424,7 @@ class TestSendMessageStructuredQuestion:
             events = await _collect_events(
                 service.send_message(
                     session_id=session.id,
-                    message="Bygg ett DOCX-flöde",
+                    message="Bygg ett flöde som sammanfattar ett dokument.",
                     litellm_model="openai/gpt-4",
                     litellm_kwargs={"api_key": "sk-test"},
                 )

@@ -9,6 +9,7 @@ from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
+    has_explicit_docx_mode_text,
     has_explicit_structured_answer,
     resolve_output_intent,
 )
@@ -23,7 +24,11 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
 from intric.flows.domain.flow import Flow
 
 SlotSource = Literal[
-    "structured_answer", "requirements_summary", "flow_default", "heuristic"
+    "structured_answer",
+    "requirements_summary",
+    "flow_default",
+    "policy_default",
+    "heuristic",
 ]
 
 
@@ -82,6 +87,7 @@ def build_resolved_requirements_state(
                 requirements_state=requirements_state,
                 freeform_text=freeform_text,
                 summary_field="input_description",
+                slot_value=primary_runtime_input,
             )
         )
 
@@ -97,6 +103,7 @@ def build_resolved_requirements_state(
                 requirements_state=requirements_state,
                 freeform_text=freeform_text,
                 summary_field="output_description",
+                slot_value=output_intent.terminal_output,
             )
         )
 
@@ -112,6 +119,7 @@ def build_resolved_requirements_state(
                 requirements_state=requirements_state,
                 freeform_text=freeform_text,
                 summary_field="output_description",
+                slot_value=output_intent.docx_output_mode,
             )
         )
 
@@ -127,6 +135,70 @@ def build_resolved_requirements_state(
                 requirements_state=requirements_state,
                 freeform_text=freeform_text,
                 summary_field="output_description",
+                slot_value=output_intent.pdf_generation_mode,
+            )
+        )
+
+    document_material_scope = _single_slot_value(
+        answer_signals=answer_signals,
+        flow_defaults=flow_defaults,
+        question_id="document_material_scope",
+    )
+    if document_material_scope is not None:
+        slots.append(
+            _build_slot(
+                name="document_material_scope",
+                value=document_material_scope,
+                question_id="document_material_scope",
+                conversation=conversation,
+                answer_signals=answer_signals,
+                flow_defaults=flow_defaults,
+                requirements_state=requirements_state,
+                freeform_text=freeform_text,
+                summary_field=None,
+                slot_value=document_material_scope,
+            )
+        )
+
+    structured_analysis_need = _single_slot_value(
+        answer_signals=answer_signals,
+        flow_defaults=flow_defaults,
+        question_id="structured_analysis_need",
+    )
+    if structured_analysis_need is not None:
+        slots.append(
+            _build_slot(
+                name="structured_analysis_need",
+                value=structured_analysis_need,
+                question_id="structured_analysis_need",
+                conversation=conversation,
+                answer_signals=answer_signals,
+                flow_defaults=flow_defaults,
+                requirements_state=requirements_state,
+                freeform_text=freeform_text,
+                summary_field=None,
+                slot_value=structured_analysis_need,
+            )
+        )
+
+    runtime_metadata_fields = _single_slot_value(
+        answer_signals=answer_signals,
+        flow_defaults=flow_defaults,
+        question_id="runtime_metadata_fields",
+    )
+    if runtime_metadata_fields is not None:
+        slots.append(
+            _build_slot(
+                name="runtime_metadata_fields",
+                value=runtime_metadata_fields,
+                question_id="runtime_metadata_fields",
+                conversation=conversation,
+                answer_signals=answer_signals,
+                flow_defaults=flow_defaults,
+                requirements_state=requirements_state,
+                freeform_text=freeform_text,
+                summary_field=None,
+                slot_value=runtime_metadata_fields,
             )
         )
 
@@ -166,7 +238,8 @@ def _build_slot(
     flow_defaults: dict[str, set[str]],
     requirements_state: RequirementsState,
     freeform_text: str,
-    summary_field: Literal["input_description", "output_description"],
+    summary_field: Literal["input_description", "output_description"] | None,
+    slot_value: str,
 ) -> RequirementSlot:
     source, evidence, confidence = _resolve_slot_origin(
         question_id=question_id,
@@ -176,6 +249,7 @@ def _build_slot(
         requirements_state=requirements_state,
         freeform_text=freeform_text,
         summary_field=summary_field,
+        slot_value=slot_value,
     )
     return RequirementSlot(
         name=name,
@@ -194,7 +268,8 @@ def _resolve_slot_origin(
     flow_defaults: dict[str, set[str]],
     requirements_state: RequirementsState,
     freeform_text: str,
-    summary_field: Literal["input_description", "output_description"],
+    summary_field: Literal["input_description", "output_description"] | None,
+    slot_value: str,
 ) -> tuple[SlotSource, tuple[str, ...], Literal["high", "medium"]]:
     if has_explicit_structured_answer(conversation, question_id):
         return (
@@ -204,7 +279,7 @@ def _resolve_slot_origin(
         )
 
     latest_summary = requirements_state.latest_summary
-    if latest_summary is not None:
+    if latest_summary is not None and summary_field is not None:
         summary_value = getattr(latest_summary, summary_field)
         if isinstance(summary_value, str) and summary_value:
             return (
@@ -220,9 +295,45 @@ def _resolve_slot_origin(
             "high",
         )
 
+    if _is_policy_default_slot(
+        question_id=question_id,
+        slot_value=slot_value,
+        freeform_text=freeform_text,
+    ):
+        return (
+            "policy_default",
+            (f"policy_default:{question_id}={slot_value}",),
+            "medium",
+        )
+
     heuristic_evidence = (
         "heuristic:role-aware freeform analysis"
         if freeform_text
         else "heuristic:no explicit evidence"
     )
     return ("heuristic", (heuristic_evidence,), "medium")
+
+
+def _is_policy_default_slot(
+    *,
+    question_id: str,
+    slot_value: str,
+    freeform_text: str,
+) -> bool:
+    return (
+        question_id == "docx_output_mode"
+        and slot_value == "generated_docx"
+        and not has_explicit_docx_mode_text(freeform_text)
+    )
+
+
+def _single_slot_value(
+    *,
+    answer_signals: dict[str, set[str]],
+    flow_defaults: dict[str, set[str]],
+    question_id: str,
+) -> str | None:
+    values = answer_signals.get(question_id) or flow_defaults.get(question_id)
+    if not values or len(values) != 1:
+        return None
+    return next(iter(values))

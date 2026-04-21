@@ -26,6 +26,7 @@ async def persist_backend_question(
     new_messages_start: int,
     question_data: dict[str, object],
     assistant_text: str,
+    assistant_metadata: dict[str, Any] | None = None,
     tool_content: str = "Question presented to user. Awaiting their selection.",
     lease_request_id: UUID | None = None,
     lease_lock_token: UUID | None = None,
@@ -36,6 +37,7 @@ async def persist_backend_question(
         ConversationMessage(
             role="assistant",
             content=assistant_text,
+            metadata=assistant_metadata,
             tool_calls=[
                 {
                     "id": tool_call_id,
@@ -81,6 +83,7 @@ async def emit_discovery_followup_if_needed(
     litellm_model: str | None = None,
     litellm_kwargs: dict[str, Any] | None = None,
     ui_language: str | None = None,
+    assistant_metadata: dict[str, Any] | None = None,
     lease_request_id: UUID | None = None,
     lease_lock_token: UUID | None = None,
 ) -> list[dict[str, str]]:
@@ -105,6 +108,7 @@ async def emit_discovery_followup_if_needed(
         new_messages_start=new_messages_start,
         question_data=question_data,
         assistant_text=assistant_text,
+        assistant_metadata=assistant_metadata,
         lease_request_id=lease_request_id,
         lease_lock_token=lease_lock_token,
     )

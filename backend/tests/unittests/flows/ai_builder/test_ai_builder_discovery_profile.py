@@ -63,7 +63,9 @@ def _make_flow(*steps: FlowStep, metadata_json: dict | None = None) -> Flow:
     )
 
 
-def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities() -> None:
+def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities() -> (
+    None
+):
     flow = _make_flow(
         _make_flow_step(
             step_order=1,
@@ -83,7 +85,10 @@ def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities
             output_mode="pass_through",
             output_type="json",
             input_bindings={"question": "{{ step_1.output.text }}"},
-            output_contract={"type": "object", "properties": {"summary": {"type": "string"}}},
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
         ),
         _make_flow_step(
             step_order=3,
@@ -105,12 +110,17 @@ def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities
                 "bindings": {"summary": "{{ step_2.output.summary }}"},
             },
         ),
-        metadata_json={"form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}},
+        metadata_json={
+            "form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}
+        },
     )
 
     profile = build_flow_capability_profile(flow)
 
-    assert tuple(signature.step_order for signature in profile.flow_input_steps) == (1, 3)
+    assert tuple(signature.step_order for signature in profile.flow_input_steps) == (
+        1,
+        3,
+    )
     assert profile.runtime_input_mode == "text_and_documents"
     assert profile.final_output_type == "docx"
     assert profile.final_output_generation_mode == "template_fill"
@@ -118,10 +128,14 @@ def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities
     assert profile.contract_step_orders == (2,)
     assert profile.variable_binding_step_orders == (2, 4)
     assert profile.all_previous_steps_orders == (4,)
-    assert profile.settled_families == frozenset({"output_artifact", "runtime_metadata"})
+    assert profile.settled_families == frozenset(
+        {"output_artifact", "runtime_metadata"}
+    )
 
 
-def test_build_discovery_profile_uses_settled_flow_state_to_keep_docx_edit_output_scoped() -> None:
+def test_build_discovery_profile_uses_settled_flow_state_to_keep_docx_edit_output_scoped() -> (
+    None
+):
     flow = _make_flow(
         _make_flow_step(
             step_order=1,
@@ -153,12 +167,16 @@ def test_build_discovery_profile_uses_settled_flow_state_to_keep_docx_edit_outpu
     )
 
     assert profile.input_intent.document_runtime_input_requested is True
-    assert profile.capabilities.settled_families == frozenset({"input_shape", "output_artifact"})
+    assert profile.capabilities.settled_families == frozenset(
+        {"input_shape", "output_artifact"}
+    )
     assert profile.edit_scope.active_families == frozenset({"output_artifact"})
     assert "input_shape" not in profile.edit_scope.active_families
 
 
-def test_build_discovery_profile_merges_short_follow_up_into_active_request_window() -> None:
+def test_build_discovery_profile_merges_short_follow_up_into_active_request_window() -> (
+    None
+):
     flow = _make_flow(
         _make_flow_step(
             step_order=1,
@@ -195,7 +213,9 @@ def test_build_discovery_profile_merges_short_follow_up_into_active_request_wind
     assert "kortare" in profile.active_request_text
 
 
-def test_build_discovery_profile_keeps_docx_output_intent_when_input_mentions_pdf() -> None:
+def test_build_discovery_profile_keeps_docx_output_intent_when_input_mentions_pdf() -> (
+    None
+):
     profile = build_discovery_profile(
         [
             ConversationMessage(
@@ -211,8 +231,34 @@ def test_build_discovery_profile_keeps_docx_output_intent_when_input_mentions_pd
 
     assert profile.output_intent.terminal_output == "docx_document"
     assert profile.output_intent.docx_output_mode == "generated_docx"
+    assert profile.resolved_requirements.slot("document_material_scope") is not None
+
+
+def test_build_discovery_profile_exposes_runtime_metadata_and_structured_analysis_slots() -> (
+    None
+):
+    profile = build_discovery_profile(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som analyserar flera PDF-dokument i samma ärende. "
+                    "Användaren ska ange ärendenummer och önskat språk. "
+                    "Strukturerad data ska användas där det förbättrar kvaliteten."
+                ),
+            )
+        ]
+    )
+
+    runtime_metadata = profile.resolved_requirements.slot("runtime_metadata_fields")
+    structured_analysis = profile.resolved_requirements.slot("structured_analysis_need")
+
+    assert runtime_metadata is not None
+    assert structured_analysis is not None
 
 
 def test_has_change_semantics_recognizes_substitution_phrase() -> None:
-    assert has_change_semantics("ändra sista steget till docx i stället för pdf") is True
+    assert (
+        has_change_semantics("ändra sista steget till docx i stället för pdf") is True
+    )
     assert has_change_semantics("analysera docx-filer och skriv en rapport") is False

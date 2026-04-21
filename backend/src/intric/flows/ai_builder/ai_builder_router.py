@@ -29,6 +29,7 @@ from intric.flows.ai_builder.ai_builder_api_models import (
     SessionModelsResponse,
     SessionPlansResponse,
     SessionResponse,
+    SessionTelemetrySummary,
 )
 from intric.flows.ai_builder.ai_builder_context import (
     resolve_planner_model,
@@ -47,6 +48,9 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_service import (
     AIBuilderService,
     PreparedMessageContext,
+)
+from intric.flows.ai_builder.ai_builder_telemetry import (
+    summarize_session_telemetry,
 )
 from intric.flows.flow_permissions import ensure_can_use_flow_ai_builder
 from intric.main.container.container import Container
@@ -244,6 +248,32 @@ def _to_file_public(file: object) -> FilePublic:
     return FilePublic(**cast(Any, file).model_dump())
 
 
+def _to_session_response(
+    session: BuilderSession,
+    *,
+    attachments: list[FilePublic] | None = None,
+    attachment_warnings: list[str] | None = None,
+) -> SessionResponse:
+    telemetry = summarize_session_telemetry(session.conversation)
+    return SessionResponse(
+        session_id=session.id,
+        status=session.status,
+        target_kind=session.target_kind,
+        flow_id=session.flow_id,
+        latest_plan_id=session.latest_plan_id,
+        telemetry=(
+            SessionTelemetrySummary.model_validate(telemetry)
+            if telemetry is not None
+            else None
+        ),
+        conversation=session.conversation,
+        attachments=attachments or [],
+        attachment_warnings=attachment_warnings or [],
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+    )
+
+
 def _ai_builder_error_response(
     *,
     description: str,
@@ -336,17 +366,10 @@ async def create_session(
         ),
     )
 
-    return SessionResponse(
-        session_id=session.id,
-        status=session.status,
-        target_kind=session.target_kind,
-        flow_id=session.flow_id,
-        latest_plan_id=session.latest_plan_id,
-        conversation=session.conversation,
+    return _to_session_response(
+        session,
         attachments=[_to_file_public(file) for file in attachment_snapshot.files],
         attachment_warnings=list(attachment_snapshot.warnings),
-        created_at=session.created_at,
-        updated_at=session.updated_at,
     )
 
 
@@ -562,17 +585,10 @@ async def get_session(
     await _require_flow_edit_permission(container, session.space_id)
     _ensure_session_creator(container, session)
 
-    return SessionResponse(
-        session_id=session.id,
-        status=session.status,
-        target_kind=session.target_kind,
-        flow_id=session.flow_id,
-        latest_plan_id=session.latest_plan_id,
-        conversation=session.conversation,
+    return _to_session_response(
+        session,
         attachments=[_to_file_public(file) for file in attachment_snapshot.files],
         attachment_warnings=list(attachment_snapshot.warnings),
-        created_at=session.created_at,
-        updated_at=session.updated_at,
     )
 
 
@@ -783,16 +799,7 @@ async def cancel_session(
         ),
     )
 
-    return SessionResponse(
-        session_id=session.id,
-        status=session.status,
-        target_kind=session.target_kind,
-        flow_id=session.flow_id,
-        latest_plan_id=session.latest_plan_id,
-        conversation=session.conversation,
-        created_at=session.created_at,
-        updated_at=session.updated_at,
-    )
+    return _to_session_response(session)
 
 
 @router.post(

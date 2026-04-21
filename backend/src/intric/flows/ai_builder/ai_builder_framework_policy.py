@@ -59,6 +59,7 @@ __all__ = [
     "normalize_question_answer",
     "normalize_structured_question_payload",
     "question_is_already_resolved",
+    "has_explicit_docx_mode_text",
     "resolve_docx_output_mode",
     "resolve_explicit_output_choice",
     "resolve_output_intent",
@@ -614,7 +615,7 @@ def _resolve_direct_output_choice(
 ) -> str | None:
     output_values = answer_signals.get("final_output_mode", set())
     pdf_generation_values = answer_signals.get("pdf_generation_mode", set())
-    role_scoped_text = scoped_text.replacement_target_text or scoped_text.output_text
+    role_scoped_text = scoped_text.preferred_output_text()
     fallback_text = scoped_text.full_text
     if "docx_document" in output_values:
         return "docx_document"
@@ -624,15 +625,17 @@ def _resolve_direct_output_choice(
         return "structured_json"
     if "structured_text" in output_values:
         return "structured_text"
+    docx_index = _first_phrase_index(role_scoped_text, DOCX_CONTEXT_MARKERS)
+    pdf_index = _first_phrase_index(role_scoped_text, PDF_OUTPUT_CONTEXT_MARKERS)
+    if docx_index is not None and (pdf_index is None or docx_index <= pdf_index):
+        return "docx_document"
     if role_scoped_text and (
         pdf_generation_values.intersection({"generated_pdf", "pdf_template_requested"})
-        or contains_any_phrase(role_scoped_text, PDF_OUTPUT_CONTEXT_MARKERS)
+        or pdf_index is not None
     ):
         return "pdf_document"
-    if role_scoped_text and contains_any_phrase(role_scoped_text, DOCX_CONTEXT_MARKERS):
-        return "docx_document"
     if contains_any_phrase(
-        role_scoped_text or fallback_text,
+        fallback_text,
         (
             "beslutsunderlag som text",
             "structured decision support as text",
@@ -647,11 +650,11 @@ def _resolve_direct_output_choice(
     ):
         return "structured_text"
     if contains_any_phrase(
-        role_scoped_text or fallback_text,
+        fallback_text,
         ("json", "structured json", "strukturerad json"),
     ):
         return "structured_json"
-    if _looks_like_pdf_template_expectation(fallback_text):
+    if _looks_like_pdf_template_expectation(role_scoped_text or fallback_text):
         return "pdf_document"
     return None
 
@@ -680,13 +683,34 @@ def resolve_docx_output_mode(
     output_text = scoped_text.preferred_output_text()
     has_docx_context = contains_any_phrase(output_text, DOCX_CONTEXT_MARKERS)
     if not has_docx_context:
-        return None
+        return (
+            "generated_docx"
+            if "docx_document" in answer_signals.get("final_output_mode", set())
+            else None
+        )
 
     if contains_any_phrase(output_text, DOCX_GENERATED_MODE_MARKERS):
         return "generated_docx"
     if contains_any_phrase(output_text, DOCX_TEMPLATE_MODE_MARKERS):
         return "template_fill_docx"
-    return None
+    return "generated_docx"
+
+
+def has_explicit_docx_mode_text(text: str) -> bool:
+    normalized_text = normalize_signal_text(text)
+    if not normalized_text:
+        return False
+
+    output_text = build_role_scoped_text(normalized_text).preferred_output_text()
+    if not output_text or not contains_any_phrase(output_text, DOCX_CONTEXT_MARKERS):
+        return False
+
+    return contains_any_phrase(
+        output_text, DOCX_GENERATED_MODE_MARKERS
+    ) or contains_any_phrase(
+        output_text,
+        DOCX_TEMPLATE_MODE_MARKERS,
+    )
 
 
 def resolve_pdf_generation_mode(
@@ -789,6 +813,21 @@ def _looks_like_text_analysis_output(text: str) -> bool:
         text,
         decision_markers,
     )
+
+
+def _first_phrase_index(text: str, phrases: Sequence[str]) -> int | None:
+    if not text:
+        return None
+
+    indexes: list[int] = []
+    for phrase in phrases:
+        normalized_phrase = normalize_signal_text(phrase)
+        if not normalized_phrase or normalized_phrase not in text:
+            continue
+        indexes.append(text.find(normalized_phrase))
+    if not indexes:
+        return None
+    return min(indexes)
 
 
 def _looks_like_pdf_template_expectation(text: str) -> bool:

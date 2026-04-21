@@ -101,6 +101,55 @@ def test_resolve_docx_output_mode_detects_template_fill_for_docx_template_reques
     assert mode == "template_fill_docx"
 
 
+def test_resolve_output_intent_defaults_generic_docx_prompt_to_generated_docx() -> None:
+    prompt = "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en DOCX-rapport."
+
+    signals = extract_answer_signals([{"role": "user", "content": prompt}])
+    intent = resolve_output_intent(prompt, signals)
+
+    assert intent.terminal_output == "docx_document"
+    assert intent.docx_output_mode == "generated_docx"
+    assert intent.pdf_generation_mode is None
+
+
+def test_resolve_output_intent_keeps_without_template_docx_prompt_on_docx_path() -> (
+    None
+):
+    prompt = "Bygg ett flöde som genererar en DOCX-rapport utan mall från uppladdade PDF-dokument."
+
+    signals = extract_answer_signals([{"role": "user", "content": prompt}])
+    intent = resolve_output_intent(prompt, signals)
+
+    assert intent.terminal_output == "docx_document"
+    assert intent.docx_output_mode == "generated_docx"
+    assert intent.pdf_generation_mode is None
+
+
+def test_resolve_output_intent_keeps_docx_template_prompt_on_docx_path() -> None:
+    prompt = (
+        "Bygg ett flöde som fyller en DOCX-mall med data från uppladdade PDF-dokument."
+    )
+
+    signals = extract_answer_signals([{"role": "user", "content": prompt}])
+    intent = resolve_output_intent(prompt, signals)
+
+    assert intent.terminal_output == "docx_document"
+    assert intent.docx_output_mode == "template_fill_docx"
+    assert intent.pdf_generation_mode is None
+
+
+def test_resolve_docx_output_mode_defaults_when_docx_is_selected_via_structured_answer() -> (
+    None
+):
+    mode = resolve_docx_output_mode(
+        "Behåll samma riktning.",
+        {"final_output_mode": {"docx_document"}},
+        explicit_output="docx_document",
+    )
+
+    assert mode == "generated_docx"
+
+
 def test_resolve_output_intent_detects_pdf_template_expectation_without_docx_mode() -> (
     None
 ):

@@ -29,6 +29,9 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_resolved_requirements import (
+    build_resolved_requirements_state,
+)
 from intric.flows.domain.flow import Flow
 
 _TASK_VERBS_SV = (
@@ -197,6 +200,10 @@ def build_discovery_profile(
         flow_defaults=flow_defaults,
         answers=answers,
     )
+    resolved_requirements = build_resolved_requirements_state(
+        active_conversation,
+        flow=flow,
+    )
     return DiscoveryProfile(
         language=resolve_discovery_language(conversation, text),
         text=text,
@@ -207,6 +214,7 @@ def build_discovery_profile(
         edit_scope=edit_scope,
         input_intent=input_intent,
         output_intent=output_intent,
+        resolved_requirements=resolved_requirements,
         flow=flow,
         edit_mode=flow is not None,
         comparison_requested=mentions_any(
