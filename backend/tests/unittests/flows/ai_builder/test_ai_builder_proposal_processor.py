@@ -20,6 +20,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     MCPPolicy,
     OutputMode,
     OutputType,
+    PlannerPlanEnvelope,
     StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
@@ -902,7 +903,103 @@ async def test_process_create_arguments_formats_structured_field_depth_errors_ac
 
 
 @pytest.mark.asyncio
-async def test_process_create_arguments_formats_structured_field_entries_in_steps_actionably() -> (
+async def test_process_create_arguments_normalizes_structured_field_entries_into_previous_json_step() -> (
+    None
+):
+    processor = _make_processor()
+    spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
+    validation = MagicMock(valid=True, errors=[])
+    plan = SimpleNamespace(id=uuid4())
+    envelope = PlannerPlanEnvelope(
+        spec=spec,
+        assumptions=[],
+        lint_warnings=[],
+        risk_acknowledgments=[],
+        plan_rationale="Struktur först.",
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_create_draft",
+            return_value=SpecValidationResult(),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_create_draft",
+            return_value=spec,
+        ) as compile_draft,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
+            return_value=SimpleNamespace(
+                spec=spec,
+                validation=validation,
+                failure_feedback=None,
+            ),
+        ),
+        patch.object(processor, "_format_quality_feedback", return_value=None),
+        patch.object(
+            processor,
+            "_format_contextual_quality_feedback",
+            return_value=None,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            new_callable=AsyncMock,
+            return_value=(plan, envelope),
+        ),
+    ):
+        result = await processor._process_create_arguments(
+            session_id=uuid4(),
+            conversation=[],
+            new_messages_start=0,
+            arguments={
+                "flow_name": "Kommunärende",
+                "plan_rationale": "Struktur först.",
+                "steps": [
+                    {
+                        "name": "Extrahera risker",
+                        "instructions": "Extrahera risker som strukturerad JSON.",
+                        "input_source": "flow_input",
+                        "input_type": "document",
+                        "output_type": "json",
+                        "runtime_upload": True,
+                        "runtime_required": True,
+                        "output_fields": [
+                            {
+                                "name": "risker",
+                                "field_type": "string",
+                                "description": "Identifierade risker.",
+                                "required": True,
+                            }
+                        ],
+                    },
+                    {
+                        "name": "osakerheter_och_risker",
+                        "field_type": "string",
+                        "description": "Osäkerheter och risker.",
+                        "required": True,
+                    },
+                ],
+            },
+            assistant_content="Här är mitt förslag:",
+            tool_call_id="call_create",
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+        )
+
+    assert result.failure_kind is None
+    assert result.event is not None
+
+    parsed_draft = compile_draft.call_args.args[0]
+    assert parsed_draft.steps[0].output_fields is not None
+    assert [field.name for field in parsed_draft.steps[0].output_fields] == [
+        "risker",
+        "osakerheter_och_risker",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_process_create_arguments_formats_structured_field_entries_in_steps_actionably_without_json_parent() -> (
     None
 ):
     processor = _make_processor()
@@ -917,20 +1014,10 @@ async def test_process_create_arguments_formats_structured_field_entries_in_step
             "steps": [
                 {
                     "name": "Extrahera risker",
-                    "instructions": "Extrahera risker som strukturerad JSON.",
+                    "instructions": "Extrahera risker som text.",
                     "input_source": "flow_input",
                     "input_type": "document",
-                    "output_type": "json",
-                    "runtime_upload": True,
-                    "runtime_required": True,
-                    "output_fields": [
-                        {
-                            "name": "risker",
-                            "field_type": "string",
-                            "description": "Identifierade risker.",
-                            "required": True,
-                        }
-                    ],
+                    "output_type": "text",
                 },
                 {
                     "name": "osakerheter_och_risker",

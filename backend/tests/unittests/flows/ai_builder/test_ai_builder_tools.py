@@ -246,21 +246,82 @@ class TestParseArguments:
                     "plan_rationale": "Struktur först.",
                     "steps": [
                         {
-                            "name": "Extrahera risker",
-                            "instructions": "Extrahera risker som strukturerad JSON.",
+                            "name": "Sammanfatta underlag",
+                            "instructions": "Skriv en sammanfattning.",
                             "input_source": "flow_input",
                             "input_type": "document",
-                            "output_type": "json",
-                            "runtime_upload": True,
-                            "runtime_required": True,
-                            "output_fields": [
-                                {
-                                    "name": "risker",
-                                    "field_type": "string",
-                                    "description": "Identifierade risker.",
-                                    "required": True,
-                                }
-                            ],
+                            "output_type": "text",
+                        },
+                        {
+                            "name": "osakerheter_och_risker",
+                            "field_type": "string",
+                            "description": "Osäkerheter och risker.",
+                            "required": True,
+                        },
+                    ],
+                }
+            )
+
+    def test_parse_create_flow_arguments_normalizes_structured_field_entries_into_previous_json_step(
+        self,
+    ) -> None:
+        draft = parse_create_flow_arguments(
+            {
+                "flow_name": "Kommunärende",
+                "plan_rationale": "Struktur först.",
+                "steps": [
+                    {
+                        "name": "Extrahera risker",
+                        "instructions": "Extrahera risker som strukturerad JSON.",
+                        "input_source": "flow_input",
+                        "input_type": "document",
+                        "output_type": "json",
+                        "runtime_upload": True,
+                        "runtime_required": True,
+                        "output_fields": [
+                            {
+                                "name": "risker",
+                                "field_type": "string",
+                                "description": "Identifierade risker.",
+                                "required": True,
+                            }
+                        ],
+                    },
+                    {
+                        "name": "osakerheter_och_risker",
+                        "field_type": "string",
+                        "description": "Osäkerheter och risker.",
+                        "required": True,
+                    },
+                ],
+            }
+        )
+
+        assert len(draft.steps) == 1
+        assert draft.steps[0].output_fields is not None
+        assert [field.name for field in draft.steps[0].output_fields] == [
+            "risker",
+            "osakerheter_och_risker",
+        ]
+
+    def test_parse_create_flow_arguments_rejects_structured_field_entries_in_steps_array_without_json_parent(
+        self,
+    ) -> None:
+        with pytest.raises(
+            Exception,
+            match=r"steps\[1\] looks like a structured output field, not a step",
+        ):
+            parse_create_flow_arguments(
+                {
+                    "flow_name": "Kommunärende",
+                    "plan_rationale": "Struktur först.",
+                    "steps": [
+                        {
+                            "name": "Extrahera risker",
+                            "instructions": "Extrahera risker som text.",
+                            "input_source": "flow_input",
+                            "input_type": "document",
+                            "output_type": "text",
                         },
                         {
                             "name": "osakerheter_och_risker",

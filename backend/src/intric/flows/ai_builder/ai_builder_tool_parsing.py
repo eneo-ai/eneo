@@ -8,8 +8,11 @@ from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     is_supported_structured_question_id,
 )
+
 _CREATE_STEP_REQUIRED_FIELDS = frozenset({"name", "instructions", "input_source"})
-_STRUCTURED_FIELD_REQUIRED_FIELDS = frozenset({"name", "field_type", "description", "required"})
+_STRUCTURED_FIELD_REQUIRED_FIELDS = frozenset(
+    {"name", "field_type", "description", "required"}
+)
 _CREATE_FORM_FIELD_REQUIRED_FIELDS = frozenset(
     {"variable_name", "label", "field_type", "required"}
 )
@@ -28,11 +31,8 @@ class RecoverableToolPayloadError(ValueError):
 def parse_create_flow_arguments(arguments: dict[str, Any]) -> FlowCreateDraft:
     """Parse and validate the new create-mode IR payload."""
     arguments = _unwrap_spec_payload(arguments)
-    cleaned = {
-        key: value
-        for key, value in arguments.items()
-        if key != "reasoning"
-    }
+    cleaned = {key: value for key, value in arguments.items() if key != "reasoning"}
+    cleaned = _normalize_misplaced_create_step_entries(cleaned)
     try:
         return FlowCreateDraft.model_validate(cleaned)
     except ValidationError as error:
@@ -65,7 +65,9 @@ def parse_structured_question(arguments: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(question_id, str) or not question_id.strip():
         raise ValueError("question_id must be a non-empty string")
     if not is_supported_structured_question_id(question_id):
-        raise ValueError("question_id must be one of the supported canonical AI Builder ids")
+        raise ValueError(
+            "question_id must be one of the supported canonical AI Builder ids"
+        )
 
     question = arguments.get("question")
     if not isinstance(question, str) or not question.strip():
@@ -85,12 +87,14 @@ def parse_structured_question(arguments: dict[str, Any]) -> dict[str, Any]:
         option_dict = cast(dict[str, Any], opt)
         if not isinstance(option_dict.get("label"), str):
             raise ValueError("each option must have a string 'label'")
-        cleaned_options.append({
-            "id": option_dict.get("id"),
-            "label": option_dict["label"],
-            "value": option_dict.get("value"),
-            "description": option_dict.get("description"),
-        })
+        cleaned_options.append(
+            {
+                "id": option_dict.get("id"),
+                "label": option_dict["label"],
+                "value": option_dict.get("value"),
+                "description": option_dict.get("description"),
+            }
+        )
 
     selection_mode = arguments.get("selection_mode", "single")
     if selection_mode not in {"single", "multi"}:
@@ -132,11 +136,15 @@ def parse_confirm_requirements(arguments: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("each key_decision must have a non-empty string 'topic'")
         dec_value = decision_dict.get("decision")
         if not isinstance(dec_value, str) or not dec_value.strip():
-            raise ValueError("each key_decision must have a non-empty string 'decision'")
-        cleaned_decisions.append({
-            "topic": topic.strip(),
-            "decision": dec_value.strip(),
-        })
+            raise ValueError(
+                "each key_decision must have a non-empty string 'decision'"
+            )
+        cleaned_decisions.append(
+            {
+                "topic": topic.strip(),
+                "decision": dec_value.strip(),
+            }
+        )
 
     input_description = arguments.get("input_description")
     if not isinstance(input_description, str) or not input_description.strip():
@@ -214,20 +222,74 @@ def _describe_misplaced_create_step_payload(
     step_index: int,
     payload: dict[str, Any],
 ) -> str | None:
-    payload_keys = set(payload)
-    missing_step_fields = _CREATE_STEP_REQUIRED_FIELDS - payload_keys
-    if not missing_step_fields:
-        return None
-    if _STRUCTURED_FIELD_REQUIRED_FIELDS.issubset(payload_keys):
+    payload_kind = _classify_misplaced_create_step_payload(payload)
+    if payload_kind == "structured_field":
         return (
             f"steps[{step_index}] looks like a structured output field, not a step. "
             "Move this object into output_fields on the JSON-producing parent step instead of steps[]. "
             "Every steps[] item must be a full create step object with at least name, instructions, input_source, and output_type."
         )
-    if _CREATE_FORM_FIELD_REQUIRED_FIELDS.issubset(payload_keys):
+    if payload_kind == "form_field":
         return (
             f"steps[{step_index}] looks like a form field, not a step. "
             "Move this object into form_fields instead of steps[]. "
             "Every steps[] item must be a full create step object with at least name, instructions, input_source, and output_type."
         )
+    return None
+
+
+def _classify_misplaced_create_step_payload(
+    payload: dict[str, Any],
+) -> str | None:
+    payload_keys = set(payload)
+    missing_step_fields = _CREATE_STEP_REQUIRED_FIELDS - payload_keys
+    if not missing_step_fields:
+        return None
+    if _STRUCTURED_FIELD_REQUIRED_FIELDS.issubset(payload_keys):
+        return "structured_field"
+    if _CREATE_FORM_FIELD_REQUIRED_FIELDS.issubset(payload_keys):
+        return "form_field"
+    return None
+
+
+def _normalize_misplaced_create_step_entries(
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    raw_steps = arguments.get("steps")
+    if not isinstance(raw_steps, list):
+        return arguments
+
+    changed = False
+    normalized_steps: list[object] = []
+    for raw_step in cast(list[object], raw_steps):
+        if not isinstance(raw_step, dict):
+            normalized_steps.append(raw_step)
+            continue
+
+        raw_step_dict = cast(dict[str, Any], raw_step)
+        if _classify_misplaced_create_step_payload(raw_step_dict) == "structured_field":
+            parent_step = _latest_json_parent_step(normalized_steps)
+            if parent_step is not None:
+                output_fields = parent_step.setdefault("output_fields", [])
+                if isinstance(output_fields, list):
+                    cast(list[object], output_fields).append(dict(raw_step_dict))
+                    changed = True
+                    continue
+        normalized_steps.append(dict(raw_step_dict))
+
+    if not changed:
+        return arguments
+
+    normalized_arguments = dict(arguments)
+    normalized_arguments["steps"] = normalized_steps
+    return normalized_arguments
+
+
+def _latest_json_parent_step(steps: list[object]) -> dict[str, Any] | None:
+    for step in reversed(steps):
+        if not isinstance(step, dict):
+            continue
+        step_dict = cast(dict[str, Any], step)
+        if step_dict.get("output_type") == "json":
+            return step_dict
     return None
