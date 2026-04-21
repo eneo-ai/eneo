@@ -3,6 +3,7 @@ from __future__ import annotations
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
+    FormFieldSpec,
     InputSource,
     InputType,
     OutputMode,
@@ -65,6 +66,112 @@ def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None
     feedback = build_conversation_aware_quality_feedback(conversation, spec)
     assert feedback is not None
     assert "form_fields" in feedback
+
+
+def test_flags_missing_form_fields_for_sectioned_rubric_intake_flows() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Visa en sektion i taget, be användaren om fritext för varje sektion, "
+                "spara innehållet separat per rubrik och skapa sedan ett DOCX-dokument."
+            ),
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Sammanställning",
+        steps=[
+            _step(
+                "step_a",
+                "Samla in sektion 1",
+                "Be användaren skriva om första rubriken.",
+                input_type=InputType.TEXT,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "sektion_1": {"type": "string"},
+                    },
+                },
+            ),
+            _step(
+                "step_b",
+                "Generera DOCX",
+                "Skapa slutligt DOCX.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+
+    assert feedback is not None
+    assert "form_fields" in feedback
+    assert "rubrik" in feedback.lower()
+
+
+def test_does_not_flag_form_fields_for_output_only_heading_requirements() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Slutrapporten ska innehålla rubrikerna Planering och hälsa, "
+                "Tidigare insatser och Ekonomi."
+            ),
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Rapport",
+        steps=[
+            _step(
+                "step_a",
+                "Skriv rapport",
+                "Skriv rapport med dessa rubriker.",
+                output_type=OutputType.DOCX,
+            )
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+
+    assert feedback is None
+
+
+def test_does_not_flag_sectioned_rubric_intake_when_form_fields_are_present() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Visa en sektion i taget, be användaren om fritext för varje sektion, "
+                "spara innehållet separat per rubrik och skapa sedan ett DOCX-dokument."
+            ),
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Sammanställning",
+        form_fields=[
+            FormFieldSpec(
+                name="planering_och_halsa", type="text", label="Planering och hälsa"
+            ),
+            FormFieldSpec(
+                name="tidigare_insatser", type="text", label="Tidigare insatser"
+            ),
+        ],
+        steps=[
+            _step(
+                "step_a",
+                "Sammanställ underlag",
+                "Sammanställ sektionerna till ett DOCX.",
+                output_type=OutputType.DOCX,
+            )
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+
+    assert feedback is None
 
 
 def test_flags_output_mismatch_against_explicit_pdf_choice() -> None:

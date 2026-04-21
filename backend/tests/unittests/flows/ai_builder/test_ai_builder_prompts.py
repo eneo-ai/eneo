@@ -638,6 +638,19 @@ class TestBuildClarificationHints:
         assert "form_fields" in hints
         assert "output_fields" in hints
 
+    def test_includes_form_field_hint_for_sectioned_rubric_intake_flows(self) -> None:
+        hints = build_clarification_hints(
+            conversation=[],
+            latest_user_message=(
+                "Visa en sektion i taget och be användaren om fritext för varje sektion. "
+                "Spara innehållet separat per rubrik och skapa sedan ett DOCX-dokument."
+            ),
+        )
+
+        assert hints is not None
+        assert "form_fields" in hints
+        assert "ett textfält per rubrik" in hints
+
     def test_create_mode_hints_reference_create_flow_instead_of_legacy_submission_tool(
         self,
     ) -> None:

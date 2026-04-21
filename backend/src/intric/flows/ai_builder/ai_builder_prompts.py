@@ -22,6 +22,10 @@ from intric.flows.ai_builder.ai_builder_flow_context import (
     build_plan_summary,
     build_step_ref_mapping,
 )
+from intric.flows.ai_builder.ai_builder_form_intake_signals import (
+    mentions_form_field_needs,
+    mentions_sectioned_form_intake,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     build_framework_guardrails_block,
@@ -303,11 +307,19 @@ def build_clarification_hints(
                 "`output_mode` direkt om du uttryckligen behöver ändra ett befintligt steg."
             )
 
-    if _mentions_form_field_needs(text):
+    if mentions_form_field_needs(text):
         hints.append(
             "- Designhint: eftersom användaren beskriver värden som ska anges eller väljas vid körning "
             "(t.ex. språk, fokus, datum, ärendenummer eller nivå) ska dessa modelleras som "
             "`form_fields` så att senare steg kan använda dem som variabler."
+        )
+
+    if mentions_sectioned_form_intake(text):
+        hints.append(
+            "- Designhint: när användaren beskriver ett fast set rubriker/sektioner där användaren ska lämna fritext "
+            "per sektion ska detta modelleras som `form_fields` (ett textfält per rubrik) i stället för ett eget "
+            "insamlingssteg per sektion. Låt senare steg använda dessa fält via `uses_form_fields` och skapa sedan "
+            "den slutliga sammanställningen från de insamlade fälten."
         )
 
     if _mentions_structured_extraction(text):
@@ -557,26 +569,6 @@ def _needs_pdf_generation_mode_question(
     return (
         resolved_output == "pdf_document"
         and resolved_pdf_mode == "pdf_template_requested"
-    )
-
-
-def _mentions_form_field_needs(text: str) -> bool:
-    return any(
-        token in text
-        for token in (
-            "ska kunna ange",
-            "ska kunna välja",
-            "ska fylla i",
-            "fyll i",
-            "ange följande",
-            "önskat språk",
-            "välja språk",
-            "fokus för analysen",
-            "ärendenummer",
-            "kort beskrivning",
-            "politisk nivå",
-            "nämnd",
-        )
     )
 
 

@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from intric.flows.ai_builder.ai_builder_form_intake_signals import (
+    mentions_sectioned_form_intake,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
@@ -103,6 +106,14 @@ def build_conversation_aware_quality_feedback(
         issues.append(
             "Användaren har bett om återanvändbara metadata vid körning men planen saknar "
             "`form_fields`. Lägg till relevanta formulärfält i stället för att gömma dessa värden i prompttext."
+        )
+
+    if mentions_sectioned_form_intake(text) and not spec.form_fields:
+        issues.append(
+            "Konversationen beskriver sektionerad fritextinsamling per rubrik/sektion, men planen saknar "
+            "`form_fields`. Modellera varje rubrik som ett eget textfält i `form_fields` i stället för att "
+            "bygga ett separat insamlingssteg per sektion, och låt senare steg använda dessa fält via "
+            "`uses_form_fields` för att skapa slutdokumentet."
         )
 
     explicit_output = output_intent.terminal_output
