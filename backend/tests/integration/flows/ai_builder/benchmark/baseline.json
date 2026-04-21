@@ -1,0 +1,417 @@
+{
+  "cases": [
+    {
+      "archetype": "attachment_heavy",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 1,
+      "case_id": "attachment_heavy_01_sv",
+      "has_explicit_step_plan": false,
+      "mvs_met": true,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": false,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 1,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": false,
+      "repair_loop_rate": null,
+      "selected_question_ids": [
+        "document_material_scope"
+      ],
+      "shallow_two_step_incidence": null,
+      "ui_language": "sv"
+    },
+    {
+      "archetype": "attachment_heavy",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 0,
+      "case_id": "attachment_heavy_02_en",
+      "has_explicit_step_plan": false,
+      "mvs_met": true,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": false,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 0,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": true,
+      "repair_loop_rate": null,
+      "selected_question_ids": [],
+      "shallow_two_step_incidence": null,
+      "ui_language": "en"
+    },
+    {
+      "archetype": "audio",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 1,
+      "case_id": "audio_01_sv",
+      "has_explicit_step_plan": false,
+      "mvs_met": true,
+      "pattern_signals": {
+        "needs_form_fields": true,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": false,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 1,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": false,
+      "repair_loop_rate": null,
+      "selected_question_ids": [
+        "final_output_mode"
+      ],
+      "shallow_two_step_incidence": null,
+      "ui_language": "sv"
+    },
+    {
+      "archetype": "audio",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 0,
+      "case_id": "audio_02_en",
+      "has_explicit_step_plan": false,
+      "mvs_met": true,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": false,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 0,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": true,
+      "repair_loop_rate": null,
+      "selected_question_ids": [],
+      "shallow_two_step_incidence": null,
+      "ui_language": "en"
+    },
+    {
+      "archetype": "document_comparison",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 1,
+      "case_id": "document_comparison_01_sv",
+      "has_explicit_step_plan": false,
+      "mvs_met": false,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": false,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 1,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": false,
+      "repair_loop_rate": null,
+      "selected_question_ids": [
+        "comparison_scope"
+      ],
+      "shallow_two_step_incidence": null,
+      "ui_language": "sv"
+    },
+    {
+      "archetype": "form_centric",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 1,
+      "case_id": "form_centric_01_sv",
+      "has_explicit_step_plan": false,
+      "mvs_met": false,
+      "pattern_signals": {
+        "needs_form_fields": true,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": false,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 1,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": false,
+      "repair_loop_rate": null,
+      "selected_question_ids": [
+        "final_output_mode"
+      ],
+      "shallow_two_step_incidence": null,
+      "ui_language": "sv"
+    },
+    {
+      "archetype": "json_pipeline",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 1,
+      "case_id": "json_pipeline_01_sv",
+      "has_explicit_step_plan": false,
+      "mvs_met": true,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": true,
+        "rich_document_workflow": true
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 1,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": false,
+      "repair_loop_rate": null,
+      "selected_question_ids": [
+        "document_material_scope"
+      ],
+      "shallow_two_step_incidence": null,
+      "ui_language": "sv"
+    },
+    {
+      "archetype": "json_pipeline",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 0,
+      "case_id": "json_pipeline_02_en",
+      "has_explicit_step_plan": false,
+      "mvs_met": true,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": true,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 0,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": true,
+      "repair_loop_rate": null,
+      "selected_question_ids": [],
+      "shallow_two_step_incidence": null,
+      "ui_language": "en"
+    },
+    {
+      "archetype": "mixed_runtime_input",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 3,
+      "case_id": "mixed_runtime_input_01_sv",
+      "has_explicit_step_plan": false,
+      "mvs_met": true,
+      "pattern_signals": {
+        "needs_form_fields": true,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": false,
+        "rich_document_workflow": true
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 3,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": false,
+      "repair_loop_rate": null,
+      "selected_question_ids": [
+        "document_material_scope",
+        "final_output_mode",
+        "structured_analysis_need"
+      ],
+      "shallow_two_step_incidence": null,
+      "ui_language": "sv"
+    },
+    {
+      "archetype": "rich",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 0,
+      "case_id": "rich_01_sv",
+      "has_explicit_step_plan": false,
+      "mvs_met": true,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": true,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 0,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": true,
+      "repair_loop_rate": null,
+      "selected_question_ids": [],
+      "shallow_two_step_incidence": null,
+      "ui_language": "sv"
+    },
+    {
+      "archetype": "rich",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 0,
+      "case_id": "rich_02_en",
+      "has_explicit_step_plan": false,
+      "mvs_met": true,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": true,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 0,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": true,
+      "repair_loop_rate": null,
+      "selected_question_ids": [],
+      "shallow_two_step_incidence": null,
+      "ui_language": "en"
+    },
+    {
+      "archetype": "template_fill",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 0,
+      "case_id": "template_fill_01_sv",
+      "has_explicit_step_plan": false,
+      "mvs_met": true,
+      "pattern_signals": {
+        "needs_form_fields": true,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": false,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 0,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": true,
+      "repair_loop_rate": null,
+      "selected_question_ids": [],
+      "shallow_two_step_incidence": null,
+      "ui_language": "sv"
+    },
+    {
+      "archetype": "template_fill",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 1,
+      "case_id": "template_fill_02_en",
+      "has_explicit_step_plan": false,
+      "mvs_met": true,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": true,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 1,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": false,
+      "repair_loop_rate": null,
+      "selected_question_ids": [
+        "document_material_scope"
+      ],
+      "shallow_two_step_incidence": null,
+      "ui_language": "en"
+    },
+    {
+      "archetype": "text_only",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 0,
+      "case_id": "text_only_01_sv",
+      "has_explicit_step_plan": false,
+      "mvs_met": false,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": false,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 0,
+      "questioning_flag": "under_signal",
+      "ready_for_confirmation": false,
+      "repair_loop_rate": null,
+      "selected_question_ids": [],
+      "shallow_two_step_incidence": null,
+      "ui_language": "sv"
+    },
+    {
+      "archetype": "text_only",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 0,
+      "case_id": "text_only_02_en",
+      "has_explicit_step_plan": false,
+      "mvs_met": false,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": false,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 0,
+      "questioning_flag": "under_signal",
+      "ready_for_confirmation": false,
+      "repair_loop_rate": null,
+      "selected_question_ids": [],
+      "shallow_two_step_incidence": null,
+      "ui_language": "en"
+    },
+    {
+      "archetype": "vague",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 2,
+      "case_id": "vague_01_sv",
+      "has_explicit_step_plan": false,
+      "mvs_met": true,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": false,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 2,
+      "questioning_flag": "within_budget",
+      "ready_for_confirmation": false,
+      "repair_loop_rate": null,
+      "selected_question_ids": [
+        "document_kind",
+        "final_output_mode"
+      ],
+      "shallow_two_step_incidence": null,
+      "ui_language": "sv"
+    },
+    {
+      "archetype": "vague",
+      "architecture_chain_correctness": null,
+      "blocking_issue_count": 0,
+      "case_id": "vague_02_en",
+      "has_explicit_step_plan": false,
+      "mvs_met": false,
+      "pattern_signals": {
+        "needs_form_fields": false,
+        "prefers_quality_step": false,
+        "prefers_structured_intermediate": false,
+        "rich_document_workflow": false
+      },
+      "plan_depth": null,
+      "question_budget": 3,
+      "question_count": 0,
+      "questioning_flag": "under_signal",
+      "ready_for_confirmation": false,
+      "repair_loop_rate": null,
+      "selected_question_ids": [],
+      "shallow_two_step_incidence": null,
+      "ui_language": "en"
+    }
+  ],
+  "cases_sha256": "096e415eb978c27067e282512a592cbde486e654a428adfe6976838ba32525b1",
+  "note": "Deterministic pre-LLM measurements only. LLM-dependent fields (plan_depth, repair_loop_rate, architecture_chain_correctness, shallow_two_step_incidence) are populated in Phase F. Baseline is frozen at Phase 0; diffs against it are expected as Phase A-G lands.",
+  "schema_version": 1
+}
