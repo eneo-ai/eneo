@@ -41,6 +41,7 @@ from intric.flows.citation_sidecar import (
 from intric.flows.enums import (
     FlowInputSource,
     FlowInputType,
+    FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
 )
@@ -377,6 +378,49 @@ def _seed_output_mode_capability(mode: FlowOutputMode) -> FlowCapability:
     )
 
 
+# Engine-truth allow-set for `step.mcp_policy`. Mirrors the legacy
+# `_ALLOWED_FLOW_MCP_POLICIES` set at `flow_validators.py:57` (which is
+# `set(FLOW_STEP_MCP_POLICY_VALUES)` — i.e. every enum value). The FCM
+# copy is typed with the enum rather than strings so consumers can do
+# enum-identity checks without re-parsing string values. Kept in lockstep
+# with `FLOW_STEP_MCP_POLICY_VALUES` by a parity test until Phase G
+# deletes the legacy whitelist.
+ALLOWED_MCP_POLICIES: frozenset[FlowMcpPolicy] = frozenset(FlowMcpPolicy)
+
+
+def _seed_mcp_policy_capability() -> FlowCapability:
+    return FlowCapability(
+        id="mcp_policy",
+        label="MCP policy",
+        description=(
+            "Controls whether a flow step inherits the enclosing assistant's "
+            "MCP (Model Context Protocol) tool access or is restricted from "
+            "tool use. The legacy validator only enforces that "
+            "`step.mcp_policy` is a known enum value; there are no per-value "
+            "semantic rules today. If a future rule diverges per value "
+            "(e.g. RESTRICTED gaining explicit runtime semantics), this "
+            "singleton capability will split into per-value entries at that "
+            "point."
+        ),
+        applies_to_tuples=(),
+        required_config=(),
+        invariants=(
+            InvariantSpec(
+                id="forbids_unsupported_mcp_policy",
+                description=(
+                    "Steps must declare `mcp_policy` as one of the values in "
+                    "`ALLOWED_MCP_POLICIES` (i.e. every `FlowMcpPolicy` "
+                    "member). `flow_validators.py:183` raises "
+                    "`\"Step {order}: unsupported mcp_policy '{value}'.\"` "
+                    "when the policy falls outside this set."
+                ),
+            ),
+        ),
+        exposure="builder",
+        not_exposed_reason=None,
+    )
+
+
 def _seed_citation_sidecar_capability() -> FlowCapability:
     return FlowCapability(
         id="citation_sidecar",
@@ -435,6 +479,7 @@ CAPABILITY_REGISTRY: Mapping[CapabilityId, FlowCapability] = MappingProxyType(
             f"output_mode_{mode.value}": _seed_output_mode_capability(mode)
             for mode in FlowOutputMode
         },
+        "mcp_policy": _seed_mcp_policy_capability(),
         "citation_sidecar": _seed_citation_sidecar_capability(),
     }
 )
