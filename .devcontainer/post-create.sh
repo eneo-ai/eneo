@@ -25,14 +25,26 @@ sudo apt-get install -y libmagic1 ffmpeg
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 
+# The backend .venv is on a named Docker volume (see docker-compose.yml).
+# Docker creates named volume mount points as root:root, but post-create.sh
+# runs as vscode — without this chown, `uv sync` fails to write CACHEDIR.TAG.
+sudo chown vscode:vscode /workspace/backend/.venv
+
 # Install Python dependencies
+# Use --reinstall-package to ensure the project entry points are up-to-date
+# even when the .venv volume persists across container rebuilds
 cd /workspace/backend
-uv sync
+uv sync --reinstall-package intric
 
 # Install pre-commit globally and setup hooks
 cd /workspace
 uv tool install pre-commit
-pre-commit install
+LOCAL_HOOKS_PATH="$(git config --local --get core.hooksPath || true)"
+if [ -n "$LOCAL_HOOKS_PATH" ] && [ ! -d "$LOCAL_HOOKS_PATH" ]; then
+    echo "Resetting repo-local core.hooksPath ('$LOCAL_HOOKS_PATH') to Git default for the devcontainer"
+    git config --local --unset-all core.hooksPath
+fi
+pre-commit install --overwrite
 
 # Install Bun
 curl -fsSL https://bun.com/install | bash -s "bun-v1.3.0"
@@ -40,6 +52,8 @@ curl -fsSL https://bun.com/install | bash -s "bun-v1.3.0"
 # Add Bun to PATH for this session
 export PATH="$HOME/.bun/bin:$PATH"
 
-# Install frontend dependencies
+# Clean frontend node_modules to prevent stale native binaries (e.g. esbuild)
+# after container rebuilds where the workspace mount persists
 cd /workspace/frontend
+rm -rf node_modules packages/*/node_modules apps/*/node_modules
 bun run setup

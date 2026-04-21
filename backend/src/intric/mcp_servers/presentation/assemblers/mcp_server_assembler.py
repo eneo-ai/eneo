@@ -53,6 +53,7 @@ class MCPServerAssembler:
         self,
         encryption_service: "EncryptionService | None" = None,
     ):
+        super().__init__()
         self.encryption_service = encryption_service
 
     @staticmethod
@@ -122,6 +123,7 @@ class MCPServerSettingsAssembler:
         self,
         encryption_service: "EncryptionService | None" = None,
     ):
+        super().__init__()
         self.encryption_service = encryption_service
 
     def from_domain_to_model(self, mcp_server: MCPServer) -> MCPServerSettingsPublic:

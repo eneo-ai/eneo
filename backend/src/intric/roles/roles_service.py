@@ -14,8 +14,11 @@ from intric.roles.role import (
     RoleUpdateRequest,
 )
 from intric.roles.roles_repo import RolesRepository
-from intric.server.dependencies.predefined_roles import load_predefined_roles_from_config
+from intric.server.dependencies.predefined_roles import (
+    load_predefined_roles_from_config,
+)
 from intric.users.user import UserInDB
+from intric.users.user_repo import UsersRepository
 
 
 class RolesService:
@@ -23,19 +26,20 @@ class RolesService:
         self,
         user: UserInDB,
         repo: RolesRepository,
-        user_repo=None,
-    ):
+        user_repo: UsersRepository | None = None,
+    ) -> None:
         self.user = user
         self.repo = repo
         self.user_repo = user_repo
 
-    def _validate(self, role: RoleInDB, role_id: UUID):
+    def _validate(self, role: RoleInDB | None, role_id: UUID) -> RoleInDB:
         if role is None or self.user.tenant_id != role.tenant_id:
             raise NotFoundException(
                 f"Role {role_id} not found for tenant({self.user.tenant_id})"
             )
+        return role
 
-    async def get_permissions(self) -> dict:
+    async def get_permissions(self) -> list[PermissionPublic]:
         return [
             PermissionPublic(name=key, description=value)
             for key, value in PERMISSIONS_WITH_DESCRIPTION.items()
@@ -51,9 +55,7 @@ class RolesService:
     @validate_permissions(Permission.ADMIN)
     async def get_role_by_uuid(self, role_id: UUID) -> RoleInDB:
         role = await self.repo.get_role(role_id)
-        self._validate(role, role_id)
-
-        return role
+        return self._validate(role, role_id)
 
     async def _ensure_admin_survives(
         self, role: RoleInDB, removing_admin: bool, deleting: bool = False
@@ -90,7 +92,6 @@ class RolesService:
     @validate_permissions(Permission.ADMIN)
     async def update_role(self, role_update: RoleUpdateRequest, role_id: UUID):
         role = await self.get_role_by_uuid(role_id)
-        self._validate(role, role_id)
 
         # Check if admin permission is being removed
         removing_admin = (
@@ -107,7 +108,6 @@ class RolesService:
     @validate_permissions(Permission.ADMIN)
     async def delete_role(self, role_id: UUID):
         role = await self.get_role_by_uuid(role_id)
-        self._validate(role, role_id)
 
         await self._ensure_admin_survives(role, removing_admin=False, deleting=True)
 
@@ -122,7 +122,6 @@ class RolesService:
     @validate_permissions(Permission.ADMIN)
     async def reset_role_to_default(self, role_id: UUID) -> RoleInDB:
         role = await self.get_role_by_uuid(role_id)
-        self._validate(role, role_id)
 
         if not role.predefined_source:
             raise BadRequestException(
@@ -150,7 +149,9 @@ class RolesService:
             name=template["name"],
             permissions=template["permissions"],
         )
-        return await self.repo.update_role(role_update)
+        updated = await self.repo.update_role(role_update)
+        assert updated is not None
+        return updated
 
     @validate_permissions(Permission.ADMIN)
     async def get_all_roles(self):

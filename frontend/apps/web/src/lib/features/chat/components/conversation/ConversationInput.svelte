@@ -1,321 +1,337 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { slide } from 'svelte/transition';
-	import { quintOut } from 'svelte/easing';
-	import { browser } from '$app/environment';
-	import AttachmentUploadIconButton from '$lib/features/attachments/components/AttachmentUploadIconButton.svelte';
-	import { IconEnter } from '@intric/icons/enter';
-	import { IconStopCircle } from '@intric/icons/stop-circle';
-	import { Button, Input, Tooltip } from '@intric/ui';
-	import { getAttachmentManager } from '$lib/features/attachments/AttachmentManager';
-	import MentionInput from '../mentions/MentionInput.svelte';
-	import { initMentionInput } from '../mentions/MentionInput';
-	import MentionButton from '../mentions/MentionButton.svelte';
-	import { getChatService } from '../../ChatService.svelte';
-	import { IconWeb } from '@intric/icons/web';
-	import { track } from '$lib/core/helpers/track';
-	import { getAppContext } from '$lib/core/AppContext';
-	import { m } from '$lib/paraglide/messages';
-	import TokenUsageBar from '$lib/features/tokens/TokenUsageBar.svelte';
-	import { ChartPie, Wrench } from 'lucide-svelte';
+  import { onMount } from "svelte";
+  import { browser } from "$app/environment";
+  import AttachmentUploadIconButton from "$lib/features/attachments/components/AttachmentUploadIconButton.svelte";
+  import { IconEnter } from "@intric/icons/enter";
+  import { IconStopCircle } from "@intric/icons/stop-circle";
+  import { Button, Input, Tooltip } from "@intric/ui";
+  import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import MentionInput from "../mentions/MentionInput.svelte";
+  import { initMentionInput } from "../mentions/MentionInput";
+  import MentionButton from "../mentions/MentionButton.svelte";
+  import { getChatService } from "../../ChatService.svelte";
+  import { IconWeb } from "@intric/icons/web";
+  import { track } from "$lib/core/helpers/track";
+  import { getAppContext } from "$lib/core/AppContext";
+  import { m } from "$lib/paraglide/messages";
+  import { Wrench, AlertTriangle } from "lucide-svelte";
+  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
 
-	const chat = getChatService();
-	const { featureFlags } = getAppContext();
+  const chat = getChatService();
+  const { featureFlags } = getAppContext();
 
-	const {
-		state: { attachments, isUploading },
-		queueValidUploads,
-		clearUploads
-	} = getAttachmentManager();
+  const {
+    state: { attachments, isUploading },
+    queueValidUploads,
+    clearUploads
+  } = getAttachmentManager();
 
-	const {
-		states: { mentions, question },
-		resetMentionInput,
-		focusMentionInput
-	} = initMentionInput({
-		triggerCharacter: '@',
-		tools: () => chat.partner.tools,
-		onEnterPressed: ask
-	});
+  const {
+    states: { mentions, question },
+    resetMentionInput,
+    setQuestionText: _setQuestionText,
+    focusMentionInput
+  } = initMentionInput({
+    triggerCharacter: "@",
+    tools: () => chat.partner.tools,
+    onEnterPressed: ask
+  });
 
-	type Props = { scrollToBottom: () => void };
+  type Props = { scrollToBottom: () => void };
 
-	const { scrollToBottom }: Props = $props();
+  const { scrollToBottom }: Props = $props();
 
-	let abortController: AbortController | undefined;
-	const TOKEN_USAGE_STORAGE_KEY = 'tokenUsageEnabled';
-	const AUTO_ACCEPT_TOOLS_STORAGE_KEY = 'autoAcceptToolsEnabled';
-	let tokenUsageEnabled = $state(false);
-	let autoAcceptTools = $state(true);
-	let hasHydratedTokenPreference = $state(false);
-	let hasHydratedToolApprovalPreference = $state(false);
+  let abortController: AbortController | undefined;
+  const AUTO_ACCEPT_TOOLS_STORAGE_KEY = "autoAcceptToolsEnabled";
+  let autoAcceptTools = $state(true);
+  let hasHydratedToolApprovalPreference = $state(false);
 
-	onMount(() => {
-		if (!browser) {
-			hasHydratedTokenPreference = true;
-			hasHydratedToolApprovalPreference = true;
-			return;
-		}
+  onMount(() => {
+    if (!browser) {
+      hasHydratedToolApprovalPreference = true;
+      return;
+    }
 
-		try {
-			const storedPreference = window.localStorage.getItem(TOKEN_USAGE_STORAGE_KEY);
-			// Always default to false (OFF) - user must explicitly enable it
-			// Only restore if it was explicitly set to true by user
-			if (storedPreference === 'true') {
-				tokenUsageEnabled = true;
-			} else {
-				// Ensure it's false and clear any stale values
-				tokenUsageEnabled = false;
-				window.localStorage.setItem(TOKEN_USAGE_STORAGE_KEY, 'false');
-			}
-		} catch (error) {
-			console.warn('Unable to read token usage preference', error);
-		} finally {
-			hasHydratedTokenPreference = true;
-		}
+    // Load auto-accept tools preference (default to true = auto-accept)
+    try {
+      const storedAutoAccept = window.localStorage.getItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY);
+      if (storedAutoAccept === "false") {
+        autoAcceptTools = false;
+      } else {
+        autoAcceptTools = true;
+        window.localStorage.setItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY, "true");
+      }
+    } catch (error) {
+      console.warn("Unable to read auto-accept tools preference", error);
+    } finally {
+      hasHydratedToolApprovalPreference = true;
+    }
+  });
 
-		// Load auto-accept tools preference (default to true = auto-accept)
-		try {
-			const storedAutoAccept = window.localStorage.getItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY);
-			if (storedAutoAccept === 'false') {
-				autoAcceptTools = false;
-			} else {
-				autoAcceptTools = true;
-				window.localStorage.setItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY, 'true');
-			}
-		} catch (error) {
-			console.warn('Unable to read auto-accept tools preference', error);
-		} finally {
-			hasHydratedToolApprovalPreference = true;
-		}
-	});
+  $effect(() => {
+    if (!browser || !hasHydratedToolApprovalPreference) return;
 
-	$effect(() => {
-		if (!browser || !hasHydratedTokenPreference) return;
+    try {
+      window.localStorage.setItem(
+        AUTO_ACCEPT_TOOLS_STORAGE_KEY,
+        autoAcceptTools ? "true" : "false"
+      );
+    } catch (error) {
+      console.warn("Unable to persist auto-accept tools preference", error);
+    }
+  });
 
-		try {
-			window.localStorage.setItem(
-				TOKEN_USAGE_STORAGE_KEY,
-				tokenUsageEnabled ? 'true' : 'false'
-			);
-		} catch (error) {
-			console.warn('Unable to persist token usage preference', error);
-		}
-	});
+  function queueUploadsFromClipboard(event: ClipboardEvent) {
+    if (!event.clipboardData?.files || event.clipboardData.files.length === 0) return;
+    queueValidUploads([...event.clipboardData.files]);
+  }
 
-	$effect(() => {
-		if (!browser || !hasHydratedToolApprovalPreference) return;
+  let inputError = $state<{ message: string; details?: string } | null>(null);
+  let errorInputSnapshot = { question: "", attachmentIds: "" };
 
-		try {
-			window.localStorage.setItem(
-				AUTO_ACCEPT_TOOLS_STORAGE_KEY,
-				autoAcceptTools ? 'true' : 'false'
-			);
-		} catch (error) {
-			console.warn('Unable to persist auto-accept tools preference', error);
-		}
-	});
+  function parseTokenError(errorMessage: string): { used: number; limit: number } | null {
+    const match = errorMessage.match(/(\d[\d,]*)\s*tokens?\s*used.*?limit\s*(?:is\s*)?(\d[\d,]*)/i);
+    if (match) {
+      return {
+        used: parseInt(match[1].replace(/,/g, "")),
+        limit: parseInt(match[2].replace(/,/g, ""))
+      };
+    }
+    return null;
+  }
 
-	function queueUploadsFromClipboard(event: ClipboardEvent) {
-		if (!event.clipboardData?.files || event.clipboardData.files.length === 0) return;
-		queueValidUploads([...event.clipboardData.files]);
-	}
+  async function ask() {
+    if (isAskingDisabled) return;
+    inputError = null;
+    const webSearchEnabled = featureFlags.showWebSearch && useWebSearch;
+    const files = $attachments.map((file) => file?.fileRef).filter((file) => file !== undefined);
+    abortController = new AbortController();
+    const tools =
+      $mentions.length > 0
+        ? {
+            assistants: $mentions.map((mention) => {
+              return { id: mention.id, handle: mention.handle };
+            })
+          }
+        : undefined;
+    const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
+    scrollToBottom();
 
-	function ask() {
-		if (isAskingDisabled) return;
-		const webSearchEnabled = featureFlags.showWebSearch && useWebSearch;
-		const files = $attachments.map((file) => file?.fileRef).filter((file) => file !== undefined);
-		abortController = new AbortController();
-		const tools =
-			$mentions.length > 0
-				? {
-						assistants: $mentions.map((mention) => {
-							return { id: mention.id, handle: mention.handle };
-						})
-					}
-				: undefined;
-		// Require tool approval if auto-accept is OFF and the assistant has MCP tools
-		const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
-		chat.askQuestion($question, files, tools, webSearchEnabled, toolApprovalEnabled, abortController);
-		scrollToBottom();
-		resetMentionInput();
-		clearUploads();
-		// Reset all token tracking when message is sent
-		chat.resetNewPromptTokens();
-	}
+    try {
+      await chat.askQuestion(
+        $question,
+        files,
+        tools,
+        webSearchEnabled,
+        toolApprovalEnabled,
+        abortController
+      );
+      resetMentionInput();
+      clearUploads();
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const lower = errorMessage.toLowerCase();
+      const isContextError =
+        lower.includes("context window") ||
+        lower.includes("context length") ||
+        lower.includes("tokens used") ||
+        lower.includes("too long");
 
-	$effect(() => {
-		track(chat.partner, chat.currentConversation);
-		focusMentionInput();
-	});
+      if (isContextError) {
+        const tokenInfo = parseTokenError(errorMessage);
+        if (tokenInfo) {
+          const excess = tokenInfo.used - tokenInfo.limit;
+          inputError = {
+            message: m.context_window_exceeded(),
+            details: `${tokenInfo.used.toLocaleString()} / ${tokenInfo.limit.toLocaleString()} tokens (${excess.toLocaleString()} ${m.over()})`
+          };
+        } else {
+          inputError = { message: m.context_window_exceeded() };
+        }
+      } else {
+        inputError = { message: getErrorMessage(error) };
+      }
+      errorInputSnapshot = {
+        question: $question,
+        attachmentIds: $attachments
+          .map((a) => a.fileRef?.id ?? "")
+          .sort()
+          .join(",")
+      };
+    }
+  }
 
-	let useWebSearch = $state(false);
+  // Clear error when user changes input (text or attachments)
+  $effect(() => {
+    const q = $question;
+    const currentIds = $attachments
+      .map((a) => a.fileRef?.id ?? "")
+      .sort()
+      .join(",");
+    const snap = errorInputSnapshot;
+    if (snap.question && (q !== snap.question || currentIds !== snap.attachmentIds)) {
+      inputError = null;
+      errorInputSnapshot = { question: "", attachmentIds: "" };
+    }
+  });
 
-	const shouldShowMentionButton = $derived.by(() => {
-		const hasTools = chat.partner.tools.assistants.length > 0;
-		const isEnabled =
-			chat.partner.type === 'default-assistant' ||
-			('allow_mentions' in chat.partner && chat.partner.allow_mentions);
-		return hasTools && isEnabled;
-	});
+  $effect(() => {
+    track(chat.partner, chat.currentConversation);
+    focusMentionInput();
+  });
 
-	// Check if the assistant has MCP servers/tools
-	const hasMcpTools = $derived.by(() => {
-		if (!chat.partner) return false;
-		// Check for mcp_servers array on the partner
-		if ('mcp_servers' in chat.partner && Array.isArray(chat.partner.mcp_servers)) {
-			return chat.partner.mcp_servers.length > 0;
-		}
-		return false;
-	});
+  let useWebSearch = $state(false);
 
-	// --- Token Calculation and Coloring Logic ---
-	const historyTokens = $derived(chat.historyTokens);
-	const promptTokens = $derived(chat.promptTokens);
-	const newTokens = $derived(chat.newPromptTokens);
-	const modelInfo = $derived(chat.partner?.model_info || null);
-	const tokenLimit = $derived(chat.effectiveTokenLimit);
-	const isApproximate = $derived($question.length > 0);
+  const shouldShowMentionButton = $derived.by(() => {
+    const hasTools = chat.partner.tools.assistants.length > 0;
+    const isEnabled =
+      chat.partner.type === "default-assistant" ||
+      ("allow_mentions" in chat.partner && chat.partner.allow_mentions);
+    return hasTools && isEnabled;
+  });
 
-	const isOverTokenLimit = $derived(
-		tokenLimit > 0 && newTokens + historyTokens + promptTokens > tokenLimit
-	);
+  // Check if the assistant has MCP servers/tools
+  const hasMcpTools = $derived.by(() => {
+    if (!chat.partner) return false;
+    // Check for mcp_servers array on the partner
+    if ("mcp_servers" in chat.partner && Array.isArray(chat.partner.mcp_servers)) {
+      return chat.partner.mcp_servers.length > 0;
+    }
+    return false;
+  });
 
-	const isAskingDisabled = $derived(
-		chat.askQuestion.isLoading ||
-			$isUploading ||
-			($question === '' && $attachments.length === 0) ||
-			!chat.hasCompletionModel ||
-			isOverTokenLimit
-	);
-
-	$effect(() => {
-		const currentAttachments = $attachments
-			.filter((att) => att.fileRef)
-			.map((att) => ({
-				id: att.fileRef!.id,
-				size: att.fileRef!.size
-			}));
-
-		chat.calculateNewPromptTokens($question, currentAttachments);
-	});
-
-	const tokenUsagePercentage = $derived(() => {
-		if (!tokenLimit) return 0;
-		return ((newTokens + historyTokens + promptTokens) / tokenLimit) * 100;
-	});
-
-	const tokenUsageColorClass = $derived(() => {
-		if (!tokenLimit) return 'text-tertiary';
-		const percentage = tokenUsagePercentage();
-		const totalTokens = newTokens + historyTokens + promptTokens;
-
-		// If no tokens at all, keep it grey
-		if (totalTokens === 0) return 'text-tertiary';
-
-		// Match the semantic colors from TokenUsageBar
-		if (percentage >= 95) return 'text-negative-stronger';
-		if (percentage >= 85) return 'text-warning-stronger';
-		if (percentage >= 70) return 'text-warning-stronger';
-		return 'text-positive-stronger';
-	});
+  const isAskingDisabled = $derived(
+    chat.askQuestion.isLoading ||
+      $isUploading ||
+      ($question === "" && $attachments.length === 0) ||
+      !chat.hasCompletionModel
+  );
 </script>
 
 <form
-	class="border-default bg-primary ring-dimmer relative flex w-[100%] max-w-[74ch] flex-col border-t p-1.5 shadow-md ring-offset-0 transition-all duration-300 md:w-full md:rounded-xl md:border {chat.hasCompletionModel ? 'focus-within:border-stronger hover:border-stronger focus-within:shadow-lg hover:ring-4' : 'pointer-events-none opacity-50'}"
+  onsubmit={async (e) => {
+    e.preventDefault();
+    await ask();
+  }}
+  class="border-default bg-primary ring-dimmer relative flex w-[100%] max-w-[74ch] flex-col border-t p-1.5 shadow-md ring-offset-0 transition-all duration-300 md:w-full md:rounded-xl md:border {chat.hasCompletionModel
+    ? 'focus-within:border-stronger hover:border-stronger focus-within:shadow-lg hover:ring-4'
+    : ''}"
 >
-	<!-- Icon always absolutely positioned to prevent jumping -->
-	{#if modelInfo && tokenLimit > 0}
-		<div class="absolute top-2 right-2.5 z-10">
-			<Tooltip text={tokenUsageEnabled ? m.hide_token_details() : m.show_token_details()} placement="top">
-				<button
-					type="button"
-					onclick={(e) => {
-						e.stopPropagation();
-						tokenUsageEnabled = !tokenUsageEnabled;
-					}}
-					class="flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-200 hover:bg-black/5 {tokenUsageColorClass()}"
-					aria-label={tokenUsageEnabled ? m.hide_token_details() : m.show_token_details()}
-					aria-pressed={tokenUsageEnabled ? "true" : "false"}
-				>
-					<ChartPie class="h-4.5 w-4.5 transition-colors duration-200" />
-				</button>
-			</Tooltip>
-		</div>
-	{/if}
+  {#if !chat.hasCompletionModel}
+    <div
+      class="bg-primary/80 absolute inset-0 z-10 flex items-center justify-center rounded-xl backdrop-blur-[1px]"
+    >
+      <div class="text-secondary flex items-center gap-2 px-4 text-sm">
+        <AlertTriangle class="h-4 w-4 flex-shrink-0" />
+        <p>{m.no_completion_model_description()}</p>
+      </div>
+    </div>
+  {/if}
+  <div class="relative">
+    <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
+    {#if chat.askQuestion.isLoading}
+      <div
+        class="bg-primary/60 absolute inset-0 flex items-center justify-center rounded-lg backdrop-blur-[1px]"
+      >
+        <div class="text-secondary flex items-center gap-2 text-sm">
+          <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"
+            ></circle>
+            <path
+              class="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+            ></path>
+          </svg>
+          {m.generating_answer()}
+        </div>
+      </div>
+    {/if}
+  </div>
 
-	<!-- Usage bar slides in below, with smooth animation -->
-	{#if modelInfo && tokenLimit > 0 && tokenUsageEnabled}
-		<div
-			transition:slide={{ duration: 350, easing: quintOut, axis: 'y' }}
-		>
-			<div class="px-2 pt-1 pr-11 pb-2">
-			<TokenUsageBar tokens={newTokens} limit={tokenLimit} {historyTokens} {promptTokens} {isApproximate} />
-			</div>
-		</div>
-	{/if}
+  {#if inputError}
+    <div
+      class="text-negative-stronger bg-negative-dimmer/30 mt-1 flex items-start gap-2 rounded-md px-2 py-1.5 text-sm"
+    >
+      <AlertTriangle class="mt-0.5 h-4 w-4 flex-shrink-0" />
+      <div>
+        <p class="font-medium">{inputError.message}</p>
+        {#if inputError.details}
+          <p class="text-negative-stronger mt-0.5">{inputError.details}</p>
+        {/if}
+      </div>
+    </div>
+  {/if}
 
-	<MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
+  <div class="mt-2 flex justify-between">
+    <div
+      class="flex items-center gap-2 {chat.askQuestion.isLoading
+        ? 'pointer-events-none opacity-40'
+        : ''}"
+    >
+      <AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
+      {#if shouldShowMentionButton}
+        <MentionButton></MentionButton>
+      {/if}
 
-	<div class="flex justify-between mt-2">
-		<div class="flex items-center gap-2">
-			<AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
-			{#if shouldShowMentionButton}
-				<MentionButton></MentionButton>
-			{/if}
+      {#if chat.partner.type === "default-assistant" && featureFlags.showWebSearch}
+        <div
+          class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5"
+        >
+          <Input.Switch bind:value={useWebSearch} class="*:!cursor-pointer">
+            <span class="-mr-2 flex gap-1"><IconWeb></IconWeb>{m.search()}</span></Input.Switch
+          >
+        </div>
+      {/if}
 
-			{#if chat.partner.type === 'default-assistant' && featureFlags.showWebSearch}
-				<div
-					class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5"
-				>
-					<Input.Switch bind:value={useWebSearch} class="*:!cursor-pointer">
-						<span class="-mr-2 flex gap-1"><IconWeb></IconWeb>{m.search()}</span></Input.Switch
-					>
-				</div>
-			{/if}
+      {#if hasMcpTools}
+        <Tooltip
+          text={autoAcceptTools ? m.auto_accept_tools_on() : m.auto_accept_tools_off()}
+          placement="top"
+        >
+          <div
+            class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5 {autoAcceptTools
+              ? 'bg-accent-dimmer text-accent-stronger border-accent-default'
+              : ''}"
+          >
+            <Input.Switch bind:value={autoAcceptTools} class="*:!cursor-pointer">
+              <span class="-mr-2 flex items-center gap-1"
+                ><Wrench class="h-5 w-5" />{m.auto_accept_tools()}</span
+              >
+            </Input.Switch>
+          </div>
+        </Tooltip>
+      {/if}
+    </div>
 
-			{#if hasMcpTools}
-				<Tooltip text={autoAcceptTools ? m.auto_accept_tools_on() : m.auto_accept_tools_off()} placement="top">
-					<div
-						class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5 {autoAcceptTools ? 'bg-accent-dimmer text-accent-stronger border-accent-default' : ''}"
-					>
-						<Input.Switch bind:value={autoAcceptTools} class="*:!cursor-pointer">
-							<span class="-mr-2 flex items-center gap-1"><Wrench class="h-5 w-5" />{m.auto_accept_tools()}</span>
-						</Input.Switch>
-					</div>
-				</Tooltip>
-			{/if}
-		</div>
-
-		<div class="flex items-center gap-2">
-			{#if chat.askQuestion.isLoading}
-				<Tooltip text={m.cancel_your_request()} placement="top" let:trigger asFragment>
-					<Button
-						unstyled
-						aria-label={m.cancel_your_request()}
-						type="submit"
-						is={trigger}
-						onclick={() => abortController?.abort('User cancelled')}
-						name="ask"
-						class="bg-secondary hover:bg-hover-stronger disabled:bg-tertiary disabled:text-secondary flex h-9 items-center justify-center !gap-1 rounded-lg !pr-1 !pl-2"
-					>
-						{m.stop_answer()}
-						<IconStopCircle />
-					</Button>
-				</Tooltip>
-			{:else}
-				<Button
-					disabled={isAskingDisabled}
-					aria-label={m.submit_your_question()}
-					type="submit"
-					onclick={() => ask()}
-					name="ask"
-					class="bg-secondary hover:bg-hover-stronger disabled:bg-tertiary disabled:text-secondary flex h-9 items-center justify-center !gap-1 rounded-lg !pr-1 !pl-2"
-				>
-					{m.send()}
-					<IconEnter />
-				</Button>
-			{/if}
-		</div>
-	</div>
+    <div class="flex items-center gap-2">
+      {#if chat.askQuestion.isLoading}
+        <Tooltip text={m.cancel_your_request()} placement="top" let:trigger asFragment>
+          <Button
+            unstyled
+            aria-label={m.cancel_your_request()}
+            type="button"
+            is={trigger}
+            onclick={() => abortController?.abort("User cancelled")}
+            name="ask"
+            class="bg-secondary hover:bg-hover-stronger disabled:bg-tertiary disabled:text-secondary flex h-9 items-center justify-center !gap-1 rounded-lg !pr-1 !pl-2"
+          >
+            {m.stop_answer()}
+            <IconStopCircle />
+          </Button>
+        </Tooltip>
+      {:else}
+        <Button
+          disabled={isAskingDisabled}
+          aria-label={m.submit_your_question()}
+          type="submit"
+          name="ask"
+          class="bg-secondary hover:bg-hover-stronger disabled:bg-tertiary disabled:text-secondary flex h-9 items-center justify-center !gap-1 rounded-lg !pr-1 !pl-2"
+        >
+          {m.send()}
+          <IconEnter />
+        </Button>
+      {/if}
+    </div>
+  </div>
 </form>

@@ -4,26 +4,47 @@
   import UserEditor from "./editor/UserEditor.svelte";
   import UserTable from "./UserTable.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { goto, invalidate } from "$app/navigation";
+  import { goto } from "$app/navigation";
   import { page } from "$app/stores";
+  import ServerPagination from "$lib/components/ServerPagination.svelte";
+  import { SvelteURLSearchParams } from "svelte/reactivity";
+  import { untrack } from "svelte";
 
   // Svelte 5 runes mode: use $props() instead of export let
   let { data } = $props();
 
-  // Get search value and tab from URL params
-  const searchValue = $derived($page.url.searchParams.get('search') || '');
-  const currentTab = $derived($page.url.searchParams.get('tab') || 'active');
+  // Get search value and tab from URL params.
+  // Support both canonical `search` and legacy `search_email` links.
+  const searchValue = $derived(
+    $page.url.searchParams.get("search") || $page.url.searchParams.get("search_email") || ""
+  );
+  const currentTab = $derived($page.url.searchParams.get("tab") || "active");
 
   // Swedish number formatting for counts (e.g., 2828 → "2 828", 50000 → "50 000")
-  const numberFormatter = new Intl.NumberFormat('sv-SE');
+  const numberFormatter = new Intl.NumberFormat("sv-SE");
 
-  setAdminUserCtx({
-    roles: data.roles,
-    userGroups: data.userGroups
-  });
+  untrack(() =>
+    setAdminUserCtx({
+      roles: data.roles,
+      userGroups: data.userGroups
+    })
+  );
 
   // Reference to UserTable component to access filterValue
-  let userTableRef: any;
+  let userTableRef: UserTable;
+
+  function goToPage(newPage: number) {
+    const url = new URL($page.url);
+    if (newPage > 1) {
+      url.searchParams.set("page", String(newPage));
+    } else {
+      url.searchParams.delete("page");
+    }
+    // resolve() requires a typed RouteId literal — for dynamic URLs we build the
+    // URL by hand and skip resolve(), see eslint-disable below.
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
+    goto(url, { noScroll: true });
+  }
 
   // Watch built-in table filter and trigger server-side search with debouncing
   let debounceTimer: ReturnType<typeof setTimeout>;
@@ -33,23 +54,45 @@
       const filterVal = userTableRef.filterValue;
 
       // Subscribe to filter changes
+      let isInitialEmission = true;
       const unsubscribe = filterVal.subscribe((value: string) => {
+        if (isInitialEmission) {
+          isInitialEmission = false;
+          // Prevent initial empty table state from wiping URL-driven searches.
+          if (!value.trim() && searchValue.trim()) {
+            return;
+          }
+        }
+
         // Debounce navigation (250ms delay)
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
           const trimmed = value.trim();
 
+          // Skip if search value hasn't changed from current URL (avoids resetting page on mount)
+          const currentSearch = $page.url.searchParams.get("search") || "";
+          if (trimmed === currentSearch) return;
+
           // Only trigger search if empty OR >= 3 characters (matches backend validation)
           // Prevents unnecessary network requests and 400 errors for short searches
-          if (trimmed === '' || trimmed.length >= 3) {
-            // Preserve current tab when searching
-            const params = new URLSearchParams();
-            if (currentTab) params.set('tab', currentTab);
-            if (trimmed) params.set('search', trimmed);
+          if (trimmed === "" || trimmed.length >= 3) {
+            // Preserve current tab when searching, reset page to 1
+            const params = new SvelteURLSearchParams();
+            if (currentTab) params.set("tab", currentTab);
+            if (trimmed) params.set("search", trimmed);
 
-            const url = params.toString() ? `/admin/users?${params.toString()}` : '/admin/users';
+            const nextUrl = params.toString()
+              ? `/admin/users?${params.toString()}`
+              : "/admin/users";
+            const currentUrl = `${$page.url.pathname}${$page.url.search}`;
+            if (nextUrl === currentUrl) {
+              return;
+            }
 
-            goto(url, { noScroll: true, keepFocus: true, replaceState: true });
+            // resolve() requires a typed RouteId literal — for dynamic URLs we build the
+            // URL by hand and skip resolve().
+            // eslint-disable-next-line svelte/no-navigation-without-resolve
+            goto(nextUrl, { noScroll: true, keepFocus: true, replaceState: true });
           }
           // If 1-2 chars: silently ignore (no request, no error, better UX)
         }, 250);
@@ -96,14 +139,18 @@
     <UserEditor mode="create"></UserEditor>
   </Page.Header>
   <Page.Main>
-    <UserTable bind:this={userTableRef} users={data.users ?? []} />
+    <UserTable bind:this={userTableRef} users={data.users ?? []} initialFilterValue={searchValue} />
 
-    <!-- Pagination display -->
     {#if data.pagination}
-      <div class="mt-4 text-sm text-gray-600">
-        Showing page {data.pagination.page} of {data.pagination.total_pages}
-        ({data.pagination.total_count} total users{searchValue ? ` matching "${searchValue}"` : ''}, {data.users.length} on this page)
-      </div>
+      <ServerPagination
+        page={data.pagination.page}
+        totalPages={data.pagination.total_pages}
+        totalCount={data.pagination.total_count}
+        pageSize={data.pagination.page_size}
+        hasNext={data.pagination.has_next}
+        hasPrevious={data.pagination.has_previous}
+        on:change={(e) => goToPage(e.detail)}
+      />
     {/if}
   </Page.Main>
 </Page.Root>

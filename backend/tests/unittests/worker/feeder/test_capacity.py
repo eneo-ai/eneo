@@ -78,9 +78,7 @@ class TestGetTenantSettings:
         mock_sessionmanager.session.return_value = mock_session_cm
 
         # Patch at the actual import location (database module), not capacity module
-        with patch(
-            "intric.database.database.sessionmanager", mock_sessionmanager
-        ):
+        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             manager = CapacityManager(redis_mock)
             result = await manager.get_tenant_settings(tenant_id)
 
@@ -114,9 +112,7 @@ class TestGetTenantSettings:
         mock_sessionmanager.session.return_value = mock_session_cm
 
         # Patch at the actual import location (database module), not capacity module
-        with patch(
-            "intric.database.database.sessionmanager", mock_sessionmanager
-        ):
+        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             manager = CapacityManager(redis_mock)
             result = await manager.get_tenant_settings(tenant_id)
 
@@ -140,9 +136,7 @@ class TestGetTenantSettings:
         mock_sessionmanager.session.return_value = mock_session_cm
 
         # Patch at the actual import location (database module), not capacity module
-        with patch(
-            "intric.database.database.sessionmanager", mock_sessionmanager
-        ):
+        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             manager = CapacityManager(redis_mock)
             result = await manager.get_tenant_settings(tenant_id)
 
@@ -227,13 +221,16 @@ class TestTryAcquireSlot:
         redis_mock = MagicMock()
         tenant_id = uuid4()
 
-        with patch(
-            "intric.worker.feeder.capacity.LuaScripts.acquire_slot",
-            new_callable=AsyncMock,
-            return_value=1,
-        ) as mock_acquire, patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
-            side_effect=[10, 300],  # max_concurrent, then ttl
+        with (
+            patch(
+                "intric.worker.feeder.capacity.LuaScripts.acquire_slot",
+                new_callable=AsyncMock,
+                return_value=1,
+            ) as mock_acquire,
+            patch(
+                "intric.worker.feeder.capacity.get_crawler_setting",
+                side_effect=[10, 300],  # max_concurrent, then ttl
+            ),
         ):
             manager = CapacityManager(redis_mock, settings=mock_settings)
             result = await manager.try_acquire_slot(tenant_id)
@@ -249,13 +246,16 @@ class TestTryAcquireSlot:
         redis_mock = MagicMock()
         tenant_id = uuid4()
 
-        with patch(
-            "intric.worker.feeder.capacity.LuaScripts.acquire_slot",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
-            side_effect=[10, 300],
+        with (
+            patch(
+                "intric.worker.feeder.capacity.LuaScripts.acquire_slot",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "intric.worker.feeder.capacity.get_crawler_setting",
+                side_effect=[10, 300],
+            ),
         ):
             manager = CapacityManager(redis_mock, settings=mock_settings)
             result = await manager.try_acquire_slot(tenant_id)
@@ -270,13 +270,16 @@ class TestTryAcquireSlot:
         redis_mock = MagicMock()
         tenant_id = uuid4()
 
-        with patch(
-            "intric.worker.feeder.capacity.LuaScripts.acquire_slot",
-            new_callable=AsyncMock,
-            side_effect=Exception("Redis error"),
-        ), patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
-            side_effect=[10, 300],
+        with (
+            patch(
+                "intric.worker.feeder.capacity.LuaScripts.acquire_slot",
+                new_callable=AsyncMock,
+                side_effect=Exception("Redis error"),
+            ),
+            patch(
+                "intric.worker.feeder.capacity.get_crawler_setting",
+                side_effect=[10, 300],
+            ),
         ):
             manager = CapacityManager(redis_mock, settings=mock_settings)
             result = await manager.try_acquire_slot(tenant_id)
@@ -295,12 +298,15 @@ class TestReleaseSlot:
         redis_mock = MagicMock()
         tenant_id = uuid4()
 
-        with patch(
-            "intric.worker.feeder.capacity.LuaScripts.release_slot",
-            new_callable=AsyncMock,
-        ) as mock_release, patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
-            return_value=300,
+        with (
+            patch(
+                "intric.worker.feeder.capacity.LuaScripts.release_slot",
+                new_callable=AsyncMock,
+            ) as mock_release,
+            patch(
+                "intric.worker.feeder.capacity.get_crawler_setting",
+                return_value=300,
+            ),
         ):
             manager = CapacityManager(redis_mock, settings=mock_settings)
             await manager.release_slot(tenant_id)
@@ -315,13 +321,16 @@ class TestReleaseSlot:
         redis_mock = MagicMock()
         tenant_id = uuid4()
 
-        with patch(
-            "intric.worker.feeder.capacity.LuaScripts.release_slot",
-            new_callable=AsyncMock,
-            side_effect=Exception("Redis error"),
-        ), patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
-            return_value=300,
+        with (
+            patch(
+                "intric.worker.feeder.capacity.LuaScripts.release_slot",
+                new_callable=AsyncMock,
+                side_effect=Exception("Redis error"),
+            ),
+            patch(
+                "intric.worker.feeder.capacity.get_crawler_setting",
+                return_value=300,
+            ),
         ):
             manager = CapacityManager(redis_mock, settings=mock_settings)
             # Should not raise
@@ -340,12 +349,15 @@ class TestGetAvailableCapacity:
         redis_mock.get = AsyncMock(return_value=None)
         tenant_id = uuid4()
 
-        with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
-            return_value=10,
-        ), patch(
-            "intric.worker.feeder.capacity.LuaScripts.slot_key",
-            return_value=f"tenant:{tenant_id}:active_jobs",
+        with (
+            patch(
+                "intric.worker.feeder.capacity.get_crawler_setting",
+                return_value=10,
+            ),
+            patch(
+                "intric.worker.feeder.capacity.LuaScripts.slot_key",
+                return_value=f"tenant:{tenant_id}:active_jobs",
+            ),
         ):
             manager = CapacityManager(redis_mock, settings=mock_settings)
             result = await manager.get_available_capacity(tenant_id)
@@ -361,12 +373,15 @@ class TestGetAvailableCapacity:
         redis_mock.get = AsyncMock(return_value=b"3")
         tenant_id = uuid4()
 
-        with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
-            return_value=10,
-        ), patch(
-            "intric.worker.feeder.capacity.LuaScripts.slot_key",
-            return_value=f"tenant:{tenant_id}:active_jobs",
+        with (
+            patch(
+                "intric.worker.feeder.capacity.get_crawler_setting",
+                return_value=10,
+            ),
+            patch(
+                "intric.worker.feeder.capacity.LuaScripts.slot_key",
+                return_value=f"tenant:{tenant_id}:active_jobs",
+            ),
         ):
             manager = CapacityManager(redis_mock, settings=mock_settings)
             result = await manager.get_available_capacity(tenant_id)
@@ -382,12 +397,15 @@ class TestGetAvailableCapacity:
         redis_mock.get = AsyncMock(return_value=b"10")
         tenant_id = uuid4()
 
-        with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
-            return_value=10,
-        ), patch(
-            "intric.worker.feeder.capacity.LuaScripts.slot_key",
-            return_value=f"tenant:{tenant_id}:active_jobs",
+        with (
+            patch(
+                "intric.worker.feeder.capacity.get_crawler_setting",
+                return_value=10,
+            ),
+            patch(
+                "intric.worker.feeder.capacity.LuaScripts.slot_key",
+                return_value=f"tenant:{tenant_id}:active_jobs",
+            ),
         ):
             manager = CapacityManager(redis_mock, settings=mock_settings)
             result = await manager.get_available_capacity(tenant_id)
@@ -403,12 +421,15 @@ class TestGetAvailableCapacity:
         redis_mock.get = AsyncMock(side_effect=Exception("Redis error"))
         tenant_id = uuid4()
 
-        with patch(
-            "intric.worker.feeder.capacity.get_crawler_setting",
-            return_value=10,
-        ), patch(
-            "intric.worker.feeder.capacity.LuaScripts.slot_key",
-            return_value=f"tenant:{tenant_id}:active_jobs",
+        with (
+            patch(
+                "intric.worker.feeder.capacity.get_crawler_setting",
+                return_value=10,
+            ),
+            patch(
+                "intric.worker.feeder.capacity.LuaScripts.slot_key",
+                return_value=f"tenant:{tenant_id}:active_jobs",
+            ),
         ):
             manager = CapacityManager(redis_mock, settings=mock_settings)
             result = await manager.get_available_capacity(tenant_id)
@@ -553,10 +574,12 @@ class TestGetMinimumFeederInterval:
     @pytest.fixture
     def mock_crawler_setting_passthrough(self):
         """Return a mock that passes through tenant settings or uses default."""
+
         def _mock(name, tenant_settings, default=None):
             if tenant_settings and name in tenant_settings:
                 return tenant_settings[name]
             return default
+
         return _mock
 
     # --- Core Contract Tests ---

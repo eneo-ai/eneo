@@ -1,12 +1,12 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from intric.assistants.api.assistant_models import (
     AssistantPublic,
     AssistantType,
     DefaultAssistant,
+    MCPServerPublicDict,
     ModelInfo,
 )
-from intric.tokens.token_utils import count_assistant_prompt_tokens
 from intric.assistants.assistant import Assistant
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.completion_models.presentation.completion_model_assembler import (
@@ -27,19 +27,27 @@ from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
 )
 from intric.prompts.api.prompt_assembler import PromptAssembler
 from intric.questions.question import ToolAssistant, UseTools
+from intric.tokens.token_utils import count_assistant_prompt_tokens
 from intric.users.user import UserInDB
 from intric.websites.presentation.website_models import WebsitePublic
 
 if TYPE_CHECKING:
+    from intric.ai_models.completion_models.completion_model import (
+        CompletionModelSparse,
+    )
+    from intric.completion_models.domain.completion_model import CompletionModel
     from intric.main.models import ResourcePermission
 
 
 class AssistantAssembler:
     def __init__(self, user: UserInDB, prompt_assembler: PromptAssembler):
+        super().__init__()
         self.user = user
         self.prompt_assembler = prompt_assembler
 
-    def _get_completion_model_sparse(self, model):
+    def _get_completion_model_sparse(
+        self, model: "CompletionModel | None"
+    ) -> "CompletionModelSparse | None":
         """
         Convert any completion model type to a CompletionModelSparse.
         Returns None if no model is provided.
@@ -47,7 +55,9 @@ class AssistantAssembler:
         if model is None:
             return None
 
-        return CompletionModelAssembler.from_completion_model_to_sparse(completion_model=model)
+        return CompletionModelAssembler.from_completion_model_to_sparse(
+            completion_model=model
+        )
 
     def _get_prompt(self, assistant: Assistant):
         return (
@@ -57,7 +67,10 @@ class AssistantAssembler:
         )
 
     def _get_attachments(self, assistant: Assistant):
-        return [FilePublic(**attachment.model_dump()) for attachment in assistant.attachments]
+        return [
+            FilePublic(**attachment.model_dump())
+            for attachment in assistant.attachments
+        ]
 
     def _get_allowed_attachments(self):
         return FileRestrictions(
@@ -71,12 +84,14 @@ class AssistantAssembler:
     def from_assistant_to_model(
         self,
         assistant: Assistant,
-        permissions: list["ResourcePermission"] = None,
-    ):
+        permissions: list["ResourcePermission"] | None = None,
+    ) -> AssistantPublic:
         permissions = permissions or []
 
         prompt = self._get_prompt(assistant)
-        completion_model = self._get_completion_model_sparse(model=assistant.completion_model)
+        completion_model = self._get_completion_model_sparse(
+            model=assistant.completion_model
+        )
         attachments = self._get_attachments(assistant)
         allowed_attachments = self._get_allowed_attachments()
         tools = UseTools(
@@ -86,10 +101,15 @@ class AssistantAssembler:
             ]
         )
 
-        groups = [CollectionPublic.from_domain(collection=group) for group in assistant.collections]
+        groups = [
+            CollectionPublic.from_domain(collection=group)
+            for group in assistant.collections
+        ]
 
-        integration_knowledge_list = IntegrationKnowledgeAssembler.to_knowledge_model_list(
-            items=assistant.integration_knowledge_list
+        integration_knowledge_list = (
+            IntegrationKnowledgeAssembler.to_knowledge_model_list(
+                items=assistant.integration_knowledge_list
+            )
         )
 
         # Calculate model info
@@ -116,6 +136,13 @@ class AssistantAssembler:
                 prompt_tokens=prompt_tokens,
             )
 
+        mcp_servers: list[MCPServerPublicDict] = [
+            cast(MCPServerPublicDict, MCPServerAssembler.to_dict_with_tools(server))
+            for server in assistant.mcp_servers
+        ]
+
+        assert assistant.user is not None
+
         return AssistantPublic(
             created_at=assistant.created_at,
             updated_at=assistant.updated_at,
@@ -127,12 +154,11 @@ class AssistantAssembler:
             allowed_attachments=allowed_attachments,
             user=assistant.user,
             groups=groups,
-            websites=[WebsitePublic.from_domain(website) for website in assistant.websites],
-            integration_knowledge_list=integration_knowledge_list,
-            mcp_servers=[
-                MCPServerAssembler.to_dict_with_tools(server)
-                for server in assistant.mcp_servers
+            websites=[
+                WebsitePublic.from_domain(website) for website in assistant.websites
             ],
+            integration_knowledge_list=integration_knowledge_list,
+            mcp_servers=mcp_servers,
             mcp_tools=[],  # Initialize as empty - frontend will track changes from current state
             completion_model=completion_model,
             completion_model_kwargs=assistant.completion_model_kwargs,

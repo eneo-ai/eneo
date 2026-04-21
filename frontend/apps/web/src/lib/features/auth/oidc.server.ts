@@ -7,7 +7,11 @@ import { getBackendUrl } from "$lib/core/environment.server";
 import { setFrontendAuthCookie } from "./auth.server";
 import { LoginError } from "./LoginError";
 
-export async function loginWithOidc(code: string, state: string, fetchFn: typeof fetch = fetch): Promise<boolean> {
+export async function loginWithOidc(
+  code: string,
+  state: string,
+  fetchFn: typeof fetch = fetch
+): Promise<boolean> {
   const resolvedBackendUrl = getBackendUrl();
   if (!resolvedBackendUrl) {
     console.error("[OIDC] Missing ENEO_BACKEND_URL configuration");
@@ -44,9 +48,8 @@ export async function loginWithOidc(code: string, state: string, fetchFn: typeof
       }
 
       const correlationId = response.headers.get("X-Correlation-ID") || undefined;
-      const rawDetail = typeof errorDetails === 'object' && errorDetails?.detail
-        ? errorDetails.detail
-        : undefined;
+      const rawDetail =
+        typeof errorDetails === "object" && errorDetails?.detail ? errorDetails.detail : undefined;
 
       console.error("[OIDC] Backend callback failed", {
         status: response.status,
@@ -59,7 +62,7 @@ export async function loginWithOidc(code: string, state: string, fetchFn: typeof
       if (response.status === 400) {
         console.error(
           `[OIDC] Invalid or expired state - user took too long to authenticate. ` +
-          `Backend correlation_id: ${correlationId || "N/A"}`
+            `Backend correlation_id: ${correlationId || "N/A"}`
         );
         throw new LoginError("oidc", "DECODE_ERROR", "", {
           correlationId,
@@ -69,7 +72,7 @@ export async function loginWithOidc(code: string, state: string, fetchFn: typeof
       } else if (response.status === 401) {
         console.error(
           `[OIDC] Token validation failed - IdP rejected authentication. ` +
-          `Backend correlation_id: ${correlationId || "N/A"}`
+            `Backend correlation_id: ${correlationId || "N/A"}`
         );
         throw new LoginError("oidc", "UNAUTHORIZED", "", {
           correlationId,
@@ -79,7 +82,7 @@ export async function loginWithOidc(code: string, state: string, fetchFn: typeof
       } else if (response.status === 403) {
         console.error(
           `[OIDC] Access forbidden - domain not allowed or user not found. ` +
-          `Backend correlation_id: ${correlationId || "N/A"}`
+            `Backend correlation_id: ${correlationId || "N/A"}`
         );
         throw new LoginError("oidc", "FORBIDDEN", "", {
           correlationId,
@@ -88,8 +91,7 @@ export async function loginWithOidc(code: string, state: string, fetchFn: typeof
         });
       } else if (response.status === 404) {
         console.error(
-          `[OIDC] User or tenant not found. ` +
-          `Backend correlation_id: ${correlationId || "N/A"}`
+          `[OIDC] User or tenant not found. ` + `Backend correlation_id: ${correlationId || "N/A"}`
         );
         throw new LoginError("oidc", "NO_TOKEN", "", {
           correlationId,

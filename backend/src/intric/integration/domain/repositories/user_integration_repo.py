@@ -9,15 +9,17 @@ if TYPE_CHECKING:
 
 class UserIntegrationRepository(ABC):
     @abstractmethod
-    async def query(self, **filters) -> list["UserIntegration"]: ...
+    async def query(self, **filters: object) -> list["UserIntegration"]: ...
 
     @abstractmethod
     async def one_or_none(
-        self, id: "UUID | None" = None, **filters
+        self, id: "UUID | None" = None, **filters: object
     ) -> "UserIntegration | None": ...
 
     @abstractmethod
-    async def one(self, id: "UUID | None" = None, **filters) -> "UserIntegration": ...
+    async def one(
+        self, id: "UUID | None" = None, **filters: object
+    ) -> "UserIntegration": ...
 
     @abstractmethod
     async def add(self, obj: "UserIntegration") -> "UserIntegration": ...

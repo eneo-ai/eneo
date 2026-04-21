@@ -34,7 +34,7 @@ export function getAttachmentRules(params: {
   );
 
   return {
-    maxTotalCount: limits.attachments.max_in_question,
+    maxTotalCount: Infinity,
     acceptedFormats: formats.map(({ mimetype, size }) => {
       return {
         mimetype,

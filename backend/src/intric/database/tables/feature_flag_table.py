@@ -8,7 +8,7 @@ from intric.database.tables.tenant_table import Tenants
 
 
 class GlobalFeatureFlag(BasePublic):
-    __tablename__ = "global_feature_flags"
+    __tablename__ = "global_feature_flags"  # type: ignore[assignment]
 
     name: Mapped[str] = mapped_column(nullable=False, unique=True)
     description: Mapped[str] = mapped_column(nullable=True)
@@ -16,7 +16,7 @@ class GlobalFeatureFlag(BasePublic):
 
 
 class TenantFeatureFlag(BaseCrossReference):
-    __tablename__ = "tenant_feature_flags"
+    __tablename__ = "tenant_feature_flags"  # type: ignore[assignment]
 
     name: Mapped[str] = mapped_column(nullable=False)
     feature_id: Mapped[UUID] = mapped_column(

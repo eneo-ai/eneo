@@ -16,7 +16,9 @@
 
   let tenantIntegrations = $derived.by(() => {
     // Filter out integrations that are not yet ready (e.g., Confluence)
-    let integrations = $state(data.tenantIntegrations.filter(i => i.integration_type === "sharepoint"));
+    let integrations = $state(
+      data.tenantIntegrations.filter((i) => i.integration_type === "sharepoint")
+    );
     return integrations;
   });
 
@@ -30,9 +32,9 @@
   const loadSharePointStatus = createAsyncState(async () => {
     try {
       const config = await data.intric.client.fetch("/api/v1/admin/sharepoint/app", {
-        method: "get",
-        params: {}
-      });
+        method: "get"
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped admin endpoint not in OpenAPI spec
+      } as any);
       sharePointConfigStatus = config ? "configured" : "not_configured";
     } catch (error) {
       console.error("Failed to load SharePoint config status:", error);
@@ -81,30 +83,38 @@
                     {#if isSharePoint(integration)}
                       <!-- SharePoint: Show config status and configure button -->
                       {#if sharePointConfigStatus === "loading"}
-                        <span class="inline-flex items-center rounded-md bg-secondary px-2 py-1 text-xs font-medium text-secondary">
+                        <span
+                          class="bg-secondary text-secondary inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
+                        >
                           {m.integration_status_loading()}
                         </span>
                       {:else if sharePointConfigStatus === "configured"}
-                        <span class="inline-flex items-center rounded-md bg-positive-dimmer px-2 py-1 text-xs font-medium text-positive-stronger">
+                        <span
+                          class="bg-positive-dimmer text-positive-stronger inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
+                        >
                           {m.integration_status_configured()}
                         </span>
                       {:else}
-                        <span class="inline-flex items-center rounded-md bg-secondary px-2 py-1 text-xs font-medium text-secondary">
+                        <span
+                          class="bg-secondary text-secondary inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
+                        >
                           {m.integration_status_not_configured()}
                         </span>
                       {/if}
 
                       <Button
-                        variant={sharePointConfigStatus === "configured" ? "secondary" : "primary"}
-                        onclick={() => $showSharePointConfigDialog = true}
+                        variant={sharePointConfigStatus === "configured" ? "outlined" : "primary"}
+                        onclick={() => ($showSharePointConfigDialog = true)}
                       >
-                        {sharePointConfigStatus === "configured" ? m.update_configuration() : m.configure_sharepoint_app()}
+                        {sharePointConfigStatus === "configured"
+                          ? m.update_configuration()
+                          : m.configure_sharepoint_app()}
                       </Button>
 
                       {#if sharePointConfigStatus === "configured"}
                         <Button
-                          variant="secondary"
-                          onclick={() => showWebhookManagement = !showWebhookManagement}
+                          variant="outlined"
+                          onclick={() => (showWebhookManagement = !showWebhookManagement)}
                         >
                           {showWebhookManagement ? m.hide_webhooks() : m.manage_webhooks()}
                         </Button>
@@ -118,20 +128,22 @@
                         >
                           {m.delete_sharepoint_app()}
                         </Button>
-                        <p class="text-xs text-secondary mt-1">
+                        <p class="text-secondary mt-1 text-xs">
                           {m.organization_access_enabled()}
                         </p>
                       {:else}
-                        <p class="text-xs text-secondary mt-1">
+                        <p class="text-secondary mt-1 text-xs">
                           {m.configure_azure_ad_app()}
                         </p>
                       {/if}
                     {:else}
                       <!-- Other integrations: Coming soon -->
-                      <span class="inline-flex items-center rounded-md bg-secondary px-2 py-1 text-xs font-medium text-secondary">
+                      <span
+                        class="bg-secondary text-secondary inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
+                      >
                         {m.coming_soon()}
                       </span>
-                      <p class="text-xs text-secondary mt-1">
+                      <p class="text-secondary mt-1 text-xs">
                         {m.configuration_options_available_soon()}
                       </p>
                     {/if}
@@ -143,7 +155,7 @@
 
           <!-- SharePoint Webhook Management (expanded when button clicked) -->
           {#if showWebhookManagement && sharePointConfigStatus === "configured"}
-            <div class="mt-6 rounded-lg border border-border bg-background p-6">
+            <div class="border-border bg-background mt-6 rounded-lg border p-6">
               <SharePointSubscriptions intric={data.intric} />
             </div>
           {/if}
@@ -155,16 +167,20 @@
           title={m.personal_integrations()}
           description={m.personal_integrations_description()}
         >
-          <div class="rounded-md border border-accent-default bg-accent-dimmer p-4">
+          <div class="border-accent-default bg-accent-dimmer rounded-md border p-4">
             <div class="flex items-start gap-3">
               <div class="flex-shrink-0">
-                <svg class="h-5 w-5 text-accent-default" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clip-rule="evenodd" />
+                <svg class="text-accent-default h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path
+                    fill-rule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z"
+                    clip-rule="evenodd"
+                  />
                 </svg>
               </div>
               <div class="flex-1 text-sm">
-                <h3 class="font-medium text-accent-stronger">{m.how_integrations_work()}</h3>
-                <ul class="mt-2 space-y-1 text-accent-default list-disc list-inside">
+                <h3 class="text-accent-stronger font-medium">{m.how_integrations_work()}</h3>
+                <ul class="text-accent-default mt-2 list-inside list-disc space-y-1">
                   <li>{m.personal_spaces_description()}</li>
                   <li>{m.shared_spaces_description()}</li>
                   <li>{m.no_person_dependency_description()}</li>

@@ -1,13 +1,17 @@
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, UploadFile
+from fastapi import APIRouter, Depends, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from intric.ai_models.embedding_models.datastore.datastore_models import (
     SemanticSearchRequest,
     SemanticSearchResponse,
 )
-from intric.authentication.auth_dependencies import get_current_active_user
+from intric.authentication.auth_dependencies import (
+    get_current_active_user,
+    get_scope_filter,
+)
 from intric.collections.presentation.collection_models import (
     CollectionPublic,
     CollectionUpdate,
@@ -20,6 +24,7 @@ from intric.groups_legacy.api.group_models import (
 from intric.info_blobs import info_blob_protocol
 from intric.info_blobs.info_blob import (
     InfoBlobAdd,
+    InfoBlobInDB,
     InfoBlobPublic,
     InfoBlobPublicNoText,
 )
@@ -41,10 +46,17 @@ router = APIRouter()
     "/",
     response_model=PaginatedResponse[GroupPublicWithMetadata],
     deprecated=True,
+    description=(
+        "Legacy groups endpoint. Use collections/spaces instead for new integrations."
+    ),
 )
-async def get_groups(container: Container = Depends(get_container(with_user=True))):
+async def get_groups(
+    request: Request,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    scope_filter = get_scope_filter(request)
     service = container.group_service()
-    groups = await service.get_groups_for_user()
+    groups = await service.get_groups_for_user(space_id_filter=scope_filter.space_id)
     counts = await service.get_counts_for_groups(groups)
     groups_public = group_protocol.to_groups_public_with_metadata(groups, counts)
 
@@ -56,26 +68,36 @@ async def get_groups(container: Container = Depends(get_container(with_user=True
     response_model=CollectionPublic,
     responses=responses.get_responses([404]),
 )
-async def get_group_by_id(id: UUID, container: Container = Depends(get_container(with_user=True))):
+async def get_group_by_id(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
     service = container.collection_crud_service()
     collection = await service.get_collection(id)
 
     return CollectionPublic.from_domain(collection=collection)
 
 
-@router.post("/", response_model=GroupPublicWithMetadata, deprecated=True)
+@router.post(
+    "/",
+    response_model=GroupPublicWithMetadata,
+    deprecated=True,
+    description=(
+        "Legacy groups endpoint. Use collections/spaces instead for new integrations."
+    ),
+)
 async def create_group(
     group: CreateGroupRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Valid values for `embedding_model` are the provided by `GET /api/v1/settings/models/`.
     Use the `name` field of the response from this endpoint.
     """
     service = container.group_service()
-    group = await service.create_group(group)
+    created_group = await service.create_group(group)
 
-    return group_protocol.to_group_public_with_metadata(group, num_info_blobs=0)
+    return group_protocol.to_group_public_with_metadata(created_group, num_info_blobs=0)
 
 
 @router.post(
@@ -86,7 +108,7 @@ async def create_group(
 async def update_group(
     id: UUID,
     group: CollectionUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
@@ -95,7 +117,9 @@ async def update_group(
     current_user = container.user()
 
     # Update collection
-    collection_updated = await service.update_collection(collection_id=id, name=group.name)
+    collection_updated = await service.update_collection(
+        collection_id=id, name=group.name
+    )
 
     # Get space for context
     space = None
@@ -142,7 +166,8 @@ async def update_group(
     responses=responses.get_responses([404]),
 )
 async def delete_group_by_id(
-    id: UUID, container: Container = Depends(get_container(with_user=True))
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
@@ -190,7 +215,10 @@ async def delete_group_by_id(
         },
     )
 
-    return JSONResponse({"id": str(id), "deletion_info": {"success": True}}, status_code=200)
+    return JSONResponse(
+        {"id": str(id), "deletion_info": {"success": True}}, status_code=200
+    )
+
 
 @router.post(
     "/{id}/info-blobs/",
@@ -200,8 +228,8 @@ async def delete_group_by_id(
 async def add_info_blobs(
     id: UUID,
     info_blobs: InfoBlobUpsertRequest,
-    container: Container = Depends(get_container(with_user=True)),
-    current_user: UserInDB = Depends(get_current_active_user),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
 ):
     """Maximum allowed simultaneous upload is 128.
 
@@ -226,12 +254,17 @@ async def add_info_blobs(
     ]
 
     service = container.info_blob_service()
-    info_blobs_added = await service.add_info_blobs(group_id=id, info_blobs=info_blobs_to_add)
+    info_blobs_added = await service.add_info_blobs(
+        group_id=id, info_blobs=info_blobs_to_add
+    )
 
     # Add to datastore
-    info_blobs_updated = []
+    info_blobs_updated: list[InfoBlobInDB] = []
     for info_blob in info_blobs_added:
-        await datastore.add(info_blob=info_blob, embedding_model=group.embedding_model)
+        await datastore.add(
+            info_blob=info_blob,
+            embedding_model=group.embedding_model,
+        )
         info_blob_updated = await service.update_info_blob_size(info_blob.id)
         info_blobs_updated.append(info_blob_updated)
 
@@ -287,13 +320,14 @@ async def add_info_blobs(
 )
 async def get_info_blobs(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.info_blob_service()
     info_blobs_in_db = await service.get_by_group(id)
 
     info_blobs_public = [
-        info_blob_protocol.to_info_blob_public_no_text(blob) for blob in info_blobs_in_db
+        info_blob_protocol.to_info_blob_public_no_text(blob)
+        for blob in info_blobs_in_db
     ]
 
     return protocol.to_paginated_response(info_blobs_public)
@@ -308,7 +342,7 @@ async def get_info_blobs(
 async def upload_file(
     id: UUID,
     file: UploadFile,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Starts a job, use the job operations to keep track of this job"""
     from intric.audit.domain.action_types import ActionType
@@ -320,9 +354,12 @@ async def upload_file(
     # Get group info for context
     group = await group_service.get_group(id)
 
-    # Upload file to group
+    # Upload file to group; content_type and filename can be None per FastAPI spec
     result = await group_service.add_file_to_group(
-        group_id=id, file=file.file, mimetype=file.content_type, filename=file.filename
+        group_id=id,
+        file=file.file,
+        mimetype=file.content_type or "",
+        filename=file.filename or "",
     )
 
     # Get space for context
@@ -371,7 +408,7 @@ async def upload_file(
 async def run_semantic_search(
     id: UUID,
     search_parameters: SemanticSearchRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.collection_crud_service()
     datastore = container.datastore()
@@ -393,7 +430,9 @@ async def run_semantic_search(
 async def transfer_group_to_space(
     id: UUID,
     transfer_req: TransferRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.resource_mover_service()
-    await service.move_collection_to_space(collection_id=id, space_id=transfer_req.target_space_id)
+    await service.move_collection_to_space(
+        collection_id=id, space_id=transfer_req.target_space_id
+    )

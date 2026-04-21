@@ -11,8 +11,6 @@
   import { m } from "$lib/paraglide/messages";
 
   export let provider: ModelProviderPublic;
-  /** Pass this to open AddCompletionModelDialog with this provider pre-selected */
-  export let onAddModel: ((providerId: string) => void) | undefined = undefined;
   export let onEditProvider: ((provider: ModelProviderPublic) => void) | undefined = undefined;
 
   const intric = getIntric();
@@ -22,7 +20,12 @@
   let deleteError: string | null = null;
   let isLoadingModels = false;
   let modelsLoadError: string | null = null;
-  let providerModels: Array<{ name: string; type: string; typeRaw: string; icon: typeof Sparkles }> = [];
+  let providerModels: Array<{
+    name: string;
+    type: string;
+    typeRaw: string;
+    icon: typeof Sparkles;
+  }> = [];
 
   async function handleDelete() {
     deleteError = null;
@@ -31,25 +34,27 @@
       await intric.modelProviders.delete({ id: provider.id });
       await invalidate("admin:model-providers:load");
       $showDeleteConfirm = false;
-    } catch (e: any) {
-      deleteError = e.message || m.failed_to_delete_provider();
+    } catch (e: unknown) {
+      deleteError = e instanceof Error ? e.message : m.failed_to_delete_provider();
     } finally {
       isDeleting = false;
     }
   }
 
-  function getModelName(model: any): string {
+  type AnyModel = Record<string, unknown>;
+
+  function getModelName(model: AnyModel): string {
     if ("nickname" in model && model.nickname) {
-      return model.nickname;
+      return String(model.nickname);
     }
     if ("model_name" in model && model.model_name) {
-      return model.model_name;
+      return String(model.model_name);
     }
-    return model.name;
+    return String(model.name);
   }
 
   function tagModels(
-    models: any[],
+    models: AnyModel[],
     type: "completion" | "embedding" | "transcription",
     label: string,
     icon: typeof Sparkles
@@ -75,10 +80,15 @@
       providerModels = [
         ...tagModels(models.completionModels, "completion", m.completion_model(), Sparkles),
         ...tagModels(models.embeddingModels, "embedding", m.embedding_model(), Box),
-        ...tagModels(models.transcriptionModels, "transcription", m.transcription_model(), AudioLines)
+        ...tagModels(
+          models.transcriptionModels,
+          "transcription",
+          m.transcription_model(),
+          AudioLines
+        )
       ].sort((a, b) => a.name.localeCompare(b.name));
-    } catch (e: any) {
-      modelsLoadError = e.message || m.failed_to_load_models();
+    } catch (e: unknown) {
+      modelsLoadError = e instanceof Error ? e.message : m.failed_to_load_models();
     } finally {
       isLoadingModels = false;
     }
@@ -87,7 +97,12 @@
 
 <Dropdown.Root>
   <Dropdown.Trigger let:trigger asFragment>
-    <Button variant="on-fill" is={trigger} padding="icon" class="transition-colors duration-150 hover:bg-hover-dimmer rounded-md">
+    <Button
+      variant="on-fill"
+      is={trigger}
+      padding="icon"
+      class="hover:bg-hover-dimmer rounded-md transition-colors duration-150"
+    >
       <IconEllipsis />
     </Button>
   </Dropdown.Trigger>
@@ -126,15 +141,19 @@
       <div class="flex flex-col gap-5 p-4">
         <!-- Error Alert -->
         {#if deleteError}
-          <div class="relative overflow-hidden rounded-lg border border-negative-default/30 bg-negative-dimmer/50">
-            <div class="absolute inset-y-0 left-0 w-1 bg-negative-default"></div>
+          <div
+            class="border-negative-default/30 bg-negative-dimmer/50 relative overflow-hidden rounded-lg border"
+          >
+            <div class="bg-negative-default absolute inset-y-0 left-0 w-1"></div>
             <div class="flex items-start gap-3 p-4 pl-5">
-              <div class="flex-shrink-0 rounded-full bg-negative-default/10 p-1.5">
-                <AlertTriangle class="h-4 w-4 text-negative-default" />
+              <div class="bg-negative-default/10 flex-shrink-0 rounded-full p-1.5">
+                <AlertTriangle class="text-negative-default h-4 w-4" />
               </div>
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-medium text-negative-stronger">{m.failed_to_delete_provider()}</p>
-                <p class="mt-1 text-sm text-negative-default/90">{deleteError}</p>
+              <div class="min-w-0 flex-1">
+                <p class="text-negative-stronger text-sm font-medium">
+                  {m.failed_to_delete_provider()}
+                </p>
+                <p class="text-negative-default/90 mt-1 text-sm">{deleteError}</p>
               </div>
             </div>
           </div>
@@ -143,31 +162,33 @@
         <!-- Models List Section -->
         {#if isLoadingModels}
           <div class="flex items-center justify-center gap-3 py-6">
-            <Loader2 class="h-5 w-5 animate-spin text-muted" />
-            <span class="text-sm text-muted">{m.loading()}</span>
+            <Loader2 class="text-muted h-5 w-5 animate-spin" />
+            <span class="text-muted text-sm">{m.loading()}</span>
           </div>
         {:else if modelsLoadError}
-          <div class="relative overflow-hidden rounded-lg border border-negative-default/30 bg-negative-dimmer/50">
-            <div class="absolute inset-y-0 left-0 w-1 bg-negative-default"></div>
+          <div
+            class="border-negative-default/30 bg-negative-dimmer/50 relative overflow-hidden rounded-lg border"
+          >
+            <div class="bg-negative-default absolute inset-y-0 left-0 w-1"></div>
             <div class="flex items-start gap-3 p-4 pl-5">
-              <div class="flex-shrink-0 rounded-full bg-negative-default/10 p-1.5">
-                <AlertTriangle class="h-4 w-4 text-negative-default" />
+              <div class="bg-negative-default/10 flex-shrink-0 rounded-full p-1.5">
+                <AlertTriangle class="text-negative-default h-4 w-4" />
               </div>
-              <p class="text-sm text-negative-default/90">{modelsLoadError}</p>
+              <p class="text-negative-default/90 text-sm">{modelsLoadError}</p>
             </div>
           </div>
         {:else if providerModels.length > 0}
-          <div class="rounded-lg border border-negative-default/30 bg-negative-dimmer/30">
-            <div class="flex items-center gap-2 border-b border-negative-default/20 px-4 py-3">
-              <AlertTriangle class="h-4 w-4 text-negative-default" />
-              <p class="text-sm font-medium text-negative-stronger">
+          <div class="border-negative-default/30 bg-negative-dimmer/30 rounded-lg border">
+            <div class="border-negative-default/20 flex items-center gap-2 border-b px-4 py-3">
+              <AlertTriangle class="text-negative-default h-4 w-4" />
+              <p class="text-negative-stronger text-sm font-medium">
                 {providerModels.length === 1
                   ? m.provider_model_count_one({ count: providerModels.length })
                   : m.provider_model_count_other({ count: providerModels.length })}
               </p>
             </div>
-            <ul class="divide-y divide-negative-default/10">
-              {#each providerModels as model}
+            <ul class="divide-negative-default/10 divide-y">
+              {#each providerModels as model (model.name)}
                 <li class="flex items-center gap-3 px-4 py-2.5">
                   <div
                     class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md"
@@ -180,38 +201,48 @@
                   >
                     <svelte:component this={model.icon} class="h-3.5 w-3.5" />
                   </div>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-primary truncate">{model.name}</p>
-                    <p class="text-xs text-muted">{model.type}</p>
+                  <div class="min-w-0 flex-1">
+                    <p class="text-primary truncate text-sm font-medium">{model.name}</p>
+                    <p class="text-muted text-xs">{model.type}</p>
                   </div>
                 </li>
               {/each}
             </ul>
             <!-- Blocking message -->
-            <div class="border-t border-negative-default/20 bg-negative-dimmer/50 px-4 py-3">
-              <p class="text-sm text-negative-stronger font-medium">
+            <div class="border-negative-default/20 bg-negative-dimmer/50 border-t px-4 py-3">
+              <p class="text-negative-stronger text-sm font-medium">
                 {m.delete_provider_blocked()}
               </p>
             </div>
           </div>
         {:else}
-          <div class="flex items-center gap-3 rounded-lg border border-positive-default/30 bg-positive-dimmer/30 px-4 py-3">
-            <div class="flex h-6 w-6 items-center justify-center rounded-full bg-positive-default/10">
-              <svg class="h-3.5 w-3.5 text-positive-default" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <div
+            class="border-positive-default/30 bg-positive-dimmer/30 flex items-center gap-3 rounded-lg border px-4 py-3"
+          >
+            <div
+              class="bg-positive-default/10 flex h-6 w-6 items-center justify-center rounded-full"
+            >
+              <svg
+                class="text-positive-default h-3.5 w-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
+              >
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
             </div>
-            <p class="text-sm text-positive-stronger">{m.no_models_in_provider()}</p>
+            <p class="text-positive-stronger text-sm">{m.no_models_in_provider()}</p>
           </div>
         {/if}
 
         <!-- Confirmation Text -->
         <div class="space-y-2">
-          <p class="text-sm text-primary">
+          <p class="text-primary text-sm">
             {m.delete_provider_confirm({ name: provider.name })}
           </p>
           {#if providerModels.length === 0 && !isLoadingModels}
-            <p class="text-sm text-muted">
+            <p class="text-muted text-sm">
               {m.delete_provider_warning()}
             </p>
           {/if}
@@ -228,7 +259,7 @@
         disabled={isDeleting || providerModels.length > 0}
       >
         {#if isDeleting}
-          <Loader2 class="h-4 w-4 animate-spin mr-2" />
+          <Loader2 class="mr-2 h-4 w-4 animate-spin" />
           {m.deleting()}
         {:else}
           {m.delete_provider()}

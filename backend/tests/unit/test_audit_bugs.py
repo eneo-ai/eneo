@@ -41,22 +41,28 @@ class TestSessionValidationBugs:
         tenant_id = uuid4()
 
         # Simulate corrupted session data in Redis - missing user_id
-        corrupted_session = json.dumps({
-            "tenant_id": str(tenant_id),  # Has tenant_id
-            # Missing "user_id" key!
-            "category": "investigation",
-            "description": "Test session",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        corrupted_session = json.dumps(
+            {
+                "tenant_id": str(tenant_id),  # Has tenant_id
+                # Missing "user_id" key!
+                "category": "investigation",
+                "description": "Test session",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         session_service.redis.get.return_value = corrupted_session.encode("utf-8")
 
         # This should return None gracefully, not raise KeyError
-        result = await session_service.validate_session("session-123", user_id, tenant_id)
+        result = await session_service.validate_session(
+            "session-123", user_id, tenant_id
+        )
 
         # Expected behavior: return None for corrupted session
         assert result is None, "Should return None for session missing required keys"
 
-    async def test_validate_session_handles_missing_tenant_id_key(self, session_service):
+    async def test_validate_session_handles_missing_tenant_id_key(
+        self, session_service
+    ):
         """BUG #4b: KeyError when session JSON missing 'tenant_id' key.
 
         Similar to missing user_id - if tenant_id is missing, validation crashes.
@@ -65,16 +71,20 @@ class TestSessionValidationBugs:
         tenant_id = uuid4()
 
         # Simulate corrupted session data - missing tenant_id
-        corrupted_session = json.dumps({
-            "user_id": str(user_id),  # Has user_id
-            # Missing "tenant_id" key!
-            "category": "investigation",
-            "description": "Test session",
-        })
+        corrupted_session = json.dumps(
+            {
+                "user_id": str(user_id),  # Has user_id
+                # Missing "tenant_id" key!
+                "category": "investigation",
+                "description": "Test session",
+            }
+        )
         session_service.redis.get.return_value = corrupted_session.encode("utf-8")
 
         # This should return None gracefully, not raise KeyError
-        result = await session_service.validate_session("session-123", user_id, tenant_id)
+        result = await session_service.validate_session(
+            "session-123", user_id, tenant_id
+        )
 
         assert result is None, "Should return None for session missing tenant_id"
 
@@ -110,8 +120,12 @@ class TestSessionValidationBugs:
         # Reset mock for validate flow
         session_service.redis.get.return_value = b"{}"
 
-        validation_result = await session_service.validate_session("session-123", user_id, tenant_id)
-        assert validation_result is None, "Should handle empty session object gracefully"
+        validation_result = await session_service.validate_session(
+            "session-123", user_id, tenant_id
+        )
+        assert validation_result is None, (
+            "Should handle empty session object gracefully"
+        )
 
     async def test_get_session_handles_non_dict_json(self, session_service):
         """BUG #4e: Non-dict JSON values should be handled gracefully.
@@ -132,7 +146,9 @@ class TestSessionValidationBugs:
             tenant_id = uuid4()
             session_service.redis.get.return_value = b'"just a string"'
 
-            validation_result = await session_service.validate_session("session-123", user_id, tenant_id)
+            validation_result = await session_service.validate_session(
+                "session-123", user_id, tenant_id
+            )
             assert validation_result is None, "Should handle non-dict JSON gracefully"
 
 
@@ -222,7 +238,10 @@ class TestConfigValidationBugs:
         Valid categories: admin_actions, user_actions, security_events,
         file_operations, integration_events, system_actions, audit_access
         """
-        from intric.audit.domain.category_mappings import CATEGORY_MAPPINGS, CATEGORY_DESCRIPTIONS
+        from intric.audit.domain.category_mappings import (
+            CATEGORY_MAPPINGS,
+            CATEGORY_DESCRIPTIONS,
+        )
 
         expected_categories = {
             "admin_actions",
@@ -383,9 +402,11 @@ class TestNullEmailBug:
         # Simulate database returning a user with NULL email and NULL username
         actor_id = mock_log.actor_id
         mock_result = MagicMock()
-        mock_result.__iter__ = lambda self: iter([
-            (actor_id, None, None),  # user_id, email=None, username=None
-        ])
+        mock_result.__iter__ = lambda self: iter(
+            [
+                (actor_id, None, None),  # user_id, email=None, username=None
+            ]
+        )
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         # This should NOT raise AttributeError
@@ -397,8 +418,9 @@ class TestNullEmailBug:
             # Verify actor info was added with a safe fallback
             actor_info = result[0].get("metadata", {}).get("actor", {})
             # Should have "Unknown" as fallback name
-            assert actor_info.get("name") == "Unknown", \
+            assert actor_info.get("name") == "Unknown", (
                 "Should use 'Unknown' as fallback when both username and email are NULL"
+            )
         except AttributeError as e:
             if "'NoneType' object has no attribute 'split'" in str(e):
                 pytest.fail(
@@ -419,9 +441,15 @@ class TestNullEmailBug:
 
         actor_id = mock_log.actor_id
         mock_result = MagicMock()
-        mock_result.__iter__ = lambda self: iter([
-            (actor_id, None, "valid_username"),  # email=None but username is present
-        ])
+        mock_result.__iter__ = lambda self: iter(
+            [
+                (
+                    actor_id,
+                    None,
+                    "valid_username",
+                ),  # email=None but username is present
+            ]
+        )
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         # This should work because username is truthy
@@ -429,8 +457,9 @@ class TestNullEmailBug:
 
         assert len(result) == 1
         actor_info = result[0].get("metadata", {}).get("actor", {})
-        assert actor_info.get("name") == "valid_username", \
+        assert actor_info.get("name") == "valid_username", (
             "Should use username when email is NULL"
+        )
 
 
 class TestCacheInvalidationBug:
@@ -495,8 +524,9 @@ class TestCacheInvalidationBug:
         category_cache_key = f"audit_config:{tenant_id}:admin_actions"
 
         # This will PASS - category cache is invalidated
-        assert category_cache_key in deleted_keys, \
+        assert category_cache_key in deleted_keys, (
             "Category cache key should be invalidated"
+        )
 
         # BUG CHECK: Were action caches also invalidated?
         # admin_actions category contains actions like: user_created, user_updated, etc.
@@ -505,7 +535,8 @@ class TestCacheInvalidationBug:
 
         # Get all actions in admin_actions category
         admin_actions = [
-            action for action, cat in CATEGORY_MAPPINGS.items()
+            action
+            for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "admin_actions"
         ]
 
@@ -561,7 +592,9 @@ class TestCacheInvalidationBug:
         # Step 1: is_action_enabled for user_created (admin_actions category)
         # Repository says category is enabled
         mock_repository.find_by_tenant_and_category.return_value = (
-            "admin_actions", True, {}  # category, enabled, action_overrides
+            "admin_actions",
+            True,
+            {},  # category, enabled, action_overrides
         )
 
         result1 = await service.is_action_enabled(tenant_id, "user_created")
@@ -580,13 +613,16 @@ class TestCacheInvalidationBug:
         await service.update_config(tenant_id, [update])
 
         # After fix: action cache should be invalidated
-        assert action_cache_key not in cache_store, \
+        assert action_cache_key not in cache_store, (
             "Action cache should be invalidated when category is toggled"
+        )
 
         # Step 3: Check is_action_enabled again
         # Repository now returns category as disabled
         mock_repository.find_by_tenant_and_category.return_value = (
-            "admin_actions", False, {}  # category is now DISABLED
+            "admin_actions",
+            False,
+            {},  # category is now DISABLED
         )
 
         result2 = await service.is_action_enabled(tenant_id, "user_created")

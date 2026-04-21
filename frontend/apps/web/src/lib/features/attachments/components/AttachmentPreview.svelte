@@ -25,11 +25,12 @@
   // Text files include plain text, PDFs, DOCX, PPTX, etc. (all are returned as text from backend)
   const isTextFile =
     (file.mimetype?.includes("text") ||
-    file.mimetype?.includes("pdf") ||
-    file.mimetype?.includes("document") ||
-    file.mimetype?.includes("presentation") ||
-    file.mimetype?.includes("msword") ||
-    file.mimetype?.includes("officedocument")) ?? false;
+      file.mimetype?.includes("pdf") ||
+      file.mimetype?.includes("document") ||
+      file.mimetype?.includes("presentation") ||
+      file.mimetype?.includes("msword") ||
+      file.mimetype?.includes("officedocument")) ??
+    false;
   const isImageFile = file.mimetype?.includes("image") ?? false;
   const isAudioFile = file.mimetype?.includes("audio") ?? false;
 
@@ -143,7 +144,6 @@
         {:else if isImageFile && signedUrl}
           <img src={signedUrl} alt={file.name} class="max-w-full rounded-lg" />
         {:else if isAudioFile && signedUrl}
-          <!-- svelte-ignore a11y-media-has-caption -->
           <audio controls class="w-full">
             <source src={signedUrl} type={file.mimetype} />
             Your browser does not support the audio element.

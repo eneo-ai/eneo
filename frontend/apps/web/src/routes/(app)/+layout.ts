@@ -8,7 +8,7 @@ export const load = async (event) => {
 
   const intric = createIntric({
     token: tokens.id_token,
-    baseUrl: environment.baseUrl,
+    baseUrl: environment.baseUrl ?? "",
     fetch: event.fetch
   });
 
@@ -24,7 +24,7 @@ export const load = async (event) => {
   const intricSocket = createIntricSocket(
     {
       token: event.data.tokens.id_token,
-      baseUrl: environment.baseUrl
+      baseUrl: environment.baseUrl ?? ""
     },
     {
       defaultSubscriptions: ["app_run_updates"]

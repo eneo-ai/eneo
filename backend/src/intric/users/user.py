@@ -6,7 +6,11 @@ from uuid import UUID
 
 from pydantic import EmailStr, Field, computed_field, field_serializer, field_validator
 
-from intric.authentication.auth_models import AccessToken, ApiKey, ApiKeyInDB
+from intric.authentication.auth_models import (
+    AccessToken,
+    ApiKey,
+    ApiKeyV2InDB,
+)
 from intric.main.models import BaseModel, InDB, ModelId, partial_model
 from intric.roles.permissions import Permission
 from intric.roles.role import RoleInDB, RolePublic
@@ -218,7 +222,7 @@ class UserAdd(UserBase):
     roles: list[ModelId] = []
 
 
-class UserUpdate(UserBase):
+class UserUpdate(BaseModel):
     id: UUID
     email: Optional[EmailStr] = None
     username: Optional[str] = None
@@ -233,6 +237,19 @@ class UserUpdate(UserBase):
 
     roles: Optional[list[ModelId]] = None
 
+    @field_validator("username")
+    def username_is_valid(cls, username: Optional[str]) -> Optional[str]:
+        if username is None:
+            return None
+        if len(username) < 1:
+            raise ValueError("Username must be 1 characters or more")
+
+        return username
+
+    @field_serializer("email")
+    def to_lower(self, email: Optional[EmailStr]):
+        return email.lower() if email is not None else None
+
 
 class UserInDBBase(InDB, UserBase):
     tenant_id: UUID
@@ -246,10 +263,19 @@ class UserGroupRead(InDB):
     name: str
 
 
-class UserInDB(InDB, UserAdd):
+class UserInDB(UserInDBBase):
+    password: Optional[str] = Field(min_length=7, max_length=100, default=None)
+    salt: Optional[str] = None
+    used_tokens: int = 0
+    email_verified: bool = False
+    is_active: bool = True
+    state: UserState
+    quota_limit: Optional[int] = None
+
     user_groups: list[UserGroupInDBRead] = []
     tenant: TenantInDB
-    api_key: Optional[ApiKeyInDB] = None
+    api_key: Optional[ApiKey] = None
+    active_api_key: Optional[ApiKeyV2InDB] = None
     roles: list[RoleInDB] = []
     quota_used: int = 0
     deleted_at: Optional[datetime] = Field(
@@ -270,7 +296,7 @@ class UserInDB(InDB, UserAdd):
     @computed_field
     @property
     def permissions(self) -> set[Permission]:
-        permissions_set = set()
+        permissions_set: set[Permission] = set()
 
         for role in self.roles:
             permissions_set.update(role.permissions)
@@ -279,9 +305,7 @@ class UserInDB(InDB, UserAdd):
 
 
 class UserCreated(UserInDB):
-    access_token: Optional[AccessToken]
-    api_key: Optional[ApiKey]
-    roles: list[RoleInDB] = []
+    access_token: Optional[AccessToken] = None
 
 
 class UserPublicBase(InDB, UserBase):
@@ -290,6 +314,7 @@ class UserPublicBase(InDB, UserBase):
 
 class UserPublic(UserPublicBase):
     truncated_api_key: Optional[str] = None
+    legacy_api_key_suffix: Optional[str] = None
     quota_limit: Optional[int] = None
     roles: list[RolePublic]
     user_groups: list[UserGroupRead]

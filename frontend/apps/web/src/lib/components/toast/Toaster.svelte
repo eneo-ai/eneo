@@ -34,7 +34,7 @@
   aria-live="polite"
   aria-label="Notifications"
 >
-  <div class="flex flex-col gap-2.5 items-end w-full max-w-sm ml-auto">
+  <div class="ml-auto flex w-full max-w-sm flex-col items-end gap-2.5">
     {#each $toasts as { id, data } (id)}
       {@const Icon = icons[data.type]}
       {@const style = styles[data.type]}
@@ -46,15 +46,15 @@
         in:fly={{ y: -20, duration: 250, easing: backOut }}
         out:fade={{ duration: 150, easing: cubicOut }}
       >
-        <Icon class="h-[18px] w-[18px] flex-shrink-0 mt-0.5 {iconStyle}" />
+        <Icon class="mt-0.5 h-[18px] w-[18px] flex-shrink-0 {iconStyle}" />
 
-        <p class="flex-1 text-sm font-medium leading-snug tracking-[-0.01em]">
+        <p class="flex-1 text-sm leading-snug font-medium tracking-[-0.01em]">
           {data.message}
         </p>
 
         <button
           {...$close(id)}
-          class="flex-shrink-0 rounded-md p-1 -mr-1 opacity-50 transition-all duration-150 hover:opacity-100 hover:bg-black/5 focus:outline-none focus-visible:ring-1 focus-visible:ring-current/40"
+          class="-mr-1 flex-shrink-0 rounded-md p-1 opacity-50 transition-all duration-150 hover:bg-black/5 hover:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-current/40"
           aria-label="Dismiss"
         >
           <X class="h-3.5 w-3.5" />

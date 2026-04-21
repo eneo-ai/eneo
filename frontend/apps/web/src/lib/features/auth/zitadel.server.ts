@@ -23,24 +23,24 @@ const basicScopes = ["openid", "email", "urn:zitadel:iam:org:project:id:zitadel:
  * @throws Error if PUBLIC_ORIGIN is not configured
  */
 function getPublicOrigin(): string {
-  if (!env.PUBLIC_ORIGIN) {
+  const publicOrigin = (env as Record<string, string | undefined>).PUBLIC_ORIGIN;
+  if (!publicOrigin) {
     throw new Error(
-      '[OIDC] PUBLIC_ORIGIN environment variable is required for OIDC authentication. ' +
-      'Set it to the externally-reachable URL for this application. ' +
-      'Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se'
+      "[OIDC] PUBLIC_ORIGIN environment variable is required for OIDC authentication. " +
+        "Set it to the externally-reachable URL for this application. " +
+        "Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se"
     );
   }
 
   // Validate format (basic check)
-  if (!env.PUBLIC_ORIGIN.startsWith('https://')) {
+  if (!publicOrigin.startsWith("https://")) {
     throw new Error(
-      '[OIDC] PUBLIC_ORIGIN must be an https:// URL for security. ' +
-      `Got: ${env.PUBLIC_ORIGIN}`
+      "[OIDC] PUBLIC_ORIGIN must be an https:// URL for security. " + `Got: ${publicOrigin}`
     );
   }
 
   // Remove trailing slash if present
-  return env.PUBLIC_ORIGIN.replace(/\/$/, '');
+  return publicOrigin.replace(/\/$/, "");
 }
 
 /** Function to get all scopes based on a origin (e.g. when using a subdomain) */

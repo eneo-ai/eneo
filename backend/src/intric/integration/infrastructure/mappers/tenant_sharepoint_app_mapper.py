@@ -1,4 +1,6 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional, Sequence
+
+from typing_extensions import override
 
 from intric.base.base_entity import EntityMapper
 from intric.database.tables.tenant_sharepoint_app_table import (
@@ -8,10 +10,13 @@ from intric.integration.domain.entities.tenant_sharepoint_app import TenantShare
 from intric.settings.encryption_service import EncryptionService
 
 
-class TenantSharePointAppMapper(EntityMapper[TenantSharePointApp, TenantSharePointAppDBModel]):
+class TenantSharePointAppMapper(
+    EntityMapper[TenantSharePointApp, TenantSharePointAppDBModel]
+):
     """Mapper for TenantSharePointApp with automatic secret encryption/decryption."""
 
-    def __init__(self, encryption_service: EncryptionService):
+    def __init__(self, encryption_service: EncryptionService) -> None:
+        super().__init__()
         self.encryption_service = encryption_service
 
     def _encrypt_optional(self, value: Optional[str]) -> Optional[str]:
@@ -26,13 +31,16 @@ class TenantSharePointAppMapper(EntityMapper[TenantSharePointApp, TenantSharePoi
             return None
         return self.encryption_service.decrypt(value)
 
+    @override
     def to_db_dict(self, entity: TenantSharePointApp) -> Dict[str, Any]:
         """Convert entity to database dict with encrypted secrets."""
-        db_dict = {
+        db_dict: Dict[str, Any] = {
             "id": entity.id,
             "tenant_id": entity.tenant_id,
             "client_id": entity.client_id,
-            "client_secret_encrypted": self.encryption_service.encrypt(entity.client_secret),
+            "client_secret_encrypted": self.encryption_service.encrypt(
+                entity.client_secret
+            ),
             "certificate_path": entity.certificate_path,
             "tenant_domain": entity.tenant_domain,
             "is_active": entity.is_active,
@@ -53,13 +61,16 @@ class TenantSharePointAppMapper(EntityMapper[TenantSharePointApp, TenantSharePoi
 
         return db_dict
 
+    @override
     def to_entity(self, db_model: TenantSharePointAppDBModel) -> TenantSharePointApp:
         """Convert database model to entity with decrypted secrets."""
         return TenantSharePointApp(
             id=db_model.id,
             tenant_id=db_model.tenant_id,
             client_id=db_model.client_id,
-            client_secret=self.encryption_service.decrypt(db_model.client_secret_encrypted),
+            client_secret=self.encryption_service.decrypt(
+                db_model.client_secret_encrypted
+            ),
             certificate_path=db_model.certificate_path,
             tenant_domain=db_model.tenant_domain,
             is_active=db_model.is_active,
@@ -73,8 +84,9 @@ class TenantSharePointAppMapper(EntityMapper[TenantSharePointApp, TenantSharePoi
             updated_at=db_model.updated_at,
         )
 
+    @override
     def to_entities(
-        self, db_models: List[TenantSharePointAppDBModel]
-    ) -> List[TenantSharePointApp]:
+        self, db_models: Sequence[TenantSharePointAppDBModel]
+    ) -> list[TenantSharePointApp]:
         """Convert list of database models to entities."""
         return [self.to_entity(db_model) for db_model in db_models]

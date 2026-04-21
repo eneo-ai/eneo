@@ -476,7 +476,7 @@ Eneo supports enterprise multi-tenancy with complete data isolation, per-tenant 
 
 **Federation Configuration:**
 ```bash
-# Example: Entra ID for a municipality
+# Example: Entra ID for a municipality (full replacement / new federation)
 PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
 {
   "provider": "entra_id",
@@ -486,7 +486,13 @@ PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
   "allowed_domains": ["municipality.gov"]
 }
 
-# Example: MobilityGuard
+# Example: Update the current federation without resending all fields
+PATCH /api/v1/sysadmin/tenants/{tenant_id}/federation
+{
+  "allowed_domains": ["municipality.gov", "municipality.se"]
+}
+
+# Example: MobilityGuard (full replacement / new federation)
 PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
 {
   "provider": "mobilityguard",

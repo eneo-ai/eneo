@@ -39,7 +39,9 @@ async def test_update_api_credential_creates_new(db_container, test_tenant):
         # We verify it exists and is encrypted (not plaintext)
         assert "api_key" in updated_tenant.api_credentials["openai"]
         encrypted_value = updated_tenant.api_credentials["openai"]["api_key"]
-        assert encrypted_value != "sk-test-key-123", "Key should be encrypted in database"
+        assert encrypted_value != "sk-test-key-123", (
+            "Key should be encrypted in database"
+        )
 
 
 @pytest.mark.asyncio
@@ -119,10 +121,7 @@ async def test_update_api_credential_multiple_providers(db_container, test_tenan
             updated_tenant.api_credentials["azure"]["api_version"]
             == "2024-02-15-preview"
         )
-        assert (
-            updated_tenant.api_credentials["azure"]["deployment_name"]
-            == "gpt-4"
-        )
+        assert updated_tenant.api_credentials["azure"]["deployment_name"] == "gpt-4"
 
 
 @pytest.mark.asyncio
@@ -442,5 +441,7 @@ async def test_get_api_credentials_masked_with_azure_extra_fields(
 
         # Verify only api_key is in masked result and is masked
         assert "azure" in masked
-        assert masked["azure"] == "...7890"  # Last 4 of api_key (no sk- prefix for azure keys)
+        assert (
+            masked["azure"] == "...7890"
+        )  # Last 4 of api_key (no sk- prefix for azure keys)
         # Note: masked dict only contains provider -> masked_key, not other fields

@@ -8,6 +8,7 @@ These tests verify end-to-end migration functionality including:
 - Migration history tracking
 - Usage statistics recalculation
 """
+
 import pytest
 from sqlalchemy import select
 
@@ -16,6 +17,7 @@ from intric.database.tables.app_table import Apps
 from intric.database.tables.service_table import Services
 from intric.database.tables.spaces_table import SpacesCompletionModels
 from intric.main.exceptions import ValidationException
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -33,10 +35,16 @@ class TestCompletionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            old_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            new_model = await completion_model_factory(session, "gpt-4", provider="openai")
+            old_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            new_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
 
-            assistant1 = await assistant_factory(session, "Test Assistant 1", old_model.id, kwargs={ "temperature": 1.25 })
+            assistant1 = await assistant_factory(
+                session, "Test Assistant 1", old_model.id, kwargs={"temperature": 1.25}
+            )
 
             # Act: Perform migration
             migration_service = container.completion_model_migration_service()
@@ -45,7 +53,7 @@ class TestCompletionModelMigration:
                 to_model_id=new_model.id,
                 entity_types=["assistants"],
                 user=admin_user,
-                confirm_migration=True
+                confirm_migration=True,
             )
 
             # Assert: Verify migration succeeded
@@ -63,9 +71,15 @@ class TestCompletionModelMigration:
             assert updated_assistant.completion_model_kwargs == {}
 
             # Verify NO assistants still use the old model
-            stmt_old = select(Assistants).where(Assistants.completion_model_id == old_model.id)
-            assistants_with_old_model = (await session.execute(stmt_old)).scalars().all()
-            assert len(assistants_with_old_model) == 0, "No assistants should still be using the old model"
+            stmt_old = select(Assistants).where(
+                Assistants.completion_model_id == old_model.id
+            )
+            assistants_with_old_model = (
+                (await session.execute(stmt_old)).scalars().all()
+            )
+            assert len(assistants_with_old_model) == 0, (
+                "No assistants should still be using the old model"
+            )
 
     async def test_migrate_spaces_successfully(
         self,
@@ -78,14 +92,24 @@ class TestCompletionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            old_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            new_model = await completion_model_factory(session, "gpt-4", provider="openai")
-            other_model = await completion_model_factory(session, "claude-3", provider="anthropic")
+            old_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            new_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
+            other_model = await completion_model_factory(
+                session, "claude-3", provider="anthropic"
+            )
 
             # Create spaces with different model configurations
             space1 = await space_factory(session, "Space 1", [old_model.id])
-            space2 = await space_factory(session, "Space 2", [old_model.id, other_model.id])
-            space3 = await space_factory(session, "Space 3", [other_model.id])  # Should not be affected
+            space2 = await space_factory(
+                session, "Space 2", [old_model.id, other_model.id]
+            )
+            space3 = await space_factory(
+                session, "Space 3", [other_model.id]
+            )  # Should not be affected
 
             # Act: Migrate spaces from old_model to new_model
             migration_service = container.completion_model_migration_service()
@@ -105,29 +129,47 @@ class TestCompletionModelMigration:
             assert result.details["spaces"] == 2
 
             # Verify space1 now has new_model (and NOT old_model)
-            stmt = select(SpacesCompletionModels).where(SpacesCompletionModels.space_id == space1.id)
+            stmt = select(SpacesCompletionModels).where(
+                SpacesCompletionModels.space_id == space1.id
+            )
             space1_models = (await session.execute(stmt)).scalars().all()
             space1_model_ids = [m.completion_model_id for m in space1_models]
             assert new_model.id in space1_model_ids, "Space1 should have new model"
-            assert old_model.id not in space1_model_ids, "Space1 should NOT have old model"
+            assert old_model.id not in space1_model_ids, (
+                "Space1 should NOT have old model"
+            )
             assert len(space1_model_ids) == 1, "Space1 should have exactly 1 model"
 
             # Verify space2 now has new_model and other_model (and NOT old_model)
-            stmt = select(SpacesCompletionModels).where(SpacesCompletionModels.space_id == space2.id)
+            stmt = select(SpacesCompletionModels).where(
+                SpacesCompletionModels.space_id == space2.id
+            )
             space2_models = (await session.execute(stmt)).scalars().all()
             space2_model_ids = [m.completion_model_id for m in space2_models]
             assert new_model.id in space2_model_ids, "Space2 should have new model"
-            assert other_model.id in space2_model_ids, "Space2 should still have other model"
-            assert old_model.id not in space2_model_ids, "Space2 should NOT have old model"
+            assert other_model.id in space2_model_ids, (
+                "Space2 should still have other model"
+            )
+            assert old_model.id not in space2_model_ids, (
+                "Space2 should NOT have old model"
+            )
             assert len(space2_model_ids) == 2, "Space2 should have exactly 2 models"
 
             # Verify space3 is unchanged (only had other_model)
-            stmt = select(SpacesCompletionModels).where(SpacesCompletionModels.space_id == space3.id)
+            stmt = select(SpacesCompletionModels).where(
+                SpacesCompletionModels.space_id == space3.id
+            )
             space3_models = (await session.execute(stmt)).scalars().all()
             space3_model_ids = [m.completion_model_id for m in space3_models]
-            assert other_model.id in space3_model_ids, "Space3 should still have other model"
-            assert new_model.id not in space3_model_ids, "Space3 should NOT have new model"
-            assert old_model.id not in space3_model_ids, "Space3 should NOT have old model"
+            assert other_model.id in space3_model_ids, (
+                "Space3 should still have other model"
+            )
+            assert new_model.id not in space3_model_ids, (
+                "Space3 should NOT have new model"
+            )
+            assert old_model.id not in space3_model_ids, (
+                "Space3 should NOT have old model"
+            )
             assert len(space3_model_ids) == 1, "Space3 should have exactly 1 model"
 
             # Verify NO spaces still have the old model
@@ -135,7 +177,9 @@ class TestCompletionModelMigration:
                 SpacesCompletionModels.completion_model_id == old_model.id
             )
             spaces_with_old_model = (await session.execute(stmt)).scalars().all()
-            assert len(spaces_with_old_model) == 0, "No spaces should still have the old model"
+            assert len(spaces_with_old_model) == 0, (
+                "No spaces should still have the old model"
+            )
 
     async def test_migrate_apps_successfully(
         self,
@@ -149,8 +193,12 @@ class TestCompletionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            old_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            new_model = await completion_model_factory(session, "gpt-4", provider="openai")
+            old_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            new_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
 
             app1 = await app_factory(session, "Test App 1", old_model.id)
             await app_factory(session, "Test App 2", old_model.id)
@@ -180,7 +228,9 @@ class TestCompletionModelMigration:
             # Verify NO apps still use the old model
             stmt_old = select(Apps).where(Apps.completion_model_id == old_model.id)
             apps_with_old_model = (await session.execute(stmt_old)).scalars().all()
-            assert len(apps_with_old_model) == 0, "No apps should still be using the old model"
+            assert len(apps_with_old_model) == 0, (
+                "No apps should still be using the old model"
+            )
 
     async def test_migrate_services_successfully(
         self,
@@ -194,8 +244,12 @@ class TestCompletionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            old_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            new_model = await completion_model_factory(session, "gpt-4", provider="openai")
+            old_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            new_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
 
             service1 = await service_factory(session, "Test Service 1", old_model.id)
             service2 = await service_factory(session, "Test Service 2", old_model.id)
@@ -219,15 +273,21 @@ class TestCompletionModelMigration:
             assert result.details["services"] == 3
 
             # Verify services now use the new model
-            stmt = select(Services).where(Services.id.in_([service1.id, service2.id, service3.id]))
+            stmt = select(Services).where(
+                Services.id.in_([service1.id, service2.id, service3.id])
+            )
             updated_services = (await session.execute(stmt)).scalars().all()
             for service in updated_services:
                 assert service.completion_model_id == new_model.id
 
             # Verify NO services still use the old model
-            stmt_old = select(Services).where(Services.completion_model_id == old_model.id)
+            stmt_old = select(Services).where(
+                Services.completion_model_id == old_model.id
+            )
             services_with_old_model = (await session.execute(stmt_old)).scalars().all()
-            assert len(services_with_old_model) == 0, "No services should still be using the old model"
+            assert len(services_with_old_model) == 0, (
+                "No services should still be using the old model"
+            )
 
     async def test_migrate_all_entity_types_together(
         self,
@@ -248,8 +308,12 @@ class TestCompletionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            old_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            new_model = await completion_model_factory(session, "gpt-4", provider="openai")
+            old_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            new_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
 
             # Create multiple entities of each type using the old model
             assistant1 = await assistant_factory(session, "Assistant 1", old_model.id)
@@ -276,7 +340,9 @@ class TestCompletionModelMigration:
 
             # Assert: Verify overall migration succeeded
             assert result.success is True
-            assert result.migrated_count == 8  # 2 assistants + 2 apps + 2 services + 2 spaces
+            assert (
+                result.migrated_count == 8
+            )  # 2 assistants + 2 apps + 2 services + 2 spaces
             assert result.failed_count == 0
 
             # Verify details breakdown
@@ -287,7 +353,9 @@ class TestCompletionModelMigration:
 
             # Verify NO entities still use the old model
             # Check assistants
-            stmt = select(Assistants).where(Assistants.completion_model_id == old_model.id)
+            stmt = select(Assistants).where(
+                Assistants.completion_model_id == old_model.id
+            )
             assert len((await session.execute(stmt)).scalars().all()) == 0
 
             # Check apps
@@ -306,7 +374,9 @@ class TestCompletionModelMigration:
 
             # Verify all entities now use the new model
             # Check assistants
-            stmt = select(Assistants).where(Assistants.id.in_([assistant1.id, assistant2.id]))
+            stmt = select(Assistants).where(
+                Assistants.id.in_([assistant1.id, assistant2.id])
+            )
             assistants = (await session.execute(stmt)).scalars().all()
             for assistant in assistants:
                 assert assistant.completion_model_id == new_model.id
@@ -325,7 +395,9 @@ class TestCompletionModelMigration:
 
             # Check spaces
             for space in [space1, space2]:
-                stmt = select(SpacesCompletionModels).where(SpacesCompletionModels.space_id == space.id)
+                stmt = select(SpacesCompletionModels).where(
+                    SpacesCompletionModels.space_id == space.id
+                )
                 space_models = (await session.execute(stmt)).scalars().all()
                 model_ids = [m.completion_model_id for m in space_models]
                 assert new_model.id in model_ids
@@ -350,9 +422,15 @@ class TestCompletionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            old_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            new_model = await completion_model_factory(session, "gpt-4", provider="openai")
-            other_model = await completion_model_factory(session, "claude-3", provider="anthropic")
+            old_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            new_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
+            other_model = await completion_model_factory(
+                session, "claude-3", provider="anthropic"
+            )
 
             # Create space WITHOUT old_model (only has other_model)
             # This represents a space where old_model is "unavailable"
@@ -361,17 +439,18 @@ class TestCompletionModelMigration:
             # Create assistant in this space using old_model
             # Note: In production, this might be prevented, but testing edge case
             assistant = await assistant_factory(
-                session,
-                "Test Assistant",
-                old_model.id,
-                space_id=space.id
+                session, "Test Assistant", old_model.id, space_id=space.id
             )
 
             # Verify initial state: space does NOT have old_model
-            stmt = select(SpacesCompletionModels).where(SpacesCompletionModels.space_id == space.id)
+            stmt = select(SpacesCompletionModels).where(
+                SpacesCompletionModels.space_id == space.id
+            )
             initial_space_models = (await session.execute(stmt)).scalars().all()
             initial_model_ids = [m.completion_model_id for m in initial_space_models]
-            assert old_model.id not in initial_model_ids, "Space should not have old_model initially"
+            assert old_model.id not in initial_model_ids, (
+                "Space should not have old_model initially"
+            )
             assert other_model.id in initial_model_ids, "Space should have other_model"
 
             # Act: Migrate assistants
@@ -395,14 +474,18 @@ class TestCompletionModelMigration:
 
             # CRITICAL: Verify space still does NOT have new_model
             # The space model availability should be respected
-            stmt = select(SpacesCompletionModels).where(SpacesCompletionModels.space_id == space.id)
+            stmt = select(SpacesCompletionModels).where(
+                SpacesCompletionModels.space_id == space.id
+            )
             final_space_models = (await session.execute(stmt)).scalars().all()
             final_model_ids = [m.completion_model_id for m in final_space_models]
 
             assert new_model.id not in final_model_ids, (
                 "Space should NOT automatically get new_model since old_model was not in space"
             )
-            assert other_model.id in final_model_ids, "Space should still have other_model"
+            assert other_model.id in final_model_ids, (
+                "Space should still have other_model"
+            )
             assert len(final_model_ids) == 1, "Space should still have exactly 1 model"
 
     # ============================================================================
@@ -448,7 +531,9 @@ class TestCompletionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            target_model = await completion_model_factory(session, "gpt-4", provider="openai")
+            target_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
             fake_source_id = uuid4()
 
             # Act & Assert: Attempt migration with non-existent source model
@@ -478,7 +563,9 @@ class TestCompletionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            source_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
+            source_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
             fake_target_id = uuid4()
 
             # Act & Assert: Attempt migration with non-existent target model
@@ -519,16 +606,10 @@ class TestCompletionModelMigration:
 
             # Create models with different families (incompatible)
             source_model = await completion_model_factory(
-                session,
-                "gpt-4",
-                provider="openai",
-                family="openai"
+                session, "gpt-4", provider="openai", family="openai"
             )
             target_model = await completion_model_factory(
-                session,
-                "claude-3-sonnet",
-                provider="anthropic",
-                family="claude"
+                session, "claude-3-sonnet", provider="anthropic", family="claude"
             )
 
             # Create assistant using source model
@@ -563,20 +644,16 @@ class TestCompletionModelMigration:
 
             # Create models with different families (incompatible)
             source_model = await completion_model_factory(
-                session,
-                "gpt-4",
-                provider="openai",
-                family="openai"
+                session, "gpt-4", provider="openai", family="openai"
             )
             target_model = await completion_model_factory(
-                session,
-                "claude-3-sonnet",
-                provider="anthropic",
-                family="claude"
+                session, "claude-3-sonnet", provider="anthropic", family="claude"
             )
 
             # Create assistant using source model
-            assistant = await assistant_factory(session, "Test Assistant", source_model.id)
+            assistant = await assistant_factory(
+                session, "Test Assistant", source_model.id
+            )
 
             # Act: Migrate WITH confirmation despite incompatibility
             migration_service = container.completion_model_migration_service()
@@ -611,16 +688,10 @@ class TestCompletionModelMigration:
 
             # Create models from different families
             openai_model = await completion_model_factory(
-                session,
-                "gpt-4",
-                provider="openai",
-                family="openai"
+                session, "gpt-4", provider="openai", family="openai"
             )
             claude_model = await completion_model_factory(
-                session,
-                "claude-3",
-                provider="anthropic",
-                family="claude"
+                session, "claude-3", provider="anthropic", family="claude"
             )
 
             # Act: Migrate with confirmation
@@ -650,17 +721,11 @@ class TestCompletionModelMigration:
 
             # Create source model WITH vision
             source_model = await completion_model_factory(
-                session,
-                "gpt-4-vision",
-                provider="openai",
-                vision=True
+                session, "gpt-4-vision", provider="openai", vision=True
             )
             # Create target model WITHOUT vision
             target_model = await completion_model_factory(
-                session,
-                "gpt-3.5-turbo",
-                provider="openai",
-                vision=False
+                session, "gpt-3.5-turbo", provider="openai", vision=False
             )
 
             # Act: Migrate with confirmation
@@ -690,17 +755,11 @@ class TestCompletionModelMigration:
 
             # Create source model WITH reasoning
             source_model = await completion_model_factory(
-                session,
-                "gpt-4o-reasoning",
-                provider="openai",
-                reasoning=True
+                session, "gpt-4o-reasoning", provider="openai", reasoning=True
             )
             # Create target model WITHOUT reasoning
             target_model = await completion_model_factory(
-                session,
-                "gpt-4",
-                provider="openai",
-                reasoning=False
+                session, "gpt-4", provider="openai", reasoning=False
             )
 
             # Act: Migrate with confirmation
@@ -730,17 +789,11 @@ class TestCompletionModelMigration:
 
             # Create source model with high token limit
             source_model = await completion_model_factory(
-                session,
-                "gpt-4-turbo",
-                provider="openai",
-                max_input_tokens=128000
+                session, "gpt-4-turbo", provider="openai", max_input_tokens=128000
             )
             # Create target model with lower token limit
             target_model = await completion_model_factory(
-                session,
-                "gpt-3.5-turbo",
-                provider="openai",
-                max_input_tokens=4096
+                session, "gpt-3.5-turbo", provider="openai", max_input_tokens=4096
             )
 
             # Act: Migrate with confirmation
@@ -769,17 +822,11 @@ class TestCompletionModelMigration:
             session = container.session()
 
             source_model = await completion_model_factory(
-                session,
-                "gpt-4",
-                provider="openai",
-                is_deprecated=False
+                session, "gpt-4", provider="openai", is_deprecated=False
             )
             # Create deprecated target model
             deprecated_model = await completion_model_factory(
-                session,
-                "gpt-3.5-turbo-0301",
-                provider="openai",
-                is_deprecated=True
+                session, "gpt-3.5-turbo-0301", provider="openai", is_deprecated=True
             )
 
             # Act: Migrate with confirmation
@@ -811,8 +858,12 @@ class TestCompletionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            source_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            target_model = await completion_model_factory(session, "gpt-4", provider="openai")
+            source_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            target_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
 
             # Act & Assert: Attempt migration with invalid entity type
             migration_service = container.completion_model_migration_service()
@@ -839,8 +890,12 @@ class TestCompletionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            source_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            target_model = await completion_model_factory(session, "gpt-4", provider="openai")
+            source_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            target_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
             await assistant_factory(session, "Test Assistant", source_model.id)
 
             # Act: Pass entity_types as string instead of list
@@ -867,8 +922,12 @@ class TestCompletionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            source_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            target_model = await completion_model_factory(session, "gpt-4", provider="openai")
+            source_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            target_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
 
             # Don't create any entities using source_model
 
@@ -899,8 +958,12 @@ class TestCompletionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            source_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            target_model = await completion_model_factory(session, "gpt-4", provider="openai")
+            source_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            target_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
 
             # Create entities of different types
             await assistant_factory(session, "Test Assistant", source_model.id)
@@ -922,4 +985,3 @@ class TestCompletionModelMigration:
             # Verify both entity types were migrated
             assert "assistants" in result.details
             assert "apps" in result.details
-

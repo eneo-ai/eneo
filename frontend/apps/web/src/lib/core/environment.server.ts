@@ -92,6 +92,6 @@ export function getEnvironmentConfig() {
     integrationRequestFormUrl,
     helpCenterUrl,
     frontendVersion,
-    gitInfo,
+    gitInfo
   });
 }

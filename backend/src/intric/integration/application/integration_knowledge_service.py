@@ -1,12 +1,21 @@
+from __future__ import annotations
+
 import asyncio
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID, uuid4
+
+from typing_extensions import TypedDict
 
 from intric.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
+from intric.integration.domain.entities.oauth_token import OauthToken
+from intric.integration.infrastructure.content_service.types import (
+    SharePointTokenProtocol,
+)
 from intric.integration.presentation.models import (
     ConfluenceContentTaskParam,
+    IntegrationType,
     SharepointContentTaskParam,
 )
 from intric.jobs.job_models import JobInDb, Task
@@ -23,6 +32,9 @@ if TYPE_CHECKING:
     from intric.embedding_models.domain.embedding_model_repo import (
         EmbeddingModelRepository,
     )
+    from intric.integration.domain.entities.tenant_sharepoint_app import (
+        TenantSharePointApp,
+    )
     from intric.integration.domain.repositories.integration_knowledge_repo import (
         IntegrationKnowledgeRepository,
     )
@@ -32,20 +44,17 @@ if TYPE_CHECKING:
     from intric.integration.domain.repositories.user_integration_repo import (
         UserIntegrationRepository,
     )
-    from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
-        TenantSharePointAppRepository,
+    from intric.integration.infrastructure.auth_service.service_account_auth_service import (
+        ServiceAccountAuthService,
     )
     from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
         TenantAppAuthService,
     )
-    from intric.integration.infrastructure.auth_service.service_account_auth_service import (
-        ServiceAccountAuthService,
-    )
-    from intric.jobs.job_service import JobService
-    from intric.spaces.space import Space
     from intric.integration.infrastructure.sharepoint_subscription_service import (
         SharePointSubscriptionService,
     )
+    from intric.jobs.job_service import JobService
+    from intric.spaces.space import Space
     from intric.spaces.space_repo import SpaceRepository
     from intric.users.user import UserInDB
 
@@ -73,6 +82,11 @@ class BatchIntegrationKnowledgeCreateResult(TypedDict):
     error: str | None
 
 
+class SubscriptionCleanupInfo(TypedDict):
+    subscription_id: UUID
+    token: "SimpleToken | OauthToken"
+
+
 class SimpleToken:
     """Simple token wrapper for subscription service compatibility.
 
@@ -81,7 +95,24 @@ class SimpleToken:
     """
 
     def __init__(self, access_token: str):
+        super().__init__()
         self.access_token = access_token
+        self.base_url = "https://graph.microsoft.com"
+        self.token_type = IntegrationType.Sharepoint
+
+
+def _as_sharepoint_token(token: SimpleToken | OauthToken) -> SharePointTokenProtocol:
+    if isinstance(token, SimpleToken):
+        return token
+    if token.is_sharepoint:
+        return cast(SharePointTokenProtocol, token)
+    raise BadRequestException("Expected a SharePoint token")
+
+
+class TenantSharePointAppRepositoryProtocol(Protocol):
+    async def one(self, *, id: UUID) -> "TenantSharePointApp": ...
+
+    async def update(self, obj: "TenantSharePointApp") -> "TenantSharePointApp": ...
 
 
 class IntegrationKnowledgeService:
@@ -96,10 +127,11 @@ class IntegrationKnowledgeService:
         user_integration_repo: "UserIntegrationRepository",
         actor_manager: "ActorManager",
         sharepoint_subscription_service: "SharePointSubscriptionService",
-        tenant_sharepoint_app_repo: "TenantSharePointAppRepository",
+        tenant_sharepoint_app_repo: TenantSharePointAppRepositoryProtocol,
         tenant_app_auth_service: "TenantAppAuthService",
-        service_account_auth_service: "ServiceAccountAuthService" = None,
-    ):
+        service_account_auth_service: "ServiceAccountAuthService | None" = None,
+    ) -> None:
+        super().__init__()
         self.job_service = job_service
         self.user = user
         self.oauth_token_repo = oauth_token_repo
@@ -109,11 +141,15 @@ class IntegrationKnowledgeService:
         self.user_integration_repo = user_integration_repo
         self.actor_manager = actor_manager
         self.sharepoint_subscription_service = sharepoint_subscription_service
-        self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
+        self.tenant_sharepoint_app_repo: TenantSharePointAppRepositoryProtocol = (
+            tenant_sharepoint_app_repo
+        )
         self.tenant_app_auth_service = tenant_app_auth_service
         self.service_account_auth_service = service_account_auth_service
 
-    async def _get_tenant_app_access_token(self, tenant_app) -> str:
+    async def _get_tenant_app_access_token(
+        self, tenant_app: "TenantSharePointApp"
+    ) -> str:
         """Resolve tenant app access token and persist service-account token rotation."""
         if tenant_app.is_service_account():
             if not self.service_account_auth_service:
@@ -228,7 +264,9 @@ class IntegrationKnowledgeService:
             token_id = oauth_token.id
             tenant_app_id = None
 
-        if hasattr(token, "token_type") and token.token_type.is_confluence:
+        if isinstance(token, OauthToken) and token.token_type.is_confluence:
+            if token_id is None:
+                raise BadRequestException("Confluence token ID is required")
             job = await self.job_service.queue_job(
                 task=Task.PULL_CONFLUENCE_CONTENT,
                 name=name,
@@ -267,10 +305,11 @@ class IntegrationKnowledgeService:
                 key[:30],
             )
             try:
+                sharepoint_token = _as_sharepoint_token(token)
                 subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
                     user_integration_id=user_integration_id,
                     site_id=key,
-                    token=token,
+                    token=sharepoint_token,
                     is_onedrive=is_onedrive,
                 )
                 if subscription:
@@ -379,34 +418,25 @@ class IntegrationKnowledgeService:
         """
         import sqlalchemy as sa
         from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         from intric.database.tables.integration_knowledge_spaces_table import (
             IntegrationKnowledgesSpaces,
         )
+        from intric.database.tables.spaces_table import Spaces as SpacesTable
 
         # Only distribute if this is an org space (no parent tenant_space_id)
         if space.tenant_space_id is not None:
             return
 
         # Get all child spaces for this tenant
-        child_spaces = await self.space_repo.session.execute(
-            sa.select(sa.column("id", sa.UUID))
-            .select_from(
-                sa.table(
-                    "spaces",
-                    sa.column("id", sa.UUID),
-                    sa.column("tenant_id", sa.UUID),
-                    sa.column("tenant_space_id", sa.UUID),
-                )
-            )
-            .where(
-                sa.and_(
-                    sa.column("tenant_id") == space.tenant_id,
-                    sa.column("tenant_space_id") == space.id,
-                )
+        child_spaces = await self.space_repo.session.scalars(
+            sa.select(SpacesTable.id).where(
+                SpacesTable.tenant_id == space.tenant_id,
+                SpacesTable.tenant_space_id == space.id,
             )
         )
 
-        child_space_ids = [row[0] for row in child_spaces.all()]
+        child_space_ids = child_spaces.all()
 
         if not child_space_ids:
             return
@@ -435,6 +465,7 @@ class IntegrationKnowledgeService:
         integration_knowledge_id: "UUID",
     ) -> None:
         import sqlalchemy as sa
+
         from intric.database.tables.integration_knowledge_spaces_table import (
             IntegrationKnowledgesSpaces,
         )
@@ -449,6 +480,14 @@ class IntegrationKnowledgeService:
 
         if not actor.can_delete_integrations():
             raise UnauthorizedException()
+
+        # SECURITY: tenant_app integrations require admin permission
+        if knowledge.user_integration.auth_type == "tenant_app":
+            if Permission.ADMIN not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Admin permission is required to delete organization-wide SharePoint integrations. "
+                    "Please contact your administrator."
+                )
 
         # Check if knowledge belongs to this space
         # Only allow deletion from the space where it was created
@@ -468,7 +507,7 @@ class IntegrationKnowledgeService:
 
         # Prepare subscription cleanup info BEFORE database delete
         # We need to get the token while the transaction is still open
-        subscription_cleanup_info = None
+        subscription_cleanup_info: SubscriptionCleanupInfo | None = None
         subscription_id = knowledge.sharepoint_subscription_id
         if subscription_id and knowledge.integration_type == "sharepoint":
             try:
@@ -483,7 +522,9 @@ class IntegrationKnowledgeService:
                         id=user_integration.tenant_app_id
                     )
                     access_token = await self._get_tenant_app_access_token(tenant_app)
-                    token = SimpleToken(access_token=access_token)
+                    token: SimpleToken | OauthToken = SimpleToken(
+                        access_token=access_token
+                    )
                 else:
                     token = await self.oauth_token_repo.one(
                         user_integration_id=knowledge.user_integration.id
@@ -510,14 +551,14 @@ class IntegrationKnowledgeService:
             asyncio.create_task(
                 self._cleanup_subscription_async(
                     subscription_id=subscription_cleanup_info["subscription_id"],
-                    token=subscription_cleanup_info["token"],
+                    token=_as_sharepoint_token(subscription_cleanup_info["token"]),
                 )
             )
 
     async def _cleanup_subscription_async(
         self,
         subscription_id: UUID,
-        token,
+        token: SharePointTokenProtocol,
     ) -> None:
         """Clean up Microsoft Graph subscription asynchronously.
 
@@ -589,7 +630,9 @@ class IntegrationKnowledgeService:
                 id=user_integration.tenant_app_id
             )
             access_token = await self._get_tenant_app_access_token(tenant_app)
-            subscription_token = SimpleToken(access_token=access_token)
+            subscription_token: SimpleToken | OauthToken = SimpleToken(
+                access_token=access_token
+            )
             token_id = None
             tenant_app_id = tenant_app.id
         else:
@@ -602,19 +645,22 @@ class IntegrationKnowledgeService:
 
         resource_type = knowledge.resource_type or "site"
         is_onedrive = resource_type == "onedrive"
-        subscription_resource_id = knowledge.drive_id if is_onedrive else knowledge.site_id
+        subscription_resource_id = (
+            knowledge.drive_id if is_onedrive else knowledge.site_id
+        )
 
         if subscription_resource_id:
             try:
-                subscription = (
-                    await self.sharepoint_subscription_service.ensure_subscription_for_site(
-                        user_integration_id=user_integration.id,
-                        site_id=subscription_resource_id,
-                        token=subscription_token,
-                        is_onedrive=is_onedrive,
-                    )
+                sharepoint_token = _as_sharepoint_token(subscription_token)
+                subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
+                    user_integration_id=user_integration.id,
+                    site_id=subscription_resource_id,
+                    token=sharepoint_token,
+                    is_onedrive=is_onedrive,
                 )
-                subscription_db_id = getattr(subscription, "id", None) if subscription else None
+                subscription_db_id = (
+                    getattr(subscription, "id", None) if subscription else None
+                )
                 existing_subscription_db_id = getattr(
                     knowledge, "sharepoint_subscription_id", None
                 )
@@ -676,6 +722,14 @@ class IntegrationKnowledgeService:
         if not actor.can_edit_integrations():
             raise UnauthorizedException()
 
+        # SECURITY: tenant_app integrations require admin permission
+        if space_knowledge.user_integration.auth_type == "tenant_app":
+            if Permission.ADMIN not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Admin permission is required to rename organization-wide SharePoint integrations. "
+                    "Please contact your administrator."
+                )
+
         # Only allow renaming from the space where knowledge was created
         if space_knowledge.space_id != space.id:
             raise UnauthorizedException(
@@ -736,11 +790,21 @@ class IntegrationKnowledgeService:
             wrapper_id=wrapper_id,
         )
 
+        # SECURITY: tenant_app integrations require admin permission
+        if owned_items and owned_items[0].user_integration.auth_type == "tenant_app":
+            if Permission.ADMIN not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Admin permission is required to rename organization-wide SharePoint integrations. "
+                    "Please contact your administrator."
+                )
+
         updated_items: list[IntegrationKnowledge] = []
         for item in owned_items:
             knowledge = await self.integration_knowledge_repo.one(id=item.id)
             knowledge.wrapper_name = normalized_name
-            updated_items.append(await self.integration_knowledge_repo.update(knowledge))
+            updated_items.append(
+                await self.integration_knowledge_repo.update(knowledge)
+            )
 
         return updated_items
 
@@ -759,6 +823,15 @@ class IntegrationKnowledgeService:
             space=space,
             wrapper_id=wrapper_id,
         )
+
+        # SECURITY: tenant_app integrations require admin permission
+        if owned_items and owned_items[0].user_integration.auth_type == "tenant_app":
+            if Permission.ADMIN not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Admin permission is required to delete organization-wide SharePoint integrations. "
+                    "Please contact your administrator."
+                )
+
         for item in list(owned_items):
             await self.remove_knowledge(
                 space_id=space_id,

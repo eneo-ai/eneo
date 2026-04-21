@@ -37,6 +37,7 @@ class FileProtocol:
         text_extractor: TextExtractor,
         image_extractor: ImageExtractor,
     ):
+        super().__init__()
         self.file_size_service = file_size_service
         self.text_extractor = text_extractor
         self.image_extractor = image_extractor
@@ -61,9 +62,9 @@ class FileProtocol:
         filepath = Path(filepath)
 
         try:
-            content = extractor(
-                filepath, upload_file.content_type, upload_file.filename
-            )
+            # content_type can be None for uploads without Content-Type header
+            content_type: str = upload_file.content_type or ""
+            content = extractor(filepath, content_type, upload_file.filename)
             checksum = self.file_size_service.get_file_checksum(filepath)
 
             if isinstance(content, str):
@@ -89,20 +90,24 @@ class FileProtocol:
         # Sanitize filename to prevent path traversal attacks
         sanitized_filename = sanitize_filename(upload_file.filename)
 
-        file_base_kwargs = {
-            "name": sanitized_filename,
-            "checksum": checksum,
-            "size": size,
-            "file_type": file_type,
-            "mimetype": upload_file.content_type,
-        }
-
         if file_type == FileType.TEXT:
-            file_base_kwargs["text"] = content
+            return FileBaseWithContent(
+                name=sanitized_filename,
+                checksum=checksum,
+                size=size,
+                file_type=file_type,
+                mimetype=upload_file.content_type,
+                text=content if isinstance(content, str) else None,
+            )
         else:
-            file_base_kwargs["blob"] = content
-
-        return FileBaseWithContent(**file_base_kwargs)
+            return FileBaseWithContent(
+                name=sanitized_filename,
+                checksum=checksum,
+                size=size,
+                file_type=file_type,
+                mimetype=upload_file.content_type,
+                blob=content if isinstance(content, bytes) else None,
+            )
 
     async def text_to_domain(
         self,
@@ -167,13 +172,14 @@ class FileProtocol:
         max_size: int | None = None,
         limit_setting_name: str | None = None,
     ):
-        if ImageMimeTypes.has_value(upload_file.content_type):
+        content_type = upload_file.content_type or ""
+        if ImageMimeTypes.has_value(content_type):
             return await self.image_to_domain(
                 upload_file,
                 max_size=max_size,
                 limit_setting_name=limit_setting_name,
             )
-        elif AudioMimeTypes.has_value(upload_file.content_type):
+        elif AudioMimeTypes.has_value(content_type):
             return await self.audio_to_domain(
                 upload_file,
                 max_size=max_size,

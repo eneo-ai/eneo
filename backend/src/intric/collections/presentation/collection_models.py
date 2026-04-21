@@ -22,7 +22,7 @@ class CollectionPublic(ResourcePermissionsMixin, BaseResponse):
     embedding_model: EmbeddingModelPublic
     metadata: CollectionMetadata
     space_id: UUID
-    
+
     @classmethod
     def from_domain(cls, collection: "Collection"):
         return cls(
@@ -30,7 +30,9 @@ class CollectionPublic(ResourcePermissionsMixin, BaseResponse):
             created_at=collection.created_at,
             updated_at=collection.updated_at,
             name=collection.name,
-            embedding_model=EmbeddingModelPublic.from_domain(collection.embedding_model),
+            embedding_model=EmbeddingModelPublic.from_domain(
+                collection.embedding_model
+            ),
             metadata=CollectionMetadata(
                 num_info_blobs=collection.num_info_blobs,
                 size=collection.size,

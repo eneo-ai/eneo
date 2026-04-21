@@ -5,10 +5,15 @@
   import JobListView from "./JobListView.svelte";
   import { ProgressBar } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import ExpiringKeysNotification from "$lib/features/api-keys/ExpiringKeysNotification.svelte";
+  import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   const jobManager = getJobManager();
   const {
     state: { uploads, jobs, currentlyRunningJobs }
   } = jobManager;
+  const {
+    state: { displayItems: expiringDisplayItems }
+  } = getExpiringKeysStore();
 
   const jobsUploadingBlob = derived(jobs, (jobs) => {
     return jobs.filter((job) => job.task === "upload_info_blob");
@@ -31,6 +36,7 @@
 </script>
 
 <div class="flex h-full w-full flex-col">
+  <ExpiringKeysNotification />
   {#if $uploads.length > 0}
     <div class="border-default flex flex-col gap-1 px-2 py-2">
       <span class="pl-3 font-medium">{m.uploading()}</span>
@@ -52,7 +58,9 @@
                 {/if}
               </div>
             {:else if upload.status === "completed"}
-              <div class="text-positive-default w-48 min-w-48 text-right font-medium">{m.done()}</div>
+              <div class="text-positive-default w-48 min-w-48 text-right font-medium">
+                {m.done()}
+              </div>
             {:else}
               <div class="flex w-48 min-w-48 items-center gap-x-4">
                 <ProgressBar progress={upload.progress}></ProgressBar>
@@ -72,7 +80,7 @@
   <JobListView jobs={$jobsPullConfluence} title={m.importing_from_confluence()}></JobListView>
   <JobListView jobs={$jobsPullSharepoint} title={m.importing_from_sharepoint()}></JobListView>
   <JobListView jobs={$jobsCrawling} title={m.crawling()}></JobListView>
-  {#if $currentlyRunningJobs === 0}
+  {#if $currentlyRunningJobs === 0 && $expiringDisplayItems.length === 0}
     <div class="text-secondary flex h-[6rem] w-full items-center justify-center">
       <span>{m.everything_up_to_date()}</span>
     </div>

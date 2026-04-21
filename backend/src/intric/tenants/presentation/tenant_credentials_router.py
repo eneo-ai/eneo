@@ -6,7 +6,7 @@ tenant-specific LLM provider API credentials.
 """
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -21,7 +21,7 @@ from intric.tenants.provider_field_config import PROVIDER_REQUIRED_FIELDS
 
 
 def check_feature_enabled(
-    settings: Settings = Depends(get_settings),
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
     """Verify tenant credentials feature is enabled.
 
@@ -48,7 +48,9 @@ router = APIRouter(
 )
 
 # Provider enum - supported LLM providers
-Provider = Literal["openai", "anthropic", "azure", "mistral", "ovhcloud", "gemini", "cohere"]
+Provider = Literal[
+    "openai", "anthropic", "azure", "mistral", "ovhcloud", "gemini", "cohere"
+]
 
 
 class SetCredentialRequest(BaseModel):
@@ -233,7 +235,7 @@ async def set_tenant_credential(
     tenant_id: UUID,
     provider: Provider,
     request: SetCredentialRequest,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ) -> SetCredentialResponse:
     """
     Set or update tenant API credentials for a specific provider.
@@ -286,7 +288,11 @@ async def set_tenant_credential(
         # Parse validation errors from service
         error_message = str(e)
         if "Credential validation failed" in error_message:
-            errors = error_message.split(": ", 1)[1].split("; ") if ": " in error_message else [error_message]
+            errors = (
+                error_message.split(": ", 1)[1].split("; ")
+                if ": " in error_message
+                else [error_message]
+            )
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={
@@ -315,7 +321,7 @@ async def set_tenant_credential(
 async def delete_tenant_credential(
     tenant_id: UUID,
     provider: Provider,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ) -> DeleteCredentialResponse:
     """
     Delete tenant API credentials for a specific provider.
@@ -362,7 +368,7 @@ async def delete_tenant_credential(
 )
 async def list_tenant_credentials(
     tenant_id: UUID,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ) -> ListCredentialsResponse:
     """
     List all configured API credentials for a tenant.

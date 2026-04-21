@@ -2,7 +2,14 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, UniqueConstraint, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import BasePublic
@@ -144,20 +151,17 @@ class EmbeddingModels(BasePublic):
 
 class CompletionModelUsageStats(BasePublic):
     """Pre-aggregated usage statistics for completion models per tenant."""
-    __tablename__ = "completion_model_usage_stats"
-    
+
+    __tablename__ = "completion_model_usage_stats"  # type: ignore[assignment]
+
     # Foreign keys
     model_id: Mapped[UUID] = mapped_column(
-        ForeignKey(CompletionModels.id, ondelete="CASCADE"), 
-        nullable=False,
-        index=True
+        ForeignKey(CompletionModels.id, ondelete="CASCADE"), nullable=False, index=True
     )
     tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Tenants.id, ondelete="CASCADE"), 
-        nullable=False,
-        index=True
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False, index=True
     )
-    
+
     # Pre-calculated counts
     assistants_count: Mapped[int] = mapped_column(default=0)
     apps_count: Mapped[int] = mapped_column(default=0)
@@ -167,20 +171,19 @@ class CompletionModelUsageStats(BasePublic):
     app_templates_count: Mapped[int] = mapped_column(default=0)
     spaces_count: Mapped[int] = mapped_column(default=0)
     total_usage: Mapped[int] = mapped_column(default=0)
-    
+
     # Metadata
     last_updated: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), 
-        server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
-    
+
     # Relationships
     completion_model: Mapped[CompletionModels] = relationship()
     tenant: Mapped["Tenants"] = relationship()
-    
+
     __table_args__ = (
-        UniqueConstraint('model_id', 'tenant_id', name='uq_model_tenant_stats'),
-        Index('idx_usage_stats_model_tenant', 'model_id', 'tenant_id'),
-        Index('idx_usage_stats_updated', 'last_updated'),
-        Index('idx_usage_stats_total_usage', 'total_usage'),
+        UniqueConstraint("model_id", "tenant_id", name="uq_model_tenant_stats"),
+        Index("idx_usage_stats_model_tenant", "model_id", "tenant_id"),
+        Index("idx_usage_stats_updated", "last_updated"),
+        Index("idx_usage_stats_total_usage", "total_usage"),
     )

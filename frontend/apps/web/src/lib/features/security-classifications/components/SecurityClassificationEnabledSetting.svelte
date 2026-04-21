@@ -8,11 +8,10 @@
   import { Button, Dialog, Input } from "@intric/ui";
   import { writable } from "svelte/store";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
-  import { IntricError } from "@intric/intric-js";
+  import { toastError } from "$lib/core/errors";
   import { Settings } from "$lib/components/layout";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
 
   const security = getSecurityClassificationService();
 
@@ -32,7 +31,7 @@
       await security.enable();
       $showEnableDialog = false;
     } catch (e) {
-      toast.error(e instanceof IntricError ? e.getReadableMessage() : String(e));
+      toastError(e);
     }
   });
 
@@ -41,7 +40,7 @@
       await security.disable();
       $showDisableDialog = false;
     } catch (e) {
-      toast.error(e instanceof IntricError ? e.getReadableMessage() : String(e));
+      toastError(e);
     }
   });
 </script>

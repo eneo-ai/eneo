@@ -32,7 +32,18 @@ class TestTenantIntegrationFactory(unittest.TestCase):
         self.assertIsInstance(tenant_integration, TenantIntegration)
         self.assertEqual(tenant_integration.id, integration_id)
         self.assertEqual(tenant_integration.tenant_id, tenant_id)
-        self.assertEqual(tenant_integration.integration, self.integration_mock)
+        self.assertEqual(tenant_integration.integration.id, self.integration_mock.id)
+        self.assertEqual(
+            tenant_integration.integration.name, self.integration_mock.name
+        )
+        self.assertEqual(
+            tenant_integration.integration.description,
+            self.integration_mock.description,
+        )
+        self.assertEqual(
+            tenant_integration.integration.integration_type,
+            self.integration_mock.integration_type,
+        )
 
     def test_create_entities(self):
         # Arrange
@@ -56,7 +67,20 @@ class TestTenantIntegrationFactory(unittest.TestCase):
             self.assertIsInstance(tenant_integration, TenantIntegration)
             self.assertEqual(tenant_integration.id, db_records[i].id)
             self.assertEqual(tenant_integration.tenant_id, db_records[i].tenant_id)
-            self.assertEqual(tenant_integration.integration, self.integration_mock)
+            self.assertEqual(
+                tenant_integration.integration.id, self.integration_mock.id
+            )
+            self.assertEqual(
+                tenant_integration.integration.name, self.integration_mock.name
+            )
+            self.assertEqual(
+                tenant_integration.integration.description,
+                self.integration_mock.description,
+            )
+            self.assertEqual(
+                tenant_integration.integration.integration_type,
+                self.integration_mock.integration_type,
+            )
 
 
 if __name__ == "__main__":

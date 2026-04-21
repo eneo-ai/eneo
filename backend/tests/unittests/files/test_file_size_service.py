@@ -12,9 +12,7 @@ from intric.files.file_size_service import FileSizeService
 @pytest.fixture
 def mock_settings(monkeypatch, tmp_path):
     settings = SimpleNamespace(upload_tmp_dir=tmp_path)
-    monkeypatch.setattr(
-        file_size_service, "get_settings", lambda: settings
-    )
+    monkeypatch.setattr(file_size_service, "get_settings", lambda: settings)
     return settings
 
 
@@ -26,7 +24,9 @@ async def test_save_file_to_disk_uses_default_tmp_dir():
     assert settings.upload_tmp_dir == Path("/tmp")
 
 
-async def test_save_file_to_disk_respects_custom_upload_tmp_dir(mock_settings, tmp_path):
+async def test_save_file_to_disk_respects_custom_upload_tmp_dir(
+    mock_settings, tmp_path
+):
     file = SpooledTemporaryFile()
     file.write(b"hello")
     file.seek(0)
@@ -60,7 +60,10 @@ async def test_save_file_to_disk_cleans_up_on_write_failure(mock_settings, tmp_p
     file.write(b"hello")
     file.seek(0)
 
-    with patch("intric.files.file_size_service.shutil.copyfileobj", side_effect=IOError("disk full")):
+    with patch(
+        "intric.files.file_size_service.shutil.copyfileobj",
+        side_effect=IOError("disk full"),
+    ):
         with pytest.raises(IOError, match="disk full"):
             await FileSizeService.save_file_to_disk(file)
 

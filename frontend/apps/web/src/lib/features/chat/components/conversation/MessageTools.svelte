@@ -69,6 +69,7 @@
       {/each}
 
       {#each message.web_search_references as searchResult (searchResult.id)}
+        <!-- eslint-disable svelte/no-navigation-without-resolve -- external web search result URL -->
         <a class="hover:bg-hover-default flex items-center gap-2" href={searchResult.url}>
           <img
             src={faviconService.getFavicon(searchResult.url)}
@@ -77,6 +78,7 @@
           />
           {searchResult.title}
         </a>
+        <!-- eslint-enable svelte/no-navigation-without-resolve -->
       {/each}
     </div>
   {/if}

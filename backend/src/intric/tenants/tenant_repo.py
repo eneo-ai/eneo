@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID
 
 import sqlalchemy as sa
 from pydantic import HttpUrl
-from sqlalchemy import cast, func
+from sqlalchemy import cast as sa_cast
+from sqlalchemy import func
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
@@ -32,7 +33,8 @@ class TenantRepository:
         session: AsyncSession,
         encryption_service: Optional["EncryptionService"] = None,
     ):
-        self.delegate = BaseRepositoryDelegate(
+        super().__init__()
+        self.delegate: BaseRepositoryDelegate[TenantInDB] = BaseRepositoryDelegate(
             session,
             Tenants,
             TenantInDB,
@@ -41,7 +43,7 @@ class TenantRepository:
         self.session = session
         self.encryption = encryption_service
 
-    async def add(self, tenant: TenantBase) -> TenantInDB:
+    async def add(self, tenant: TenantBase) -> TenantInDB | None:
         """Create new tenant with auto-generated slug.
 
         If the tenant doesn't have a slug, it will be auto-generated from the name.
@@ -68,6 +70,7 @@ class TenantRepository:
                     .options(selectinload(Tenants.modules))
                 )
                 tenant_in_db = await self.delegate.get_model_from_query(stmt)
+                assert tenant_in_db is not None
                 logger.info(
                     f"Generated slug '{slug}' for tenant {tenant_in_db.name}",
                     extra={"tenant_id": str(tenant_in_db.id), "slug": slug},
@@ -77,10 +80,10 @@ class TenantRepository:
         except IntegrityError as e:
             raise exceptions.UniqueException("Tenant name already exists.") from e
 
-    async def get(self, id: UUID) -> TenantInDB:
+    async def get(self, id: UUID) -> TenantInDB | None:
         return await self.delegate.get(id)
 
-    async def get_all_tenants(self, domain: str | None = None):
+    async def get_all_tenants(self, domain: str | None = None) -> list[TenantInDB]:
         if domain is not None:
             return await self.delegate.filter_by(conditions={Tenants.domain: domain})
 
@@ -97,34 +100,63 @@ class TenantRepository:
             .options(selectinload(Tenants.modules))
         )
         tenant = await self.session.scalar(tenant_stmt)
+        if tenant is None:
+            raise exceptions.NotFoundException("Tenant not found.")
 
-        tenant.modules = modules.all()
+        tenant.modules = list(modules.all())
 
         return TenantInDB.model_validate(tenant)
 
     async def update_tenant(self, tenant: TenantUpdate) -> TenantInDB:
-        return await self.delegate.update(tenant)
+        return cast(TenantInDB, await self.delegate.update(tenant))
+
+    async def update_api_key_policy(
+        self,
+        tenant_id: UUID,
+        policy_updates: dict[str, Any],
+    ) -> TenantInDB:
+        tenant = await self.get(tenant_id)
+        if tenant is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+        policy = dict(tenant.api_key_policy or {})
+        policy.update(policy_updates)
+
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(api_key_policy=policy, updated_at=datetime.now(timezone.utc))
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
 
     async def delete_tenant_by_id(self, id: UUID) -> TenantInDB:
-        return await self.delegate.delete(id)
+        return cast(TenantInDB, await self.delegate.delete(id))
 
     async def set_privacy_policy(
         self, privacy_policy: Optional[HttpUrl], tenant_id: UUID
     ) -> TenantInDB:
-        privacy_policy = str(privacy_policy) if privacy_policy is not None else None
+        privacy_policy_value = (
+            str(privacy_policy) if privacy_policy is not None else None
+        )
         stmt = (
             sa.update(Tenants)
             .where(Tenants.id == tenant_id)
-            .values(privacy_policy=privacy_policy)
+            .values(privacy_policy=privacy_policy_value)
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )
 
-        return await self.delegate.get_model_from_query(stmt)
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
 
     async def get_tenant_from_zitadel_org_id(self, zitadel_org_id: str) -> TenantInDB:
-        return await self.delegate.get_by(
-            conditions={Tenants.zitadel_org_id: zitadel_org_id}
+        return cast(
+            TenantInDB,
+            await self.delegate.get_by(
+                conditions={Tenants.zitadel_org_id: zitadel_org_id}
+            ),
         )
 
     async def update_api_credential(
@@ -132,7 +164,7 @@ class TenantRepository:
         tenant_id: UUID,
         provider: str,
         credential: dict[str, Any],
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Update or add API credential using JSONB set operation with encryption.
 
         Uses PostgreSQL's jsonb_set function to efficiently update a single
@@ -145,7 +177,7 @@ class TenantRepository:
             credential: The credential dictionary containing api_key and optional fields
 
         Returns:
-            Updated TenantInDB instance with refreshed api_credentials
+            Updated TenantInDB instance with refreshed api_credentials, or None
         """
         # DEBUG: Log encryption state
         logger.info(
@@ -179,20 +211,21 @@ class TenantRepository:
                 api_credentials=func.jsonb_set(
                     Tenants.api_credentials,
                     [provider.lower()],
-                    cast(credential_to_store, JSONB),
+                    sa_cast(credential_to_store, JSONB),
                     True,  # create_if_missing
                 )
             )
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )
-        return await self.delegate.get_model_from_query(stmt)
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
 
     async def delete_api_credential(
         self,
         tenant_id: UUID,
         provider: str,
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Remove API credential using JSONB delete operator.
 
         Uses PostgreSQL's JSONB #- operator to efficiently remove a single
@@ -210,13 +243,14 @@ class TenantRepository:
             .where(Tenants.id == tenant_id)
             .values(
                 api_credentials=Tenants.api_credentials.op("#-")(
-                    cast([provider.lower()], postgresql.ARRAY(sa.Text))
+                    sa_cast([provider.lower()], postgresql.ARRAY(sa.Text))
                 )
             )
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )
-        return await self.delegate.get_model_from_query(stmt)
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
 
     async def get_api_credentials_masked(
         self,
@@ -241,11 +275,16 @@ class TenantRepository:
         if not credentials:
             return {}
 
-        masked = {}
-        for provider, cred in credentials.items():
+        masked: dict[str, str] = {}
+        # JSONB from PostgreSQL arrives as Any; cast to a typed dict at the boundary.
+        credentials_typed: dict[str, object] = cast(dict[str, object], credentials)
+        for provider, cred in credentials_typed.items():
             # Handle both dict format and legacy string format
+            api_key: str
             if isinstance(cred, dict):
-                api_key = cred.get("api_key", "")
+                cred_dict = cast(dict[str, object], cred)
+                raw = cred_dict.get("api_key", "")
+                api_key = raw if isinstance(raw, str) else str(raw)
             else:
                 api_key = str(cred)
 
@@ -306,11 +345,16 @@ class TenantRepository:
         if not credentials:
             return {}
 
-        metadata = {}
-        for provider, cred in credentials.items():
+        metadata: dict[str, dict[str, str]] = {}
+        # JSONB from PostgreSQL arrives as Any; cast to a typed dict at the boundary.
+        credentials_typed: dict[str, object] = cast(dict[str, object], credentials)
+        for provider, cred in credentials_typed.items():
             # Extract api_key from credential structure
+            api_key: str
             if isinstance(cred, dict):
-                api_key = cred.get("api_key", "")
+                cred_dict = cast(dict[str, object], cred)
+                raw = cred_dict.get("api_key", "")
+                api_key = raw if isinstance(raw, str) else str(raw)
             else:
                 api_key = str(cred)
 
@@ -335,10 +379,15 @@ class TenantRepository:
             # Mask the key - show last 4 chars or "***" for short keys
             masked_key = mask_api_key(api_key)
 
+            cred_for_set_at = (
+                cast(dict[str, object], cred) if isinstance(cred, dict) else {}
+            )
+            set_at_raw = cred_for_set_at.get("set_at")
+            set_at_str = set_at_raw if isinstance(set_at_raw, str) else ""
             metadata[provider] = {
                 "masked_key": masked_key,
                 "encryption_status": encryption_status,
-                "set_at": cred.get("set_at") if isinstance(cred, dict) else None,
+                "set_at": set_at_str,
             }
 
         return metadata
@@ -410,7 +459,9 @@ class TenantRepository:
                     .values(slug=check_slug, updated_at=datetime.now(timezone.utc))
                 )
                 await self.session.execute(stmt)
-                logger.info(f"Generated and saved slug '{check_slug}' for tenant {tenant.name}")
+                logger.info(
+                    f"Generated and saved slug '{check_slug}' for tenant {tenant.name}"
+                )
                 return check_slug
             counter += 1
 
@@ -484,8 +535,11 @@ class TenantRepository:
         if not config:
             return None
 
+        config_typed: dict[str, object] = dict(config)
+
         # Extract and process client_secret
-        client_secret = config.get("client_secret", "")
+        raw_secret = config_typed.get("client_secret", "")
+        client_secret = raw_secret if isinstance(raw_secret, str) else str(raw_secret)
 
         # Detect encryption status BEFORE decryption
         if client_secret.startswith("enc:fernet:v"):
@@ -505,13 +559,30 @@ class TenantRepository:
 
         masked_secret = mask_api_key(client_secret)
 
+        def _str_or_none(v: object) -> str | None:
+            return v if isinstance(v, str) else None
+
+        domains_raw = config_typed.get("allowed_domains", [])
+        domains: list[str] = (
+            [d for d in cast(list[object], domains_raw) if isinstance(d, str)]
+            if isinstance(domains_raw, list)
+            else []
+        )
+        redirect_uris_raw = config_typed.get("additional_redirect_uris", [])
+        redirect_uris: list[str] = (
+            [u for u in cast(list[object], redirect_uris_raw) if isinstance(u, str)]
+            if isinstance(redirect_uris_raw, list)
+            else []
+        )
+
         return {
-            "provider": config.get("provider"),
-            "client_id": config.get("client_id"),
+            "provider": _str_or_none(config_typed.get("provider")),
+            "client_id": _str_or_none(config_typed.get("client_id")),
             "masked_secret": masked_secret,
-            "issuer": config.get("issuer"),
-            "allowed_domains": config.get("allowed_domains", []),
-            "encrypted_at": config.get("encrypted_at"),
+            "issuer": _str_or_none(config_typed.get("issuer")),
+            "allowed_domains": domains,
+            "additional_redirect_uris": redirect_uris,
+            "encrypted_at": _str_or_none(config_typed.get("encrypted_at")),
             "encryption_status": encryption_status,
         }
 
@@ -537,7 +608,7 @@ class TenantRepository:
         self,
         tenant_id: UUID,
         favorites: list[str],
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Replace the tenant's favorite providers list.
 
         Args:
@@ -551,7 +622,7 @@ class TenantRepository:
             sa.update(Tenants)
             .where(Tenants.id == tenant_id)
             .values(
-                favorite_providers=cast(favorites, JSONB),
+                favorite_providers=sa_cast(favorites, JSONB),
                 updated_at=datetime.now(timezone.utc),
             )
             .returning(Tenants)
@@ -563,7 +634,7 @@ class TenantRepository:
         self,
         tenant_id: UUID,
         crawler_settings: dict[str, Any],
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Atomically merge crawler settings for a tenant.
 
         Uses PostgreSQL's || operator to merge JSONB objects atomically,
@@ -582,19 +653,20 @@ class TenantRepository:
             .where(Tenants.id == tenant_id)
             .values(
                 crawler_settings=func.coalesce(
-                    Tenants.crawler_settings, cast({}, JSONB)
-                ).op("||")(cast(crawler_settings, JSONB)),
+                    Tenants.crawler_settings, sa_cast({}, JSONB)
+                ).op("||")(sa_cast(crawler_settings, JSONB)),
                 updated_at=datetime.now(timezone.utc),
             )
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )
-        return await self.delegate.get_model_from_query(stmt)
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
 
     async def clear_crawler_settings(
         self,
         tenant_id: UUID,
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Clear all crawler settings for a tenant, reverting to defaults.
 
         Args:
@@ -613,4 +685,5 @@ class TenantRepository:
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )
-        return await self.delegate.get_model_from_query(stmt)
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)

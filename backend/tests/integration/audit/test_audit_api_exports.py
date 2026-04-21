@@ -26,7 +26,9 @@ class TestExportAuthentication:
 class TestCsvExport:
     """Tests for CSV export functionality."""
 
-    async def test_csv_export_default_format(self, client, auth_headers, sample_audit_logs):
+    async def test_csv_export_default_format(
+        self, client, auth_headers, sample_audit_logs
+    ):
         """Verify CSV is the default export format."""
         response = await client.get(
             "/api/v1/audit/logs/export",
@@ -35,7 +37,9 @@ class TestCsvExport:
         assert response.status_code == 200
         assert "text/csv" in response.headers.get("content-type", "")
 
-    async def test_csv_export_explicit_format(self, client, auth_headers, sample_audit_logs):
+    async def test_csv_export_explicit_format(
+        self, client, auth_headers, sample_audit_logs
+    ):
         """Verify CSV format can be explicitly requested."""
         response = await client.get(
             "/api/v1/audit/logs/export?format=csv",
@@ -44,7 +48,9 @@ class TestCsvExport:
         assert response.status_code == 200
         assert "text/csv" in response.headers.get("content-type", "")
 
-    async def test_csv_export_has_header_row(self, client, auth_headers, sample_audit_logs):
+    async def test_csv_export_has_header_row(
+        self, client, auth_headers, sample_audit_logs
+    ):
         """Verify CSV export includes header row."""
         response = await client.get(
             "/api/v1/audit/logs/export?format=csv",
@@ -59,7 +65,9 @@ class TestCsvExport:
         assert "action" in headers
         assert "actor" in headers or "actor_id" in headers
 
-    async def test_csv_export_content_disposition(self, client, auth_headers, sample_audit_logs):
+    async def test_csv_export_content_disposition(
+        self, client, auth_headers, sample_audit_logs
+    ):
         """Verify CSV export has proper Content-Disposition header."""
         response = await client.get(
             "/api/v1/audit/logs/export?format=csv",
@@ -70,7 +78,9 @@ class TestCsvExport:
         assert "audit_logs" in content_disp
         assert ".csv" in content_disp
 
-    async def test_csv_export_with_filters(self, client, auth_headers, sample_audit_logs):
+    async def test_csv_export_with_filters(
+        self, client, auth_headers, sample_audit_logs
+    ):
         """Verify CSV export respects filters."""
         response = await client.get(
             "/api/v1/audit/logs/export?format=csv&action=user_created",
@@ -91,9 +101,13 @@ class TestCsvExport:
 class TestCsvInjectionProtection:
     """Tests for CSV injection protection in exports."""
 
-    async def test_formula_prefix_sanitized_in_export(self, client, auth_headers, db_session, test_tenant, test_user):
+    async def test_formula_prefix_sanitized_in_export(
+        self, client, auth_headers, db_session, test_tenant, test_user
+    ):
         """Verify formula characters are sanitized in CSV export."""
-        from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+        from intric.audit.infrastructure.audit_log_repo_impl import (
+            AuditLogRepositoryImpl,
+        )
         from intric.audit.domain.audit_log import AuditLog
         from intric.audit.domain.action_types import ActionType
         from intric.audit.domain.entity_types import EntityType
@@ -142,7 +156,9 @@ class TestJsonlExport:
         assert response.status_code == 200
         assert "application/x-ndjson" in response.headers.get("content-type", "")
 
-    async def test_jsonl_export_each_line_is_valid_json(self, client, auth_headers, sample_audit_logs):
+    async def test_jsonl_export_each_line_is_valid_json(
+        self, client, auth_headers, sample_audit_logs
+    ):
         """Verify each line in JSONL export is valid JSON."""
         import json
 
@@ -161,7 +177,9 @@ class TestJsonlExport:
             except json.JSONDecodeError:
                 pytest.fail(f"Invalid JSON line: {line[:100]}")
 
-    async def test_jsonl_export_contains_required_fields(self, client, auth_headers, sample_audit_logs):
+    async def test_jsonl_export_contains_required_fields(
+        self, client, auth_headers, sample_audit_logs
+    ):
         """Verify JSONL records contain required fields."""
         import json
 
@@ -179,7 +197,9 @@ class TestJsonlExport:
             assert "action" in record
             assert "timestamp" in record or "created_at" in record
 
-    async def test_jsonl_export_content_disposition(self, client, auth_headers, sample_audit_logs):
+    async def test_jsonl_export_content_disposition(
+        self, client, auth_headers, sample_audit_logs
+    ):
         """Verify JSONL export has proper Content-Disposition header."""
         response = await client.get(
             "/api/v1/audit/logs/export?format=json",
@@ -190,7 +210,9 @@ class TestJsonlExport:
         assert "audit_logs" in content_disp
         assert ".jsonl" in content_disp
 
-    async def test_jsonl_export_with_date_filter(self, client, auth_headers, sample_audit_logs):
+    async def test_jsonl_export_with_date_filter(
+        self, client, auth_headers, sample_audit_logs
+    ):
         """Verify JSONL export respects date filters."""
         from_date = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
 
@@ -205,7 +227,9 @@ class TestJsonlExport:
 class TestGdprExport:
     """Tests for GDPR Article 15 export functionality."""
 
-    async def test_gdpr_export_with_user_id(self, client, auth_headers, sample_audit_logs, test_user):
+    async def test_gdpr_export_with_user_id(
+        self, client, auth_headers, sample_audit_logs, test_user
+    ):
         """Verify GDPR export filters by user_id."""
         response = await client.get(
             f"/api/v1/audit/logs/export?user_id={test_user}",
@@ -213,7 +237,9 @@ class TestGdprExport:
         )
         assert response.status_code == 200
 
-    async def test_gdpr_export_csv_format(self, client, auth_headers, sample_audit_logs, test_user):
+    async def test_gdpr_export_csv_format(
+        self, client, auth_headers, sample_audit_logs, test_user
+    ):
         """Verify GDPR export works with CSV format."""
         response = await client.get(
             f"/api/v1/audit/logs/export?user_id={test_user}&format=csv",
@@ -222,7 +248,9 @@ class TestGdprExport:
         assert response.status_code == 200
         assert "text/csv" in response.headers.get("content-type", "")
 
-    async def test_gdpr_export_json_format(self, client, auth_headers, sample_audit_logs, test_user):
+    async def test_gdpr_export_json_format(
+        self, client, auth_headers, sample_audit_logs, test_user
+    ):
         """Verify GDPR export works with JSON format."""
         response = await client.get(
             f"/api/v1/audit/logs/export?user_id={test_user}&format=json",
@@ -235,7 +263,9 @@ class TestGdprExport:
 class TestExportAuditTrail:
     """Tests for export action auditing."""
 
-    async def test_export_creates_audit_entry(self, client, auth_headers, auth_headers_with_session):
+    async def test_export_creates_audit_entry(
+        self, client, auth_headers, auth_headers_with_session
+    ):
         """Verify exporting logs creates AUDIT_LOG_EXPORTED entry."""
         headers, cookies = auth_headers_with_session
 

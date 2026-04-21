@@ -1,15 +1,20 @@
 # MIT License
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication.auth_dependencies import require_permission
 from intric.main.container.container import Container
 from intric.roles.permissions import Permission
 from intric.roles.role import (
     PermissionPublic,
     RoleCreateRequest,
+    RoleInDB,
     RolePublic,
     RolesPaginatedResponse,
     RoleUpdateRequest,
@@ -19,12 +24,9 @@ from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.tenants.tenant import TenantUpdatePublic
 
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-
 router = APIRouter()
+
+_ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
 
 
 @router.get(
@@ -33,8 +35,8 @@ router = APIRouter()
     responses=responses.get_responses([404]),
 )
 async def get_permissions(
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: _ContainerDep,
+) -> list[PermissionPublic]:
     service = container.role_service()
     return await service.get_permissions()
 
@@ -43,7 +45,9 @@ async def get_permissions(
 async def get_role_templates(
     container: Container = Depends(get_container(with_user=True)),
 ):
-    from intric.server.dependencies.predefined_roles import load_predefined_roles_from_config
+    from intric.server.dependencies.predefined_roles import (
+        load_predefined_roles_from_config,
+    )
 
     return load_predefined_roles_from_config()
 
@@ -53,8 +57,8 @@ async def get_role_templates(
     response_model=RolesPaginatedResponse,
 )
 async def get_roles(
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: _ContainerDep,
+) -> RolesPaginatedResponse:
     service = container.role_service()
     roles = await service.get_all_roles()
 
@@ -68,8 +72,8 @@ async def get_roles(
 )
 async def get_role_by_id(
     role_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: _ContainerDep,
+) -> RoleInDB | None:
     service = container.role_service()
     return await service.get_role_by_uuid(role_id)
 
@@ -77,8 +81,8 @@ async def get_role_by_id(
 @router.post("/", response_model=RolePublic)
 async def create_role(
     role: RoleCreateRequest,
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: _ContainerDep,
+) -> RoleInDB:
     service = container.role_service()
     user = container.user()
 
@@ -112,8 +116,8 @@ async def create_role(
 async def update_role(
     role_id: UUID,
     role: RoleUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: _ContainerDep,
+) -> RoleInDB | None:
     service = container.role_service()
     user = container.user()
 
@@ -122,9 +126,10 @@ async def update_role(
 
     # Update role
     updated_role = await service.update_role(role_id=role_id, role_update=role)
+    assert updated_role is not None
 
     # Track changes
-    changes = {}
+    changes: dict[str, dict[str, object]] = {}
     if role.name and role.name != old_role.name:
         changes["name"] = {"old": old_role.name, "new": role.name}
     if role.permissions and set(role.permissions) != set(old_role.permissions):
@@ -159,13 +164,14 @@ async def update_role(
 )
 async def delete_role_by_id(
     role_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: _ContainerDep,
+) -> RoleInDB | None:
     service = container.role_service()
     user = container.user()
 
     # Get role info before deletion (snapshot pattern)
     role_to_delete = await service.get_role_by_uuid(role_id)
+    assert role_to_delete is not None
 
     # Delete role
     deleted_role = await service.delete_role(role_id)

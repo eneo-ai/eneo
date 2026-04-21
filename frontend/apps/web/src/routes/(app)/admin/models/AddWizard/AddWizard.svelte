@@ -9,6 +9,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { Check, Loader2, AlertTriangle } from "lucide-svelte";
   import StepProvider from "./StepProvider.svelte";
   import StepCredentials from "./StepCredentials.svelte";
@@ -108,7 +109,7 @@
       $wizardData.selectedProviderId = preSelectedProviderId;
       $wizardData.isCreatingNewProvider = false;
       // Resolve provider type from the providers list
-      const matched = providers.find(p => p.id === preSelectedProviderId);
+      const matched = providers.find((p) => p.id === preSelectedProviderId);
       if (matched?.provider_type) {
         $wizardData.selectedProviderType = matched.provider_type;
       }
@@ -125,10 +126,14 @@
 
   function getStepLabel(labelKey: string): string {
     switch (labelKey) {
-      case "wizard_step_provider": return m.wizard_step_provider();
-      case "wizard_step_credentials": return m.wizard_step_credentials();
-      case "wizard_step_models": return m.wizard_step_models();
-      default: return "";
+      case "wizard_step_provider":
+        return m.wizard_step_provider();
+      case "wizard_step_credentials":
+        return m.wizard_step_credentials();
+      case "wizard_step_models":
+        return m.wizard_step_models();
+      default:
+        return "";
     }
   }
 
@@ -160,7 +165,9 @@
   }
 
   // Skip credentials step if using existing provider
-  function handleProviderSelected(event: CustomEvent<{ providerId: string | null; isNew: boolean; providerType: string }>) {
+  function handleProviderSelected(
+    event: CustomEvent<{ providerId: string | null; isNew: boolean; providerType: string }>
+  ) {
     const { providerId, isNew, providerType } = event.detail;
     $wizardData.selectedProviderId = providerId;
     $wizardData.isCreatingNewProvider = isNew;
@@ -253,9 +260,9 @@
       // All models validated — create them
       await createModels(modelsToCreate, providerId);
       return;
-    } catch (e: any) {
-      error = e.message || m.failed_to_create_model();
-      toast.error(m.failed_to_create_model());
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : m.failed_to_create_model();
+      toastError(e, m.failed_to_create_model());
     } finally {
       isSubmitting = false;
       isValidating = false;
@@ -273,9 +280,9 @@
     try {
       if (!providerId) throw new Error(m.no_provider_selected());
       await createModels(models, providerId);
-    } catch (e: any) {
-      error = e.message || m.failed_to_create_model();
-      toast.error(m.failed_to_create_model());
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : m.failed_to_create_model();
+      toastError(e, m.failed_to_create_model());
     } finally {
       isSubmitting = false;
     }
@@ -287,52 +294,54 @@
   }
 
   async function createModels(modelsToCreate: typeof $wizardData.models, providerId: string) {
-      // Create models based on type
-      for (const model of modelsToCreate) {
-        if (modelType === "completion") {
-          await intric.tenantModels.createCompletion({
-            provider_id: providerId,
-            name: model.name,
-            display_name: model.displayName,
-            family: model.family ?? "openai",
-            max_input_tokens: model.maxInputTokens,
-            max_output_tokens: model.maxOutputTokens,
-            vision: model.vision ?? false,
-            reasoning: model.reasoning ?? false,
-            supports_tool_calling: model.supportsToolCalling ?? false,
-            hosting: model.hosting ?? "swe",
-            is_active: true
-          });
-        } else if (modelType === "embedding") {
-          await intric.tenantModels.createEmbedding({
-            provider_id: providerId,
-            name: model.name,
-            display_name: model.displayName,
-            family: model.family ?? "openai",
-            dimensions: model.dimensions ?? undefined,
-            max_input: model.maxInput ?? undefined,
-            hosting: model.hosting ?? "swe",
-            is_active: true
-          });
-        } else if (modelType === "transcription") {
-          await intric.tenantModels.createTranscription({
-            provider_id: providerId,
-            name: model.name,
-            display_name: model.displayName,
-            family: model.family ?? "openai",
-            hosting: model.hosting ?? "swe",
-            is_active: true
-          });
-        }
+    // Create models based on type
+    for (const model of modelsToCreate) {
+      if (modelType === "completion") {
+        await intric.tenantModels.createCompletion({
+          provider_id: providerId,
+          name: model.name,
+          display_name: model.displayName,
+          family: model.family ?? "openai",
+          max_input_tokens: model.maxInputTokens,
+          max_output_tokens: model.maxOutputTokens,
+          vision: model.vision ?? false,
+          reasoning: model.reasoning ?? false,
+          supports_tool_calling: model.supportsToolCalling ?? false,
+          hosting: model.hosting ?? "swe",
+          is_active: true
+        });
+      } else if (modelType === "embedding") {
+        await intric.tenantModels.createEmbedding({
+          provider_id: providerId,
+          name: model.name,
+          display_name: model.displayName,
+          family: model.family ?? "openai",
+          dimensions: model.dimensions ?? undefined,
+          max_input: model.maxInput ?? undefined,
+          hosting: model.hosting ?? "swe",
+          is_active: true
+        });
+      } else if (modelType === "transcription") {
+        await intric.tenantModels.createTranscription({
+          provider_id: providerId,
+          name: model.name,
+          display_name: model.displayName,
+          family: model.family ?? "openai",
+          hosting: model.hosting ?? "swe",
+          is_active: true
+        });
       }
+    }
 
-      await invalidate("admin:model-providers:load");
-      await invalidate("admin:models:load");
+    await invalidate("admin:model-providers:load");
+    await invalidate("admin:models:load");
 
-      const modelCount = modelsToCreate.length;
-      toast.success(modelCount === 1 ? m.model_created_success() : m.models_created_success({ count: modelCount }));
+    const modelCount = modelsToCreate.length;
+    toast.success(
+      modelCount === 1 ? m.model_created_success() : m.models_created_success({ count: modelCount })
+    );
 
-      closeWizard();
+    closeWizard();
   }
 
   function closeWizard() {
@@ -365,47 +374,51 @@
 <Dialog.Root {openController}>
   <Dialog.Content width="large" form>
     <!-- Progress Header with subtle gradient -->
-    <Dialog.Title class="!pb-0 bg-gradient-to-b from-surface-dimmer/50 to-transparent">
+    <Dialog.Title class="from-surface-dimmer/50 bg-gradient-to-b to-transparent !pb-0">
       <div class="flex flex-col gap-6">
         <span>{m.add_provider_and_models()}</span>
 
         <!-- Step Indicator - Refined text-based design -->
         <nav class="flex items-center" aria-label="Wizard steps">
-          {#each stepLabels as { step, labelKey }, i}
+          {#each stepLabels as { step, labelKey }, i (step)}
             {@const isActive = step === $currentStep}
             {@const isCompleted = step < $currentStep}
-            {@const isClickable = step < $currentStep || (step === 3 && !$wizardData.isCreatingNewProvider && $wizardData.selectedProviderId)}
+            {@const isClickable =
+              step < $currentStep ||
+              (step === 3 && !$wizardData.isCreatingNewProvider && $wizardData.selectedProviderId)}
 
             <!-- Step Label -->
             <button
               type="button"
-              class="relative flex items-center gap-2 px-1 py-2 text-sm transition-all duration-150 rounded-sm
-                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface
+              class="focus-visible:ring-accent-default/60 focus-visible:ring-offset-surface relative flex items-center gap-2 rounded-sm px-1 py-2 text-sm
+                transition-all duration-150 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none
                 {isActive
-                  ? 'text-primary font-medium'
-                  : isCompleted
-                    ? 'text-positive-stronger cursor-pointer hover:text-positive-default'
-                    : 'text-muted cursor-default tracking-wide'}"
+                ? 'text-primary font-medium'
+                : isCompleted
+                  ? 'text-positive-stronger hover:text-positive-default cursor-pointer'
+                  : 'text-muted cursor-default tracking-wide'}"
               disabled={!isClickable}
               on:click={() => isClickable && goToStep(step)}
-              aria-current={isActive ? 'step' : undefined}
+              aria-current={isActive ? "step" : undefined}
             >
               {#if isCompleted}
-                <Check class="h-4 w-4 text-positive-default" />
+                <Check class="text-positive-default h-4 w-4" />
               {/if}
               <span>{getStepLabel(labelKey)}</span>
 
               <!-- Active underline indicator -->
               {#if isActive}
-                <span class="absolute bottom-0 left-1 right-1 h-0.5 bg-accent-default rounded-full"></span>
+                <span class="bg-accent-default absolute right-1 bottom-0 left-1 h-0.5 rounded-full"
+                ></span>
               {/if}
             </button>
 
             <!-- Connector Line -->
             {#if i < stepLabels.length - 1}
-              <div class="mx-3 h-px w-8 transition-colors duration-150
-                {step < $currentStep ? 'bg-positive-default' : 'bg-border-dimmer'}">
-              </div>
+              <div
+                class="mx-3 h-px w-8 transition-colors duration-150
+                {step < $currentStep ? 'bg-positive-default' : 'bg-border-dimmer'}"
+              ></div>
             {/if}
           {/each}
         </nav>
@@ -415,7 +428,9 @@
     <Dialog.Section class="!px-8">
       <div class="relative py-6">
         {#if error}
-          <div class="border-error bg-error-dimmer text-error-stronger mb-4 border-l-2 px-4 py-2 text-sm">
+          <div
+            class="border-error bg-error-dimmer text-error-stronger mb-4 border-l-2 px-4 py-2 text-sm"
+          >
             {error}
           </div>
         {/if}
@@ -423,65 +438,78 @@
         {#if pendingValidationWarnings.length > 0}
           <!-- Validation warning — ask user to go back or create anyway -->
           <div class="flex flex-col gap-4">
-            <div class="flex items-start gap-3 rounded-lg border border-warning-default/30 bg-warning-dimmer/50 p-4">
-              <AlertTriangle class="h-5 w-5 text-warning-default flex-shrink-0 mt-0.5" />
+            <div
+              class="border-warning-default/30 bg-warning-dimmer/50 flex items-start gap-3 rounded-lg border p-4"
+            >
+              <AlertTriangle class="text-warning-default mt-0.5 h-5 w-5 flex-shrink-0" />
               <div class="flex-1">
-                <p class="text-sm font-medium text-warning-stronger">{m.model_validation_warning_title()}</p>
+                <p class="text-warning-stronger text-sm font-medium">
+                  {m.model_validation_warning_title()}
+                </p>
                 <ul class="mt-2 space-y-1">
-                  {#each pendingValidationWarnings as warning}
-                    <li class="text-sm text-warning-default">{warning}</li>
+                  {#each pendingValidationWarnings as warning, i (i)}
+                    <li class="text-warning-default text-sm">{warning}</li>
                   {/each}
                 </ul>
               </div>
             </div>
           </div>
         {:else}
-
-        <!-- Step Content - Grid overlay technique for smooth crossfade without jumping -->
-        <div class="grid min-h-[380px] items-start overflow-hidden" style="grid-template: 1fr / 1fr;">
-          {#key $currentStep}
-            <div
-              in:fly={{ x: flyX, duration: transitionDuration, delay: transitionDuration * 0.4, easing: cubicOut, opacity: 0 }}
-              out:fade={{ duration: transitionDuration * 0.35 }}
-              class="w-full"
-              style="grid-area: 1 / 1;"
-            >
-            {#if $currentStep === 1}
-              <StepProvider
-                {providers}
-                {favoriteProviders}
-                {capabilities}
-                selectedProviderId={$wizardData.selectedProviderId}
-                on:select={handleProviderSelected}
-              />
-            {:else if $currentStep === 2}
-              <StepCredentials
-                providerType={$wizardData.selectedProviderType}
-                {providerFields}
-                on:complete={handleCredentialsCompleted}
-                on:back={previousStep}
-              />
-            {:else if $currentStep === 3}
-              <StepModels
-                bind:this={stepModelsRef}
-                {modelType}
-                {capabilities}
-                providerType={$wizardData.selectedProviderType}
-                providerId={$wizardData.selectedProviderId}
-                bind:models={$wizardData.models}
-                bind:canFinish={canFinishModels}
-                on:complete={handleComplete}
-                on:back={previousStep}
-              />
-            {/if}
+          <!-- Step Content - Grid overlay technique for smooth crossfade without jumping -->
+          <div
+            class="grid min-h-[380px] items-start overflow-hidden"
+            style="grid-template: 1fr / 1fr;"
+          >
+            {#key $currentStep}
+              <div
+                in:fly={{
+                  x: flyX,
+                  duration: transitionDuration,
+                  delay: transitionDuration * 0.4,
+                  easing: cubicOut,
+                  opacity: 0
+                }}
+                out:fade={{ duration: transitionDuration * 0.35 }}
+                class="w-full"
+                style="grid-area: 1 / 1;"
+              >
+                {#if $currentStep === 1}
+                  <StepProvider
+                    {providers}
+                    {favoriteProviders}
+                    {capabilities}
+                    selectedProviderId={$wizardData.selectedProviderId}
+                    on:select={handleProviderSelected}
+                  />
+                {:else if $currentStep === 2}
+                  <StepCredentials
+                    providerType={$wizardData.selectedProviderType}
+                    {providerFields}
+                    on:complete={handleCredentialsCompleted}
+                    on:back={previousStep}
+                  />
+                {:else if $currentStep === 3}
+                  <StepModels
+                    bind:this={stepModelsRef}
+                    {modelType}
+                    {capabilities}
+                    providerType={$wizardData.selectedProviderType}
+                    providerId={$wizardData.selectedProviderId}
+                    bind:models={$wizardData.models}
+                    bind:canFinish={canFinishModels}
+                    on:complete={handleComplete}
+                    on:back={previousStep}
+                  />
+                {/if}
+              </div>
+            {/key}
           </div>
-        {/key}
-      </div>
         {/if}
-    </Dialog.Section>
+      </div></Dialog.Section
+    >
 
     <!-- Footer with visual separation -->
-    <Dialog.Controls class="border-t border-dimmer pt-4">
+    <Dialog.Controls class="border-dimmer border-t pt-4">
       {#if pendingValidationWarnings.length > 0}
         <Button variant="outlined" on:click={handleGoBackFromValidation}>{m.back()}</Button>
         <Button
@@ -496,14 +524,20 @@
           {isSubmitting ? m.creating() : m.create_anyway()}
         </Button>
       {:else}
-        <Button variant="outlined" on:click={handleCancel} class="focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface">{m.cancel()}</Button>
+        <Button
+          variant="outlined"
+          on:click={handleCancel}
+          class="focus-visible:ring-accent-default/70 focus-visible:ring-offset-surface focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:!outline-none"
+          >{m.cancel()}</Button
+        >
 
         {#if $currentStep === 3}
           <Button
             variant="primary"
-            on:click={() => handleComplete(new CustomEvent("complete", { detail: { skip: false } }))}
+            on:click={() =>
+              handleComplete(new CustomEvent("complete", { detail: { skip: false } }))}
             disabled={isSubmitting || isValidating || !canFinishModels}
-            class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/50 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
+            class="focus-visible:ring-accent-default/50 focus-visible:ring-offset-surface gap-2 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:!outline-none"
           >
             {#if isSubmitting || isValidating}
               <Loader2 class="h-4 w-4 animate-spin" />

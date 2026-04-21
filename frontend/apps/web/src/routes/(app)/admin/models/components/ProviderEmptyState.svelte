@@ -19,20 +19,22 @@
 </script>
 
 <div
-  class="flex items-center gap-4 py-3 px-4 bg-surface-dimmer/40 rounded-lg border border-dashed border-dimmer/80"
+  class="bg-surface-dimmer/40 border-dimmer/80 flex items-center gap-4 rounded-lg border border-dashed px-4 py-3"
   in:fade={{ duration: 200 }}
 >
   <!-- Icon -->
-  <div class="flex-shrink-0 p-3 rounded-lg bg-surface dark:bg-accent-dimmer border border-dimmer/50 dark:border-accent-default/20">
-    <Layers class="w-5 h-5 text-muted/50 dark:text-accent-stronger" strokeWidth={1.5} />
+  <div
+    class="bg-surface dark:bg-accent-dimmer border-dimmer/50 dark:border-accent-default/20 flex-shrink-0 rounded-lg border p-3"
+  >
+    <Layers class="text-muted/50 dark:text-accent-stronger h-5 w-5" strokeWidth={1.5} />
   </div>
 
   <!-- Text -->
-  <div class="flex-1 min-w-0">
-    <p class="text-sm text-secondary font-medium">
+  <div class="min-w-0 flex-1">
+    <p class="text-secondary text-sm font-medium">
       {m.no_models_in_provider()}
     </p>
-    <p class="text-xs text-muted/70 mt-0.5">
+    <p class="text-muted/70 mt-0.5 text-xs">
       {m.add_model_to_get_started()}
     </p>
   </div>
@@ -41,10 +43,10 @@
   <Button
     variant="outlined"
     padding="icon-leading"
-    class="flex-shrink-0 text-xs h-8"
+    class="h-8 flex-shrink-0 text-xs"
     on:click={handleAddModel}
   >
-    <Plus class="w-3.5 h-3.5" />
+    <Plus class="h-3.5 w-3.5" />
     {m.add_model()}
   </Button>
 </div>

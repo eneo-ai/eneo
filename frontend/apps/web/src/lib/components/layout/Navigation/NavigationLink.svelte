@@ -1,10 +1,11 @@
 <script lang="ts">
   import type { Icon } from "@intric/icons";
+  import type { ComponentType } from "svelte";
   import { cva } from "class-variance-authority";
 
   export let href: string;
   export let isActive: boolean;
-  export let icon: Icon;
+  export let icon: Icon | ComponentType;
   export let label: string;
 
   const link = cva(
@@ -29,6 +30,7 @@
   );
 </script>
 
+<!-- eslint-disable svelte/no-navigation-without-resolve -- href is a typed prop passed from caller -->
 <a class={link({ active: isActive })} aria-current={isActive ? "page" : undefined} {href}>
   {#if isActive}
     <div class="bg-dynamic-default absolute top-0 bottom-0 left-0 w-[4px] rounded-r-full"></div>
@@ -37,3 +39,4 @@
   <span>{label}</span>
   <slot />
 </a>
+<!-- eslint-enable svelte/no-navigation-without-resolve -->

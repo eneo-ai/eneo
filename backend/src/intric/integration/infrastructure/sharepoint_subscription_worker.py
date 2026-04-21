@@ -7,7 +7,9 @@ This worker handles:
 
 from typing import Optional
 
-from intric.integration.domain.entities.sharepoint_subscription import SharePointSubscription
+from intric.integration.domain.entities.sharepoint_subscription import (
+    SharePointSubscription,
+)
 from intric.integration.infrastructure.content_service.sharepoint_content_service import (
     SimpleSharePointToken,
 )
@@ -39,7 +41,9 @@ async def get_token_for_subscription(
     oauth_token_service = container.oauth_token_service()
 
     try:
-        user_integration = await user_integration_repo.one(id=subscription.user_integration_id)
+        user_integration = await user_integration_repo.one(
+            id=subscription.user_integration_id
+        )
     except Exception as e:
         logger.error(
             f"Failed to get user integration for subscription {subscription.subscription_id}: {e}"
@@ -56,19 +60,28 @@ async def get_token_for_subscription(
 
         try:
             tenant_sharepoint_app_repo = container.tenant_sharepoint_app_repo()
-            tenant_app = await tenant_sharepoint_app_repo.one(id=user_integration.tenant_app_id)
+            tenant_app = await tenant_sharepoint_app_repo.one(
+                id=user_integration.tenant_app_id
+            )
 
             if tenant_app.is_service_account():
                 service_account_auth_service = container.service_account_auth_service()
-                token_data = await service_account_auth_service.refresh_access_token(tenant_app)
+                token_data = await service_account_auth_service.refresh_access_token(
+                    tenant_app
+                )
                 new_refresh_token = token_data.get("refresh_token")
-                if new_refresh_token and new_refresh_token != tenant_app.service_account_refresh_token:
+                if (
+                    new_refresh_token
+                    and new_refresh_token != tenant_app.service_account_refresh_token
+                ):
                     tenant_app.update_refresh_token(new_refresh_token)
                     await tenant_sharepoint_app_repo.update(tenant_app)
                 access_token = token_data["access_token"]
             else:
                 tenant_app_auth_service = container.tenant_app_auth_service()
-                access_token = await tenant_app_auth_service.get_access_token(tenant_app)
+                access_token = await tenant_app_auth_service.get_access_token(
+                    tenant_app
+                )
 
             return SimpleSharePointToken(access_token=access_token)
 
@@ -97,8 +110,10 @@ async def get_token_for_subscription(
                 return None
 
             # Refresh token if needed
-            token = await oauth_token_service.refresh_and_update_token(token_id=token.id)
-            return token
+            token = await oauth_token_service.refresh_and_update_token(
+                token_id=token.id
+            )
+            return token  # type: ignore[return-value]
 
         except Exception as e:
             logger.error(
@@ -123,7 +138,9 @@ async def renew_expiring_subscriptions(container: Container):
     sharepoint_subscription_service = container.sharepoint_subscription_service()
 
     # Find subscriptions expiring in next 48 hours (2 days)
-    expiring = await sharepoint_subscription_service.list_expiring_subscriptions(hours=48)
+    expiring = await sharepoint_subscription_service.list_expiring_subscriptions(
+        hours=48
+    )
 
     if not expiring:
         logger.info("No subscriptions need renewal")
@@ -148,8 +165,7 @@ async def renew_expiring_subscriptions(container: Container):
 
             # Renew subscription
             success = await sharepoint_subscription_service.renew_subscription(
-                subscription=subscription,
-                token=token
+                subscription=subscription, token=token
             )
 
             if success:
@@ -160,7 +176,7 @@ async def renew_expiring_subscriptions(container: Container):
         except Exception as exc:
             logger.error(
                 f"Error renewing subscription {subscription.subscription_id}: {exc}",
-                exc_info=True
+                exc_info=True,
             )
             failed_count += 1
 
@@ -232,9 +248,10 @@ async def cleanup_orphaned_subscriptions(container: Container):
                 continue
 
             # Delete subscription
-            success = await sharepoint_subscription_service.delete_subscription_if_unused(
-                subscription_id=subscription.id,
-                token=token
+            success = (
+                await sharepoint_subscription_service.delete_subscription_if_unused(
+                    subscription_id=subscription.id, token=token
+                )
             )
 
             if success:
@@ -245,7 +262,7 @@ async def cleanup_orphaned_subscriptions(container: Container):
         except Exception as exc:
             logger.error(
                 f"Error cleaning up subscription {subscription.subscription_id}: {exc}",
-                exc_info=True
+                exc_info=True,
             )
             failed_count += 1
 

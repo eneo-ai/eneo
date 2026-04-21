@@ -22,8 +22,7 @@
     class="h-12 w-full"
     aria-haspopup="dialog"
     aria-expanded={$showExploreDialog}
-    on:click={() => showExploreDialog.set(true)}
-    ><IconHistory />{m.explore_conversations()}</Button
+    on:click={() => showExploreDialog.set(true)}><IconHistory />{m.explore_conversations()}</Button
   >
   <Dialog.Content width="large">
     <Dialog.Title>{m.explore_conversations()}</Dialog.Title>

@@ -1,16 +1,17 @@
 """Unify roles system: merge predefined roles into tenant-scoped roles
 
 Revision ID: unify_roles
-Revises: 20260319_add_nickname
+Revises: 202604101000
 Create Date: 2026-03-24
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "unify_roles"
-down_revision = "20260319_add_nickname"
+down_revision = "202604101000"
 branch_labels = None
 depends_on = None
 

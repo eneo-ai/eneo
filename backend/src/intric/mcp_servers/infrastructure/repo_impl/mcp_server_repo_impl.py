@@ -4,6 +4,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
+from typing_extensions import override
 
 from intric.database.tables.mcp_server_table import MCPServers as MCPServersTable
 from intric.database.tables.security_classifications_table import (
@@ -25,6 +26,7 @@ class MCPServerRepoImpl(
     def __init__(self, session: "AsyncSession", mapper: MCPServerMapper):
         super().__init__(session=session, model=MCPServersTable, mapper=mapper)
 
+    @override
     async def all(self) -> list[MCPServer]:
         query = select(self._db_model)
         result = await self.session.scalars(query)
@@ -56,6 +58,7 @@ class MCPServerRepoImpl(
 
         return self.mapper.to_entities(records)
 
+    @override
     async def query_by_tenant(self, tenant_id: UUID) -> list[MCPServer]:
         """Get all MCP servers for a specific tenant with tools loaded."""
         query = (

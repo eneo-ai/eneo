@@ -77,6 +77,7 @@
   async function openQuestionHistory() {
     const next = new URL($page.url);
     next.searchParams.set("tab", "questions");
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from current page URL with mutated search params
     await goto(next.toString(), {
       replaceState: true,
       noScroll: true,
@@ -168,10 +169,7 @@
         class="border-default bg-secondary flex flex-wrap items-center justify-between gap-3 rounded-t-lg border-b px-4 py-3"
       >
         <div class="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium">
-          <IconSparkles
-            class="text-accent-default size-4 shrink-0 opacity-60"
-            aria-hidden="true"
-          />
+          <IconSparkles class="text-accent-default size-4 shrink-0 opacity-60" aria-hidden="true" />
           <span class="truncate">{message.question}</span>
         </div>
         <div class="flex shrink-0 items-center gap-2">
@@ -193,22 +191,22 @@
       </div>
 
       <div
-        class="prose prose-neutral max-h-[min(65vh,42rem)] overflow-y-auto px-6 pt-4 pb-6 pr-10 text-base [scrollbar-gutter:stable_both-edges]"
+        class="prose prose-neutral max-h-[min(65vh,42rem)] overflow-y-auto px-6 pt-4 pr-10 pb-6 text-base [scrollbar-gutter:stable_both-edges]"
         aria-live="polite"
       >
         {#if loadingAnswer && message.answer.length === 0}
           <div class="flex flex-col gap-3 py-2" role="status" aria-live="polite">
-            <div class="h-4 w-3/4 animate-pulse rounded bg-secondary"></div>
+            <div class="bg-secondary h-4 w-3/4 animate-pulse rounded"></div>
             <div
-              class="h-4 w-full animate-pulse rounded bg-secondary"
+              class="bg-secondary h-4 w-full animate-pulse rounded"
               style="animation-delay: 75ms"
             ></div>
             <div
-              class="h-4 w-5/6 animate-pulse rounded bg-secondary"
+              class="bg-secondary h-4 w-5/6 animate-pulse rounded"
               style="animation-delay: 150ms"
             ></div>
             <div
-              class="h-4 w-2/3 animate-pulse rounded bg-secondary"
+              class="bg-secondary h-4 w-2/3 animate-pulse rounded"
               style="animation-delay: 225ms"
             ></div>
             <span class="sr-only">{m.loading()}</span>

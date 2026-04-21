@@ -20,6 +20,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { m } from "$lib/paraglide/messages";
+  import { SvelteURLSearchParams } from "svelte/reactivity";
 
   let userStats = $state<UserTokenUsageSummary | null>(null);
   let isLoading = $state(false);
@@ -104,6 +105,7 @@
     const url = new URL($page.url);
     if (url.searchParams.has("page")) {
       url.searchParams.set("page", "1");
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from current page
       goto(url, { replaceState: true });
     }
   }
@@ -119,7 +121,7 @@
   function onUserClick(user: UserTokenUsage) {
     // Preserve current URL state by including pagination parameters
     const currentUrl = new URL($page.url);
-    const params = new URLSearchParams();
+    const params = new SvelteURLSearchParams();
 
     // Preserve pagination parameters for the back navigation
     if (currentUrl.searchParams.get("page"))
@@ -130,12 +132,14 @@
       params.set("sortOrder", currentUrl.searchParams.get("sortOrder")!);
 
     const userDetailUrl = `/admin/usage/users/${user.user_id}${params.toString() ? "?" + params.toString() : ""}`;
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with user id and query
     goto(userDetailUrl);
   }
 
   function onPageChange(newPage: number) {
     const url = new URL($page.url);
     url.searchParams.set("page", newPage.toString());
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from current page
     goto(url, { replaceState: true });
   }
 
@@ -145,6 +149,7 @@
     url.searchParams.set("sortOrder", newSortOrder);
     // Reset to page 1 when sorting changes
     url.searchParams.set("page", "1");
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from current page
     goto(url, { replaceState: true });
   }
 </script>
@@ -164,7 +169,11 @@
         <div class="text-red-500">{error}</div>
       </div>
     {:else if userStats && userStats.users.length > 0}
-      <UserOverviewBar {userStats} highThreshold={thresholds.high} mediumThreshold={thresholds.medium}></UserOverviewBar>
+      <UserOverviewBar
+        {userStats}
+        highThreshold={thresholds.high}
+        mediumThreshold={thresholds.medium}
+      ></UserOverviewBar>
       <div class="mt-4">
         <UserTokenTable
           users={userStats.users}

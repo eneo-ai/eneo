@@ -206,8 +206,10 @@
   });
 
   function getUsageIntensity(tokens: number) {
-    if (tokens > thresholds.high) return { label: m.usage_level_high(), class: "bg-secondary text-error" };
-    if (tokens > thresholds.medium) return { label: m.usage_level_medium(), class: "bg-secondary text-warning" };
+    if (tokens > thresholds.high)
+      return { label: m.usage_level_high(), class: "bg-secondary text-error" };
+    if (tokens > thresholds.medium)
+      return { label: m.usage_level_medium(), class: "bg-secondary text-warning" };
     return { label: m.usage_level_low(), class: "bg-secondary text-success" };
   }
 
@@ -333,7 +335,7 @@
             >
               <div class="flex flex-col gap-4">
                 <div class="bg-secondary flex h-4 w-full overflow-clip rounded-full">
-                  {#each modelsByProvider.filter((org) => org.tokenCount > 0) as org (org.org)}
+                  {#each modelsByProvider.filter((org) => org.tokenCount > 0) as org (org.provider)}
                     <div
                       class="last-of-type:!border-none"
                       style="width: {formatPercent(
@@ -343,7 +345,7 @@
                   {/each}
                 </div>
                 <div class="flex flex-wrap gap-x-6">
-                  {#each modelsByProvider as org (org.org)}
+                  {#each modelsByProvider as org (org.provider)}
                     <div class="flex items-center gap-2">
                       <div
                         style="background: var(--{org.colour})"
@@ -413,7 +415,9 @@
                           topModels.length > 0
                             ? (model.total_token_usage / topModels[0].total_token_usage) * 100
                             : 0
-                        )}%; background: var(--{getChartColour(model.model_provider ?? model.model_org)})"
+                        )}%; background: var(--{getChartColour(
+                          model.model_provider ?? model.model_org
+                        )})"
                       ></div>
                     </div>
                   </div>

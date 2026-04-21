@@ -27,10 +27,12 @@
 {#if CustomRenderer}
   <CustomRenderer {token} />
 {:else if reference}
+  <!-- eslint-disable svelte/no-navigation-without-resolve -- external URL from reference metadata -->
   <a
     class="border-stronger bg-secondary hover:bg-hover-stronger inline-block min-h-7 min-w-7 rounded-lg border border-b-2 px-2 text-center font-mono text-base font-normal no-underline hover:cursor-pointer"
     href={reference.metadata.url}
     target="_blank"
     rel="noreferrer">{reference.number}</a
   >
+  <!-- eslint-enable svelte/no-navigation-without-resolve -->
 {/if}

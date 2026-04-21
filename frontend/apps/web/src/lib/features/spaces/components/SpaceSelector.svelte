@@ -71,7 +71,7 @@
         {$currentSpace.name}
       </span>
     {/if}
-    {#if (!$currentSpace.organization)}
+    {#if !$currentSpace.organization}
       <IconChevronUpDown class="text-muted group-hover:text-accent-stronger min-w-6" />
     {/if}
   </Button>
@@ -95,10 +95,12 @@
     <div
       class="border-default text-secondary flex items-baseline justify-between gap-4 border-b pt-1 pr-3 pb-2.5 pl-6 font-mono text-[0.85rem] font-medium tracking-[0.015rem]"
     >
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
       <a href={localizeHref("/spaces/list")} class="hover:underline">{m.your_spaces()}</a>
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
     </div>
 
-   <div class="relative max-h-[50vh] overflow-y-auto">
+    <div class="relative max-h-[50vh] overflow-y-auto">
       {#each $accessibleSpaces.filter((s) => !s.personal && !s.organization) as space (space.id)}
         <Button
           unstyled

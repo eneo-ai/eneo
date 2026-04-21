@@ -1,14 +1,15 @@
-from typing import TYPE_CHECKING, Optional
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Optional, cast
 from uuid import UUID as UUIDType
 
-from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
+
 from intric.main.exceptions import (
-    NotFoundException,
     BadRequestException,
     NameCollisionException,
+    NotFoundException,
 )
 from intric.roles.permissions import Permission, validate_permissions
 from intric.templates.assistant_template.api.assistant_template_models import (
@@ -17,8 +18,13 @@ from intric.templates.assistant_template.api.assistant_template_models import (
 
 if TYPE_CHECKING:
     from uuid import UUID
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from intric.feature_flag.feature_flag_service import FeatureFlagService
+    from intric.templates.assistant_template.api.assistant_template_models import (
+        AssistantTemplateUpdate,
+    )
     from intric.templates.assistant_template.assistant_template import AssistantTemplate
     from intric.templates.assistant_template.assistant_template_factory import (
         AssistantTemplateFactory,
@@ -26,10 +32,6 @@ if TYPE_CHECKING:
     from intric.templates.assistant_template.assistant_template_repo import (
         AssistantTemplateRepository,
     )
-    from intric.templates.assistant_template.api.assistant_template_models import (
-        AssistantTemplateUpdate,
-    )
-    from intric.feature_flag.feature_flag_service import FeatureFlagService
     from intric.users.user import UserInDB
 
 
@@ -42,6 +44,7 @@ class AssistantTemplateService:
         session: "AsyncSession",
         user: "UserInDB",
     ) -> None:
+        super().__init__()
         self.factory = factory
         self.repo = repo
         self.feature_flag_service = feature_flag_service
@@ -56,8 +59,7 @@ class AssistantTemplateService:
         Time complexity: O(log n) using primary key and composite index
         """
         assistant_template = await self.repo.get_by_id(
-            assistant_template_id=assistant_template_id,
-            tenant_id=tenant_id
+            assistant_template_id=assistant_template_id, tenant_id=tenant_id
         )
 
         if assistant_template is None:
@@ -77,8 +79,7 @@ class AssistantTemplateService:
         """
         # Check feature flag
         is_enabled = await self.feature_flag_service.check_is_feature_enabled(
-            feature_name="using_templates",
-            tenant_id=tenant_id
+            feature_name="using_templates", tenant_id=tenant_id
         )
         if not is_enabled:
             # Return empty list when feature disabled (not error)
@@ -104,8 +105,7 @@ class AssistantTemplateService:
         """
         # Check feature flag enabled for tenant
         is_enabled = await self.feature_flag_service.check_is_feature_enabled(
-            feature_name="using_templates",
-            tenant_id=tenant_id
+            feature_name="using_templates", tenant_id=tenant_id
         )
         if not is_enabled:
             raise BadRequestException(
@@ -114,8 +114,7 @@ class AssistantTemplateService:
 
         # Check duplicate name within tenant
         duplicate_exists = await self.repo.check_duplicate_name(
-            name=data.name,
-            tenant_id=tenant_id
+            name=data.name, tenant_id=tenant_id
         )
         if duplicate_exists:
             raise NameCollisionException(
@@ -123,13 +122,14 @@ class AssistantTemplateService:
             )
 
         # Create template with tenant_id
+        import sqlalchemy as sa
+
         from intric.database.tables.assistant_template_table import AssistantTemplates
         from intric.templates.assistant_template.assistant_template import (
             AssistantTemplate,
         )
-        import sqlalchemy as sa
 
-        snapshot = AssistantTemplate.create_snapshot(
+        snapshot: dict[str, object] = AssistantTemplate.create_snapshot(
             {
                 "name": data.name,
                 "description": data.description,
@@ -163,7 +163,7 @@ class AssistantTemplateService:
             result = await self.session.execute(stmt)
             template_record = result.scalar_one()
         except IntegrityError as e:
-            if 'uq_assistant_templates_name_tenant' in str(e):
+            if "uq_assistant_templates_name_tenant" in str(e):
                 raise NameCollisionException(
                     f"A template with name '{data.name}' already exists in this tenant"
                 )
@@ -193,8 +193,7 @@ class AssistantTemplateService:
         """
         # Verify template belongs to tenant
         template = await self.repo.get_by_id(
-            assistant_template_id=template_id,
-            tenant_id=tenant_id
+            assistant_template_id=template_id, tenant_id=tenant_id
         )
         if not template:
             raise NotFoundException(
@@ -204,8 +203,7 @@ class AssistantTemplateService:
         # If name changed, check duplicate
         if data.name and data.name != template.name:
             duplicate_exists = await self.repo.check_duplicate_name(
-                name=data.name,
-                tenant_id=tenant_id
+                name=data.name, tenant_id=tenant_id
             )
             if duplicate_exists:
                 raise NameCollisionException(
@@ -213,8 +211,9 @@ class AssistantTemplateService:
                 )
 
         # Update template (original_snapshot preserved)
-        from intric.database.tables.assistant_template_table import AssistantTemplates
         import sqlalchemy as sa
+
+        from intric.database.tables.assistant_template_table import AssistantTemplates
 
         update_values = {}
         if data.name is not None:
@@ -238,7 +237,7 @@ class AssistantTemplateService:
             sa.update(AssistantTemplates)
             .where(
                 AssistantTemplates.id == template_id,
-                AssistantTemplates.tenant_id == tenant_id
+                AssistantTemplates.tenant_id == tenant_id,
             )
             .values(**update_values)
             .returning(AssistantTemplates)
@@ -268,13 +267,13 @@ class AssistantTemplateService:
 
         Time complexity: O(log n) for ownership + count check + update
         """
-        from intric.database.tables.assistant_template_table import AssistantTemplates
         import sqlalchemy as sa
+
+        from intric.database.tables.assistant_template_table import AssistantTemplates
 
         # Verify template belongs to tenant
         template = await self.repo.get_by_id(
-            assistant_template_id=template_id,
-            tenant_id=tenant_id
+            assistant_template_id=template_id, tenant_id=tenant_id
         )
         if not template:
             raise NotFoundException(
@@ -289,7 +288,7 @@ class AssistantTemplateService:
                 .where(
                     AssistantTemplates.tenant_id == tenant_id,
                     AssistantTemplates.is_default == True,
-                    AssistantTemplates.id != template_id  # Exclude current template
+                    AssistantTemplates.id != template_id,  # Exclude current template
                 )
                 .with_for_update()
             )
@@ -306,7 +305,7 @@ class AssistantTemplateService:
             sa.update(AssistantTemplates)
             .where(
                 AssistantTemplates.id == template_id,
-                AssistantTemplates.tenant_id == tenant_id
+                AssistantTemplates.tenant_id == tenant_id,
             )
             .values(is_default=is_default)
             .returning(AssistantTemplates)
@@ -343,8 +342,7 @@ class AssistantTemplateService:
         """
         # Verify template belongs to tenant
         template = await self.repo.get_by_id(
-            assistant_template_id=template_id,
-            tenant_id=tenant_id
+            assistant_template_id=template_id, tenant_id=tenant_id
         )
         if not template:
             raise NotFoundException(
@@ -352,7 +350,9 @@ class AssistantTemplateService:
             )
 
         # Soft-delete with audit trail (no usage blocking)
-        result = await self.repo.soft_delete(id=template_id, tenant_id=tenant_id, user_id=user_id)
+        result = await self.repo.soft_delete(
+            id=template_id, tenant_id=tenant_id, user_id=user_id
+        )
         if not result:
             raise NotFoundException("Template not found")
 
@@ -377,8 +377,7 @@ class AssistantTemplateService:
         """
         # Verify template belongs to tenant
         template = await self.repo.get_by_id(
-            assistant_template_id=template_id,
-            tenant_id=tenant_id
+            assistant_template_id=template_id, tenant_id=tenant_id
         )
         if not template:
             raise NotFoundException(
@@ -392,26 +391,37 @@ class AssistantTemplateService:
             )
 
         # Restore from snapshot
-        from intric.database.tables.assistant_template_table import AssistantTemplates
         import sqlalchemy as sa
 
-        snapshot = template.original_snapshot
-        completion_model_id = snapshot.get("completion_model_id")
+        from intric.database.tables.assistant_template_table import AssistantTemplates
+
+        snapshot: dict[str, object] = template.original_snapshot
+        completion_model_id = cast(str | None, snapshot.get("completion_model_id"))
+        name = cast(str | None, snapshot.get("name"))
+        description = cast(str | None, snapshot.get("description"))
+        category = cast(str | None, snapshot.get("category"))
+        prompt_text = cast(str | None, snapshot.get("prompt_text"))
+        completion_model_kwargs = cast(
+            dict[str, object] | None, snapshot.get("completion_model_kwargs")
+        )
+        wizard = cast(dict[str, object] | None, snapshot.get("wizard"))
 
         stmt = (
             sa.update(AssistantTemplates)
             .where(
                 AssistantTemplates.id == template_id,
-                AssistantTemplates.tenant_id == tenant_id
+                AssistantTemplates.tenant_id == tenant_id,
             )
             .values(
-                name=snapshot.get("name"),
-                description=snapshot.get("description"),
-                category=snapshot.get("category"),
-                prompt_text=snapshot.get("prompt_text"),
-                completion_model_kwargs=snapshot.get("completion_model_kwargs"),
-                completion_model_id=UUIDType(completion_model_id) if completion_model_id else None,
-                wizard=snapshot.get("wizard"),
+                name=name,
+                description=description,
+                category=category,
+                prompt_text=prompt_text,
+                completion_model_kwargs=completion_model_kwargs,
+                completion_model_id=UUIDType(completion_model_id)
+                if completion_model_id
+                else None,
+                wizard=wizard,
                 updated_at=datetime.now(timezone.utc),
             )
             .returning(AssistantTemplates)
@@ -447,7 +457,9 @@ class AssistantTemplateService:
                               or not in deleted state
         """
         # Perform restore with audit trail
-        template = await self.repo.restore(id=template_id, tenant_id=tenant_id, user_id=user_id)
+        template = await self.repo.restore(
+            id=template_id, tenant_id=tenant_id, user_id=user_id
+        )
 
         if not template:
             raise NotFoundException(
@@ -475,9 +487,7 @@ class AssistantTemplateService:
         """
         result = await self.repo.permanent_delete(id=template_id, tenant_id=tenant_id)
         if not result:
-            raise NotFoundException(
-                "Template not found or not in deleted state"
-            )
+            raise NotFoundException("Template not found or not in deleted state")
 
     @validate_permissions(Permission.ADMIN)
     async def get_templates_for_tenant(
@@ -493,24 +503,18 @@ class AssistantTemplateService:
 
         Time complexity: O(k log n) where k is number of tenant templates
         """
-        from intric.database.tables.assistant_template_table import AssistantTemplates
         from intric.database.tables.assistant_table import Assistants
+        from intric.database.tables.assistant_template_table import AssistantTemplates
 
         # Query with LEFT JOIN to get usage count
         # Note: Assistants don't have tenant_id (they use space_id -> Space -> Tenant)
         # Tenant isolation is guaranteed by template filtering in WHERE clause
         stmt = (
-            select(
-                AssistantTemplates,
-                func.count(Assistants.id).label("usage_count")
-            )
-            .outerjoin(
-                Assistants,
-                AssistantTemplates.id == Assistants.template_id
-            )
+            select(AssistantTemplates, func.count(Assistants.id).label("usage_count"))
+            .outerjoin(Assistants, AssistantTemplates.id == Assistants.template_id)
             .where(
                 AssistantTemplates.tenant_id == tenant_id,
-                AssistantTemplates.deleted_at.is_(None)
+                AssistantTemplates.deleted_at.is_(None),
             )
             .group_by(AssistantTemplates.id)
             .options(selectinload(AssistantTemplates.completion_model))
@@ -520,10 +524,10 @@ class AssistantTemplateService:
         rows = result.all()
 
         # Convert to (AssistantTemplate, usage_count) tuples
-        templates_with_usage = []
+        templates_with_usage: list[tuple[AssistantTemplate, int]] = []
         for row in rows:
-            template_record = row[0]
-            usage_count = row[1]
+            template_record: AssistantTemplates = row[0]
+            usage_count: int = row[1]
             template = self.factory.create_assistant_template(item=template_record)
             templates_with_usage.append((template, usage_count))
 
@@ -542,24 +546,18 @@ class AssistantTemplateService:
 
         Time complexity: O(k log n) where k is number of deleted templates
         """
-        from intric.database.tables.assistant_template_table import AssistantTemplates
         from intric.database.tables.assistant_table import Assistants
+        from intric.database.tables.assistant_template_table import AssistantTemplates
 
         # Query with LEFT JOIN to get usage count for deleted templates
         # Note: Assistants don't have tenant_id (they use space_id -> Space -> Tenant)
         # Tenant isolation is guaranteed by template filtering in WHERE clause
         stmt = (
-            select(
-                AssistantTemplates,
-                func.count(Assistants.id).label("usage_count")
-            )
-            .outerjoin(
-                Assistants,
-                AssistantTemplates.id == Assistants.template_id
-            )
+            select(AssistantTemplates, func.count(Assistants.id).label("usage_count"))
+            .outerjoin(Assistants, AssistantTemplates.id == Assistants.template_id)
             .where(
                 AssistantTemplates.tenant_id == tenant_id,
-                AssistantTemplates.deleted_at.is_not(None)
+                AssistantTemplates.deleted_at.is_not(None),
             )
             .group_by(AssistantTemplates.id)
             .order_by(AssistantTemplates.deleted_at.desc())
@@ -570,10 +568,10 @@ class AssistantTemplateService:
         rows = result.all()
 
         # Convert to (AssistantTemplate, usage_count) tuples
-        templates_with_usage = []
+        templates_with_usage: list[tuple[AssistantTemplate, int]] = []
         for row in rows:
-            template_record = row[0]
-            usage_count = row[1]
+            template_record: AssistantTemplates = row[0]
+            usage_count: int = row[1]
             template = self.factory.create_assistant_template(item=template_record)
             templates_with_usage.append((template, usage_count))
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { getIntric } from "$lib/core/Intric";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import TemplateCreateAssistant from "$lib/features/templates/components/assistants/TemplateCreateAssistant.svelte";
@@ -7,11 +8,11 @@
   import { IconAssistant } from "@intric/icons/assistant";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { IconPeople } from "@intric/icons/people";
-  import { IntricError, type Settings } from "@intric/intric-js";
+  import { type Settings } from "@intric/intric-js";
   import { Button, Dialog, Dropdown, Input } from "@intric/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   let { data }: { data: { settings: Settings } } = $props();
 
@@ -39,23 +40,26 @@
       });
       refreshCurrentSpace();
       if (openGroupChatAfterCreation) {
-        goto(`/spaces/${$currentSpace.routeId}/group-chats/${newGroup.id}/edit?next=default`);
+        goto(
+          resolve(`/spaces/${$currentSpace.routeId}/group-chats/${newGroup.id}/edit?next=default`)
+        );
       }
       newGroupChatName = "";
       $showCreateGroupChatDialog = false;
     } catch (error) {
-      const message = error instanceof IntricError ? error.getReadableMessage() : String(error);
-      toast.error(message);
+      toastError(error);
     }
   }
 </script>
 
 <div class="flex gap-[1px]">
-  <TemplateCreateAssistant settings={data.settings} let:trigger={createAssistantTrigger}>
+  <!-- eslint-disable-next-line @typescript-eslint/no-explicit-any -->
+  {#snippet triggerSnippet(createAssistantTrigger: any)}
     <Button variant="primary" is={createAssistantTrigger} class="!rounded-r-none"
       >{m.create_assistant()}</Button
-    ></TemplateCreateAssistant
-  >
+    >
+  {/snippet}
+  <TemplateCreateAssistant settings={data.settings} {triggerSnippet} />
   <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
     <Dropdown.Trigger asFragment let:trigger>
       <Button padding="icon" variant="primary" is={trigger} class="!rounded-l-none"

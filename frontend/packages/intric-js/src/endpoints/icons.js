@@ -3,8 +3,8 @@
 /**
  * @typedef {Object} Icon
  * @property {string} id
- * @property {string} created_at
- * @property {string} updated_at
+ * @property {string | null} [created_at]
+ * @property {string | null} [updated_at]
  */
 
 /**

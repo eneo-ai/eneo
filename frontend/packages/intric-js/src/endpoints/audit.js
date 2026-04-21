@@ -10,7 +10,7 @@ export function initAudit(client) {
      * Sets HTTP-only cookie with session ID. Session expires after 1 hour.
      * Required before viewing audit logs.
      * @param {{category: string, description: string}} justification - Access justification (description: 10-500 chars)
-     * @returns {Promise<{status: string, message?: string}>}
+     * @returns {Promise<any>}
      * @throws {IntricError}
      * */
     createAccessSession: async (justification) => {
@@ -35,6 +35,7 @@ export function initAudit(client) {
      * */
     list: async (options) => {
       // Convert actions array to comma-separated string for query param
+      /** @type {any} */
       const queryParams = { ...options };
       if (queryParams.actions && Array.isArray(queryParams.actions)) {
         queryParams.actions = queryParams.actions.join(",");
@@ -70,7 +71,7 @@ export function initAudit(client) {
     /**
      * Export audit logs to CSV format.
      * @param {{user_id?: string, actor_id?: string, action?: import('../types/schema').components["schemas"]["ActionType"], from_date?: string, to_date?: string}} [options]
-     * @returns {Promise<Blob>} CSV content as blob
+     * @returns {Promise<any>} CSV content
      * @throws {IntricError}
      * */
     export: async (options) => {

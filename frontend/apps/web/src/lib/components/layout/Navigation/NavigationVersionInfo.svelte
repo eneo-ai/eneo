@@ -15,10 +15,7 @@
     class="text-muted hover:text-secondary flex w-full items-center justify-between gap-2"
   >
     <span>{m.version()}</span>
-    <IconChevronDown
-      size="sm"
-      class="transition-transform {expanded ? 'rotate-180' : ''}"
-    />
+    <IconChevronDown size="sm" class="transition-transform {expanded ? 'rotate-180' : ''}" />
   </button>
 
   {#if expanded}

@@ -12,7 +12,7 @@ from intric.database.tables.users_table import Users
 
 
 class CollectionsTable(BasePublic):
-    __tablename__ = "groups"
+    __tablename__ = "groups"  # type: ignore[assignment]
 
     name: Mapped[str] = mapped_column(nullable=False)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -23,7 +23,9 @@ class CollectionsTable(BasePublic):
     embedding_model_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(EmbeddingModels.id, ondelete="SET NULL"),
     )
-    space_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey(Spaces.id, ondelete="CASCADE"))
+    space_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE")
+    )
 
     # relationships
     user: Mapped[Users] = relationship()

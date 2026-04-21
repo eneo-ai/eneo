@@ -11,7 +11,16 @@ Each field definition has:
   - in: "credentials" or "config" — where the value is stored in the API payload
 """
 
-from typing import Any, Set, TypedDict
+from typing import Protocol, Set
+
+from typing_extensions import TypedDict
+
+
+class CredentialRequest(Protocol):
+    """Protocol for credential request objects passed to validate_provider_credentials."""
+
+    @property
+    def api_key(self) -> str | None: ...
 
 
 class FieldDefinition(TypedDict):
@@ -111,7 +120,7 @@ def is_field_required(provider: str, field: str) -> bool:
 
 
 def validate_provider_credentials(
-    provider: str, request_data: Any, strict_mode: bool
+    provider: str, request_data: CredentialRequest, strict_mode: bool
 ) -> list[str]:
     """
     Validate credentials against provider-specific requirements.
@@ -124,7 +133,7 @@ def validate_provider_credentials(
     Returns:
         List of validation error messages (empty if valid)
     """
-    errors = []
+    errors: list[str] = []
 
     # Get required fields for this provider from centralized config
     required_fields = get_required_fields(provider)

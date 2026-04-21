@@ -6,6 +6,7 @@ Tests cover:
 - Knowledge visibility across space hierarchy
 - Correct handling of union queries
 """
+
 from sqlalchemy import select
 
 from intric.database.tables.spaces_table import Spaces
@@ -19,7 +20,11 @@ class TestKnowledgeRetrieval:
     """Test knowledge retrieval from different space types."""
 
     async def test_child_space_retrieves_distributed_knowledge(
-        self, db_container, tenant_factory, user_integration_factory, embedding_model_factory
+        self,
+        db_container,
+        tenant_factory,
+        user_integration_factory,
+        embedding_model_factory,
     ):
         """Verify child space can retrieve knowledge distributed from org space."""
         async with db_container() as container:
@@ -48,7 +53,9 @@ class TestKnowledgeRetrieval:
 
             # Create knowledge on org space
             embedding_model = await embedding_model_factory(session)
-            user_integration = await user_integration_factory(session, tenant_id=tenant.id)
+            user_integration = await user_integration_factory(
+                session, tenant_id=tenant.id
+            )
 
             knowledge = IntegrationKnowledge(
                 name="Org Knowledge",
@@ -74,9 +81,9 @@ class TestKnowledgeRetrieval:
                 (IntegrationKnowledge.space_id == org_space.id)
                 | (
                     IntegrationKnowledge.id.in_(
-                        select(IntegrationKnowledgesSpaces.integration_knowledge_id).where(
-                            IntegrationKnowledgesSpaces.space_id == child_space.id
-                        )
+                        select(
+                            IntegrationKnowledgesSpaces.integration_knowledge_id
+                        ).where(IntegrationKnowledgesSpaces.space_id == child_space.id)
                     )
                 )
             )
@@ -88,7 +95,11 @@ class TestKnowledgeRetrieval:
             assert retrieved_knowledge[0].space_id == org_space.id
 
     async def test_child_space_retrieves_own_plus_distributed_knowledge(
-        self, db_container, tenant_factory, user_integration_factory, embedding_model_factory
+        self,
+        db_container,
+        tenant_factory,
+        user_integration_factory,
+        embedding_model_factory,
     ):
         """Verify child space can retrieve both own knowledge and distributed knowledge."""
         async with db_container() as container:
@@ -117,7 +128,9 @@ class TestKnowledgeRetrieval:
 
             # Create embedding model and user integration
             embedding_model = await embedding_model_factory(session)
-            user_integration = await user_integration_factory(session, tenant_id=tenant.id)
+            user_integration = await user_integration_factory(
+                session, tenant_id=tenant.id
+            )
 
             # Create knowledge on org space
             org_knowledge = IntegrationKnowledge(
@@ -156,9 +169,9 @@ class TestKnowledgeRetrieval:
                 (IntegrationKnowledge.space_id == child_space.id)
                 | (
                     IntegrationKnowledge.id.in_(
-                        select(IntegrationKnowledgesSpaces.integration_knowledge_id).where(
-                            IntegrationKnowledgesSpaces.space_id == child_space.id
-                        )
+                        select(
+                            IntegrationKnowledgesSpaces.integration_knowledge_id
+                        ).where(IntegrationKnowledgesSpaces.space_id == child_space.id)
                     )
                 )
             )
@@ -171,7 +184,11 @@ class TestKnowledgeRetrieval:
             assert child_knowledge.id in knowledge_ids
 
     async def test_org_space_sees_only_own_knowledge(
-        self, db_container, tenant_factory, user_integration_factory, embedding_model_factory
+        self,
+        db_container,
+        tenant_factory,
+        user_integration_factory,
+        embedding_model_factory,
     ):
         """Verify org space does not see child space knowledge."""
         async with db_container() as container:
@@ -200,7 +217,9 @@ class TestKnowledgeRetrieval:
 
             # Create embedding model and user integration
             embedding_model = await embedding_model_factory(session)
-            user_integration = await user_integration_factory(session, tenant_id=tenant.id)
+            user_integration = await user_integration_factory(
+                session, tenant_id=tenant.id
+            )
 
             # Create knowledge on org space
             org_knowledge = IntegrationKnowledge(
@@ -239,7 +258,11 @@ class TestKnowledgeRetrieval:
             assert org_knowledge_list[0].space_id == org_space.id
 
     async def test_sibling_spaces_cannot_see_each_other_knowledge(
-        self, db_container, tenant_factory, user_integration_factory, embedding_model_factory
+        self,
+        db_container,
+        tenant_factory,
+        user_integration_factory,
+        embedding_model_factory,
     ):
         """Verify sibling child spaces cannot see each other's knowledge."""
         async with db_container() as container:
@@ -275,7 +298,9 @@ class TestKnowledgeRetrieval:
 
             # Create embedding model and user integration
             embedding_model = await embedding_model_factory(session)
-            user_integration = await user_integration_factory(session, tenant_id=tenant.id)
+            user_integration = await user_integration_factory(
+                session, tenant_id=tenant.id
+            )
 
             # Create knowledge on child_1
             knowledge_1 = IntegrationKnowledge(
@@ -304,7 +329,12 @@ class TestKnowledgeVisibilityBoundaries:
     """Test knowledge visibility boundaries."""
 
     async def test_personal_space_cannot_see_org_knowledge(
-        self, db_container, tenant_factory, user_factory, user_integration_factory, embedding_model_factory
+        self,
+        db_container,
+        tenant_factory,
+        user_factory,
+        user_integration_factory,
+        embedding_model_factory,
     ):
         """Verify personal space cannot access org space knowledge by default."""
         async with db_container() as container:
@@ -334,7 +364,9 @@ class TestKnowledgeVisibilityBoundaries:
 
             # Create knowledge on org space
             embedding_model = await embedding_model_factory(session)
-            user_integration = await user_integration_factory(session, tenant_id=tenant.id)
+            user_integration = await user_integration_factory(
+                session, tenant_id=tenant.id
+            )
 
             org_knowledge = IntegrationKnowledge(
                 name="Org Knowledge",
@@ -358,7 +390,11 @@ class TestKnowledgeVisibilityBoundaries:
             assert len(personal_knowledge) == 0
 
     async def test_cross_tenant_spaces_isolation(
-        self, db_container, tenant_factory, user_integration_factory, embedding_model_factory
+        self,
+        db_container,
+        tenant_factory,
+        user_integration_factory,
+        embedding_model_factory,
     ):
         """Verify spaces in different tenants cannot see each other's knowledge."""
         async with db_container() as container:
@@ -387,7 +423,9 @@ class TestKnowledgeVisibilityBoundaries:
 
             # Create knowledge in tenant 1
             embedding_model = await embedding_model_factory(session)
-            user_integration_1 = await user_integration_factory(session, tenant_id=tenant_1.id)
+            user_integration_1 = await user_integration_factory(
+                session, tenant_id=tenant_1.id
+            )
 
             knowledge_1 = IntegrationKnowledge(
                 name="Tenant 1 Knowledge",

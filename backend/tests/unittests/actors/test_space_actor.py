@@ -13,7 +13,9 @@ ALL_PERMISSIONS = set(Permission)
 
 # Mocking external dependencies
 class MockUser:
-    def __init__(self, id, permissions=None, modules=None, role=None, user_groups_ids=None):
+    def __init__(
+        self, id, permissions=None, modules=None, role=None, user_groups_ids=None
+    ):
         self.id = id
         self.permissions = permissions if permissions is not None else []
         self.modules = modules or []
@@ -28,7 +30,15 @@ class MockGroupMember:
 
 
 class MockSpace:
-    def __init__(self, user_id, personal=False, members=None, tenant_space_id=None, id=None, group_members=None):
+    def __init__(
+        self,
+        user_id,
+        personal=False,
+        members=None,
+        tenant_space_id=None,
+        id=None,
+        group_members=None,
+    ):
         self.user_id = user_id
         self.personal = personal
         self.members = members or {}
@@ -46,7 +56,7 @@ class MockSpace:
     # Org = saknar både user_id och tenant_space_id
     def is_organization(self):
         return (self.user_id is None) and (self.tenant_space_id is None)
-    
+
 
 class MockSpaceRole:
     ADMIN = "admin"
@@ -81,19 +91,16 @@ def editor_user():
 def admin_user():
     return MockUser(id=4, role=MockSpaceRole.ADMIN, permissions=ALL_PERMISSIONS)
 
+
 @pytest.fixture
 def organization_space():
-    return MockSpace(
-        user_id=None, 
-        personal=False, 
-        tenant_space_id=None,
-        id="org-1"
-    )
+    return MockSpace(user_id=None, personal=False, tenant_space_id=None, id="org-1")
+
 
 @pytest.fixture
 def personal_space(organization_space, owner_user):
     return MockSpace(
-        user_id=owner_user.id, 
+        user_id=owner_user.id,
         personal=True,
         tenant_space_id=organization_space.id,
         id="personal-1",
@@ -485,6 +492,311 @@ def test_group_editor_cannot_manage_group_members(
         )
         is False
     )
+
+
+# ---------------------------------------------------------------------------
+# Service API key role derivation
+# ---------------------------------------------------------------------------
+
+
+class MockServiceKey:
+    """Minimal stand-in for ApiKeyV2InDB used by SpaceActor."""
+
+    def __init__(self, scope_type, scope_id, permission, ownership="service"):
+        self.scope_type = scope_type
+        self.scope_id = scope_id
+        self.permission = permission
+        self.ownership = ownership
+
+
+class MockServiceUser(MockUser):
+    def __init__(self, active_api_key, **kwargs):
+        super().__init__(**kwargs)
+        self.active_api_key = active_api_key
+
+
+class MockAssistant:
+    def __init__(self, id):
+        self.id = id
+
+
+class MockApp:
+    def __init__(self, id):
+        self.id = id
+
+
+class MockSpaceWithResources(MockSpace):
+    def __init__(self, *, assistants=None, apps=None, **kwargs):
+        super().__init__(**kwargs)
+        self.assistants = assistants or []
+        self.apps = apps or []
+
+
+def test_service_key_tenant_scoped_grants_viewer():
+    key = MockServiceKey("tenant", None, "read")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+
+
+def test_service_key_tenant_scoped_admin_grants_edit():
+    key = MockServiceKey("tenant", None, "admin")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
+    actor = SpaceActor(user, space)
+    assert actor.can_edit_space()
+
+
+def test_service_key_space_scoped_matching():
+    key = MockServiceKey("space", "s1", "read")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+
+
+def test_service_key_space_scoped_non_matching():
+    key = MockServiceKey("space", "s1", "read")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="other")
+    actor = SpaceActor(user, space)
+    assert not actor.can_read_space()
+
+
+def test_service_key_assistant_scoped_matching():
+    key = MockServiceKey("assistant", "asst-1", "write")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpaceWithResources(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        assistants=[MockAssistant("asst-1")],
+    )
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+    assert actor.can_read_assistants()
+
+
+def test_service_key_assistant_scoped_non_matching():
+    key = MockServiceKey("assistant", "asst-other", "write")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpaceWithResources(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        assistants=[MockAssistant("asst-1")],
+    )
+    actor = SpaceActor(user, space)
+    assert not actor.can_read_space()
+
+
+def test_service_key_tenant_scoped_write_grants_editor():
+    """Write permission → EDITOR: can CRUD resources but NOT edit space."""
+    key = MockServiceKey("tenant", None, "write")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+    assert actor.can_read_assistants()
+    assert actor.can_create_assistants()
+    assert actor.can_edit_assistants()
+    assert actor.can_delete_assistants()
+    assert not actor.can_edit_space()
+    assert not actor.can_delete_space()
+
+
+def test_service_key_app_scoped_matching():
+    key = MockServiceKey("app", "app-1", "write")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpaceWithResources(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        apps=[MockApp("app-1")],
+    )
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+    assert actor.can_read_apps()
+
+
+def test_service_key_app_scoped_non_matching():
+    key = MockServiceKey("app", "app-other", "write")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpaceWithResources(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        apps=[MockApp("app-1")],
+    )
+    actor = SpaceActor(user, space)
+    assert not actor.can_read_space()
+
+
+def test_user_key_does_not_trigger_service_role():
+    """A user key (ownership=user) with active_api_key set must NOT derive a
+    synthetic role — it should fall through to normal membership checks."""
+    key = MockServiceKey("tenant", None, "admin", ownership="user")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
+    actor = SpaceActor(user, space)
+    # User has no membership → should be denied even though key has admin
+    assert not actor.can_read_space()
+
+
+def test_service_key_no_key_returns_none():
+    """Regular user without active_api_key — actor should fall through."""
+    user = MockUser(id=99)
+    space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
+    actor = SpaceActor(user, space)
+    # No membership, no service key → can_read_space should be False
+    assert not actor.can_read_space()
+
+
+# ---------------------------------------------------------------------------
+# User-owned key caps membership role (defense in depth)
+# ---------------------------------------------------------------------------
+
+
+def test_user_key_read_caps_admin_member_to_viewer():
+    """A user-owned read key held by a space admin must behave as a viewer."""
+    admin_user = MockUser(id=42, role="admin")
+    key = MockServiceKey("tenant", None, "read", ownership="user")
+    user = MockServiceUser(id=42, active_api_key=key, role="admin")
+    space = MockSpace(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        members={admin_user.id: admin_user},
+    )
+    space.members = {user.id: MockUser(id=user.id, role="admin")}
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+    assert not actor.can_edit_space()
+    assert not actor.can_delete_space()
+    assert not actor.can_create_assistants()
+    assert not actor.can_edit_assistants()
+    assert not actor.can_delete_assistants()
+
+
+def test_user_key_admin_does_not_upgrade_viewer_member():
+    """A user-owned admin key held by a viewer must still behave as a viewer."""
+    key = MockServiceKey("tenant", None, "admin", ownership="user")
+    user = MockServiceUser(id=42, active_api_key=key, role="viewer")
+    space = MockSpace(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        members={user.id: MockUser(id=user.id, role="viewer")},
+    )
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+    assert not actor.can_edit_space()
+    assert not actor.can_create_assistants()
+
+
+def test_user_key_admin_matches_admin_member():
+    """Admin user + admin key → admin (min preserves the shared level)."""
+    key = MockServiceKey("tenant", None, "admin", ownership="user")
+    user = MockServiceUser(id=42, active_api_key=key, role="admin")
+    space = MockSpace(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        members={user.id: MockUser(id=user.id, role="admin")},
+    )
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+    assert actor.can_edit_space()
+    assert actor.can_delete_space()
+
+
+def test_user_key_scope_not_covering_space_denies_access():
+    """A user-owned key scoped to space-B must not grant access to space-A,
+    even when the user has direct admin membership in space-A. The credential
+    in hand does not extend to space-A."""
+    key = MockServiceKey("space", "space-B", "admin", ownership="user")
+    user = MockServiceUser(id=42, active_api_key=key, role="admin")
+    space_a = MockSpace(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="space-A",
+        members={user.id: MockUser(id=user.id, role="admin")},
+    )
+    actor = SpaceActor(user, space_a)
+    assert not actor.can_read_space()
+
+
+def test_bearer_user_without_key_keeps_full_membership_role():
+    """Bearer-auth flows leave active_api_key unset — no cap, full role."""
+    user = MockUser(id=42, role="admin")
+    space = MockSpace(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        members={user.id: MockUser(id=user.id, role="admin")},
+    )
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+    assert actor.can_edit_space()
+    assert actor.can_delete_space()
+
+
+def test_personal_space_owner_with_read_key_can_still_read():
+    """Personal space owner with a user-owned read key must retain READ
+    actions (reading resources, asking assistants). Owner-only read actions
+    should pass; mutating actions must be filtered out."""
+    key = MockServiceKey("space", "personal-s1", "read", ownership="user")
+    user = MockServiceUser(
+        id=42,
+        active_api_key=key,
+        permissions=[
+            Permission.ASSISTANTS,
+            Permission.APPS,
+            Permission.COLLECTIONS,
+        ],
+    )
+    space = MockSpace(user_id=42, personal=True, id="personal-s1")
+    actor = SpaceActor(user, space)
+    assert actor.can_read_space()
+    assert actor.can_read_assistants()
+    assert actor.can_read_apps()
+    assert actor.can_read_collections()
+    assert not actor.can_edit_space()
+    assert not actor.can_delete_space()
+    assert not actor.can_create_assistants()
+    assert not actor.can_edit_assistants()
+    assert not actor.can_delete_assistants()
+
+
+def test_personal_space_owner_with_write_key_can_edit_but_not_delete():
+    """Personal space owner + write key → can read/create/edit/publish but
+    DELETE requires admin at the HTTP layer, so it must be filtered too."""
+    key = MockServiceKey("space", "personal-s1", "write", ownership="user")
+    user = MockServiceUser(
+        id=42,
+        active_api_key=key,
+        permissions=[
+            Permission.ASSISTANTS,
+            Permission.APPS,
+            Permission.COLLECTIONS,
+        ],
+    )
+    space = MockSpace(user_id=42, personal=True, id="personal-s1")
+    actor = SpaceActor(user, space)
+    assert actor.can_read_assistants()
+    assert actor.can_create_assistants()
+    assert actor.can_edit_assistants()
+    assert not actor.can_delete_assistants()
 
 
 # Integration Knowledge Permission Tests - Shared Spaces

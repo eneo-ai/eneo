@@ -1,6 +1,11 @@
+import re
+from collections import defaultdict
+from datetime import date
+from typing import Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from typing_extensions import TypedDict
 
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -16,17 +21,75 @@ from intric.model_providers.presentation.model_provider_models import (
     ModelProviderUpdate,
     ValidateModelRequest,
 )
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.protocol import responses
 from intric.settings.encryption_service import EncryptionService
+from intric.tenants.provider_field_config import (
+    DEFAULT_FIELDS,
+    PROVIDER_FIELD_DEFINITIONS,
+    FieldDefinition,
+    get_canonical_provider_type,
+    get_field_definitions,
+)
 from intric.tenants.tenant_repo import TenantRepository
 from intric.users.user import UserInDB
 
 router = APIRouter()
 
+CurrentUser = Annotated[UserInDB, Depends(get_current_active_user)]
+SessionDep = Annotated[AsyncSession, Depends(get_session_with_transaction)]
+SerializedField = TypedDict(
+    "SerializedField",
+    {"name": str, "required": bool, "secret": bool, "in": str},
+)
+
+
+class ModelCostInfo(TypedDict, total=False):
+    litellm_provider: str
+    mode: str
+    deprecation_date: str
+    max_input_tokens: int | None
+    max_output_tokens: int | None
+    output_vector_size: int | None
+    supports_vision: bool
+    supports_function_calling: bool
+    supports_reasoning: bool
+
+
+class ModelCapabilityBase(TypedDict):
+    name: str
+
+
+class ModelCapability(ModelCapabilityBase, total=False):
+    max_input_tokens: int | None
+    max_output_tokens: int | None
+    output_vector_size: int | None
+    supports_vision: bool
+    supports_function_calling: bool
+    supports_reasoning: bool
+
+
+class ProviderCapabilities(TypedDict):
+    modes: list[str]
+    models: dict[str, list[ModelCapability]]
+    fields: list[SerializedField]
+
+
+def serialize_fields(fields: list[FieldDefinition]) -> list[SerializedField]:
+    return [
+        {
+            "name": field["name"],
+            "required": field["required"],
+            "secret": field["secret"],
+            "in": field["in_"],
+        }
+        for field in fields
+    ]
+
 
 def get_model_provider_service(
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: CurrentUser,
+    session: SessionDep,
 ) -> ModelProviderService:
     """Dependency for getting the model provider service."""
     settings = get_settings()
@@ -35,14 +98,19 @@ def get_model_provider_service(
     return ModelProviderService(repository, encryption)
 
 
+ServiceDep = Annotated[ModelProviderService, Depends(get_model_provider_service)]
+
+
 @router.get(
     "/",
     response_model=list[ModelProviderPublic],
 )
 async def list_providers(
-    service: ModelProviderService = Depends(get_model_provider_service),
-):
+    user: CurrentUser,
+    service: ServiceDep,
+) -> list[ModelProviderPublic]:
     """List all model providers for the tenant."""
+    validate_permission(user, Permission.ADMIN)
     providers = await service.get_all()
     return [ModelProviderPublic(**provider.to_dict()) for provider in providers]
 
@@ -51,25 +119,15 @@ async def list_providers(
     "/capabilities/",
 )
 async def get_provider_capabilities(
-    _user: UserInDB = Depends(get_current_active_user),
-):
+    _user: CurrentUser,
+) -> dict[str, object]:
     """Get supported model types and top models per provider type from LiteLLM.
 
     Returns a structured response with:
     - providers: dict of canonical provider types, each with modes, models, and fields
     - default_fields: fallback field definitions for providers without custom fields
     """
-    import re
-
     import litellm
-    from collections import defaultdict
-    from datetime import date
-
-    from intric.tenants.provider_field_config import (
-        DEFAULT_FIELDS,
-        get_canonical_provider_type,
-        get_field_definitions,
-    )
 
     # Mode mapping: LiteLLM mode -> our model type
     mode_map = {
@@ -98,13 +156,14 @@ async def get_provider_capabilities(
         return "00000000"
 
     # Collect all models per provider per mode with metadata
-    raw: dict[str, dict[str, dict[str, dict]]] = defaultdict(
+    model_cost = cast(dict[str, ModelCostInfo], getattr(litellm, "model_cost"))
+    raw: dict[str, dict[str, dict[str, ModelCapability]]] = defaultdict(
         lambda: defaultdict(dict)
     )
 
     today = date.today().isoformat()
 
-    for model_key, info in litellm.model_cost.items():
+    for model_key, info in model_cost.items():
         raw_provider = info.get("litellm_provider", "")
         litellm_mode = info.get("mode", "")
         mode = mode_map.get(litellm_mode)
@@ -128,7 +187,14 @@ async def get_provider_capabilities(
             continue
         if any(
             kw in model_lower
-            for kw in ("realtime", "-audio-", "gpt-audio", "search-preview", "search-api", "-diarize")
+            for kw in (
+                "realtime",
+                "-audio-",
+                "gpt-audio",
+                "search-preview",
+                "search-api",
+                "-diarize",
+            )
         ):
             continue
 
@@ -136,7 +202,7 @@ async def get_provider_capabilities(
         provider = get_canonical_provider_type(raw_provider) if raw_provider else ""
 
         if provider and mode and model_key not in raw[provider][mode]:
-            model_info: dict = {"name": model_key}
+            model_info: ModelCapability = {"name": model_key}
             if mode == "completion":
                 model_info["max_input_tokens"] = info.get("max_input_tokens")
                 model_info["max_output_tokens"] = info.get("max_output_tokens")
@@ -144,25 +210,16 @@ async def get_provider_capabilities(
                 model_info["supports_function_calling"] = info.get(
                     "supports_function_calling", False
                 )
-                model_info["supports_reasoning"] = info.get(
-                    "supports_reasoning", False
-                )
+                model_info["supports_reasoning"] = info.get("supports_reasoning", False)
             elif mode == "embedding":
                 model_info["max_input_tokens"] = info.get("max_input_tokens")
                 model_info["output_vector_size"] = info.get("output_vector_size")
             raw[provider][mode][model_key] = model_info
 
-    # Serialize field definitions (convert in_ -> in for JSON)
-    def serialize_fields(fields: list) -> list[dict]:
-        return [
-            {"name": f["name"], "required": f["required"], "secret": f["secret"], "in": f["in_"]}
-            for f in fields
-        ]
-
     # Build response sorted by release date (newest first)
-    providers = {}
+    providers: dict[str, ProviderCapabilities] = {}
     for provider, modes in raw.items():
-        provider_data: dict = {
+        provider_data: ProviderCapabilities = {
             "modes": sorted(modes.keys()),
             "models": {},
             "fields": serialize_fields(get_field_definitions(provider)),
@@ -177,8 +234,6 @@ async def get_provider_capabilities(
 
     # Ensure providers with custom field definitions are always present
     # (e.g. hosted_vllm, which is self-hosted and has no static models in LiteLLM)
-    from intric.tenants.provider_field_config import PROVIDER_FIELD_DEFINITIONS
-
     for provider_type in PROVIDER_FIELD_DEFINITIONS:
         if provider_type not in providers:
             providers[provider_type] = {
@@ -196,21 +251,22 @@ async def get_provider_capabilities(
 
 @router.get("/favorites/")
 async def get_favorite_providers(
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
-):
+    user: CurrentUser,
+    session: SessionDep,
+) -> dict[str, list[str]]:
     """Get the tenant's favorite provider types."""
     repo = TenantRepository(session)
     tenant = await repo.get(user.tenant_id)
+    assert tenant is not None
     return {"providers": tenant.favorite_providers}
 
 
 @router.put("/favorites/")
 async def set_favorite_providers(
     body: FavoriteProvidersUpdate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
-):
+    user: CurrentUser,
+    session: SessionDep,
+) -> dict[str, list[str]]:
     """Set the tenant's favorite provider types."""
     repo = TenantRepository(session)
     await repo.update_favorite_providers(user.tenant_id, body.providers)
@@ -222,24 +278,26 @@ async def set_favorite_providers(
 )
 async def get_model_defaults(
     model_name: str,
-    _user: UserInDB = Depends(get_current_active_user),
-):
+    _user: CurrentUser,
+) -> dict[str, object]:
     """Look up recommended default values for a model from LiteLLM's model_cost database."""
     import litellm
 
+    model_cost = cast(dict[str, ModelCostInfo], getattr(litellm, "model_cost"))
+
     # Try exact match first
-    info = litellm.model_cost.get(model_name)
+    info = model_cost.get(model_name)
 
     # If no exact match, try common prefixed variants
     if info is None:
-        prefixes = set()
-        for key in litellm.model_cost:
+        prefixes: set[str] = set()
+        for key in model_cost:
             if "/" in key:
                 prefix = key.split("/")[0]
                 prefixes.add(prefix)
         for prefix in sorted(prefixes):
             candidate = f"{prefix}/{model_name}"
-            info = litellm.model_cost.get(candidate)
+            info = model_cost.get(candidate)
             if info is not None:
                 break
 
@@ -263,9 +321,11 @@ async def get_model_defaults(
 )
 async def get_provider(
     provider_id: UUID,
-    service: ModelProviderService = Depends(get_model_provider_service),
-):
+    user: CurrentUser,
+    service: ServiceDep,
+) -> ModelProviderPublic:
     """Get a specific model provider."""
+    validate_permission(user, Permission.ADMIN)
     provider = await service.get_by_id(provider_id)
     return ModelProviderPublic(**provider.to_dict())
 
@@ -277,10 +337,11 @@ async def get_provider(
 )
 async def create_provider(
     data: ModelProviderCreate,
-    user: UserInDB = Depends(get_current_active_user),
-    service: ModelProviderService = Depends(get_model_provider_service),
-):
+    user: CurrentUser,
+    service: ServiceDep,
+) -> ModelProviderPublic:
     """Create a new model provider."""
+    validate_permission(user, Permission.ADMIN)
     provider = await service.create(
         tenant_id=user.tenant_id,
         name=data.name,
@@ -300,9 +361,11 @@ async def create_provider(
 async def update_provider(
     provider_id: UUID,
     data: ModelProviderUpdate,
-    service: ModelProviderService = Depends(get_model_provider_service),
-):
+    user: CurrentUser,
+    service: ServiceDep,
+) -> ModelProviderPublic:
     """Update an existing model provider."""
+    validate_permission(user, Permission.ADMIN)
     provider = await service.update(
         provider_id=provider_id,
         name=data.name,
@@ -319,8 +382,8 @@ async def update_provider(
 )
 async def list_provider_models(
     provider_id: UUID,
-    service: ModelProviderService = Depends(get_model_provider_service),
-):
+    service: ServiceDep,
+) -> list[dict[str, Any]]:
     """List available models/deployments from the provider's API using its credentials."""
     return await service.list_available_models(provider_id)
 
@@ -331,8 +394,8 @@ async def list_provider_models(
 )
 async def test_provider(
     provider_id: UUID,
-    service: ModelProviderService = Depends(get_model_provider_service),
-):
+    service: ServiceDep,
+) -> dict[str, Any]:
     """Test connectivity to a model provider."""
     return await service.test_connection(provider_id)
 
@@ -344,8 +407,8 @@ async def test_provider(
 async def validate_model(
     provider_id: UUID,
     body: ValidateModelRequest,
-    service: ModelProviderService = Depends(get_model_provider_service),
-):
+    service: ServiceDep,
+) -> dict[str, Any]:
     """Validate that a model works with this provider by making a minimal API call."""
     return await service.validate_model(provider_id, body.model_name, body.model_type)
 
@@ -356,11 +419,13 @@ async def validate_model(
 )
 async def delete_provider(
     provider_id: UUID,
-    service: ModelProviderService = Depends(get_model_provider_service),
-):
+    user: CurrentUser,
+    service: ServiceDep,
+) -> dict[str, str]:
     """Delete a model provider.
 
     Will fail if the provider has models attached to it.
     """
+    validate_permission(user, Permission.ADMIN)
     await service.delete(provider_id)
     return {"message": "Provider deleted successfully"}

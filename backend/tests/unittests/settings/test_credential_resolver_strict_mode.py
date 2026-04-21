@@ -190,9 +190,7 @@ class TestCredentialResolverStrictMode:
             tenant_id="sundsvall-municipality",
             name="Sundsvall Municipality",
             api_credentials={
-                "openai": {
-                    "api_key": "tenant-specific-openai-key-sk-proj-xyz123"
-                }
+                "openai": {"api_key": "tenant-specific-openai-key-sk-proj-xyz123"}
             },
         )
 
@@ -279,7 +277,7 @@ class TestCredentialResolverStrictMode:
                 provider="vllm",
                 field="endpoint",
                 fallback="http://global-vllm-endpoint:8000",
-                required=True  # vLLM endpoint is required in strict mode
+                required=True,  # vLLM endpoint is required in strict mode
             )
 
         # Verify error message is helpful

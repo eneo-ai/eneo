@@ -14,7 +14,6 @@ from intric.storage.presentation.storage_models import (
 
 
 class StorageInfoAssembler:
-
     def from_space_member_to_storage_space_member(
         self,
         space_member: SpaceMember,
@@ -30,7 +29,6 @@ class StorageInfoAssembler:
     def from_storage_space_info_to_model(
         self, space: StorageSpaceInfo
     ) -> StorageSpaceInfoModel:
-
         space_members = [
             self.from_space_member_to_storage_space_member(space_member=space_member)
             for space_member in space.members
@@ -46,7 +44,6 @@ class StorageInfoAssembler:
         )
 
     def from_storage_info_to_model(self, storage: StorageInfo) -> StorageInfoModel:
-
         count = len(storage.get_shared_spaces())
         storage_space_infos = [
             self.from_storage_space_info_to_model(space=space)

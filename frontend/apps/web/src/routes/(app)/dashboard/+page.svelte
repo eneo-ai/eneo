@@ -76,7 +76,12 @@
           <SelectTheme></SelectTheme>
         </div>
         <div class="border-default my-1 border-b"></div>
-        <Button is={item} variant="destructive" href={localizeHref("/logout")} padding="icon-leading">
+        <Button
+          is={item}
+          variant="destructive"
+          href={localizeHref("/logout")}
+          padding="icon-leading"
+        >
           <IconLogout />
           {m.logout()}</Button
         >
@@ -104,12 +109,7 @@
 
         <!-- Level 1: Space Content (contains Level 2 accordion) -->
         {#if $isSelected(space.id)}
-          <div
-            class="pl-4"
-            {...$content(space.id)}
-            use:content
-            transition:slide
-          >
+          <div class="pl-4" {...$content(space.id)} use:content transition:slide>
             <SpaceAccordionContent {space} />
           </div>
         {/if}

@@ -93,11 +93,11 @@ export function initIntegrations(client) {
        * Preview to knowledge items that can be imported through this integration
        * @param {Object} args
        * @param {{id: string}} args.integration UserIntegration
-       * @param {import('../types/resources').IntegrationKnowledgePreview} args.preview The preview item received from calling the preview
+       * @param {import('../types/resources').IntegrationKnowledgePreview & {folder_id?: string, folder_path?: string, resource_type?: string}} args.preview The preview item received from calling the preview
        * @param {{id: string}} args.space Space to add this to
        * @param {{id: string}} args.embedding_model Embedding model to use
        *
-       * @returns {Promise<Job>} The background job processing this import
+       * @returns {Promise<any>} The background job processing this import
        * @throws {IntricError}
        * */
       import: async ({ integration, preview, space, embedding_model }) => {
@@ -266,20 +266,12 @@ export function initIntegrations(client) {
       },
 
       /**
-       * Rename an integration knowledge item
-       * @param {Object} args
-       * @param {{id: string}} args.knowledge IntegrationKnowledge to rename
-       * @param {{id: string}} args.space Space where the knowledge belongs
-       * @param {string} args.name New name for the knowledge
-       * @throws {IntricError}
-       * */
-      /**
        * Trigger a full resync for a SharePoint integration knowledge
        * @param {Object} args
        * @param {{id: string}} args.knowledge IntegrationKnowledge to sync
        * @param {{id: string}} args.space Space where the knowledge belongs
        *
-       * @returns {Promise<Job>} The background job processing this sync
+       * @returns {Promise<any>} The background job processing this sync
        * @throws {IntricError}
        * */
       triggerFullSync: async ({ knowledge, space }) => {
@@ -297,6 +289,14 @@ export function initIntegrations(client) {
         return job;
       },
 
+      /**
+       * Rename an integration knowledge item
+       * @param {Object} args
+       * @param {{id: string}} args.knowledge IntegrationKnowledge to rename
+       * @param {{id: string}} args.space Space where the knowledge belongs
+       * @param {string} args.name New name for the knowledge
+       * @throws {IntricError}
+       * */
       rename: async ({ knowledge, space, name }) => {
         const { id: integration_knowledge_id } = knowledge;
         const { id } = space;
@@ -430,12 +430,15 @@ export function initIntegrations(client) {
          * */
         recreateSubscription: async (subscription) => {
           const { id } = subscription;
-          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/{id}/recreate", {
-            method: "post",
-            params: {
-              path: { id }
+          const res = await client.fetch(
+            "/api/v1/admin/sharepoint/subscriptions/{subscription_id}/recreate",
+            {
+              method: "post",
+              params: {
+                path: { subscription_id: id }
+              }
             }
-          });
+          );
           return res;
         }
       }

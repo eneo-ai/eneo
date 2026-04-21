@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
 from intric.ai_models.completion_models.completion_model import CompletionModelSparse
-from intric.completion_models.presentation.completion_model_models import (
+from intric.completion_models.presentation import (
     CompletionModelPublic,
 )
 from intric.security_classifications.presentation.security_classification_models import (
@@ -20,7 +20,7 @@ class CompletionModelAssembler:
             created_at=completion_model.created_at,
             updated_at=completion_model.updated_at,
             name=completion_model.name,
-            nickname=completion_model.nickname,
+            nickname=completion_model.nickname or completion_model.name,
             max_input_tokens=completion_model.max_input_tokens,
             max_output_tokens=completion_model.max_output_tokens,
             vision=completion_model.vision,
@@ -53,7 +53,9 @@ class CompletionModelAssembler:
         )
 
     @staticmethod
-    def from_completion_model_to_sparse(completion_model: "CompletionModel"):
+    def from_completion_model_to_sparse(
+        completion_model: "CompletionModel | CompletionModelSparse",
+    ) -> CompletionModelSparse:
         """
         Converts a domain CompletionModel to a CompletionModelSparse instance.
         CompletionModelSparse is used for lightweight representations where
@@ -64,7 +66,7 @@ class CompletionModelAssembler:
             updated_at=completion_model.updated_at,
             id=completion_model.id,
             name=completion_model.name,
-            nickname=completion_model.nickname,
+            nickname=completion_model.nickname or completion_model.name,
             family=completion_model.family,
             max_input_tokens=completion_model.max_input_tokens,
             max_output_tokens=completion_model.max_output_tokens,
@@ -83,7 +85,9 @@ class CompletionModelAssembler:
             base_url=completion_model.base_url,
         )
 
-    def from_completion_models_to_models(self, completion_models: list["CompletionModel"]):
+    def from_completion_models_to_models(
+        self, completion_models: list["CompletionModel"]
+    ):
         completion_models_public = [
             self.from_completion_model_to_model(completion_model=completion_model)
             for completion_model in completion_models

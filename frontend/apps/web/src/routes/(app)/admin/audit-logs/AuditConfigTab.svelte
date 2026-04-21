@@ -2,23 +2,41 @@
   import { Button, Input } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
   import * as m from "$lib/paraglide/messages";
-  import { ChevronDown, ChevronRight, Search, Check, X } from "lucide-svelte";
+  import { ChevronRight, Search, Check, X } from "lucide-svelte";
   import { onMount } from "svelte";
   import { slide, fly } from "svelte/transition";
+  import { SvelteSet } from "svelte/reactivity";
 
   const intric = getIntric();
 
+  // Types for audit config
+  type CategoryConfigItem = {
+    category: string;
+    enabled: boolean;
+    description: string;
+    action_count: number;
+    example_actions: string[];
+  };
+
+  type ActionConfigItem = {
+    action: string;
+    enabled: boolean;
+    category: string;
+    name_sv: string;
+    description_sv: string;
+  };
+
   // State
-  let categoryConfig = $state([]);
-  let actionConfig = $state([]);
-  let expandedCategories = $state(new Set());
+  let categoryConfig = $state<CategoryConfigItem[]>([]);
+  let actionConfig = $state<ActionConfigItem[]>([]);
+  const expandedCategories = new SvelteSet<string>();
   let searchQuery = $state("");
   let isLoading = $state(true);
   let showLoading = $state(false); // Only show loading spinner after 200ms delay
   let isSaving = $state(false);
   let hasChanges = $state(false);
-  let originalCategoryConfig = [];
-  let originalActionConfig = [];
+  let originalCategoryConfig: CategoryConfigItem[] = [];
+  let originalActionConfig: ActionConfigItem[] = [];
 
   // Show loading indicator only after 200ms delay (prevents flash for fast loads)
   $effect(() => {
@@ -39,18 +57,19 @@
     }
 
     const query = searchQuery.toLowerCase();
-    const filtered = actionConfig.filter(action =>
-      action.action.toLowerCase().includes(query) ||
-      action.name_sv?.toLowerCase().includes(query) ||
-      action.description_sv?.toLowerCase().includes(query)
+    const filtered = actionConfig.filter(
+      (action) =>
+        action.action.toLowerCase().includes(query) ||
+        action.name_sv?.toLowerCase().includes(query) ||
+        action.description_sv?.toLowerCase().includes(query)
     );
 
     return groupActionsByCategory(filtered);
   });
 
   // Group actions by category
-  function groupActionsByCategory(actions) {
-    const grouped = {};
+  function groupActionsByCategory(actions: ActionConfigItem[]): Record<string, ActionConfigItem[]> {
+    const grouped: Record<string, ActionConfigItem[]> = {};
     for (const action of actions) {
       if (!grouped[action.category]) {
         grouped[action.category] = [];
@@ -61,31 +80,24 @@
   }
 
   // Get category display name
-  function getCategoryName(category) {
+  function getCategoryName(category: string): string {
     const key = `audit_category_${category}`;
-    return (m)[key]?.() || category;
-  }
-
-  // Get category description from config
-  function getCategoryDescription(category) {
-    const cat = categoryConfig.find(c => c.category === category);
-    return cat?.description || "";
+    return (m as unknown as Record<string, (() => string) | undefined>)[key]?.() || category;
   }
 
   // Toggle category expansion
-  function toggleCategory(category) {
+  function toggleCategory(category: string) {
     if (expandedCategories.has(category)) {
       expandedCategories.delete(category);
     } else {
       expandedCategories.add(category);
     }
-    expandedCategories = new Set(expandedCategories);
   }
 
   // Toggle all actions in a category with proper Svelte 5 reactivity
-  function toggleAllInCategory(category, enabled) {
+  function toggleAllInCategory(category: string, enabled: boolean) {
     // Create new array with updated actions
-    actionConfig = actionConfig.map(action => {
+    actionConfig = actionConfig.map((action) => {
       if (action.category === category) {
         return { ...action, enabled };
       }
@@ -93,7 +105,7 @@
     });
 
     // Update category enabled state
-    categoryConfig = categoryConfig.map(cat => {
+    categoryConfig = categoryConfig.map((cat) => {
       if (cat.category === category) {
         return { ...cat, enabled };
       }
@@ -104,15 +116,15 @@
   }
 
   // Toggle individual action with proper Svelte 5 reactivity
-  function toggleAction(actionId, categoryId) {
+  function toggleAction(actionId: string, categoryId: string) {
     // Find the current action to get its state
-    const currentAction = actionConfig.find(a => a.action === actionId);
+    const currentAction = actionConfig.find((a) => a.action === actionId);
     if (!currentAction) return;
 
     const newEnabledState = !currentAction.enabled;
 
     // Create new array with updated action
-    actionConfig = actionConfig.map(a => {
+    actionConfig = actionConfig.map((a) => {
       if (a.action === actionId) {
         return { ...a, enabled: newEnabledState };
       }
@@ -120,12 +132,12 @@
     });
 
     // Check if all actions in the category have the same state
-    const categoryActions = actionConfig.filter(a => a.category === categoryId);
-    const allEnabled = categoryActions.every(a => a.enabled);
-    const allDisabled = categoryActions.every(a => !a.enabled);
+    const categoryActions = actionConfig.filter((a) => a.category === categoryId);
+    const allEnabled = categoryActions.every((a) => a.enabled);
+    const allDisabled = categoryActions.every((a) => !a.enabled);
 
     // Update category state based on actions
-    categoryConfig = categoryConfig.map(cat => {
+    categoryConfig = categoryConfig.map((cat) => {
       if (cat.category === categoryId) {
         if (allEnabled) {
           return { ...cat, enabled: true };
@@ -142,15 +154,16 @@
 
   // Check if there are unsaved changes
   function checkForChanges() {
-    const categoryChanged = JSON.stringify(categoryConfig) !== JSON.stringify(originalCategoryConfig);
+    const categoryChanged =
+      JSON.stringify(categoryConfig) !== JSON.stringify(originalCategoryConfig);
     const actionChanged = JSON.stringify(actionConfig) !== JSON.stringify(originalActionConfig);
     hasChanges = categoryChanged || actionChanged;
   }
 
   // Count enabled actions in a category
-  function countEnabledInCategory(category) {
-    const actions = actionConfig.filter(a => a.category === category);
-    const enabled = actions.filter(a => a.enabled).length;
+  function countEnabledInCategory(category: string) {
+    const actions = actionConfig.filter((a) => a.category === category);
+    const enabled = actions.filter((a) => a.enabled).length;
     return { enabled, total: actions.length };
   }
 
@@ -171,7 +184,6 @@
       // Store originals for change detection
       originalCategoryConfig = JSON.parse(JSON.stringify(catConfig.categories));
       originalActionConfig = JSON.parse(JSON.stringify(actConfig.actions));
-
     } catch (error) {
       console.error("Failed to load audit configuration:", error);
     } finally {
@@ -185,7 +197,7 @@
       isSaving = true;
 
       // Prepare category updates
-      const categoryUpdates = categoryConfig.map(cat => ({
+      const categoryUpdates = categoryConfig.map((cat) => ({
         category: cat.category,
         enabled: cat.enabled
       }));
@@ -217,7 +229,6 @@
         await loadConfig();
         hasChanges = false;
       }
-
     } catch (error) {
       console.error("Failed to save audit configuration:", error);
     } finally {
@@ -237,13 +248,11 @@
     for (const category of categoryConfig) {
       expandedCategories.add(category.category);
     }
-    expandedCategories = new Set(expandedCategories);
   }
 
   // Collapse all categories
   function collapseAll() {
     expandedCategories.clear();
-    expandedCategories = new Set(expandedCategories);
   }
 
   onMount(() => {
@@ -252,45 +261,57 @@
 </script>
 
 {#if isLoading && showLoading}
-  <div class="space-y-3 animate-pulse">
+  <div class="animate-pulse space-y-3">
     <!-- Skeleton header card -->
-    <div class="rounded-xl border border-default bg-subtle p-6">
-      <div class="h-6 w-48 bg-default/10 rounded mb-3"></div>
-      <div class="h-4 w-96 bg-default/10 rounded mb-5"></div>
+    <div class="border-default bg-subtle rounded-xl border p-6">
+      <div class="bg-default/10 mb-3 h-6 w-48 rounded"></div>
+      <div class="bg-default/10 mb-5 h-4 w-96 rounded"></div>
       <div class="flex gap-3">
-        <div class="flex-1 h-11 bg-default/10 rounded"></div>
-        <div class="h-11 w-24 bg-default/10 rounded"></div>
-        <div class="h-11 w-24 bg-default/10 rounded"></div>
+        <div class="bg-default/10 h-11 flex-1 rounded"></div>
+        <div class="bg-default/10 h-11 w-24 rounded"></div>
+        <div class="bg-default/10 h-11 w-24 rounded"></div>
       </div>
     </div>
     <!-- Skeleton category cards -->
-    {#each Array(5) as _}
-      <div class="rounded-xl border border-default bg-primary h-20"></div>
+    {#each Array(5) as _, i (i)}
+      <div class="border-default bg-primary h-20 rounded-xl border"></div>
     {/each}
   </div>
 {:else if !isLoading}
   <!-- Header Section with improved styling -->
-  <div class="mb-6 rounded-xl border border-default bg-subtle p-6 shadow-sm">
+  <div class="border-default bg-subtle mb-6 rounded-xl border p-6 shadow-sm">
     <div class="mb-5">
-      <h3 class="text-lg font-semibold text-default mb-2">{m.audit_config_header()}</h3>
-      <p class="text-sm text-muted leading-relaxed">{m.audit_config_description()}</p>
+      <h3 class="text-default mb-2 text-lg font-semibold">{m.audit_config_header()}</h3>
+      <p class="text-muted text-sm leading-relaxed">{m.audit_config_description()}</p>
     </div>
 
     <!-- Search and Controls with better spacing -->
-    <div class="flex flex-col sm:flex-row gap-3">
-      <div class="flex-1 relative">
-        <Search class="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted pointer-events-none" />
+    <div class="flex flex-col gap-3 sm:flex-row">
+      <div class="relative flex-1">
+        <Search
+          class="text-muted pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2"
+        />
         <Input.Text
           bind:value={searchQuery}
           placeholder={m.audit_config_search_placeholder()}
-          class="pl-10 h-11 text-sm"
+          class="h-11 pl-10 text-sm"
         />
       </div>
       <div class="flex gap-2">
-        <Button variant="ghost" onclick={expandAll} size="sm" class="h-11 px-4 text-sm font-medium">
+        <Button
+          variant="simple"
+          onclick={expandAll}
+          size="sm"
+          class="h-11 px-4 text-sm font-medium"
+        >
           {m.audit_config_expand_all()}
         </Button>
-        <Button variant="ghost" onclick={collapseAll} size="sm" class="h-11 px-4 text-sm font-medium">
+        <Button
+          variant="simple"
+          onclick={collapseAll}
+          size="sm"
+          class="h-11 px-4 text-sm font-medium"
+        >
           {m.audit_config_collapse_all()}
         </Button>
       </div>
@@ -301,29 +322,41 @@
   <div class="space-y-3">
     {#each categoryConfig as category (category.category)}
       {@const actions = filteredActionsByCategory[category.category] || []}
-      {@const { enabled: enabledCount, total: totalCount } = countEnabledInCategory(category.category)}
+      {@const { enabled: enabledCount, total: totalCount } = countEnabledInCategory(
+        category.category
+      )}
       {@const isExpanded = expandedCategories.has(category.category)}
 
       {#if actions.length > 0 || !searchQuery}
-        <div class="rounded-xl border border-default bg-primary overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5">
+        <div
+          class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+        >
           <!-- Category Header with improved layout -->
-          <div class="px-6 py-4 bg-subtle border-b border-default">
+          <div class="bg-subtle border-default border-b px-6 py-4">
             <div class="flex items-center justify-between gap-4">
               <button
                 onclick={() => toggleCategory(category.category)}
-                class="flex-1 flex items-center gap-3 text-left hover:text-accent-default transition-colors group min-w-0"
+                class="hover:text-accent-default group flex min-w-0 flex-1 items-center gap-3 text-left transition-colors"
               >
-                <div class="rounded-md p-1 group-hover:bg-hover transition-all duration-200 flex-shrink-0">
-                  <ChevronRight class={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90 text-default' : 'text-muted'}`} />
+                <div
+                  class="group-hover:bg-hover flex-shrink-0 rounded-md p-1 transition-all duration-200"
+                >
+                  <ChevronRight
+                    class={`h-4 w-4 transition-transform duration-200 ${isExpanded ? "text-default rotate-90" : "text-muted"}`}
+                  />
                 </div>
-                <span class="font-semibold text-default text-sm truncate">{getCategoryName(category.category)}</span>
-                <span class="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1 text-xs font-semibold text-muted border border-default flex-shrink-0">
-                  <span class={enabledCount > 0 ? 'text-accent-default' : ''}>{enabledCount}</span>
+                <span class="text-default truncate text-sm font-semibold"
+                  >{getCategoryName(category.category)}</span
+                >
+                <span
+                  class="bg-primary text-muted border-default inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold"
+                >
+                  <span class={enabledCount > 0 ? "text-accent-default" : ""}>{enabledCount}</span>
                   <span class="text-muted/50">/</span>
                   <span>{totalCount}</span>
                 </span>
               </button>
-              <div class="flex items-center gap-3 flex-shrink-0">
+              <div class="flex flex-shrink-0 items-center gap-3">
                 <Input.Switch
                   value={category.enabled}
                   sideEffect={() => toggleAllInCategory(category.category, !category.enabled)}
@@ -331,32 +364,39 @@
               </div>
             </div>
             {#if category.description}
-              <p class="text-sm text-muted mt-3 ml-9 leading-relaxed">{category.description}</p>
+              <p class="text-muted mt-3 ml-9 text-sm leading-relaxed">{category.description}</p>
             {/if}
           </div>
 
           <!-- Actions List with improved styling -->
           {#if isExpanded && actions.length > 0}
-            <div transition:slide={{ duration: 200 }} class="divide-y divide-default bg-primary">
+            <div transition:slide={{ duration: 200 }} class="divide-default bg-primary divide-y">
               {#each actions as action (action.action)}
-                <div class="px-6 py-5 hover:bg-hover/50 transition-colors duration-150">
+                <div class="hover:bg-hover/50 px-6 py-5 transition-colors duration-150">
                   <div class="flex items-start justify-between gap-6">
-                    <div class="flex-1 min-w-0">
-                      <div class="flex items-center gap-2.5 mb-1.5 flex-wrap">
-                        <span class="text-sm font-semibold text-default">
+                    <div class="min-w-0 flex-1">
+                      <div class="mb-1.5 flex flex-wrap items-center gap-2.5">
+                        <span class="text-default text-sm font-semibold">
                           {action.name_sv || action.action}
                         </span>
                         {#if !action.enabled}
-                          <span class="inline-flex items-center gap-1 rounded-full bg-red-50 dark:bg-red-950 px-2.5 py-1 text-xs font-semibold text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 flex-shrink-0">
+                          <span
+                            class="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
+                          >
                             <X class="h-3.5 w-3.5" />
                             {m.audit_config_disabled()}
                           </span>
                         {/if}
                       </div>
                       {#if action.description_sv}
-                        <p class="text-sm text-muted leading-relaxed mb-2">{action.description_sv}</p>
+                        <p class="text-muted mb-2 text-sm leading-relaxed">
+                          {action.description_sv}
+                        </p>
                       {/if}
-                      <code class="inline-block text-xs font-mono bg-accent-default/5 text-accent-default/90 dark:bg-accent-default/10 dark:text-accent-default px-2.5 py-1 rounded-md border border-accent-default/20">{action.action}</code>
+                      <code
+                        class="bg-accent-default/5 text-accent-default/90 dark:bg-accent-default/10 dark:text-accent-default border-accent-default/20 inline-block rounded-md border px-2.5 py-1 font-mono text-xs"
+                        >{action.action}</code
+                      >
                     </div>
                     <div class="flex-shrink-0 pt-0.5">
                       <Input.Checkbox
@@ -381,28 +421,41 @@
   <!-- Save Bar with refined styling -->
   {#if hasChanges}
     <div transition:fly={{ y: 20, duration: 200 }} class="sticky bottom-4 mt-6">
-      <div class="rounded-lg border border-accent-default bg-accent-default/5 backdrop-blur-sm p-4 shadow-lg">
-        <div class="flex items-center justify-between flex-wrap gap-3">
+      <div
+        class="border-accent-default bg-accent-default/5 rounded-lg border p-4 shadow-lg backdrop-blur-sm"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="flex items-center gap-3">
-            <div class="rounded-md bg-accent-default/15 p-2">
-              <Check class="h-4 w-4 text-accent-default" />
+            <div class="bg-accent-default/15 rounded-md p-2">
+              <Check class="text-accent-default h-4 w-4" />
             </div>
             <div>
-              <p class="text-sm text-default font-semibold">
+              <p class="text-default text-sm font-semibold">
                 {m.audit_config_unsaved_changes()}
               </p>
-              <p class="text-xs text-muted mt-0.5">
-                Ändringar träder i kraft omedelbart
-              </p>
+              <p class="text-muted mt-0.5 text-xs">Ändringar träder i kraft omedelbart</p>
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <Button variant="ghost" onclick={resetChanges} size="sm" class="h-10 px-4 text-sm font-medium">
+            <Button
+              variant="simple"
+              onclick={resetChanges}
+              size="sm"
+              class="h-10 px-4 text-sm font-medium"
+            >
               {m.audit_config_reset()}
             </Button>
-            <Button variant="primary" onclick={saveConfig} disabled={isSaving} size="sm" class="h-10 px-5 text-sm font-semibold">
+            <Button
+              variant="primary"
+              onclick={saveConfig}
+              disabled={isSaving}
+              size="sm"
+              class="h-10 px-5 text-sm font-semibold"
+            >
               {#if isSaving}
-                <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                <div
+                  class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                ></div>
                 {m.audit_config_saving()}
               {:else}
                 <Check class="h-4 w-4" />

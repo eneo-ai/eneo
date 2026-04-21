@@ -153,7 +153,9 @@ class TestGdprExportWithMixedMetadata:
         self, client, auth_headers, db_session, test_tenant, test_user
     ):
         """Verify GDPR export handles logs with and without target metadata."""
-        from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+        from intric.audit.infrastructure.audit_log_repo_impl import (
+            AuditLogRepositoryImpl,
+        )
         from intric.audit.domain.audit_log import AuditLog
         from intric.audit.domain.action_types import ActionType
         from intric.audit.domain.entity_types import EntityType
@@ -270,7 +272,9 @@ class TestCsvExportMemoryLimit:
     4. Return X-Total-Records header with actual count
     """
 
-    async def test_csv_export_respects_max_records_limit(self, client, auth_headers, db_session, test_tenant, test_user):
+    async def test_csv_export_respects_max_records_limit(
+        self, client, auth_headers, db_session, test_tenant, test_user
+    ):
         """Verify CSV export respects max_records limit and returns truncation headers.
 
         Expected behavior:
@@ -278,7 +282,9 @@ class TestCsvExportMemoryLimit:
         - Response includes X-Records-Truncated: true when limit is hit
         - Response includes X-Total-Records header with actual count
         """
-        from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+        from intric.audit.infrastructure.audit_log_repo_impl import (
+            AuditLogRepositoryImpl,
+        )
         from intric.audit.domain.audit_log import AuditLog
         from intric.audit.domain.action_types import ActionType
         from intric.audit.domain.entity_types import EntityType
@@ -384,7 +390,9 @@ class TestCsvExportMemoryLimit:
             "Missing X-Records-Truncated header in export response"
         )
 
-    async def test_csv_export_default_limit_prevents_unbounded_export(self, client, auth_headers):
+    async def test_csv_export_default_limit_prevents_unbounded_export(
+        self, client, auth_headers
+    ):
         """Verify export has a default max_records limit (50,000).
 
         The default limit prevents memory exhaustion with large exports.

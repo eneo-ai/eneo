@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 class CrawlRunRepository:
     def __init__(self, session: "AsyncSession"):
+        super().__init__()
         self.session = session
 
     async def one(self, id: UUID) -> CrawlRun:
@@ -53,6 +54,8 @@ class CrawlRunRepository:
             .returning(CrawlRunsTable)
         )
         record = await self.session.scalar(stmt)
+        if record is None:
+            raise RuntimeError("Insert into crawl_runs did not return a record")
         return CrawlRun.to_domain(record=record)
 
     async def update(self, crawl_run: CrawlRun) -> CrawlRun:
@@ -70,6 +73,8 @@ class CrawlRunRepository:
             .returning(CrawlRunsTable)
         )
         record = await self.session.scalar(stmt)
+        if record is None:
+            raise RuntimeError("Update of crawl_run did not return a record")
         return CrawlRun.to_domain(record=record)
 
     async def get_crawl_runs(self, website_id: UUID) -> list[CrawlRun]:

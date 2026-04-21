@@ -1,7 +1,9 @@
 from typing import TYPE_CHECKING, Any, Dict, List, Sequence
 
 if TYPE_CHECKING:
-    from intric.database.tables.mcp_server_table import MCPServerSettings as MCPServerSettingsTable
+    from intric.database.tables.mcp_server_table import (
+        MCPServerSettings as MCPServerSettingsTable,
+    )
 
 from intric.mcp_servers.domain.entities.mcp_server import MCPServerSettings
 from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
@@ -24,7 +26,9 @@ class MCPServerSettingsMapper:
         )
 
     @staticmethod
-    def to_entities(tables: Sequence["MCPServerSettingsTable"]) -> List[MCPServerSettings]:
+    def to_entities(
+        tables: Sequence["MCPServerSettingsTable"],
+    ) -> List[MCPServerSettings]:
         """Convert list of database tables to list of domain entities."""
         return [MCPServerSettingsMapper.to_entity(table) for table in tables]
 

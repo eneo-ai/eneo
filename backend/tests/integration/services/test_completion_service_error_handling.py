@@ -356,7 +356,7 @@ async def test_different_provider_types_create_correct_adapters(
                 nickname=f"{provider_type}-model",
                 name=f"{provider_type.title()} Model",
                 max_input_tokens=8192,
-            max_output_tokens=4096,
+                max_output_tokens=4096,
                 vision=False,
                 family=family,
                 hosting="usa",

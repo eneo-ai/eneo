@@ -1,10 +1,51 @@
-from typing import TYPE_CHECKING, Optional
-from uuid import UUID
+import random
+from datetime import datetime, timezone
+from enum import Enum
+from typing import TYPE_CHECKING, Optional, cast
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import jwt
+import sqlalchemy as sa
+from starlette.requests import Request
 
-from intric.authentication.auth_models import AccessToken
+from intric.allowed_origins.allowed_origin_repo import AllowedOriginRepository
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.application.audit_service import AuditService
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+from intric.audit.domain.outcome import Outcome
+from intric.authentication.api_key_policy import ApiKeyPolicyService
+from intric.authentication.api_key_rate_limiter import ApiKeyRateLimiter
+from intric.authentication.api_key_resolver import (
+    ApiKeyAuthResolver,
+    ApiKeyValidationError,
+    check_resource_permission,
+)
+from intric.authentication.api_key_router_helpers import extract_audit_context
+from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
+from intric.authentication.auth_models import (
+    METHOD_PERMISSION_MAP,
+    PERMISSION_LEVEL_ORDER,
+    AccessToken,
+    ApiKeyOwnership,
+    ApiKeyPermission,
+    ApiKeyScopeType,
+    ApiKeyV2InDB,
+)
 from intric.authentication.auth_service import AuthService
+from intric.database.tables.app_table import AppRuns, Apps
+from intric.database.tables.assistant_table import Assistants
+from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.group_chats_table import GroupChatsTable
+from intric.database.tables.info_blobs_table import InfoBlobs
+from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.prompts_table import PromptsAssistants
+from intric.database.tables.service_table import Services
+from intric.database.tables.sessions_table import Sessions
+from intric.database.tables.spaces_table import Spaces
+from intric.database.tables.users_table import Users
+from intric.database.tables.websites_table import CrawlRuns, Websites
 from intric.info_blobs.info_blob_repo import InfoBlobRepository
 from intric.main.config import get_settings
 from intric.main.exceptions import (
@@ -17,6 +58,7 @@ from intric.main.exceptions import (
 )
 from intric.main.logging import get_logger
 from intric.main.models import ModelId
+from intric.roles.permissions import Permission
 from intric.settings.settings import SettingsUpsert
 from intric.settings.settings_repo import SettingsRepository
 from intric.tenants.tenant import TenantState
@@ -25,7 +67,6 @@ from intric.users.user import (
     PropUserInvite,
     UserAdd,
     UserAddSuperAdmin,
-    UserBase,
     UserState,
     UserUpdate,
     UserUpdatePublic,
@@ -33,10 +74,128 @@ from intric.users.user import (
 from intric.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
+    from intric.database.database import AsyncSession
+    from intric.feature_flag.feature_flag_service import FeatureFlagService
+    from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
 
 
 logger = get_logger(__name__)
+
+
+def _permission_allows(key: ApiKeyV2InDB, required: ApiKeyPermission) -> bool:
+    granted = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
+    needed = PERMISSION_LEVEL_ORDER.get(required.value, 3)
+    return granted >= needed
+
+
+def _check_basic_method_permission(
+    request: Request,
+    key: ApiKeyV2InDB,
+) -> None:
+    """Enforce the key's basic permission level against the HTTP method.
+
+    Catch-all for routes without a specific resource guard.
+    No read-overrides — only the raw method->permission mapping applies.
+    """
+    required = METHOD_PERMISSION_MAP.get(request.method, "admin")
+    required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
+    granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
+
+    if granted_level < required_level:
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_permission",
+            message=(
+                f"API key cannot perform {request.method} requests "
+                f"on this endpoint (requires '{required}' permission)."
+            ),
+            context={
+                "auth_layer": "api_key_method",
+                "action": request.method.lower(),
+                "required_level": required,
+            },
+        )
+
+
+def _check_management_permission(
+    key: ApiKeyV2InDB,
+    required: str,
+) -> None:
+    """Enforce a minimum API key permission for management endpoints.
+
+    NOT gated by the feature flag — management guards always enforce.
+    """
+    granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
+    required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
+
+    if granted_level < required_level:
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_permission",
+            message=(
+                "API key does not have required permission. "
+                "Use a key with 'admin' permission, or authenticate "
+                "with a bearer token."
+            ),
+            context={
+                "auth_layer": "api_key_method",
+                "action": "management",
+                "required_level": required,
+            },
+        )
+
+
+def _check_method_resource_permission(
+    request: Request,
+    key: ApiKeyV2InDB,
+    config: dict[str, object],
+) -> None:
+    """Check method→permission and fine-grained resource permission.
+
+    The method→permission check (with read-overrides) is ALWAYS enforced,
+    even when ``api_key_enforce_resource_permissions`` is disabled.
+    The fine-grained resource-type check is delegated to
+    ``check_resource_permission`` which self-gates via the flag.
+
+    Called after authentication has set ``request.state.api_key``.
+    *config* is written by the router-level
+    ``require_resource_permission_for_method`` dependency.
+    """
+    resource_type = cast(str, config["resource_type"])
+    read_override_endpoints = cast(
+        "frozenset[str] | None", config.get("read_override_endpoints")
+    )
+
+    required = METHOD_PERMISSION_MAP.get(request.method, "admin")
+
+    if required != "read" and read_override_endpoints:
+        route = request.scope.get("route")
+        if route and hasattr(route, "endpoint"):
+            if route.endpoint.__name__ in read_override_endpoints:
+                required = "read"
+
+    # Method→permission: always enforced (respects read-overrides above)
+    required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
+    granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
+    if granted_level < required_level:
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_permission",
+            message=(
+                f"API key cannot perform {request.method} requests "
+                f"on this endpoint (requires '{required}' permission)."
+            ),
+            context={
+                "auth_layer": "api_key_method",
+                "action": request.method.lower(),
+                "required_level": required,
+                "resource_type": resource_type,
+            },
+        )
+
+    # Fine-grained resource permission (self-gated by flag)
+    check_resource_permission(key, resource_type, required)
 
 
 class UserService:
@@ -44,29 +203,49 @@ class UserService:
         self,
         user_repo: UsersRepository,
         auth_service: AuthService,
+        api_key_auth_resolver: ApiKeyAuthResolver,
+        api_key_v2_repo: ApiKeysV2Repository,
+        allowed_origin_repo: AllowedOriginRepository,
+        audit_service: Optional[AuditService],
         settings_repo: SettingsRepository,
         tenant_repo: TenantRepository,
         info_blob_repo: InfoBlobRepository,
+        space_service: Optional["SpaceService"] = None,
+        api_key_rate_limiter: Optional[ApiKeyRateLimiter] = None,
+        feature_flag_service: Optional["FeatureFlagService"] = None,
+        session: Optional["AsyncSession"] = None,
     ):
+        super().__init__()
         self.repo = user_repo
         self.auth_service = auth_service
+        self.api_key_auth_resolver = api_key_auth_resolver
+        self.api_key_v2_repo = api_key_v2_repo
+        self.allowed_origin_repo = allowed_origin_repo
+        self.space_service = space_service
+        self.audit_service = audit_service
         self.settings_repo = settings_repo
         self.tenant_repo = tenant_repo
         self.info_blob_repo = info_blob_repo
+        self.api_key_rate_limiter = api_key_rate_limiter
+        self.feature_flag_service = feature_flag_service
+        self._session = session
 
-    async def _validate_email(self, user: UserBase):
+    async def _validate_email(self, email: str | None):
+        if email is None:
+            return
+
         if (
-            await self.repo.get_user_by_email(email=user.email, with_deleted=True)
+            await self.repo.get_user_by_email(email=email, with_deleted=True)
             is not None
         ):
             raise UniqueUserException("That email is already taken.")
 
-    async def _validate_username(self, user: UserBase):
+    async def _validate_username(self, username: str | None):
+        if username is None:
+            return
+
         if (
-            user.username is not None
-            and await self.repo.get_user_by_username(
-                username=user.username, with_deleted=True
-            )
+            await self.repo.get_user_by_username(username=username, with_deleted=True)
             is not None
         ):
             raise UniqueUserException("That username is already taken.")
@@ -75,8 +254,8 @@ class UserService:
         self,
         email: str,
         password: str,
-        correlation_id: str = None,
-        source_ip: str = None,
+        correlation_id: str | None = None,
+        source_ip: str | None = None,
     ):
         """
         Authenticate user with username/password.
@@ -197,7 +376,7 @@ class UserService:
         access_token: str,
         key: jwt.PyJWK,
         signing_algos: list[str],
-        correlation_id: str = None,
+        correlation_id: str | None = None,
     ):
         # MIT License
         was_federated = False
@@ -214,12 +393,18 @@ class UserService:
         )
 
         try:
+            client_id = get_settings().oidc_client_id
+            if client_id is None:
+                raise AuthenticationException(
+                    "System configuration error: OIDC client ID not configured"
+                )
+
             username, email = self.auth_service.get_username_and_email_from_openid_jwt(
                 id_token=id_token,
                 access_token=access_token,
                 key=key.key,
                 signing_algos=signing_algos,
-                client_id=get_settings().oidc_client_id,
+                client_id=client_id,
                 options={"verify_iat": False},
                 correlation_id=correlation_id,
             )
@@ -424,7 +609,7 @@ class UserService:
                 raise
 
         # Create access token
-        access_token = self.auth_service.create_access_token_for_user(user=user_in_db)
+        issued_token = self.auth_service.create_access_token_for_user(user=user_in_db)
 
         logger.info(
             "OIDC login completed successfully",
@@ -438,7 +623,7 @@ class UserService:
 
         return (
             AccessToken(
-                access_token=access_token,
+                access_token=issued_token,
                 token_type="bearer",
             ),
             was_federated,
@@ -446,8 +631,8 @@ class UserService:
         )
 
     async def register(self, new_user: UserAddSuperAdmin):
-        await self._validate_email(new_user)
-        await self._validate_username(new_user)
+        await self._validate_email(new_user.email)
+        await self._validate_username(new_user.username)
 
         tenant = await self.tenant_repo.get(new_user.tenant_id)
         if tenant is None:
@@ -488,46 +673,945 @@ class UserService:
         username = self.auth_service.get_username_from_token(
             token, get_settings().jwt_secret
         )
+        if username is None:
+            return None
         return await self.repo.get_user_by_username(username)
 
-    async def _get_user_from_api_key(self, api_key: str):
-        key = await self.auth_service.get_api_key(api_key)
+    async def _resolve_space_id_for_scope(
+        self, scope_type: str, scope_id: UUID
+    ) -> UUID | None:
+        """Resolve a key's scope to its parent space_id (lightweight, no user context)."""
+        from intric.database.tables.app_table import Apps  # noqa: F811
+        from intric.database.tables.assistant_table import Assistants  # noqa: F811
 
-        if key is None or key.user_id is None:
+        if scope_type in (ApiKeyScopeType.SPACE, ApiKeyScopeType.SPACE.value):
+            return scope_id
+        if scope_type in (ApiKeyScopeType.ASSISTANT, ApiKeyScopeType.ASSISTANT.value):
+            query = sa.select(Assistants.space_id).where(Assistants.id == scope_id)
+        elif scope_type in (ApiKeyScopeType.APP, ApiKeyScopeType.APP.value):
+            query = sa.select(Apps.space_id).where(Apps.id == scope_id)
+        else:
+            return None
+        assert self._session is not None
+        return await self._session.scalar(query)
+
+    async def _is_space_member(self, space_id: UUID, user_id: UUID) -> bool:
+        """Check if user is a member of space (index-only, no user context)."""
+        from intric.database.tables.spaces_table import SpacesUsers
+
+        query = (
+            sa.select(sa.literal(1))
+            .select_from(SpacesUsers)
+            .where(SpacesUsers.space_id == space_id, SpacesUsers.user_id == user_id)
+            .limit(1)
+        )
+        assert self._session is not None
+        return await self._session.scalar(query) is not None
+
+    async def _build_service_user(self, key: ApiKeyV2InDB) -> "UserInDB":
+        """Build a synthetic UserInDB for service keys — no DB user lookup.
+
+        Stores the API key on `service_api_key` so that SpaceActor can derive
+        the correct role without a real membership row.
+        """
+        from intric.users.user import UserInDB as UserInDBModel
+
+        tenant = await self.tenant_repo.get(key.tenant_id)
+        if tenant is None:
+            raise BadRequestException(
+                f"Tenant {key.tenant_id} does not exist for service key {key.id}"
+            )
+        synthetic_id = uuid5(NAMESPACE_URL, f"service-key:{key.id}")
+
+        key_suffix = key.key_suffix or key.id.hex[:8]
+        return UserInDBModel(
+            id=synthetic_id,
+            email=f"sk-{key_suffix}@service.key",
+            username=f"Service Key ({key.name})",
+            state=UserState.ACTIVE,
+            tenant_id=key.tenant_id,
+            tenant=tenant,
+            active_api_key=key,
+            roles=[],
+            used_tokens=0,
+            email_verified=True,
+            is_active=True,
+        )
+
+    async def _resolve_api_key(
+        self,
+        api_key: str,
+        request: Request | None = None,
+        expected_tenant_id: UUID | None = None,
+    ) -> tuple["UserInDB", ApiKeyV2InDB]:
+        resolved = await self.api_key_auth_resolver.resolve(
+            api_key, expected_tenant_id=expected_tenant_id
+        )
+
+        ownership = getattr(resolved.key, "ownership", ApiKeyOwnership.USER)
+        if isinstance(ownership, str):
+            ownership = ApiKeyOwnership(ownership)
+
+        if ownership == ApiKeyOwnership.SERVICE:
+            user = await self._build_service_user(resolved.key)
+        else:
+            owner_user_id = resolved.key.owner_user_id
+            if owner_user_id is None:
+                raise ApiKeyValidationError(
+                    status_code=401,
+                    code="invalid_api_key",
+                    message="API key is invalid.",
+                )
+            user = await self.repo.get_user_by_id(owner_user_id)
+            if user is None:
+                raise ApiKeyValidationError(
+                    status_code=401,
+                    code="invalid_api_key",
+                    message="API key is invalid.",
+                )
+            if user.tenant_id != resolved.key.tenant_id:
+                raise ApiKeyValidationError(
+                    status_code=401,
+                    code="invalid_api_key",
+                    message="API key is invalid.",
+                )
+
+            if user.state != UserState.ACTIVE:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="owner_inactive",
+                    message=f"API key owner account is {user.state.value}.",
+                )
+
+            # Verify the owner still has the permissions required for this key's scope.
+            # Tenant-scoped keys require the owner to be a tenant admin.
+            if (
+                resolved.key.scope_type
+                in (
+                    ApiKeyScopeType.TENANT,
+                    ApiKeyScopeType.TENANT.value,
+                )
+                and Permission.ADMIN not in user.permissions
+            ):
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="owner_permission_revoked",
+                    message="API key owner no longer has admin permissions required for tenant-scoped keys.",
+                )
+
+            # Scoped keys require the owner to still be a member of the target space.
+            if (
+                self._session is not None
+                and resolved.key.scope_type
+                not in (
+                    ApiKeyScopeType.TENANT,
+                    ApiKeyScopeType.TENANT.value,
+                )
+                and resolved.key.scope_id is not None
+            ):
+                space_id = await self._resolve_space_id_for_scope(
+                    scope_type=resolved.key.scope_type,
+                    scope_id=resolved.key.scope_id,
+                )
+                if space_id is not None and not await self._is_space_member(
+                    space_id=space_id, user_id=user.id
+                ):
+                    raise ApiKeyValidationError(
+                        status_code=403,
+                        code="owner_membership_revoked",
+                        message="API key owner is no longer a member of the target space.",
+                    )
+
+        # Store the authenticating API key on the user so downstream layers
+        # (e.g. SpaceAssembler) can reflect effective permissions accurately.
+        user.active_api_key = resolved.key
+
+        ip_address, request_id, user_agent = extract_audit_context(request)
+
+        policy_service = ApiKeyPolicyService(
+            allowed_origin_repo=self.allowed_origin_repo,
+            space_service=self.space_service,
+            user=None,
+        )
+        origin = request.headers.get("origin") if request else None
+        client_ip = ip_address
+        # Permission check runs after rate-limiting and last_used_at intentionally:
+        # 1. Guardrails (IP/origin/expiry) block stolen keys before any logic
+        # 2. Rate limiting before authz prevents permission-probing resource exhaustion
+        # 3. last_used_at records all access attempts for security forensics
+        try:
+            await policy_service.enforce_guardrails(
+                key=resolved.key,
+                origin=origin,
+                client_ip=client_ip,
+            )
+            if self.api_key_rate_limiter is not None:
+                await self.api_key_rate_limiter.enforce(resolved.key)
+        except ApiKeyValidationError as exc:
+            await self._log_api_key_auth_failed(
+                user,
+                resolved.key,
+                exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+                request=request,
+            )
+            raise
+
+        settings = get_settings()
+        await self.api_key_v2_repo.update_last_used_at(
+            key_id=resolved.key.id,
+            tenant_id=resolved.key.tenant_id,
+            last_used_at=datetime.now(timezone.utc),
+            min_interval_seconds=settings.api_key_last_used_min_interval_seconds,
+        )
+
+        if request is None:
+            raise ApiKeyValidationError(
+                status_code=500,
+                code="server_configuration_error",
+                message="API key authentication requires request context.",
+            )
+
+        request.state.api_key = resolved.key
+        request.state.api_key_permission = resolved.key.permission
+        request.state.api_key_scope_type = resolved.key.scope_type
+        request.state.api_key_scope_id = resolved.key.scope_id
+        request.state.api_key_resource_permissions = resolved.key.resource_permissions
+
+        # Deferred tenant-scope-for-delete check (stashed by router-level dep)
+        if getattr(request.state, "_require_tenant_scope_for_delete", False):
+            scope_type_str = (
+                resolved.key.scope_type.value
+                if hasattr(resolved.key.scope_type, "value")
+                else str(resolved.key.scope_type)
+            )
+            if scope_type_str != "tenant":
+                exc = ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        "File deletion requires a tenant-scoped API key. "
+                        "Files are user-scoped and may be attached to conversations "
+                        "across multiple spaces."
+                    ),
+                )
+                await self._log_api_key_auth_failed(
+                    user,
+                    resolved.key,
+                    exc,
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                    request=request,
+                )
+                raise exc
+
+        # Method-level permission: ALWAYS enforced (not gated by flag).
+        # Routes with resource guards use read-overrides; others use basic check.
+        # Fine-grained resource permission check inside _check_method_resource_permission
+        # is self-gated by the flag via check_resource_permission().
+        perm_config = getattr(request.state, "_resource_perm_config", None)
+        if perm_config is not None:
+            # Route has resource guard — method check with read-overrides + resource check
+            try:
+                _check_method_resource_permission(request, resolved.key, perm_config)
+            except ApiKeyValidationError as exc:
+                await self._log_api_key_auth_failed(
+                    user,
+                    resolved.key,
+                    exc,
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                    request=request,
+                )
+                raise
+        else:
+            # No resource guard — basic method→permission check
+            try:
+                _check_basic_method_permission(request, resolved.key)
+            except ApiKeyValidationError as exc:
+                await self._log_api_key_auth_failed(
+                    user,
+                    resolved.key,
+                    exc,
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                    request=request,
+                )
+                raise
+
+        # Management endpoint guard (NOT gated by feature flag)
+        required_perm = getattr(request.state, "_required_api_key_permission", None)
+        if required_perm is not None:
+            try:
+                _check_management_permission(resolved.key, required_perm)
+            except ApiKeyValidationError as exc:
+                await self._log_api_key_auth_failed(
+                    user,
+                    resolved.key,
+                    exc,
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                    request=request,
+                )
+                raise
+
+        # Scope enforcement (always active)
+        scope_config = getattr(request.state, "_scope_check_config", None)
+        if (
+            scope_config is not None
+            and resolved.key.scope_type != ApiKeyScopeType.TENANT.value
+        ):
+            try:
+                await self._enforce_api_key_scope(
+                    request,
+                    resolved.key,
+                    scope_config,
+                )
+            except ApiKeyValidationError as exc:
+                await self._log_api_key_auth_failed(
+                    user,
+                    resolved.key,
+                    exc,
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                    request=request,
+                )
+                raise
+
+        await self._maybe_log_api_key_used(
+            user,
+            resolved.key,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+            request=request,
+        )
+
+        logger.info(
+            "API key authenticated",
+            extra={
+                "tenant_id": str(resolved.key.tenant_id),
+                "user_id": str(user.id),
+                "api_key_id": str(resolved.key.id),
+                "scope_type": resolved.key.scope_type,
+                "scope_id": str(resolved.key.scope_id)
+                if resolved.key.scope_id
+                else None,
+                "permission": resolved.key.permission,
+                "key_type": resolved.key.key_type,
+            },
+        )
+
+        return user, resolved.key
+
+    async def _get_assistant_scope_context(
+        self, assistant_id: UUID
+    ) -> tuple[UUID, UUID]:
+        stmt = (
+            sa.select(Assistants.space_id, Users.tenant_id)
+            .join(Users, Users.id == Assistants.user_id)
+            .where(Assistants.id == assistant_id)
+            .limit(1)
+        )
+        record = await self.repo.session.execute(stmt)
+        row = record.first()
+        if row is None or row.space_id is None:
+            raise ApiKeyValidationError(
+                status_code=404,
+                code="resource_not_found",
+                message="Assistant not found.",
+            )
+        return row.space_id, row.tenant_id
+
+    def _require_api_key_permission(
+        self, *, key: ApiKeyV2InDB, required: ApiKeyPermission
+    ) -> None:
+        if not _permission_allows(key, required):
+            raise ApiKeyValidationError(
+                status_code=403,
+                code="insufficient_permission",
+                message="API key does not have required permission.",
+            )
+
+    async def _require_api_key_scope_for_assistant(
+        self,
+        *,
+        key: ApiKeyV2InDB,
+        assistant_id: UUID,
+        assistant_space_id: UUID | None = None,
+        assistant_tenant_id: UUID | None = None,
+    ) -> None:
+        scope_type = ApiKeyScopeType(key.scope_type)
+        if scope_type == ApiKeyScopeType.ASSISTANT:
+            if key.scope_id != assistant_id:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message="API key is not scoped to this assistant.",
+                )
             return
 
-        return await self.repo.get_user_by_id(key.user_id)
+        if scope_type in (ApiKeyScopeType.SPACE, ApiKeyScopeType.TENANT):
+            if assistant_space_id is None or assistant_tenant_id is None:
+                (
+                    assistant_space_id,
+                    assistant_tenant_id,
+                ) = await self._get_assistant_scope_context(assistant_id)
+            if (
+                scope_type == ApiKeyScopeType.SPACE
+                and key.scope_id != assistant_space_id
+            ):
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message="API key is not scoped to this assistant's space.",
+                )
+            if (
+                scope_type == ApiKeyScopeType.TENANT
+                and key.tenant_id != assistant_tenant_id
+            ):
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message="API key is not scoped to this tenant.",
+                )
+            return
 
-    async def _get_user_from_api_key_or_assistant_api_key(
-        self, api_key: str, assistant_id: UUID = None
-    ):
-        api_key_in_db = await self.auth_service.get_api_key(api_key)
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_scope",
+            message="API key scope does not allow assistant access.",
+        )
 
-        if api_key_in_db is None:
-            raise AuthenticationException("No authenticated user.")
-        elif api_key_in_db.user_id is not None:
-            return await self.repo.get_user_by_id(api_key_in_db.user_id)
-        elif api_key_in_db.assistant_id is not None:
-            if assistant_id is not None:
-                if assistant_id != api_key_in_db.assistant_id:
+    # --- Scope enforcement (Phase 3) ---
+
+    async def _resolve_space_id_for_resource(
+        self,
+        resource_type: str,
+        resource_id: UUID,
+    ) -> UUID | None:
+        """Resolve a resource to its space_id via lightweight direct queries.
+
+        Uses self.repo.session for DB access — no SpaceRepository dependency,
+        so this works during authentication before the user is set on the container.
+        """
+        session = self.repo.session
+
+        if resource_type == "space":
+            return resource_id
+        elif resource_type == "assistant":
+            stmt = sa.select(Assistants.space_id).where(Assistants.id == resource_id)
+            return await session.scalar(stmt)
+        elif resource_type == "app":
+            stmt = sa.select(Apps.space_id).where(Apps.id == resource_id)
+            return await session.scalar(stmt)
+        elif resource_type == "service":
+            stmt = sa.select(Services.space_id).where(Services.id == resource_id)
+            return await session.scalar(stmt)
+        elif resource_type == "group_chat":
+            stmt = sa.select(GroupChatsTable.space_id).where(
+                GroupChatsTable.id == resource_id
+            )
+            return await session.scalar(stmt)
+        elif resource_type == "conversation":
+            # Session → assistant_id or group_chat_id → space_id
+            row = await session.execute(
+                sa.select(Sessions.assistant_id, Sessions.group_chat_id).where(
+                    Sessions.id == resource_id
+                )
+            )
+            result = row.one_or_none()
+            if result is None:
+                return None
+            if result.assistant_id is not None:
+                stmt = sa.select(Assistants.space_id).where(
+                    Assistants.id == result.assistant_id
+                )
+                return await session.scalar(stmt)
+            if result.group_chat_id is not None:
+                stmt = sa.select(GroupChatsTable.space_id).where(
+                    GroupChatsTable.id == result.group_chat_id
+                )
+                return await session.scalar(stmt)
+            return None
+        elif resource_type == "collection":
+            stmt = sa.select(CollectionsTable.space_id).where(
+                CollectionsTable.id == resource_id
+            )
+            return await session.scalar(stmt)
+        elif resource_type == "website":
+            stmt = sa.select(Websites.space_id).where(Websites.id == resource_id)
+            return await session.scalar(stmt)
+        elif resource_type == "app_run":
+            return await self._resolve_app_run_space_id(resource_id)
+        elif resource_type == "crawl_run":
+            return await self._resolve_crawl_run_space_id(resource_id)
+        elif resource_type == "prompt":
+            # Prompt may be mapped to assistants in multiple spaces. Use a stable
+            # deterministic fallback for scalar callers; authorization uses
+            # _resolve_prompt_space_ids for full membership checks.
+            space_ids = await self._resolve_prompt_space_ids(resource_id)
+            if not space_ids:
+                return None
+            return sorted(space_ids, key=str)[0]
+        elif resource_type == "info_blob":
+            stmt = (
+                sa.select(
+                    sa.func.coalesce(
+                        CollectionsTable.space_id,
+                        Websites.space_id,
+                        IntegrationKnowledge.space_id,
+                    )
+                )
+                .select_from(InfoBlobs)
+                .outerjoin(
+                    CollectionsTable,
+                    CollectionsTable.id == InfoBlobs.group_id,
+                )
+                .outerjoin(
+                    Websites,
+                    Websites.id == InfoBlobs.website_id,
+                )
+                .outerjoin(
+                    IntegrationKnowledge,
+                    IntegrationKnowledge.id == InfoBlobs.integration_knowledge_id,
+                )
+                .where(InfoBlobs.id == resource_id)
+            )
+            return await session.scalar(stmt)
+        else:
+            logger.warning(
+                "Scope enforcement: unhandled resource_type=%s, denying access",
+                resource_type,
+            )
+            return None
+
+    async def _resolve_app_run_space_id(self, app_run_id: UUID) -> UUID | None:
+        """Resolve app_run → app → space_id."""
+        stmt = (
+            sa.select(Spaces.id)
+            .select_from(AppRuns)
+            .join(Apps, Apps.id == AppRuns.app_id)
+            .join(Spaces, Spaces.id == Apps.space_id)
+            .where(AppRuns.id == app_run_id)
+        )
+        result = await self.repo.session.scalar(stmt)
+        return result
+
+    async def _resolve_crawl_run_space_id(self, crawl_run_id: UUID) -> UUID | None:
+        """Resolve crawl_run → website → space_id."""
+        stmt = (
+            sa.select(Websites.space_id)
+            .select_from(CrawlRuns)
+            .join(Websites, Websites.id == CrawlRuns.website_id)
+            .where(CrawlRuns.id == crawl_run_id)
+        )
+        result = await self.repo.session.scalar(stmt)
+        return result
+
+    async def _resolve_prompt_space_ids(self, prompt_id: UUID) -> set[UUID]:
+        """Resolve all spaces a prompt belongs to via Prompt<->Assistant mappings."""
+        stmt = (
+            sa.select(Assistants.space_id)
+            .select_from(PromptsAssistants)
+            .join(Assistants, Assistants.id == PromptsAssistants.assistant_id)
+            .where(PromptsAssistants.prompt_id == prompt_id)
+        )
+        rows = (await self.repo.session.scalars(stmt)).all()
+        return {space_id for space_id in rows if space_id is not None}
+
+    async def _resolve_app_run_app_id(self, app_run_id: UUID) -> UUID | None:
+        """Resolve app_run → app_id for app-scoped key enforcement."""
+        stmt = sa.select(AppRuns.app_id).where(AppRuns.id == app_run_id)
+        result = await self.repo.session.scalar(stmt)
+        return result
+
+    async def _resolve_session_assistant_id(self, session_id: UUID) -> UUID | None:
+        """Resolve session → assistant_id for assistant-scoped key enforcement."""
+        stmt = sa.select(Sessions.assistant_id).where(Sessions.id == session_id)
+        result = await self.repo.session.scalar(stmt)
+        return result
+
+    def _parse_uuid(self, raw_value: object) -> UUID | None:
+        if raw_value is None:
+            return None
+        try:
+            return UUID(str(raw_value))
+        except (ValueError, AttributeError):
+            return None
+
+    def _extract_scoped_resource_id(
+        self,
+        *,
+        request: Request,
+        resource_type: str,
+        path_param: str | None,
+    ) -> tuple[UUID | None, str | None]:
+        path_params = request.scope.get("path_params", {})
+
+        if path_param is not None:
+            return self._parse_uuid(path_params.get(path_param)), path_param
+
+        # Only info-blobs has deterministic mount-level routes that can
+        # safely infer scoped identifiers when path_param=None.
+        if resource_type == "info_blob":
+            for candidate in ("id", "space_id"):
+                if candidate in path_params:
+                    return self._parse_uuid(path_params.get(candidate)), candidate
+
+        return None, None
+
+    async def _enforce_api_key_scope(
+        self,
+        request: Request,
+        key: ApiKeyV2InDB,
+        scope_config: dict[str, object],
+    ) -> None:
+        """Enforce API key scope restrictions.
+
+        Called after authentication when scope config is set on the route
+        and the key is non-tenant scoped.
+        """
+        resource_type = cast(str, scope_config["resource_type"])
+        path_param = cast("str | None", scope_config["path_param"])
+        scope_type = ApiKeyScopeType(key.scope_type)
+
+        # 1. Tenant-scoped keys always pass (fast path)
+        if scope_type == ApiKeyScopeType.TENANT:
+            return
+
+        # 2. Admin/key-management routes: deny all non-tenant keys
+        if resource_type == "admin":
+            raise ApiKeyValidationError(
+                status_code=403,
+                code="insufficient_scope",
+                message=(
+                    f"API key is scoped to {key.scope_type} '{key.scope_id}'. "
+                    f"Admin endpoints require a tenant-scoped key."
+                ),
+            )
+
+        # 3. Extract resource_id from path params
+        resource_id, resolved_param = self._extract_scoped_resource_id(
+            request=request,
+            resource_type=resource_type,
+            path_param=path_param,
+        )
+
+        # 4. LIST-ENDPOINT RULES (no resource_id in path)
+        if resource_id is None:
+            if scope_type == ApiKeyScopeType.SPACE:
+                # Space-scoped: pass — service layer filters by space membership
+                return
+            elif scope_type == ApiKeyScopeType.ASSISTANT:
+                if resource_type in ("assistant", "conversation", "file"):
                     return
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to assistant '{key.scope_id}'. "
+                        f"It can only access that assistant, its conversations, and files."
+                    ),
+                )
+            elif scope_type == ApiKeyScopeType.APP:
+                if resource_type in ("app", "app_run", "file"):
+                    return
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to app '{key.scope_id}'. "
+                        f"It can only access that app, its runs, and files."
+                    ),
+                )
+            return
 
-            return await self.repo.get_user_by_assistant_id(api_key_in_db.assistant_id)
+        # 5. SINGLE-RESOURCE RULES (resource_id found in path)
 
-        # Else return None
+        if scope_type == ApiKeyScopeType.SPACE:
+            if resource_type == "file":
+                # Defense-in-depth: if file routes ever become ID-scoped in this layer,
+                # keep them allowed and rely on FileService ownership + DELETE guard.
+                return
+            if resource_type == "prompt":
+                target_space_ids = await self._resolve_prompt_space_ids(resource_id)
+                if not target_space_ids or key.scope_id not in target_space_ids:
+                    # Fail-closed: can't prove scope or no membership in prompt spaces
+                    raise ApiKeyValidationError(
+                        status_code=403,
+                        code="insufficient_scope",
+                        message=(
+                            f"API key is scoped to space '{key.scope_id}'. "
+                            f"The requested resource belongs to a different scope."
+                        ),
+                    )
+                return
+
+            if resource_type == "info_blob" and resolved_param == "space_id":
+                target_space_id = resource_id
+            else:
+                target_space_id = await self._resolve_space_id_for_resource(
+                    resource_type, resource_id
+                )
+            if target_space_id is None:
+                # Fail-closed: can't prove scope → deny
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to space '{key.scope_id}'. "
+                        f"The requested resource belongs to a different scope."
+                    ),
+                )
+            if key.scope_id != target_space_id:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to space '{key.scope_id}'. "
+                        f"The requested resource belongs to a different scope."
+                    ),
+                )
+            return
+
+        if scope_type == ApiKeyScopeType.ASSISTANT:
+            if resource_type == "file":
+                # Files are user-scoped; assistant keys can use non-destructive file routes.
+                return
+            if resource_type == "assistant":
+                if key.scope_id == resource_id:
+                    return
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to assistant '{key.scope_id}'. "
+                        f"It can only access that assistant, its conversations, and files."
+                    ),
+                )
+            elif resource_type == "conversation":
+                assistant_id = await self._resolve_session_assistant_id(resource_id)
+                if assistant_id is not None and key.scope_id == assistant_id:
+                    return
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to assistant '{key.scope_id}'. "
+                        f"It can only access that assistant, its conversations, and files."
+                    ),
+                )
+            else:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to assistant '{key.scope_id}'. "
+                        f"It can only access that assistant, its conversations, and files."
+                    ),
+                )
+
+        if scope_type == ApiKeyScopeType.APP:
+            if resource_type == "file":
+                # Files are user-scoped; app keys can use non-destructive file routes.
+                return
+            if resource_type == "app":
+                if key.scope_id == resource_id:
+                    return
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to app '{key.scope_id}'. "
+                        f"It can only access that app, its runs, and files."
+                    ),
+                )
+            elif resource_type == "app_run":
+                app_id = await self._resolve_app_run_app_id(resource_id)
+                if app_id is not None and key.scope_id == app_id:
+                    return
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to app '{key.scope_id}'. "
+                        f"It can only access that app, its runs, and files."
+                    ),
+                )
+            else:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to app '{key.scope_id}'. "
+                        f"It can only access that app, its runs, and files."
+                    ),
+                )
+
+    async def _maybe_log_api_key_used(
+        self,
+        user: "UserInDB",
+        key: ApiKeyV2InDB,
+        *,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
+        request: Request | None = None,
+    ) -> None:
+        if self.audit_service is None:
+            return
+        sample_rate = get_settings().api_key_used_audit_sample_rate
+        if sample_rate <= 0 or random.random() > sample_rate:
+            return
+
+        ownership_raw = getattr(key, "ownership", "user")
+        ownership = (
+            ownership_raw.value
+            if isinstance(ownership_raw, Enum)
+            else str(ownership_raw)
+        )
+
+        extra: dict[str, object] = {
+            "scope_type": key.scope_type,
+            "scope_id": str(key.scope_id) if key.scope_id else None,
+            "permission": key.permission,
+            "key_type": key.key_type,
+            "key_prefix": key.key_prefix,
+            "ownership": ownership,
+        }
+        if request is not None:
+            route = request.scope.get("route")
+            extra["request_path"] = route.path if route else request.url.path
+            extra["method"] = request.method
+            origin = request.headers.get("origin")
+            if origin:
+                extra["origin"] = origin
+
+        is_service = ownership == "service"
+
+        if is_service:
+            metadata = AuditMetadata.system_action(
+                description="Service API key used",
+                target=key,
+                extra=extra,
+            )
+        else:
+            metadata = AuditMetadata.standard(actor=user, target=key, extra=extra)
+
+        await self.audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=None if is_service else user.id,
+            actor_type=ActorType.SYSTEM if is_service else ActorType.USER,
+            action=ActionType.API_KEY_USED,
+            entity_type=EntityType.API_KEY,
+            entity_id=key.id,
+            description="Service API key used" if is_service else "API key used",
+            metadata=metadata,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
+
+    async def _log_api_key_auth_failed(
+        self,
+        user: "UserInDB",
+        key: ApiKeyV2InDB,
+        exc: ApiKeyValidationError,
+        *,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
+        request: Request | None = None,
+    ) -> None:
+        if self.audit_service is None:
+            return
+
+        extra: dict[str, object] = {
+            "code": exc.code,
+            "error_message": exc.message,
+            "scope_type": key.scope_type,
+            "scope_id": str(key.scope_id) if key.scope_id else None,
+            "permission": key.permission,
+            "key_type": key.key_type,
+            "key_prefix": key.key_prefix,
+        }
+        if exc.context is not None:
+            extra.update(exc.context)
+        if request is not None:
+            route = request.scope.get("route")
+            extra["request_path"] = route.path if route else request.url.path
+            extra["method"] = request.method
+            origin = request.headers.get("origin")
+            if origin:
+                extra["origin"] = origin
+
+        ownership_raw = getattr(key, "ownership", "user")
+        ownership = (
+            ownership_raw.value
+            if isinstance(ownership_raw, Enum)
+            else str(ownership_raw)
+        )
+        is_service = ownership == "service"
+
+        if is_service:
+            metadata = AuditMetadata.system_action(
+                description="Service API key auth failed",
+                target=key,
+                extra=extra,
+            )
+        else:
+            metadata = AuditMetadata.standard(actor=user, target=key, extra=extra)
+
+        await self.audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=None if is_service else user.id,
+            actor_type=ActorType.SYSTEM if is_service else ActorType.USER,
+            action=ActionType.API_KEY_AUTH_FAILED,
+            entity_type=EntityType.API_KEY,
+            entity_id=key.id,
+            description="Service API key auth failed"
+            if is_service
+            else "API key authentication failed",
+            metadata=metadata,
+            outcome=Outcome.FAILURE,
+            error_message=exc.message,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
+
+        logger.warning(
+            "API key authentication failed",
+            extra={
+                "tenant_id": str(user.tenant_id),
+                "user_id": str(user.id),
+                "api_key_id": str(key.id),
+                "code": exc.code,
+                "error_message": exc.message,
+            },
+        )
 
     async def authenticate(
         self,
         token: str | None = None,
         api_key: str | None = None,
         with_quota_used: bool = False,
+        request: Request | None = None,
     ):
         user_in_db = None
         if token is not None:
             user_in_db = await self._get_user_from_token(token)
 
         elif api_key is not None:
-            user_in_db = await self._get_user_from_api_key(api_key)
+            user_in_db, _ = await self._resolve_api_key(api_key, request=request)
 
         if user_in_db is None:
             raise AuthenticationException("No authenticated user.")
@@ -542,8 +1626,8 @@ class UserService:
         return user_in_db
 
     async def _check_user_and_tenant_state(
-        self, user_in_db, correlation_id: str = None
-    ):
+        self, user_in_db: "UserInDB", correlation_id: str | None = None
+    ) -> None:
         """
         Check if the user or their tenant has restrictions.
         Raises appropriate exceptions if user is inactive or tenant is suspended.
@@ -603,18 +1687,52 @@ class UserService:
 
     async def authenticate_with_assistant_api_key(
         self,
-        api_key: str,
-        token: str,
-        assistant_id: UUID = None,
-    ):
+        api_key: str | None,
+        token: str | None,
+        assistant_id: UUID | None = None,
+        request: Request | None = None,
+    ) -> "UserInDB":
         user_in_db = None
+        assistant_space_id: UUID | None = None
+        assistant_tenant_id: UUID | None = None
         if token is not None:
             user_in_db = await self._get_user_from_token(token)
 
         elif api_key is not None:
-            user_in_db = await self._get_user_from_api_key_or_assistant_api_key(
-                api_key, assistant_id
+            if assistant_id is not None:
+                (
+                    assistant_space_id,
+                    assistant_tenant_id,
+                ) = await self._get_assistant_scope_context(assistant_id)
+            user_in_db, key = await self._resolve_api_key(
+                api_key,
+                request=request,
+                expected_tenant_id=assistant_tenant_id,
             )
+            ip_addr, req_id, ua = extract_audit_context(request)
+            try:
+                if assistant_id is not None:
+                    await self._require_api_key_scope_for_assistant(
+                        key=key,
+                        assistant_id=assistant_id,
+                        assistant_space_id=assistant_space_id,
+                        assistant_tenant_id=assistant_tenant_id,
+                    )
+                self._require_api_key_permission(
+                    key=key, required=ApiKeyPermission.READ
+                )
+                check_resource_permission(key, "assistants", "read")
+            except ApiKeyValidationError as exc:
+                await self._log_api_key_auth_failed(
+                    user_in_db,
+                    key,
+                    exc,
+                    ip_address=ip_addr,
+                    request_id=req_id,
+                    user_agent=ua,
+                    request=request,
+                )
+                raise
 
         if user_in_db is None:
             raise AuthenticationException("No authenticated user.")
@@ -625,6 +1743,7 @@ class UserService:
 
     async def update_used_tokens(self, user_id: UUID, tokens_to_add: int):
         user_in_db = await self.repo.get_user_by_id(user_id)
+        assert user_in_db is not None
         new_used_tokens = user_in_db.used_tokens + tokens_to_add
         user_update = UserUpdate(id=user_in_db.id, used_tokens=new_used_tokens)
         await self.repo.update(user_update)
@@ -637,7 +1756,7 @@ class UserService:
 
     async def get_all_users(
         self,
-        tenant_id: UUID = None,
+        tenant_id: UUID | None = None,
         cursor: Optional[str] = None,
         previous: bool = False,
         limit: Optional[int] = None,
@@ -657,10 +1776,10 @@ class UserService:
         )
 
     async def invite_user(self, user_invite: PropUserInvite, tenant_id: UUID):
-        await self._validate_email(user_invite)
+        await self._validate_email(user_invite.email)
         username = getattr(user_invite, "username", None)
         if username is not None:
-            await self._validate_username(user_invite)
+            await self._validate_username(username)
 
         tenant = await self.tenant_repo.get(tenant_id)
         if tenant is None:
@@ -684,8 +1803,8 @@ class UserService:
         return user_in_db
 
     async def update_user(self, user_id: UUID, user_update_public: UserUpdatePublic):
-        await self._validate_email(user_update_public)
-        await self._validate_username(user_update_public)
+        await self._validate_email(user_update_public.email)
+        await self._validate_username(user_update_public.username)
 
         # If roles are being changed, check admin safety
         if user_update_public.roles is not None:
@@ -702,15 +1821,20 @@ class UserService:
 
                     # Check against current roles that are being kept
                     for role in current_user.roles:
-                        if role.id in new_role_ids and Permission.ADMIN in role.permissions:
+                        if (
+                            role.id in new_role_ids
+                            and Permission.ADMIN in role.permissions
+                        ):
                             will_have_admin = True
                             break
 
                     # Also check new roles not in current set (role swap A→B)
                     if not will_have_admin:
-                        new_ids_not_in_current = new_role_ids - {r.id for r in current_user.roles}
+                        new_ids_not_in_current = new_role_ids - {
+                            r.id for r in current_user.roles
+                        }
                         if new_ids_not_in_current:
-                            new_roles = await self.repo._get_roles(
+                            new_roles = await self.repo.get_roles_by_ids(
                                 [ModelId(id=rid) for rid in new_ids_not_in_current],
                                 current_user.tenant_id,
                             )

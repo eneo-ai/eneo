@@ -3,6 +3,7 @@ Fixtures for organization-based knowledge tests.
 
 These fixtures support testing knowledge distribution across org space and child spaces.
 """
+
 from uuid import uuid4
 
 import pytest
@@ -37,7 +38,10 @@ def tenant_factory(admin_user):
     Returns:
         Tenants: The created tenant
     """
-    async def _create_tenant(session, name: str = None, quota_limit: int = None, **extra) -> Tenants:
+
+    async def _create_tenant(
+        session, name: str = None, quota_limit: int = None, **extra
+    ) -> Tenants:
         """Create a tenant."""
         if name is None:
             name = f"Tenant-{str(uuid4())[:8]}"
@@ -75,12 +79,9 @@ def user_factory(admin_user):
     Returns:
         Users: The created user
     """
+
     async def _create_user(
-        session,
-        tenant_id=None,
-        email: str = None,
-        username: str = None,
-        **extra
+        session, tenant_id=None, email: str = None, username: str = None, **extra
     ) -> Users:
         """Create a user."""
         if tenant_id is None:
@@ -99,7 +100,7 @@ def user_factory(admin_user):
             password="hashed_password",
             salt="salt",
             state="active",
-            **extra
+            **extra,
         )
         session.add(user)
         await session.flush()
@@ -130,11 +131,9 @@ def user_integration_factory(admin_user):
     Returns:
         UserIntegration: The created user integration with proper tenant_integration
     """
+
     async def _create_user_integration(
-        session,
-        tenant_id=None,
-        integration_name: str = None,
-        **extra
+        session, tenant_id=None, integration_name: str = None, **extra
     ) -> UserIntegration:
         """Create a user integration."""
         if tenant_id is None:
@@ -166,7 +165,7 @@ def user_integration_factory(admin_user):
             tenant_id=tenant_id,
             tenant_integration_id=tenant_integration.id,
             authenticated=True,
-            **extra
+            **extra,
         )
         session.add(user_integration)
         await session.flush()
@@ -195,10 +194,9 @@ def embedding_model_factory(admin_user):
     Returns:
         EmbeddingModels: The created embedding model
     """
+
     async def _create_embedding_model(
-        session,
-        name: str = None,
-        **extra
+        session, name: str = None, **extra
     ) -> EmbeddingModels:
         """Create an embedding model."""
         if name is None:
@@ -211,7 +209,7 @@ def embedding_model_factory(admin_user):
             stability="stable",
             hosting="cloud",
             description=f"{name} embedding model",
-            **extra
+            **extra,
         )
         session.add(model)
         await session.flush()

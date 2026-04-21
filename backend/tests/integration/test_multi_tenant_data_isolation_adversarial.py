@@ -24,6 +24,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
     """Helper to create a test tenant via API."""
     payload = {
@@ -132,8 +133,12 @@ async def test_user_cannot_access_other_tenant_space_via_id_manipulation(
     - Information leakage via error messages
     """
     # Create two tenants
-    tenant_a = await _create_tenant(client, super_admin_token, f"tenant-a-{uuid4().hex[:6]}")
-    tenant_b = await _create_tenant(client, super_admin_token, f"tenant-b-{uuid4().hex[:6]}")
+    tenant_a = await _create_tenant(
+        client, super_admin_token, f"tenant-a-{uuid4().hex[:6]}"
+    )
+    tenant_b = await _create_tenant(
+        client, super_admin_token, f"tenant-b-{uuid4().hex[:6]}"
+    )
 
     # Create users
     user_a = await _create_user(
@@ -175,7 +180,9 @@ async def test_user_cannot_access_other_tenant_space_via_id_manipulation(
     if attack_response.status_code == 404:
         error_detail = attack_response.json().get("detail", "")
         # Should NOT reveal "Space exists but belongs to different tenant"
-        assert "tenant" not in error_detail.lower(), "Error message leaks tenant information"
+        assert "tenant" not in error_detail.lower(), (
+            "Error message leaks tenant information"
+        )
 
 
 @pytest.mark.integration
@@ -205,8 +212,12 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     # Enable tenant credentials for this test
     monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
     # Create two tenants with credentials
-    tenant_a = await _create_tenant(client, super_admin_token, f"tenant-cred-a-{uuid4().hex[:6]}")
-    tenant_b = await _create_tenant(client, super_admin_token, f"tenant-cred-b-{uuid4().hex[:6]}")
+    tenant_a = await _create_tenant(
+        client, super_admin_token, f"tenant-cred-a-{uuid4().hex[:6]}"
+    )
+    tenant_b = await _create_tenant(
+        client, super_admin_token, f"tenant-cred-b-{uuid4().hex[:6]}"
+    )
 
     key_a = f"sk-tenant-a-{uuid4().hex[:12]}"
     key_b = f"sk-tenant-b-{uuid4().hex[:12]}"
@@ -243,7 +254,9 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     assert creds_a[0]["masked_key"] == expected_mask
 
     # Verify NO leakage of Tenant B's key
-    assert key_b[-4:] not in response_a.text, "CRITICAL: Tenant B's key leaked in Tenant A's response!"
+    assert key_b[-4:] not in response_a.text, (
+        "CRITICAL: Tenant B's key leaked in Tenant A's response!"
+    )
 
     # Request for Tenant B credentials
     response_b = await client.get(
@@ -260,7 +273,9 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     assert creds_b[0]["masked_key"] == expected_mask_b
 
     # Verify NO leakage of Tenant A's key
-    assert key_a[-4:] not in response_b.text, "CRITICAL: Tenant A's key leaked in Tenant B's response!"
+    assert key_a[-4:] not in response_b.text, (
+        "CRITICAL: Tenant A's key leaked in Tenant B's response!"
+    )
 
 
 @pytest.mark.integration
@@ -285,8 +300,12 @@ async def test_user_login_rejects_wrong_tenant_credentials(
     - Cross-tenant session creation
     """
     # Create two tenants
-    tenant_a = await _create_tenant(client, super_admin_token, f"tenant-login-a-{uuid4().hex[:6]}")
-    _ = await _create_tenant(client, super_admin_token, f"tenant-login-b-{uuid4().hex[:6]}")
+    tenant_a = await _create_tenant(
+        client, super_admin_token, f"tenant-login-a-{uuid4().hex[:6]}"
+    )
+    _ = await _create_tenant(
+        client, super_admin_token, f"tenant-login-b-{uuid4().hex[:6]}"
+    )
 
     # Create user in Tenant A
     user_a_email = f"alice@tenant-a-{uuid4().hex[:4]}.example.com"
@@ -318,9 +337,9 @@ async def test_user_login_rejects_wrong_tenant_credentials(
     tenant_payload = tenant_info.json()
     tenant_name = tenant_payload.get("name") or tenant_payload.get("display_name")
     if tenant_name is None and isinstance(tenant_payload.get("tenant"), dict):
-        tenant_name = tenant_payload["tenant"].get("name") or tenant_payload["tenant"].get(
-            "display_name"
-        )
+        tenant_name = tenant_payload["tenant"].get("name") or tenant_payload[
+            "tenant"
+        ].get("display_name")
 
     expected_names = {tenant_a["name"], tenant_a.get("display_name")}
     expected_names.discard(None)
@@ -352,8 +371,12 @@ async def test_federation_config_endpoint_isolates_tenants(
     - Configuration overwrite vulnerabilities
     """
     # Create two tenants
-    tenant_a = await _create_tenant(client, super_admin_token, f"tenant-fed-a-{uuid4().hex[:6]}")
-    tenant_b = await _create_tenant(client, super_admin_token, f"tenant-fed-b-{uuid4().hex[:6]}")
+    tenant_a = await _create_tenant(
+        client, super_admin_token, f"tenant-fed-a-{uuid4().hex[:6]}"
+    )
+    tenant_b = await _create_tenant(
+        client, super_admin_token, f"tenant-fed-b-{uuid4().hex[:6]}"
+    )
 
     # Mock discovery endpoints
     discovery_a = "https://idp.tenant-a.local/.well-known/openid-configuration"
@@ -437,8 +460,12 @@ async def test_space_deletion_rejects_cross_tenant_operation(
     - Audit trail gaps
     """
     # Create two tenants
-    tenant_a = await _create_tenant(client, super_admin_token, f"tenant-del-a-{uuid4().hex[:6]}")
-    tenant_b = await _create_tenant(client, super_admin_token, f"tenant-del-b-{uuid4().hex[:6]}")
+    tenant_a = await _create_tenant(
+        client, super_admin_token, f"tenant-del-a-{uuid4().hex[:6]}"
+    )
+    tenant_b = await _create_tenant(
+        client, super_admin_token, f"tenant-del-b-{uuid4().hex[:6]}"
+    )
 
     # Create users
     user_a = await _create_user(
@@ -481,7 +508,9 @@ async def test_space_deletion_rejects_cross_tenant_operation(
         f"/api/v1/spaces/{space_a_id}/",  # Note: trailing slash required by router
         headers={"Authorization": f"Bearer {token_a}"},
     )
-    assert verify_response.status_code == 200, "Space should still exist for legitimate owner"
+    assert verify_response.status_code == 200, (
+        "Space should still exist for legitimate owner"
+    )
 
 
 @pytest.mark.integration
@@ -506,8 +535,12 @@ async def test_list_spaces_endpoint_filters_by_tenant(
     - Count/total leakage
     """
     # Create two tenants
-    tenant_a = await _create_tenant(client, super_admin_token, f"tenant-list-a-{uuid4().hex[:6]}")
-    tenant_b = await _create_tenant(client, super_admin_token, f"tenant-list-b-{uuid4().hex[:6]}")
+    tenant_a = await _create_tenant(
+        client, super_admin_token, f"tenant-list-a-{uuid4().hex[:6]}"
+    )
+    tenant_b = await _create_tenant(
+        client, super_admin_token, f"tenant-list-b-{uuid4().hex[:6]}"
+    )
 
     # Create users
     user_a = await _create_user(
@@ -532,13 +565,17 @@ async def test_list_spaces_endpoint_filters_by_tenant(
     # User A creates 3 spaces
     spaces_a = []
     for i in range(3):
-        space = await _create_space(client, token_a, f"tenant-a-space-{i}-{uuid4().hex[:4]}")
+        space = await _create_space(
+            client, token_a, f"tenant-a-space-{i}-{uuid4().hex[:4]}"
+        )
         spaces_a.append(space["id"])
 
     # User B creates 2 spaces
     spaces_b = []
     for i in range(2):
-        space = await _create_space(client, token_b, f"tenant-b-space-{i}-{uuid4().hex[:4]}")
+        space = await _create_space(
+            client, token_b, f"tenant-b-space-{i}-{uuid4().hex[:4]}"
+        )
         spaces_b.append(space["id"])
 
     # User B lists spaces (should only see their own)
@@ -558,7 +595,9 @@ async def test_list_spaces_endpoint_filters_by_tenant(
         f"Expected at least 2 spaces for Tenant B, got {len(returned_ids)}"
     )
     for space_id in spaces_b:
-        assert space_id in returned_ids, f"Tenant B's space {space_id} missing from list"
+        assert space_id in returned_ids, (
+            f"Tenant B's space {space_id} missing from list"
+        )
 
     # Verify NO Tenant A spaces are leaked
     for space_id in spaces_a:
@@ -595,8 +634,12 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     """
 
     # Create two tenants with users
-    tenant_a = await _create_tenant(client, super_admin_token, f"tenant-concurrent-a-{uuid4().hex[:6]}")
-    tenant_b = await _create_tenant(client, super_admin_token, f"tenant-concurrent-b-{uuid4().hex[:6]}")
+    tenant_a = await _create_tenant(
+        client, super_admin_token, f"tenant-concurrent-a-{uuid4().hex[:6]}"
+    )
+    tenant_b = await _create_tenant(
+        client, super_admin_token, f"tenant-concurrent-b-{uuid4().hex[:6]}"
+    )
 
     user_a = await _create_user(
         client,
@@ -635,10 +678,14 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
             headers={"Authorization": f"Bearer {token_a}"},
         )
 
-        results_a.append({
-            "space_id": space["id"],
-            "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
-        })
+        results_a.append(
+            {
+                "space_id": space["id"],
+                "tenant_name": tenant_info.json()[
+                    "name"
+                ],  # TenantPublic has name, not id
+            }
+        )
 
     async def user_b_workflow():
         """User B creates space and verifies tenant info."""
@@ -651,10 +698,14 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
             headers={"Authorization": f"Bearer {token_b}"},
         )
 
-        results_b.append({
-            "space_id": space["id"],
-            "tenant_name": tenant_info.json()["name"],  # TenantPublic has name, not id
-        })
+        results_b.append(
+            {
+                "space_id": space["id"],
+                "tenant_name": tenant_info.json()[
+                    "name"
+                ],  # TenantPublic has name, not id
+            }
+        )
 
     # Fire concurrent requests (balanced across tenants, interleaved)
     total_tasks = 40

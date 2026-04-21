@@ -2,6 +2,7 @@
 #
 # Licensed under the MIT License.
 
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -13,7 +14,9 @@ router = APIRouter()
 
 
 @router.get("/", response_model=StorageModel)
-async def get_storage(container: Container = Depends(get_container(with_user=True))):
+async def get_storage(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> StorageModel:
     service = container.storage_service()
     assembler = container.storage_assembler()
 
@@ -24,7 +27,9 @@ async def get_storage(container: Container = Depends(get_container(with_user=Tru
 
 
 @router.get("/spaces/", response_model=StorageInfoModel)
-async def get_spaces(container: Container = Depends(get_container(with_user=True))):
+async def get_spaces(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> StorageInfoModel:
     service = container.storage_service()
     assembler = container.storage_assembler()
 

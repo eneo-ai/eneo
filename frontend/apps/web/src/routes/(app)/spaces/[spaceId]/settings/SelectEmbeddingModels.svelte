@@ -13,7 +13,8 @@
   import { Settings } from "$lib/components/layout";
   import { sortModels } from "$lib/features/ai-models/sortModels";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
+  import { SvelteSet } from "svelte/reactivity";
 
   export let selectableModels: (EmbeddingModel & {
     meets_security_classification?: boolean | null | undefined;
@@ -30,7 +31,7 @@
     ($currentSpace) => $currentSpace.embedding_models.map((model) => model.id) ?? []
   );
 
-  let loading = new Set<string>();
+  let loading = new SvelteSet<string>();
   let isOrgSpace = $currentSpace.organization;
 
   async function toggleModel(model: EmbeddingModel) {
@@ -52,7 +53,7 @@
         await updateSpace({ embedding_models: newModels });
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
     }
     loading.delete(model.id);
     loading = loading;
@@ -71,11 +72,12 @@
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
       >
-      {#if isOrgSpace}
-        <span class="font-bold">{m.hint()}:&nbsp;</span>{m.embedding_models_multiple_warning_organization()}
-      {:else}
-        <span class="font-bold">{m.hint()}:&nbsp;</span>{m.embedding_models_multiple_warning()}
-      {/if}
+        {#if isOrgSpace}
+          <span class="font-bold">{m.hint()}:&nbsp;</span
+          >{m.embedding_models_multiple_warning_organization()}
+        {:else}
+          <span class="font-bold">{m.hint()}:&nbsp;</span>{m.embedding_models_multiple_warning()}
+        {/if}
       </p>
     {/if}
   </svelte:fragment>

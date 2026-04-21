@@ -1,13 +1,15 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, Dict
+from typing import TYPE_CHECKING, Dict, Optional
 from uuid import UUID
 
 from intric.base.base_entity import Entity
 
 if TYPE_CHECKING:
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
+    from intric.integration.domain.entities.sharepoint_subscription import (
+        SharePointSubscription,
+    )
     from intric.integration.domain.entities.user_integration import UserIntegration
-    from intric.integration.domain.entities.sharepoint_subscription import SharePointSubscription
 
 
 _DEFAULT_SIZE = 0

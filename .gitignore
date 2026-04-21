@@ -25,6 +25,9 @@
 exports/
 backend/exports/
 
+# test results
+backend/test-results/
+
 # claude
 .claude/*.local.json
 backend/openapi.json
@@ -43,3 +46,28 @@ specs/
 .serena/
 .speckit/
 .playwright-mcp/
+
+# ── GSD baseline (auto-generated) ──
+.gsd
+.gsd-id
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
+.env.*
+!.env.example
+node_modules/
+.next/
+dist/
+build/
+__pycache__/
+venv/
+target/
+vendor/
+*.log
+coverage/
+.cache/
+tmp/

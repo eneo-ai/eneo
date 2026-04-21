@@ -9,7 +9,7 @@ in crawler_settings_helper.py which is the SINGLE SOURCE OF TRUTH.
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -281,7 +281,7 @@ class DeleteSettingsResponse(BaseModel):
 async def update_crawler_settings(
     tenant_id: UUID,
     request: CrawlerSettingsUpdate,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ) -> CrawlerSettingsResponse:
     """
     Update crawler settings for a tenant.
@@ -341,7 +341,7 @@ async def update_crawler_settings(
 )
 async def get_crawler_settings(
     tenant_id: UUID,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ) -> CrawlerSettingsResponse:
     """
     Get current crawler settings for a tenant.
@@ -386,7 +386,7 @@ async def get_crawler_settings(
 )
 async def delete_crawler_settings(
     tenant_id: UUID,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ) -> DeleteSettingsResponse:
     """
     Delete all tenant crawler settings, reverting to defaults.

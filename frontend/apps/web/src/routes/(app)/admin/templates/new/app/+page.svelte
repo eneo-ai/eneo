@@ -3,8 +3,10 @@
   import { Page, Settings } from "$lib/components/layout";
   import { Button, Input } from "@intric/ui";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
@@ -24,7 +26,7 @@
 
   let { data } = $props();
 
-  const intric = data.intric;
+  const intric = $derived(data.intric);
 
   // Template state
   let name = $state("");
@@ -32,13 +34,15 @@
   let category = $state("");
   let iconName = $state<string | null>(null);
   let promptText = $state("");
-  let completionModel = $state(data.completionModels?.[0] || null);
+  let completionModel = $state(untrack(() => data.completionModels?.[0] || null));
   let completionModelKwargs = $state({});
   let isSaving = $state(false);
 
   // Input field configuration
   let inputDescription = $state("");
-  let inputType = $state<"text-upload" | "text-field" | "audio-upload" | "audio-recorder" | "image-upload">("text-field");
+  let inputType = $state<
+    "text-upload" | "text-field" | "audio-upload" | "audio-recorder" | "image-upload"
+  >("text-field");
 
   const inputTypes = {
     "text-upload": { icon: IconFileText, label: m.upload_text_document() },
@@ -94,32 +98,34 @@
       // Transform wizard configuration to backend format
       // NOTE: App templates MUST have collections: null (backend validator enforces this)
       const wizard = {
-        attachments: wizardAttachmentsEnabled ? {
-          required: wizardAttachmentsRequired,
-          title: wizardAttachmentsTitle || undefined,
-          description: wizardAttachmentsDescription || undefined
-        } : null,
-        collections: null  // MUST be null for app templates (backend validator)
+        attachments: wizardAttachmentsEnabled
+          ? {
+              required: wizardAttachmentsRequired,
+              title: wizardAttachmentsTitle || undefined,
+              description: wizardAttachmentsDescription || undefined
+            }
+          : null,
+        collections: null // MUST be null for app templates (backend validator)
       };
 
       const templateData = {
         name,
         description,
         category,
-        prompt: promptText,  // Backend expects string, not object
+        prompt: promptText, // Backend expects string, not object
         completion_model_id: completionModel?.id,
         completion_model_kwargs: completionModelKwargs,
-        input_type: inputType,  // Single string, not array
+        input_type: inputType, // Single string, not array
         input_description: inputDescription || undefined,
-        wizard,  // Always send wizard object, never undefined
-        icon_name: iconName || undefined  // Include icon if selected
+        wizard, // Always send wizard object, never undefined
+        icon_name: iconName || undefined // Include icon if selected
       };
 
       await intric.templates.admin.createApp(templateData);
-      goto("/admin/templates?success=template_created");
+      goto(resolve("/admin/templates?success=template_created"));
     } catch (error) {
       console.error("Failed to create template:", error);
-      toast.error(m.failed_to_create_template());
+      toastError(error, m.failed_to_create_template());
     } finally {
       isSaving = false;
     }
@@ -134,17 +140,12 @@
   <Page.Header>
     <Page.Title
       title={m.create_app_template()}
-      parent={{ href: "/admin/templates", label: m.templates() }}
+      parent={{ href: "/admin/templates", title: m.templates() }}
     />
 
     <Page.Flex>
       <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
-      <Button
-        variant="positive"
-        class="w-32"
-        onclick={handleCreateTemplate}
-        disabled={isSaving}
-      >
+      <Button variant="positive" class="w-32" onclick={handleCreateTemplate} disabled={isSaving}>
         {isSaving ? m.loading() : m.create_template()}
       </Button>
     </Page.Flex>
@@ -344,10 +345,14 @@
             />
 
             {#if wizardAttachmentsEnabled}
-              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
+              <div
+                class="border-default bg-hover-default flex flex-col gap-4 rounded-lg border p-4"
+              >
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardAttachmentsRequired} />
-                  <span class="text-sm text-default">{m.wizard_attachments_required_description()}</span>
+                  <span class="text-default text-sm"
+                    >{m.wizard_attachments_required_description()}</span
+                  >
                 </label>
 
                 <Input.Text
@@ -357,7 +362,10 @@
                 />
 
                 <div class="flex flex-col gap-1">
-                  <label for="wizard-attachments-description" class="text-sm font-medium text-default">{m.description()}</label>
+                  <label
+                    for="wizard-attachments-description"
+                    class="text-default text-sm font-medium">{m.description()}</label
+                  >
                   <textarea
                     id="wizard-attachments-description"
                     bind:value={wizardAttachmentsDescription}

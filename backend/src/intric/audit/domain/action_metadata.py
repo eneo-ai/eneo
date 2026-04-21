@@ -1,12 +1,20 @@
-"""Action metadata registry - Swedish names and descriptions for all 65 actions.
+"""Action metadata registry - Swedish names and descriptions for all actions.
 
 Used by the audit configuration UI to display human-readable action names.
 """
 
+from typing_extensions import TypedDict
+
 from intric.audit.domain.action_types import ActionType
 
+
+class ActionMetadata(TypedDict):
+    name_sv: str
+    description_sv: str
+
+
 # Maps action type values to Swedish display metadata
-ACTION_METADATA = {
+ACTION_METADATA: dict[str, ActionMetadata] = {
     # Admin Actions (13)
     ActionType.USER_CREATED.value: {
         "name_sv": "Användare skapad",
@@ -51,6 +59,46 @@ ACTION_METADATA = {
     ActionType.API_KEY_GENERATED.value: {
         "name_sv": "API-nyckel genererad",
         "description_sv": "Loggar när nya API-nycklar skapas",
+    },
+    ActionType.API_KEY_CREATED.value: {
+        "name_sv": "API-nyckel skapad",
+        "description_sv": "Loggar när en API-nyckel skapas",
+    },
+    ActionType.API_KEY_UPDATED.value: {
+        "name_sv": "API-nyckel uppdaterad",
+        "description_sv": "Loggar när en API-nyckel uppdateras",
+    },
+    ActionType.API_KEY_REVOKED.value: {
+        "name_sv": "API-nyckel revokerad",
+        "description_sv": "Loggar när en API-nyckel revokeras",
+    },
+    ActionType.API_KEY_SUSPENDED.value: {
+        "name_sv": "API-nyckel pausad",
+        "description_sv": "Loggar när en API-nyckel suspenderas",
+    },
+    ActionType.API_KEY_REACTIVATED.value: {
+        "name_sv": "API-nyckel återaktiverad",
+        "description_sv": "Loggar när en API-nyckel återaktiveras",
+    },
+    ActionType.API_KEY_ROTATED.value: {
+        "name_sv": "API-nyckel roterad",
+        "description_sv": "Loggar när en API-nyckel roteras",
+    },
+    ActionType.API_KEY_EXPIRED.value: {
+        "name_sv": "API-nyckel utgången",
+        "description_sv": "Loggar när en API-nyckel löper ut",
+    },
+    ActionType.API_KEY_USED.value: {
+        "name_sv": "API-nyckel använd",
+        "description_sv": "Loggar när en API-nyckel används",
+    },
+    ActionType.API_KEY_AUTH_FAILED.value: {
+        "name_sv": "API-nyckel misslyckad",
+        "description_sv": "Loggar misslyckade API-nyckelautentiseringar",
+    },
+    ActionType.TENANT_POLICY_UPDATED.value: {
+        "name_sv": "API-nyckelpolicy uppdaterad",
+        "description_sv": "Loggar ändringar av API-nyckelpolicy per tenant",
     },
     ActionType.MODULE_ADDED.value: {
         "name_sv": "Modul tillagd",
@@ -132,6 +180,10 @@ ACTION_METADATA = {
     ActionType.SESSION_ENDED.value: {
         "name_sv": "Session avslutad",
         "description_sv": "Loggar när en användarsession avslutas",
+    },
+    ActionType.TOOL_APPROVAL_SUBMITTED.value: {
+        "name_sv": "Verktygsgodkännande inskickat",
+        "description_sv": "Loggar när användaren godkänner eller nekar MCP-verktyg",
     },
     ActionType.FILE_UPLOADED.value: {
         "name_sv": "Fil uppladdad",
@@ -308,7 +360,7 @@ ACTION_METADATA = {
 }
 
 
-def get_action_metadata(action: str) -> dict:
+def get_action_metadata(action: str) -> ActionMetadata:
     """Get Swedish metadata for an action.
 
     Args:

@@ -72,6 +72,13 @@ export function createMentionInput(params: MentionInputParams) {
     selectedIndex.set(0);
   }
 
+  function setQuestionText(text: string) {
+    question.set(text);
+    if (inputNode) {
+      inputNode.textContent = text;
+    }
+  }
+
   function handleInputSuggestions(event: Event) {
     if (!(event instanceof InputEvent)) return;
     let shouldShowSuggestions = get(showSuggestions);
@@ -553,6 +560,7 @@ export function createMentionInput(params: MentionInputParams) {
     insertMentionNode,
     showMentionPicker,
     resetMentionInput,
+    setQuestionText,
     focusMentionInput: () => {
       inputNode?.focus();
     }

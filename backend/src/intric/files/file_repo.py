@@ -8,17 +8,19 @@ from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.files_table import Files
 from intric.files.file_models import File, FileCreate, FileInfo
+from intric.main.exceptions import NotFoundException
 
 
 class FileRepository:
     def __init__(self, session: AsyncSession):
-        self._delegate = BaseRepositoryDelegate(
+        super().__init__()
+        self._delegate: BaseRepositoryDelegate[File] = BaseRepositoryDelegate(
             session=session, table=Files, in_db_model=File
         )
         self.session = session
 
     async def add(self, file: FileCreate) -> File:
-        return cast(File, await self._delegate.add(file))
+        return await self._delegate.add(file)
 
     async def get_list_by_id_and_user(
         self, ids: list[UUID], user_id: UUID, include_transcription: bool = True
@@ -58,13 +60,12 @@ class FileRepository:
 
     async def get_by_id(self, file_id: UUID) -> File:
         file = await self._delegate.get(id=file_id)
+        if file is None:
+            raise NotFoundException()
         return File.model_validate(file)
 
     async def get_list_by_user(self, user_id: UUID) -> list[File]:
-        return cast(
-            list[File],
-            await self._delegate.filter_by(conditions={Files.user_id: user_id}),
-        )
+        return await self._delegate.filter_by(conditions={Files.user_id: user_id})
 
     async def get_by_checksum(self, checksum: str) -> File:
         return cast(
@@ -74,6 +75,19 @@ class FileRepository:
 
     async def delete(self, id: UUID) -> File:
         return cast(File, await self._delegate.delete(id))
+
+    async def delete_by_owner(self, id: UUID, user_id: UUID) -> File | None:
+        """Atomic owner-bound delete. Returns None if no matching row."""
+        stmt = (
+            sa.delete(Files)
+            .where(Files.id == id, Files.user_id == user_id)
+            .returning(Files)
+        )
+        result = await self.session.execute(stmt)
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return File.model_validate(row)
 
     async def update(self, file: File) -> File:
         return cast(File, await self._delegate.update(file))

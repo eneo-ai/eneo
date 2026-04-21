@@ -14,9 +14,12 @@
   import { m } from "$lib/paraglide/messages";
   import MCPServerDialog from "./MCPServerDialog.svelte";
   import DeleteMCPDialog from "./DeleteMCPDialog.svelte";
+  import type { components } from "@intric/intric-js";
+
+  type MCPServerSettings = components["schemas"]["MCPServerSettingsPublic"];
 
   type Props = {
-    mcpServer: any;
+    mcpServer: MCPServerSettings;
   };
 
   const { mcpServer }: Props = $props();
@@ -28,7 +31,7 @@
 
   let syncing = $state(false);
 
-  async function handleSave(data: any, id?: string) {
+  async function handleSave(data: Record<string, unknown>, id?: string) {
     if (id) {
       await intric.mcpServers.update({ id, ...data });
     }

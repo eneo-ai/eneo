@@ -14,11 +14,13 @@
   import { onMount } from "svelte";
   import {
     getModelProviderCapabilities,
-    type ModelProviderCapabilities
+    type ModelProviderCapabilities,
+    type CapabilityModel
   } from "./modelProviderCapabilities";
+  import type { ModelProviderPublic } from "@intric/intric-js";
 
   export let openController: Writable<boolean>;
-  export let providers: any[] = [];
+  export let providers: ModelProviderPublic[] = [];
   export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
   const intric = getIntric();
@@ -43,18 +45,18 @@
   let apiVersion = "";
   let deploymentName = "";
 
-  const providerTypes = [
+  const providerTypes: ReadonlyArray<{ value: string; label: string }> = [
     { value: "openai", label: "OpenAI Compatible (Self-Hosted)" },
     { value: "openai", label: "OpenAI" },
     { value: "azure", label: "Azure OpenAI" },
     { value: "anthropic", label: "Anthropic (Claude)" },
     { value: "gemini", label: "Google Gemini" },
-    { value: "cohere", label: "Cohere" },
+    { value: "cohere", label: "Cohere" }
   ];
 
-  const modelFamilies = [
+  const modelFamilies: ReadonlyArray<{ value: string; label: string }> = [
     { value: "openai", label: "OpenAI (Standard)" },
-    { value: "e5", label: "E5 (HuggingFace)" },
+    { value: "e5", label: "E5 (HuggingFace)" }
   ];
 
   const providerTypeStore = writable(providerTypes[0]);
@@ -62,38 +64,35 @@
 
   // Sync the store with providerType variable
   $: {
-    if ($providerTypeStore && $providerTypeStore.value) {
-      const value = typeof $providerTypeStore.value === 'object'
-        ? $providerTypeStore.value.value
-        : $providerTypeStore.value;
-      providerType = value;
+    if ($providerTypeStore) {
+      providerType = $providerTypeStore.value;
     }
   }
 
   // Sync the store with family variable
   $: {
-    if ($modelFamilyStore && $modelFamilyStore.value) {
-      const value = typeof $modelFamilyStore.value === 'object'
-        ? $modelFamilyStore.value.value
-        : $modelFamilyStore.value;
-      family = value;
+    if ($modelFamilyStore) {
+      family = $modelFamilyStore.value;
     }
   }
 
   // Create options for provider select - add "Create New" option
   $: providerOptions = [
-    ...providers.map(p => ({ value: p.id, label: p.name })),
+    ...providers.map((p) => ({ value: p.id, label: p.name })),
     { value: CREATE_NEW_PROVIDER, label: "+ Create New Provider" }
   ];
 
   // Store for selected provider - initialized once
-  const providerStore = writable<{ value: string; label: string }>({ value: "", label: m.select_provider() });
+  const providerStore = writable<{ value: string; label: string }>({
+    value: "",
+    label: m.select_provider()
+  });
 
   // Initialize provider selection when dialog opens
   $: if ($openController && providerOptions.length > 0) {
     const preselectedId = preSelectedProviderId ? $preSelectedProviderId : null;
     if (preselectedId) {
-      const matchingProvider = providerOptions.find(p => p.value === preselectedId);
+      const matchingProvider = providerOptions.find((p) => p.value === preselectedId);
       if (matchingProvider) {
         providerStore.set(matchingProvider);
       }
@@ -106,7 +105,10 @@
   // Sync selected provider ID and show/hide provider form
   $: {
     if ($providerStore && $providerStore.value) {
-      const value = typeof $providerStore.value === 'object' ? ($providerStore.value as any).value : $providerStore.value;
+      const value =
+        typeof $providerStore.value === "object"
+          ? ($providerStore.value as { value: string }).value
+          : $providerStore.value;
       selectedProviderId = value;
       showProviderForm = value === CREATE_NEW_PROVIDER;
     }
@@ -120,7 +122,13 @@
       throw new Error("API key is required");
     }
 
-    const providerData: any = {
+    const providerData: {
+      name: string;
+      provider_type: string;
+      credentials: { api_key: string };
+      config: Record<string, string>;
+      is_active: boolean;
+    } = {
       name: providerName,
       provider_type: providerType,
       credentials: { api_key: apiKey },
@@ -185,7 +193,7 @@
         display_name: displayName,
         family: family,
         is_active: isActive,
-        is_default: isDefault,
+        is_default: isDefault
       });
 
       // Invalidate to reload data
@@ -196,8 +204,8 @@
 
       // Reset form
       resetForm();
-    } catch (e: any) {
-      error = e.message || "Failed to create embedding model";
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : "Failed to create embedding model";
     } finally {
       isSubmitting = false;
     }
@@ -257,7 +265,9 @@
   });
 
   // Available embedding models for the selected provider
-  $: availableModels = (capabilities?.providers[selectedProviderType]?.models?.embedding ?? []).map((m: any) => typeof m === "string" ? m : m.name) as string[];
+  $: availableModels = (capabilities?.providers[selectedProviderType]?.models?.embedding ?? []).map(
+    (m: CapabilityModel) => (typeof m === "string" ? m : (m.name ?? ""))
+  ) as string[];
 
   function selectModel(model: string) {
     modelName = model;
@@ -268,14 +278,15 @@
 
   $: selectedProviderType = (() => {
     if (showProviderForm) return providerType;
-    const p = providers.find(p => p.id === selectedProviderId);
+    const p = providers.find((p) => p.id === selectedProviderId);
     return p?.provider_type ?? "";
   })();
 
-  $: providerHasNoSupport = selectedProviderType !== ""
-    && !!capabilities
-    && selectedProviderType in capabilities.providers
-    && !capabilities.providers[selectedProviderType]?.modes?.includes("embedding");
+  $: providerHasNoSupport =
+    selectedProviderType !== "" &&
+    !!capabilities &&
+    selectedProviderType in capabilities.providers &&
+    !capabilities.providers[selectedProviderType]?.modes?.includes("embedding");
 </script>
 
 <Dialog.Root {openController}>
@@ -285,18 +296,20 @@
     <Dialog.Section>
       <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4 p-4">
         {#if error}
-          <div class="border-error bg-error-dimmer text-error-stronger border-l-2 px-4 py-2 text-sm">
+          <div
+            class="border-error bg-error-dimmer text-error-stronger border-l-2 px-4 py-2 text-sm"
+          >
             {error}
           </div>
         {/if}
 
         <!-- Provider Selection -->
         <div class="flex flex-col gap-2">
-          <Select.Root customStore={providerStore} class="border-b border-dimmer">
+          <Select.Root customStore={providerStore} class="border-dimmer border-b">
             <Select.Label>Provider</Select.Label>
             <Select.Trigger placeholder="Select or create provider"></Select.Trigger>
             <Select.Options>
-              {#each providerOptions as provider}
+              {#each providerOptions as provider (provider.value)}
                 <Select.Item value={provider} label={provider.label}>{provider.label}</Select.Item>
               {/each}
             </Select.Options>
@@ -304,26 +317,33 @@
         </div>
 
         {#if providerHasNoSupport}
-          <div class="flex items-start gap-3 rounded-lg border border-label-default bg-label-dimmer px-4 py-3 text-sm label-warning">
-            <TriangleAlert class="h-5 w-5 flex-shrink-0 text-label-stronger mt-0.5" />
+          <div
+            class="border-label-default bg-label-dimmer label-warning flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
+          >
+            <TriangleAlert class="text-label-stronger mt-0.5 h-5 w-5 flex-shrink-0" />
             <div>
-              <p class="font-medium text-label-stronger">{m.provider_no_support_title({ providerType: selectedProviderType })}</p>
-              <p class="text-label-default mt-0.5">{m.provider_no_support_description({ modelType: "embedding" })}</p>
+              <p class="text-label-stronger font-medium">
+                {m.provider_no_support_title({
+                  providerType: selectedProviderType,
+                  modelType: "embedding"
+                })}
+              </p>
+              <p class="text-label-default mt-0.5">{m.provider_no_support_description()}</p>
             </div>
           </div>
         {/if}
 
         <!-- Provider Creation Form (shown when "+ Create New Provider" is selected) -->
         {#if showProviderForm}
-          <div class="rounded-lg border border-dimmer bg-surface-dimmer p-4 flex flex-col gap-4">
+          <div class="border-dimmer bg-surface-dimmer flex flex-col gap-4 rounded-lg border p-4">
             <h3 class="text-sm font-semibold">New Provider Details</h3>
 
             <div class="flex flex-col gap-2">
-              <Select.Root customStore={providerTypeStore} class="border-b border-dimmer">
+              <Select.Root customStore={providerTypeStore} class="border-dimmer border-b">
                 <Select.Label>Provider Type</Select.Label>
                 <Select.Trigger placeholder="Select provider type"></Select.Trigger>
                 <Select.Options>
-                  {#each providerTypes as type}
+                  {#each providerTypes as type (type.value)}
                     <Select.Item value={type} label={type.label}>{type.label}</Select.Item>
                   {/each}
                 </Select.Options>
@@ -352,9 +372,7 @@
                 placeholder="Enter API key"
                 required
               />
-              <p class="text-muted-foreground text-xs">
-                Will be encrypted before storage
-              </p>
+              <p class="text-muted-foreground text-xs">Will be encrypted before storage</p>
             </div>
 
             <div class="flex flex-col gap-2">
@@ -417,13 +435,13 @@
               <div class="flex flex-col gap-2">
                 <span class="text-sm font-medium">{m.suggested_models()}</span>
                 <div class="flex flex-wrap gap-2">
-                  {#each availableModels as model}
+                  {#each availableModels as model (model)}
                     <button
                       type="button"
                       class="rounded-full border px-3 py-1.5 text-sm transition-all duration-150
                         {modelName === model
-                          ? 'border-accent-default bg-accent-dimmer text-accent-stronger'
-                          : 'border-dimmer hover:border-accent-default hover:bg-accent-dimmer'}"
+                        ? 'border-accent-default bg-accent-dimmer text-accent-stronger'
+                        : 'border-dimmer hover:border-accent-default hover:bg-accent-dimmer'}"
                       on:click={() => selectModel(model)}
                     >
                       {model}
@@ -454,23 +472,24 @@
                 placeholder="e.g., OpenAI Embeddings Large, Ada 002"
                 required
               />
-              <p class="text-muted-foreground text-xs">
-                User-friendly name shown in the UI
-              </p>
+              <p class="text-muted-foreground text-xs">User-friendly name shown in the UI</p>
             </div>
 
             <div class="flex flex-col gap-2">
-              <Select.Root customStore={modelFamilyStore} class="border-b border-dimmer">
+              <Select.Root customStore={modelFamilyStore} class="border-dimmer border-b">
                 <Select.Label>Model Family</Select.Label>
                 <Select.Trigger placeholder="Select model family"></Select.Trigger>
                 <Select.Options>
-                  {#each modelFamilies as modelFamily}
-                    <Select.Item value={modelFamily} label={modelFamily.label}>{modelFamily.label}</Select.Item>
+                  {#each modelFamilies as modelFamily (modelFamily.value)}
+                    <Select.Item value={modelFamily} label={modelFamily.label}
+                      >{modelFamily.label}</Select.Item
+                    >
                   {/each}
                 </Select.Options>
               </Select.Root>
               <p class="text-muted-foreground text-xs">
-                The embedding model family determines input format (e.g., E5 requires "passage:" prefix)
+                The embedding model family determines input format (e.g., E5 requires "passage:"
+                prefix)
               </p>
             </div>
 
@@ -490,14 +509,14 @@
       </form>
     </Dialog.Section>
 
-    <Dialog.Controls let:close>
+    <Dialog.Controls>
       <Button variant="outlined" on:click={handleCancel}>Cancel</Button>
-      <Button
-        variant="primary"
-        on:click={handleSubmit}
-        disabled={isSubmitting}
-      >
-        {isSubmitting ? (showProviderForm ? "Creating Provider & Model..." : "Creating Model...") : "Create"}
+      <Button variant="primary" on:click={handleSubmit} disabled={isSubmitting}>
+        {isSubmitting
+          ? showProviderForm
+            ? "Creating Provider & Model..."
+            : "Creating Model..."
+          : "Create"}
       </Button>
     </Dialog.Controls>
   </Dialog.Content>

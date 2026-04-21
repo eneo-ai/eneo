@@ -9,6 +9,7 @@
     if (data.zitadelLink) {
       window.location.href = data.zitadelLink;
     } else {
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- server endpoint, not a typed route
       goto("/login");
     }
   }

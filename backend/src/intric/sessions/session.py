@@ -8,7 +8,13 @@ from intric.ai_models.completion_models.completion_model import CompletionModelP
 from intric.files.file_models import FilePublic
 from intric.info_blobs.info_blob import InfoBlobAskAssistantPublic
 from intric.main.models import DateTimeModelMixin, InDB
-from intric.questions.question import Message, Question, ToolCallInfo, UseTools, WebSearchResultPublic
+from intric.questions.question import (
+    Message,
+    Question,
+    ToolCallInfo,
+    UseTools,
+    WebSearchResultPublic,
+)
 
 if TYPE_CHECKING:
     from intric.assistants.api.assistant_models import AssistantSparse
@@ -94,6 +100,8 @@ class IntricEventType(str, Enum):
     GENERATING_IMAGE = "generating_image"
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
+    TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
+    TOKEN_USAGE = "token_usage"
 
 
 class SSEBase(BaseModel):
@@ -115,15 +123,36 @@ class SSEIntricEvent(SSEBase):
 
 class SSEToolCall(SSEBase):
     """Event emitted when MCP tools are being executed."""
+
     intric_event_type: IntricEventType = IntricEventType.TOOL_CALL
     tools: list[ToolCallInfo]
 
 
 class SSEToolApprovalRequired(SSEBase):
     """Event emitted when MCP tools require user approval before execution."""
+
     intric_event_type: IntricEventType = IntricEventType.TOOL_APPROVAL_REQUIRED
     approval_id: str  # UUID to correlate approval response
     tools: list[ToolCallInfo]  # Tools pending approval
+
+
+class SSEToolApprovalTimeout(SSEBase):
+    """Event emitted when tool approval timed out."""
+
+    intric_event_type: IntricEventType = IntricEventType.TOOL_APPROVAL_TIMEOUT
+    approval_id: str
+    tools: list[ToolCallInfo]
+
+
+class TokenUsageEvent(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    turn_tokens: int
+
+
+class SSETokenUsage(SSEBase):
+    intric_event_type: IntricEventType = IntricEventType.TOKEN_USAGE
+    usage: TokenUsageEvent
 
 
 class SSEFirstChunk(AskChatResponse):
@@ -135,8 +164,26 @@ class SSEError(SSEBase):
     error_code: Optional[int] = None
 
 
+class ToolApprovalResponse(BaseModel):
+    status: str
+    approval_id: str
+    decisions_received: int
+    decisions_remaining: int
+    unrecognized_tool_call_ids: list[str] = []
+
+
 # Add the SSE models here in order to include them in the openapi schema
-SSE_MODELS = [SSEText, SSEIntricEvent, SSEToolCall, SSEToolApprovalRequired, SSEFiles, SSEFirstChunk, SSEError]
+SSE_MODELS = [
+    SSEText,
+    SSEIntricEvent,
+    SSEToolCall,
+    SSEToolApprovalRequired,
+    SSEToolApprovalTimeout,
+    SSETokenUsage,
+    SSEFiles,
+    SSEFirstChunk,
+    SSEError,
+]
 
 # Add standalone enums that need to be included in the openapi schema
 SSE_ENUMS = [IntricEventType]

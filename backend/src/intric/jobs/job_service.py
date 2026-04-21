@@ -15,7 +15,8 @@ class JobService:
         self,
         user: UserInDB,
         job_repo: JobRepository,
-    ):
+    ) -> None:
+        super().__init__()
         self.user = user
         self.job_repo = job_repo
 

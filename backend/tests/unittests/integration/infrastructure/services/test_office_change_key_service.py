@@ -115,9 +115,7 @@ class TestOfficeChangeKeyService(unittest.TestCase):
         self.mock_redis.delete = AsyncMock()
 
         # Act
-        await self.service.invalidate_change_key(
-            self.integration_id, self.item_id
-        )
+        await self.service.invalidate_change_key(self.integration_id, self.item_id)
 
         # Assert
         self.mock_redis.delete.assert_called_once()
@@ -131,12 +129,12 @@ class TestOfficeChangeKeyService(unittest.TestCase):
     async def test_clear_integration_cache(self):
         """Test clear_integration_cache removes all ChangeKeys for an integration."""
         # Arrange
-        self.mock_redis.eval = AsyncMock(return_value=42)  # Return number of deleted keys
+        self.mock_redis.eval = AsyncMock(
+            return_value=42
+        )  # Return number of deleted keys
 
         # Act
-        deleted_count = await self.service.clear_integration_cache(
-            self.integration_id
-        )
+        deleted_count = await self.service.clear_integration_cache(self.integration_id)
 
         # Assert
         self.mock_redis.eval.assert_called_once()
@@ -148,9 +146,7 @@ class TestOfficeChangeKeyService(unittest.TestCase):
         key = self.service._get_changekey_key(self.integration_id, self.item_id)
 
         # Assert
-        self.assertEqual(
-            key, f"office_change_key:{self.integration_id}:{self.item_id}"
-        )
+        self.assertEqual(key, f"office_change_key:{self.integration_id}:{self.item_id}")
 
     def test_get_changekey_key_with_special_characters(self):
         """Test _get_changekey_key handles special characters in item_id."""

@@ -34,15 +34,15 @@
   // Icon state
   let currentIconId = data.groupChat.icon_id ?? null;
   let iconUploading = false;
-  let iconError = null;
+  let iconError: string | null = null;
 
-  function getIconUrl(id) {
+  function getIconUrl(id: string | null) {
     return id ? data.intric.icons.url({ id }) : null;
   }
 
   $: iconUrl = getIconUrl(currentIconId);
 
-  async function handleIconUpload(event) {
+  async function handleIconUpload(event: CustomEvent<File>) {
     const file = event.detail;
     iconUploading = true;
     iconError = null;

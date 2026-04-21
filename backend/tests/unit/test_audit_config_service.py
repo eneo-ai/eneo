@@ -28,8 +28,8 @@ ALL_CATEGORIES = [
 
 # Expected action counts per category
 EXPECTED_CATEGORY_COUNTS = {
-    "admin_actions": 13,
-    "user_actions": 28,
+    "admin_actions": 23,
+    "user_actions": 29,
     "security_events": 6,
     "file_operations": 2,
     "integration_events": 19,
@@ -325,9 +325,9 @@ class TestUpdateConfig:
         # Category cache should be invalidated
         expected_category_key = f"audit_config:{tenant_id}:admin_actions"
         delete_calls = [str(call) for call in mock_redis.delete.call_args_list]
-        assert any(
-            expected_category_key in call for call in delete_calls
-        ), f"Category cache {expected_category_key} should be invalidated"
+        assert any(expected_category_key in call for call in delete_calls), (
+            f"Category cache {expected_category_key} should be invalidated"
+        )
 
         # All action caches for this category should also be invalidated
         actions_in_category = [
@@ -337,9 +337,9 @@ class TestUpdateConfig:
         ]
         # 1 category + N actions in admin_actions category
         expected_calls = 1 + len(actions_in_category)
-        assert (
-            mock_redis.delete.call_count == expected_calls
-        ), f"Expected {expected_calls} cache invalidations (1 category + {len(actions_in_category)} actions)"
+        assert mock_redis.delete.call_count == expected_calls, (
+            f"Expected {expected_calls} cache invalidations (1 category + {len(actions_in_category)} actions)"
+        )
 
     async def test_update_config_returns_updated_config(
         self, config_service, mock_repository, mock_redis
@@ -662,15 +662,15 @@ class TestUpdateActionConfig:
 class TestAllCategoriesHaveCorrectActionCounts:
     """Verify each category has the expected number of actions mapped."""
 
-    def test_admin_actions_has_13_actions(self):
-        """Verify admin_actions has 13 action types."""
+    def test_admin_actions_has_23_actions(self):
+        """Verify admin_actions has 23 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "admin_actions")
-        assert count == 13
+        assert count == 23
 
-    def test_user_actions_has_28_actions(self):
-        """Verify user_actions has 28 action types."""
+    def test_user_actions_has_29_actions(self):
+        """Verify user_actions has 29 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "user_actions")
-        assert count == 28
+        assert count == 29
 
     def test_security_events_has_6_actions(self):
         """Verify security_events has 6 action types."""

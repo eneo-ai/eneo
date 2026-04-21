@@ -10,6 +10,7 @@
   import { Loader2 } from "lucide-svelte";
   import ProviderGlyph from "./components/ProviderGlyph.svelte";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { onMount } from "svelte";
   import {
     getModelProviderCapabilities,
@@ -51,14 +52,14 @@
   });
 
   // Build provider type options from capabilities (or fallback)
-  const fallbackProviderTypes = [
+  const fallbackProviderTypes: ReadonlyArray<{ value: string; label: string }> = [
     { value: "openai", label: "OpenAI" },
     { value: "azure", label: "Azure OpenAI" },
     { value: "anthropic", label: "Anthropic" },
     { value: "gemini", label: "Google Gemini" },
     { value: "cohere", label: "Cohere" },
     { value: "mistral", label: "Mistral AI" },
-    { value: "hosted_vllm", label: "vLLM" },
+    { value: "hosted_vllm", label: "vLLM" }
   ];
 
   function formatProviderName(type: string): string {
@@ -69,7 +70,7 @@
       gemini: "Google Gemini",
       cohere: "Cohere",
       mistral: "Mistral AI",
-      hosted_vllm: "vLLM",
+      hosted_vllm: "vLLM"
     };
     return knownLabels[type] ?? type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
@@ -90,7 +91,7 @@
   // Fallback fields when capabilities haven't loaded
   const fallbackFields: ModelProviderFieldDef[] = [
     { name: "api_key", required: true, secret: true, in: "credentials" },
-    { name: "endpoint", required: false, secret: false, in: "config" },
+    { name: "endpoint", required: false, secret: false, in: "config" }
   ];
 
   // Determine mode
@@ -146,7 +147,7 @@
     }
 
     // Set the store to match the provider type (for display)
-    const matchingType = providerTypes.find(t => t.value === p.provider_type);
+    const matchingType = providerTypes.find((t) => t.value === p.provider_type);
     if (matchingType) {
       providerTypeStore.set(matchingType);
     }
@@ -157,7 +158,7 @@
       api_key: m.api_key(),
       endpoint: m.endpoint_url(),
       api_version: m.api_version(),
-      deployment_name: m.deployment_name(),
+      deployment_name: m.deployment_name()
     };
     return labels[name] ?? name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
@@ -165,11 +166,12 @@
   function getFieldPlaceholder(name: string): string {
     const placeholders: Record<string, string> = {
       api_key: m.enter_api_key(),
-      endpoint: providerType === "azure"
-        ? "https://your-resource.openai.azure.com"
-        : "https://api.example.com/v1",
+      endpoint:
+        providerType === "azure"
+          ? "https://your-resource.openai.azure.com"
+          : "https://api.example.com/v1",
       api_version: m.api_version_placeholder(),
-      deployment_name: m.deployment_name_placeholder(),
+      deployment_name: m.deployment_name_placeholder()
     };
     return placeholders[name] ?? "";
   }
@@ -234,10 +236,15 @@
 
       if (isEditMode && provider) {
         // Update existing provider
-        const updateData: any = {
+        const updateData: {
+          name: string;
+          config: Record<string, string>;
+          is_active: boolean;
+          credentials?: Record<string, string>;
+        } = {
           name: providerName,
           config,
-          is_active: isActive,
+          is_active: isActive
         };
 
         if (Object.keys(credentials).length > 0) {
@@ -252,7 +259,7 @@
           provider_type: providerType,
           credentials,
           config,
-          is_active: true,
+          is_active: true
         });
       }
 
@@ -267,9 +274,14 @@
 
       // Reset form
       resetForm();
-    } catch (e: any) {
-      error = e.message || (isEditMode ? m.failed_to_update_provider() : m.failed_to_create_provider());
-      toast.error(isEditMode ? m.failed_to_update_provider() : m.failed_to_create_provider());
+    } catch (e: unknown) {
+      error =
+        e instanceof Error
+          ? e.message
+          : isEditMode
+            ? m.failed_to_update_provider()
+            : m.failed_to_create_provider();
+      toastError(e, isEditMode ? m.failed_to_update_provider() : m.failed_to_create_provider());
     } finally {
       isSubmitting = false;
     }
@@ -298,33 +310,37 @@
     <Dialog.Section>
       <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4 p-4 pb-6">
         {#if error}
-          <div class="border-negative-default bg-negative-dimmer text-negative-stronger border-l-2 px-4 py-2 text-sm rounded-r">
+          <div
+            class="border-negative-default bg-negative-dimmer text-negative-stronger rounded-r border-l-2 px-4 py-2 text-sm"
+          >
             {error}
           </div>
         {/if}
 
         <!-- Provider Type -->
         <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-secondary">{m.provider_type()}</label>
+          <span class="text-secondary text-sm font-medium">{m.provider_type()}</span>
 
           {#if isEditMode}
             <!-- Read-only display in edit mode -->
-            <div class="flex items-center gap-3 rounded-lg border border-dimmer bg-secondary px-4 py-2.5">
-              <ProviderGlyph providerType={providerType} size="sm" />
+            <div
+              class="border-dimmer bg-secondary flex items-center gap-3 rounded-lg border px-4 py-2.5"
+            >
+              <ProviderGlyph {providerType} size="sm" />
               <span class="text-sm">{formatProviderName(providerType)}</span>
             </div>
           {:else}
             <!-- Custom trigger wrapper with glyph overlay -->
             <div class="provider-type-select">
               <!-- Glyph positioned inside the trigger visually, centered vertically -->
-              <div class="absolute left-3 top-0 h-10 z-10 pointer-events-none flex items-center">
-                <ProviderGlyph providerType={providerType} size="sm" />
+              <div class="pointer-events-none absolute top-0 left-3 z-10 flex h-10 items-center">
+                <ProviderGlyph {providerType} size="sm" />
               </div>
 
               <Select.Root customStore={providerTypeStore}>
                 <Select.Trigger />
                 <Select.Options>
-                  {#each providerTypes as type}
+                  {#each providerTypes as type (type.value)}
                     <Select.Item value={type} label={type.label}>
                       <div class="flex items-center gap-3 py-0.5">
                         <ProviderGlyph providerType={type.value} size="sm" />
@@ -340,14 +356,16 @@
 
         <!-- Provider Name -->
         <div class="flex flex-col gap-2">
-          <label for="provider-name" class="text-sm font-medium text-secondary">{m.provider_name()}</label>
+          <label for="provider-name" class="text-secondary text-sm font-medium"
+            >{m.provider_name()}</label
+          >
           <Input.Text
             id="provider-name"
             bind:value={providerName}
             placeholder={m.provider_name_placeholder()}
             required
           />
-          <p class="text-muted-foreground text-xs mt-1">
+          <p class="text-muted-foreground mt-1 text-xs">
             {m.provider_name_hint()}
           </p>
         </div>
@@ -357,17 +375,17 @@
           {#if field.name === "api_key"}
             <!-- Special handling for API key: masked display in edit mode -->
             <div class="flex flex-col gap-2">
-              <label for="field-{field.name}" class="text-sm font-medium text-secondary">{formatFieldLabel(field.name)}</label>
+              <label for="field-{field.name}" class="text-secondary text-sm font-medium"
+                >{formatFieldLabel(field.name)}</label
+              >
               {#if isEditMode && provider?.masked_api_key && !isEditingApiKey}
-                <div class="flex items-center justify-between rounded-lg border border-dimmer bg-secondary px-4 py-3 transition-colors duration-150 hover:border-default">
-                  <span class="font-mono text-sm text-muted">
+                <div
+                  class="border-dimmer bg-secondary hover:border-default flex items-center justify-between rounded-lg border px-4 py-3 transition-colors duration-150"
+                >
+                  <span class="text-muted font-mono text-sm">
                     {provider.masked_api_key}
                   </span>
-                  <Button
-                    variant="outlined"
-                    size="sm"
-                    on:click={() => isEditingApiKey = true}
-                  >
+                  <Button variant="outlined" size="sm" on:click={() => (isEditingApiKey = true)}>
                     {m.change()}
                   </Button>
                 </div>
@@ -382,15 +400,18 @@
                 {#if isEditMode && provider?.masked_api_key}
                   <button
                     type="button"
-                    class="text-muted-foreground text-xs underline text-left hover:text-primary transition-colors"
-                    on:click={() => { isEditingApiKey = false; fieldValues["api_key"] = ""; }}
+                    class="text-muted-foreground hover:text-primary text-left text-xs underline transition-colors"
+                    on:click={() => {
+                      isEditingApiKey = false;
+                      fieldValues["api_key"] = "";
+                    }}
                   >
                     {m.cancel_keep_current_key()} ({provider.masked_api_key})
                   </button>
                 {:else}
                   {@const hint = getFieldHint(field.name)}
                   {#if hint}
-                    <p class="text-muted-foreground text-xs mt-1">{hint}</p>
+                    <p class="text-muted-foreground mt-1 text-xs">{hint}</p>
                   {/if}
                 {/if}
               {/if}
@@ -399,10 +420,10 @@
             {@const hint = getFieldHint(field.name)}
             <!-- Generic field rendering -->
             <div class="flex flex-col gap-2">
-              <label for="field-{field.name}" class="text-sm font-medium text-secondary">
+              <label for="field-{field.name}" class="text-secondary text-sm font-medium">
                 {formatFieldLabel(field.name)}
                 {#if !field.required}
-                  <span class="text-muted font-normal text-xs ml-1">(optional)</span>
+                  <span class="text-muted ml-1 text-xs font-normal">(optional)</span>
                 {/if}
               </label>
               <Input.Text
@@ -413,7 +434,7 @@
                 required={field.required}
               />
               {#if hint}
-                <p class="text-muted-foreground text-xs mt-1">{hint}</p>
+                <p class="text-muted-foreground mt-1 text-xs">{hint}</p>
               {/if}
             </div>
           {/if}
@@ -421,7 +442,7 @@
 
         <!-- Provider Active Toggle -->
         {#if isEditMode}
-          <div class="border-t border-dimmer pt-5 mt-4">
+          <div class="border-dimmer mt-4 border-t pt-5">
             <Input.Switch bind:value={isActive}>
               <span class="text-sm font-medium">{m.provider_is_active()}</span>
             </Input.Switch>
@@ -433,7 +454,7 @@
       </form>
     </Dialog.Section>
 
-    <Dialog.Controls let:close>
+    <Dialog.Controls>
       <Button variant="outlined" on:click={handleCancel}>{m.cancel()}</Button>
       <Button
         variant="primary"
@@ -442,7 +463,7 @@
         class="min-w-[120px]"
       >
         {#if isSubmitting}
-          <Loader2 class="w-4 h-4 mr-2 animate-spin" />
+          <Loader2 class="mr-2 h-4 w-4 animate-spin" />
           {isEditMode ? m.saving() : m.creating()}
         {:else}
           {isEditMode ? m.save_changes() : m.create_provider()}

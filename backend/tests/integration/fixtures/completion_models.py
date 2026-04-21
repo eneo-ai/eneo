@@ -3,6 +3,7 @@ Fixtures for completion models (mirrors src/intric/completion_models/).
 
 These fixtures create completion models with settings stored directly on the model.
 """
+
 import pytest
 from sqlalchemy import select
 
@@ -93,7 +94,7 @@ def completion_model_factory(admin_user):
         is_enabled: bool = True,
         is_default: bool = False,
         family: str = None,
-        **kwargs
+        **kwargs,
     ) -> CompletionModels:
         """Create a completion model with the specified properties."""
         # Auto-determine family based on provider if not specified
@@ -120,7 +121,9 @@ def completion_model_factory(admin_user):
         org = org_map.get(provider)
 
         # Get or create provider for this tenant (required by check constraint)
-        provider_id = await _get_or_create_provider(session, admin_user.tenant_id, provider)
+        provider_id = await _get_or_create_provider(
+            session, admin_user.tenant_id, provider
+        )
 
         # Create the completion model with settings directly on it
         model = CompletionModels(

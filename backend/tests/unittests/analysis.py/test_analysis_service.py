@@ -104,7 +104,9 @@ def analysis_service(user, mock_space_service):
 
 async def test_ask_question_not_in_space(service: AnalysisService):
     service.assistant_service.get_assistant.return_value = (
-        AsyncMock(space_id=None, user=service.user, completion_model=_make_completion_model()),
+        AsyncMock(
+            space_id=None, user=service.user, completion_model=_make_completion_model()
+        ),
         MagicMock(),
     )
 
@@ -143,7 +145,11 @@ async def test_ask_question_personal_space_with_access(service: AnalysisService)
     service.space_service.get_space.return_value = MagicMock(user_id=uuid4())
     service.user = user
     service.assistant_service.get_assistant.return_value = (
-        AsyncMock(space_id=uuid4(), user=service.user, completion_model=_make_completion_model()),
+        AsyncMock(
+            space_id=uuid4(),
+            user=service.user,
+            completion_model=_make_completion_model(),
+        ),
         MagicMock(),
     )
 

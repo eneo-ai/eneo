@@ -5,8 +5,8 @@ import pytest
 
 from intric.authentication.auth_models import AccessToken, ApiKeyCreated
 from intric.main.exceptions import AuthenticationException, UniqueUserException
-from intric.settings.settings import SettingsUpsert
 from intric.main.models import ModelId
+from intric.settings.settings import SettingsUpsert
 from intric.users.user import (
     PropUserInvite,
     UserAdd,
@@ -24,6 +24,10 @@ def service_with_mocks():
     return UserService(
         user_repo=AsyncMock(),
         auth_service=AsyncMock(),
+        api_key_auth_resolver=AsyncMock(),
+        api_key_v2_repo=AsyncMock(),
+        allowed_origin_repo=AsyncMock(),
+        audit_service=AsyncMock(),
         settings_repo=AsyncMock(),
         tenant_repo=AsyncMock(),
         info_blob_repo=AsyncMock(),
@@ -112,9 +116,7 @@ async def test_register_user_creates_a_user_and_settings(service: UserService):
         state="active",
     )
     expected_user_in_db = UserInDB(
-        **expected_user_upsert.model_dump(
-            exclude_none=True, exclude={"roles"}
-        ),
+        **expected_user_upsert.model_dump(exclude_none=True, exclude={"roles"}),
         id=uuid4(),
         tenant=TEST_TENANT,
     )
@@ -174,9 +176,7 @@ async def test_invite_user_creates_user_and_settings(service: UserService):
     service.tenant_repo.get.return_value = TEST_TENANT
 
     role_id = uuid4()
-    user_invite = PropUserInvite(
-        email="invitee@test.com", role=ModelId(id=role_id)
-    )
+    user_invite = PropUserInvite(email="invitee@test.com", role=ModelId(id=role_id))
 
     expected_user_upsert = UserAdd(
         email="invitee@test.com",
@@ -185,9 +185,7 @@ async def test_invite_user_creates_user_and_settings(service: UserService):
         roles=[ModelId(id=role_id)],
     )
     expected_user_in_db = UserInDB(
-        **expected_user_upsert.model_dump(
-            exclude_none=True, exclude={"roles"}
-        ),
+        **expected_user_upsert.model_dump(exclude_none=True, exclude={"roles"}),
         id=uuid4(),
         tenant=TEST_TENANT,
     )

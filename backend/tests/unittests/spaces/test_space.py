@@ -34,7 +34,8 @@ def space():
 
 def test_get_latest_available_embedding_model(space: Space):
     embedding_models = [
-        MagicMock(created_at=datetime(2024, 1, 3 - i), can_access=True) for i in range(3)
+        MagicMock(created_at=datetime(2024, 1, 3 - i), can_access=True)
+        for i in range(3)
     ]
     space.embedding_models = embedding_models
 
@@ -45,7 +46,8 @@ def test_get_latest_available_embedding_model(space: Space):
 
 def test_get_latest_available_embedding_model_when_not_ordered(space: Space):
     embedding_models = [
-        MagicMock(created_at=datetime(2024, 1, 3 - i), can_access=True) for i in range(3)
+        MagicMock(created_at=datetime(2024, 1, 3 - i), can_access=True)
+        for i in range(3)
     ]
     embedding_models = list(reversed(embedding_models))
     space.embedding_models = embedding_models
@@ -97,7 +99,9 @@ def test_space_update_completion_models(space: Space):
 
 
 def test_get_latest_completion_model(space: Space):
-    completion_models = [MagicMock(created_at=datetime(2024, 1, 3 - i)) for i in range(3)]
+    completion_models = [
+        MagicMock(created_at=datetime(2024, 1, 3 - i)) for i in range(3)
+    ]
     completion_models = list(reversed(completion_models))
 
     space.completion_models = completion_models

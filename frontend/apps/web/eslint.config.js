@@ -30,7 +30,7 @@ export default ts.config(
     }
   },
   {
-    ignores: ["build/", ".svelte-kit/", "dist/"]
+    ignores: ["build/", ".svelte-kit/", "dist/", "src/lib/paraglide/"]
   },
   {
     rules: {
@@ -38,6 +38,8 @@ export default ts.config(
       "@typescript-eslint/no-unused-vars": [
         "error",
         {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
           caughtErrors: "none"
         }
       ]

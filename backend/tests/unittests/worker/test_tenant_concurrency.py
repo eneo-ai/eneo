@@ -238,7 +238,9 @@ async def test_local_fallback_enforces_limit_with_lock():
     failed = [r for r in results if not r]
 
     assert len(succeeded) == 3, f"Expected 3 acquisitions, got {len(succeeded)}"
-    assert len(failed) == 8, f"Expected 8 rejections (11 total - 3 limit), got {len(failed)}"
+    assert len(failed) == 8, (
+        f"Expected 8 rejections (11 total - 3 limit), got {len(failed)}"
+    )
 
     # Cleanup
     for _ in range(len(succeeded)):

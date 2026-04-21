@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import Depends
 
 from intric.authentication.auth_dependencies import (
@@ -12,16 +14,18 @@ from intric.users.user import UserInDB
 
 
 def get_settings_service_allowing_read_only_key(
-    user: UserInDB = Depends(
-        get_user_from_token_or_assistant_api_key_without_assistant_id
-    ),
-    repo: SettingsRepository = Depends(get_repository(SettingsRepository)),
-    container: Container = Depends(get_container(with_user=True)),
-):
+    user: Annotated[
+        UserInDB,
+        Depends(get_user_from_token_or_assistant_api_key_without_assistant_id),
+    ],
+    repo: Annotated[SettingsRepository, Depends(get_repository(SettingsRepository))],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> SettingService:
     return SettingService(
         repo=repo,
         user=user,
         ai_models_service=container.ai_models_service(),
         feature_flag_service=container.feature_flag_service(),
         tenant_repo=container.tenant_repo(),
+        audit_service=container.audit_service(),
     )

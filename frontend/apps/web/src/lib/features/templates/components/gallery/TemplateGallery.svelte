@@ -41,17 +41,22 @@
           class="flex w-full flex-col gap-1.5 px-6 pt-4 pb-1 last-of-type:pb-4"
         >
           <!-- Category Header with Count Badge -->
-          <div class="flex items-center gap-3 px-2 pb-2 border-b border-border-dimmer">
+          <div class="border-border-dimmer flex items-center gap-3 border-b px-2 pb-2">
             <h3 id="category-{idx}" class="flex-1 text-base font-semibold">
               {section.title}
             </h3>
-            <span class="text-xs text-muted tabular-nums">
-              {section.templates.length} {section.templates.length === 1 ? m.template_singular() : m.template_plural()}
+            <span class="text-muted text-xs tabular-nums">
+              {section.templates.length}
+              {section.templates.length === 1 ? m.template_singular() : m.template_plural()}
             </span>
           </div>
 
           <!-- Responsive Template Grid -->
-          <div role="listbox" aria-label="{section.title}" class="grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 px-2 pt-1">
+          <div
+            role="listbox"
+            aria-label={section.title}
+            class="grid w-full grid-cols-1 gap-3 px-2 pt-1 sm:grid-cols-2 lg:grid-cols-3"
+          >
             {#each section.templates as template (template.id)}
               {@const isSelected = template.id === currentlySelected?.id}
               {@const hasKnowledge = !!template.wizard?.collections}
@@ -68,45 +73,49 @@
                 }}
                 {...dynamicColour({ basedOn: template.category })}
                 type="button"
-                class="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:ring-offset-2 transition-colors duration-150"
+                class="focus-visible:ring-accent-default rounded-xl transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
                 data-selected={isSelected}
               >
                 <div
-                  class="tile-bg border-default flex h-full flex-col overflow-clip rounded-xl border transition-[background,border-color,box-shadow] duration-150 relative {isCompact ? 'gap-0 p-3' : 'gap-2.5 p-4'}"
+                  class="tile-bg border-default relative flex h-full flex-col overflow-clip rounded-xl border transition-[background,border-color,box-shadow] duration-150 {isCompact
+                    ? 'gap-0 p-3'
+                    : 'gap-2.5 p-4'}"
                 >
                   {#if isSelected}
                     <span class="absolute top-2.5 right-2.5">
-                      <Check class="h-5 w-5 text-accent-default" strokeWidth={2.5} />
+                      <Check class="text-accent-default h-5 w-5" strokeWidth={2.5} />
                     </span>
                   {/if}
                   {#if template.is_default}
                     <span
-                      class="absolute top-2.5 {isSelected ? 'right-9' : 'right-2.5'} px-2 py-0.5 text-xs font-medium rounded-full bg-positive-stronger/10 text-positive-stronger border border-positive-stronger/20"
+                      class="absolute top-2.5 {isSelected
+                        ? 'right-9'
+                        : 'right-2.5'} bg-positive-stronger/10 text-positive-stronger border-positive-stronger/20 rounded-full border px-2 py-0.5 text-xs font-medium"
                     >
                       {m.default_model()}
                     </span>
                   {/if}
                   <div class="flex w-full items-center gap-2.5">
                     <TemplateIcon {template}></TemplateIcon>
-                    <h4 class="text-dynamic-stronger text-left text-sm font-semibold line-clamp-1">
+                    <h4 class="text-dynamic-stronger line-clamp-1 text-left text-sm font-semibold">
                       {formatEmojiTitle(template.name)}
                     </h4>
                   </div>
                   {#if hasDescription}
-                    <p class="w-full text-left text-xs leading-relaxed text-muted line-clamp-2">
+                    <p class="text-muted line-clamp-2 w-full text-left text-xs leading-relaxed">
                       {template.description}
                     </p>
                   {/if}
                   {#if hasMetadata}
                     <div class="flex items-center gap-3 pt-0.5">
                       {#if hasKnowledge}
-                        <span class="flex items-center gap-1 text-xs text-muted">
+                        <span class="text-muted flex items-center gap-1 text-xs">
                           <BookOpen class="h-3 w-3" />
                           {m.wizard_collections_section()}
                         </span>
                       {/if}
                       {#if hasAttachments}
-                        <span class="flex items-center gap-1 text-xs text-muted">
+                        <span class="text-muted flex items-center gap-1 text-xs">
                           <FileUp class="h-3 w-3" />
                           {m.wizard_attachments_section()}
                         </span>

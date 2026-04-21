@@ -14,7 +14,7 @@
   export let data;
 
   const { tenant } = getAppContext();
-  $: defaultRoleId = tenant.default_role_id ?? null;
+  const defaultRoleId = tenant.default_role_id ?? null;
 </script>
 
 <svelte:head>

@@ -134,9 +134,7 @@ class TestCrawlerTenantSettingsResolution:
         """When tenant has custom crawl_max_length, it's used."""
         tenant_settings = {"crawl_max_length": 120}  # 2 minutes
 
-        with patch(
-            "intric.crawler.crawler.get_crawler_setting"
-        ) as mock_get_setting:
+        with patch("intric.crawler.crawler.get_crawler_setting") as mock_get_setting:
             mock_get_setting.return_value = 120
 
             # Mock _crawl to capture the max_length parameter
@@ -166,9 +164,7 @@ class TestCrawlerTenantSettingsResolution:
     @pytest.mark.asyncio
     async def test_uses_default_when_no_tenant_settings(self):
         """When no tenant settings provided, uses environment default."""
-        with patch(
-            "intric.crawler.crawler.get_crawler_setting"
-        ) as mock_get_setting:
+        with patch("intric.crawler.crawler.get_crawler_setting") as mock_get_setting:
             mock_get_setting.return_value = 7200  # Default 2 hours
 
             captured_max_length = None
@@ -197,9 +193,7 @@ class TestCrawlerTenantSettingsResolution:
 
         tenant_settings = {"crawl_max_length": 300}
 
-        with patch(
-            "intric.crawler.crawler.get_crawler_setting"
-        ) as mock_get_setting:
+        with patch("intric.crawler.crawler.get_crawler_setting") as mock_get_setting:
             mock_get_setting.return_value = 300
 
             captured_max_length = None

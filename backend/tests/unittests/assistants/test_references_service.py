@@ -70,7 +70,6 @@ def test_remove_duplicate_chunks_multiple_info_blobs():
     ),
 )
 def test_concatenate_session_and_question(num_questions: int, expected_answer: str):
-
     def get_questions(num_questions: int):
         questions = []
         for i in range(num_questions):

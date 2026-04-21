@@ -15,7 +15,10 @@ if TYPE_CHECKING:
 class ModelProviderService:
     """Service for managing model providers with credential encryption."""
 
-    def __init__(self, repository: ModelProviderRepository, encryption: EncryptionService):
+    def __init__(
+        self, repository: ModelProviderRepository, encryption: EncryptionService
+    ):
+        super().__init__()
         self.repository = repository
         self.encryption = encryption
 
@@ -25,7 +28,9 @@ class ModelProviderService:
 
         # Encrypt API key if present
         if "api_key" in encrypted_creds and encrypted_creds["api_key"]:
-            encrypted_creds["api_key"] = self.encryption.encrypt(encrypted_creds["api_key"])
+            encrypted_creds["api_key"] = self.encryption.encrypt(
+                encrypted_creds["api_key"]
+            )
 
         # Add more credential fields here if needed in the future
         # e.g., client_secret, access_token, etc.
@@ -38,7 +43,9 @@ class ModelProviderService:
 
         # Decrypt API key if present
         if "api_key" in decrypted_creds and decrypted_creds["api_key"]:
-            decrypted_creds["api_key"] = self.encryption.decrypt(decrypted_creds["api_key"])
+            decrypted_creds["api_key"] = self.encryption.decrypt(
+                decrypted_creds["api_key"]
+            )
 
         return decrypted_creds
 
@@ -124,7 +131,9 @@ class ModelProviderService:
         if name is not None and name != provider.name:
             existing = await self.repository.get_by_name(name)
             if existing is not None:
-                raise NameCollisionException(f"Provider with name '{name}' already exists")
+                raise NameCollisionException(
+                    f"Provider with name '{name}' already exists"
+                )
             provider.name = name
 
         if credentials is not None:
@@ -171,7 +180,10 @@ class ModelProviderService:
         For transcription models: skips validation (requires audio file).
         """
         if model_type == "transcription":
-            return {"success": True, "message": "Validation skipped for transcription models"}
+            return {
+                "success": True,
+                "message": "Validation skipped for transcription models",
+            }
 
         import litellm
 
@@ -200,11 +212,14 @@ class ModelProviderService:
         elif provider_type in ("vllm",) or provider.config.get("endpoint"):
             kwargs["api_base"] = provider.config.get("endpoint", "")
 
+        aembedding: Any = getattr(litellm, "aembedding")
+        acompletion: Any = getattr(litellm, "acompletion")
+
         try:
             if model_type == "embedding":
-                await litellm.aembedding(input=["test"], **kwargs)
+                await aembedding(input=["test"], **kwargs)
             else:
-                await litellm.acompletion(
+                await acompletion(
                     messages=[{"role": "user", "content": "hi"}],
                     max_completion_tokens=10,
                     drop_params=True,
@@ -277,9 +292,7 @@ class ModelProviderService:
                         data = resp.json()
                         return [
                             {"name": m["id"]}
-                            for m in sorted(
-                                data.get("data", []), key=lambda m: m["id"]
-                            )
+                            for m in sorted(data.get("data", []), key=lambda m: m["id"])
                         ]
                     return []
 
@@ -293,6 +306,8 @@ class ModelProviderService:
         have been deprecated.
         """
         import litellm
+
+        acompletion: Any = getattr(litellm, "acompletion")
 
         provider = await self.repository.get_by_id(provider_id)
         decrypted_creds = self._decrypt_credentials(provider.credentials)
@@ -358,7 +373,7 @@ class ModelProviderService:
         for model in candidates:
             kwargs = {**base_kwargs, "model": model}
             try:
-                await litellm.acompletion(**kwargs)
+                await acompletion(**kwargs)
                 return {"success": True, "message": "Connection successful"}
             except Exception as e:
                 error_name = e.__class__.__name__

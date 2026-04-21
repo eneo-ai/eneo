@@ -42,6 +42,7 @@
 {#if reference}
   {#if reference.metadata.url}
     <Tooltip text={reference.metadata.url} renderInline>
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- external reference URL from message metadata -->
       <a
         href={reference.metadata.url}
         target="_blank"
@@ -50,6 +51,7 @@
       >
         {@render label(reference.number, reference.metadata.title)}
       </a>
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
     </Tooltip>
   {:else}
     <Tooltip text={reference.metadata.title ?? undefined} renderInline>
@@ -63,6 +65,7 @@
 {/if}
 {#if webReference}
   <Tooltip text={webReference.title} renderInline>
+    <!-- eslint-disable svelte/no-navigation-without-resolve -- external web search reference URL -->
     <a
       href={webReference.url}
       target="_blank"
@@ -75,6 +78,7 @@
         class="!m-0 h-7 w-7 p-0.5"
       />
     </a>
+    <!-- eslint-enable svelte/no-navigation-without-resolve -->
   </Tooltip>
 {/if}
 

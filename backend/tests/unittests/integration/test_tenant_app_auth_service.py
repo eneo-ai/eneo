@@ -17,6 +17,7 @@ from intric.integration.infrastructure.auth_service.tenant_app_auth_service impo
     TenantAppToken,
 )
 
+
 @pytest.fixture
 def mock_tenant_app():
     """Create a mock tenant SharePoint app."""
@@ -29,6 +30,7 @@ def mock_tenant_app():
     app.is_active = True
     return app
 
+
 @pytest.fixture
 def mock_token_response():
     """Create a mock successful token response."""
@@ -37,6 +39,7 @@ def mock_token_response():
         "expires_in": 3600,  # 1 hour
         "access_token": "mock-access-token-123",
     }
+
 
 @pytest.fixture
 def mock_httpx_response(mock_token_response):
@@ -47,24 +50,25 @@ def mock_httpx_response(mock_token_response):
     response.text = "success"
     return response
 
+
 @pytest.fixture
 def service():
     """Create a fresh TenantAppAuthService instance."""
     return TenantAppAuthService()
+
 
 def test_tenant_app_token_is_expired():
     """Token correctly identifies if it has expired."""
     # Create expired token
     expired_token = TenantAppToken(
         access_token="token",
-        expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)
+        expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
     )
     assert expired_token.is_expired() is True
 
     # Create valid token
     valid_token = TenantAppToken(
-        access_token="token",
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
+        access_token="token", expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
     )
     assert valid_token.is_expired() is False
 
@@ -74,14 +78,14 @@ def test_tenant_app_token_is_expiring_soon():
     # Token expiring in 3 minutes (default threshold is 5 minutes)
     soon_expiring = TenantAppToken(
         access_token="token",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=3)
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=3),
     )
     assert soon_expiring.is_expiring_soon() is True
 
     # Token expiring in 10 minutes (beyond default threshold)
     not_expiring_soon = TenantAppToken(
         access_token="token",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10)
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
     )
     assert not_expiring_soon.is_expiring_soon() is False
 
@@ -90,7 +94,7 @@ def test_tenant_app_token_is_expiring_soon_custom_threshold():
     """Token correctly uses custom expiration threshold."""
     token = TenantAppToken(
         access_token="token",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=8)
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=8),
     )
 
     # With 5-minute threshold (default)
@@ -98,6 +102,7 @@ def test_tenant_app_token_is_expiring_soon_custom_threshold():
 
     # With 10-minute threshold
     assert token.is_expiring_soon(minutes=10) is True
+
 
 async def test_acquire_token_success(service, mock_tenant_app, mock_httpx_response):
     """Successfully acquires token via client credentials flow."""
@@ -128,7 +133,10 @@ async def test_acquire_token_success(service, mock_tenant_app, mock_httpx_respon
         assert posted_data["grant_type"] == "client_credentials"
         assert posted_data["scope"] == "https://graph.microsoft.com/.default"
 
-async def test_token_caching_returns_cached_if_valid(service, mock_tenant_app, mock_httpx_response):
+
+async def test_token_caching_returns_cached_if_valid(
+    service, mock_tenant_app, mock_httpx_response
+):
     """Returns cached token if it hasn't expired and isn't expiring soon."""
     with patch("httpx.AsyncClient") as mock_client_class:
         mock_client = AsyncMock()
@@ -155,7 +163,7 @@ async def test_token_auto_refresh_on_expiration_threshold(service, mock_tenant_a
     # Create a token that's expiring soon (in 3 minutes)
     soon_expiring_token = TenantAppToken(
         access_token="old-token",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=3)
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=3),
     )
 
     # Manually insert into cache
@@ -184,7 +192,9 @@ async def test_token_auto_refresh_on_expiration_threshold(service, mock_tenant_a
         mock_client.post.assert_called_once()
 
 
-async def test_force_refresh_bypasses_cache(service, mock_tenant_app, mock_httpx_response):
+async def test_force_refresh_bypasses_cache(
+    service, mock_tenant_app, mock_httpx_response
+):
     """force_refresh=True acquires new token even if cached token is valid."""
     with patch("httpx.AsyncClient") as mock_client_class:
         mock_client = AsyncMock()
@@ -204,7 +214,10 @@ async def test_force_refresh_bypasses_cache(service, mock_tenant_app, mock_httpx
         # But HTTP request should have been made twice
         assert mock_client.post.call_count == 2
 
-async def test_cache_clear_invalidates_token(service, mock_tenant_app, mock_httpx_response):
+
+async def test_cache_clear_invalidates_token(
+    service, mock_tenant_app, mock_httpx_response
+):
     """clear_cache() removes token from cache."""
     with patch("httpx.AsyncClient") as mock_client_class:
         mock_client = AsyncMock()
@@ -300,9 +313,7 @@ async def test_test_credentials_http_error(service, mock_tenant_app):
         "error_description": "AADSTS7000215: Invalid client secret provided. Trace ID: abc",
     }
     error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-        "Unauthorized",
-        request=MagicMock(),
-        response=error_response
+        "Unauthorized", request=MagicMock(), response=error_response
     )
 
     with patch("httpx.AsyncClient") as mock_client_class:
@@ -340,15 +351,14 @@ async def test_test_credentials_network_error(service, mock_tenant_app):
         assert error is not None
         assert "Connection failed" in error
 
+
 async def test_invalid_credentials_raises_error(service, mock_tenant_app):
     """Invalid credentials raise HTTPStatusError."""
     error_response = MagicMock(spec=httpx.Response)
     error_response.status_code = 401
     error_response.text = "AADSTS7000215: Invalid client secret"
     error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-        "Unauthorized",
-        request=MagicMock(),
-        response=error_response
+        "Unauthorized", request=MagicMock(), response=error_response
     )
 
     with patch("httpx.AsyncClient") as mock_client_class:
@@ -361,6 +371,7 @@ async def test_invalid_credentials_raises_error(service, mock_tenant_app):
         # Execute and assert
         with pytest.raises(httpx.HTTPStatusError):
             await service.get_access_token(mock_tenant_app)
+
 
 async def test_token_response_parsing(service, mock_tenant_app):
     """Correctly parses token response from Microsoft Graph."""
@@ -391,9 +402,16 @@ async def test_token_response_parsing(service, mock_tenant_app):
         assert cached.access_token == "custom-access-token-xyz"
         # Should expire in approximately 2 hours (allowing small time drift)
         time_until_expiry = cached.expires_at - datetime.now(timezone.utc)
-        assert timedelta(hours=1, minutes=59) < time_until_expiry < timedelta(hours=2, minutes=1)
+        assert (
+            timedelta(hours=1, minutes=59)
+            < time_until_expiry
+            < timedelta(hours=2, minutes=1)
+        )
 
-async def test_concurrent_token_requests_dont_duplicate_calls(service, mock_tenant_app, mock_httpx_response):
+
+async def test_concurrent_token_requests_dont_duplicate_calls(
+    service, mock_tenant_app, mock_httpx_response
+):
     """Multiple concurrent requests should ideally use cached token."""
     # Note: This is a basic test. True thread safety would require locks,
     # but for this simple cache, race conditions are acceptable.
@@ -406,10 +424,9 @@ async def test_concurrent_token_requests_dont_duplicate_calls(service, mock_tena
         mock_client_class.return_value = mock_client
 
         # Make 5 concurrent requests
-        results = await asyncio.gather(*[
-            service.get_access_token(mock_tenant_app)
-            for _ in range(5)
-        ])
+        results = await asyncio.gather(
+            *[service.get_access_token(mock_tenant_app) for _ in range(5)]
+        )
 
         # All results should be the same token
         assert all(r == "mock-access-token-123" for r in results)
@@ -420,15 +437,14 @@ async def test_concurrent_token_requests_dont_duplicate_calls(service, mock_tena
         assert 1 <= call_count <= 5  # Permissive check
         # In practice with proper locking, this would always be 1
 
+
 async def test_http_500_error_raises_exception(service, mock_tenant_app):
     """Server errors (5xx) raise HTTPStatusError."""
     error_response = MagicMock(spec=httpx.Response)
     error_response.status_code = 500
     error_response.text = "Internal Server Error"
     error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-        "Internal Server Error",
-        request=MagicMock(),
-        response=error_response
+        "Internal Server Error", request=MagicMock(), response=error_response
     )
 
     with patch("httpx.AsyncClient") as mock_client_class:

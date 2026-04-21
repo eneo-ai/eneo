@@ -32,7 +32,7 @@ Security considerations:
 - Use IDs instead of names where possible for data minimization
 """
 
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 from uuid import UUID
 
 
@@ -43,8 +43,8 @@ class AuditMetadata:
     def standard(
         actor: Any,
         target: Any,
-        changes: Optional[dict[str, Any]] = None,
-        extra: Optional[dict[str, Any]] = None,
+        changes: Optional[Mapping[str, object]] = None,
+        extra: Optional[Mapping[str, object]] = None,
         space: Optional[Any] = None,
         tenant: Optional[Any] = None,
     ) -> dict[str, Any]:
@@ -109,7 +109,7 @@ class AuditMetadata:
             target_snapshot["tenant_id"] = str(tenant.id)
             target_snapshot["tenant_name"] = getattr(tenant, "name", None)
 
-        metadata = {
+        metadata: dict[str, Any] = {
             "actor": {
                 "id": str(actor.id),
                 "name": actor_name,
@@ -122,7 +122,7 @@ class AuditMetadata:
             metadata["changes"] = changes
 
         if extra:
-            metadata["extra"] = extra
+            metadata["extra"] = dict(extra)
 
         return metadata
 
@@ -131,7 +131,7 @@ class AuditMetadata:
         actor: Any,
         targets: list[Any],
         operation: str,
-        extra: Optional[dict[str, Any]] = None,
+        extra: Optional[Mapping[str, object]] = None,
     ) -> dict[str, Any]:
         """
         Create metadata for operations affecting multiple entities.
@@ -167,7 +167,7 @@ class AuditMetadata:
             or "unknown"
         )
 
-        metadata = {
+        metadata: dict[str, Any] = {
             "actor": {
                 "id": str(actor.id),
                 "name": actor_name,
@@ -185,7 +185,7 @@ class AuditMetadata:
         }
 
         if extra:
-            metadata["extra"] = extra
+            metadata["extra"] = dict(extra)
 
         return metadata
 
@@ -194,7 +194,7 @@ class AuditMetadata:
         description: str,
         target: Optional[Any] = None,
         affected_count: Optional[int] = None,
-        extra: Optional[dict[str, Any]] = None,
+        extra: Optional[Mapping[str, object]] = None,
     ) -> dict[str, Any]:
         """
         Create metadata for system-initiated actions.
@@ -222,7 +222,7 @@ class AuditMetadata:
                 extra={"retention_days": 365, "policy_id": str(policy.id)}
             )
         """
-        metadata = {
+        metadata: dict[str, Any] = {
             "system_action": description,
         }
 
@@ -236,7 +236,7 @@ class AuditMetadata:
             metadata["affected_count"] = affected_count
 
         if extra:
-            metadata["extra"] = extra
+            metadata["extra"] = dict(extra)
 
         return metadata
 
@@ -285,7 +285,7 @@ class AuditMetadata:
             or "unknown"
         )
 
-        metadata = {
+        metadata: dict[str, Any] = {
             "actor": {
                 "id": str(actor.id),
                 "name": actor_name,
@@ -299,7 +299,7 @@ class AuditMetadata:
             metadata["failure_reason"] = failure_reason
 
         if extra:
-            metadata["extra"] = extra
+            metadata["extra"] = dict(extra)
 
         return metadata
 
@@ -307,8 +307,8 @@ class AuditMetadata:
     def minimal(
         actor_id: UUID,
         target_id: UUID,
-        extra: Optional[dict[str, Any]] = None,
-    ) -> dict[str, Any]:
+        extra: Optional[Mapping[str, object]] = None,
+    ) -> Mapping[str, object]:
         """
         Create minimal metadata with just IDs (data minimization).
 
@@ -330,12 +330,12 @@ class AuditMetadata:
                 extra={"size_bytes": file.size}
             )
         """
-        metadata = {
+        metadata: dict[str, Any] = {
             "actor": {"id": str(actor_id)},
             "target": {"id": str(target_id)},
         }
 
         if extra:
-            metadata["extra"] = extra
+            metadata["extra"] = dict(extra)
 
         return metadata

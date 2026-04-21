@@ -14,6 +14,7 @@ export function initModelProviders(client) {
     list: async (options) => {
       const res = await client.fetch("/api/v1/admin/model-providers/", {
         method: "get",
+        // @ts-ignore - query params accepted by backend but schema marks params as not required
         params: {
           query: options?.activeOnly ? { active_only: true } : undefined
         }
@@ -28,9 +29,9 @@ export function initModelProviders(client) {
      * @throws {IntricError}
      * */
     get: async ({ id }) => {
-      const res = await client.fetch("/api/v1/admin/model-providers/{id}/", {
+      const res = await client.fetch("/api/v1/admin/model-providers/{provider_id}/", {
         method: "get",
-        params: { path: { id } }
+        params: { path: { provider_id: id } }
       });
 
       return res;
@@ -41,8 +42,8 @@ export function initModelProviders(client) {
      * @param {Object} provider
      * @param {string} provider.name User-defined name
      * @param {string} provider.provider_type Provider type (e.g., "openai", "vllm")
-     * @param {Object} provider.credentials Provider credentials
-     * @param {Object} [provider.config] Provider configuration
+     * @param {{[key: string]: unknown}} provider.credentials Provider credentials
+     * @param {{[key: string]: unknown}} [provider.config] Provider configuration
      * @param {boolean} [provider.is_active] Whether provider is active
      * @throws {IntricError}
      * */
@@ -62,15 +63,15 @@ export function initModelProviders(client) {
      * @param {{id: string}} provider
      * @param {Object} update
      * @param {string} [update.name]
-     * @param {Object} [update.credentials]
-     * @param {Object} [update.config]
+     * @param {{[key: string]: unknown}} [update.credentials]
+     * @param {{[key: string]: unknown}} [update.config]
      * @param {boolean} [update.is_active]
      * @throws {IntricError}
      * */
     update: async ({ id }, update) => {
-      const res = await client.fetch("/api/v1/admin/model-providers/{id}/", {
+      const res = await client.fetch("/api/v1/admin/model-providers/{provider_id}/", {
         method: "put",
-        params: { path: { id } },
+        params: { path: { provider_id: id } },
         requestBody: {
           "application/json": update
         }
@@ -87,25 +88,27 @@ export function initModelProviders(client) {
      * @throws {IntricError}
      * */
     delete: async ({ id }, options) => {
-      await client.fetch("/api/v1/admin/model-providers/{id}/", {
+      /** @type {any} */
+      const params = {
+        path: { provider_id: id },
+        query: options?.force ? { force: true } : undefined
+      };
+      await client.fetch("/api/v1/admin/model-providers/{provider_id}/", {
         method: "delete",
-        params: {
-          path: { id },
-          query: options?.force ? { force: true } : undefined
-        }
+        params
       });
     },
 
     /**
      * List available models/deployments from the provider's own API.
      * @param {{id: string}} provider
-     * @returns {Promise<Array<{name: string, model?: string, status?: string, owned_by?: string, display_name?: string}>>}
+     * @returns {Promise<any>}
      * @throws {IntricError}
      * */
     listModels: async ({ id }) => {
-      const res = await client.fetch("/api/v1/admin/model-providers/{id}/models/", {
+      const res = await client.fetch("/api/v1/admin/model-providers/{provider_id}/models/", {
         method: "get",
-        params: { path: { id } }
+        params: { path: { provider_id: id } }
       });
 
       return res;
@@ -113,7 +116,7 @@ export function initModelProviders(client) {
 
     /**
      * Get the tenant's favorite provider types.
-     * @returns {Promise<{providers: string[]}>}
+     * @returns {Promise<any>}
      * @throws {IntricError}
      * */
     getFavorites: async () => {
@@ -127,7 +130,7 @@ export function initModelProviders(client) {
     /**
      * Set the tenant's favorite provider types.
      * @param {string[]} providers Ordered list of provider type strings
-     * @returns {Promise<{providers: string[]}>}
+     * @returns {Promise<any>}
      * @throws {IntricError}
      * */
     setFavorites: async (providers) => {
@@ -143,7 +146,7 @@ export function initModelProviders(client) {
 
     /**
      * Get supported model types and top models per provider type from LiteLLM.
-     * @returns {Promise<{providers: Record<string, {modes: string[], models: Record<string, object[]>, fields: object[]}>, default_fields: object[]}>}
+     * @returns {Promise<any>}
      * @throws {IntricError}
      * */
     getCapabilities: async () => {
@@ -158,17 +161,20 @@ export function initModelProviders(client) {
      * Validate that a model works with a provider by making a minimal API call.
      * @param {{id: string}} provider
      * @param {{model_name: string, model_type?: string}} body
-     * @returns {Promise<{success: boolean, message?: string, error?: string}>}
+     * @returns {Promise<any>}
      * @throws {IntricError}
      * */
     validateModel: async ({ id }, { model_name, model_type = "completion" }) => {
-      const res = await client.fetch("/api/v1/admin/model-providers/{id}/validate-model/", {
-        method: "post",
-        params: { path: { id } },
-        requestBody: {
-          "application/json": { model_name, model_type }
+      const res = await client.fetch(
+        "/api/v1/admin/model-providers/{provider_id}/validate-model/",
+        {
+          method: "post",
+          params: { path: { provider_id: id } },
+          requestBody: {
+            "application/json": { model_name, model_type }
+          }
         }
-      });
+      );
 
       return res;
     },
@@ -176,7 +182,7 @@ export function initModelProviders(client) {
     /**
      * Look up recommended default values for a model from LiteLLM.
      * @param {string} modelName The model identifier to look up
-     * @returns {Promise<{found: boolean, max_input_tokens?: number, max_output_tokens?: number, supports_vision?: boolean, supports_function_calling?: boolean, supports_reasoning?: boolean}>}
+     * @returns {Promise<any>}
      * @throws {IntricError}
      * */
     getModelDefaults: async (modelName) => {
@@ -194,9 +200,9 @@ export function initModelProviders(client) {
      * @throws {IntricError}
      * */
     test: async ({ id }) => {
-      const res = await client.fetch("/api/v1/admin/model-providers/{id}/test/", {
+      const res = await client.fetch("/api/v1/admin/model-providers/{provider_id}/test/", {
         method: "post",
-        params: { path: { id } }
+        params: { path: { provider_id: id } }
       });
 
       return res;

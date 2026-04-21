@@ -1,11 +1,18 @@
 # MIT License
 import asyncio
 from collections import Counter
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from typing import List, Optional, Tuple, cast
 from uuid import UUID
 
+from intric.ai_models.completion_models.completion_model import (
+    Completion,
+    CompletionModelResponse,
+)
+from intric.ai_models.completion_models.completion_model import (
+    CompletionModel as AICompletionModel,
+)
 from intric.analysis.analysis import (
     AnalysisProcessingMode,
     AssistantInsightQuestion,
@@ -13,6 +20,7 @@ from intric.analysis.analysis import (
     Counts,
 )
 from intric.analysis.analysis_repo import AnalysisRepository
+from intric.assistants.assistant import Assistant
 from intric.assistants.assistant_service import AssistantService
 from intric.completion_models.infrastructure.completion_service import CompletionService
 from intric.completion_models.infrastructure.static_prompts import ANALYSIS_PROMPT
@@ -23,10 +31,10 @@ from intric.main.exceptions import (
     UnauthorizedException,
 )
 from intric.main.logging import get_logger
+from intric.questions.question import Question
 from intric.questions.questions_repo import QuestionRepository
 from intric.roles.permissions import Permission, validate_permissions
-from intric.sessions.session import SessionInDB
-from intric.sessions.session import SessionMetadataPublic
+from intric.sessions.session import SessionInDB, SessionMetadataPublic
 from intric.sessions.session_service import SessionService
 from intric.sessions.sessions_repo import SessionRepository
 from intric.spaces.space_service import SpaceService
@@ -68,9 +76,7 @@ Answer style requirements:
 - Keep the answer language aligned with the user's language.
 """
 
-NO_QUESTIONS_ANSWER = (
-    "No questions were found in the selected timeframe, so there is not enough data to generate insights."
-)
+NO_QUESTIONS_ANSWER = "No questions were found in the selected timeframe, so there is not enough data to generate insights."
 
 
 class AnalysisService:
@@ -86,6 +92,7 @@ class AnalysisService:
         group_chat_service: GroupChatService,
         completion_service: CompletionService,
     ):
+        super().__init__()
         self.user = user
         self.repo = repo
         self.assistant_service = assistant_service
@@ -102,8 +109,8 @@ class AnalysisService:
 
     @staticmethod
     def _deduplicate_questions(questions: list[str]) -> list[str]:
-        counts = Counter(questions)
-        result = []
+        counts: Counter[str] = Counter(questions)
+        result: list[str] = []
         for question, count in counts.most_common():
             if count > 1:
                 result.append(f"[x{count}] {question}")
@@ -172,7 +179,7 @@ class AnalysisService:
         self,
         *,
         sem: asyncio.Semaphore,
-        model,
+        model: Assistant,
         chunk: list[str],
         index: int,
         total: int,
@@ -186,7 +193,7 @@ class AnalysisService:
                 chunk_total=total,
                 questions=chunk_questions,
             )
-            summary_response = await asyncio.wait_for(
+            summary_response: CompletionModelResponse = await asyncio.wait_for(
                 model.get_response(
                     question="Summarize these usage questions",
                     completion_service=self.completion_service,
@@ -195,12 +202,13 @@ class AnalysisService:
                 ),
                 timeout=_CHUNK_TIMEOUT_SECONDS,
             )
-            return (summary_response.completion.text or "").strip()
+            completion_obj = cast(Completion, summary_response.completion)
+            return (completion_obj.text or "").strip()
 
     async def _summarize_question_chunks(
         self,
         *,
-        model,
+        model: Assistant,
         questions: list[str],
         days: int,
     ) -> list[str]:
@@ -237,38 +245,37 @@ class AnalysisService:
     async def _answer_with_adaptive_budget(
         self,
         *,
-        model,
+        model: Assistant,
         question: str,
         from_date: datetime,
         to_date: datetime,
         question_texts: list[str],
         stream: bool,
-    ):
-        from intric.ai_models.completion_models.completion_model import (
-            Completion,
-            CompletionModelResponse,
-        )
-
+    ) -> CompletionModelResponse:
         started = perf_counter()
         cleaned_questions = [
-            self._normalize_question_text(item) for item in question_texts if item and item.strip()
+            self._normalize_question_text(item)
+            for item in question_texts
+            if item and item.strip()
         ]
 
         if not cleaned_questions:
             no_data_completion = Completion(text=NO_QUESTIONS_ANSWER, stop=True)
+            cm = cast(AICompletionModel, model.completion_model)
             if stream:
+
                 async def _no_data_stream():
                     yield no_data_completion
 
                 response = CompletionModelResponse(
                     completion=_no_data_stream(),
-                    model=model.completion_model,
+                    model=cm,
                     total_token_count=0,
                 )
             else:
                 response = CompletionModelResponse(
                     completion=no_data_completion,
-                    model=model.completion_model,
+                    model=cm,
                     total_token_count=0,
                 )
             logger.info(
@@ -332,7 +339,9 @@ class AnalysisService:
         summaries_text = "\n\n".join(
             f"Summary {idx + 1}:\n{summary}" for idx, summary in enumerate(summaries)
         )
-        reduce_prompt = REDUCE_SUMMARY_PROMPT.format(days=days, summaries=summaries_text)
+        reduce_prompt = REDUCE_SUMMARY_PROMPT.format(
+            days=days, summaries=summaries_text
+        )
 
         result = await model.get_response(
             question=question,
@@ -362,7 +371,7 @@ class AnalysisService:
         from_date: datetime,
         to_date: datetime,
         include_followup: bool,
-    ) -> tuple[object, list[str]]:
+    ) -> tuple[Assistant, list[str]]:
         if assistant_id:
             await self._check_insight_access(assistant_id=assistant_id)
             assistant, _ = await self.assistant_service.get_assistant(assistant_id)
@@ -375,8 +384,15 @@ class AnalysisService:
             )
             return assistant, [row.question for row in rows]
 
+        if group_chat_id is None:
+            raise BadRequestException(
+                "Either assistant_id or group_chat_id must be provided"
+            )
+
         await self._check_insight_access(group_chat_id=group_chat_id)
-        space = await self.space_service.get_space_by_group_chat(group_chat_id=group_chat_id)
+        space = await self.space_service.get_space_by_group_chat(
+            group_chat_id=group_chat_id
+        )
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
 
         if not group_chat.assistants:
@@ -384,7 +400,7 @@ class AnalysisService:
                 "Group chat has no assistants to process the analysis"
             )
 
-        model_to_use = group_chat.assistants[0].assistant
+        model_to_use: Assistant = group_chat.assistants[0].assistant
         rows = await self.repo.get_group_chat_question_texts_since(
             group_chat_id=group_chat_id,
             from_date=from_date,
@@ -425,6 +441,10 @@ class AnalysisService:
                 tenant_id=self.user.tenant_id,
             )
         else:
+            if group_chat_id is None:
+                raise BadRequestException(
+                    "Either assistant_id or group_chat_id must be provided"
+                )
             await self._check_insight_access(group_chat_id=group_chat_id)
             question_count = await self.repo.count_group_chat_questions_since(
                 group_chat_id=group_chat_id,
@@ -543,7 +563,10 @@ class AnalysisService:
             active_user_count=active_users,
         )
 
-    async def _check_space_permissions(self, space_id: UUID):
+    async def _check_space_permissions(self, space_id: UUID | None):
+        if space_id is None:
+            return
+
         space = await self.space_service.get_space(space_id)
         if space.is_personal() and Permission.INSIGHTS not in self.user.permissions:
             raise UnauthorizedException(
@@ -552,8 +575,8 @@ class AnalysisService:
 
     async def _check_insight_access(
         self,
-        group_chat_id: UUID = None,
-        assistant_id: UUID = None,
+        group_chat_id: UUID | None = None,
+        assistant_id: UUID | None = None,
     ):
         if assistant_id:
             space = await self.space_service.get_space_by_assistant(
@@ -582,17 +605,20 @@ class AnalysisService:
                 raise UnauthorizedException(
                     "Insights are not enabled for this group chat"
                 )
+        else:
+            raise BadRequestException(
+                "Either assistant_id or group_chat_id must be provided"
+            )
 
     async def get_questions_since(
         self,
         assistant_id: UUID,
-        from_date: date,
-        to_date: date,
+        from_date: datetime,
+        to_date: datetime,
         include_followups: bool = False,
-    ):
+    ) -> list[Question]:
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-        if assistant.space_id is not None:
-            await self._check_space_permissions(assistant.space_id)
+        await self._check_space_permissions(assistant.space_id)
 
         sessions = await self.repo.get_assistant_sessions_since(
             assistant_id=assistant_id,
@@ -604,7 +630,7 @@ class AnalysisService:
         if include_followups:
             return [question for session in sessions for question in session.questions]
 
-        first_questions = []
+        first_questions: list[Question] = []
         for session in sessions:
             questions = session.questions
             if questions:
@@ -622,10 +648,10 @@ class AnalysisService:
     async def get_questions_from_group_chat(
         self,
         group_chat_id: UUID,
-        from_date: date,
-        to_date: date,
+        from_date: datetime,
+        to_date: datetime,
         include_followups: bool = False,
-    ):
+    ) -> list[Question]:
         """Get questions asked to a group chat within a date range"""
         # Get sessions for the group chat
         sessions = await self.repo.get_group_chat_sessions_since(
@@ -638,7 +664,7 @@ class AnalysisService:
         if include_followups:
             return [question for session in sessions for question in session.questions]
 
-        first_questions = []
+        first_questions: list[Question] = []
         for session in sessions:
             questions = session.questions
             if questions:
@@ -657,13 +683,12 @@ class AnalysisService:
         question: str,
         stream: bool,
         assistant_id: UUID,
-        from_date: date,
-        to_date: date,
+        from_date: datetime,
+        to_date: datetime,
         include_followup: bool = False,
-    ):
+    ) -> CompletionModelResponse:
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-        if assistant.space_id is not None:
-            await self._check_space_permissions(assistant.space_id)
+        await self._check_space_permissions(assistant.space_id)
         rows = await self.repo.get_assistant_question_texts_since(
             assistant_id=assistant_id,
             from_date=from_date,
@@ -687,9 +712,9 @@ class AnalysisService:
         from_date: datetime,
         to_date: datetime,
         include_followup: bool = False,
-        assistant_id: UUID = None,
-        group_chat_id: UUID = None,
-    ):
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> CompletionModelResponse:
         """
         Ask a question about the questions previously asked to an assistant or group chat.
 
@@ -719,7 +744,10 @@ class AnalysisService:
             )
 
         started = perf_counter()
-        model_to_use, question_texts = await self._get_question_texts_for_unified_analysis(
+        (
+            model_to_use,
+            question_texts,
+        ) = await self._get_question_texts_for_unified_analysis(
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
             from_date=from_date,
@@ -759,12 +787,15 @@ class AnalysisService:
         cursor: str | None = None,
     ) -> tuple[list[AssistantInsightQuestion], int, str | None]:
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-        if assistant.space_id is not None:
-            await self._check_space_permissions(assistant.space_id)
+        await self._check_space_permissions(assistant.space_id)
 
         cursor_created_at, cursor_id = self._decode_question_cursor(cursor)
         started = perf_counter()
-        rows, total_count, has_more = await self.repo.get_assistant_question_history_page(
+        (
+            rows,
+            total_count,
+            has_more,
+        ) = await self.repo.get_assistant_question_history_page(
             assistant_id=assistant_id,
             from_date=from_date,
             to_date=to_date,
@@ -813,12 +844,12 @@ class AnalysisService:
     async def get_assistant_insight_sessions(
         self,
         assistant_id: UUID,
-        limit: int = None,
-        cursor: datetime = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
         previous: bool = False,
-        name_filter: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        name_filter: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> Tuple[List[SessionMetadataPublic], int]:
         """Get all sessions for an assistant across all users in the tenant (with insight access)
 
@@ -850,17 +881,17 @@ class AnalysisService:
             end_date=end_date,
             tenant_id=self.user.tenant_id,
         )
-        return cast(List[SessionMetadataPublic], sessions), int(total or 0)
+        return sessions, int(total or 0)
 
     async def get_group_chat_insight_sessions(
         self,
         group_chat_id: UUID,
-        limit: int = None,
-        cursor: datetime = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
         previous: bool = False,
-        name_filter: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        name_filter: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> Tuple[List[SessionMetadataPublic], int]:
         """Get all sessions for a group chat across all users in the tenant (with insight access)
 
@@ -892,12 +923,12 @@ class AnalysisService:
             end_date=end_date,
             tenant_id=self.user.tenant_id,
         )
-        return cast(List[SessionMetadataPublic], sessions), int(total or 0)
+        return sessions, int(total or 0)
 
     async def get_insight_session(
         self,
         session_id: UUID,
-    ) -> SessionInDB:
+    ) -> SessionInDB | None:
         """Get a specific session with insight access
 
         Args:
@@ -913,6 +944,7 @@ class AnalysisService:
             BadRequestException: If neither assistant_id nor group_chat_id is provided
         """
         session = await self.session_repo.get(id=session_id)
+        assert session is not None
 
         if session.group_chat_id is not None:
             await self._check_insight_access(group_chat_id=session.group_chat_id)
@@ -983,6 +1015,7 @@ class AnalysisService:
                 tenant_id=self.user.tenant_id,
             )
         else:
+            assert group_chat_id is not None
             (
                 session_count,
                 question_count,
@@ -1029,4 +1062,5 @@ class AnalysisService:
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
-        return response.completion.text or ""
+        completion = cast(Completion, response.completion)
+        return completion.text or ""

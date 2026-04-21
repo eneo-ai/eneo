@@ -6,8 +6,20 @@ import {
   getCategoryInfo
 } from "./TemplateCategories";
 
+type CommonKeys = keyof AssistantTemplate & keyof AppTemplate;
+type RequiredKeys = {
+  [K in CommonKeys]: undefined extends AssistantTemplate[K]
+    ? never
+    : undefined extends AppTemplate[K]
+      ? never
+      : K;
+}[CommonKeys];
+type OptionalKeys = Exclude<CommonKeys, RequiredKeys>;
+
 export type GenericTemplate = {
-  [K in keyof AssistantTemplate & keyof AppTemplate]: AssistantTemplate[K] | AppTemplate[K];
+  [K in RequiredKeys]: AssistantTemplate[K] | AppTemplate[K];
+} & {
+  [K in OptionalKeys]?: AssistantTemplate[K] | AppTemplate[K];
 };
 
 // Creating an app from template has the same request body, so we can use the assistant one for both of them

@@ -1,5 +1,6 @@
 import os
 import pathlib
+from typing import Any
 
 import yaml
 
@@ -13,7 +14,7 @@ PREDEFINED_ROLES_FILE_NAME = "predefined_roles.yml"
 logger = get_logger(__name__)
 
 
-def load_predefined_roles_from_config():
+def load_predefined_roles_from_config() -> list[dict[str, Any]]:
     config_path = os.path.join(
         pathlib.Path(__file__).parent.resolve(), PREDEFINED_ROLES_FILE_NAME
     )
@@ -28,8 +29,9 @@ async def seed_roles_for_all_tenants():
         templates = load_predefined_roles_from_config()
         async with sessionmanager.session() as session, session.begin():
             import sqlalchemy as sa
-            from intric.database.tables.tenant_table import Tenants
+
             from intric.database.tables.roles_table import Roles
+            from intric.database.tables.tenant_table import Tenants
 
             # Get all tenants (id + default_role_id)
             result = await session.execute(
@@ -56,13 +58,19 @@ async def seed_roles_for_all_tenants():
                         # But track "User" role id for default_role_id
                         if name == "User":
                             user_role_id = next(
-                                r.id for r in existing_roles if r.predefined_source == "User"
+                                r.id
+                                for r in existing_roles
+                                if r.predefined_source == "User"
                             )
                         continue
 
                     # If a role with matching name exists but no predefined_source, tag it
                     matching = next(
-                        (r for r in existing_roles if r.name == name and not r.predefined_source),
+                        (
+                            r
+                            for r in existing_roles
+                            if r.name == name and not r.predefined_source
+                        ),
                         None,
                     )
                     if matching:

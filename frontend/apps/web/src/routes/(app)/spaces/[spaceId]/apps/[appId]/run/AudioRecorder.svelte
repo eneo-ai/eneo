@@ -404,7 +404,7 @@
     try {
       mediaStream = await requestAudioStream();
 
-      const streamEndedHandler = (_event: Event) => {
+      const streamEndedHandler = (_: Event) => {
         if (!isRecording) return;
         const errorMsg = m.recording_device_disconnected();
         setRecordingErrorState(errorMsg);
@@ -494,7 +494,9 @@
         </div>
         {#if maxSizeLabel}
           <div class="size-row">
-            <span class="size-display">{formatMegabytes(recordingStats.totalBytes)} / {maxSizeLabel} MB</span>
+            <span class="size-display"
+              >{formatMegabytes(recordingStats.totalBytes)} / {maxSizeLabel} MB</span
+            >
             <div class="size-progress-track">
               <div class="size-progress-bar" style="width: {sizePercent}%"></div>
             </div>
@@ -506,27 +508,31 @@
     {:else if recordingState === "error"}
       <div class="flex flex-col gap-2 px-4 py-3">
         <div class="flex flex-col gap-0.5">
-          <div class="text-sm font-semibold text-negative-stronger">
+          <div class="text-negative-stronger text-sm font-semibold">
             {m.recording_error()}
           </div>
           {#if recordingErrorHint}
-            <div class="text-sm leading-snug text-negative-stronger/90">
+            <div class="text-negative-stronger/90 text-sm leading-snug">
               {recordingErrorHint}
             </div>
           {/if}
         </div>
         {#if recordingError}
           <details class="error-details-collapse">
-            <summary class="cursor-pointer select-none list-none text-xs font-medium text-negative-default hover:text-negative-stronger transition-colors underline underline-offset-2">
+            <summary
+              class="text-negative-default hover:text-negative-stronger cursor-pointer list-none text-xs font-medium underline underline-offset-2 transition-colors select-none"
+            >
               {m.view_diagnostics()}
             </summary>
-            <div class="mt-2 rounded-md px-3 py-2 font-mono text-xs leading-relaxed break-words bg-negative-default/15 text-negative-stronger/80 border border-negative-default/25">
+            <div
+              class="bg-negative-default/15 text-negative-stronger/80 border-negative-default/25 mt-2 rounded-md border px-3 py-2 font-mono text-xs leading-relaxed break-words"
+            >
               {recordingError}
             </div>
           </details>
         {:else}
           <button
-            class="cursor-pointer text-xs font-medium underline underline-offset-2 transition-colors text-negative-default hover:text-negative-stronger text-left"
+            class="text-negative-default hover:text-negative-stronger cursor-pointer text-left text-xs font-medium underline underline-offset-2 transition-colors"
             on:click={() => {
               console.warn("Recording diagnostics:", recordingStats);
               toast.info(m.diagnostics_logged_console());
@@ -537,13 +543,7 @@
         {/if}
       </div>
     {:else if audioURL}
-      <audio
-        controls
-        preload="metadata"
-        src={audioURL}
-        class="audio-player"
-        dir="ltr"
-      ></audio>
+      <audio controls preload="metadata" src={audioURL} class="audio-player" dir="ltr"></audio>
     {:else}
       <div class="volume-container">
         <div class="volume-track">
@@ -628,7 +628,7 @@
   }
 
   .recording-widget[data-state="error"] {
-    @apply bg-negative-dimmer border-negative-default/40 rounded-2xl max-w-sm border;
+    @apply bg-negative-dimmer border-negative-default/40 max-w-sm rounded-2xl border;
   }
 
   .recording-widget[data-state="processing"] {
@@ -681,7 +681,7 @@
   }
 
   .size-display {
-    @apply text-xs opacity-80 whitespace-nowrap;
+    @apply text-xs whitespace-nowrap opacity-80;
   }
 
   /* Size limit progress bar */

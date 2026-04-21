@@ -15,6 +15,7 @@
   import { getAdminUserCtx } from "../ctx";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const intric = getIntric();
 
@@ -40,7 +41,7 @@
       roles: Role[];
       user_groups: UserGroup[];
     };
-    showDialog: Dialog.OpenState; // For parent component control (used in UserActions dropdown)
+    showDialog?: Dialog.OpenState; // For parent component control (used in UserActions dropdown)
   };
 
   let {
@@ -83,9 +84,9 @@
       // Invalidate does not update the user and userPassword values in this component, so we need to update
       user = editableUser;
       userPassword = "";
-      showDialog.set(false);
+      showDialog?.set(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
     }
   }
 
@@ -104,9 +105,9 @@
       editableUser.updateWithValue(createEmptyUser());
       userPassword = "";
       invalidate("admin:users:load");
-      showDialog.set(false);
+      showDialog?.set(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
     }
   }
 </script>

@@ -43,8 +43,8 @@ export function initMCPServers(client) {
      * @param {"sse" | "streamable_http"} [params.transport_type] Transport type (default: sse)
      * @param {"none" | "bearer"} [params.http_auth_type] Authentication type (default: none)
      * @param {string} [params.description] Description
-     * @param {Object} [params.http_auth_config_schema] Authentication configuration
-     * @param {Object} [params.config_schema] JSON schema for configuration
+     * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
+     * @param {{[key: string]: unknown} | null} [params.config_schema] JSON schema for configuration
      * @param {string[]} [params.tags] Tags for categorization
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
@@ -64,22 +64,24 @@ export function initMCPServers(client) {
       documentation_url,
       security_classification
     }) => {
+      /** @type {any} */
+      const body = {
+        name,
+        http_url,
+        transport_type,
+        http_auth_type,
+        description,
+        http_auth_config_schema,
+        config_schema,
+        tags,
+        icon_url,
+        documentation_url,
+        security_classification
+      };
       const res = await client.fetch("/api/v1/mcp-servers/", {
         method: "post",
         requestBody: {
-          "application/json": {
-            name,
-            http_url,
-            transport_type,
-            http_auth_type,
-            description,
-            http_auth_config_schema,
-            config_schema,
-            tags,
-            icon_url,
-            documentation_url,
-            security_classification
-          }
+          "application/json": body
         }
       });
       return res;
@@ -94,8 +96,8 @@ export function initMCPServers(client) {
      * @param {"sse" | "streamable_http"} [params.transport_type] Transport type
      * @param {"none" | "bearer"} [params.http_auth_type] Authentication type
      * @param {string} [params.description] Description
-     * @param {Object} [params.http_auth_config_schema] Authentication configuration
-     * @param {Object} [params.config_schema] JSON schema for configuration
+     * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
+     * @param {{[key: string]: unknown} | null} [params.config_schema] JSON schema for configuration
      * @param {string[]} [params.tags] Tags for categorization
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
@@ -116,25 +118,27 @@ export function initMCPServers(client) {
       documentation_url,
       security_classification
     }) => {
+      /** @type {any} */
+      const body = {
+        name,
+        http_url,
+        transport_type,
+        http_auth_type,
+        description,
+        http_auth_config_schema,
+        config_schema,
+        tags,
+        icon_url,
+        documentation_url,
+        security_classification
+      };
       const res = await client.fetch("/api/v1/mcp-servers/{id}/", {
         method: "post",
         params: {
           path: { id }
         },
         requestBody: {
-          "application/json": {
-            name,
-            http_url,
-            transport_type,
-            http_auth_type,
-            description,
-            http_auth_config_schema,
-            config_schema,
-            tags,
-            icon_url,
-            documentation_url,
-            security_classification
-          }
+          "application/json": body
         }
       });
       return res;
@@ -171,7 +175,7 @@ export function initMCPServers(client) {
      * Enable an MCP server for the current tenant.
      * @param {Object} params
      * @param {string} params.mcp_server_id The MCP server ID to enable
-     * @param {Object} [params.env_vars] Environment variables/credentials for this MCP
+     * @param {{[key: string]: unknown} | null} [params.env_vars] Environment variables/credentials for this MCP
      * @throws {IntricError}
      * */
     enable: async ({ mcp_server_id, env_vars }) => {
@@ -194,7 +198,7 @@ export function initMCPServers(client) {
      * @param {Object} params
      * @param {string} params.mcp_server_id The MCP server ID
      * @param {boolean} [params.is_org_enabled] Enable/disable the MCP
-     * @param {Object} [params.env_vars] Environment variables/credentials
+     * @param {{[key: string]: unknown} | null} [params.env_vars] Environment variables/credentials
      * @throws {IntricError}
      * */
     updateSettings: async ({ mcp_server_id, is_org_enabled, env_vars }) => {
@@ -235,10 +239,10 @@ export function initMCPServers(client) {
      * @throws {IntricError}
      * */
     listTools: async ({ mcp_server_id }) => {
-      const res = await client.fetch("/api/v1/mcp-servers/{mcp_server_id}/tools/", {
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/tools/", {
         method: "get",
         params: {
-          path: { mcp_server_id }
+          path: { id: mcp_server_id }
         }
       });
       return res;
@@ -251,10 +255,10 @@ export function initMCPServers(client) {
      * @throws {IntricError}
      * */
     syncTools: async ({ mcp_server_id }) => {
-      const res = await client.fetch("/api/v1/mcp-servers/{mcp_server_id}/tools/sync/", {
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/tools/sync/", {
         method: "post",
         params: {
-          path: { mcp_server_id }
+          path: { id: mcp_server_id }
         }
       });
       return res;
@@ -269,10 +273,10 @@ export function initMCPServers(client) {
      * @throws {IntricError}
      * */
     updateToolEnabled: async ({ mcp_server_id, tool_id, is_enabled }) => {
-      const res = await client.fetch("/api/v1/mcp-servers/{mcp_server_id}/tools/{tool_id}/", {
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/tools/{tool_id}/", {
         method: "put",
         params: {
-          path: { mcp_server_id, tool_id }
+          path: { id: mcp_server_id, tool_id }
         },
         requestBody: {
           "application/json": {
@@ -291,9 +295,9 @@ export function initMCPServers(client) {
      * @throws {IntricError}
      * */
     approveToolChanges: async ({ mcp_server_id, tool_ids }) => {
-      const res = await client.fetch("/api/v1/mcp-servers/{mcp_server_id}/tools/review/approve/", {
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/tools/review/approve/", {
         method: "post",
-        params: { path: { mcp_server_id } },
+        params: { path: { id: mcp_server_id } },
         requestBody: { "application/json": { tool_ids } }
       });
       return res;
@@ -307,9 +311,9 @@ export function initMCPServers(client) {
      * @throws {IntricError}
      * */
     rejectToolChanges: async ({ mcp_server_id, tool_ids }) => {
-      const res = await client.fetch("/api/v1/mcp-servers/{mcp_server_id}/tools/review/reject/", {
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/tools/review/reject/", {
         method: "post",
-        params: { path: { mcp_server_id } },
+        params: { path: { id: mcp_server_id } },
         requestBody: { "application/json": { tool_ids } }
       });
       return res;
@@ -322,13 +326,10 @@ export function initMCPServers(client) {
      * @throws {IntricError}
      * */
     approveAllToolChanges: async ({ mcp_server_id }) => {
-      const res = await client.fetch(
-        "/api/v1/mcp-servers/{mcp_server_id}/tools/review/approve-all/",
-        {
-          method: "post",
-          params: { path: { mcp_server_id } }
-        }
-      );
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/tools/review/approve-all/", {
+        method: "post",
+        params: { path: { id: mcp_server_id } }
+      });
       return res;
     },
 

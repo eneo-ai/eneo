@@ -12,7 +12,9 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.asyncio
-async def test_audit_logs_requires_authentication(client, test_tenant, test_user, db_session):
+async def test_audit_logs_requires_authentication(
+    client, test_tenant, test_user, db_session
+):
     """Test that audit endpoints require authentication."""
     # Create a log first
     async with db_session() as session:
@@ -35,7 +37,9 @@ async def test_audit_logs_requires_authentication(client, test_tenant, test_user
 
 
 @pytest.mark.asyncio
-async def test_audit_logs_rejects_super_admin_key(client, test_tenant, test_user, db_session, super_admin_token):
+async def test_audit_logs_rejects_super_admin_key(
+    client, test_tenant, test_user, db_session, super_admin_token
+):
     """Test that audit endpoints reject super admin API key (no tenant context)."""
     # Create a log
     async with db_session() as session:
@@ -54,8 +58,7 @@ async def test_audit_logs_rejects_super_admin_key(client, test_tenant, test_user
 
     # Query with super admin API key (should fail - no tenant context)
     response = await client.get(
-        "/api/v1/audit/logs",
-        headers={"X-API-Key": super_admin_token}
+        "/api/v1/audit/logs", headers={"X-API-Key": super_admin_token}
     )
 
     # Super admin key has no tenant, so audit endpoints correctly reject it

@@ -14,20 +14,22 @@ from pydantic import (
     computed_field,
     field_validator,
 )
+from typing_extensions import TypedDict
 
 from intric.ai_models.completion_models.completion_model import (
-    CompletionModel,
+    Completion,
+    CompletionModelPublic,
     CompletionModelSparse,
     ModelKwargs,
 )
 from intric.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
 from intric.collections.presentation.collection_models import CollectionPublic
+from intric.completion_models.domain.completion_model import CompletionModel
 from intric.completion_models.infrastructure.web_search import WebSearchResult
 from intric.files.file_models import File, FilePublic, FileRestrictions
 from intric.groups_legacy.api.group_models import GroupInDBBase
-from intric.info_blobs.info_blob import InfoBlobInDBNoText
+from intric.info_blobs.info_blob import InfoBlobInDBWithScore
 from intric.integration.presentation.models import IntegrationKnowledgePublic
-from intric.main.config import get_settings
 from intric.main.models import (
     NOT_PROVIDED,
     InDB,
@@ -64,37 +66,6 @@ class ModelInfo(BaseModel):
         return self.max_input_tokens
 
 
-class TokenEstimateRequest(BaseModel):
-    """Request payload for estimating tokens."""
-
-    text: str = Field(default="", description="User input text to evaluate")
-    file_ids: list[UUID] = Field(
-        default_factory=list, description="List of file IDs to include in the estimate"
-    )
-
-
-class TokenEstimateBreakdown(BaseModel):
-    """Breakdown of token usage by source."""
-
-    prompt: int = Field(description="Tokens used by assistant prompt")
-    text: int = Field(description="Tokens used by user input text")
-    files: int = Field(description="Total tokens used by all files")
-    file_details: dict[str, int] = Field(
-        default_factory=dict, description="Per-file token counts"
-    )
-
-
-class TokenEstimateResponse(BaseModel):
-    """Response model for token usage estimation."""
-
-    tokens: int = Field(description="Total token count")
-    percentage: float = Field(description="Percentage of context window used")
-    limit: int = Field(description="Model's context window limit")
-    breakdown: TokenEstimateBreakdown = Field(
-        description="Token usage breakdown by source"
-    )
-
-
 # Relationship models
 class GroupWithEmbeddingModel(GroupInDBBase):
     embedding_model: Optional[EmbeddingModelLegacy] = None
@@ -107,14 +78,38 @@ class AssistantGuard(BaseModel):
     on_fail_message: str = "Jag kan tyvärr inte svara på det. Fråga gärna något annat!"
 
 
+class MCPServerPublicDict(TypedDict):
+    id: str
+    name: str
+    description: str | None
+    http_url: str | None
+    http_auth_type: str | None
+    tags: list[str] | None
+    icon_url: str | None
+    security_classification: dict[str, object] | None
+    tools: list[dict[str, object]]
+
+
+def _empty_uuid_list() -> list[UUID]:
+    return []
+
+
+def _empty_mcp_server_public_dict_list() -> list[MCPServerPublicDict]:
+    return []
+
+
+def _empty_mcp_tool_setting_list() -> list[MCPToolSetting]:
+    return []
+
+
 class AssistantBase(BaseModel):
     name: str
-    completion_model_kwargs: ModelKwargs = Field(default_factory=ModelKwargs)
-    logging_enabled: bool = False
+    completion_model_kwargs: ModelKwargs | None = Field(default_factory=ModelKwargs)
+    logging_enabled: bool | None = False
 
     @field_validator("completion_model_kwargs", mode="before")
     @classmethod
-    def set_model_kwargs(cls, model_kwargs):
+    def set_model_kwargs(cls, model_kwargs: ModelKwargs | None):
         return model_kwargs or ModelKwargs()
 
 
@@ -126,22 +121,22 @@ class AssistantCreatePublic(AssistantBase):
         description="This field is deprecated and will be ignored",
     )
     groups: list[ModelId] = Field(
-        default=[],
+        default_factory=lambda: list[ModelId](),
         deprecated=True,
         description="This field is deprecated and will be ignored",
     )
     websites: list[ModelId] = Field(
-        default=[],
+        default_factory=lambda: list[ModelId](),
         deprecated=True,
         description="This field is deprecated and will be ignored",
     )
     integration_knowledge_list: list[ModelId] = Field(
-        default=[],
+        default_factory=lambda: list[ModelId](),
         deprecated=True,
         description="This field is deprecated and will be ignored",
     )
     mcp_servers: list[ModelId] = Field(
-        default=[],
+        default_factory=lambda: list[ModelId](),
         deprecated=True,
         description="This field is deprecated and will be ignored",
     )
@@ -171,8 +166,12 @@ class AssistantCreatePublic(AssistantBase):
 class AssistantUpdatePublic(AssistantCreatePublic):
     prompt: Optional[PromptCreate] = None
     attachments: Optional[list[ModelId]] = None
+    groups: Optional[list[ModelId]] = None  # type: ignore[assignment]
+    websites: Optional[list[ModelId]] = None  # type: ignore[assignment]
+    integration_knowledge_list: Optional[list[ModelId]] = None  # type: ignore[assignment]
+    mcp_servers: Optional[list[ModelId]] = None  # type: ignore[assignment]
     mcp_tools: Optional[list[MCPToolSetting]] = None
-    description: Optional[str] = Field(
+    description: Optional[str] = Field(  # type: ignore[call-overload]
         default=NOT_PROVIDED,
         description=(
             "A description of the assitant that will be used as "
@@ -188,7 +187,7 @@ class AssistantUpdatePublic(AssistantCreatePublic):
         ),
     )
     data_retention_days: Optional[int] = None
-    metadata_json: Optional[dict] = Field(
+    metadata_json: Union[dict[str, object], None, NotProvided] = Field(
         default=NOT_PROVIDED,
         description="Metadata for the assistant",
     )
@@ -202,8 +201,8 @@ class AssistantCreate(AssistantBase):
     prompt: Optional[PromptCreate] = None
     space_id: UUID
     user_id: UUID
-    groups: list[ModelId] = []
-    websites: list[ModelId] = []
+    groups: list[UUID] = Field(default_factory=_empty_uuid_list)
+    websites: list[UUID] = Field(default_factory=_empty_uuid_list)
     guardrail_active: Optional[bool] = None
     completion_model_id: UUID = Field(
         validation_alias=AliasChoices(
@@ -221,14 +220,14 @@ class AssistantPublicBase(InDB):
     name: str
     prompt: PromptCreate
     completion_model_kwargs: Optional[ModelKwargs] = None
-    logging_enabled: bool
+    logging_enabled: bool | None
     space_id: Optional[UUID] = None
 
 
 class AskAssistant(BaseModel):
     question: str
     session_id: Optional[UUID] = None  # Add optional session_id field
-    files: list[ModelId] = Field(max_length=get_settings().max_in_question, default=[])
+    files: list[UUID] = Field(default_factory=_empty_uuid_list)
     stream: bool = False
     tools: Optional[UseTools] = None
 
@@ -240,9 +239,9 @@ class AssistantResponse(BaseModel):
     question: str
     question_id: Optional[UUID] = None
     files: list[File]
-    answer: str | AsyncIterable[str]
-    info_blobs: list[InfoBlobInDBNoText]
-    completion_model: CompletionModel
+    answer: str | AsyncIterable[Completion]
+    info_blobs: list[InfoBlobInDBWithScore]
+    completion_model: CompletionModel | CompletionModelPublic
     tools: UseTools
     web_search_results: list[WebSearchResult]
 
@@ -254,7 +253,7 @@ class AssistantSparse(ResourcePermissionsMixin, AssistantBase, InDB):
     user_id: UUID
     published: bool = False
     description: Optional[str] = None
-    metadata_json: Optional[dict] = Field(
+    metadata_json: Optional[dict[str, object]] = Field(
         default=None,
         description="Metadata for the assistant",
     )
@@ -274,15 +273,17 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     prompt: Optional[PromptPublic] = None
     space_id: UUID
     completion_model_kwargs: ModelKwargs
-    logging_enabled: bool
+    logging_enabled: bool | None
     attachments: list[FilePublic]
     allowed_attachments: FileRestrictions
     groups: list[CollectionPublic]
     websites: list[WebsitePublic]
     integration_knowledge_list: list[IntegrationKnowledgePublic]
-    mcp_servers: list[dict]  # Will be populated by assembler
+    mcp_servers: list[MCPServerPublicDict] = Field(
+        default_factory=_empty_mcp_server_public_dict_list
+    )
     mcp_tools: list[MCPToolSetting] = Field(
-        default_factory=list
+        default_factory=_empty_mcp_tool_setting_list
     )  # Tool-level overrides
     completion_model: Optional[CompletionModelSparse] = None
     published: bool = False
@@ -290,7 +291,7 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     tools: UseTools
     type: AssistantType
     model_info: Optional[ModelInfo] = None
-    description: Optional[str] = Field(
+    description: Optional[str] = Field(  # type: ignore[call-overload]
         default=None,
         description=(
             "A description of the assitant that will be used "
@@ -312,7 +313,7 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
         default=None,
         description="Number of days to retain data for this assistant",
     )
-    metadata_json: Optional[dict] = Field(
+    metadata_json: Optional[dict[str, object]] = Field(
         default=None,
         description="Metadata for the assistant",
     )

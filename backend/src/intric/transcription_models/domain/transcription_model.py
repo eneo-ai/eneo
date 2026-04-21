@@ -96,7 +96,7 @@ class TranscriptionModel(AIModel):
             hosting=transcription_model_db.hosting,
             org=transcription_model_db.org,
             stability=transcription_model_db.stability,
-            open_source=transcription_model_db.open_source,
+            open_source=transcription_model_db.open_source or False,
             description=transcription_model_db.description,
             hf_link=transcription_model_db.hf_link,
             base_url=transcription_model_db.base_url,

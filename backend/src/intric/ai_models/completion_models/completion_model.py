@@ -34,8 +34,10 @@ class ResponseType(str, Enum):
     INTRIC_EVENT = "intric_event"
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
+    TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
+    TOKEN_USAGE = "token_usage"
     ERROR = "error"
 
 
@@ -43,7 +45,7 @@ class ResponseType(str, Enum):
 class FunctionDefinition:
     name: str
     description: str
-    schema: dict
+    schema: dict[str, object]
 
 
 @dataclass
@@ -55,11 +57,16 @@ class FunctionCall:
 @dataclass
 class ToolCallMetadata:
     """Metadata for MCP tool calls to be rendered by frontend."""
+
     server_name: str
     tool_name: str
-    arguments: Optional[dict] = None  # The input values provided to the tool
+    arguments: Optional[dict[str, object]] = (
+        None  # The input values provided to the tool
+    )
     tool_call_id: Optional[str] = None  # The tool call ID for approval flow
     approved: Optional[bool] = None  # True=approved, False=denied, None=pending/auto
+    # Additive state field for richer clients; legacy `approved` remains authoritative.
+    result_status: Optional[str] = None
 
 
 @dataclass
@@ -81,7 +88,7 @@ class Completion:
 
 class CompletionModelBase(BaseModel):
     name: str
-    nickname: str
+    nickname: Optional[str] = None
     family: Optional[str] = None
     max_input_tokens: int
     max_output_tokens: int
@@ -218,7 +225,7 @@ class ModelKwargs(BaseModel):
     top_p: Optional[float] = None
     reasoning_effort: Optional[str] = None
     verbosity: Optional[str] = None
-    response_format: Optional[dict] = None
+    response_format: Optional[dict[str, object]] = None
     presence_penalty: Optional[float] = None
     frequency_penalty: Optional[float] = None
     top_k: Optional[int] = None

@@ -1,14 +1,14 @@
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
+
+from pydantic import HttpUrl
 
 from intric.main.exceptions import NotFoundException
 from intric.main.models import ModelId
 from intric.tenants.crawler_settings_helper import get_all_crawler_settings
 from intric.tenants.masking import mask_api_key
 from intric.tenants.provider_field_config import validate_provider_credentials
-from pydantic import HttpUrl
-
 from intric.tenants.tenant import (
     TenantBase,
     TenantInDB,
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from intric.ai_models.embedding_models.embedding_models_repo import (
         AdminEmbeddingModelsService,
     )
+    from intric.roles.roles_repo import RolesRepository
     from intric.transcription_models.infrastructure import (
         TranscriptionModelEnableService,
     )
@@ -36,8 +37,9 @@ class TenantService:
         completion_model_repo: "CompletionModelsRepository",
         embedding_model_repo: "AdminEmbeddingModelsService",
         transcription_model_enable_service: "TranscriptionModelEnableService",
-        role_repo=None,
+        role_repo: "RolesRepository | None" = None,
     ):
+        super().__init__()
         self.repo = repo
         self.completion_model_repo = completion_model_repo
         self.embedding_model_repo = embedding_model_repo
@@ -52,24 +54,26 @@ class TenantService:
     async def get_all_tenants(self, domain: str | None) -> list[TenantInDB]:
         return await self.repo.get_all_tenants(domain=domain)
 
-    async def get_tenant_by_id(self, id: UUID) -> TenantInDB:
+    async def get_tenant_by_id(self, id: UUID) -> TenantInDB | None:
         tenant = await self.repo.get(id)
         self._validate(tenant, id)
 
         return tenant
 
-    async def create_tenant(self, tenant: TenantBase) -> TenantInDB:
+    async def create_tenant(self, tenant: TenantBase) -> TenantInDB | None:
         tenant_in_db = await self.repo.add(tenant)
+        if tenant_in_db is None:
+            return None
 
         # Seed default roles from predefined templates
         if self.role_repo is not None:
+            from intric.roles.role import RoleCreate
             from intric.server.dependencies.predefined_roles import (
                 load_predefined_roles_from_config,
             )
-            from intric.roles.role import RoleCreate
 
             templates = load_predefined_roles_from_config()
-            user_role_id = None
+            user_role_id: UUID | None = None
             for template in templates:
                 role = RoleCreate(
                     name=template["name"],
@@ -84,6 +88,7 @@ class TenantService:
             # Set "User" as default role for new tenants
             if user_role_id:
                 from intric.tenants.tenant import TenantUpdate
+
                 await self.repo.update_tenant(
                     TenantUpdate(id=tenant_in_db.id, default_role_id=user_role_id)
                 )
@@ -91,18 +96,32 @@ class TenantService:
 
         return tenant_in_db
 
-    async def delete_tenant(self, tenant_id: UUID) -> TenantInDB:
+    async def delete_tenant(self, tenant_id: UUID) -> TenantInDB | None:
         tenant = await self.get_tenant_by_id(tenant_id)
         self._validate(tenant, tenant_id)
 
         return await self.repo.delete_tenant_by_id(tenant_id)
 
-    async def update_tenant(self, tenant_update: TenantUpdatePublic, id: UUID) -> TenantInDB:
+    async def update_tenant(
+        self, tenant_update: TenantUpdatePublic, id: UUID
+    ) -> TenantInDB:
         tenant = await self.get_tenant_by_id(id)
         self._validate(tenant, id)
+        assert tenant is not None
 
-        tenant_update = TenantUpdate(**tenant_update.model_dump(exclude_unset=True), id=tenant.id)
+        tenant_update = TenantUpdate(
+            **tenant_update.model_dump(exclude_unset=True), id=tenant.id
+        )
         return await self.repo.update_tenant(tenant_update)
+
+    async def update_api_key_policy(
+        self,
+        tenant_id: UUID,
+        policy_updates: dict[str, Any],
+    ) -> TenantInDB:
+        tenant = await self.get_tenant_by_id(tenant_id)
+        self._validate(tenant, tenant_id)
+        return await self.repo.update_api_key_policy(tenant_id, policy_updates)
 
     async def add_modules(self, list_of_module_ids: list[ModelId], tenant_id: UUID):
         return await self.repo.add_modules(list_of_module_ids, tenant_id)
@@ -146,13 +165,22 @@ class TenantService:
 
         # Create a simple validation object
         class CredentialData:
-            def __init__(self, api_key, endpoint, api_version, deployment_name):
+            def __init__(
+                self,
+                api_key: str,
+                endpoint: str | None,
+                api_version: str | None,
+                deployment_name: str | None,
+            ) -> None:
+                super().__init__()
                 self.api_key = api_key
                 self.endpoint = endpoint
                 self.api_version = api_version
                 self.deployment_name = deployment_name
 
-        credential_data = CredentialData(api_key, endpoint, api_version, deployment_name)
+        credential_data = CredentialData(
+            api_key, endpoint, api_version, deployment_name
+        )
 
         # Validate provider-specific fields
         validation_errors = validate_provider_credentials(
@@ -184,16 +212,21 @@ class TenantService:
 
         # Extract timestamp from stored credential
         provider_key = provider.lower()
-        stored_credential = (
-            updated_tenant.api_credentials.get(provider_key, {})
+        raw_cred_value = (
+            updated_tenant.api_credentials.get(provider_key)
             if updated_tenant and updated_tenant.api_credentials
-            else {}
-        )
-
-        timestamp_raw = (
-            stored_credential.get("set_at")
-            if isinstance(stored_credential, dict)
             else None
+        )
+        stored_credential: dict[str, object]
+        if isinstance(raw_cred_value, dict):
+            # cast to typed dict at the JSONB boundary; keys are always str
+            stored_credential = cast(dict[str, object], raw_cred_value)
+        else:
+            stored_credential = {}
+
+        timestamp_candidate: object = stored_credential.get("set_at")
+        timestamp_raw: str | None = (
+            timestamp_candidate if isinstance(timestamp_candidate, str) else None
         )
 
         try:
@@ -275,6 +308,7 @@ class TenantService:
         # Validate tenant exists
         tenant = await self.repo.get(tenant_id)
         self._validate(tenant, tenant_id)
+        assert tenant is not None
 
         # Get credentials with metadata (masked keys + encryption status)
         credentials_metadata = await self.repo.get_api_credentials_with_metadata(
@@ -286,11 +320,17 @@ class TenantService:
         tenant_credentials = tenant.api_credentials or {}
 
         for provider, metadata in credentials_metadata.items():
-            credential_data = tenant_credentials.get(provider, {})
+            raw_cred_item = tenant_credentials.get(provider)
+            credential_data: dict[str, object]
+            if isinstance(raw_cred_item, dict):
+                # cast to typed dict at the JSONB boundary; keys are always str
+                credential_data = cast(dict[str, object], raw_cred_item)
+            else:
+                credential_data = {}
             config: dict[str, Any] = {}
-            configured_at: datetime = tenant.updated_at
+            configured_at: datetime | None = tenant.updated_at
 
-            if isinstance(credential_data, dict):
+            if credential_data:
                 # Extract config (all fields except sensitive ones)
                 config = {
                     k: v
@@ -298,24 +338,32 @@ class TenantService:
                     if k not in {"api_key", "encrypted_at", "set_at"}
                 }
 
-                # Extract timestamp
-                timestamp_candidate = metadata.get("set_at") or credential_data.get("set_at")
+                # Extract timestamp - prefer metadata.set_at, fall back to credential fields
+                ts_from_metadata = metadata.get("set_at") or ""
+                ts_from_cred_raw: object = credential_data.get("set_at")
+                ts_from_cred = (
+                    ts_from_cred_raw if isinstance(ts_from_cred_raw, str) else ""
+                )
+                timestamp_candidate = ts_from_metadata or ts_from_cred
                 if not timestamp_candidate:
-                    timestamp_candidate = credential_data.get("encrypted_at")
+                    enc_raw: object = credential_data.get("encrypted_at")
+                    timestamp_candidate = enc_raw if isinstance(enc_raw, str) else ""
 
-                if isinstance(timestamp_candidate, str):
+                if timestamp_candidate:
                     try:
                         configured_at = datetime.fromisoformat(timestamp_candidate)
                     except ValueError:
                         configured_at = tenant.updated_at
 
-            credentials.append({
-                "provider": provider,
-                "masked_key": metadata["masked_key"],
-                "configured_at": configured_at,
-                "encryption_status": metadata["encryption_status"],
-                "config": config,
-            })
+            credentials.append(
+                {
+                    "provider": provider,
+                    "masked_key": metadata["masked_key"],
+                    "configured_at": configured_at,
+                    "encryption_status": metadata["encryption_status"],
+                    "config": config,
+                }
+            )
 
         return credentials
 
@@ -358,6 +406,7 @@ class TenantService:
         )
 
         # Build response with defaults filled in using the helper
+        assert updated_tenant is not None
         effective_settings = get_all_crawler_settings(updated_tenant.crawler_settings)
 
         return {
@@ -392,6 +441,7 @@ class TenantService:
         # Validate tenant exists
         tenant = await self.repo.get(tenant_id)
         self._validate(tenant, tenant_id)
+        assert tenant is not None
 
         # Get tenant overrides
         overrides = tenant.crawler_settings or {}
@@ -427,6 +477,7 @@ class TenantService:
         # Validate tenant exists
         tenant = await self.repo.get(tenant_id)
         self._validate(tenant, tenant_id)
+        assert tenant is not None
 
         # Get keys before deletion
         deleted_keys = list((tenant.crawler_settings or {}).keys())
@@ -443,7 +494,7 @@ class TenantService:
         self,
         tenant_id: UUID,
         privacy_policy_url: HttpUrl | None,
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """
         Set privacy policy URL for a tenant.
 
@@ -470,7 +521,7 @@ class TenantService:
         self,
         tenant_id: UUID,
         enabled: bool,
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """
         Enable or disable security classifications for a tenant.
 

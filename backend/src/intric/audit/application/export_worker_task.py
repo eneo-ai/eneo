@@ -4,6 +4,7 @@ import os
 from uuid import UUID
 
 import redis.asyncio as aioredis
+from typing_extensions import TypedDict
 
 from intric.audit.application.audit_export_service import AuditExportService
 from intric.audit.application.audit_task_params import AuditExportTaskParams
@@ -16,12 +17,22 @@ from intric.main.logging import get_logger
 logger = get_logger(__name__)
 
 
+class AuditExportTaskResult(TypedDict, total=False):
+    job_id: str
+    status: str
+    file_path: str
+    file_size_bytes: int
+    total_records: int
+    processed_records: int
+    error_message: str
+
+
 async def export_audit_logs_task(
-    job_id: str,
-    params: dict,
+    job_id: UUID,
+    params: AuditExportTaskParams,
     session: AsyncSession,
     redis: aioredis.Redis,
-) -> dict:
+) -> AuditExportTaskResult:
     """
     Worker task to export audit logs to file.
 
@@ -40,10 +51,8 @@ async def export_audit_logs_task(
     """
     settings = get_settings()
     job_manager = ExportJobManager(redis)
-    job_uuid = UUID(job_id)
-
-    # Validate params
-    task_params = AuditExportTaskParams.from_dict(params)
+    job_uuid = job_id
+    task_params = params
 
     # Create export directory for tenant
     export_dir = settings.export_dir / str(task_params.tenant_id)
@@ -56,7 +65,7 @@ async def export_audit_logs_task(
     logger.info(
         "Starting export job",
         extra={
-            "job_id": job_id,
+            "job_id": str(job_id),
             "tenant_id": str(task_params.tenant_id),
             "format": task_params.format.value,
             "file_path": str(file_path),
@@ -106,7 +115,7 @@ async def export_audit_logs_task(
             if file_path.exists():
                 os.remove(file_path)
             return {
-                "job_id": job_id,
+                "job_id": str(job_id),
                 "status": "cancelled",
                 "processed_records": total_records,
             }
@@ -124,7 +133,7 @@ async def export_audit_logs_task(
         )
 
         return {
-            "job_id": job_id,
+            "job_id": str(job_id),
             "status": "completed",
             "file_path": str(file_path),
             "file_size_bytes": file_size,
@@ -154,7 +163,7 @@ async def export_audit_logs_task(
             os.remove(file_path)
 
         return {
-            "job_id": job_id,
+            "job_id": str(job_id),
             "status": "failed",
             "error_message": error_message,
         }

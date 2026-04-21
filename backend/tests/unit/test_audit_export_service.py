@@ -7,7 +7,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.application.audit_export_service import AuditExportService, ExportTooLargeError
+from intric.audit.application.audit_export_service import (
+    AuditExportService,
+    ExportTooLargeError,
+)
 
 
 def make_raw_log_dict(
@@ -110,7 +113,9 @@ class TestExportCsv:
         assert "Metadata" in result
 
     @pytest.mark.asyncio
-    async def test_export_csv_with_logs(self, export_service, mock_repository, sample_log_dict):
+    async def test_export_csv_with_logs(
+        self, export_service, mock_repository, sample_log_dict
+    ):
         """export_csv() should include log data in CSV format."""
         mock_repository.stream_logs_raw = make_stream_mock([sample_log_dict])
 
@@ -122,7 +127,9 @@ class TestExportCsv:
         assert "User test@example.com created" in result
 
     @pytest.mark.asyncio
-    async def test_export_csv_sanitizes_description(self, export_service, mock_repository):
+    async def test_export_csv_sanitizes_description(
+        self, export_service, mock_repository
+    ):
         """export_csv() should sanitize descriptions starting with dangerous chars."""
         log_with_formula = make_raw_log_dict(description="=SUM(A1:A10)")
         mock_repository.stream_logs_raw = make_stream_mock([log_with_formula])
@@ -143,7 +150,9 @@ class TestExportCsv:
         assert "Timestamp" in lines[0]
 
     @pytest.mark.asyncio
-    async def test_export_csv_with_user_id_filter(self, export_service, mock_repository, sample_log_dict):
+    async def test_export_csv_with_user_id_filter(
+        self, export_service, mock_repository, sample_log_dict
+    ):
         """export_csv() with user_id should use stream_user_logs_raw (GDPR export)."""
         mock_repository.stream_user_logs_raw = make_stream_mock([sample_log_dict])
         user_id = uuid4()
@@ -154,7 +163,9 @@ class TestExportCsv:
         mock_repository.stream_logs_raw.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_export_csv_respects_max_records_limit(self, export_service, mock_repository, sample_log_dict):
+    async def test_export_csv_respects_max_records_limit(
+        self, export_service, mock_repository, sample_log_dict
+    ):
         """export_csv() should stop at max_records limit."""
         # Return 100 logs but limit to 5
         logs = [make_raw_log_dict() for _ in range(100)]
@@ -179,7 +190,9 @@ class TestExportJsonl:
         )
 
     @pytest.mark.asyncio
-    async def test_export_jsonl_format(self, export_service, mock_repository, sample_log_dict):
+    async def test_export_jsonl_format(
+        self, export_service, mock_repository, sample_log_dict
+    ):
         """export_jsonl() should output one JSON object per line."""
         import json
 
@@ -196,7 +209,9 @@ class TestExportJsonl:
             assert "actor_id" in parsed
 
     @pytest.mark.asyncio
-    async def test_export_jsonl_includes_all_fields(self, export_service, mock_repository, sample_log_dict):
+    async def test_export_jsonl_includes_all_fields(
+        self, export_service, mock_repository, sample_log_dict
+    ):
         """export_jsonl() should include all log fields."""
         import json
 
@@ -206,9 +221,15 @@ class TestExportJsonl:
         parsed = json.loads(result.strip())
 
         expected_fields = [
-            "timestamp", "actor_id", "actor_type", "action",
-            "entity_type", "entity_id", "description", "outcome",
-            "metadata"
+            "timestamp",
+            "actor_id",
+            "actor_type",
+            "action",
+            "entity_type",
+            "entity_id",
+            "description",
+            "outcome",
+            "metadata",
         ]
         for field in expected_fields:
             assert field in parsed
@@ -222,7 +243,9 @@ class TestExportJsonl:
         assert result == ""
 
     @pytest.mark.asyncio
-    async def test_export_jsonl_respects_max_records(self, export_service, mock_repository, sample_log_dict):
+    async def test_export_jsonl_respects_max_records(
+        self, export_service, mock_repository, sample_log_dict
+    ):
         """export_jsonl() should stop at max_records limit."""
         logs = [make_raw_log_dict() for _ in range(100)]
         mock_repository.stream_logs_raw = make_stream_mock(logs)
@@ -233,7 +256,9 @@ class TestExportJsonl:
         assert len(lines) == 5
 
     @pytest.mark.asyncio
-    async def test_export_jsonl_with_user_id_filter(self, export_service, mock_repository, sample_log_dict):
+    async def test_export_jsonl_with_user_id_filter(
+        self, export_service, mock_repository, sample_log_dict
+    ):
         """export_jsonl() with user_id should use stream_user_logs_raw (GDPR export)."""
         mock_repository.stream_user_logs_raw = make_stream_mock([sample_log_dict])
         user_id = uuid4()
@@ -307,7 +332,9 @@ class TestDatetimeHandling:
         }
 
     @pytest.mark.asyncio
-    async def test_handles_native_datetime_objects(self, export_service, mock_repository):
+    async def test_handles_native_datetime_objects(
+        self, export_service, mock_repository
+    ):
         """export_csv() should correctly serialize native datetime objects."""
         ts = datetime(2024, 6, 15, 14, 30, 45, tzinfo=timezone.utc)
         log = self.make_log_with_datetime(ts)
@@ -362,7 +389,9 @@ class TestGeneratorExports:
         return [make_raw_log_dict() for _ in range(5)]
 
     @pytest.mark.asyncio
-    async def test_export_csv_stream_yields_header_first(self, export_service, mock_repository):
+    async def test_export_csv_stream_yields_header_first(
+        self, export_service, mock_repository
+    ):
         """export_csv_stream() should yield header as first chunk."""
         mock_repository.stream_logs_raw = make_stream_mock([])
 
@@ -418,7 +447,9 @@ class TestGeneratorExports:
         mock_repository.stream_logs_raw = make_stream_mock(logs)
 
         chunks = []
-        async for chunk in export_service.export_csv_stream(tenant_id=uuid4(), max_records=5):
+        async for chunk in export_service.export_csv_stream(
+            tenant_id=uuid4(), max_records=5
+        ):
             chunks.append(chunk)
 
         full_content = "".join(chunks)
@@ -452,7 +483,9 @@ class TestGeneratorExports:
             assert "actor_id" in parsed
 
     @pytest.mark.asyncio
-    async def test_export_jsonl_stream_empty_result(self, export_service, mock_repository):
+    async def test_export_jsonl_stream_empty_result(
+        self, export_service, mock_repository
+    ):
         """export_jsonl_stream() should yield nothing for empty dataset."""
         mock_repository.stream_logs_raw = make_stream_mock([])
 
@@ -486,7 +519,9 @@ class TestGeneratorExports:
         mock_repository.stream_logs_raw = make_stream_mock(logs)
 
         chunks = []
-        async for chunk in export_service.export_jsonl_stream(tenant_id=uuid4(), max_records=5):
+        async for chunk in export_service.export_jsonl_stream(
+            tenant_id=uuid4(), max_records=5
+        ):
             chunks.append(chunk)
 
         full_content = b"".join(chunks).decode("utf-8")
@@ -502,7 +537,9 @@ class TestGeneratorExports:
         user_id = uuid4()
 
         chunks = []
-        async for chunk in export_service.export_csv_stream(tenant_id=uuid4(), user_id=user_id):
+        async for chunk in export_service.export_csv_stream(
+            tenant_id=uuid4(), user_id=user_id
+        ):
             chunks.append(chunk)
 
         mock_repository.stream_user_logs_raw.assert_called()
@@ -517,7 +554,9 @@ class TestGeneratorExports:
         user_id = uuid4()
 
         chunks = []
-        async for chunk in export_service.export_jsonl_stream(tenant_id=uuid4(), user_id=user_id):
+        async for chunk in export_service.export_jsonl_stream(
+            tenant_id=uuid4(), user_id=user_id
+        ):
             chunks.append(chunk)
 
         mock_repository.stream_user_logs_raw.assert_called()
@@ -562,7 +601,9 @@ class TestOomProtection:
     async def test_export_csv_skips_check_with_max_records(self, mock_repository):
         """export_csv() should skip OOM check when max_records is set."""
         mock_repository.count_logs = AsyncMock(return_value=500_000)  # Would fail
-        mock_repository.stream_logs_raw = make_stream_mock([make_raw_log_dict() for _ in range(5)])
+        mock_repository.stream_logs_raw = make_stream_mock(
+            [make_raw_log_dict() for _ in range(5)]
+        )
 
         service = AuditExportService(mock_repository)
 
@@ -577,7 +618,9 @@ class TestOomProtection:
     async def test_export_jsonl_skips_check_with_max_records(self, mock_repository):
         """export_jsonl() should skip OOM check when max_records is set."""
         mock_repository.count_logs = AsyncMock(return_value=500_000)  # Would fail
-        mock_repository.stream_logs_raw = make_stream_mock([make_raw_log_dict() for _ in range(3)])
+        mock_repository.stream_logs_raw = make_stream_mock(
+            [make_raw_log_dict() for _ in range(3)]
+        )
 
         service = AuditExportService(mock_repository)
 

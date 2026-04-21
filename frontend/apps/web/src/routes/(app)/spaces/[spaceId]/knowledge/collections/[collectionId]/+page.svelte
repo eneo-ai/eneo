@@ -40,7 +40,8 @@
       placement="left"
     >
       <Page.Flex>
-        <BlobCreate disabled={$disabledModelInUse || data.readonly} collection={data.collection}></BlobCreate>
+        <BlobCreate disabled={$disabledModelInUse || data.readonly} collection={data.collection}
+        ></BlobCreate>
         <BlobUpload
           disabled={$disabledModelInUse || data.readonly}
           collection={data.collection}

@@ -20,6 +20,7 @@
   import { localizeHref } from "$lib/paraglide/runtime";
   import { fade, fly } from "svelte/transition";
   import { quadInOut } from "svelte/easing";
+  import { untrack } from "svelte";
 
   dayjs.extend(utc);
 
@@ -30,7 +31,7 @@
 
   const attachmentUrlService = getAttachmentUrlService();
 
-  let result = $state(data.result);
+  let result = $state(untrack(() => data.result));
   const resultTitle = $derived(getResultTitle(result));
 
   async function downloadAsText(text?: string | null) {
@@ -139,10 +140,12 @@
     class="bg-primary sticky top-0 z-10 flex items-center justify-between px-3.5 py-3 backdrop-blur-md"
     in:fade={{ duration: 50 }}
   >
+    <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing with dynamic app ID -->
     <a
       href={localizeHref(`/dashboard/app/${data.app.id}`)}
       class="flex max-w-[calc(100%_-_7rem)] flex-grow items-center rounded-lg"
     >
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
       <span
         class="border-default hover:bg-hover-dimmer flex h-8 w-8 items-center justify-center rounded-lg border"
         >←</span
@@ -159,7 +162,11 @@
         {resultTitle}
       </h1>
     </a>
-    <Button variant="primary" href={localizeHref(`/dashboard/app/${data.app.id}`)} class="!rounded-lg !px-5 !py-1">
+    <Button
+      variant="primary"
+      href={localizeHref(`/dashboard/app/${data.app.id}`)}
+      class="!rounded-lg !px-5 !py-1"
+    >
       {m.new_run()}
     </Button>
   </div>
@@ -241,8 +248,8 @@
         <div class="flex flex-col items-center justify-center gap-4 py-8">
           <span class="text-secondary">{m.app_run_failed_files_list()}</span>
           {#each result.input.files as file (file.id)}
-            {#await intric.files.url({ id: file.id, download: true }) then fileUrl}
-              <Button href={fileUrl} variant="outlined">
+            {#await intric.files.generateSignedUrl( { fileId: file.id, expiresIn: 3600, contentDisposition: "attachment" } ) then signedFile}
+              <Button href={signedFile.url} variant="outlined">
                 <IconDownload />
                 {m.download()} "{file.name}"
               </Button>
@@ -265,7 +272,9 @@
       <div class="mt-4 flex flex-col gap-2">
         <span class="text-secondary text-sm font-medium">{m.input_files()}</span>
         {#each result.input.files as file (file.id)}
-          <div class="border-default bg-primary flex items-center gap-2 rounded-lg border px-4 py-3">
+          <div
+            class="border-default bg-primary flex items-center gap-2 rounded-lg border px-4 py-3"
+          >
             <UploadedFileIcon class="min-w-6" {file} />
             <span class="truncate">{file.name}</span>
           </div>

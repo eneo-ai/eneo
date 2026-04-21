@@ -42,6 +42,7 @@ def patch_settings(monkeypatch):
 @pytest.fixture
 def protocol(tmp_path):
     file_size_service = MagicMock()
+
     # save_file_to_disk returns a real temp file path
     async def fake_save(file):
         dest = tmp_path / "uploaded"
@@ -67,7 +68,9 @@ def protocol(tmp_path):
 def _make_upload(content_type: str, size: int) -> UploadFile:
     """Create an UploadFile with a file object that reports the given size."""
     data = BytesIO(b"x" * min(size, 1024))  # don't allocate huge buffers
-    upload = UploadFile(file=data, filename="test_file", headers={"content-type": content_type})
+    upload = UploadFile(
+        file=data, filename="test_file", headers={"content-type": content_type}
+    )
     return upload, size
 
 
@@ -164,7 +167,14 @@ async def test_audio_50mb_accepted(protocol):
 @pytest.mark.asyncio
 async def test_to_domain_routes_audio_mime_types(protocol):
     """All audio MIME types should route through audio_to_domain."""
-    for mime in ["audio/mpeg", "audio/mp3", "audio/wav", "audio/ogg", "audio/webm", "video/webm"]:
+    for mime in [
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/wav",
+        "audio/ogg",
+        "audio/webm",
+        "video/webm",
+    ]:
         upload, size = _make_upload(mime, 1000)
         protocol.file_size_service.get_file_size.return_value = size
 

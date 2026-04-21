@@ -32,6 +32,7 @@ class RetentionService:
     """Service for managing audit log retention policies."""
 
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.session = session
 
     async def get_policy(self, tenant_id: UUID) -> RetentionPolicyModel:
@@ -113,7 +114,9 @@ class RetentionService:
         }
 
         if conversation_retention_enabled is not None:
-            update_values["conversation_retention_enabled"] = conversation_retention_enabled
+            update_values["conversation_retention_enabled"] = (
+                conversation_retention_enabled
+            )
 
         if conversation_retention_days is not None:
             update_values["conversation_retention_days"] = conversation_retention_days
@@ -138,9 +141,13 @@ class RetentionService:
                 "retention_days": retention_days,
             }
             if conversation_retention_enabled is not None:
-                create_values["conversation_retention_enabled"] = conversation_retention_enabled
+                create_values["conversation_retention_enabled"] = (
+                    conversation_retention_enabled
+                )
             if conversation_retention_days is not None:
-                create_values["conversation_retention_days"] = conversation_retention_days
+                create_values["conversation_retention_days"] = (
+                    conversation_retention_days
+                )
 
             query = (
                 insert(AuditRetentionPolicy)
@@ -162,7 +169,9 @@ class RetentionService:
         Returns:
             Number of logs purged
         """
-        from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+        from intric.audit.infrastructure.audit_log_repo_impl import (
+            AuditLogRepositoryImpl,
+        )
 
         # Get retention policy
         policy = await self.get_policy(tenant_id)

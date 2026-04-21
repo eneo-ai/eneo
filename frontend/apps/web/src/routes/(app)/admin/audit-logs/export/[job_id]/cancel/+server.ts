@@ -10,7 +10,7 @@ export const POST: RequestHandler = async (event) => {
     const { id_token, environment } = event.locals;
 
     if (!id_token || !environment.baseUrl) {
-      throw error(401, new Error("Unauthorized"));
+      throw error(401);
     }
 
     const jobId = event.params.job_id;
@@ -22,14 +22,14 @@ export const POST: RequestHandler = async (event) => {
     const response = await event.fetch(backendUrl.toString(), {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${id_token}`,
-      },
+        Authorization: `Bearer ${id_token}`
+      }
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Export cancel failed:", response.status, errorText);
-      throw error(response.status, new Error(`Failed to cancel export: ${response.statusText}`));
+      throw error(response.status);
     }
 
     const result = await response.json();
@@ -39,6 +39,6 @@ export const POST: RequestHandler = async (event) => {
     if (err instanceof Response) {
       throw err;
     }
-    throw error(500, new Error("Failed to cancel export"));
+    throw error(500);
   }
 };

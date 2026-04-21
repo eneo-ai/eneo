@@ -6,6 +6,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
   import { ArrowLeft, Loader2 } from "lucide-svelte";
 
@@ -39,7 +40,7 @@
   // Fallback fields when capabilities haven't loaded yet
   const fallbackFields: typeof providerFields = [
     { name: "api_key", required: true, secret: true, in: "credentials" },
-    { name: "endpoint", required: false, secret: false, in: "config" },
+    { name: "endpoint", required: false, secret: false, in: "config" }
   ];
 
   $: fields = providerFields ?? fallbackFields;
@@ -54,8 +55,9 @@
   }
 
   // Validation: name must be filled + all required fields
-  $: isValid = providerName.trim() !== "" &&
-    fields.every(f => !f.required || (fieldValues[f.name] ?? "").trim() !== "");
+  $: isValid =
+    providerName.trim() !== "" &&
+    fields.every((f) => !f.required || (fieldValues[f.name] ?? "").trim() !== "");
 
   // Auto-focus first input and prefill provider name on mount
   onMount(() => {
@@ -78,7 +80,7 @@
       gemini: "Google Gemini",
       cohere: "Cohere",
       mistral: "Mistral AI",
-      hosted_vllm: "vLLM",
+      hosted_vllm: "vLLM"
     };
     return knownLabels[type] ?? type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
@@ -88,7 +90,7 @@
       api_key: m.api_key(),
       endpoint: m.endpoint_url(),
       api_version: m.api_version(),
-      deployment_name: m.deployment_name(),
+      deployment_name: m.deployment_name()
     };
     return labels[name] ?? name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
@@ -96,13 +98,14 @@
   function getFieldPlaceholder(name: string): string {
     const placeholders: Record<string, string> = {
       api_key: m.enter_api_key(),
-      endpoint: providerType === "azure"
-        ? "https://your-resource.openai.azure.com"
-        : providerType === "hosted_vllm"
-          ? "https://your-vllm-server.com"
-          : "https://api.example.com/v1",
+      endpoint:
+        providerType === "azure"
+          ? "https://your-resource.openai.azure.com"
+          : providerType === "hosted_vllm"
+            ? "https://your-vllm-server.com"
+            : "https://api.example.com/v1",
       api_version: m.api_version_placeholder(),
-      deployment_name: m.deployment_name_placeholder(),
+      deployment_name: m.deployment_name_placeholder()
     };
     return placeholders[name] ?? "";
   }
@@ -146,14 +149,14 @@
         provider_type: providerType,
         credentials,
         config,
-        is_active: true,
+        is_active: true
       });
 
       toast.success(m.provider_created_success());
       dispatch("complete", { providerId: provider.id });
-    } catch (e: any) {
-      error = e.message || m.failed_to_create_provider();
-      toast.error(m.failed_to_create_provider());
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : m.failed_to_create_provider();
+      toastError(e, m.failed_to_create_provider());
     } finally {
       isSubmitting = false;
     }
@@ -166,11 +169,11 @@
 
 <div class="flex flex-col gap-6">
   <!-- Header with Provider Type -->
-  <div class="flex items-center gap-4 rounded-lg bg-surface-dimmer p-4">
+  <div class="bg-surface-dimmer flex items-center gap-4 rounded-lg p-4">
     <ProviderGlyph type={providerType} size="lg" />
     <div>
-      <h3 class="font-medium text-primary">{formatProviderLabel(providerType)}</h3>
-      <p class="text-sm text-muted">{m.enter_provider_credentials()}</p>
+      <h3 class="text-primary font-medium">{formatProviderLabel(providerType)}</h3>
+      <p class="text-muted text-sm">{m.enter_provider_credentials()}</p>
     </div>
   </div>
 
@@ -180,7 +183,10 @@
     </div>
   {/if}
 
-  <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4 p-4 rounded-lg border border-dimmer bg-surface-dimmer/30">
+  <form
+    on:submit|preventDefault={handleSubmit}
+    class="border-dimmer bg-surface-dimmer/30 flex flex-col gap-4 rounded-lg border p-4"
+  >
     <!-- Provider Name (always first) -->
     <div class="flex flex-col gap-2">
       <label for="cred-provider-name" class="text-sm font-medium">{m.provider_name()}</label>
@@ -202,7 +208,7 @@
         <label for="cred-{field.name}" class="text-sm font-medium">
           {formatFieldLabel(field.name)}
           {#if !field.required}
-            <span class="text-muted font-normal text-xs ml-1">(optional)</span>
+            <span class="text-muted ml-1 text-xs font-normal">(optional)</span>
           {/if}
         </label>
         <Input.Text
@@ -220,8 +226,12 @@
   </form>
 
   <!-- Navigation -->
-  <div class="flex items-center justify-between border-t border-dimmer pt-4">
-    <Button variant="outlined" on:click={handleBack} class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
+  <div class="border-dimmer flex items-center justify-between border-t pt-4">
+    <Button
+      variant="outlined"
+      on:click={handleBack}
+      class="focus-visible:ring-accent-default/70 focus-visible:ring-offset-surface gap-2 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:!outline-none"
+    >
       <ArrowLeft class="h-4 w-4" />
       {m.back()}
     </Button>
@@ -230,10 +240,10 @@
       variant="primary"
       on:click={handleSubmit}
       disabled={!isValid || isSubmitting}
-      class="focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/50 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
+      class="focus-visible:ring-accent-default/50 focus-visible:ring-offset-surface focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:!outline-none"
     >
       {#if isSubmitting}
-        <Loader2 class="h-4 w-4 animate-spin mr-2" />
+        <Loader2 class="mr-2 h-4 w-4 animate-spin" />
         {m.creating()}
       {:else}
         {m.create_and_continue()}

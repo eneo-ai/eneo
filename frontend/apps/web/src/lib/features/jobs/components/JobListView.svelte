@@ -31,7 +31,7 @@
               {/if}
             </div>
           {:else if job.status === "complete"}
-            <div class="flex flex-col items-end text-right gap-0.5 w-48">
+            <div class="flex w-48 flex-col items-end gap-0.5 text-right">
               <div class="text-positive-default font-medium">{m.done()}</div>
               {#if job.result_location}
                 <div class="text-secondary text-xs whitespace-normal">{job.result_location}</div>

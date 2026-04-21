@@ -1,6 +1,7 @@
 import { createContext } from "$lib/core/context";
 import { m } from "$lib/paraglide/messages";
 import { toast } from "$lib/components/toast";
+import { toastError } from "$lib/core/errors";
 import { type GroupSparse, type TemplateAdditionalField } from "@intric/intric-js";
 import { derived, get, writable } from "svelte/store";
 import { type Attachment } from "../attachments/AttachmentManager";
@@ -90,7 +91,7 @@ function createTemplateController(data: TemplateControllerParams) {
         const res = await adapter.createNew({ name: $name });
         onResourceCreated(res);
       } catch (e) {
-        toast.error(`Couldn't create ${$name}: ${e}`);
+        toastError(e);
       }
       return;
     }
@@ -154,7 +155,7 @@ function createTemplateController(data: TemplateControllerParams) {
       selectedAttachments.set([]);
       onResourceCreated(res);
     } catch (e) {
-      toast.error(`Couldn't create ${$name} from template ${$template.name}: ${e}`);
+      toastError(e);
     }
   }
 

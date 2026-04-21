@@ -8,7 +8,7 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { Dialog, Button, Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const { updateUserInfo } = getAppContext();
 
@@ -33,7 +33,7 @@
       await updateUserInfo({ firstName, lastName, displayName });
       $isOpen = false;
     } catch (e) {
-      toast.error(m.error_updating_user_info());
+      toastError(e, m.error_updating_user_info());
     }
   }
 

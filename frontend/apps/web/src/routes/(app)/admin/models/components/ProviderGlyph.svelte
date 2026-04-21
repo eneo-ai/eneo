@@ -19,10 +19,11 @@
   };
 
   // Glob import all image assets at build time — no hardcoded mapping needed
-  const logoModules = import.meta.glob(
-    "$lib/assets/provider-logos/*.{svg,png,jpg,jpeg,webp}",
-    { eager: true, query: "?url", import: "default" }
-  );
+  const logoModules = import.meta.glob("$lib/assets/provider-logos/*.{svg,png,jpg,jpeg,webp}", {
+    eager: true,
+    query: "?url",
+    import: "default"
+  });
 
   const logos: Record<string, string> = {};
   for (const [path, url] of Object.entries(logoModules)) {
@@ -47,8 +48,8 @@
     {sizeConfig.chip}
     {sizeConfig.radius}
     bg-surface-dimmer dark:bg-surface-dimmest
-    border border-dimmer
-    flex items-center justify-center
+    border-dimmer flex
+    items-center justify-center border
     shadow-[inset_0_1px_2px_oklch(0%_0_0/0.05)]
     transition-all duration-150 ease-out
     hover:translate-y-[-1px]
@@ -61,7 +62,10 @@
       src={logoUrl}
       alt={resolvedType}
       class="{sizeConfig.img} object-contain dark:brightness-90 dark:contrast-125"
-      class:dark-invert={resolvedType === "openai" || resolvedType === "anthropic" || resolvedType === "ollama" || resolvedType === "replicate"}
+      class:dark-invert={resolvedType === "openai" ||
+        resolvedType === "anthropic" ||
+        resolvedType === "ollama" ||
+        resolvedType === "replicate"}
     />
   {:else}
     <!-- Fallback: generic grid icon for unknown providers -->

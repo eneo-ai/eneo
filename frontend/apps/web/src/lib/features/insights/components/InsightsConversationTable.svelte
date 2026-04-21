@@ -13,9 +13,13 @@
   import { m } from "$lib/paraglide/messages";
 
   const insights = getInsightsService();
-  const table = Table.createWithStore(toStore(() => insights.conversations), 999999, {
-    serverSideFilter: true
-  });
+  const table = Table.createWithStore(
+    toStore(() => insights.conversations),
+    999999,
+    {
+      serverSideFilter: true
+    }
+  );
   const dateFormatter = new Intl.DateTimeFormat(undefined, {
     year: "numeric",
     month: "2-digit",
@@ -44,7 +48,7 @@
       accessor: (item) => item,
       cell: (item) => {
         return createRender(Table.FormattedCell, {
-          value: formatDate(item.value.created_at),
+          value: formatDate(item.value.created_at ?? ""),
           monospaced: true
         });
       },
@@ -107,7 +111,8 @@
           variant="primary-outlined"
           on:click={() => insights.loadMoreConversations()}
           aria-label={m.load_more_conversations()}
-          disabled={insights.loadMoreConversations.isLoading || insights.searchConversations.isLoading}
+          disabled={insights.loadMoreConversations.isLoading ||
+            insights.searchConversations.isLoading}
         >
           {#if insights.loadMoreConversations.isLoading}
             {m.loading()}

@@ -22,10 +22,12 @@
 {#if results.length > 0}
   <div class="flex flex-col">
     {#each results as result (result.id)}
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing with dynamic app and result IDs -->
       <a
         href={localizeHref(`/dashboard/app/${app.id}/results/${result.id}`)}
         class="border-default hover:bg-hover-dimmer flex items-center justify-between border-b px-3 py-3"
       >
+        <!-- eslint-enable svelte/no-navigation-without-resolve -->
         <span class="text-secondary text-sm">{formatDate(result.created_at)}</span>
         <AppResultStatus run={result} />
       </a>

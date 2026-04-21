@@ -51,16 +51,16 @@ class Users(BasePublic):
 
 users_roles_table = Table(
     "users_roles",
-    Base.metadata,
-    Column("user_id", ForeignKey(Users.id, ondelete="CASCADE"), primary_key=True),
-    Column("role_id", ForeignKey(Roles.id, ondelete="CASCADE"), primary_key=True),
+    Base.metadata,  # type: ignore[attr-defined]
+    Column("user_id", ForeignKey(Users.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
+    Column("role_id", ForeignKey(Roles.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
 )
 
 usergroups_users_table = Table(
     "usergroups_users",
-    Base.metadata,
-    Column("user_id", ForeignKey(Users.id, ondelete="CASCADE"), primary_key=True),
+    Base.metadata,  # type: ignore[attr-defined]
+    Column("user_id", ForeignKey(Users.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
     Column(
         "user_group_id", ForeignKey(UserGroups.id, ondelete="CASCADE"), primary_key=True
-    ),
+    ),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
 )

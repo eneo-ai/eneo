@@ -4,16 +4,18 @@ from sqlalchemy.orm import selectinload
 
 from intric.database.tables.integration_table import (
     OauthToken as OauthTokenDBModel,
+)
+from intric.database.tables.integration_table import (
     UserIntegration,
 )
 from intric.integration.domain.entities.oauth_token import OauthToken
 from intric.integration.domain.repositories.oauth_token_repo import (
     OauthTokenRepository,
 )
-from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 from intric.integration.infrastructure.mappers.oauth_token_mapper import (
     OauthTokenMapper,
 )
+from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

@@ -74,6 +74,14 @@ class FakeSession:
         self._calls += 1
         return FakeResult(row)
 
+    async def scalar(self, statement):  # noqa: ARG002
+        if self._calls < len(self._rows):
+            row = self._rows[self._calls]
+        else:
+            row = None
+        self._calls += 1
+        return getattr(row, "id", row)
+
     def begin(self):  # noqa: D401
         return FakeTransaction()
 
@@ -81,7 +89,11 @@ class FakeSession:
 class FakeTenantRepo:
     def __init__(self, primary_tenant, tenants=None):
         self._primary = primary_tenant
-        self._tenants = tenants if tenants is not None else ([primary_tenant] if primary_tenant else [])
+        self._tenants = (
+            tenants
+            if tenants is not None
+            else ([primary_tenant] if primary_tenant else [])
+        )
 
     async def get(self, tenant_id):
         for tenant in self._tenants:
@@ -199,7 +211,9 @@ async def test_recalculate_tenant_usage_stats_success():
     user = build_user(tenant.id, tenant)
     user_row = SimpleNamespace(id=user.id)
     job_service = FakeJobService()
-    container = FakeContainer(tenant=tenant, user_row=user_row, user_obj=user, job_service=job_service)
+    container = FakeContainer(
+        tenant=tenant, user_row=user_row, user_obj=user, job_service=job_service
+    )
 
     result = await recalculate_tenant_usage_stats(container, tenant.id)
 
@@ -209,8 +223,9 @@ async def test_recalculate_tenant_usage_stats_success():
     assert task == Task.UPDATE_MODEL_USAGE_STATS
     assert isinstance(params, UpdateUsageStatsTaskParams)
     assert params.tenant_id == tenant.id
-    assert container.user() == user
-    assert container.tenant() == tenant
+    assert params.user_id == user.id
+    assert container.user() is None
+    assert container.tenant() is None
 
 
 @pytest.mark.asyncio
@@ -220,7 +235,9 @@ async def test_recalculate_tenant_usage_stats_rejects_user_mismatch():
     user = build_user(wrong_tenant.id, wrong_tenant)  # user from different tenant
     user_row = SimpleNamespace(id=user.id)
     job_service = FakeJobService()
-    container = FakeContainer(tenant=tenant, user_row=user_row, user_obj=user, job_service=job_service)
+    container = FakeContainer(
+        tenant=tenant, user_row=user_row, user_obj=user, job_service=job_service
+    )
 
     result = await recalculate_tenant_usage_stats(container, tenant.id)
 
@@ -234,7 +251,9 @@ async def test_recalculate_tenant_usage_stats_handles_missing_user():
     tenant = build_tenant()
     user_row = None  # session will return no user rows
     job_service = FakeJobService()
-    container = FakeContainer(tenant=tenant, user_row=user_row, user_obj=None, job_service=job_service)
+    container = FakeContainer(
+        tenant=tenant, user_row=user_row, user_obj=None, job_service=job_service
+    )
 
     result = await recalculate_tenant_usage_stats(container, tenant.id)
 
@@ -255,8 +274,12 @@ async def test_recalculate_tenant_usage_stats_isolated_between_tenants():
 
     job_service = FakeJobService()
 
-    container_a = FakeContainer(tenant=tenant_a, user_row=row_a, user_obj=user_a, job_service=job_service)
-    container_b = FakeContainer(tenant=tenant_b, user_row=row_b, user_obj=user_b, job_service=job_service)
+    container_a = FakeContainer(
+        tenant=tenant_a, user_row=row_a, user_obj=user_a, job_service=job_service
+    )
+    container_b = FakeContainer(
+        tenant=tenant_b, user_row=row_b, user_obj=user_b, job_service=job_service
+    )
 
     result_a = await recalculate_tenant_usage_stats(container_a, tenant_a.id)
     result_b = await recalculate_tenant_usage_stats(container_b, tenant_b.id)
@@ -273,11 +296,14 @@ async def test_recalculate_tenant_usage_stats_isolated_between_tenants():
     assert first_params.tenant_id == tenant_a.id
     assert second_params.tenant_id == tenant_b.id
 
-    # Ensure per-container context is scoped to the tenant of the job being queued
-    assert container_a.tenant() == tenant_a
-    assert container_b.tenant() == tenant_b
-    assert container_a.user() == user_a
-    assert container_b.user() == user_b
+    # The queued jobs carry their tenant/user context in params, while provider
+    # overrides are reset after queuing so contexts do not leak across tenants.
+    assert first_params.user_id == user_a.id
+    assert second_params.user_id == user_b.id
+    assert container_a.tenant() is None
+    assert container_b.tenant() is None
+    assert container_a.user() is None
+    assert container_b.user() is None
 
 
 @pytest.mark.asyncio

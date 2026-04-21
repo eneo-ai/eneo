@@ -146,13 +146,15 @@
           class="bg-primary border-default flex min-h-[14rem] w-full flex-col items-center justify-start rounded-lg border p-8 shadow-md md:p-12"
         >
           <div
-            class="insights-answer-scroll prose w-full max-w-[70ch] flex-grow overflow-y-auto pr-6 md:pr-8 max-h-[min(65vh,42rem)]"
+            class="insights-answer-scroll prose max-h-[min(65vh,42rem)] w-full max-w-[70ch] flex-grow overflow-y-auto pr-6 md:pr-8"
             tabindex="-1"
             role="region"
             aria-label={m.generate_insights()}
           >
             <h3 class="m-0 flex gap-2 pb-4 text-lg font-medium">
-              <IconSparkles data-dynamic-colour="moss" class="text-dynamic-default size-6"
+              <IconSparkles
+                data-dynamic-colour="moss"
+                class="text-dynamic-default size-6"
                 aria-hidden="true"
               ></IconSparkles>
               {insights.question}
@@ -173,16 +175,12 @@
             {/if}
           </div>
           {#if insights.analysisJobStatus === "queued" || insights.analysisJobStatus === "processing"}
-            <p
-              class="text-secondary self-start pt-4 text-sm"
-              role="status"
-              aria-live="polite"
-            >
+            <p class="text-secondary self-start pt-4 text-sm" role="status" aria-live="polite">
               {m.loading_ellipsis()}
             </p>
           {/if}
           {#if insights.analysisJobError}
-            <p class="text-red-700 self-start pt-4 text-sm" role="alert">
+            <p class="self-start pt-4 text-sm text-red-700" role="alert">
               {m.error_connecting_to_server()}
             </p>
           {/if}

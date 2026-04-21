@@ -1,8 +1,11 @@
 import asyncio
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from intric.integration.domain.entities.user_integration import (
     UserIntegration,
+)
+from intric.integration.infrastructure.content_service.types import (
+    SharePointTokenProtocol,
 )
 from intric.main.exceptions import UnauthorizedException
 from intric.main.logging import get_logger
@@ -13,17 +16,20 @@ logger = get_logger(__name__)
 if TYPE_CHECKING:
     from uuid import UUID
 
+    from intric.integration.domain.entities.tenant_sharepoint_app import (
+        TenantSharePointApp,
+    )
     from intric.integration.domain.repositories.oauth_token_repo import (
         OauthTokenRepository,
     )
     from intric.integration.domain.repositories.tenant_integration_repo import (
         TenantIntegrationRepository,
     )
-    from intric.integration.domain.repositories.user_integration_repo import (
-        UserIntegrationRepository,
-    )
     from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
         TenantSharePointAppRepository,
+    )
+    from intric.integration.domain.repositories.user_integration_repo import (
+        UserIntegrationRepository,
     )
     from intric.integration.infrastructure.sharepoint_subscription_service import (
         SharePointSubscriptionService,
@@ -40,8 +46,11 @@ class UserIntegrationService:
         user: "UserInDB",
         tenant_sharepoint_app_repo: Optional["TenantSharePointAppRepository"] = None,
         oauth_token_repo: Optional["OauthTokenRepository"] = None,
-        sharepoint_subscription_service: Optional["SharePointSubscriptionService"] = None,
-    ):
+        sharepoint_subscription_service: Optional[
+            "SharePointSubscriptionService"
+        ] = None,
+    ) -> None:
+        super().__init__()
         self.user_integration_repo = user_integration_repo
         self.tenant_integration_repo = tenant_integration_repo
         self.user = user
@@ -58,9 +67,12 @@ class UserIntegrationService:
 
         import sqlalchemy as sa
         from sqlalchemy.orm import selectinload
+
+        from intric.database.tables.integration_table import (
+            TenantIntegration as TenantIntegrationDB,
+        )
         from intric.database.tables.integration_table import (
             UserIntegration as UserIntegrationDB,
-            TenantIntegration as TenantIntegrationDB,
         )
         from intric.integration.domain.factories.user_integration_factory import (
             UserIntegrationFactory,
@@ -77,24 +89,24 @@ class UserIntegrationService:
                 sa.and_(
                     UserIntegrationDB.user_id.is_(None),  # Person-independent
                     UserIntegrationDB.auth_type == "tenant_app",
-                    UserIntegrationDB.tenant_integration.has(tenant_id=tenant_id)
+                    UserIntegrationDB.tenant_integration.has(tenant_id=tenant_id),
                 )
             )
         )
-        tenant_app_result = await self.user_integration_repo.session.execute(tenant_app_stmt)
-        tenant_app_db_models = [row[0] for row in tenant_app_result.all()]
-        tenant_app_list = UserIntegrationFactory.create_entities(records=tenant_app_db_models)
+        tenant_app_result = await self.user_integration_repo.session.execute(  # type: ignore[attr-defined]
+            tenant_app_stmt
+        )
+        tenant_app_db_models: list[Any] = [row[0] for row in tenant_app_result.all()]  # type: ignore[union-attr]
+        tenant_app_list = UserIntegrationFactory.create_entities(
+            records=tenant_app_db_models
+        )
 
-        user_oauth_map = {
-            item.tenant_integration.id: item for item in user_oauth_list
-        }
-        tenant_app_map = {
-            item.tenant_integration.id: item for item in tenant_app_list
-        }
+        user_oauth_map = {item.tenant_integration.id: item for item in user_oauth_list}
+        tenant_app_map = {item.tenant_integration.id: item for item in tenant_app_list}
 
         available = await self.tenant_integration_repo.query(tenant_id=tenant_id)
 
-        results = []
+        results: list[UserIntegration] = []
         for a in available:
             if a.id in tenant_app_map:
                 results.append(tenant_app_map[a.id])
@@ -103,8 +115,7 @@ class UserIntegrationService:
                 results.append(user_oauth_map[a.id])
             else:
                 user_integration = UserIntegration(
-                    tenant_integration=a,
-                    user_id=user_id
+                    tenant_integration=a, user_id=user_id
                 )
                 results.append(user_integration)
 
@@ -141,26 +152,23 @@ class UserIntegrationService:
 
         # Collect Graph subscription IDs before DB cascade deletes them
         import sqlalchemy as sa
+
         from intric.database.tables.sharepoint_subscription_table import (
             SharePointSubscription as SharePointSubscriptionDB,
         )
 
-        stmt = sa.select(
-            SharePointSubscriptionDB.subscription_id
-        ).where(
+        stmt = sa.select(SharePointSubscriptionDB.subscription_id).where(
             SharePointSubscriptionDB.user_integration_id == integration.id
         )
-        result = await self.user_integration_repo.session.execute(stmt)
-        graph_subscription_ids = [row[0] for row in result.all()]
+        result = await self.user_integration_repo.session.execute(stmt)  # type: ignore[attr-defined]
+        graph_subscription_ids: list[str] = [row[0] for row in result.all()]  # type: ignore[union-attr]
 
         if not graph_subscription_ids:
             return
 
         # Get token for Graph API calls
         try:
-            token = await self.oauth_token_repo.one(
-                user_integration_id=integration.id
-            )
+            token = await self.oauth_token_repo.one(user_integration_id=integration.id)
         except Exception:
             logger.warning(
                 "Could not get token for webhook cleanup of user_integration %s; "
@@ -170,18 +178,22 @@ class UserIntegrationService:
             return
 
         # Fire-and-forget Graph API cleanup (DB rows will be cascade-deleted)
+        # token is always a SharePoint token for SharePoint subscriptions
+        sp_token = cast(SharePointTokenProtocol, token)
         for graph_sub_id in graph_subscription_ids:
-            asyncio.create_task(
-                self._delete_graph_subscription(graph_sub_id, token)
-            )
+            asyncio.create_task(self._delete_graph_subscription(graph_sub_id, sp_token))
 
     async def _delete_graph_subscription(
-        self, graph_subscription_id: str, token
+        self,
+        graph_subscription_id: str,
+        token: SharePointTokenProtocol,
     ) -> None:
         """Fire-and-forget: delete a single subscription from Microsoft Graph."""
         try:
             assert self.sharepoint_subscription_service is not None
-            await self.sharepoint_subscription_service._delete_graph_subscription(
+            await cast(
+                Any, self.sharepoint_subscription_service
+            )._delete_graph_subscription(
                 subscription_id=graph_subscription_id,
                 token=token,
             )
@@ -209,27 +221,35 @@ class UserIntegrationService:
             tenant_id=self.user.tenant_id,
         )
 
-        tenant_app = None
+        tenant_app: Optional["TenantSharePointApp"] = None
         if self.tenant_sharepoint_app_repo:
             try:
-                tenant_app = await self.tenant_sharepoint_app_repo.one_or_none(
+                _raw_app = await self.tenant_sharepoint_app_repo.one_or_none(  # type: ignore[attr-defined]
                     tenant_id=self.user.tenant_id
+                )
+                tenant_app = (
+                    cast("TenantSharePointApp", _raw_app)
+                    if _raw_app is not None
+                    else None
                 )
             except Exception as e:
                 logger.warning(
                     f"Failed to fetch tenant SharePoint app: {type(e).__name__}: {str(e)}",
-                    extra={"tenant_id": str(self.user.tenant_id)}
+                    extra={"tenant_id": str(self.user.tenant_id)},
                 )
 
         is_admin = Permission.ADMIN in self.user.permissions
 
         if space.is_personal():
-            available = []
+            available: list[UserIntegration] = []
             for integration in all_integrations:
                 if integration.auth_type != "user_oauth" and integration.authenticated:
                     continue
 
-                if integration.tenant_integration.integration.integration_type == "sharepoint":
+                if (
+                    integration.tenant_integration.integration.integration_type
+                    == "sharepoint"
+                ):
                     if not tenant_app or not tenant_app.is_active:
                         continue
 
@@ -242,6 +262,7 @@ class UserIntegrationService:
                 return []
 
             return [
-                integration for integration in all_integrations
+                integration
+                for integration in all_integrations
                 if integration.authenticated and integration.auth_type == "tenant_app"
             ]

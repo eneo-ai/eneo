@@ -18,15 +18,15 @@ from uuid import uuid4
 import pytest
 
 
-
-
 def create_mock_container(embeddings_service):
     """Create a mock Container for persist_batch testing."""
     mock_container = MagicMock()
     mock_session_provider = MagicMock()
     mock_session_provider.override = MagicMock()
     mock_container.session = mock_session_provider
-    mock_container.create_embeddings_service = MagicMock(return_value=embeddings_service)
+    mock_container.create_embeddings_service = MagicMock(
+        return_value=embeddings_service
+    )
     return mock_container
 
 
@@ -74,7 +74,9 @@ class TestPersistBatchReturnType:
         )
 
         # Should return (0, 0, [], {})
-        assert result == (0, 0, [], {}), f"Empty buffer should return (0, 0, [], {{}}), got {result}"
+        assert result == (0, 0, [], {}), (
+            f"Empty buffer should return (0, 0, [], {{}}), got {result}"
+        )
 
     @pytest.mark.asyncio
     async def test_no_embedding_model_returns_all_failed(self):
@@ -249,7 +251,9 @@ class TestEmbeddingAPIFailures:
             {"url": "page3", "status": "success", "reason": "embedded and persisted"},
         ]
 
-        successful_urls = [p["url"] for p in pages_processed if p["status"] == "success"]
+        successful_urls = [
+            p["url"] for p in pages_processed if p["status"] == "success"
+        ]
         failed_count = sum(1 for p in pages_processed if p["status"] == "failed")
 
         assert successful_urls == ["page1", "page3"]
@@ -389,7 +393,9 @@ class TestCrawlContextSecurity:
         assert "testuser" in repr_output, "Username should be visible in repr"
 
         # Verify the field still holds the correct value
-        assert ctx.http_auth_pass == secret_password, "Password should still be accessible"
+        assert ctx.http_auth_pass == secret_password, (
+            "Password should still be accessible"
+        )
 
 
 # =============================================================================

@@ -14,7 +14,7 @@
   import GroupMemberRole from "./GroupMemberRole.svelte";
   import { Page, Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
-  import { IconGroup } from "@intric/icons/group";
+  import { IconPeople } from "@intric/icons/people";
 
   const { user } = getAppContext();
 
@@ -121,11 +121,12 @@
                   class="border-default hover:bg-hover-dimmer flex items-center justify-between gap-4 border-b py-4 pr-4 pl-4"
                 >
                   <div class="flex items-center gap-2">
-                    <IconGroup class="h-6 w-6 text-secondary" />
+                    <IconPeople class="text-secondary h-6 w-6" />
                     <span class="text-primary font-medium">{groupMember.name}</span>
                   </div>
                   <span class="text-secondary text-sm">
-                    {groupMember.user_count} {groupMember.user_count === 1 ? m.user() : m.users()}
+                    {groupMember.user_count}
+                    {groupMember.user_count === 1 ? m.user() : m.users()}
                   </span>
                   <div class="flex-grow"></div>
                   {#if $currentSpace.hasPermission("edit", "group_member")}

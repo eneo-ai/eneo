@@ -1,11 +1,16 @@
 import io
 import re
 import time
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication.signed_urls import generate_signed_token, verify_signed_token
 from intric.files.file_models import (
     ContentDisposition,
@@ -26,11 +31,6 @@ from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-
 router = APIRouter()
 
 
@@ -39,7 +39,7 @@ router = APIRouter()
 )
 async def upload_file(
     upload_file: UploadFile,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
     current_user = container.user()
@@ -81,7 +81,7 @@ async def upload_file(
     status_code=200,
 )
 async def get_files(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
     files = await service.get_files()
@@ -98,7 +98,7 @@ async def get_files(
 )
 async def get_file(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
     return await service.get_file_by_id(file_id=id)
@@ -107,7 +107,7 @@ async def get_file(
 @router.delete("/{id}/", status_code=204)
 async def delete_file(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
     current_user = container.user()
@@ -163,7 +163,7 @@ async def generate_signed_url(
     id: UUID,
     request: Request,
     signed_url_req: SignedURLRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     # Verify the file exists and the user has access to it
     service = container.file_service()
@@ -212,9 +212,9 @@ async def generate_signed_url(
 )
 async def download_file_signed(
     id: UUID,
-    token: str = Query(..., description="The signed token for file access"),
-    range: str = Header(None),
-    container: Container = Depends(get_container()),
+    token: Annotated[str, Query(description="The signed token for file access")],
+    container: Annotated[Container, Depends(get_container())],
+    range: Annotated[str | None, Header()] = None,
 ):
     payload = verify_signed_token(token)
     if not payload:
@@ -255,7 +255,7 @@ async def download_file_signed(
 
     total_size = len(content_bytes)
     headers = {
-        "Content-Disposition": f"{content_disposition.value}; filename=\"{response_filename}\"",
+        "Content-Disposition": f'{content_disposition.value}; filename="{response_filename}"',
         "Accept-Ranges": "bytes",
     }
 

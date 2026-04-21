@@ -41,7 +41,7 @@ class TranscriptionModelPublic(BaseModel):
         return cls(
             id=model.id,
             name=model.name,
-            nickname=model.nickname,
+            nickname=model.nickname or "",
             family=model.family,
             is_deprecated=model.is_deprecated,
             stability=model.stability,

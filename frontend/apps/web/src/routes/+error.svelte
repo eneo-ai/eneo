@@ -17,14 +17,17 @@
 
   async function handleServerError(error: Error) {
     if (error.code === 9006) {
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- server endpoint, not a typed route
       goto("/activate");
       return;
     }
     if (error.code === 9025) {
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- server endpoint, not a typed route
       goto("/deactivated");
       return;
     }
     if (error.status === 401) {
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- server endpoint, not a typed route
       goto("/logout?message=expired");
       return;
     }
