@@ -1,0 +1,69 @@
+[importlinter]
+root_package = intric
+include_external_packages = False
+
+[importlinter:contract:flows-engine-no-ai-builder]
+# The flows engine (everything under `intric.flows` except the AI Builder
+# plugin itself) must not import from the AI Builder. Phase A of the
+# architecture rewrite un-inverts the two existing violations below; this
+# contract locks the boundary so no _new_ ones slip in.
+name = Flows engine must not import AI Builder (Phase A un-inverts)
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    intric.flows.api
+    intric.flows.application
+    intric.flows.citation_sidecar
+    intric.flows.domain
+    intric.flows.enums
+    intric.flows.execution_backend
+    intric.flows.flow
+    intric.flows.flow_care_data_policy
+    intric.flows.flow_dispatch
+    intric.flows.flow_evidence_policy
+    intric.flows.flow_factory
+    intric.flows.flow_file_upload_service
+    intric.flows.flow_input_limits
+    intric.flows.flow_permissions
+    intric.flows.flow_repo
+    intric.flows.flow_retention_policy
+    intric.flows.flow_run_evidence
+    intric.flows.flow_run_evidence_bundle
+    intric.flows.flow_run_export_json
+    intric.flows.flow_run_input_payload
+    intric.flows.flow_run_provenance
+    intric.flows.flow_run_redaction
+    intric.flows.flow_run_repo
+    intric.flows.flow_run_service
+    intric.flows.flow_run_step_inputs
+    intric.flows.flow_security_classification
+    intric.flows.flow_service
+    intric.flows.flow_template_asset_repo
+    intric.flows.flow_template_asset_service
+    intric.flows.flow_template_validation
+    intric.flows.flow_validators
+    intric.flows.flow_validators_form
+    intric.flows.flow_validators_http
+    intric.flows.flow_validators_template
+    intric.flows.flow_variable_definitions
+    intric.flows.flow_version_repo
+    intric.flows.http_transport
+    intric.flows.infrastructure
+    intric.flows.output_modes
+    intric.flows.output_processing
+    intric.flows.principal
+    intric.flows.runtime
+    intric.flows.runtime_input
+    intric.flows.source_display
+    intric.flows.step_chain_rules
+    intric.flows.step_config_secrets
+    intric.flows.step_lineage
+    intric.flows.template_reference_analyzer
+    intric.flows.transcription_config
+    intric.flows.type_policies
+    intric.flows.variable_resolver
+forbidden_modules =
+    intric.flows.ai_builder
+ignore_imports =
+    intric.flows.flow_validators -> intric.flows.ai_builder.ai_builder_step_capabilities
+    intric.flows.api.flow_router -> intric.flows.ai_builder.ai_builder_router
