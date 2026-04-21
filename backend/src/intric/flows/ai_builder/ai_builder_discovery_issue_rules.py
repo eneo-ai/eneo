@@ -598,13 +598,37 @@ def runtime_metadata_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if mentions_runtime_metadata(text):
         return False
-    if all(
-        key in answers
-        for key in (
-            "processing_scope",
-            "input_material_mode",
-            "final_output_mode",
-        )
+    if not _runtime_metadata_prerequisites_resolved(profile):
+        return False
+    return True
+
+
+def _runtime_metadata_prerequisites_resolved(profile: DiscoveryProfile) -> bool:
+    if looks_like_case_scope_is_vague(profile):
+        return False
+    if looks_like_input_mode_is_vague(profile):
+        return False
+    if profile.input_intent.needs_architecture_clarification:
+        return False
+    if (
+        profile.document_like_input
+        and profile.resolved_requirements.slot("document_material_scope") is None
+        and "document_material_scope" not in profile.answers
+        and "document_material_scope" not in profile.flow_defaults
     ):
         return False
-    return False
+    if document_cardinality_is_vague(profile):
+        return False
+    if document_kind_is_vague(profile):
+        return False
+    if looks_like_output_is_vague(profile):
+        return False
+    if ultra_vague_output_choice_is_vague(profile):
+        return False
+    if needs_docx_mode_choice(profile):
+        return False
+    if needs_pdf_generation_mode_choice(profile):
+        return False
+    if final_pdf_type_is_vague(profile):
+        return False
+    return True

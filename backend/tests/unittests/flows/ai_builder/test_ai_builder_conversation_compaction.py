@@ -268,6 +268,38 @@ def test_compaction_skips_structured_answer_echo_when_preserving_latest_user_req
     assert "pdf_document" not in request_window.text
 
 
+def test_compaction_skips_structured_answer_echo_with_terminal_punctuation() -> None:
+    conversation = [_msg("user", content=f"filler {i}") for i in range(45)]
+    conversation.extend(
+        [
+            _msg(
+                "user",
+                content="pdf_document.",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_value": "pdf_document",
+                    }
+                },
+            ),
+            _msg(
+                "user",
+                content="Behåll samma flöde men lägg till källor också.",
+            ),
+        ]
+    )
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=20,
+        tail_messages=10,
+    )
+    request_window = build_active_request_window(compacted, flow_defaults={})
+
+    assert "pdf_document." not in request_window.text
+    assert "lägg till källor också" in request_window.text
+
+
 def test_compaction_preserves_latest_freeform_request_even_if_question_answer_metadata_exists() -> (
     None
 ):

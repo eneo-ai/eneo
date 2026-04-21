@@ -17,6 +17,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     resolve_docx_output_mode,
     resolve_explicit_output_choice,
     resolve_output_intent,
+    resolve_pdf_generation_mode,
 )
 from intric.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage, OutputType
@@ -177,6 +178,28 @@ def test_resolve_output_intent_keeps_plain_pdf_when_pdf_generation_mode_is_answe
     assert intent.terminal_output == "pdf_document"
     assert intent.pdf_generation_mode == "generated_pdf"
     assert intent.docx_output_mode is None
+
+
+def test_resolve_pdf_generation_mode_defaults_when_pdf_is_selected_via_structured_answer() -> (
+    None
+):
+    mode = resolve_pdf_generation_mode(
+        "Behåll samma riktning.",
+        {"final_output_mode": {"pdf_document"}},
+        explicit_output="pdf_document",
+    )
+
+    assert mode == "generated_pdf"
+
+
+def test_resolve_output_intent_defaults_generic_pdf_prompt_to_generated_pdf() -> None:
+    prompt = "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en PDF-rapport."
+
+    signals = extract_answer_signals([{"role": "user", "content": prompt}])
+    intent = resolve_output_intent(prompt, signals)
+
+    assert intent.terminal_output == "pdf_document"
+    assert intent.pdf_generation_mode == "generated_pdf"
 
 
 def test_resolve_output_intent_defaults_report_like_prompt_to_structured_text() -> None:
@@ -748,6 +771,48 @@ def test_aggregate_freeform_user_text_keeps_long_freeform_message_even_with_stru
     )
 
     assert "word dokument istället för en pdf" in text
+
+
+def test_aggregate_freeform_user_text_filters_structured_answer_echo_with_terminal_punctuation() -> (
+    None
+):
+    text = aggregate_freeform_user_text(
+        [
+            ConversationMessage(
+                role="user",
+                content="pdf_document.",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_value": "pdf_document",
+                    }
+                },
+            ),
+        ]
+    )
+
+    assert text == ""
+
+
+def test_aggregate_freeform_user_text_keeps_mixed_content_after_structured_answer_echo() -> (
+    None
+):
+    text = aggregate_freeform_user_text(
+        [
+            ConversationMessage(
+                role="user",
+                content="pdf_document. men lägg till källor också",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_value": "pdf_document",
+                    }
+                },
+            ),
+        ]
+    )
+
+    assert "lägg till källor också" in text
 
 
 def test_question_resolution_ignores_prior_answer_labels_when_output_not_changed() -> (

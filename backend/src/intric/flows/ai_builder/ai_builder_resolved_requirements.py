@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -10,6 +11,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
     has_explicit_docx_mode_text,
+    has_explicit_pdf_mode_text,
     has_explicit_structured_answer,
     resolve_output_intent,
 )
@@ -50,6 +52,24 @@ class ResolvedRequirementsState:
             if slot.name == name:
                 return slot
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyDefaultRule:
+    default_value: str
+    has_explicit_text: Callable[[str], bool]
+
+
+_POLICY_DEFAULT_RULES: dict[str, PolicyDefaultRule] = {
+    "docx_output_mode": PolicyDefaultRule(
+        default_value="generated_docx",
+        has_explicit_text=has_explicit_docx_mode_text,
+    ),
+    "pdf_generation_mode": PolicyDefaultRule(
+        default_value="generated_pdf",
+        has_explicit_text=has_explicit_pdf_mode_text,
+    ),
+}
 
 
 def build_resolved_requirements_state(
@@ -320,10 +340,11 @@ def _is_policy_default_slot(
     slot_value: str,
     freeform_text: str,
 ) -> bool:
+    rule = _POLICY_DEFAULT_RULES.get(question_id)
     return (
-        question_id == "docx_output_mode"
-        and slot_value == "generated_docx"
-        and not has_explicit_docx_mode_text(freeform_text)
+        rule is not None
+        and slot_value == rule.default_value
+        and not rule.has_explicit_text(freeform_text)
     )
 
 

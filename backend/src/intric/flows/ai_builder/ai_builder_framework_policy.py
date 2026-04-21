@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -60,6 +60,7 @@ __all__ = [
     "normalize_structured_question_payload",
     "question_is_already_resolved",
     "has_explicit_docx_mode_text",
+    "has_explicit_pdf_mode_text",
     "resolve_docx_output_mode",
     "resolve_explicit_output_choice",
     "resolve_output_intent",
@@ -328,11 +329,18 @@ def _looks_like_structured_answer_echo(
 
     if normalized_content in candidates:
         return True
+    normalized_without_terminal_punctuation = normalized_content.rstrip(" .?!")
+    if (
+        normalized_without_terminal_punctuation
+        and normalized_without_terminal_punctuation in candidates
+    ):
+        return True
 
     return (
-        len(normalized_content) <= 80
-        and len(normalized_content.split()) <= 4
-        and not any(marker in normalized_content for marker in (".", "?", "!", "\n"))
+        len(normalized_without_terminal_punctuation) <= 80
+        and len(normalized_without_terminal_punctuation.split()) <= 4
+        and not any(marker in normalized_content for marker in ("\n",))
+        and normalized_content == normalized_without_terminal_punctuation
     )
 
 
@@ -697,19 +705,23 @@ def resolve_docx_output_mode(
 
 
 def has_explicit_docx_mode_text(text: str) -> bool:
-    normalized_text = normalize_signal_text(text)
-    if not normalized_text:
-        return False
+    return _has_explicit_output_mode_text(
+        text,
+        context_markers=DOCX_CONTEXT_MARKERS,
+        generated_markers=DOCX_GENERATED_MODE_MARKERS,
+        template_matcher=lambda output_text: contains_any_phrase(
+            output_text,
+            DOCX_TEMPLATE_MODE_MARKERS,
+        ),
+    )
 
-    output_text = build_role_scoped_text(normalized_text).preferred_output_text()
-    if not output_text or not contains_any_phrase(output_text, DOCX_CONTEXT_MARKERS):
-        return False
 
-    return contains_any_phrase(
-        output_text, DOCX_GENERATED_MODE_MARKERS
-    ) or contains_any_phrase(
-        output_text,
-        DOCX_TEMPLATE_MODE_MARKERS,
+def has_explicit_pdf_mode_text(text: str) -> bool:
+    return _has_explicit_output_mode_text(
+        text,
+        context_markers=PDF_OUTPUT_CONTEXT_MARKERS,
+        generated_markers=PDF_GENERATED_MODE_MARKERS,
+        template_matcher=_looks_like_pdf_template_expectation,
     )
 
 
@@ -739,7 +751,7 @@ def resolve_pdf_generation_mode(
         return "generated_pdf"
     if _looks_like_pdf_template_expectation(output_text):
         return "pdf_template_requested"
-    return None
+    return "generated_pdf"
 
 
 def resolve_output_intent(
@@ -812,6 +824,26 @@ def _looks_like_text_analysis_output(text: str) -> bool:
     return contains_any_phrase(text, extraction_markers) and contains_any_phrase(
         text,
         decision_markers,
+    )
+
+
+def _has_explicit_output_mode_text(
+    text: str,
+    *,
+    context_markers: Sequence[str],
+    generated_markers: Sequence[str],
+    template_matcher: Callable[[str], bool],
+) -> bool:
+    normalized_text = normalize_signal_text(text)
+    if not normalized_text:
+        return False
+
+    output_text = build_role_scoped_text(normalized_text).preferred_output_text()
+    if not output_text or not contains_any_phrase(output_text, context_markers):
+        return False
+
+    return contains_any_phrase(output_text, generated_markers) or template_matcher(
+        output_text
     )
 
 

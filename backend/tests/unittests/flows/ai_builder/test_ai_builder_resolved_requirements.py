@@ -101,6 +101,33 @@ def test_resolved_requirements_state_uses_policy_default_when_docx_is_only_selec
     assert docx_mode.confidence == "medium"
 
 
+def test_resolved_requirements_state_uses_policy_default_when_pdf_is_only_selected_via_output_answer() -> (
+    None
+):
+    state = build_resolved_requirements_state(
+        [
+            ConversationMessage(
+                role="user",
+                content="Behåll samma riktning.",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_option_id": "pdf_document",
+                        "selected_value": "pdf_document",
+                        "answer": "pdf_document",
+                    }
+                },
+            )
+        ]
+    )
+
+    pdf_mode = state.slot("pdf_generation_mode")
+    assert pdf_mode is not None
+    assert pdf_mode.value == "generated_pdf"
+    assert pdf_mode.source == "policy_default"
+    assert pdf_mode.confidence == "medium"
+
+
 def test_build_resolved_requirements_prompt_block_includes_sources_and_evidence() -> (
     None
 ):

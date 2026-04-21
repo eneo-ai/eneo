@@ -1428,6 +1428,154 @@ class TestExtendedClarificationHints:
         assert "structured_analysis_need" not in question_ids
         assert "runtime_metadata_fields" not in question_ids
 
+    def test_case_like_flow_with_resolved_core_requirements_asks_runtime_metadata_fields(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Bygg ett flöde för ett kommunärende.",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="Ett ärende åt gången",
+                metadata={
+                    "question_answer": {
+                        "question_id": "processing_scope",
+                        "selected_option_id": "single_case",
+                        "answer": "single_case",
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Dokument",
+                metadata={
+                    "question_answer": {
+                        "question_id": "input_material_mode",
+                        "selected_option_id": "documents",
+                        "answer": "documents",
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Ett huvuddokument per ärende",
+                metadata={
+                    "question_answer": {
+                        "question_id": "document_material_scope",
+                        "selected_option_id": "single_document_case",
+                        "answer": "single_document_case",
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Strukturerat beslutsunderlag som text.",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_option_id": "structured_text",
+                        "answer": "structured_text",
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "runtime_metadata_fields" in question_ids
+
+    def test_case_like_flow_with_explicit_runtime_metadata_does_not_reask_runtime_metadata_fields(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Bygg ett flöde för ett kommunärende.",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="Ett ärende åt gången",
+                metadata={
+                    "question_answer": {
+                        "question_id": "processing_scope",
+                        "selected_option_id": "single_case",
+                        "answer": "single_case",
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Dokument",
+                metadata={
+                    "question_answer": {
+                        "question_id": "input_material_mode",
+                        "selected_option_id": "documents",
+                        "answer": "documents",
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Ett huvuddokument per ärende",
+                metadata={
+                    "question_answer": {
+                        "question_id": "document_material_scope",
+                        "selected_option_id": "single_document_case",
+                        "answer": "single_document_case",
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Strukturerat beslutsunderlag som text.",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_option_id": "structured_text",
+                        "answer": "structured_text",
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Lägg till grundläggande metadata",
+                metadata={
+                    "question_answer": {
+                        "question_id": "runtime_metadata_fields",
+                        "selected_option_id": "basic_case_metadata",
+                        "answer": "basic_case_metadata",
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "runtime_metadata_fields" not in question_ids
+
     def test_complex_pdf_analysis_prompt_does_not_surface_structured_analysis_question(
         self,
     ) -> None:
@@ -1653,6 +1801,7 @@ class TestExtendedClarificationHints:
         ]
 
         assert "final_pdf_type" not in question_ids
+        assert "pdf_generation_mode" not in question_ids
 
     def test_audio_hint(self) -> None:
         hints = build_clarification_hints(
