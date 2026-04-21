@@ -34,6 +34,10 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
+from intric.flows.citation_sidecar import (
+    CITATION_MODE_INLINE_INREF_SIDECAR,
+    resolve_citation_mode,
+)
 from intric.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -336,3 +340,40 @@ def resolve_document_generation_mode(
     if output_type is FlowOutputType.PDF:
         return "generated"
     return None
+
+
+def is_citation_capable_step(
+    *,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+    output_config: object,
+) -> bool:
+    """Engine-truth: can this step emit an inline-inref citation sidecar?
+
+    Mirrors `is_citation_capable_step` in
+    `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a
+    parity test until Phase G deletes the ai_builder copy.
+
+    Capability holds iff:
+    - `output_config` is a dict that requests the
+      `inline_inref_sidecar` citation mode, AND
+    - `output_type` is `TEXT` (the only artefact the citation sidecar
+      attaches to today), AND
+    - `output_mode` is neither `TEMPLATE_FILL` nor `TRANSCRIBE_ONLY`
+      (template-fill is a docx pathway; transcribe-only has no source
+      documents to cite).
+
+    `output_config` is typed as `object` rather than `dict` because
+    `resolve_citation_mode` itself already tolerates any shape — a
+    non-dict payload collapses to `off` and returns `False`. Keeping the
+    wide type matches the legacy signature and covers malformed persisted
+    payloads without the caller having to pre-validate.
+    """
+    if resolve_citation_mode(output_config) != CITATION_MODE_INLINE_INREF_SIDECAR:
+        return False
+    if output_type is not FlowOutputType.TEXT:
+        return False
+    return output_mode not in {
+        FlowOutputMode.TEMPLATE_FILL,
+        FlowOutputMode.TRANSCRIBE_ONLY,
+    }

@@ -19,11 +19,15 @@ from intric.flows.ai_builder.ai_builder_step_capabilities import (
     BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE,
 )
 from intric.flows.ai_builder.ai_builder_step_capabilities import (
+    is_citation_capable_step as _legacy_is_citation_capable_step,
+)
+from intric.flows.ai_builder.ai_builder_step_capabilities import (
     resolve_document_generation_mode as _legacy_resolve_document_generation_mode,
 )
 from intric.flows.ai_builder.ai_builder_step_capabilities import (
     supports_step_io_mode_combo as _legacy_supports_step_io_mode_combo,
 )
+from intric.flows.citation_sidecar import CITATION_MODE_INLINE_INREF_SIDECAR
 from intric.flows.enums import FlowInputType, FlowOutputMode, FlowOutputType
 from intric.flows.flow_capability_manifest import (
     CAPABILITY_REGISTRY,
@@ -31,6 +35,7 @@ from intric.flows.flow_capability_manifest import (
     FCM_VERSION,
     FINAL_OUTPUT_ARTIFACT_BY_TYPE,
     FlowCapability,
+    is_citation_capable_step,
     resolve_document_generation_mode,
     supports_step_io_tuple,
 )
@@ -364,6 +369,132 @@ def test_supports_step_io_tuple_rejects_transcribe_only_for_non_audio_text() -> 
                 input_type is FlowInputType.AUDIO and output_type is FlowOutputType.TEXT
             )
             assert legal is expected
+
+
+_CITATION_CONFIG_CASES: tuple[tuple[str, object], ...] = (
+    ("enabled_sidecar", {"citation_mode": CITATION_MODE_INLINE_INREF_SIDECAR}),
+    # Whitespace-padded value covers `resolve_citation_mode`'s `.strip()`
+    # branch — the FCM predicate relies on that normalisation and must not
+    # regress if someone later inlines a raw equality check.
+    ("enabled_whitespace_padded", {"citation_mode": "  inline_inref_sidecar  "}),
+    ("disabled_off", {"citation_mode": "off"}),
+    # Non-string value covers `resolve_citation_mode`'s `isinstance(..., str)`
+    # guard; must resolve to OFF regardless of the rest of the step.
+    ("non_string_value", {"citation_mode": 1}),
+    ("empty_dict", {}),
+    ("non_dict_none", None),
+)
+
+
+@pytest.mark.parametrize(
+    "config_label,output_config",
+    _CITATION_CONFIG_CASES,
+    ids=[c[0] for c in _CITATION_CONFIG_CASES],
+)
+@pytest.mark.parametrize("output_type", list(FlowOutputType))
+@pytest.mark.parametrize("output_mode", list(FlowOutputMode))
+def test_is_citation_capable_step_parity_with_legacy(
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+    config_label: str,
+    output_config: object,
+) -> None:
+    """Parity: FCM `is_citation_capable_step` (enum-typed, engine-side) must
+    agree with the legacy `ai_builder` version (string-typed) on every
+    (output_type, output_mode, citation-config) combination. Covers the four
+    representative citation configs: enabled sidecar, explicit off, empty
+    dict, and a non-dict sentinel — matching the branch structure of
+    `resolve_citation_mode`."""
+    fcm_result = is_citation_capable_step(
+        output_type=output_type,
+        output_mode=output_mode,
+        output_config=output_config,
+    )
+    legacy_result = _legacy_is_citation_capable_step(
+        output_type=output_type.value,
+        output_mode=output_mode.value,
+        output_config=output_config,
+    )
+    assert fcm_result is legacy_result, (
+        f"is_citation_capable_step drift: output={output_type} "
+        f"mode={output_mode} config={config_label} "
+        f"fcm={fcm_result} legacy={legacy_result}"
+    )
+
+
+def test_is_citation_capable_step_requires_inline_inref_sidecar_mode() -> None:
+    """Explicit rule guardrail: only `inline_inref_sidecar` citation mode
+    unlocks citation capability. Any other recognisable mode (including the
+    explicit 'off' sentinel and an unknown mode string) must return False
+    even when the rest of the step is citation-friendly."""
+    for bad_mode in ("off", "unknown_mode", "", "inline", "sidecar"):
+        assert (
+            is_citation_capable_step(
+                output_type=FlowOutputType.TEXT,
+                output_mode=FlowOutputMode.PASS_THROUGH,
+                output_config={"citation_mode": bad_mode},
+            )
+            is False
+        ), f"non-sidecar citation_mode={bad_mode!r} must not unlock capability"
+
+
+def test_is_citation_capable_step_requires_text_output() -> None:
+    """Explicit rule guardrail: citation capability is TEXT-output only, even
+    when the sidecar is enabled. JSON/PDF/DOCX outputs must all reject
+    capability — the engine does not support inline-inref sidecars on
+    non-text outputs."""
+    enabled_config = {"citation_mode": CITATION_MODE_INLINE_INREF_SIDECAR}
+    for output_type in FlowOutputType:
+        result = is_citation_capable_step(
+            output_type=output_type,
+            output_mode=FlowOutputMode.PASS_THROUGH,
+            output_config=enabled_config,
+        )
+        assert result is (output_type is FlowOutputType.TEXT), (
+            f"citation capability must be TEXT-only; got {result} for {output_type}"
+        )
+
+
+def test_is_citation_capable_step_rejects_template_fill_and_transcribe_only() -> None:
+    """Explicit rule guardrail: even on TEXT output with sidecar enabled, the
+    `TEMPLATE_FILL` and `TRANSCRIBE_ONLY` output modes must reject citation
+    capability — template-fill is a docx-artefact mode and transcription is
+    citation-naive at the wizard level."""
+    enabled_config = {"citation_mode": CITATION_MODE_INLINE_INREF_SIDECAR}
+    for output_mode in FlowOutputMode:
+        result = is_citation_capable_step(
+            output_type=FlowOutputType.TEXT,
+            output_mode=output_mode,
+            output_config=enabled_config,
+        )
+        expected = output_mode not in {
+            FlowOutputMode.TEMPLATE_FILL,
+            FlowOutputMode.TRANSCRIBE_ONLY,
+        }
+        assert result is expected, (
+            f"citation capability for TEXT + {output_mode} must be {expected}; got {result}"
+        )
+
+
+@pytest.mark.parametrize(
+    "non_dict_config",
+    [None, "not a dict", 42, 0, 1.5, True, False, [], (), ["citation_mode"]],
+)
+def test_is_citation_capable_step_treats_non_dict_config_as_off(
+    non_dict_config: object,
+) -> None:
+    """Regression guardrail: `resolve_citation_mode` returns `off` for any
+    non-dict `output_config`. Citation capability must therefore be False for
+    all non-dict inputs, independent of the step's output_type/mode. Matches
+    the legacy runtime defence-in-depth against malformed config payloads."""
+    assert (
+        is_citation_capable_step(
+            output_type=FlowOutputType.TEXT,
+            output_mode=FlowOutputMode.PASS_THROUGH,
+            output_config=non_dict_config,
+        )
+        is False
+    )
 
 
 def test_fcm_module_has_no_ai_builder_imports() -> None:
