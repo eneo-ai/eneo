@@ -123,10 +123,6 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
             "slutresultat",
             "generate",
             "generera",
-            "produce",
-            "producera",
-            "create",
-            "skapa",
         ),
     )
     if not output_intent and not profile.final_output_text_or_docx:
