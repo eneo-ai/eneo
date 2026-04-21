@@ -178,6 +178,63 @@ def test_chain_compatibility_mirrors_legacy_compatible_type_coercions() -> None:
     )
 
 
+@pytest.mark.parametrize("input_key", sorted(INPUT_TYPE_POLICIES.keys()))
+def test_capability_channel_mirrors_policy(input_key: str) -> None:
+    """A.1b: every seeded input capability carries the same `channel` as its
+    `InputTypePolicy`. FCM is the typed mirror; `type_policies.py` remains
+    the editable source until Phase G."""
+    policy = INPUT_TYPE_POLICIES[input_key]
+    capability = CAPABILITY_REGISTRY[f"input_{input_key}"]
+    assert capability.channel == policy.channel
+
+
+@pytest.mark.parametrize("input_key", sorted(INPUT_TYPE_POLICIES.keys()))
+def test_capability_invariants_track_policy_flags(input_key: str) -> None:
+    """A.1b: each of the three policy-derived invariants is present iff
+    the corresponding flag on `InputTypePolicy` demands it. Drift between
+    seeder and policy is caught here."""
+    policy = INPUT_TYPE_POLICIES[input_key]
+    capability = CAPABILITY_REGISTRY[f"input_{input_key}"]
+    invariant_ids = {inv.id for inv in capability.invariants}
+    assert ("input_contract_forbidden" in invariant_ids) == (
+        not policy.contract_allowed
+    )
+    assert ("requires_non_empty_extraction" in invariant_ids) == (
+        policy.requires_extraction
+    )
+    assert ("requires_at_least_one_file" in invariant_ids) == policy.requires_files
+
+
+def test_input_capability_rejects_missing_channel() -> None:
+    """A.1b symmetric guard: every `input_*` capability must declare a
+    channel. `channel=None` is valid for future non-input capabilities
+    (citation, transcription wizard, MCP) but never for an input
+    capability — the runtime uses `channel` to decide whether to forward
+    file bytes to the LLM."""
+    with pytest.raises(ValueError, match="channel"):
+        FlowCapability(
+            id="input_fixture",
+            label="fixture",
+            description="fixture",
+            applies_to_tuples=(),
+            required_config=(),
+            invariants=(),
+            exposure="builder",
+            not_exposed_reason=None,
+            channel=None,
+        )
+
+
+def test_input_text_has_no_absorbed_invariants() -> None:
+    """Positive guardrail: `input_text` has `contract_allowed=True`,
+    `requires_extraction=False`, `requires_files=False` → zero absorbed
+    invariants. Catches a future seeder bug that would add spurious
+    invariants where the policy has none."""
+    capability = CAPABILITY_REGISTRY["input_text"]
+    assert capability.invariants == ()
+    assert capability.channel == "text_only"
+
+
 def test_fcm_module_has_no_ai_builder_imports() -> None:
     """Redundant with the P0.7 `importlinter` contract but keeps the invariant
     obvious in this test module: engine capability truth must not depend on

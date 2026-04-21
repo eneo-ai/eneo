@@ -10,6 +10,21 @@ transcription wizard, etc.) lands in A.1; the public API
 Engine-truth only: no Pattern Registry, no AI Builder, no planner prose.
 Planner-facing copy and strategy live on the Pattern Registry (A.4) and
 Question Catalog (A.4b).
+
+Versioning discipline: `FCM_VERSION` is the monotonic integer stamped on
+persisted plans, planning-state snapshots, and digests starting in Phase
+C. Phase A (A.0–A.6) is an unpublished epoch — no consumer reads the
+version yet, so capability-surface changes during Phase A do not bump
+`FCM_VERSION`. Phase A ends with `FCM_VERSION=1`; the first bump lands
+when a later consumer begins persisting the version. After that, any
+capability-surface change — new registry key, added/changed
+`applies_to_tuples`, added/changed `FlowCapability` / nested-type field,
+or altered `invariants` content — bumps the version and keeps any retired
+capability resolvable with a deprecation reason for one bump cycle.
+
+A.3's bump-discipline CI test must cover this full surface; the plan's
+original narrow spec (keys + `applies_to_tuples`) misses field additions
+and invariant-content changes. A.3 widens it.
 """
 
 from __future__ import annotations
@@ -32,6 +47,7 @@ FCM_VERSION: int = 1
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
 Exposure = Literal["builder", "engine_only", "not_exposed"]
+Channel = Literal["text_only", "files_only"]
 
 
 @dataclass(frozen=True)
@@ -77,6 +93,7 @@ class FlowCapability:
     invariants: tuple[InvariantSpec, ...]
     exposure: Exposure
     not_exposed_reason: str | None
+    channel: Channel | None = None
 
     def __post_init__(self) -> None:
         has_reason = bool(self.not_exposed_reason and self.not_exposed_reason.strip())
@@ -91,6 +108,11 @@ class FlowCapability:
                 "`not_exposed_reason`; engine-truth rejects the contradictory "
                 "state — leave `not_exposed_reason=None` for builder exposure."
             )
+        if self.id.startswith("input_") and self.channel is None:
+            raise ValueError(
+                f"Capability '{self.id}' is an input capability but has "
+                "`channel=None`; every input capability must declare its channel."
+            )
 
 
 _UNSUPPORTED_REASONS: dict[str, str] = {
@@ -99,6 +121,69 @@ _UNSUPPORTED_REASONS: dict[str, str] = {
         "no runtime backend accepts raw image bytes for a flow step."
     ),
 }
+
+
+def _narrow_channel(key: str, raw: str) -> Channel:
+    """Narrow `InputTypePolicy.channel` (`str`) into the FCM `Channel` literal.
+
+    Fail-loud on drift so a new channel value in `type_policies.py` can't
+    silently pass through the FCM seeder without a matching update here.
+    """
+    if raw == "text_only":
+        return "text_only"
+    if raw == "files_only":
+        return "files_only"
+    raise ValueError(
+        f"INPUT_TYPE_POLICIES['{key}'].channel has unknown value {raw!r}; "
+        "FCM expects 'text_only' or 'files_only'."
+    )
+
+
+def _absorbed_invariants(
+    key: str, policy: InputTypePolicy
+) -> tuple[InvariantSpec, ...]:
+    """Mirror the three runtime rules on `InputTypePolicy` as FCM invariants.
+
+    Rules are the ones enforced by `flow_validators.validate_steps` and
+    `runtime.step_input_validation.validate_runtime_input_policy`. The
+    `supported` flag is handled upstream via `exposure`; the `channel`
+    field is a capability attribute, not a runtime rule, and is mirrored
+    separately on `FlowCapability.channel`.
+    """
+    invariants: list[InvariantSpec] = []
+    if not policy.contract_allowed:
+        invariants.append(
+            InvariantSpec(
+                id="input_contract_forbidden",
+                description=(
+                    f"Steps using the `{key}` input capability must not set "
+                    "`input_contract`; the runtime rejects contract on "
+                    "non-contract-allowed capabilities."
+                ),
+            )
+        )
+    if policy.requires_extraction:
+        invariants.append(
+            InvariantSpec(
+                id="requires_non_empty_extraction",
+                description=(
+                    f"Steps using the `{key}` input capability must produce "
+                    "non-empty extracted text at runtime; empty extraction "
+                    "is rejected by `validate_runtime_input_policy`."
+                ),
+            )
+        )
+    if policy.requires_files:
+        invariants.append(
+            InvariantSpec(
+                id="requires_at_least_one_file",
+                description=(
+                    f"Steps using the `{key}` input capability must present "
+                    "at least one compatible file at runtime."
+                ),
+            )
+        )
+    return tuple(invariants)
 
 
 def _seed_input_type_capability(key: str, policy: InputTypePolicy) -> FlowCapability:
@@ -119,9 +204,10 @@ def _seed_input_type_capability(key: str, policy: InputTypePolicy) -> FlowCapabi
         ),
         applies_to_tuples=(),
         required_config=(),
-        invariants=(),
+        invariants=_absorbed_invariants(key, policy),
         exposure=exposure,
         not_exposed_reason=reason,
+        channel=_narrow_channel(key, policy.channel),
     )
 
 
