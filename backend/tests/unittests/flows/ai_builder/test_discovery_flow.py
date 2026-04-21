@@ -803,14 +803,14 @@ class TestExtendedClarificationHints:
         _, question_data, _assistant_text = followup
         assert question_data["question_id"] == "final_output_mode"
 
-    def test_municipal_case_prompt_suppresses_high_value_questions_for_medium_complexity(
+    def test_rich_prompt_uses_full_question_budget_when_slots_remain(
         self,
     ) -> None:
-        """Medium-complexity prompt (48 words) with 2 answers already given.
+        """P0.2: rich prompts no longer get fewer questions than short ones.
 
-        document_material_scope is high_value, which the budget filter correctly
-        suppresses for medium/advanced complexity. The user gave enough context
-        so no further questions are needed.
+        Budget is 3 for any prompt without an explicit step plan. With 2
+        structured answers already given, the 3rd slot is still available
+        and the engine proposes the next architecture-impact question.
         """
         conversation = [
             ConversationMessage(
@@ -848,7 +848,9 @@ class TestExtendedClarificationHints:
         ]
 
         followup = build_discovery_followup(conversation)
-        assert followup is None
+        assert followup is not None
+        _, question_data, _assistant_text = followup
+        assert question_data["question_id"] == "structured_analysis_need"
 
     def test_vague_decision_support_prompt_is_resolved_after_full_answers(self) -> None:
         """After 5 explicit answers covering scope, input, output mode, and

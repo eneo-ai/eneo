@@ -106,6 +106,9 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     question_is_already_resolved,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    detect_planner_pattern_signals,
+)
 from intric.flows.ai_builder.ai_builder_signal_confidence import (
     has_low_confidence_signals,
     score_conversation_signals,
@@ -375,9 +378,9 @@ def analyze_discovery(
             )
         )
 
-    if (
-        _structured_analysis_need_is_vague(profile)
-        and question_exposure_for_id("structured_analysis_need") == "user_requirement"
+    if _structured_analysis_need_is_vague(profile) and (
+        question_exposure_for_id("structured_analysis_need") == "user_requirement"
+        or _should_surface_structured_analysis_question(profile)
     ):
         raw_issues.append(
             DiscoveryIssue(
@@ -758,6 +761,16 @@ def _has_minimum_viable_specification(profile: DiscoveryProfile) -> bool:
     return sum([has_input, has_output, has_purpose]) >= 2
 
 
+def _should_surface_structured_analysis_question(profile: DiscoveryProfile) -> bool:
+    pattern = detect_planner_pattern_signals(profile.text)
+    return (
+        pattern.rich_document_workflow
+        and not profile.edit_mode
+        and profile.resolved_requirements.slot("structured_analysis_need") is None
+        and "structured_analysis_need" not in profile.answers
+    )
+
+
 def _apply_discovery_decision_engine(
     *,
     issues: list[DiscoveryIssue],
@@ -776,5 +789,4 @@ def _apply_discovery_decision_engine(
         profile=profile,
         conversation=conversation,
         semantic_result=semantic_result,
-        text_has_task_verbs=_text_has_task_verbs(profile.text),
     )

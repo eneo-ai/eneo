@@ -23,6 +23,9 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     mentions_runtime_metadata,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    detect_planner_pattern_signals,
+)
 from intric.flows.ai_builder.ai_builder_signal_confidence import (
     ScoredSignal,
     score_conversation_signals,
@@ -53,7 +56,6 @@ def apply_discovery_decision_engine(
     profile: DiscoveryProfile,
     conversation: list[ConversationMessage],
     semantic_result: SemanticAdjudicationResult | None,
-    text_has_task_verbs: bool,
 ) -> tuple[
     list[DiscoveryIssue],
     list[str],
@@ -64,10 +66,8 @@ def apply_discovery_decision_engine(
     scored_signals = score_conversation_signals(
         conversation, freeform_text=profile.text
     )
-    rich_prompt = is_rich_prompt(profile, text_has_task_verbs=text_has_task_verbs)
-    max_questions = (
-        1 if has_explicit_step_plan(profile.text) else 2 if rich_prompt else 3
-    )
+    planner_patterns = detect_planner_pattern_signals(profile.text)
+    max_questions = compute_question_budget(profile.text)
     assumptions: list[str] = list(
         semantic_result.assumptions if semantic_result else ()
     )
@@ -89,6 +89,10 @@ def apply_discovery_decision_engine(
         if (
             question_id is not None
             and question_exposure_for_id(question_id) != "user_requirement"
+            and not (
+                question_id == "structured_analysis_need"
+                and planner_patterns.rich_document_workflow
+            )
         ):
             suppressed.append(
                 suppressed_candidate(candidate, reason="planner_internal_question")
@@ -376,37 +380,32 @@ def suppressed_candidate(
     )
 
 
-def is_rich_prompt(
-    profile: DiscoveryProfile,
-    *,
-    text_has_task_verbs: bool,
-) -> bool:
-    signal_count = 0
-    if profile.document_like_input or profile.audio_like_input:
-        signal_count += 1
-    if profile.final_output_text_or_docx or "final_output_mode" in profile.answers:
-        signal_count += 1
-    if profile.case_like_flow or profile.comparison_requested or text_has_task_verbs:
-        signal_count += 1
-    if mentions_runtime_metadata(profile.text):
-        signal_count += 1
-    if explicit_structured_reuse_preference(profile.text):
-        signal_count += 1
-    return signal_count >= 4
+def compute_question_budget(text: str) -> int:
+    """Return 1 if user provided an explicit step plan, otherwise 3.
+
+    Rich prompts should not receive fewer questions than short prompts (P0.2).
+    """
+    return 1 if has_explicit_step_plan(text) else 3
 
 
 def has_explicit_step_plan(text: str) -> bool:
     return mentions_any(
-        text,
+        text.casefold(),
         (
             "steg 1",
             "steg 2",
+            "steg 3",
             "step 1",
             "step 2",
+            "step 3",
             "tre steg",
             "three steps",
             "3-stegs",
             "3-step",
+            "fyra steg",
+            "four steps",
+            "4-stegs",
+            "4-step",
         ),
     )
 

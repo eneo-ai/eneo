@@ -16,6 +16,9 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     mentions_runtime_metadata,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    detect_planner_pattern_signals,
+)
 
 _DOCUMENT_PACKAGE_PHRASES: tuple[str, ...] = (
     "dokumentpaket",
@@ -555,6 +558,7 @@ def structured_analysis_need_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     answers = profile.answers
     text = profile.text
+    planner_patterns = detect_planner_pattern_signals(text)
     if "structured_analysis_need" in answers:
         return False
     if "structured_json" in answers.get("final_output_mode", set()):
@@ -575,6 +579,10 @@ def structured_analysis_need_is_vague(profile: DiscoveryProfile) -> bool:
             "ekonomiska risker",
             "operativa risker",
         ),
+    ):
+        return True
+    if planner_patterns.rich_document_workflow and (
+        planner_patterns.needs_form_fields or planner_patterns.prefers_quality_step
     ):
         return True
     return False
