@@ -393,14 +393,16 @@ def _seed_mcp_policy_capability() -> FlowCapability:
         id="mcp_policy",
         label="MCP policy",
         description=(
-            "Controls whether a flow step inherits the enclosing assistant's "
-            "MCP (Model Context Protocol) tool access or is restricted from "
-            "tool use. The legacy validator only enforces that "
-            "`step.mcp_policy` is a known enum value; there are no per-value "
-            "semantic rules today. If a future rule diverges per value "
-            "(e.g. RESTRICTED gaining explicit runtime semantics), this "
-            "singleton capability will split into per-value entries at that "
-            "point."
+            "Controls the flow step's MCP (Model Context Protocol) tool-access "
+            "posture within the tenant → space → step cascade. Tenant admins "
+            "enable MCP servers globally; space admins narrow that set per-MCP "
+            "and per-tool within the space; the step then chooses which of the "
+            "space-allowed MCPs/tools to expose at runtime. The legacy "
+            "validator only enforces that `step.mcp_policy` is a known enum "
+            "value; there are no per-value semantic rules today. If a future "
+            "rule diverges per value (e.g. RESTRICTED gaining explicit runtime "
+            "semantics), this singleton capability will split into per-value "
+            "entries at that point."
         ),
         applies_to_tuples=(),
         required_config=(),
