@@ -23,7 +23,18 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
     resolve_requirements_state,
 )
+from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
+    KNOWN_REQUIREMENT_SLOT_NAMES,
+)
 from intric.flows.domain.flow import Flow
+
+__all__ = [
+    "KNOWN_REQUIREMENT_SLOT_NAMES",
+    "RequirementSlot",
+    "ResolvedRequirementsState",
+    "SlotSource",
+    "build_resolved_requirements_state",
+]
 
 SlotSource = Literal[
     "structured_answer",
@@ -52,19 +63,6 @@ class ResolvedRequirementsState:
             if slot.name == name:
                 return slot
         return None
-
-
-KNOWN_REQUIREMENT_SLOT_NAMES: frozenset[str] = frozenset(
-    {
-        "primary_runtime_input",
-        "terminal_output",
-        "docx_output_mode",
-        "pdf_generation_mode",
-        "document_material_scope",
-        "structured_analysis_need",
-        "runtime_metadata_fields",
-    }
-)
 
 
 @dataclass(frozen=True, slots=True)

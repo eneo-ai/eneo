@@ -17,7 +17,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_resolved_requirements import (
+from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
@@ -311,7 +311,7 @@ class TestCatalogInvariants:
     def test_catalog_keys_equal_known_slot_names(self) -> None:
         """Exact-key pin. The catalog seeds one template per architectural
         slot — renaming or adding a slot in
-        `ai_builder_resolved_requirements.py` requires a matching catalog
+        `ai_builder_slot_vocabulary.py` requires a matching catalog
         change in the same diff. The live frozenset is the single source
         of truth."""
         assert frozenset(QUESTION_CATALOG.keys()) == KNOWN_REQUIREMENT_SLOT_NAMES, (

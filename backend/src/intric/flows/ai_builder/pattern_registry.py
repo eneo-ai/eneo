@@ -12,8 +12,8 @@ Each `Pattern` captures:
   `"single-step summarize"`, `"avoid audio+template_fill"`). These are
   deliberately terse, non-localized tokens; no prose.
 - `required_architectural_slots` — slot names from
-  `ai_builder_resolved_requirements.py` that this archetype's
-  discovery must resolve before the planner can commit to it.
+  `ai_builder_slot_vocabulary.py` that this archetype's discovery
+  must resolve before the planner can commit to it.
 - `question_template_ids` — forward-references the Question Catalog
   (A.4b). Resolution is pinned by an A.5 CI test once the catalog lands.
 - `polarity` — `"positive"` archetypes are recommended paths;

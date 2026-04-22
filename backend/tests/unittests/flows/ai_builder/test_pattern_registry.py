@@ -2,8 +2,8 @@
 
 Covers: `Pattern` dataclass shape (structural planner-strategy fields
 only), registry immutability, version constant, exact seed ids,
-slot-vocabulary anchored on the live `ai_builder_resolved_requirements`
-export, and negative-pattern bite asserted against live FCM callables.
+slot-vocabulary anchored on the live `ai_builder_slot_vocabulary`
+leaf export, and negative-pattern bite asserted against live FCM callables.
 Matches the `test_ai_builder_recipe_selector.py` idiom — plain test
 class, no fixtures beyond scoped helpers, direct imports.
 
@@ -19,7 +19,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_resolved_requirements import (
+from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
 from intric.flows.ai_builder.pattern_registry import (
@@ -210,7 +210,7 @@ class TestPositivePatternContract:
         self, positive_patterns: list[Pattern]
     ) -> None:
         """A Pattern may only reference slot names that exist in
-        `ai_builder_resolved_requirements.KNOWN_REQUIREMENT_SLOT_NAMES`.
+        `ai_builder_slot_vocabulary.KNOWN_REQUIREMENT_SLOT_NAMES`.
         The live export is the single source of truth; a rename there
         without a matching Pattern Registry update fails this test."""
         for pattern in positive_patterns:

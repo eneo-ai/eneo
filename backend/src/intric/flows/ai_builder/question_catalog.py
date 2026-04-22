@@ -8,7 +8,7 @@ no FCM truth — that surface belongs to Pattern Registry (A.4) and FCM
 (A.0–A.3).
 
 Catalog keys are slot names from
-`ai_builder_resolved_requirements.KNOWN_REQUIREMENT_SLOT_NAMES`. Pattern
+`ai_builder_slot_vocabulary.KNOWN_REQUIREMENT_SLOT_NAMES`. Pattern
 Registry's `question_template_ids` field forward-references these keys;
 A.5 promotes the dangling-reference check into a CI-enforced rule.
 
@@ -26,9 +26,9 @@ therefore needs a slot-key → legacy-question-id bridge for those two
 rows; the remaining five migrate cleanly.
 
 This module is a pure leaf: its only non-stdlib import is the
-slot-name frozenset from `ai_builder_resolved_requirements.py`. A.5's
-importlinter rule will need to permit that single dependency or
-relocate the frozenset to its own leaf module.
+slot-name frozenset from the dedicated leaf module
+`ai_builder_slot_vocabulary.py`. A.5b adds the importlinter rule that
+enforces this boundary.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from intric.flows.ai_builder.ai_builder_resolved_requirements import (
+from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
 
