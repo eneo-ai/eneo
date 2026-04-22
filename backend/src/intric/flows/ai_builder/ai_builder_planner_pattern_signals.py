@@ -28,7 +28,6 @@ _DOCUMENT_OUTPUT_MARKERS: tuple[str, ...] = (
     "report",
     "slutdokument",
     "slutligt dokument",
-    "beslutsunderlag",
     "decision support",
 )
 

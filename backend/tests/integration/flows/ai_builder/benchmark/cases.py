@@ -42,7 +42,7 @@ BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
         prompt=(
             "Vi laddar upp tre PDF-dokument per körning: ansökan, "
             "bakgrundsdokument och ett policydokument. Flödet ska läsa "
-            "alla tre och producera en sammanfattning som beslutsunderlag."
+            "alla tre och producera en sammanfattande rapport."
         ),
     ),
     BenchmarkCase(
@@ -97,9 +97,9 @@ BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
         archetype="json_pipeline",
         ui_language="sv",
         prompt=(
-            "Extrahera strukturerad JSON från ett uppladdat dokument "
+            "Extrahera strukturerad JSON från ett uppladdat PDF-underlag "
             "(titel, sammanfattning, risk), återanvänd fälten och skriv "
-            "ett beslutsunderlag i text."
+            "en rapport i text."
         ),
     ),
     BenchmarkCase(
