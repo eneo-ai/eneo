@@ -79,12 +79,12 @@ class TestParseArguments:
     def test_parse_create_flow_arguments_returns_typed_draft(self) -> None:
         draft = parse_create_flow_arguments(
             {
-                "flow_name": "Kommunärende",
+                "flow_name": "Dokumentanalys",
                 "plan_rationale": "Struktur först.",
                 "steps": [
                     {
                         "name": "Extrahera",
-                        "instructions": "Extrahera juridiska risker.",
+                        "instructions": "Extrahera strukturerad data.",
                         "input_source": "flow_input",
                         "input_type": "document",
                         "output_type": "json",
@@ -100,8 +100,8 @@ class TestParseArguments:
                         ],
                     },
                     {
-                        "name": "Skriv beslutsunderlag",
-                        "instructions": "Skriv beslutsunderlag.",
+                        "name": "Skriv slutrapport",
+                        "instructions": "Skriv slutrapport.",
                         "input_source": "previous_step",
                         "input_type": "json",
                         "output_type": "text",
@@ -117,7 +117,7 @@ class TestParseArguments:
             }
         )
 
-        assert draft.flow_name == "Kommunärende"
+        assert draft.flow_name == "Dokumentanalys"
         assert draft.steps[0].runtime_upload is True
         assert draft.steps[0].output_fields is not None
         assert draft.steps[0].output_fields[0].name == "risknivå"
@@ -128,7 +128,7 @@ class TestParseArguments:
     ) -> None:
         draft = parse_create_flow_arguments(
             {
-                "flow_name": "Kommunärende",
+                "flow_name": "Dokumentanalys",
                 "plan_rationale": "Struktur först.",
                 "steps": [
                     {
@@ -185,7 +185,7 @@ class TestParseArguments:
         with pytest.raises(Exception, match="nesting depth cannot exceed 3"):
             parse_create_flow_arguments(
                 {
-                    "flow_name": "Kommunärende",
+                    "flow_name": "Dokumentanalys",
                     "plan_rationale": "Struktur först.",
                     "steps": [
                         {
@@ -242,7 +242,7 @@ class TestParseArguments:
         ):
             parse_create_flow_arguments(
                 {
-                    "flow_name": "Kommunärende",
+                    "flow_name": "Dokumentanalys",
                     "plan_rationale": "Struktur först.",
                     "steps": [
                         {
@@ -267,7 +267,7 @@ class TestParseArguments:
     ) -> None:
         draft = parse_create_flow_arguments(
             {
-                "flow_name": "Kommunärende",
+                "flow_name": "Dokumentanalys",
                 "plan_rationale": "Struktur först.",
                 "steps": [
                     {
@@ -313,7 +313,7 @@ class TestParseArguments:
         ):
             parse_create_flow_arguments(
                 {
-                    "flow_name": "Kommunärende",
+                    "flow_name": "Dokumentanalys",
                     "plan_rationale": "Struktur först.",
                     "steps": [
                         {
