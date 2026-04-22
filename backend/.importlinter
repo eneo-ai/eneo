@@ -67,3 +67,16 @@ forbidden_modules =
     intric.flows.ai_builder
 ignore_imports =
     intric.flows.api.flow_router -> intric.flows.ai_builder.ai_builder_router
+
+[importlinter:contract:fcm-no-ai-builder]
+# The Flow Capability Manifest is engine truth. Even though the broader
+# `flows-engine-no-ai-builder` contract already lists `flow_capability_manifest`
+# in its source modules, we pin this narrower rule on its own so that:
+# (1) a regression produces an FCM-specific failure message, and
+# (2) the invariant survives any future revision of Rule 1's source enumeration.
+name = FCM must not import AI Builder
+type = forbidden
+source_modules =
+    intric.flows.flow_capability_manifest
+forbidden_modules =
+    intric.flows.ai_builder
