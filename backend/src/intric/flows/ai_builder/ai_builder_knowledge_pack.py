@@ -23,6 +23,7 @@ from intric.flows.ai_builder.ai_builder_knowledge_pack_protocol import (
     build_role_and_protocol,
     build_structured_reference_block,
 )
+from intric.flows.ai_builder.pattern_registry import render_knowledge_pack
 
 
 def build_prompt_knowledge_sections(
@@ -54,6 +55,7 @@ def build_prompt_knowledge_sections(
                 KNOWLEDGE_PACK_CREATE_STEP_DESIGN,
                 KNOWLEDGE_PACK_CREATE_RECIPES,
                 VALIDATION_REPAIR_EXAMPLES,
+                render_knowledge_pack(),
             ]
         )
     return sections

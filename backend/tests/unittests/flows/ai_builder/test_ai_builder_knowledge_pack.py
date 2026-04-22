@@ -18,7 +18,9 @@ def test_build_prompt_knowledge_sections_for_create_discovery_is_compact() -> No
     assert not any("Validation Repair Examples" in section for section in sections)
 
 
-def test_build_prompt_knowledge_sections_for_create_proposal_includes_full_create_guidance() -> None:
+def test_build_prompt_knowledge_sections_for_create_proposal_includes_full_create_guidance() -> (
+    None
+):
     sections = build_prompt_knowledge_sections(
         is_edit_mode=False,
         has_confirmed_requirements=True,
@@ -40,6 +42,51 @@ def test_build_prompt_knowledge_sections_for_edit_mode_uses_edit_guidance() -> N
     assert any("Variabelsystemet" in section for section in sections)
     assert any("Redigeringsläge (Edit Mode)" in section for section in sections)
     assert any("Input- och utdatakontrakt" in section for section in sections)
+
+
+def test_build_prompt_knowledge_sections_includes_registry_rendered_pack_in_create_mode() -> (
+    None
+):
+    sections = build_prompt_knowledge_sections(
+        is_edit_mode=False,
+        has_confirmed_requirements=True,
+    )
+
+    assert any("Flow capabilities (engine truth)" in section for section in sections), (
+        "registry-rendered capabilities header missing from create-mode prompt"
+    )
+    assert any(
+        "Planner patterns (positive archetypes)" in section for section in sections
+    ), "registry-rendered positive patterns header missing"
+    assert any("Discovery questions" in section for section in sections), (
+        "registry-rendered discovery questions header missing"
+    )
+
+
+def test_build_prompt_knowledge_sections_omits_registry_pack_without_confirmed_requirements() -> (
+    None
+):
+    sections = build_prompt_knowledge_sections(
+        is_edit_mode=False,
+        has_confirmed_requirements=False,
+    )
+
+    assert not any(
+        "Flow capabilities (engine truth)" in section for section in sections
+    ), "registry-rendered pack must not leak into the pre-requirements discovery prompt"
+
+
+def test_build_prompt_knowledge_sections_omits_registry_pack_in_edit_mode() -> None:
+    sections = build_prompt_knowledge_sections(
+        is_edit_mode=True,
+        has_confirmed_requirements=False,
+    )
+
+    assert not any(
+        "Flow capabilities (engine truth)" in section for section in sections
+    ), (
+        "registry-rendered pack is create-mode only; edit-mode prompt must not include it"
+    )
 
 
 def test_role_and_reference_blocks_switch_submission_tool_by_mode() -> None:

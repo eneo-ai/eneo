@@ -137,11 +137,12 @@ class TestBuildSystemPrompt:
                 "output_description": "Test",
             },
         )
+        # Planner-emitted-variable syntax stays hidden in create mode;
+        # templating is backend-compiled, not planner-authored.
         assert "input_bindings.question" not in prompt
-        assert "input_contract" not in prompt
-        assert "output_contract" not in prompt
         assert "{{ step_a.output.text }}" not in prompt
         assert "do not emit plan_step_ref values" in prompt
+        # Create-mode IR surface (what the planner DOES emit) stays present.
         assert "output_fields" in prompt
         assert "runtime_upload" in prompt
 
