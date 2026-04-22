@@ -46,7 +46,7 @@ class TestQuestionTaxonomy:
                 role="user",
                 content=(
                     "Jag vill ha ett flöde som bearbetar ett ärende med dokument "
-                    "och producerar rapport med beslutsstöd"
+                    "och producerar en sammanfattande rapport"
                 ),
             )
         ]
@@ -67,7 +67,7 @@ class TestQuestionTaxonomy:
             ConversationMessage(
                 role="user",
                 content=(
-                    "Jag vill analysera dokument och producera rapport med beslutsstöd"
+                    "Jag vill analysera dokument och producera en sammanfattande rapport"
                 ),
             ),
             ConversationMessage(
@@ -123,9 +123,7 @@ class TestMVSGate:
         conversation = [
             ConversationMessage(
                 role="user",
-                content=(
-                    "Analysera kommunala handlingar och ta fram beslutsunderlag som DOCX"
-                ),
+                content=("Analysera dokument och ta fram en rapport som DOCX"),
             )
         ]
         analysis = analyze_discovery(conversation)
@@ -212,13 +210,13 @@ class TestQuestionBudget:
             ConversationMessage(
                 role="user",
                 content=(
-                    "Jag vill bygga ett flöde som heter Kommunanalys expertz. "
+                    "Jag vill bygga ett flöde som heter Dokumentanalys expert. "
                     "Flödet ska hjälpa en chef att förstå ett ärende. "
                     "Användaren ska kunna ladda upp underlag som PDF, ange "
-                    "ärendenummer, kort beskrivning, språk för rapporten och "
+                    "referensnummer, kort beskrivning, språk för rapporten och "
                     "fokus för analysen. Flödet ska analysera materialet, "
                     "extrahera viktiga fakta, risker, möjligheter och "
-                    "rekommendationer, och skapa ett beslutsunderlag. "
+                    "rekommendationer, och skapa en slutrapport. "
                     "Jag vill att lösningen blir robust och att strukturerad "
                     "data används där det förbättrar kvaliteten."
                 ),
@@ -242,17 +240,17 @@ class TestQuestionBudget:
             f"{[i.issue_id for i in blocking]}"
         )
 
-    def test_kommunanalys_prompt_uses_assumptions_for_scope_and_document_shape(
+    def test_detailed_analysis_prompt_uses_assumptions_for_scope_and_document_shape(
         self,
     ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
                 content=(
-                    "Jag vill bygga ett flöde som heter Kommunanalys expertz. "
+                    "Jag vill bygga ett flöde som heter Dokumentanalys expert. "
                     "Flödet ska hjälpa en chef att förstå ett ärende. "
                     "Användaren ska kunna ladda upp underlag som PDF, ange "
-                    "ärendenummer, kort beskrivning, språk för rapporten och "
+                    "referensnummer, kort beskrivning, språk för rapporten och "
                     "fokus för analysen. Flödet ska analysera materialet, "
                     "extrahera viktiga fakta, risker, möjligheter och "
                     "rekommendationer, och skapa en rapport. "
@@ -303,7 +301,7 @@ class TestQuestionBudget:
                     "Bygg ett flöde med tre steg: steg 1 transkribera ljud "
                     "från mötesinsplening och skriv ut texten, steg 2 extrahera "
                     "JSON-fakta med nyckelinformation från transkriberingen, "
-                    "steg 3 generera en strukturerad rapport som beslutsunderlag "
+                    "steg 3 generera en strukturerad rapport "
                     "med rekommendationer baserat på extraherade fakta. "
                     "Flödet ska stödja uppladdning av ljudfiler vid körning."
                 ),
