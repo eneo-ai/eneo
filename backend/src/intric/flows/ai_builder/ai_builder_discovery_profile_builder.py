@@ -90,7 +90,6 @@ _STRUCTURED_REPORT_HINTS = (
     "report",
     "pdf",
     "docx",
-    "beslutsunderlag",
     "structured report",
     "strukturerad",
 )

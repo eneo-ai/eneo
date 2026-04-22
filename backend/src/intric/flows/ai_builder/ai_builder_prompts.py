@@ -316,7 +316,7 @@ def build_clarification_hints(
     if mentions_form_field_needs(text):
         hints.append(
             "- Designhint: eftersom användaren beskriver värden som ska anges eller väljas vid körning "
-            "(t.ex. språk, fokus, datum, ärendenummer eller nivå) ska dessa modelleras som "
+            "(t.ex. språk, fokus, datum, referensnummer eller nivå) ska dessa modelleras som "
             "`form_fields` så att senare steg kan använda dem som variabler."
         )
 

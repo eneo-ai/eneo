@@ -11,10 +11,8 @@ _FORM_FIELD_NEED_MARKERS: tuple[str, ...] = (
     "önskat språk",
     "välja språk",
     "fokus för analysen",
-    "ärendenummer",
     "kort beskrivning",
     "politisk nivå",
-    "nämnd",
 )
 
 _SECTION_SCOPE_MARKERS: tuple[str, ...] = (
