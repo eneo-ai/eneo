@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_flow_architecture import (
+    render_flow_architecture,
+)
 from intric.flows.ai_builder.ai_builder_knowledge_pack_core import (
     KNOWLEDGE_PACK_ANTI_PATTERNS,
     KNOWLEDGE_PACK_CONTRACTS,
@@ -11,7 +14,6 @@ from intric.flows.ai_builder.ai_builder_knowledge_pack_core import (
     KNOWLEDGE_PACK_VARIABLE_SYSTEM,
 )
 from intric.flows.ai_builder.ai_builder_knowledge_pack_create import (
-    KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE,
     KNOWLEDGE_PACK_CREATE_RECIPES,
 )
 from intric.flows.ai_builder.ai_builder_knowledge_pack_edit import (
@@ -50,7 +52,7 @@ def build_prompt_knowledge_sections(
         )
         return sections
 
-    sections.append(KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE)
+    sections.append(render_flow_architecture())
     if has_confirmed_requirements:
         sections.extend(
             [
@@ -66,7 +68,6 @@ def build_prompt_knowledge_sections(
 __all__ = [
     "KNOWLEDGE_PACK_ANTI_PATTERNS",
     "KNOWLEDGE_PACK_CONTRACTS",
-    "KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE",
     "KNOWLEDGE_PACK_CREATE_RECIPES",
     "KNOWLEDGE_PACK_EDIT_MODE",
     "KNOWLEDGE_PACK_FLOW_ARCHITECTURE",

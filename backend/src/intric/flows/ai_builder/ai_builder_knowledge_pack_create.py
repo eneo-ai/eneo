@@ -1,42 +1,5 @@
 from __future__ import annotations
 
-_KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE = """\
-# Create-flow-kompilering
-
-I create-läge beskriver du bara avsikten i `create_flow`. Backend kompilerar \
-utkastet till den kanoniska flödesspecifikationen.
-
-## Vad du SKA ange
-- `instructions` — vanlig text utan variabelsyntax
-- `input_source`, `input_type`, `output_type`
-- `runtime_upload`, `runtime_required`, `runtime_max_files` för första uppladdningssteget
-- `uses_form_fields` när senare steg behöver formulärvärden
-- `uses_previous_fields` när senare steg behöver specifika strukturerade fält från tidigare JSON-steg
-- `document_delivery_mode` för PDF/DOCX-leverans
-- `citations_requested` för textsteg som ska ha källhänvisningar
-- `output_fields` för JSON-steg
-
-## Vad backend äger
-- stegrefar (`plan_step_ref`)
-- underlag / variabelinjektion mellan steg
-- kontrakt / JSON Schema
-- `output_mode`
-- runtime-input-config
-
-## Praktiska regler
-- Steg 1 MÅSTE använda `input_source=\"flow_input\"`
-- Senare steg får inte använda `input_source=\"flow_input\"`; använd `previous_step` eller `all_previous_steps`
-- Sista steget MÅSTE ha `output_type` som matchar den explicit efterfrågade slutartefakten (`text`, `json`, `pdf` eller `docx`)
-- När flera uppladdade dokument ska vägas samman i en gemensam analys eller grounded sammanfattning ska ett samlande steg använda `input_source=\"all_previous_steps\"`
-- Varje objekt i `steps` måste vara ett komplett steg. Fältdefinitioner med `name`, `field_type`, `description` och `required` hör hemma i `output_fields`, inte som egna poster i `steps`
-- Filuppladdning används via `runtime_upload=true` på ett `flow_input`-steg med \
-  `input_type=document`, `file` eller `audio`
-- Använd `output_type=\"json\"` + `output_fields` när nästa steg behöver namngivna datapunkter
-- Använd `output_type=\"text\"` för grounded sammanfattningar, resonemang och läsbar rapporttext
-- Använd `output_type=\"docx\"` eller `\"pdf\"` bara när steget faktiskt levererar dokumentet
-"""
-
-
 _KNOWLEDGE_PACK_CREATE_RECIPES = """\
 # Create-läge: vanliga mönster
 
@@ -137,12 +100,9 @@ _KNOWLEDGE_PACK_CREATE_RECIPES = """\
 ```"""
 
 
-KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE = _KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE
 KNOWLEDGE_PACK_CREATE_RECIPES = _KNOWLEDGE_PACK_CREATE_RECIPES
 
 __all__ = [
-    "_KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE",
     "_KNOWLEDGE_PACK_CREATE_RECIPES",
-    "KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE",
     "KNOWLEDGE_PACK_CREATE_RECIPES",
 ]
