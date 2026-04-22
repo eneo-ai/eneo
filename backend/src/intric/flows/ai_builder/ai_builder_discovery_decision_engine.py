@@ -422,7 +422,6 @@ def implies_single_case(text: str) -> bool:
             "ett ärende",
             "one municipal case",
             "one case",
-            "ärendenummer",
             "case number",
         ),
     )
@@ -458,7 +457,6 @@ def implies_structured_report_pdf(text: str) -> bool:
     return mentions_any(
         text,
         (
-            "beslutsunderlag",
             "risker",
             "möjligheter",
             "rekommendationer",
@@ -478,7 +476,6 @@ def looks_like_case_document_family(text: str) -> bool:
             "municipal case",
             "underlag",
             "case material",
-            "beslutsunderlag",
             "tjänsteskrivelse",
             "remiss",
         ),
