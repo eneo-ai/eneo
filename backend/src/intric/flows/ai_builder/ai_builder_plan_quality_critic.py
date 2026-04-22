@@ -4,18 +4,18 @@ from collections.abc import Mapping
 from typing import Any
 
 from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    DOCX_MODE_INVARIANTS,
+    FORM_FIELDS_INVARIANTS,
+    TERMINAL_OUTPUT_INVARIANTS,
     CriticContext,
+    has_json_contract_step,
     render_critic_issues,
-)
-from intric.flows.ai_builder.ai_builder_form_intake_signals import (
-    mentions_sectioned_form_intake,
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
     needs_structured_extraction,
     resolve_output_intent,
-    runtime_metadata_requested,
 )
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     degrades_document_entry_to_generic_file,
@@ -139,53 +139,10 @@ def build_conversation_aware_quality_feedback(
     )
     issues: list[str] = []
 
-    if runtime_metadata_requested(answer_signals) and not spec.form_fields:
-        issues.append(
-            "Användaren har bett om återanvändbara metadata vid körning men planen saknar "
-            "`form_fields`. Lägg till relevanta formulärfält i stället för att gömma dessa värden i prompttext."
-        )
-
-    if mentions_sectioned_form_intake(text) and not spec.form_fields:
-        issues.append(
-            "Konversationen beskriver sektionerad fritextinsamling per rubrik/sektion, men planen saknar "
-            "`form_fields`. Modellera varje rubrik som ett eget textfält i `form_fields` i stället för att "
-            "bygga ett separat insamlingssteg per sektion, och låt senare steg använda dessa fält via "
-            "`uses_form_fields` för att skapa slutdokumentet."
-        )
-
-    if planner_patterns.rich_document_workflow:
-        if planner_patterns.needs_form_fields and not spec.form_fields:
-            issues.append(
-                "Behovet beskriver ett dokumentbaserat flöde som också kräver manuella kompletteringar eller "
-                "inmatningsfält, men planen saknar `form_fields`. Modellera dessa värden som form_fields i "
-                "stället för att gömma dem i instruktionstexten."
-            )
-        if (
-            planner_patterns.prefers_structured_intermediate
-            and not _has_json_contract_step(spec)
-        ):
-            issues.append(
-                "Behovet beskriver ett dokumentflöde som ska återanvända strukturerad analys, men planen saknar "
-                'ett tydligt JSON-steg med `output_contract`. Lägg till ett mellanliggande `output_type="json"`-steg '
-                "innan slutlig rapport eller dokumentleverans."
-            )
-        if planner_patterns.prefers_quality_step and len(spec.steps) < 3:
-            issues.append(
-                "Behovet beskriver ett mer genomarbetat dokumentflöde med analys, granskning eller kvalitetssäkring, "
-                "men planen kollapsar fortfarande till för få steg. Lägg till minst ett mellanliggande analys- eller "
-                "granskningssteg innan slutleveransen."
-            )
+    issues.extend(render_critic_issues(context, invariants=FORM_FIELDS_INVARIANTS))
 
     explicit_output = output_intent.terminal_output
-    issues.extend(render_critic_issues(context))
-    if (
-        explicit_output == "docx_document"
-        and spec.steps[-1].output_type != OutputType.DOCX
-    ):
-        issues.append(
-            "Användaren har valt DOCX som slutartefakt men sista steget producerar inte DOCX. "
-            "Justera slutstegets output_type så att det matchar användarens val."
-        )
+    issues.extend(render_critic_issues(context, invariants=TERMINAL_OUTPUT_INVARIANTS))
     intermediate_document_feedback = _non_terminal_document_output_feedback(
         explicit_output=explicit_output,
         spec=spec,
@@ -199,17 +156,16 @@ def build_conversation_aware_quality_feedback(
         answer_signals,
         step_count=len(spec.steps),
         terminal_output_type=spec.steps[-1].output_type,
-    ) and not _has_json_contract_step(spec):
+    ) and not has_json_contract_step(spec):
         issues.append(
             "Planen verkar behöva strukturerad extraktion för vidare återanvändning, men saknar ett "
             '`output_type="json"`-steg med `output_contract`. Lägg till ett tydligt JSON-extraktionssteg '
             "innan den slutliga text- eller dokumentproduktionen."
         )
 
-    # Check: missing JSON contract when conversation explicitly asks for structured extraction
     # Anti-over-structuring guardrail: only warn when the user explicitly wants JSON/structured
     # extraction for downstream reuse — never for simple human-readable terminal output.
-    if _conversation_requests_json_contract(text) and not _has_json_contract_step(spec):
+    if _conversation_requests_json_contract(text) and not has_json_contract_step(spec):
         if not _terminal_step_is_human_readable_only(text, spec):
             issues.append(
                 "Konversationen nämner strukturerad extraktion (JSON, fält, kontrakt) men inget steg "
@@ -217,7 +173,6 @@ def build_conversation_aware_quality_feedback(
                 "om data ska återanvändas i nästa steg eller av ett externt system."
             )
 
-    # Check: missing audio transcription step when audio is mentioned standalone
     if _conversation_mentions_audio(text) and not _spec_handles_audio(spec):
         if not mixed_audio_document_input_requested(text, flow=flow):
             issues.append(
@@ -227,7 +182,7 @@ def build_conversation_aware_quality_feedback(
 
     if (
         _conversation_requests_field_reuse(text)
-        and _has_json_contract_step(spec)
+        and has_json_contract_step(spec)
         and not _spec_uses_input_bindings(spec)
     ):
         issues.append(
@@ -243,23 +198,7 @@ def build_conversation_aware_quality_feedback(
             '`input_source="all_previous_steps"`. Använd en aggregerande eller jämförande koppling när flera dokument ska behandlas tillsammans.'
         )
 
-    if (
-        output_intent.docx_output_mode == "template_fill_docx"
-        and not _spec_uses_template_fill(spec)
-    ):
-        issues.append(
-            "Konversationen efterfrågar mallbaserad DOCX-generering men planen saknar ett steg med "
-            '`output_mode="template_fill"`. Använd template_fill när ett Word-dokument ska fyllas från en mall.'
-        )
-
-    if output_intent.docx_output_mode == "generated_docx" and _spec_uses_template_fill(
-        spec
-    ):
-        issues.append(
-            "Konversationen efterfrågar genererad DOCX utan mall, men planen använder fortfarande "
-            '`output_mode="template_fill"`. Använd inte template_fill när användaren uttryckligen '
-            "valt genererad DOCX utan mall."
-        )
+    issues.extend(render_critic_issues(context, invariants=DOCX_MODE_INVARIANTS))
 
     if mixed_audio_document_input_requested(text, flow=flow):
         if degrades_document_entry_to_generic_file(spec, flow=flow):
@@ -285,18 +224,6 @@ def build_conversation_aware_quality_feedback(
     if not issues:
         return None
     return format_revision_feedback("Quality issues", issues)
-
-
-def _has_json_contract_step(spec: FlowDraftSpecCore) -> bool:
-    for index, step in enumerate(spec.steps):
-        if step.output_type != OutputType.JSON:
-            continue
-        if step.output_contract is None:
-            continue
-        if index == len(spec.steps) - 1 and len(spec.steps) == 1:
-            continue
-        return True
-    return False
 
 
 def _conversation_requests_json_contract(text: str) -> bool:
@@ -360,10 +287,6 @@ def _spec_uses_all_previous_steps(spec: FlowDraftSpecCore) -> bool:
     return any(
         step.input_source == InputSource.ALL_PREVIOUS_STEPS for step in spec.steps
     )
-
-
-def _spec_uses_template_fill(spec: FlowDraftSpecCore) -> bool:
-    return any(step.output_mode == OutputMode.TEMPLATE_FILL for step in spec.steps)
 
 
 def _non_terminal_document_output_feedback(
