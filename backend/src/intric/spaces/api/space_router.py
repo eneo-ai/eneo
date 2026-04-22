@@ -12,6 +12,7 @@ from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.authentication.auth_dependencies import get_scope_filter, require_permission
+from intric.authentication.auth_models import ApiKeyOwnership
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
 from intric.integration.presentation.assemblers.integration_knowledge_assembler import (
@@ -51,11 +52,19 @@ from intric.spaces.api.space_models import (
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
 )
+from intric.users.user import UserInDB
 from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _is_service_api_key(user: UserInDB) -> bool:
+    key = user.active_api_key
+    if key is None:
+        return False
+    return key.ownership == ApiKeyOwnership.SERVICE
 
 
 async def forbid_org_space(
@@ -146,9 +155,11 @@ async def update_space(
     assembler = container.space_assembler()
     current_user = container.user()
 
-    # Require spaces permission for shared spaces
+    # Require spaces permission for shared spaces.
+    # Service API keys authorize via scope+permission and have no user roles,
+    # so the SpaceActor enforces their access — skip the role gate for them.
     old_space = await service.get_space(id)
-    if not old_space.is_personal():
+    if not old_space.is_personal() and not _is_service_api_key(current_user):
         validate_permission(current_user, Permission.SHARED_SPACES)
 
     def _get_model_ids_or_none(models: list[ModelId] | None):
@@ -326,9 +337,10 @@ async def delete_space(
     service = container.space_service()
     user = container.user()
 
-    # Require spaces permission for shared spaces
+    # Require spaces permission for shared spaces.
+    # Service API keys authorize via scope+permission — skip the role gate.
     space = await service.get_space(id)
-    if not space.is_personal():
+    if not space.is_personal() and not _is_service_api_key(user):
         validate_permission(user, Permission.SHARED_SPACES)
 
     # Delete space

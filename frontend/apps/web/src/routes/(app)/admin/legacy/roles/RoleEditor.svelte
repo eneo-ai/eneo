@@ -87,7 +87,7 @@
       await intric.roles.resetToDefault(role);
       invalidate("admin:roles:load");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toastError(error);
     }
     isProcessing = false;
   }
@@ -99,7 +99,7 @@
       invalidate("admin:roles:load");
       window.location.reload();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toastError(error);
     }
     isProcessing = false;
   }

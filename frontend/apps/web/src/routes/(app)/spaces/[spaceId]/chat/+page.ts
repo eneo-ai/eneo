@@ -12,7 +12,7 @@ export const load: PageLoad = async (event) => {
 
   const partnerId =
     partnerType === "default-assistant"
-      ? currentSpace.default_assistant.id
+      ? (currentSpace.default_assistant?.id ?? null)
       : event.url.searchParams.get("id");
   const selectedSessionId = event.url.searchParams.get("session_id");
 

@@ -106,12 +106,14 @@ def add_tenant_user(
             owner_permissions = [
                 "admin",
                 "assistants",
+                "group_chats",
+                "apps",
                 "services",
                 "collections",
                 "insights",
                 "AI",
-                "editor",
                 "websites",
+                "integrations",
                 "shared_spaces",
             ]
             add_role_query = sql.SQL(

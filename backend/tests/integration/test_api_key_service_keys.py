@@ -19,7 +19,6 @@ import sqlalchemy as sa
 
 from intric.users.user import UserAdd, UserState
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -278,10 +277,11 @@ async def test_service_key_survives_owner_deletion(
         session = container.session()
         await session.execute(
             sa.text(
-                "INSERT INTO users_predefined_roles (user_id, predefined_role_id) "
-                "SELECT :uid, id FROM predefined_roles WHERE name = 'Owner' LIMIT 1"
+                "INSERT INTO users_roles (user_id, role_id) "
+                "SELECT :uid, id FROM roles "
+                "WHERE name = 'Owner' AND tenant_id = :tid LIMIT 1"
             ),
-            {"uid": str(creator.id)},
+            {"uid": str(creator.id), "tid": str(creator.tenant_id)},
         )
 
     # Re-fetch creator so permissions include the admin role

@@ -25,7 +25,7 @@ export function initRoles(client) {
      * */
     listTemplates: async () => {
       const res = await client.fetch("/api/v1/roles/templates/", { method: "get" });
-      return res;
+      return /** @type {Array<{name: string, permissions: string[]}>} */ (res);
     },
 
     /**

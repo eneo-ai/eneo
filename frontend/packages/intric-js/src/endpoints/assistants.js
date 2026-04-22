@@ -160,11 +160,14 @@ export function initAssistants(client) {
             path: { id }
           });
 
+      const fileIds = files?.map((f) => f.id);
       await client.stream(
         streamArgs.endpoint,
         {
           params: { path: streamArgs.path, query: { version: 2 } },
-          requestBody: { "application/json": { question, files, stream: true } }
+          requestBody: {
+            "application/json": { question, files: fileIds, stream: true }
+          }
         },
         {
           onOpen: async (response) => {

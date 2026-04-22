@@ -646,8 +646,16 @@ class UserService:
             salt = None
             hashed_pass = None
 
+        payload = new_user.model_dump(exclude={"password"})
+
+        # Apply tenant default role when caller didn't specify any.
+        # Mirrors the federated-login path so sysadmin-created users can
+        # operate on shared spaces out of the box.
+        if not payload.get("roles") and tenant.default_role_id is not None:
+            payload["roles"] = [ModelId(id=tenant.default_role_id)]
+
         user_add = UserAdd(
-            **new_user.model_dump(exclude={"password"}),
+            **payload,
             password=hashed_pass,
             salt=salt,
             state=UserState.ACTIVE,
