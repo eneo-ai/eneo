@@ -71,3 +71,15 @@ vendor/
 coverage/
 .cache/
 tmp/
+.omx/
+.codex/*
+!.codex/agents/
+!.codex/agents/**
+!.codex/skills/
+!.codex/skills/**
+.codex/skills/.system/**
+!.codex/prompts/
+!.codex/prompts/**
+
+# Local gate-work helpers (AI Builder hardening toil reduction — never committed)
+scripts/gate-local/
