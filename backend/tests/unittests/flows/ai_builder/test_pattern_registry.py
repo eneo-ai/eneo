@@ -26,6 +26,9 @@ from intric.flows.ai_builder.pattern_registry import (
     PATTERN_REGISTRY,
     PATTERN_REGISTRY_VERSION,
     Pattern,
+    find_pattern_candidates,
+    question_template_ids_for_slot,
+    render_knowledge_pack,
 )
 from intric.flows.enums import (
     FlowInputType,
@@ -265,3 +268,187 @@ class TestQuestionTemplateIdReferences:
                     f"{pattern.id}: question_template_id {qid!r} must be a string"
                 )
                 assert qid.strip(), f"{pattern.id}: empty question_template_id rejected"
+
+
+class TestPatternRegistryPublicApi:
+    """Public planner-strategy entry points: scoring, slot → qid lookup, and
+    the LLM-facing knowledge pack renderer.
+    """
+
+    def test_find_pattern_candidates_returns_empty_tuple_for_blank_text(
+        self,
+    ) -> None:
+        """No signal → no candidates. Returning `()` (not a raised
+        exception) keeps callers on a single code path when the planner
+        state has yet to accumulate any prompt text."""
+        assert find_pattern_candidates("") == ()
+        assert find_pattern_candidates("   \n   ") == ()
+
+    def test_find_pattern_candidates_matches_on_retrieval_hint_tokens(
+        self,
+    ) -> None:
+        """A prompt containing a literal retrieval-hint token scores
+        that pattern above zero. `summarize_text` has the hint token
+        `summary`; we assert membership, not position, so the test is
+        robust across pattern reorderings."""
+        matches = find_pattern_candidates("I want a quick summary of my text")
+        matched_ids = {match.pattern.id for match in matches}
+        assert "summarize_text" in matched_ids, (
+            f"summarize_text should match 'summary of my text'; got {matched_ids}"
+        )
+
+    def test_find_pattern_candidates_does_not_match_on_substrings(self) -> None:
+        """Word-boundary matching regression guard. A hint token like
+        `form` (from `extract_structured_fields`) must not match inside
+        `information`; `step` (from `multi_step_quality_chain`) must not
+        match inside `stepwise`; `document` (from document-family
+        patterns) must not match inside `documentation`. A substring
+        match would silently score noise patterns against unrelated
+        prompts and poison downstream planner scoring."""
+        matches = find_pattern_candidates(
+            "I need information about the stepwise documentation"
+        )
+        matched_ids = {match.pattern.id for match in matches}
+        assert "extract_structured_fields" not in matched_ids, (
+            f"`form` substring-matched inside `information`: {matched_ids}"
+        )
+        assert "multi_step_quality_chain" not in matched_ids, (
+            f"`step` substring-matched inside `stepwise`: {matched_ids}"
+        )
+        for doc_pattern_id in (
+            "document_to_docx_template",
+            "document_to_pdf_report",
+            "document_to_structured_report",
+        ):
+            assert doc_pattern_id not in matched_ids, (
+                f"`document` substring-matched inside `documentation`: "
+                f"{doc_pattern_id} in {matched_ids}"
+            )
+
+    def test_find_pattern_candidates_excludes_zero_score_patterns(self) -> None:
+        """Patterns with zero token hits are not emitted. A planner
+        consumer iterating the tuple should see only the archetypes that
+        actually matched."""
+        matches = find_pattern_candidates("summarize my document please")
+        for match in matches:
+            assert match.score > 0, (
+                f"{match.pattern.id}: zero-score pattern should not be in "
+                f"candidates; got score={match.score}"
+            )
+
+    def test_find_pattern_candidates_never_returns_negative_patterns(
+        self,
+    ) -> None:
+        """Negative archetypes describe shapes to avoid; they must never
+        appear in the candidate output. A prompt mentioning 'avoid image
+        input' still must not surface `image_input_pipeline`."""
+        matches = find_pattern_candidates(
+            "template fill with generated pdf avoid image input pipeline"
+        )
+        for match in matches:
+            assert match.pattern.polarity == "positive", (
+                f"{match.pattern.id}: negative pattern surfaced in candidates"
+            )
+
+    def test_find_pattern_candidates_is_sorted_by_descending_score_then_id(
+        self,
+    ) -> None:
+        """Determinism contract: higher scores come first; ties break on
+        ascending pattern id so the planner sees a stable order across
+        process restarts."""
+        matches = find_pattern_candidates(
+            "summarize my document and extract fields into json"
+        )
+        scores = [match.score for match in matches]
+        assert scores == sorted(scores, reverse=True), (
+            f"scores not descending: {scores}"
+        )
+        for idx in range(len(matches) - 1):
+            if matches[idx].score == matches[idx + 1].score:
+                assert matches[idx].pattern.id < matches[idx + 1].pattern.id, (
+                    f"tie not broken on ascending id: "
+                    f"{matches[idx].pattern.id} >= {matches[idx + 1].pattern.id}"
+                )
+
+    def test_pattern_match_is_frozen_dataclass(self) -> None:
+        """Results must not be mutated by consumers. Freezing guards
+        against a caller that patches `score` in place between rank and
+        render."""
+        matches = find_pattern_candidates("summarize")
+        assert matches, "summarize should produce at least one match"
+        match = matches[0]
+        with pytest.raises(FrozenInstanceError):
+            match.score = 999  # type: ignore[misc]
+
+    def test_question_template_ids_for_slot_returns_declared_qids(self) -> None:
+        """`summarize_text` declares `primary_runtime_input` and
+        `terminal_output` as both slots and question_template_ids. The
+        lookup must return the qids in declaration order."""
+        qids = question_template_ids_for_slot("summarize_text", "primary_runtime_input")
+        assert qids == ("primary_runtime_input",)
+        qids = question_template_ids_for_slot("summarize_text", "terminal_output")
+        assert qids == ("terminal_output",)
+
+    def test_question_template_ids_for_slot_returns_empty_for_unknown_slot(
+        self,
+    ) -> None:
+        """A slot the pattern does not declare yields `()` — not an
+        exception, because 'does this pattern care about slot X' is a
+        valid question a consumer may ask repeatedly."""
+        assert (
+            question_template_ids_for_slot("summarize_text", "pdf_generation_mode")
+            == ()
+        )
+
+    def test_question_template_ids_for_slot_raises_for_unknown_pattern_id(
+        self,
+    ) -> None:
+        """A typo in `pattern_id` should fail loudly. Returning `()`
+        would mask a programmer error — the caller almost certainly
+        meant a real pattern id."""
+        with pytest.raises(KeyError):
+            question_template_ids_for_slot("no_such_pattern", "primary_runtime_input")
+
+    def test_render_knowledge_pack_mentions_every_positive_pattern(self) -> None:
+        """Silent-drop guard: the knowledge pack must mention every
+        positive archetype at least once, so the LLM planner can never
+        silently miss a pattern because the renderer's loop was
+        short-circuited."""
+        rendered = render_knowledge_pack()
+        for pattern in PATTERN_REGISTRY.values():
+            if pattern.polarity != "positive":
+                continue
+            assert pattern.id in rendered, (
+                f"positive pattern {pattern.id!r} missing from knowledge pack"
+            )
+
+    def test_render_knowledge_pack_mentions_every_negative_pattern(self) -> None:
+        """Negative archetypes are the 'don't do this' section — omitting
+        one would silently drop an anti-pattern warning."""
+        rendered = render_knowledge_pack()
+        for pattern in PATTERN_REGISTRY.values():
+            if pattern.polarity != "negative":
+                continue
+            assert pattern.id in rendered, (
+                f"negative pattern {pattern.id!r} missing from knowledge pack"
+            )
+
+    def test_render_knowledge_pack_mentions_every_builder_exposed_capability(
+        self,
+    ) -> None:
+        """Engine-truth capabilities that the builder exposes must all
+        land in the pack. `not_exposed` / `engine_only` capabilities are
+        filtered out — they are not planner-eligible."""
+        rendered = render_knowledge_pack()
+        for cap in CAPABILITY_REGISTRY.values():
+            if cap.exposure != "builder":
+                continue
+            assert cap.id in rendered, (
+                f"builder-exposed capability {cap.id!r} missing from knowledge pack"
+            )
+
+    def test_render_knowledge_pack_is_deterministic(self) -> None:
+        """Two invocations must return the exact same bytes. A
+        non-deterministic pack would poison LLM prompt caching and
+        make planning-state snapshots unreproducible."""
+        assert render_knowledge_pack() == render_knowledge_pack()

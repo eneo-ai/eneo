@@ -30,10 +30,14 @@ a fingerprint update, mirroring the FCM bump-discipline policy.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
+
+from intric.flows.ai_builder.question_catalog import QUESTION_CATALOG, QuestionTemplate
+from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY, FlowCapability
 
 PATTERN_REGISTRY_VERSION: int = 1
 
@@ -323,3 +327,207 @@ def _build_registry() -> Mapping[str, Pattern]:
 
 
 PATTERN_REGISTRY: Mapping[str, Pattern] = _build_registry()
+
+
+@dataclass(frozen=True, slots=True)
+class PatternMatch:
+    """Scored match from `find_pattern_candidates`.
+
+    `score` is an integer token-hit count — higher means more
+    retrieval-hint tokens from the pattern were found in the prompt. It
+    is deliberately not a probability: patterns do not have a prior and
+    the hint vocabulary is sparse, so a float would imply calibration
+    that does not exist.
+    """
+
+    pattern: Pattern
+    score: int
+
+
+_WORD_PATTERN: re.Pattern[str] = re.compile(r"\w+", re.UNICODE)
+
+
+def _tokenize_hints(retrieval_hints: tuple[str, ...]) -> tuple[str, ...]:
+    """Flatten retrieval hints into case-folded tokens.
+
+    Each hint line is split on whitespace so a multi-token hint like
+    `"summarize summary summera sammanfatta"` contributes four separate
+    matchable tokens. Empty results are filtered so blank hints (none
+    exist today, but cheap to guard) never inflate a score.
+    """
+    tokens: list[str] = []
+    for hint in retrieval_hints:
+        for token in hint.casefold().split():
+            if token:
+                tokens.append(token)
+    return tuple(tokens)
+
+
+def _word_tokens(text: str) -> frozenset[str]:
+    """Case-folded Unicode word tokens extracted from `text`.
+
+    Used as the membership set for hint matching so that a hint token
+    `form` cannot spuriously match inside `information`, `step` inside
+    `stepwise`, or `document` inside `documentation`. Unicode word chars
+    preserve Swedish `å`, `ä`, `ö`.
+    """
+    return frozenset(
+        match.group(0) for match in _WORD_PATTERN.finditer(text.casefold())
+    )
+
+
+def find_pattern_candidates(text: str) -> tuple[PatternMatch, ...]:
+    """Score every positive pattern against `text` via retrieval-hint
+    word-token overlap.
+
+    Matching is on whole-word boundaries: a hint token like `form` only
+    scores when `form` appears as a standalone word in `text`, never as
+    a substring of `information`. Returns descending by score, ties
+    broken by ascending pattern id for deterministic ordering across
+    process restarts. Zero-score patterns are omitted so a no-signal
+    prompt returns `()`. Negative patterns are never scored — they
+    describe shapes to avoid, not candidates to propose; the knowledge
+    pack surfaces them separately.
+    """
+    text_tokens = _word_tokens(text)
+    if not text_tokens:
+        return ()
+
+    matches: list[PatternMatch] = []
+    for pattern in PATTERN_REGISTRY.values():
+        if pattern.polarity != "positive":
+            continue
+        score = sum(
+            1
+            for token in _tokenize_hints(pattern.retrieval_hints)
+            if token in text_tokens
+        )
+        if score > 0:
+            matches.append(PatternMatch(pattern=pattern, score=score))
+
+    matches.sort(key=lambda match: (-match.score, match.pattern.id))
+    return tuple(matches)
+
+
+def question_template_ids_for_slot(pattern_id: str, slot: str) -> tuple[str, ...]:
+    """Return the question-template ids this pattern declares for `slot`.
+
+    Preserves the pattern's declaration order. Returns `()` when the
+    pattern does not reference the slot. Raises `KeyError` for an unknown
+    `pattern_id` — a typo in a caller should fail loudly rather than
+    silently return empty.
+
+    Slot names are not validated against
+    `KNOWN_REQUIREMENT_SLOT_NAMES` here; the dangling-reference guard in
+    `test_question_catalog.py::test_every_question_template_id_resolves_in_catalog`
+    already covers that contract.
+    """
+    pattern = PATTERN_REGISTRY[pattern_id]
+    if slot not in pattern.required_architectural_slots:
+        return ()
+    return tuple(qid for qid in pattern.question_template_ids if qid == slot)
+
+
+_KNOWLEDGE_PACK_HEADER_CAPABILITIES = "## Flow capabilities (engine truth)"
+_KNOWLEDGE_PACK_HEADER_POSITIVES = "## Planner patterns (positive archetypes)"
+_KNOWLEDGE_PACK_HEADER_NEGATIVES = "## Planner patterns (negative archetypes — avoid)"
+_KNOWLEDGE_PACK_HEADER_QUESTIONS = "## Discovery questions"
+
+
+def _render_capability(cap: FlowCapability) -> str:
+    lines: list[str] = [f"- {cap.id}: {cap.label}", f"  {cap.description}"]
+    if cap.applies_to_tuples:
+        tuple_lines = ", ".join(
+            f"({source.value}, {input_type.value}, {output_type.value}, {output_mode.value})"
+            for source, input_type, output_type, output_mode in cap.applies_to_tuples
+        )
+        lines.append(f"  applies_to: {tuple_lines}")
+    return "\n".join(lines)
+
+
+def _render_pattern(pattern: Pattern) -> str:
+    lines: list[str] = [f"- {pattern.id}"]
+    if pattern.polarity == "positive" and pattern.examples:
+        lines.append("  examples: " + "; ".join(pattern.examples))
+    if pattern.polarity == "negative" and pattern.negative_examples:
+        lines.append("  avoid: " + "; ".join(pattern.negative_examples))
+    if pattern.retrieval_hints:
+        lines.append("  hints: " + "; ".join(pattern.retrieval_hints))
+    if pattern.required_architectural_slots:
+        lines.append(
+            "  required_slots: " + ", ".join(pattern.required_architectural_slots)
+        )
+    if pattern.question_template_ids:
+        lines.append(
+            "  question_template_ids: " + ", ".join(pattern.question_template_ids)
+        )
+    return "\n".join(lines)
+
+
+def _render_question_template(template: QuestionTemplate) -> str:
+    lines: list[str] = [
+        f"- {template.id}",
+        f"  sv: {template.question_sv}",
+        f"  en: {template.question_en}",
+        f"  help_sv: {template.help_sv}",
+        f"  help_en: {template.help_en}",
+    ]
+    for option in template.options:
+        lines.append(f"    * {option.id} (value={option.value})")
+        lines.append(f"      sv: {option.label_sv} — {option.description_sv}")
+        lines.append(f"      en: {option.label_en} — {option.description_en}")
+    return "\n".join(lines)
+
+
+def render_knowledge_pack() -> str:
+    """Render the LLM-facing knowledge pack.
+
+    Sections are emitted in a fixed order with grep-friendly headers:
+    builder-exposed capabilities, positive patterns, negative patterns,
+    and the question templates referenced by any pattern's
+    `question_template_ids` (rendered bilingually — the planner prompt
+    consumes both sv and en copy).
+
+    Every level is sorted by id so two invocations return byte-identical
+    output. The determinism contract is pinned by
+    `test_render_knowledge_pack_is_deterministic`; silent-drop guards
+    cover every capability, pattern, and referenced question.
+    """
+    sections: list[str] = []
+
+    sections.append(_KNOWLEDGE_PACK_HEADER_CAPABILITIES)
+    builder_caps = sorted(
+        (cap for cap in CAPABILITY_REGISTRY.values() if cap.exposure == "builder"),
+        key=lambda cap: cap.id,
+    )
+    sections.extend(_render_capability(cap) for cap in builder_caps)
+
+    positives = sorted(
+        (p for p in PATTERN_REGISTRY.values() if p.polarity == "positive"),
+        key=lambda p: p.id,
+    )
+    sections.append(_KNOWLEDGE_PACK_HEADER_POSITIVES)
+    sections.extend(_render_pattern(p) for p in positives)
+
+    negatives = sorted(
+        (p for p in PATTERN_REGISTRY.values() if p.polarity == "negative"),
+        key=lambda p: p.id,
+    )
+    sections.append(_KNOWLEDGE_PACK_HEADER_NEGATIVES)
+    sections.extend(_render_pattern(p) for p in negatives)
+
+    referenced_qids: set[str] = {
+        qid
+        for pattern in PATTERN_REGISTRY.values()
+        for qid in pattern.question_template_ids
+    }
+    referenced_templates = sorted(
+        (QUESTION_CATALOG[qid] for qid in referenced_qids if qid in QUESTION_CATALOG),
+        key=lambda template: template.id,
+    )
+    sections.append(_KNOWLEDGE_PACK_HEADER_QUESTIONS)
+    sections.extend(
+        _render_question_template(template) for template in referenced_templates
+    )
+
+    return "\n\n".join(sections) + "\n"
