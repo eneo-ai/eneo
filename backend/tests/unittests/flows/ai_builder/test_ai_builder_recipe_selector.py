@@ -166,14 +166,14 @@ class TestRecipeSelection:
         ``"review my document"`` scores `multi_step_quality_chain=2`
         (tokens `review, document`) versus `document_to_*=1` runners,
         so the trigger's absolute floor and strict-margin checks both
-        pass. But `multi_step_quality_chain` is omitted from
-        `PATTERN_TO_RECIPES` precisely because its retrieval hints
-        (`review`, `document`, `chain`) overlap with generic planner
-        vocabulary. Firing on those tokens would narrow a plain
-        document-review prompt onto the rich-workflow recipe without
-        any structural evidence. The rich-workflow recipe still
-        reaches the planner through `extract_planner_pattern_recipe_signals`
-        when the prompt actually describes that workflow.
+        pass. But `multi_step_quality_chain` leaves `recipe_sections`
+        empty precisely because its retrieval hints (`review`, `document`,
+        `chain`) overlap with generic planner vocabulary. Firing on
+        those tokens would narrow a plain document-review prompt onto
+        the rich-workflow recipe without any structural evidence. The
+        rich-workflow recipe still reaches the planner through
+        `extract_planner_pattern_recipe_signals` when the prompt actually
+        describes that workflow.
         """
         result = select_relevant_recipes(
             {},

@@ -39,7 +39,7 @@ from typing import Literal
 from intric.flows.ai_builder.question_catalog import QUESTION_CATALOG, QuestionTemplate
 from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY, FlowCapability
 
-PATTERN_REGISTRY_VERSION: int = 2
+PATTERN_REGISTRY_VERSION: int = 3
 
 PatternPolarity = Literal["positive", "negative"]
 _VALID_POLARITIES: frozenset[str] = frozenset({"positive", "negative"})
@@ -61,6 +61,14 @@ class Pattern:
     non-localized structural token (same vocabulary discipline as
     `examples` / `retrieval_hints`) naming one step in the chain;
     single-step shapes leave it empty.
+
+    `recipe_sections` names the knowledge-pack recipe-section keys
+    (`"transcription"`, `"docx_template"`, etc.) a pattern should
+    activate when it wins a `find_pattern_candidates` scoring pass. The
+    recipe selector reads this field instead of maintaining a separate
+    pattern-id → section mapping. Patterns whose retrieval hints are too
+    generic for reliable score-only triggering (and every negative
+    pattern) leave it empty to opt out.
     """
 
     id: str
@@ -71,6 +79,7 @@ class Pattern:
     question_template_ids: tuple[str, ...]
     polarity: PatternPolarity
     chain_steps: tuple[str, ...] = ()
+    recipe_sections: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.id or not self.id.strip():
@@ -92,6 +101,7 @@ def _pattern(
     negative_examples: tuple[str, ...] = (),
     polarity: PatternPolarity = "positive",
     chain_steps: tuple[str, ...] = (),
+    recipe_sections: tuple[str, ...] = (),
 ) -> Pattern:
     return Pattern(
         id=id,
@@ -102,6 +112,7 @@ def _pattern(
         question_template_ids=question_template_ids,
         polarity=polarity,
         chain_steps=chain_steps,
+        recipe_sections=recipe_sections,
     )
 
 
@@ -143,6 +154,7 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "primary_runtime_input",
             "terminal_output",
         ),
+        recipe_sections=("json_pipeline",),
     ),
     _pattern(
         id="document_to_structured_report",
@@ -165,6 +177,7 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "terminal_output",
             "document_material_scope",
         ),
+        recipe_sections=("document_analysis",),
     ),
     _pattern(
         id="document_to_docx_template",
@@ -193,6 +206,7 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "extract_template_variables_step",
             "template_fill_docx_step",
         ),
+        recipe_sections=("docx_template",),
     ),
     _pattern(
         id="document_to_pdf_report",
@@ -216,6 +230,7 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "pdf_generation_mode",
             "document_material_scope",
         ),
+        recipe_sections=("document_analysis",),
     ),
     _pattern(
         id="audio_transcription",
@@ -235,7 +250,17 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "primary_runtime_input",
             "terminal_output",
         ),
+        recipe_sections=("transcription",),
     ),
+    # `recipe_sections=()` on this pattern and on `sectioned_form_intake`
+    # below is an intentional score-trigger opt-out, not a missed migration.
+    # Their retrieval hints (`review`, `document`, `chain`, `form`,
+    # `sections`, `headings`) overlap too heavily with generic planner
+    # vocabulary; score-only activation would narrow "review my document"
+    # onto the rich-workflow recipe. These recipes still reach the planner
+    # through the phrase-aware signal paths in `ai_builder_recipe_selector`
+    # (`extract_planner_pattern_recipe_signals`,
+    # `extract_form_intake_recipe_signals`).
     _pattern(
         id="multi_step_quality_chain",
         examples=(
@@ -286,6 +311,7 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "terminal_output",
             "document_material_scope",
         ),
+        recipe_sections=("comparison",),
     ),
     _pattern(
         id="sectioned_form_intake",

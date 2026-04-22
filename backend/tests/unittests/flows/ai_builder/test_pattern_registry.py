@@ -40,10 +40,10 @@ from intric.flows.flow_capability_manifest import (
     supports_step_io_tuple,
 )
 
-# Exact seed pinned here — the 6-8/1-2 count band from the plan is
-# advisory; the canonical list lives in code. Changing this set is a
-# deliberate surface change and should be a one-line diff against both
-# registry and test.
+# Exact seed pinned here — the canonical archetype list lives in code,
+# not in any external target band. Changing this set is a deliberate
+# surface change and should be a one-line diff against both registry
+# and test.
 _EXPECTED_POSITIVE_IDS: frozenset[str] = frozenset(
     {
         "summarize_text",
@@ -131,8 +131,8 @@ _NEGATIVE_FCM_ASSERTIONS: dict[str, Callable[[], None]] = {
 
 
 class TestPatternDataclass:
-    def test_pattern_version_is_two(self) -> None:
-        assert PATTERN_REGISTRY_VERSION == 2
+    def test_pattern_version_is_three(self) -> None:
+        assert PATTERN_REGISTRY_VERSION == 3
 
     def test_pattern_is_frozen_with_structural_fields(self) -> None:
         pattern = Pattern(
@@ -194,6 +194,26 @@ class TestPatternDataclass:
         )
         assert pattern.chain_steps == ()
 
+    def test_pattern_recipe_sections_defaults_to_empty_tuple(self) -> None:
+        """`recipe_sections` names the knowledge-pack recipe-section keys
+        (`"transcription"`, `"docx_template"`, etc.) that a pattern
+        activates when it wins a `find_pattern_candidates` scoring pass.
+        Patterns without a stable recipe-section mapping — including
+        every negative pattern and patterns whose retrieval hints are
+        too generic for score-based triggering — leave it empty; the
+        default is `()` so adding the field does not require touching
+        the existing negative-pattern seeds."""
+        pattern = Pattern(
+            id="fixture",
+            examples=(),
+            retrieval_hints=(),
+            negative_examples=(),
+            required_architectural_slots=(),
+            question_template_ids=(),
+            polarity="positive",
+        )
+        assert pattern.recipe_sections == ()
+
 
 class TestRegistryInvariants:
     def test_registry_is_immutable(self) -> None:
@@ -207,9 +227,8 @@ class TestRegistryInvariants:
             del PATTERN_REGISTRY[first_key]  # type: ignore[misc]
 
     def test_registry_matches_expected_seed_ids(self) -> None:
-        """Exact-id pin. The plan's '6-8 positive + 1-2 negative' band is
-        advisory; this test is the canonical source of truth for the
-        seeded archetypes. Changing the seed is a deliberate one-line
+        """Exact-id pin. This test is the canonical source of truth for
+        the seeded archetypes. Changing the seed is a deliberate one-line
         diff against both registry and `_EXPECTED_*_IDS` above."""
         positive_ids = frozenset(
             p.id for p in PATTERN_REGISTRY.values() if p.polarity == "positive"
@@ -293,6 +312,76 @@ class TestPositivePatternContract:
                 f"non-empty chain_steps; got {pattern.chain_steps!r}"
             )
 
+    def test_positive_patterns_recipe_sections_match_canonical_seed(self) -> None:
+        """Exact-seed pin for `Pattern.recipe_sections`. Each positive
+        pattern either names the recipe-section keys it should activate
+        when it wins a `find_pattern_candidates` scoring pass, or leaves
+        the tuple empty to opt out of score-based recipe triggering.
+
+        `multi_step_quality_chain` and `sectioned_form_intake` stay
+        empty on purpose — their retrieval hints (`review`, `document`,
+        `chain`, `form`, `sections`, `headings`) overlap too heavily
+        with generic planner vocabulary, so score-only triggering is
+        unreliable; those recipes still reach the planner through the
+        phrase-aware signal paths.
+
+        `summarize_text` stays empty because it has no dedicated recipe
+        section — the golden example plus base architecture cover it.
+
+        Changing this seed is a deliberate one-line diff against both
+        the registry and this test; a drift here almost certainly means
+        the recipe selector's intended narrowing got silently widened.
+        """
+        canonical_seed: dict[str, tuple[str, ...]] = {
+            "audio_transcription": ("transcription",),
+            "comparison": ("comparison",),
+            "document_to_docx_template": ("docx_template",),
+            "document_to_pdf_report": ("document_analysis",),
+            "document_to_structured_report": ("document_analysis",),
+            "extract_structured_fields": ("json_pipeline",),
+            "multi_step_quality_chain": (),
+            "sectioned_form_intake": (),
+            "summarize_text": (),
+        }
+
+        # Exhaustiveness: every positive pattern in the registry must
+        # appear in `canonical_seed`. A future positive pattern added
+        # without a seed entry would otherwise silently inherit the
+        # dataclass default `()` and bypass this drift check.
+        positive_ids = frozenset(
+            p.id for p in PATTERN_REGISTRY.values() if p.polarity == "positive"
+        )
+        assert frozenset(canonical_seed) == positive_ids, (
+            f"canonical_seed missing positive patterns: "
+            f"{sorted(positive_ids - frozenset(canonical_seed))}; "
+            f"or stale entries: "
+            f"{sorted(frozenset(canonical_seed) - positive_ids)}"
+        )
+
+        # Cross-module contract: every declared recipe-section key must
+        # exist in the selector's `RECIPE_SECTIONS` registry. A typo
+        # (`"json_pipline"`) on a Pattern would otherwise silently
+        # fall through `_filter_recipe_sections` without activating
+        # anything.
+        from intric.flows.ai_builder.ai_builder_recipe_selector import (
+            RECIPE_SECTIONS,
+        )
+
+        known_section_keys = frozenset(RECIPE_SECTIONS.keys())
+
+        for pattern_id, expected in canonical_seed.items():
+            pattern = PATTERN_REGISTRY[pattern_id]
+            assert pattern.recipe_sections == expected, (
+                f"{pattern_id}: recipe_sections drift. "
+                f"Expected {expected!r}, got {pattern.recipe_sections!r}"
+            )
+            unknown = frozenset(pattern.recipe_sections) - known_section_keys
+            assert not unknown, (
+                f"{pattern_id}: recipe_sections references unknown "
+                f"selector keys {sorted(unknown)}; must be a subset of "
+                f"{sorted(known_section_keys)}"
+            )
+
 
 class TestNegativePatternContract:
     @pytest.fixture
@@ -324,6 +413,20 @@ class TestNegativePatternContract:
         surfaces the stale negative."""
         for pattern in negative_patterns:
             _NEGATIVE_FCM_ASSERTIONS[pattern.id]()
+
+    def test_negative_patterns_declare_no_recipe_sections(
+        self, negative_patterns: list[Pattern]
+    ) -> None:
+        """Negative patterns describe shapes the planner must avoid; they
+        must never activate a recipe section. An accidental populated
+        `recipe_sections` on a negative would let a score-based trigger
+        widen the recipe pack with the anti-pattern's guidance — the
+        opposite of what the negative is for."""
+        for pattern in negative_patterns:
+            assert pattern.recipe_sections == (), (
+                f"{pattern.id}: negative pattern must leave recipe_sections "
+                f"empty; got {pattern.recipe_sections!r}"
+            )
 
 
 class TestQuestionTemplateIdReferences:

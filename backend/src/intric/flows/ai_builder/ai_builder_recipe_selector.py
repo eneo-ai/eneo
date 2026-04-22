@@ -52,30 +52,6 @@ SIGNAL_TO_RECIPES: dict[str, list[str]] = {
     ],
 }
 
-# Pattern Registry pattern-id → recipe sections. Applied alongside
-# SIGNAL_TO_RECIPES so a prompt without an ad-hoc keyword trigger still
-# activates the right recipe when its retrieval-hint tokens score a
-# Pattern. `golden_example` is auto-added by the selector when any
-# trigger fires, so per-pattern tuples omit it.
-#
-# `multi_step_quality_chain` and `sectioned_form_intake` are deliberately
-# omitted: their retrieval hints (`review`, `document`, `chain`, `form`,
-# `sections`, `headings`) overlap too heavily with generic planner
-# vocabulary, so pure score-based triggering would narrow prompts like
-# "review my document" or "review the headings" onto those recipes.
-# Those recipes still reach the planner through their dedicated signal
-# paths (`extract_planner_pattern_recipe_signals`,
-# `extract_form_intake_recipe_signals`), which use phrase-aware evidence
-# instead of single-token overlap.
-PATTERN_TO_RECIPES: dict[str, tuple[str, ...]] = {
-    "audio_transcription": ("transcription",),
-    "comparison": ("comparison",),
-    "document_to_docx_template": ("docx_template",),
-    "document_to_pdf_report": ("document_analysis",),
-    "document_to_structured_report": ("document_analysis",),
-    "extract_structured_fields": ("json_pipeline",),
-}
-
 
 def select_relevant_recipes(
     answer_signals: dict[str, set[str]],
@@ -126,12 +102,16 @@ def select_relevant_recipes(
     #   2. `top.score > runner_up_score` — ties fall through to the
     #      full-pack fallback so the selector never unions unrelated
     #      recipes when the signal is ambiguous.
+    # Patterns whose retrieval hints overlap with generic planner
+    # vocabulary (e.g. `multi_step_quality_chain`, `sectioned_form_intake`)
+    # opt out by leaving `Pattern.recipe_sections` empty — they still
+    # reach the planner through the phrase-aware signal paths above.
     candidates = find_pattern_candidates(lowered)
     if candidates:
         top = candidates[0]
         runner_up_score = candidates[1].score if len(candidates) > 1 else 0
         if top.score >= 2 and top.score > runner_up_score:
-            needed.update(PATTERN_TO_RECIPES.get(top.pattern.id, ()))
+            needed.update(top.pattern.recipe_sections)
 
     # If no signals detected, return full recipes (safe fallback)
     source = recipe_source or KNOWLEDGE_PACK_RECIPES
