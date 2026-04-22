@@ -14,7 +14,7 @@ class TestRecipeSelection:
         result = select_relevant_recipes({})
         assert "Transkribering" in result
         assert "Dokumentanalys" in result
-        assert "GULDEXEMPEL" in result
+        assert "Exempel" in result
 
     def test_audio_signal_includes_transcription(self):
         signals = {"final_output_mode": {"structured_text"}}
@@ -25,18 +25,18 @@ class TestRecipeSelection:
     def test_docx_signal_includes_template_recipe(self):
         signals = {"final_output_mode": {"docx_document"}}
         result = select_relevant_recipes(signals)
-        assert "DOCX" in result or "GULDEXEMPEL" in result
+        assert "DOCX" in result or "Exempel" in result
 
     def test_json_signal_includes_json_pipeline(self):
         signals = {"final_output_mode": {"structured_json"}}
         result = select_relevant_recipes(signals)
-        assert "JSON" in result or "GULDEXEMPEL" in result
+        assert "JSON" in result or "Exempel" in result
 
     def test_golden_example_always_included_with_signals(self):
         signals = {"final_output_mode": {"structured_text"}}
         text = "analysera dokument"
         result = select_relevant_recipes(signals, text)
-        assert "GULDEXEMPEL" in result
+        assert "Exempel" in result
 
     def test_filtered_result_is_shorter_than_full(self):
         """Filtered recipes should be shorter than full recipes."""
@@ -54,7 +54,7 @@ class TestRecipeSelection:
 
     def test_freeform_text_triggers_docx_recipes(self):
         result = select_relevant_recipes({}, "output should be a DOCX file")
-        assert "DOCX" in result or "GULDEXEMPEL" in result
+        assert "DOCX" in result or "Exempel" in result
 
     def test_sectioned_form_intake_text_selects_dedicated_recipe(self):
         result = select_relevant_recipes(

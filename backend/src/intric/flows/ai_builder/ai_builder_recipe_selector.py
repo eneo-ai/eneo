@@ -24,7 +24,7 @@ RECIPE_SECTIONS: dict[str, tuple[str, ...]] = {
         "Dokumentanalys",
         "Dokumentpaket -> JSON -> grounded text -> DOCX/PDF",
     ),
-    "golden_example": ("GULDEXEMPEL", "Guldexempel"),
+    "golden_example": ("Exempel",),
     "docx_template": ("DOCX",),
     "json_pipeline": ("JSON", "JSON-steg"),
     "comparison": ("Jämför",),

@@ -452,37 +452,37 @@ Steg 3: Skriv beslutsunderlag (all_previous_steps ELLER previous_step med bindin
 Steg 3 kan använda `input_bindings.question` för att kombinera:
 `{{ step_a.output.text }}` (fakta) + `{{ step_b.output.text }}` (bedömning)
 
-## 3. GULDEXEMPEL: Kontraktsdriven ärendeanalys (komplett create_flow)
+## 3. Exempel: Kontraktsdriven dokumentgranskning (komplett create_flow)
 
 Följande visar exakt hur ett `create_flow`-anrop ska se ut — med formulär, \
 typed `output_fields`, runtime-uppladdning och detaljerade instruktioner:
 
 ```json
 {
-  "flow_name": "Ärendeanalys med rekommendation",
-  "flow_description": "Analyserar ärenden och producerar strukturerad bedömning med rekommendation",
+  "flow_name": "Dokumentanalys med rekommendation",
+  "flow_description": "Analyserar uppladdade dokumentpaket och producerar strukturerad bedömning med rekommendation",
   "plan_rationale": "Extraherar först strukturerad riskdata och skriver sedan en läsbar rekommendation.",
   "assumptions": [
     "Användaren laddar upp dokument vid körning",
     "Risknivå räcker som enum i den strukturerade analysen"
   ],
   "form_fields": [
-    {"variable_name": "Ärendenummer", "field_type": "text", "label": "Ärendenummer", "required": true},
-    {"variable_name": "Kategori", "field_type": "select", "label": "Kategori", "required": true,
-     "options": ["bygglov", "detaljplan", "miljö"]}
+    {"variable_name": "referens_id", "field_type": "text", "label": "Referens-ID", "required": true},
+    {"variable_name": "kategori", "field_type": "select", "label": "Kategori", "required": true,
+     "options": ["kontrakt", "riktlinje", "rapport"]}
   ],
   "steps": [
     {
       "name": "Extrahera och strukturera",
-      "instructions": "Du är en ärendeanalytiker. Extrahera en kort sammanfattning, en risknivå och relevanta nyckelord från ärendedokumenten. Returnera enbart strukturerad JSON som matchar de begärda fälten.",
+      "instructions": "Du är en dokumentanalytiker. Extrahera en kort sammanfattning, en risknivå och relevanta nyckelord från dokumentpaketet. Returnera enbart strukturerad JSON som matchar de begärda fälten.",
       "input_source": "flow_input",
       "input_type": "document",
       "output_type": "json",
       "runtime_upload": true,
       "runtime_required": true,
-      "uses_form_fields": ["Ärendenummer", "Kategori"],
+      "uses_form_fields": ["referens_id", "kategori"],
       "output_fields": [
-        {"name": "sammanfattning", "field_type": "string", "description": "Sammanfattning av ärendet i 2-3 meningar", "required": true},
+        {"name": "sammanfattning", "field_type": "string", "description": "Sammanfattning av dokumentet i 2-3 meningar", "required": true},
         {"name": "risk", "field_type": "string", "description": "Bedömd risknivå som låg, medel eller hög", "required": true},
         {"name": "nyckelord", "field_type": "array", "description": "Relevanta nyckelord", "required": false, "item_fields": [
           {"name": "värde", "field_type": "string", "description": "Ett nyckelord", "required": true}
@@ -491,11 +491,11 @@ typed `output_fields`, runtime-uppladdning och detaljerade instruktioner:
     },
     {
       "name": "Skriv rekommendation",
-      "instructions": "Du är en handläggare som skriver rekommendationer. Skriv en tydlig rekommendation med inledning, analysens slutsatser, rekommenderad åtgärd och riskhantering. Skriv på formell svenska och håll dig under 500 ord.",
+      "instructions": "Du är en granskare som skriver rekommendationer. Skriv en tydlig rekommendation med inledning, analysens slutsatser, rekommenderad åtgärd och riskhantering. Skriv på formell svenska och håll dig under 500 ord.",
       "input_source": "previous_step",
       "input_type": "json",
       "output_type": "text",
-      "uses_form_fields": ["Ärendenummer", "Kategori"]
+      "uses_form_fields": ["referens_id", "kategori"]
     }
   ]
 }

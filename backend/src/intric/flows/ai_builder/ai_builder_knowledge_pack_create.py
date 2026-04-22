@@ -106,48 +106,48 @@ _KNOWLEDGE_PACK_CREATE_RECIPES = """\
 - Om användaren vill kunna hoppa över eller gå tillbaka, modellera detta som separata styrfält eller interaktionslogik runt samma formulärdata — inte som sju separata JSON-insamlingssteg
 - Slutsteget ska använda de insamlade formulärfälten för att skapa sammanställningen med samma rubriker
 
-## Guldexempel: dokumentpaket med riskanalys
+## Exempel: dokumentgranskning med riskanalys
 ```json
 {
-  "flow_name": "Kommunärende med riskanalys",
+  "flow_name": "Dokumentgranskning med riskanalys",
   "plan_rationale": "Extraherar först strukturerade risker och skriver sedan grounded beslutsunderlag innan slutlig DOCX-rapport.",
   "form_fields": [
-    {"variable_name": "arendenummer", "label": "Ärendenummer", "field_type": "text", "required": true, "options": []},
-    {"variable_name": "ansvarig_namnd", "label": "Ansvarig nämnd", "field_type": "text", "required": true, "options": []}
+    {"variable_name": "referens_id", "label": "Referens-ID", "field_type": "text", "required": true, "options": []},
+    {"variable_name": "ansvarig_enhet", "label": "Ansvarig enhet", "field_type": "text", "required": true, "options": []}
   ],
   "steps": [
     {
       "name": "Extrahera text och riskdata",
-      "instructions": "Extrahera centrala fakta, juridiska risker och ekonomiska konsekvenser som strukturerad JSON.",
+      "instructions": "Extrahera centrala fakta och identifierade risker som strukturerad JSON.",
       "input_source": "flow_input",
       "input_type": "document",
       "output_type": "json",
       "runtime_upload": true,
       "runtime_required": true,
       "runtime_max_files": 10,
-      "uses_form_fields": ["arendenummer", "ansvarig_namnd"],
+      "uses_form_fields": ["referens_id", "ansvarig_enhet"],
       "document_delivery_mode": "not_applicable",
       "citations_requested": false,
       "output_fields": [
-        {"name": "sammanfattning", "field_type": "string", "description": "Kort ärendesammanfattning", "required": true},
+        {"name": "sammanfattning", "field_type": "string", "description": "Kort sammanfattning av dokumentet", "required": true},
         {"name": "risker", "field_type": "array", "description": "Identifierade risker", "required": true, "item_fields": [
           {"name": "rubrik", "field_type": "string", "description": "Riskrubrik", "required": true},
           {"name": "konsekvens", "field_type": "object", "description": "Konsekvenssammanfattning", "required": false, "fields": [
-            {"name": "juridisk", "field_type": "string", "description": "Juridisk konsekvens", "required": false},
-            {"name": "ekonomisk", "field_type": "string", "description": "Ekonomisk konsekvens", "required": false}
+            {"name": "beskrivning", "field_type": "string", "description": "Beskrivning av konsekvensen", "required": false},
+            {"name": "nivå", "field_type": "string", "description": "Allvarlighetsgrad (låg, medel, hög)", "required": false}
           ]}
         ]}
       ]
     },
     {
       "name": "Grounded sammanfattning",
-      "instructions": "Skriv en grounded sammanfattning som kopplar riskerna till relevanta teorier och tydligt anger spårbara källor.",
+      "instructions": "Skriv en grounded sammanfattning som kopplar riskerna till källdokumentet och anger spårbara referenser.",
       "input_source": "previous_step",
       "input_type": "json",
       "output_type": "text",
-      "uses_form_fields": ["arendenummer", "ansvarig_namnd"],
+      "uses_form_fields": ["referens_id", "ansvarig_enhet"],
       "uses_previous_fields": [
-        {"from_step": 1, "field_path": "sammanfattning", "label": "Ärendesammanfattning"},
+        {"from_step": 1, "field_path": "sammanfattning", "label": "Dokumentsammanfattning"},
         {"from_step": 1, "field_path": "risker.0.rubrik", "label": "Första riskrubrik"}
       ],
       "document_delivery_mode": "not_applicable",
@@ -160,7 +160,7 @@ _KNOWLEDGE_PACK_CREATE_RECIPES = """\
       "input_type": "text",
       "output_type": "docx",
       "document_delivery_mode": "generated",
-      "uses_form_fields": ["arendenummer", "ansvarig_namnd"],
+      "uses_form_fields": ["referens_id", "ansvarig_enhet"],
       "citations_requested": false
     }
   ]
