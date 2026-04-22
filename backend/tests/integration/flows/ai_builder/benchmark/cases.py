@@ -60,8 +60,8 @@ BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
         archetype="audio",
         ui_language="sv",
         prompt=(
-            "Transkribera ett kommunalt nämndsammanträde (ljudfil) och "
-            "producera ett kort mötesprotokoll i text."
+            "Transkribera ett internt möte (ljudfil) och producera ett "
+            "kort mötesprotokoll i text."
         ),
     ),
     BenchmarkCase(
@@ -117,7 +117,7 @@ BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
         archetype="mixed_runtime_input",
         ui_language="sv",
         prompt=(
-            "Formuläret tar handläggarens namn och ärende-id som "
+            "Formuläret tar användarens namn och referens-id som "
             "inmatningsfält, kombineras med ett uppladdat PDF-underlag "
             "och producerar en kort åtgärdsplan i text."
         ),
@@ -127,9 +127,9 @@ BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
         archetype="rich",
         ui_language="sv",
         prompt=(
-            "Användaren laddar upp ett ärende-PDF. Flödet ska extrahera "
-            "beslutsfält, producera en sammanfattning med risker och "
-            "möjligheter, och generera en DOCX-rapport med handläggarens "
+            "Användaren laddar upp ett PDF-underlag. Flödet ska extrahera "
+            "nyckelfält, producera en sammanfattning med risker och "
+            "möjligheter, och generera en DOCX-rapport med användarens "
             "namn."
         ),
     ),

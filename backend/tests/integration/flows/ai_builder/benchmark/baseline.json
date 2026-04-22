@@ -3,7 +3,7 @@
     {
       "archetype": "attachment_heavy",
       "architecture_chain_correctness": null,
-      "blocking_issue_count": 1,
+      "blocking_issue_count": 0,
       "case_id": "attachment_heavy_01_sv",
       "has_explicit_step_plan": false,
       "mvs_met": true,
@@ -15,13 +15,11 @@
       },
       "plan_depth": null,
       "question_budget": 3,
-      "question_count": 1,
+      "question_count": 0,
       "questioning_flag": "within_budget",
-      "ready_for_confirmation": false,
+      "ready_for_confirmation": true,
       "repair_loop_rate": null,
-      "selected_question_ids": [
-        "document_material_scope"
-      ],
+      "selected_question_ids": [],
       "shallow_two_step_incidence": null,
       "ui_language": "sv"
     },
@@ -51,25 +49,23 @@
     {
       "archetype": "audio",
       "architecture_chain_correctness": null,
-      "blocking_issue_count": 1,
+      "blocking_issue_count": 0,
       "case_id": "audio_01_sv",
       "has_explicit_step_plan": false,
       "mvs_met": true,
       "pattern_signals": {
-        "needs_form_fields": true,
+        "needs_form_fields": false,
         "prefers_quality_step": false,
         "prefers_structured_intermediate": false,
         "rich_document_workflow": false
       },
       "plan_depth": null,
       "question_budget": 3,
-      "question_count": 1,
+      "question_count": 0,
       "questioning_flag": "within_budget",
-      "ready_for_confirmation": false,
+      "ready_for_confirmation": true,
       "repair_loop_rate": null,
-      "selected_question_ids": [
-        "final_output_mode"
-      ],
+      "selected_question_ids": [],
       "shallow_two_step_incidence": null,
       "ui_language": "sv"
     },
@@ -197,7 +193,7 @@
     {
       "archetype": "mixed_runtime_input",
       "architecture_chain_correctness": null,
-      "blocking_issue_count": 3,
+      "blocking_issue_count": 2,
       "case_id": "mixed_runtime_input_01_sv",
       "has_explicit_step_plan": false,
       "mvs_met": true,
@@ -209,13 +205,12 @@
       },
       "plan_depth": null,
       "question_budget": 3,
-      "question_count": 3,
+      "question_count": 2,
       "questioning_flag": "within_budget",
       "ready_for_confirmation": false,
       "repair_loop_rate": null,
       "selected_question_ids": [
         "document_material_scope",
-        "final_output_mode",
         "structured_analysis_need"
       ],
       "shallow_two_step_incidence": null,
@@ -224,7 +219,7 @@
     {
       "archetype": "rich",
       "architecture_chain_correctness": null,
-      "blocking_issue_count": 0,
+      "blocking_issue_count": 2,
       "case_id": "rich_01_sv",
       "has_explicit_step_plan": false,
       "mvs_met": true,
@@ -232,15 +227,18 @@
         "needs_form_fields": false,
         "prefers_quality_step": false,
         "prefers_structured_intermediate": true,
-        "rich_document_workflow": false
+        "rich_document_workflow": true
       },
       "plan_depth": null,
       "question_budget": 3,
-      "question_count": 0,
+      "question_count": 2,
       "questioning_flag": "within_budget",
-      "ready_for_confirmation": true,
+      "ready_for_confirmation": false,
       "repair_loop_rate": null,
-      "selected_question_ids": [],
+      "selected_question_ids": [
+        "document_material_scope",
+        "structured_analysis_need"
+      ],
       "shallow_two_step_incidence": null,
       "ui_language": "sv"
     },
@@ -411,7 +409,7 @@
       "ui_language": "en"
     }
   ],
-  "cases_sha256": "096e415eb978c27067e282512a592cbde486e654a428adfe6976838ba32525b1",
+  "cases_sha256": "b6d68fe5a0effe9c6c7115ba8fcc8e6f48a95df7769c31d82d77206fae829348",
   "note": "Deterministic pre-LLM measurements only. LLM-dependent fields (plan_depth, repair_loop_rate, architecture_chain_correctness, shallow_two_step_incidence) are populated by a later golden-fixture evaluation harness. The committed baseline is a frozen reference; diffs against it are expected as the architecture evolves.",
   "schema_version": 1
 }
