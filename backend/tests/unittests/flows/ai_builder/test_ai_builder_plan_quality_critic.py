@@ -52,7 +52,7 @@ def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None
         }
     ]
     spec = FlowDraftSpecCore(
-        flow_name="Kommunanalys",
+        flow_name="Dokumentanalys",
         steps=[
             _step(
                 "step_a",
@@ -255,7 +255,7 @@ def test_flags_missing_structured_extraction_when_user_asked_for_structured_fiel
         }
     ]
     spec = FlowDraftSpecCore(
-        flow_name="Kommunanalys",
+        flow_name="Dokumentanalys",
         steps=[
             _step(
                 "step_a",
@@ -265,8 +265,8 @@ def test_flags_missing_structured_extraction_when_user_asked_for_structured_fiel
             ),
             _step(
                 "step_b",
-                "Skriv beslutsunderlag",
-                "Skriv ett beslutsunderlag baserat på föregående steg.",
+                "Skriv slutrapport",
+                "Skriv en slutrapport baserat på föregående steg.",
                 input_source=InputSource.PREVIOUS_STEP,
             ),
         ],
@@ -301,7 +301,7 @@ def test_flags_edit_plan_that_fakes_audio_transcription_by_downgrading_to_generi
         id=uuid4(),
         tenant_id=uuid4(),
         space_id=uuid4(),
-        name="Kommunanalys",
+        name="Dokumentanalys",
         steps=[
             FlowStep(
                 assistant_id=uuid4(),
@@ -335,7 +335,7 @@ def test_flags_edit_plan_that_fakes_audio_transcription_by_downgrading_to_generi
         }
     ]
     spec = FlowDraftSpecCore(
-        flow_name="Kommunanalys",
+        flow_name="Dokumentanalys",
         steps=[
             StepSpec(
                 plan_step_ref="step_a",
@@ -380,7 +380,7 @@ def test_allows_audio_first_edit_when_plan_uses_real_transcription_step() -> Non
         id=uuid4(),
         tenant_id=uuid4(),
         space_id=uuid4(),
-        name="Kommunanalys",
+        name="Dokumentanalys",
         steps=[
             FlowStep(
                 assistant_id=uuid4(),
@@ -417,7 +417,7 @@ def test_allows_audio_first_edit_when_plan_uses_real_transcription_step() -> Non
         }
     ]
     spec = FlowDraftSpecCore(
-        flow_name="Kommunanalys",
+        flow_name="Dokumentanalys",
         steps=[
             StepSpec(
                 plan_step_ref="step_a",
