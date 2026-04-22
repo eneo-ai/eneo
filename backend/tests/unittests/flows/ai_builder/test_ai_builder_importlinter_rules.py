@@ -46,6 +46,10 @@ RULE_2_NAME = "FCM must not import AI Builder"
 
 AI_BUILDER_PACKAGE = "intric.flows.ai_builder"
 FCM_MODULE = "intric.flows.flow_capability_manifest"
+FLOW_MODELS_API_MODULE = "intric.flows.api.flow_models"
+FLOW_API_PARENT_PACKAGE = "intric.flows.api"
+FLOW_MODELS_API_MODULE_LEAF = "flow_models"
+BRIDGE_MODULE_NAME = "ai_builder_materialization_bridge"
 
 
 def _backend_root() -> Path:
@@ -108,6 +112,45 @@ def _plugin_sibling_imports(
                     if name not in permitted:
                         offenders.append(f"import {name}")
 
+    return offenders
+
+
+def _modules_importing_flow_models_api(
+    package_root: pathlib.Path,
+) -> dict[str, list[str]]:
+    """Return ``{relative_posix_path: [import_strings]}`` for ``.py`` files
+    under ``package_root`` that pull in ``intric.flows.api.flow_models`` by
+    any import shape:
+
+    - ``from intric.flows.api.flow_models import X``
+    - ``import intric.flows.api.flow_models``
+    - ``from intric.flows.api import flow_models``  (parent-package form)
+
+    Recurses through sub-packages so Rule 6 stays honest if the ai_builder
+    package grows nested modules. Skips every ``__init__.py``.
+    """
+    offenders: dict[str, list[str]] = {}
+    for py_file in sorted(package_root.rglob("*.py")):
+        if py_file.name == "__init__.py":
+            continue
+        tree = ast.parse(py_file.read_text(encoding="utf-8"))
+        imports: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.module == FLOW_MODELS_API_MODULE:
+                    names = ", ".join(alias.name for alias in node.names)
+                    imports.append(f"from {node.module} import {names}")
+                elif node.module == FLOW_API_PARENT_PACKAGE:
+                    for alias in node.names:
+                        if alias.name == FLOW_MODELS_API_MODULE_LEAF:
+                            imports.append(f"from {node.module} import {alias.name}")
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == FLOW_MODELS_API_MODULE:
+                        imports.append(f"import {alias.name}")
+        if imports:
+            rel = py_file.relative_to(package_root).as_posix()
+            offenders[rel] = imports
     return offenders
 
 
@@ -242,4 +285,84 @@ class TestRule4QuestionCatalogDirectSiblingImports:
             "FCM imports (intric.flows.flow_capability_manifest) live "
             "outside the plugin and are unaffected by this rule.\n"
             f"Offending imports: {offenders}"
+        )
+
+
+class TestRule6MaterializationBridgeAcl:
+    """Rule 6 — Materialization Bridge ACL.
+
+    Inside ``intric.flows.ai_builder``, only
+    ``ai_builder_materialization_bridge.py`` is permitted to import from
+    ``intric.flows.api.flow_models`` (the flows-domain draft-write
+    surface). The bridge is a docstring-only scaffold in A.5; concrete
+    implementation lands in Phase D.7.
+    """
+
+    def _package_root(self) -> pathlib.Path:
+        return _backend_root() / "src" / "intric" / "flows" / "ai_builder"
+
+    def test_bridge_is_docstring_only_scaffold(self) -> None:
+        """A.5 Rule 6 wants the bridge scaffolded as an empty module with a
+        role-docstring; concrete implementation lands in Phase D.7. Assert
+        both: the file exists, and its top-level body is the module
+        docstring and nothing else.
+        """
+        bridge = self._package_root() / f"{BRIDGE_MODULE_NAME}.py"
+        assert bridge.exists(), (
+            "Expected Materialization Bridge scaffold at "
+            f"{bridge.relative_to(_backend_root())}."
+        )
+        tree = ast.parse(bridge.read_text(encoding="utf-8"))
+        assert ast.get_docstring(tree) is not None, (
+            f"{BRIDGE_MODULE_NAME}.py must have a module docstring declaring "
+            "its bridge role."
+        )
+        body = tree.body
+        assert len(body) == 1 and isinstance(body[0], ast.Expr), (
+            f"{BRIDGE_MODULE_NAME}.py is the A.5 scaffold — keep it "
+            "docstring-only. Concrete bridge logic lands in Phase D.7; "
+            "adding code here now widens the write-surface seam before "
+            "the ACL is ready to guard it.\n"
+            f"Found {len(body)} top-level statements: "
+            f"{[type(n).__name__ for n in body]}"
+        )
+
+    def test_only_bridge_imports_flows_api_flow_models(self) -> None:
+        offenders = _modules_importing_flow_models_api(self._package_root())
+        offenders.pop(f"{BRIDGE_MODULE_NAME}.py", None)
+        assert not offenders, (
+            "Only `ai_builder_materialization_bridge.py` may import from "
+            f"`{FLOW_MODELS_API_MODULE}` inside the ai_builder plugin. "
+            "All other modules must route draft-write type usage through "
+            "the bridge (Rule 6 of Phase A.5; concrete bridge implementation "
+            "lands in Phase D.7).\n"
+            f"Offenders: {offenders}"
+        )
+
+    def test_helper_catches_all_offending_import_shapes(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """The ACL helper must catch every import shape that reaches
+        ``intric.flows.api.flow_models``, including the parent-package
+        form. Without this fixture check, a silent helper regression would
+        leave the production-tree ACL test passing because no offenders
+        exist today — a green that would mask a future real offender.
+        """
+        shapes = {
+            "qualified_from.py": "from intric.flows.api.flow_models import X\n",
+            "parent_from.py": "from intric.flows.api import flow_models\n",
+            "bare_import.py": "import intric.flows.api.flow_models\n",
+            # Nested offender also pins the recursive scan + relative-path
+            # keying the helper uses. If this drops back to a flat glob, the
+            # nested fixture goes missing and the test fires.
+            "nested/deep_from.py": "from intric.flows.api.flow_models import Y\n",
+        }
+        for rel_name, src in shapes.items():
+            target = tmp_path / rel_name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(src, encoding="utf-8")
+        offenders = _modules_importing_flow_models_api(tmp_path)
+        assert set(offenders) == set(shapes), (
+            "Helper missed at least one import shape.\n"
+            f"Expected: {set(shapes)}\nGot: {set(offenders)}"
         )
