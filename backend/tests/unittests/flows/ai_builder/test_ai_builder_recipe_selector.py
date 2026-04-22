@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_knowledge_pack_create import (
-    KNOWLEDGE_PACK_CREATE_RECIPES,
+from intric.flows.ai_builder.ai_builder_create_recipes import (
+    render_knowledge_pack_create_recipes,
 )
 from intric.flows.ai_builder.ai_builder_recipe_selector import select_relevant_recipes
 
@@ -63,7 +63,7 @@ class TestRecipeSelection:
                 "Visa en sektion i taget och be användaren om fritext för varje sektion. "
                 "Skapa sedan ett DOCX-dokument."
             ),
-            recipe_source=KNOWLEDGE_PACK_CREATE_RECIPES,
+            recipe_source=render_knowledge_pack_create_recipes(),
         )
 
         assert "Sektionerad insamling via formulärfält" in result
@@ -83,7 +83,7 @@ class TestRecipeSelection:
         result = select_relevant_recipes(
             {},
             "extract structured fields from input",
-            recipe_source=KNOWLEDGE_PACK_CREATE_RECIPES,
+            recipe_source=render_knowledge_pack_create_recipes(),
         )
 
         assert "## JSON-steg" in result
@@ -106,7 +106,7 @@ class TestRecipeSelection:
         result = select_relevant_recipes(
             {},
             "analyze my document and produce a report",
-            recipe_source=KNOWLEDGE_PACK_CREATE_RECIPES,
+            recipe_source=render_knowledge_pack_create_recipes(),
         )
 
         # No trigger fires → full pack returned, so every base section present.
@@ -128,7 +128,7 @@ class TestRecipeSelection:
         result = select_relevant_recipes(
             {},
             "extract",
-            recipe_source=KNOWLEDGE_PACK_CREATE_RECIPES,
+            recipe_source=render_knowledge_pack_create_recipes(),
         )
 
         # No trigger fires → full pack returned.
@@ -150,7 +150,7 @@ class TestRecipeSelection:
         result = select_relevant_recipes(
             {},
             "analysis report",
-            recipe_source=KNOWLEDGE_PACK_CREATE_RECIPES,
+            recipe_source=render_knowledge_pack_create_recipes(),
         )
 
         assert "## Dokumentpaket -> JSON -> grounded text -> DOCX/PDF" in result
@@ -178,7 +178,7 @@ class TestRecipeSelection:
         result = select_relevant_recipes(
             {},
             "review my document",
-            recipe_source=KNOWLEDGE_PACK_CREATE_RECIPES,
+            recipe_source=render_knowledge_pack_create_recipes(),
         )
 
         # multi_step_quality_chain wins by margin but is not registered,

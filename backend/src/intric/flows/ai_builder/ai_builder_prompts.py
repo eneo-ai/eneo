@@ -6,6 +6,9 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from intric.flows.ai_builder.ai_builder_create_recipes import (
+    render_knowledge_pack_create_recipes,
+)
 from intric.flows.ai_builder.ai_builder_discovery import (
     build_discovery_guidance,
 )
@@ -42,9 +45,6 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
 )
 from intric.flows.ai_builder.ai_builder_knowledge_pack import (
     build_prompt_knowledge_sections,
-)
-from intric.flows.ai_builder.ai_builder_knowledge_pack_create import (
-    KNOWLEDGE_PACK_CREATE_RECIPES,
 )
 from intric.flows.ai_builder.ai_builder_models import (
     ConversationMessage,
@@ -107,16 +107,17 @@ def build_system_prompt(
         sections.append(resolved_requirements_block)
 
     if confirmed_requirements and not is_edit_mode:
+        full_create_recipes = render_knowledge_pack_create_recipes()
         selected_recipes = select_relevant_recipes(
             _extract_signals_from_requirements(confirmed_requirements),
             freeform_text=" ".join(
                 str(confirmed_requirements.get(key, ""))
                 for key in ("summary", "input_description", "output_description")
             ),
-            recipe_source=KNOWLEDGE_PACK_CREATE_RECIPES,
+            recipe_source=full_create_recipes,
         )
         sections = [
-            selected_recipes if section == KNOWLEDGE_PACK_CREATE_RECIPES else section
+            selected_recipes if section == full_create_recipes else section
             for section in sections
         ]
 

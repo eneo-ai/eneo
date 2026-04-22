@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_create_recipes import (
+    render_knowledge_pack_create_recipes,
+)
 from intric.flows.ai_builder.ai_builder_flow_architecture import (
     render_flow_architecture,
 )
@@ -12,9 +15,6 @@ from intric.flows.ai_builder.ai_builder_knowledge_pack_core import (
     KNOWLEDGE_PACK_RECIPES,
     KNOWLEDGE_PACK_STEP_DESIGN,
     KNOWLEDGE_PACK_VARIABLE_SYSTEM,
-)
-from intric.flows.ai_builder.ai_builder_knowledge_pack_create import (
-    KNOWLEDGE_PACK_CREATE_RECIPES,
 )
 from intric.flows.ai_builder.ai_builder_knowledge_pack_edit import (
     KNOWLEDGE_PACK_EDIT_MODE,
@@ -57,7 +57,7 @@ def build_prompt_knowledge_sections(
         sections.extend(
             [
                 render_step_design(),
-                KNOWLEDGE_PACK_CREATE_RECIPES,
+                render_knowledge_pack_create_recipes(),
                 render_validation_repair_examples(),
                 render_knowledge_pack(),
             ]
@@ -68,7 +68,6 @@ def build_prompt_knowledge_sections(
 __all__ = [
     "KNOWLEDGE_PACK_ANTI_PATTERNS",
     "KNOWLEDGE_PACK_CONTRACTS",
-    "KNOWLEDGE_PACK_CREATE_RECIPES",
     "KNOWLEDGE_PACK_EDIT_MODE",
     "KNOWLEDGE_PACK_FLOW_ARCHITECTURE",
     "KNOWLEDGE_PACK_IO_INTELLIGENCE",
