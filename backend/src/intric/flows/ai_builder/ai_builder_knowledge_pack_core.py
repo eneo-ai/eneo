@@ -81,9 +81,9 @@ Alla variabler skrivs som `{{ variabelnamn }}` med dubbla klammerparenteser.
 
 ### 1. Flödesindata-variabler (form fields)
 Om flödet har ett formulär (form_fields) blir varje fälts namn en variabel:
-- `{{ Ärendenummer }}` — värdet av formulärfältet "Ärendenummer"
+- `{{ Referens-ID }}` — värdet av formulärfältet "Referens-ID"
 - `{{ Bakgrund som text }}` — värdet av formulärfältet "Bakgrund som text"
-- `{{ Förslag-till-beslut }}` — värdet av formulärfältet "Förslag-till-beslut"
+- `{{ Rekommendation }}` — värdet av formulärfältet "Rekommendation"
 
 ### 2. Steg-utdata-variabler (step outputs)
 Varje steg producerar utdata som är tillgängligt för efterföljande steg:
@@ -94,8 +94,8 @@ Varje steg producerar utdata som är tillgängligt för efterföljande steg:
 ### 3. Runtime-alias för stegnamn (inte primär AI-authoring)
 Runtime kan exponera alias baserade på `user_description`, men AI Builder-utkast ska \
 INTE förlita sig på dem som primär referensmodell:
-- Om ett körande flöde har ett steg som heter "Ärendet" kan runtime exponera \
-  `{{ Ärendet }}` som en bekvämlighetsalias.
+- Om ett körande flöde har ett steg som heter "Dokumentet" kan runtime exponera \
+  `{{ Dokumentet }}` som en bekvämlighetsalias.
 - Detta är en runtime-bekvämlighet för befintliga flöden, inte den kanoniska \
   AI Builder-syntaxen.
 
@@ -104,7 +104,7 @@ INTE förlita sig på dem som primär referensmodell:
 - Om du arbetar i canonical spec eller felsöker kompilerade utkast ska samma referens återanvändas konsekvent i variabler och underlag.
 - Runtime skriver senare om dessa till interna `step_1`, `step_2`-referenser. Blanda inte authoring-refar och runtime-refar i samma felsökningskontext.
 - Blanda inte `step_a` och `step_1` i samma utkast eller felsökningskontext.
-- Använd inte stegnamn som `{{ Ärendet }}` i nya AI Builder-utkast även om de kan fungera i befintliga körningar.
+- Använd inte stegnamn som `{{ Dokumentet }}` i nya AI Builder-utkast även om de kan fungera i befintliga körningar.
 
 ### 4. Systemvariabler
 - `{{ föregående_steg }}` — textutdata från det direkt föregående steget
@@ -133,7 +133,7 @@ bearbeta. Om det lämnas tomt används resultatet från föregående steg automa
 Exempel — ett steg som kombinerar data från flera källor:
 ```json
 {
-  "question": "Rubrik: {{ Ärendet }}\\nBakgrund: {{ Bakgrund }}\\nÖverväganden: {{ Förvaltningens överväganden }}\\nTidigare beslut: {{ step_5.output.text }}"
+  "question": "Rubrik: {{ Dokumentet }}\\nBakgrund: {{ Bakgrund }}\\nÖverväganden: {{ Överväganden }}\\nTidigare beslut: {{ step_5.output.text }}"
 }
 ```
 
@@ -141,7 +141,7 @@ Exempel — ett steg som kombinerar data från flera källor:
 Variabler fungerar även i instruktionerna, men blir då en del av AI:ns beteende, \
 inte den text som bearbetas. Exempel:
 ```
-Ärendenumret är {{ Ärendenummer }}. Formulera beslutsunderlag baserat på {{ Förslag-till-beslut }}.
+Referens-ID:t är {{ Referens-ID }}. Formulera rapport baserat på {{ Rekommendation }}.
 ```
 
 ## Viktiga regler
@@ -175,7 +175,7 @@ Varje steg har två centrala texter som styr AI:ns beteende:
 ```
 ### START PÅ INSTRUKTION
 Du är en assistent som hjälper till att formulera tydliga och effektiva att-satser.
-Din indata är en kort beskrivning av ärendet samt ett antal att-satser skrivna av ovana handläggare.
+Din indata är en kort beskrivning av dokumentet samt ett antal att-satser skrivna av ovana granskare.
 
 KRAV FÖR ATT-SATSER:
 - Varje att-sats ska endast avhandla en sak.
@@ -190,7 +190,7 @@ BEGRÄNSNINGAR:
 - Undvik sammanslagning av flera beslut i en att-sats.
 - Tydlighet framför komplexa formuleringar.
 ### SLUT PÅ INSTRUKTION
-{{ Ärendet }}{{ Förslag-till-beslut }}{{ step_5.output.text }}
+{{ Dokumentet }}{{ Rekommendation }}{{ step_5.output.text }}
 ```
 
 ## Underlag / input_bindings.question
@@ -206,14 +206,14 @@ BEGRÄNSNINGAR:
 ### Exempel:
 ```json
 {
-  "question": "ÄRENDEDATA:\\n{{ Ärendenummer }}\\n\\nBAKGRUND:\\n{{ Bakgrund som text }}\\n\\nFÖRVALTNINGENS BEDÖMNING:\\n{{ Förvaltningens överväganden }}\\n\\nFÖRSLAG TILL BESLUT:\\n{{ Förslag-till-beslut }}"
+  "question": "REFERENSDATA:\\n{{ Referens-ID }}\\n\\nBAKGRUND:\\n{{ Bakgrund som text }}\\n\\nBEDÖMNING:\\n{{ Överväganden }}\\n\\nREKOMMENDATION:\\n{{ Rekommendation }}"
 }
 ```
 
 ### Exempel med formdata + runtime input + tidigare steg:
 ```json
 {
-  "question": "FORMULÄRDATA:\\nBrukare: {{ Brukarens namn }}\\nKontext: {{ Handläggningskontext }}\\n\\nKÖRNINGSDATA:\\n{{ step_input.text }}\\n\\nSTRUKTURERAD ANALYS:\\nSammanfattning: {{ step_a.output.structured.sammanfattning }}\\nRisk: {{ step_a.output.structured.risk }}\\n\\nTIDIGARE BEDÖMNING:\\n{{ step_b.output.text }}"
+  "question": "FORMULÄRDATA:\\nDokumentets namn: {{ Dokumentets namn }}\\nKontext: {{ Granskningskontext }}\\n\\nKÖRNINGSDATA:\\n{{ step_input.text }}\\n\\nSTRUKTURERAD ANALYS:\\nSammanfattning: {{ step_a.output.structured.sammanfattning }}\\nRisk: {{ step_a.output.structured.risk }}\\n\\nTIDIGARE BEDÖMNING:\\n{{ step_b.output.text }}"
 }
 ```
 
@@ -221,12 +221,12 @@ BEGRÄNSNINGAR:
 1. **Enkel kedja** (steg 2 bearbetar steg 1): Instruktioner räcker, underlag kan vara tomt
 2. **Sammansättning** (steg kombinerar data från flera steg): Underlag bygger texten, \
    instruktioner styr bearbetningen
-3. **Komplex produktion** (sista steget i en tjänsteskrivelse): Underlag samlar ALL \
+3. **Komplex produktion** (sista steget i en rapport): Underlag samlar ALL \
    data, instruktioner beskriver format och krav i detalj
 
 ## Variabler i instruktioner vs underlag
 - I **underlag**: `{{ step_c.output.text }}` → texten LÄGGS IN i underlaget
-- I **instruktioner**: `{{ Ärendenummer }}` → värdet blir del av AI:ns beteende/kontext
+- I **instruktioner**: `{{ Referens-ID }}` → värdet blir del av AI:ns beteende/kontext
 - Båda fungerar, men underlaget är primärt stället för datainsamling
 
 ## Underlags-designmönster
@@ -272,11 +272,11 @@ detta till korrekt JSON Schema i den kanoniska specifikationen.
 {
   "type": "object",
   "properties": {
-    "ärendenummer": { "type": "string" },
+    "referens_id": { "type": "string" },
     "bakgrund": { "type": "string" },
     "prioritet": { "type": "string", "enum": ["hög", "medel", "låg"] }
   },
-  "required": ["ärendenummer", "bakgrund"]
+  "required": ["referens_id", "bakgrund"]
 }
 ```
 
@@ -285,16 +285,16 @@ detta till korrekt JSON Schema i den kanoniska specifikationen.
 {
   "type": "object",
   "properties": {
-    "ärende": {
+    "dokument": {
       "type": "object",
       "properties": {
         "nummer": { "type": "string", "pattern": "^[A-Z]{2}-\\\\d{4}-\\\\d+$" },
         "rubrik": { "type": "string", "minLength": 5 },
-        "kategori": { "type": "string", "enum": ["bygglov", "detaljplan", "miljö"] }
+        "kategori": { "type": "string", "enum": ["kontrakt", "riktlinje", "rapport"] }
       },
       "required": ["nummer", "rubrik"]
     },
-    "handlingar": {
+    "bilagor": {
       "type": "array",
       "items": {
         "type": "object",
@@ -305,7 +305,7 @@ detta till korrekt JSON Schema i den kanoniska specifikationen.
       }
     }
   },
-  "required": ["ärende"]
+  "required": ["dokument"]
 }
 ```
 
@@ -321,7 +321,7 @@ detta till korrekt JSON Schema i den kanoniska specifikationen.
 {
   "type": "object",
   "properties": {
-    "sammanfattning": { "type": "string", "description": "Kort sammanfattning av ärendet" },
+    "sammanfattning": { "type": "string", "description": "Kort sammanfattning av dokumentet" },
     "nyckelord": { "type": "array", "items": { "type": "string" } },
     "bedömning": {
       "type": "object",
@@ -369,7 +369,7 @@ Steg 2: input_type=json, output_type=text
 
 ### Mönster 2: Validerad pipeline
 ```
-Steg 1: input_type=json, input_contract={kräver "ärende", "bakgrund"}
+Steg 1: input_type=json, input_contract={kräver "dokument", "bakgrund"}
   → Steget STOPPAR om indata saknar obligatoriska fält
   → Instruktioner bearbetar validerad data med full trygghet
 
@@ -587,7 +587,7 @@ _KNOWLEDGE_PACK_STEP_DESIGN = """\
   långa när format, regler eller beslutslogik kräver det.
 
 ## Underlagsdesign (input_bindings.question)
-- Strukturera med tydliga rubriker: `ÄRENDEDATA:\\n{{ var }}\\n\\nBAKGRUND:\\n{{ var }}`
+- Strukturera med tydliga rubriker: `REFERENSDATA:\\n{{ var }}\\n\\nBAKGRUND:\\n{{ var }}`
 - Använd deklarerade `plan_step_ref`-värden för stegvariabler: `{{ step_a.output.text }}`
 - Kombinera formulärdata OCH stegutdata i samma underlag
 - Lägg normalt metadata/formfält först, sedan `step_input.text` om runtime_input används, \
