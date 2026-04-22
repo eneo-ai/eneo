@@ -31,7 +31,7 @@ name: eneo
 
 services:
   traefik:
-    image: traefik:v3.0
+    image: traefik:v3
     container_name: eneo_traefik
     restart: unless-stopped
     command:
