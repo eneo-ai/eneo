@@ -922,6 +922,7 @@ class TestCriticInvariantLoop:
             signal_text="",
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output="pdf_document"),
+            mixed_audio_doc_input=False,
         )
 
         issues = render_critic_issues(context)
@@ -961,6 +962,7 @@ class TestCriticInvariantLoop:
             signal_text="",
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output="pdf_document"),
+            mixed_audio_doc_input=False,
         )
 
         assert render_critic_issues(context) == []
@@ -991,85 +993,57 @@ class TestCriticInvariantLoop:
             signal_text="",
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
         )
 
         assert render_critic_issues(context) == []
 
 
-class TestCriticInvariantGroups:
-    """Cluster tuples (`FORM_FIELDS_INVARIANTS`, `TERMINAL_OUTPUT_INVARIANTS`,
-    `DOCX_MODE_INVARIANTS`) allow the critic to evaluate one cluster at a time
-    when issue ordering matters. `CRITIC_INVARIANTS` is the flat default.
+class TestCriticInvariantRegistry:
+    """The flat `CRITIC_INVARIANTS` tuple is the sole public registry.
+
+    Ordering matters because the planner reads issues in the order the critic
+    surfaces them; a regression test here pins that contract so a future
+    reorder must be deliberate.
     """
 
-    def test_form_fields_group_registers_expected_invariants(self) -> None:
+    def test_critic_invariants_registered_in_stable_order(self) -> None:
+        """Full flat-registry ordering lockdown. Any intentional reorder must
+        update this list and justify the shift in the commit message.
+        """
         from intric.flows.ai_builder.ai_builder_critic_invariants import (
-            FORM_FIELDS_INVARIANTS,
+            CRITIC_INVARIANTS,
         )
 
-        ids = [inv.id for inv in FORM_FIELDS_INVARIANTS]
-        assert ids == [
+        assert [inv.id for inv in CRITIC_INVARIANTS] == [
             "runtime_metadata_requires_form_fields",
             "sectioned_form_intake_requires_form_fields",
             "rich_workflow_requires_form_fields",
             "rich_workflow_requires_json_contract_step",
             "rich_workflow_requires_multiple_steps",
-        ]
-
-    def test_terminal_output_group_registers_expected_invariants(self) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
-            TERMINAL_OUTPUT_INVARIANTS,
-        )
-
-        ids = [inv.id for inv in TERMINAL_OUTPUT_INVARIANTS]
-        assert ids == [
             "pdf_terminal_output_alignment",
             "docx_terminal_output_alignment",
-        ]
-
-    def test_docx_mode_group_registers_expected_invariants(self) -> None:
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
-            DOCX_MODE_INVARIANTS,
-        )
-
-        ids = [inv.id for inv in DOCX_MODE_INVARIANTS]
-        assert ids == [
+            "non_terminal_step_document_conversion_forbidden",
+            "non_terminal_step_template_fill_forbidden",
+            "structured_extraction_requires_json_contract_step",
+            "explicit_json_contract_request_without_step",
+            "standalone_audio_requires_transcription_step",
+            "field_reuse_requires_input_bindings",
+            "multi_document_compare_requires_all_previous_steps",
             "template_fill_docx_requires_template_fill_step",
             "generated_docx_rejects_template_fill",
+            "mixed_audio_doc_rejects_file_degradation",
+            "mixed_audio_doc_rejects_pseudo_transcription",
+            "mixed_audio_doc_requires_real_transcription_step",
         ]
 
-    def test_critic_invariants_composition_matches_group_order(self) -> None:
-        """The flat registry must equal the concatenation of the three group
-        tuples in declared order — this guards downstream planner-prose
-        ordering if a future caller evaluates the full registry in one pass.
+    def test_render_critic_issues_accepts_custom_invariant_subset(self) -> None:
+        """`render_critic_issues` evaluates whatever tuple is passed via
+        `invariants=`; callers can build their own subset without relying on
+        pre-defined cluster tuples.
         """
         from intric.flows.ai_builder.ai_builder_critic_invariants import (
             CRITIC_INVARIANTS,
-            DOCX_MODE_INVARIANTS,
-            FORM_FIELDS_INVARIANTS,
-            TERMINAL_OUTPUT_INVARIANTS,
-        )
-
-        assert [inv.id for inv in CRITIC_INVARIANTS] == [
-            inv.id
-            for inv in (
-                *FORM_FIELDS_INVARIANTS,
-                *TERMINAL_OUTPUT_INVARIANTS,
-                *DOCX_MODE_INVARIANTS,
-            )
-        ]
-
-    def test_render_critic_issues_filters_to_selected_cluster(self) -> None:
-        """Passing `invariants=<group>` must filter evaluation to that group.
-
-        The context below trips both a TERMINAL_OUTPUT invariant (DOCX intent
-        with a TEXT terminal step) and a DOCX_MODE invariant
-        (template_fill_docx intent with no template_fill step). The default
-        call must surface both; restricting to `DOCX_MODE_INVARIANTS` must
-        surface only the template_fill remediation.
-        """
-        from intric.flows.ai_builder.ai_builder_critic_invariants import (
-            DOCX_MODE_INVARIANTS,
             CriticContext,
             render_critic_issues,
         )
@@ -1103,10 +1077,20 @@ class TestCriticInvariantGroups:
                 terminal_output="docx_document",
                 docx_output_mode="template_fill_docx",
             ),
+            mixed_audio_doc_input=False,
+        )
+        template_fill_only = tuple(
+            inv
+            for inv in CRITIC_INVARIANTS
+            if inv.id
+            in {
+                "template_fill_docx_requires_template_fill_step",
+                "generated_docx_rejects_template_fill",
+            }
         )
 
         default_issues = render_critic_issues(context)
-        filtered_issues = render_critic_issues(context, invariants=DOCX_MODE_INVARIANTS)
+        filtered_issues = render_critic_issues(context, invariants=template_fill_only)
 
         assert any("DOCX som slutartefakt" in issue for issue in default_issues)
         assert any("template_fill" in issue for issue in default_issues)
@@ -1115,9 +1099,8 @@ class TestCriticInvariantGroups:
         ]
 
     def test_public_helper_importable_from_invariants(self) -> None:
-        """`has_json_contract_step` is shared between invariants and the critic
-        (the critic still uses it for checks not yet migrated), so it is
-        exposed as a public symbol.
+        """`has_json_contract_step` stays public because external callers can
+        reuse the same semantics when composing their own invariants.
         """
         from intric.flows.ai_builder.ai_builder_critic_invariants import (
             has_json_contract_step,
