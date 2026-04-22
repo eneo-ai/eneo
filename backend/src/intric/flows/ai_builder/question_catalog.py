@@ -10,7 +10,9 @@ no FCM truth — that surface belongs to Pattern Registry (A.4) and FCM
 Catalog keys are slot names from
 `ai_builder_slot_vocabulary.KNOWN_REQUIREMENT_SLOT_NAMES`. Pattern
 Registry's `question_template_ids` field forward-references these keys;
-A.5 promotes the dangling-reference check into a CI-enforced rule.
+Rule 5 of Phase A.5 is the CI-enforced dangling-reference guard — see
+`test_every_question_template_id_resolves_in_catalog` in
+`tests/unittests/flows/ai_builder/test_question_catalog.py`.
 
 `QUESTION_CATALOG_VERSION` starts at `1` and stays there through the
 Phase A epoch. First bump lands with the first persisted consumer

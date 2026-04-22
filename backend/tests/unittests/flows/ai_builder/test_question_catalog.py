@@ -439,9 +439,18 @@ class TestPatternRegistryBackfill:
             )
 
     def test_every_question_template_id_resolves_in_catalog(self) -> None:
-        """Dangling-reference guard at the scaffold stage. A.5 promotes
-        this into an importlinter rule + CI test; here we pin the
-        back-fill doesn't ship dangling ids."""
+        """Rule 5 of Phase A.5 — dangling-reference CI guard.
+
+        Every entry in any ``Pattern.question_template_ids`` tuple must
+        resolve to a live ``QUESTION_CATALOG`` row. The rule fires on
+        every CI run, not just A.4b back-fill validation: any future
+        Pattern Registry or Question Catalog change that introduces a
+        dangling reference must fail here before landing.
+
+        Rule 5 is a data-reference rule, not an import rule; hence it
+        lives with the Question Catalog data contract rather than with
+        the A.5b importlinter boundary tests.
+        """
         for pattern in PATTERN_REGISTRY.values():
             for qid in pattern.question_template_ids:
                 assert qid in QUESTION_CATALOG, (

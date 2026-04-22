@@ -15,7 +15,10 @@ Each `Pattern` captures:
   `ai_builder_slot_vocabulary.py` that this archetype's discovery
   must resolve before the planner can commit to it.
 - `question_template_ids` — forward-references the Question Catalog
-  (A.4b). Resolution is pinned by an A.5 CI test once the catalog lands.
+  (A.4b). Resolution is pinned by Rule 5 of Phase A.5 — see
+  `test_every_question_template_id_resolves_in_catalog` in
+  `tests/unittests/flows/ai_builder/test_question_catalog.py`; any
+  dangling reference fails CI.
 - `polarity` — `"positive"` archetypes are recommended paths;
   `"negative"` archetypes are anti-patterns grounded in FCM truth so
   the knowledge pack can tell the planner "don't propose this shape".
