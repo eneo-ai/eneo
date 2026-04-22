@@ -112,6 +112,10 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "primary_runtime_input",
             "terminal_output",
         ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
     ),
     _pattern(
         id="extract_structured_fields",
@@ -124,6 +128,10 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "input_type=text output_type=json output_mode=pass_through",
         ),
         required_architectural_slots=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+        question_template_ids=(
             "primary_runtime_input",
             "terminal_output",
         ),
@@ -144,6 +152,11 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "terminal_output",
             "document_material_scope",
         ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
+            "document_material_scope",
+        ),
     ),
     _pattern(
         id="document_to_docx_template",
@@ -156,6 +169,12 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "output_type=docx output_mode=template_fill",
         ),
         required_architectural_slots=(
+            "primary_runtime_input",
+            "terminal_output",
+            "docx_output_mode",
+            "document_material_scope",
+        ),
+        question_template_ids=(
             "primary_runtime_input",
             "terminal_output",
             "docx_output_mode",
@@ -178,6 +197,12 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "pdf_generation_mode",
             "document_material_scope",
         ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
+            "pdf_generation_mode",
+            "document_material_scope",
+        ),
     ),
     _pattern(
         id="audio_transcription",
@@ -193,6 +218,10 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "primary_runtime_input",
             "terminal_output",
         ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
     ),
     _pattern(
         id="multi_step_quality_chain",
@@ -205,6 +234,12 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "structured intermediate previous_step",
         ),
         required_architectural_slots=(
+            "primary_runtime_input",
+            "terminal_output",
+            "document_material_scope",
+            "structured_analysis_need",
+        ),
+        question_template_ids=(
             "primary_runtime_input",
             "terminal_output",
             "document_material_scope",
@@ -227,6 +262,11 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "terminal_output",
             "document_material_scope",
         ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
+            "document_material_scope",
+        ),
     ),
     _pattern(
         id="sectioned_form_intake",
@@ -240,6 +280,10 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "input_type=text output_type=json output_mode=pass_through",
         ),
         required_architectural_slots=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+        question_template_ids=(
             "primary_runtime_input",
             "terminal_output",
         ),
