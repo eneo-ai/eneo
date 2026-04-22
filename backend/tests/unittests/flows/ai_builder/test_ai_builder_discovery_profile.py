@@ -111,7 +111,7 @@ def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities
             },
         ),
         metadata_json={
-            "form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}
+            "form_schema": {"fields": [{"name": "referensnummer", "type": "text"}]}
         },
     )
 
@@ -222,7 +222,7 @@ def test_build_discovery_profile_keeps_docx_output_intent_when_input_mentions_pd
                 role="user",
                 content=(
                     "Bygg ett flöde som tar emot ett dokumentpaket med flera PDF-filer i ett ärende. "
-                    "Steg 1 extraherar text ur alla dokument. Steg 2 identifierar juridiska risker som "
+                    "Steg 1 extraherar text ur alla dokument. Steg 2 identifierar risker och möjligheter som "
                     "strukturerad JSON. Steg 3 genererar en strukturerad DOCX-rapport utan mall."
                 ),
             )

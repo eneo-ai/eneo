@@ -1247,7 +1247,7 @@ async def test_process_edit_arguments_passes_metadata_to_edit_validator() -> Non
     flow.description = "Skapar PDF idag."
     flow.metadata_json = {
         "form_schema": {
-            "fields": [{"name": "ärendenummer", "type": "text"}],
+            "fields": [{"name": "referensnummer", "type": "text"}],
         }
     }
 

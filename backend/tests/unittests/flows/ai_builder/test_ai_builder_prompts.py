@@ -645,7 +645,7 @@ class TestBuildClarificationHints:
         hints = build_clarification_hints(
             conversation=[],
             latest_user_message=(
-                "Användaren ska kunna ange ärendenummer och önskat språk. "
+                "Användaren ska kunna ange referensnummer och önskat språk. "
                 "Extrahera strukturerad JSON med fält för risker, möjligheter och rekommendationer."
             ),
         )
@@ -684,14 +684,14 @@ class TestBuildClarificationHints:
             metadata_json={
                 "form_schema": {
                     "fields": [
-                        {"name": "Ärendenummer", "type": "text"},
+                        {"name": "Referensnummer", "type": "text"},
                         {"name": "Prioritet", "type": "select"},
                     ]
                 }
             },
         )
         ctx = build_flow_context(flow)
-        assert "Ärendenummer" in ctx
+        assert "Referensnummer" in ctx
         assert "Prioritet" in ctx
         assert "Formulärfält" in ctx
 
@@ -740,14 +740,14 @@ class TestBuildClarificationHints:
         step.input_contract = {
             "type": "object",
             "properties": {
-                "ärendenummer": {"type": "string"},
+                "referensnummer": {"type": "string"},
                 "bakgrund": {"type": "string"},
             },
         }
         flow = _make_flow(steps=[step])
         ctx = build_flow_context(flow)
         assert "Indatakontrakt:" in ctx
-        assert "ärendenummer" in ctx
+        assert "referensnummer" in ctx
 
     def test_long_bindings_are_truncated(self) -> None:
         step = _make_step(step_order=1, user_description="Steg")
@@ -803,7 +803,7 @@ class TestBuildClarificationHints:
             name="Rapportflöde",
             steps=[step_one, step_two],
             metadata_json={
-                "form_schema": {"fields": [{"name": "Ärendenummer", "type": "text"}]}
+                "form_schema": {"fields": [{"name": "Referensnummer", "type": "text"}]}
             },
         )
 
@@ -827,7 +827,7 @@ class TestBuildClarificationHints:
         assert "Flödets nuvarande profil" in ctx
         assert "Indata: dokument via steg 1" in ctx
         assert "Utdata: PDF via steg 2" in ctx
-        assert "Formulär: Ärendenummer" in ctx
+        assert "Formulär: Referensnummer" in ctx
         assert "Kunskapsbaser: steg 2 (Policy)" in ctx
         assert "Källhänvisningar: steg 1" in ctx
         assert "Aktiv familj: output_artifact" in ctx
@@ -959,12 +959,12 @@ class TestBuildPlanSummary:
                 ),
             ],
             form_fields=[
-                FormFieldSpec(name="Ärendenummer", type="text", label="Ärende"),
+                FormFieldSpec(name="Referensnummer", type="text", label="Ärende"),
                 FormFieldSpec(name="Prioritet", type="select", label="Prio"),
             ],
         )
         summary = build_plan_summary(spec)
-        assert "Ärendenummer" in summary
+        assert "Referensnummer" in summary
         assert "Prioritet" in summary
         assert "Formulärfält" in summary
 

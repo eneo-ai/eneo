@@ -2235,13 +2235,13 @@ class TestSendMessageToolCall:
         completion_service._get_adapter.return_value = adapter
 
         bad_args = {
-            "flow_name": "Kommunanalys Pro",
+            "flow_name": "Dokumentanalys Pro",
             "flow_description": "Narrative summary only, no concrete steps yet.",
         }
         bad_tc = _make_tool_call(arguments=bad_args)
 
         good_args = {
-            "flow_name": "Kommunanalys Pro",
+            "flow_name": "Dokumentanalys Pro",
             "steps": [
                 {
                     "plan_step_ref": "step_a",
