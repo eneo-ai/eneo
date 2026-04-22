@@ -113,7 +113,6 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
         (
             "decision support",
             "beslutsstöd",
-            "beslutsunderlag",
             "report",
             "rapport",
             "summary",
@@ -161,7 +160,6 @@ def ultra_vague_output_choice_is_vague(profile: DiscoveryProfile) -> bool:
             "text summary",
             "textsammanfattning",
             "sammanfattning som text",
-            "beslutsunderlag",
             "decision support",
         ),
     ):
