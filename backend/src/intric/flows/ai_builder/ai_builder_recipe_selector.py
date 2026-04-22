@@ -35,20 +35,23 @@ RECIPE_SECTIONS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# Signal → required recipe sections
+# Signal → required recipe sections.
+# `golden_example` is intentionally absent — `select_relevant_recipes` adds it
+# unconditionally once any signal triggers a narrowing, so listing it per
+# signal would only invite drift between this map and that single source of
+# truth.
 SIGNAL_TO_RECIPES: dict[str, list[str]] = {
-    "audio": ["transcription", "golden_example"],
-    "documents": ["document_analysis", "golden_example"],
-    "docx_document": ["docx_template", "golden_example"],
-    "pdf_document": ["document_analysis", "golden_example"],
-    "structured_json": ["json_pipeline", "golden_example"],
-    "structured_text": ["document_analysis", "golden_example"],
-    "comparison": ["comparison", "golden_example"],
-    "sectioned_form_intake": ["sectioned_form_intake", "golden_example"],
+    "audio": ["transcription"],
+    "documents": ["document_analysis"],
+    "docx_document": ["docx_template"],
+    "pdf_document": ["document_analysis"],
+    "structured_json": ["json_pipeline"],
+    "structured_text": ["document_analysis"],
+    "comparison": ["comparison"],
+    "sectioned_form_intake": ["sectioned_form_intake"],
     "rich_document_workflow": [
         "rich_document_workflow",
         "json_pipeline",
-        "golden_example",
     ],
 }
 
