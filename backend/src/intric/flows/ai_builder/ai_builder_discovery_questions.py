@@ -437,12 +437,12 @@ def output_reader_question(language: DiscoveryLanguage) -> DiscoveryQuestionSugg
             ),
             _option(
                 language=language,
-                id="case_officer_reader",
-                swedish_label="Handläggare eller analytiker",
-                english_label="Case officer or analyst",
+                id="specialist_reader",
+                swedish_label="Specialist eller analytiker",
+                english_label="Specialist or analyst",
                 swedish_description="Använd en mer detaljerad och arbetsinriktad analysstil.",
                 english_description="Use a more detailed working style for professional analysis.",
-                value="case_officer_reader",
+                value="specialist_reader",
             ),
             _option(
                 language=language,

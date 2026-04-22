@@ -111,8 +111,6 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
     output_intent = mentions_any(
         text,
         (
-            "decision support",
-            "beslutsstöd",
             "report",
             "rapport",
             "summary",
@@ -434,8 +432,7 @@ def reader_and_style_is_vague(profile: DiscoveryProfile) -> bool:
             "politician",
             "analyst",
             "analytiker",
-            "case officer",
-            "handläggare",
+            "specialist",
             "public",
             "allmänhet",
         ),
@@ -455,9 +452,7 @@ def reader_and_style_is_vague(profile: DiscoveryProfile) -> bool:
         ),
     ):
         return False
-    return mentions_any(
-        text, ("decision support", "beslutsstöd", "report", "rapport", "memo")
-    )
+    return mentions_any(text, ("report", "rapport", "memo"))
 
 
 def final_output_scope_is_vague(profile: DiscoveryProfile) -> bool:

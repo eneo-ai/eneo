@@ -502,7 +502,4 @@ def _has_explicit_input_resolution(explicit_question_ids: set[str] | None) -> bo
 
 
 def _mentions_source_material_underlag(text: str) -> bool:
-    return contains_any_phrase(text, ("underlag",)) and not contains_any_phrase(
-        text,
-        ("beslutsunderlag",),
-    )
+    return contains_any_phrase(text, ("underlag",))

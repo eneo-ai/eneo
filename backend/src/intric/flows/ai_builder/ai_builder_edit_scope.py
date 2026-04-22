@@ -100,8 +100,6 @@ _OUTPUT_STYLE_HINTS: tuple[str, ...] = (
     "sektioner",
     "summary only",
     "bara sammanfattning",
-    "decision proposal",
-    "beslutsförslag",
 )
 
 _STRUCTURED_REUSE_HINTS: tuple[str, ...] = (
