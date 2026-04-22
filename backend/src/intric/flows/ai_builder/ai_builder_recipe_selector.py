@@ -16,6 +16,7 @@ from intric.flows.ai_builder.ai_builder_knowledge_pack import (
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     extract_planner_pattern_recipe_signals,
 )
+from intric.flows.ai_builder.pattern_registry import find_pattern_candidates
 
 # Recipe section markers — these map to section headers in the recipes block
 RECIPE_SECTIONS: dict[str, tuple[str, ...]] = {
@@ -49,6 +50,30 @@ SIGNAL_TO_RECIPES: dict[str, list[str]] = {
         "json_pipeline",
         "golden_example",
     ],
+}
+
+# Pattern Registry pattern-id → recipe sections. Applied alongside
+# SIGNAL_TO_RECIPES so a prompt without an ad-hoc keyword trigger still
+# activates the right recipe when its retrieval-hint tokens score a
+# Pattern. `golden_example` is auto-added by the selector when any
+# trigger fires, so per-pattern tuples omit it.
+#
+# `multi_step_quality_chain` and `sectioned_form_intake` are deliberately
+# omitted: their retrieval hints (`review`, `document`, `chain`, `form`,
+# `sections`, `headings`) overlap too heavily with generic planner
+# vocabulary, so pure score-based triggering would narrow prompts like
+# "review my document" or "review the headings" onto those recipes.
+# Those recipes still reach the planner through their dedicated signal
+# paths (`extract_planner_pattern_recipe_signals`,
+# `extract_form_intake_recipe_signals`), which use phrase-aware evidence
+# instead of single-token overlap.
+PATTERN_TO_RECIPES: dict[str, tuple[str, ...]] = {
+    "audio_transcription": ("transcription",),
+    "comparison": ("comparison",),
+    "document_to_docx_template": ("docx_template",),
+    "document_to_pdf_report": ("document_analysis",),
+    "document_to_structured_report": ("document_analysis",),
+    "extract_structured_fields": ("json_pipeline",),
 }
 
 
@@ -90,6 +115,23 @@ def select_relevant_recipes(
         needed.update(SIGNAL_TO_RECIPES.get(signal, []))
     for signal in extract_planner_pattern_recipe_signals(lowered):
         needed.update(SIGNAL_TO_RECIPES.get(signal, []))
+
+    # Pattern Registry hint vocabulary shares generic English tokens like
+    # `document` or `report` across several document-family patterns, so
+    # the selector only trusts the pattern-registry trigger when two
+    # guardrails hold:
+    #   1. `top.score >= 2` — a single-token winner (e.g., bare "extract"
+    #      or "docx") is too weak to narrow the pack; the keyword/signal
+    #      paths handle those prompts through their dedicated triggers.
+    #   2. `top.score > runner_up_score` — ties fall through to the
+    #      full-pack fallback so the selector never unions unrelated
+    #      recipes when the signal is ambiguous.
+    candidates = find_pattern_candidates(lowered)
+    if candidates:
+        top = candidates[0]
+        runner_up_score = candidates[1].score if len(candidates) > 1 else 0
+        if top.score >= 2 and top.score > runner_up_score:
+            needed.update(PATTERN_TO_RECIPES.get(top.pattern.id, ()))
 
     # If no signals detected, return full recipes (safe fallback)
     source = recipe_source or KNOWLEDGE_PACK_RECIPES
