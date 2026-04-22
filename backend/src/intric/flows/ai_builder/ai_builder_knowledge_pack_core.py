@@ -364,7 +364,7 @@ Steg 1: input_type=text, output_type=json, output_contract={...}
 
 Steg 2: input_type=json, output_type=text
   Underlag: "Sammanfattning: {{ step_a.output.structured.sammanfattning }}\\nRisk: {{ step_a.output.structured.bedömning.risk }}"
-  Instruktioner: "Skriv ett beslutsunderlag baserat på analysen."
+  Instruktioner: "Skriv en rapport baserat på analysen."
 ```
 
 ### Mönster 2: Validerad pipeline
@@ -380,9 +380,9 @@ Steg 2: output_type=json, output_contract={kräver "beslut", "motivering"}
 
 ### Mönster 3: Formulär + kontrakt
 ```
-Formulärfält: ärendenummer (text), kategori (select: [bygglov, detaljplan, miljö])
+Formulärfält: referens_id (text), kategori (select: [kontrakt, riktlinje, rapport])
 Steg 1: input_type=text, input_source=flow_input
-  Underlag: "Ärende: {{ ärendenummer }}\\nKategori: {{ kategori }}"
+  Underlag: "Referens: {{ referens_id }}\\nKategori: {{ kategori }}"
   → Formulärdata valideras av formuläret, inte kontraktet
   → Kontrakt behövs inte här — formuläret sköter valideringen
 ```
@@ -447,7 +447,7 @@ Steg 2: Sammanfatta transkription (previous_step, text, pass_through, text)
 ```
 Steg 1: Extrahera fakta (flow_input, document/text, pass_through, text)
 Steg 2: Bedöm konsekvenser (previous_step, text, pass_through, text)
-Steg 3: Skriv beslutsunderlag (all_previous_steps ELLER previous_step med bindings)
+Steg 3: Skriv rapport (all_previous_steps ELLER previous_step med bindings)
 ```
 Steg 3 kan använda `input_bindings.question` för att kombinera:
 `{{ step_a.output.text }}` (fakta) + `{{ step_b.output.text }}` (bedömning)
@@ -617,7 +617,7 @@ _KNOWLEDGE_PACK_IO_INTELLIGENCE = """
 ### Underlag efter stegintention
 - **Analysera / bedöma**: ge AI:n sammanställd sakdata via rubriker + specifika fält
 - **Sammanfatta**: mata främst text (`previous_step` eller `step_input.text`) och bara nödvändig metadata
-- **Generera dokument**: samla färdiga beslutsunderlag, rubriker och utvalda JSON-fält — inte rå JSON
+- **Generera dokument**: samla färdiga rapporttexter, rubriker och utvalda JSON-fält — inte rå JSON
 - **Jämföra flera källor**: använd selektiva bindings eller `all_previous_steps` bara när ALLA föregående steg faktiskt behövs
 
 ### När ska man använda JSON output?

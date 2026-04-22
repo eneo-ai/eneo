@@ -110,7 +110,7 @@ _KNOWLEDGE_PACK_CREATE_RECIPES = """\
 ```json
 {
   "flow_name": "Dokumentgranskning med riskanalys",
-  "plan_rationale": "Extraherar först strukturerade risker och skriver sedan grounded beslutsunderlag innan slutlig DOCX-rapport.",
+  "plan_rationale": "Extraherar först strukturerade risker och skriver sedan grounded rapport innan slutlig DOCX-leverans.",
   "form_fields": [
     {"variable_name": "referens_id", "label": "Referens-ID", "field_type": "text", "required": true, "options": []},
     {"variable_name": "ansvarig_enhet", "label": "Ansvarig enhet", "field_type": "text", "required": true, "options": []}
