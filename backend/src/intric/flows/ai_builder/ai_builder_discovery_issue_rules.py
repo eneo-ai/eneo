@@ -565,9 +565,6 @@ def structured_analysis_need_is_vague(profile: DiscoveryProfile) -> bool:
             "risker",
             "möjligheter",
             "rekommendationer",
-            "juridiska risker",
-            "ekonomiska risker",
-            "operativa risker",
         ),
     ):
         return True

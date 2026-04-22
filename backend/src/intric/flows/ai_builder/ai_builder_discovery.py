@@ -354,7 +354,7 @@ def analyze_discovery(
                 severity="blocking",
                 message=localized_text(
                     profile.language,
-                    "Det är fortfarande oklart hur omfattande beslutsunderlaget ska vara.",
+                    "Det är fortfarande oklart hur omfattande det slutliga beslutsstödet ska vara.",
                     "The level of detail in the final decision-support output is still unclear.",
                 ),
                 suggestion=decision_support_scope_question(profile.language),
