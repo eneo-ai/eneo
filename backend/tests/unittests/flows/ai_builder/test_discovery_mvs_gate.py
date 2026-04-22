@@ -255,7 +255,7 @@ class TestQuestionBudget:
                     "ärendenummer, kort beskrivning, språk för rapporten och "
                     "fokus för analysen. Flödet ska analysera materialet, "
                     "extrahera viktiga fakta, risker, möjligheter och "
-                    "rekommendationer, och skapa ett beslutsunderlag. "
+                    "rekommendationer, och skapa en rapport. "
                     "Jag vill att lösningen blir robust och att strukturerad "
                     "data används där det förbättrar kvaliteten."
                 ),

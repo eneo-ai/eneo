@@ -56,11 +56,9 @@ def test_resolve_explicit_output_choice_respects_existing_flow_default_when_outp
     assert output == "structured_text"
 
 
-def test_resolve_explicit_output_choice_detects_swedish_decision_support_text_output() -> (
-    None
-):
+def test_resolve_explicit_output_choice_detects_swedish_text_summary_output() -> None:
     output = resolve_explicit_output_choice(
-        "Slutresultatet ska vara ett strukturerat beslutsunderlag som text.",
+        "Slutresultatet ska vara en strukturerad textsammanfattning av materialet.",
         {},
     )
 
@@ -76,6 +74,31 @@ def test_resolve_explicit_output_choice_detects_generic_english_decision_support
     )
 
     assert output == "structured_text"
+
+
+def test_resolve_explicit_output_choice_does_not_detect_municipal_swedish_phrasings() -> (
+    None
+):
+    """Lockdown for the framework_policy domain-vocabulary purge.
+
+    Municipality-specific Swedish phrasings (`beslutsunderlag som text`,
+    bare `beslutsunderlag`) must not bias the planner toward
+    `structured_text`. Retained generic markers (`text summary`,
+    `textsammanfattning`, `sammanfattning som text`, `rapport`,
+    `report`, `memo`, `sammanfattning`, `summary`, plus the generic
+    English `decision support as text` family) are pinned by sibling
+    tests and cover the same detection surface for any non-municipal
+    phrasing — a Swedish user who reaches for `textsammanfattning` or
+    `rapport` still hits `structured_text` correctly."""
+    municipal_swedish_inputs = (
+        "Slutresultatet ska vara ett strukturerat beslutsunderlag som text.",
+        "Bygg ett flöde som producerar ett beslutsunderlag.",
+    )
+    for prompt in municipal_swedish_inputs:
+        assert resolve_explicit_output_choice(prompt, {}) is None, (
+            f"Municipal Swedish phrasing leaked back into output-shape "
+            f"detection: {prompt!r}"
+        )
 
 
 def test_resolve_docx_output_mode_ignores_generic_template_wording_when_output_is_pdf() -> (

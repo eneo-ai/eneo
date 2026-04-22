@@ -3556,7 +3556,7 @@ class TestSendMessageStructuredQuestion:
             conversation=[
                 ConversationMessage(
                     role="user",
-                    content="Jag vill bygga ett flöde som hjälper mig att förstå kommunala underlag och skapa ett beslutsunderlag.",
+                    content="Jag vill bygga ett flöde som läser in dokument och skapar en textsammanfattning.",
                     metadata={"ui_language": "sv"},
                 ),
                 ConversationMessage(

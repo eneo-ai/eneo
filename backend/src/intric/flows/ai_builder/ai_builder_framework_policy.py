@@ -645,8 +645,6 @@ def _resolve_direct_output_choice(
     if contains_any_phrase(
         fallback_text,
         (
-            "beslutsunderlag som text",
-            "structured decision support as text",
             "decision support as text",
             "decision support text",
             "decision-support text",
@@ -876,7 +874,6 @@ def _infer_output_content_shape(text: str) -> str | None:
         "structured report",
         "rapport",
         "report",
-        "beslutsunderlag",
         "memo",
         "sammanfattning",
         "summary",
