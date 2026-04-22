@@ -13,6 +13,9 @@ from intric.flows.ai_builder.ai_builder_form_intake_signals import (
 from intric.flows.ai_builder.ai_builder_knowledge_pack import (
     KNOWLEDGE_PACK_RECIPES,
 )
+from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    extract_planner_pattern_recipe_signals,
+)
 
 # Recipe section markers — these map to section headers in the recipes block
 RECIPE_SECTIONS: dict[str, tuple[str, ...]] = {
@@ -26,6 +29,9 @@ RECIPE_SECTIONS: dict[str, tuple[str, ...]] = {
     "json_pipeline": ("JSON", "JSON-steg"),
     "comparison": ("Jämför",),
     "sectioned_form_intake": ("Sektionerad insamling via formulärfält",),
+    "rich_document_workflow": (
+        "Dokumentflöde med formulärkomplettering och kvalitetssteg",
+    ),
 }
 
 # Signal → required recipe sections
@@ -38,6 +44,11 @@ SIGNAL_TO_RECIPES: dict[str, list[str]] = {
     "structured_text": ["document_analysis", "golden_example"],
     "comparison": ["comparison", "golden_example"],
     "sectioned_form_intake": ["sectioned_form_intake", "golden_example"],
+    "rich_document_workflow": [
+        "rich_document_workflow",
+        "json_pipeline",
+        "golden_example",
+    ],
 }
 
 
@@ -76,6 +87,8 @@ def select_relevant_recipes(
     if "json" in lowered:
         needed.update(SIGNAL_TO_RECIPES.get("structured_json", []))
     for signal in extract_form_intake_recipe_signals(lowered):
+        needed.update(SIGNAL_TO_RECIPES.get(signal, []))
+    for signal in extract_planner_pattern_recipe_signals(lowered):
         needed.update(SIGNAL_TO_RECIPES.get(signal, []))
 
     # If no signals detected, return full recipes (safe fallback)

@@ -28,6 +28,13 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputType,
 )
 from intric.flows.ai_builder.ai_builder_plan_store import format_revision_feedback
+from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    build_requirements_signal_text,
+    detect_planner_pattern_signals,
+)
+from intric.flows.ai_builder.ai_builder_requirements_state import (
+    resolve_requirements_state,
+)
 from intric.flows.domain.flow import Flow
 
 # Markers that indicate the user explicitly wants structured JSON extraction
@@ -100,6 +107,21 @@ def build_conversation_aware_quality_feedback(
     issues: list[str] = []
     answer_signals = extract_answer_signals(conversation)
     text = aggregate_freeform_user_text(conversation)
+    requirements_state = resolve_requirements_state(
+        [
+            item
+            if isinstance(item, ConversationMessage)
+            else ConversationMessage.model_validate(item)
+            for item in conversation
+        ]
+    )
+    requirements_text = build_requirements_signal_text(
+        requirements_state.latest_summary.model_dump(mode="json")
+        if requirements_state.latest_summary is not None
+        else None
+    )
+    signal_text = "\n".join(part for part in (text, requirements_text) if part)
+    planner_patterns = detect_planner_pattern_signals(signal_text)
     output_intent = resolve_output_intent(text, answer_signals)
 
     if runtime_metadata_requested(answer_signals) and not spec.form_fields:
@@ -115,6 +137,29 @@ def build_conversation_aware_quality_feedback(
             "bygga ett separat insamlingssteg per sektion, och låt senare steg använda dessa fält via "
             "`uses_form_fields` för att skapa slutdokumentet."
         )
+
+    if planner_patterns.rich_document_workflow:
+        if planner_patterns.needs_form_fields and not spec.form_fields:
+            issues.append(
+                "Behovet beskriver ett dokumentbaserat flöde som också kräver manuella kompletteringar eller "
+                "inmatningsfält, men planen saknar `form_fields`. Modellera dessa värden som form_fields i "
+                "stället för att gömma dem i instruktionstexten."
+            )
+        if (
+            planner_patterns.prefers_structured_intermediate
+            and not _has_json_contract_step(spec)
+        ):
+            issues.append(
+                "Behovet beskriver ett dokumentflöde som ska återanvända strukturerad analys, men planen saknar "
+                'ett tydligt JSON-steg med `output_contract`. Lägg till ett mellanliggande `output_type="json"`-steg '
+                "innan slutlig rapport eller dokumentleverans."
+            )
+        if planner_patterns.prefers_quality_step and len(spec.steps) < 3:
+            issues.append(
+                "Behovet beskriver ett mer genomarbetat dokumentflöde med analys, granskning eller kvalitetssäkring, "
+                "men planen kollapsar fortfarande till för få steg. Lägg till minst ett mellanliggande analys- eller "
+                "granskningssteg innan slutleveransen."
+            )
 
     explicit_output = output_intent.terminal_output
     if (

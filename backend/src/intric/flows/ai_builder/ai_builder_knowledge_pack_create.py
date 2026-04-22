@@ -88,6 +88,17 @@ _KNOWLEDGE_PACK_CREATE_RECIPES = """\
 - Håll strukturen stabil och återanvändbar för nästa steg
 - Om nästa steg bara behöver några datapunkter, gör JSON-steget tydligt och smalt
 
+## Dokumentflöde med formulärkomplettering och kvalitetssteg
+- När användaren beskriver ett dokumentbaserat flöde som också behöver kompletterande användarvärden, återanvändbar strukturerad analys eller ett kvalitets-/granskningssteg ska du inte kollapsa planen till en minimal tvåstegskedja
+- Preferera i stället en tydlig pipeline:
+  1. `flow_input` för dokumentuppladdning
+  2. ett JSON-steg som extraherar återanvändbara fält
+  3. ett analys-, kvalitets- eller granskningssteg som använder `uses_previous_fields`
+  4. ett slutsteg som producerar `docx`, `pdf` eller grounded text
+- Om användaren nämner att vissa uppgifter kan saknas eller behöva förtydligas ska dessa modelleras som `form_fields`, och senare steg ska läsa dem via `uses_form_fields`
+- När du behöver både dokument och formulärdata i samma lösning ska dokument förbli primär `flow_input`, medan manuella kompletteringar ligger i `form_fields`
+- Om användaren uttryckligen ber om ett mer genomarbetat flöde, kvalitetssäkring eller språkgranskning ska detta synas som egna mellanliggande steg i planen
+
 ## Sektionerad insamling via formulärfält
 - När användaren beskriver ett fast set rubriker/sektioner där användaren ska lämna fritext per sektion ska du modellera detta som `form_fields`, inte som ett eget insamlingssteg per rubrik
 - Skapa ett textfält per rubrik/sektion

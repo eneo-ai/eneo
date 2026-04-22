@@ -50,6 +50,11 @@ from intric.flows.ai_builder.ai_builder_models import (
     ConversationMessage,
     RequirementsSummaryPayload,
 )
+from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    build_requirements_signal_text,
+    detect_planner_pattern_signals,
+    extract_planner_pattern_recipe_signals,
+)
 from intric.flows.ai_builder.ai_builder_recipe_selector import (
     select_relevant_recipes,
 )
@@ -599,9 +604,14 @@ def _extract_signals_from_requirements(
     if not confirmed_requirements:
         return {}
     signals: dict[str, set[str]] = {}
-    input_desc = confirmed_requirements.get("input_description", "").lower()
-    output_desc = confirmed_requirements.get("output_description", "").lower()
-    combined = f"{input_desc} {output_desc}"
+    requirements_text = build_requirements_signal_text(
+        confirmed_requirements
+    ).casefold()
+    input_desc = str(confirmed_requirements.get("input_description", "")).casefold()
+    output_desc = str(confirmed_requirements.get("output_description", "")).casefold()
+    combined = " ".join(
+        part for part in (requirements_text, input_desc, output_desc) if part
+    )
 
     input_intent = resolve_input_intent(input_desc, {})
     if input_intent.primary_runtime_input == "audio":
@@ -618,19 +628,19 @@ def _extract_signals_from_requirements(
         signals.setdefault("final_output_mode", set()).add("pdf_document")
     if "json" in combined:
         signals.setdefault("final_output_mode", set()).add("structured_json")
+        signals.setdefault("structured_analysis_need", set()).add(
+            "use_structured_analysis"
+        )
     if "jämför" in combined or "compar" in combined:
         signals.setdefault("comparison_scope", set()).add("comparison")
-    for signal in extract_form_intake_recipe_signals(
-        " ".join(
-            value
-            for value in (
-                confirmed_requirements.get("summary", ""),
-                input_desc,
-                output_desc,
-            )
-            if isinstance(value, str)
-        ).casefold()
-    ):
+    pattern = detect_planner_pattern_signals(combined)
+    if pattern.prefers_structured_intermediate:
+        signals.setdefault("structured_analysis_need", set()).add(
+            "use_structured_analysis"
+        )
+    for signal in extract_form_intake_recipe_signals(combined):
+        signals.setdefault("planner_pattern", set()).add(signal)
+    for signal in extract_planner_pattern_recipe_signals(combined):
         signals.setdefault("planner_pattern", set()).add(signal)
     return signals
 
