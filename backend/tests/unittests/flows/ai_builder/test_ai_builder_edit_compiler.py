@@ -282,7 +282,7 @@ class TestUntouchedStepsPreserved:
             ),
             _make_flow_step(
                 step_order=2,
-                user_description="Skriv beslutsunderlag",
+                user_description="Skriv slutrapport",
                 input_source="previous_step",
                 input_type="text",
                 output_type="text",
@@ -386,7 +386,7 @@ class TestTransitionNormalization:
                 input_type="json",
                 output_type="json",
                 input_bindings={
-                    "question": "{{ step_2.output.structured }}\n\närendenummer: {{ arendenummer }}"
+                    "question": "{{ step_2.output.structured }}\n\nreferensnummer: {{ referensnummer }}"
                 },
                 output_contract={
                     "type": "object",
@@ -523,7 +523,7 @@ class TestCompiledResultApproval:
         existing = [
             _make_flow_step(
                 step_order=1,
-                user_description="Skriv beslutsunderlag",
+                user_description="Skriv slutrapport",
                 output_type="text",
             ),
         ]
@@ -541,14 +541,14 @@ class TestCompiledResultApproval:
         )
 
         original_desc = (
-            "Tar emot uppladdade ärendedokument vid körning och skapar ett kort "
-            "svenskt beslutsunderlag i textformat."
+            "Tar emot uppladdade dokument vid körning och skapar en kort "
+            "svensk slutrapport i textformat."
         )
         result = compile_edit_draft(
             draft,
             existing,
             base_flow_revision=5,
-            flow_name="Beslutsunderlag",
+            flow_name="Slutrapport",
             flow_description=original_desc,
         )
 
@@ -874,7 +874,7 @@ class TestMixedOperations:
 class TestAssistantSnapshotPreservation:
     def test_output_only_edit_preserves_existing_assistant_snapshot(self):
         existing = [
-            _make_flow_step(step_order=1, user_description="Skriv beslutsunderlag"),
+            _make_flow_step(step_order=1, user_description="Skriv slutrapport"),
         ]
         assistant_snapshots = _make_assistant_snapshots(*existing)
 
@@ -1087,7 +1087,7 @@ class TestFlowDescriptionSemantics:
         existing = [
             _make_flow_step(
                 step_order=1,
-                user_description="Skriv beslutsunderlag",
+                user_description="Skriv slutrapport",
                 output_type="text",
             ),
         ]
@@ -1106,14 +1106,13 @@ class TestFlowDescriptionSemantics:
             draft,
             existing,
             base_flow_revision=5,
-            flow_name="Beslutsunderlag",
-            flow_description="Skapar beslutsunderlag i textformat.",
+            flow_name="Slutrapport",
+            flow_description="Skapar slutrapport i textformat.",
         )
 
         # Description NOT mutated
         assert (
-            result.compiled_spec.flow_description
-            == "Skapar beslutsunderlag i textformat."
+            result.compiled_spec.flow_description == "Skapar slutrapport i textformat."
         )
         # Advisory present
         assert any(

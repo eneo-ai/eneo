@@ -298,7 +298,7 @@ class TestValidAddOperations:
                 _existing_step(step_order=3),
             ],
             current_metadata_json={
-                "form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}
+                "form_schema": {"fields": [{"name": "referensnummer", "type": "text"}]}
             },
         )
         assert not result.valid
@@ -314,7 +314,7 @@ class TestValidAddOperations:
                         name="Nytt steg",
                         instructions="Bygg nytt steg.",
                         input_source=InputSource.PREVIOUS_STEP,
-                        uses_form_fields=["ärendenummer"],
+                        uses_form_fields=["referensnummer"],
                     ),
                 )
             ]
@@ -328,7 +328,7 @@ class TestValidAddOperations:
                 _existing_step(step_order=3),
             ],
             current_metadata_json={
-                "form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}
+                "form_schema": {"fields": [{"name": "referensnummer", "type": "text"}]}
             },
         )
         assert result.valid
@@ -460,7 +460,7 @@ class TestValidModifyOperations:
                 _existing_step(step_order=3),
             ],
             current_metadata_json={
-                "form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}
+                "form_schema": {"fields": [{"name": "referensnummer", "type": "text"}]}
             },
         )
         assert not result.valid
@@ -472,7 +472,7 @@ class TestValidModifyOperations:
                 StepEditOperation(
                     op="modify",
                     target_ref="existing_step_2",
-                    patch=StepPatch(uses_form_fields=["ärendenummer"]),
+                    patch=StepPatch(uses_form_fields=["referensnummer"]),
                 )
             ]
         )
@@ -485,7 +485,7 @@ class TestValidModifyOperations:
                 _existing_step(step_order=3),
             ],
             current_metadata_json={
-                "form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}
+                "form_schema": {"fields": [{"name": "referensnummer", "type": "text"}]}
             },
         )
         assert result.valid
@@ -496,11 +496,11 @@ class TestValidModifyOperations:
                 StepEditOperation(
                     op="modify",
                     target_ref="existing_step_2",
-                    patch=StepPatch(uses_form_fields=["ärendenummer"]),
+                    patch=StepPatch(uses_form_fields=["referensnummer"]),
                 )
             ],
             form_operations=[
-                FormFieldOperation(op="remove", field_name="ärendenummer"),
+                FormFieldOperation(op="remove", field_name="referensnummer"),
             ],
         )
         result = validate_edit_draft(
@@ -512,7 +512,7 @@ class TestValidModifyOperations:
                 _existing_step(step_order=3),
             ],
             current_metadata_json={
-                "form_schema": {"fields": [{"name": "ärendenummer", "type": "text"}]}
+                "form_schema": {"fields": [{"name": "referensnummer", "type": "text"}]}
             },
         )
         assert not result.valid

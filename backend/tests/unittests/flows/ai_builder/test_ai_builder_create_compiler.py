@@ -40,36 +40,36 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
     None
 ):
     draft = FlowCreateDraft(
-        flow_name="Kommunärendeanalys",
+        flow_name="Dokumentanalys",
         flow_description="Analyserar dokumentpaket.",
         plan_rationale="Strukturerad extraktion först för säkrare vidare analys.",
         assumptions=["PDF-paketet hör till ett och samma ärende."],
         form_fields=[
             CreateFormFieldDraft(
-                variable_name="ärendenummer",
-                label="Ärendenummer",
+                variable_name="referensnummer",
+                label="Referensnummer",
                 field_type="text",
                 required=True,
             ),
             CreateFormFieldDraft(
-                variable_name="ansvarig_nämnd",
-                label="Ansvarig nämnd",
+                variable_name="ansvarig_enhet",
+                label="Ansvarig enhet",
                 field_type="select",
                 required=True,
-                options=["Kommunstyrelsen", "Socialnämnden"],
+                options=["Avdelning A", "Avdelning B"],
             ),
         ],
         steps=[
             CreateStepDraft(
-                name="Extrahera juridiska risker",
-                instructions="Extrahera juridiska risker och ekonomiska konsekvenser.",
+                name="Extrahera strukturerad data",
+                instructions="Extrahera viktiga datapunkter.",
                 input_source="flow_input",
                 input_type="document",
                 output_type="json",
                 runtime_upload=True,
                 runtime_required=True,
                 runtime_max_files=5,
-                uses_form_fields=["ärendenummer", "ansvarig_nämnd"],
+                uses_form_fields=["referensnummer", "ansvarig_enhet"],
                 output_fields=[
                     _field(
                         "risker",
@@ -81,9 +81,9 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
                         ],
                     ),
                     _field(
-                        "ekonomiska_konsekvenser",
+                        "konsekvenser",
                         "array",
-                        description="Ekonomiska effekter.",
+                        description="Identifierade effekter.",
                         item_fields=[
                             _field(
                                 "sammanfattning",
@@ -108,11 +108,11 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
 
     compiled = compile_create_draft(draft)
 
-    assert compiled.flow_name == "Kommunärendeanalys"
+    assert compiled.flow_name == "Dokumentanalys"
     assert [step.plan_step_ref for step in compiled.steps] == ["step_a", "step_b"]
     assert compiled.form_fields is not None
-    assert compiled.form_fields[0].name == "ärendenummer"
-    assert compiled.form_fields[1].options == ["Kommunstyrelsen", "Socialnämnden"]
+    assert compiled.form_fields[0].name == "referensnummer"
+    assert compiled.form_fields[1].options == ["Avdelning A", "Avdelning B"]
 
     first_step = compiled.steps[0]
     assert first_step.input_config is not None
@@ -122,11 +122,11 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
     assert runtime_input["max_files"] == 5
     assert runtime_input["input_format"] == "document"
     assert first_step.input_bindings == {
-        "question": "{{ step_input.text }}\n\närendenummer: {{ ärendenummer }}\nansvarig_nämnd: {{ ansvarig_nämnd }}"
+        "question": "{{ step_input.text }}\n\nreferensnummer: {{ referensnummer }}\nansvarig_enhet: {{ ansvarig_enhet }}"
     }
     assert "Required JSON fields:" in first_step.assistant_spec.instructions
     assert "risker" in first_step.assistant_spec.instructions
-    assert "ekonomiska_konsekvenser" in first_step.assistant_spec.instructions
+    assert "konsekvenser" in first_step.assistant_spec.instructions
     assert first_step.output_contract is not None
     assert first_step.output_contract["properties"]["risker"]["type"] == "array"
     assert (
@@ -153,12 +153,12 @@ def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindi
     None
 ):
     draft = FlowCreateDraft(
-        flow_name="Kommunärendeanalys",
+        flow_name="Dokumentanalys",
         plan_rationale="Återanvänd specifika fält i steg 3.",
         form_fields=[
             CreateFormFieldDraft(
-                variable_name="ärendenummer",
-                label="Ärendenummer",
+                variable_name="referensnummer",
+                label="Referensnummer",
                 field_type="text",
                 required=True,
             )
@@ -187,12 +187,12 @@ def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindi
                 ],
             ),
             CreateStepDraft(
-                name="Skriv beslutsunderlag",
-                instructions="Skriv beslutsunderlag med specifika datapunkter.",
+                name="Skriv slutrapport",
+                instructions="Skriv slutrapport med specifika datapunkter.",
                 input_source="previous_step",
                 input_type="json",
                 output_type="text",
-                uses_form_fields=["ärendenummer"],
+                uses_form_fields=["referensnummer"],
                 uses_previous_fields=[
                     {
                         "from_step": 1,
@@ -216,7 +216,7 @@ def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindi
     assert second_step.input_bindings["question"] == (
         "Sammanfattning: {{ step_a.output.structured.sammanfattning }}\n\n"
         "Första riskrubrik: {{ step_a.output.structured.risker.0.rubrik }}\n\n"
-        "ärendenummer: {{ ärendenummer }}"
+        "referensnummer: {{ referensnummer }}"
     )
 
 
