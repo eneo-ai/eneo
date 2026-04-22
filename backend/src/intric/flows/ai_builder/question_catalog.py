@@ -602,31 +602,37 @@ def _project_option(option: QuestionOption, locale: Locale) -> RenderedOption:
             description=option.description_sv,
             value=option.value,
         )
-    return RenderedOption(
-        id=option.id,
-        label=option.label_en,
-        description=option.description_en,
-        value=option.value,
-    )
+    if locale == "en":
+        return RenderedOption(
+            id=option.id,
+            label=option.label_en,
+            description=option.description_en,
+            value=option.value,
+        )
+    raise ValueError(f"Unsupported locale: {locale!r}. Expected 'sv' or 'en'.")
 
 
 def render_question(template_id: str, locale: Locale) -> RenderedQuestion:
     """Snapshot `QUESTION_CATALOG[template_id]` into `locale`.
 
     Raises `KeyError` for an unknown `template_id` — a typo should
-    surface loudly. Options and worked-example order is preserved from
-    the template; the Literal-typed `locale` parameter is the only
-    branch point.
+    surface loudly. Raises `ValueError` for any locale outside the
+    supported `Literal["sv", "en"]` contract; lax callers that slip a
+    non-literal in at runtime fail loudly rather than silently falling
+    back to English. Options and worked-example order is preserved from
+    the template.
     """
     template = QUESTION_CATALOG[template_id]
     if locale == "sv":
         question = template.question_sv
         help_text = template.help_sv
         worked_examples = template.worked_examples_sv
-    else:
+    elif locale == "en":
         question = template.question_en
         help_text = template.help_en
         worked_examples = template.worked_examples_en
+    else:
+        raise ValueError(f"Unsupported locale: {locale!r}. Expected 'sv' or 'en'.")
     return RenderedQuestion(
         id=template.id,
         locale=locale,

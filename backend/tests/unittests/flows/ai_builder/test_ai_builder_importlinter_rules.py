@@ -46,9 +46,7 @@ RULE_2_NAME = "FCM must not import AI Builder"
 
 AI_BUILDER_PACKAGE = "intric.flows.ai_builder"
 FCM_MODULE = "intric.flows.flow_capability_manifest"
-FLOW_MODELS_API_MODULE = "intric.flows.api.flow_models"
 FLOW_API_PARENT_PACKAGE = "intric.flows.api"
-FLOW_MODELS_API_MODULE_LEAF = "flow_models"
 BRIDGE_MODULE_NAME = "ai_builder_materialization_bridge"
 
 
@@ -115,16 +113,21 @@ def _plugin_sibling_imports(
     return offenders
 
 
-def _modules_importing_flow_models_api(
+def _modules_importing_flows_api(
     package_root: pathlib.Path,
 ) -> dict[str, list[str]]:
     """Return ``{relative_posix_path: [import_strings]}`` for ``.py`` files
-    under ``package_root`` that pull in ``intric.flows.api.flow_models`` by
-    any import shape:
+    under ``package_root`` that pull in any ``intric.flows.api.*`` module
+    by any import shape:
 
-    - ``from intric.flows.api.flow_models import X``
-    - ``import intric.flows.api.flow_models``
-    - ``from intric.flows.api import flow_models``  (parent-package form)
+    - ``from intric.flows.api.<module> import X``
+    - ``import intric.flows.api.<module>``
+    - ``from intric.flows.api import <module>``   (parent-package form)
+
+    The whole ``intric.flows.api`` surface is off-limits to non-bridge
+    ai_builder modules: DTOs, assemblers, HTTP routers — none of them are
+    legitimate dependencies of planner code. Only the materialization
+    bridge may reach in when it lands.
 
     Recurses through sub-packages so Rule 6 stays honest if the ai_builder
     package grows nested modules. Skips every ``__init__.py``.
@@ -137,17 +140,20 @@ def _modules_importing_flow_models_api(
         imports: list[str] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
-                if node.module == FLOW_MODELS_API_MODULE:
-                    names = ", ".join(alias.name for alias in node.names)
-                    imports.append(f"from {node.module} import {names}")
-                elif node.module == FLOW_API_PARENT_PACKAGE:
+                module = node.module or ""
+                if module == FLOW_API_PARENT_PACKAGE:
                     for alias in node.names:
-                        if alias.name == FLOW_MODELS_API_MODULE_LEAF:
-                            imports.append(f"from {node.module} import {alias.name}")
+                        imports.append(f"from {module} import {alias.name}")
+                elif module.startswith(f"{FLOW_API_PARENT_PACKAGE}."):
+                    names = ", ".join(alias.name for alias in node.names)
+                    imports.append(f"from {module} import {names}")
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name == FLOW_MODELS_API_MODULE:
-                        imports.append(f"import {alias.name}")
+                    name = alias.name
+                    if name == FLOW_API_PARENT_PACKAGE or name.startswith(
+                        f"{FLOW_API_PARENT_PACKAGE}."
+                    ):
+                        imports.append(f"import {name}")
         if imports:
             rel = py_file.relative_to(package_root).as_posix()
             offenders[rel] = imports
@@ -289,9 +295,10 @@ class TestRule6MaterializationBridgeAcl:
 
     Inside ``intric.flows.ai_builder``, only
     ``ai_builder_materialization_bridge.py`` is permitted to import from
-    ``intric.flows.api.flow_models`` (the flows-domain draft-write
-    surface). The bridge currently carries only a role docstring; any
-    concrete bridge logic added in future must keep the ACL intact.
+    the ``intric.flows.api`` package — the flows-domain write surface
+    covering DTOs, assemblers, and routers. The bridge currently carries
+    only a role docstring; any concrete bridge logic added in future
+    must keep the ACL intact.
     """
 
     def _package_root(self) -> pathlib.Path:
@@ -322,13 +329,13 @@ class TestRule6MaterializationBridgeAcl:
             f"{[type(n).__name__ for n in body]}"
         )
 
-    def test_only_bridge_imports_flows_api_flow_models(self) -> None:
-        offenders = _modules_importing_flow_models_api(self._package_root())
+    def test_only_bridge_imports_flows_api(self) -> None:
+        offenders = _modules_importing_flows_api(self._package_root())
         offenders.pop(f"{BRIDGE_MODULE_NAME}.py", None)
         assert not offenders, (
             "Only `ai_builder_materialization_bridge.py` may import from "
-            f"`{FLOW_MODELS_API_MODULE}` inside the ai_builder plugin. "
-            "All other modules must route draft-write type usage through "
+            f"`{FLOW_API_PARENT_PACKAGE}` inside the ai_builder plugin. "
+            "All other modules must route flows-api type usage through "
             "the bridge.\n"
             f"Offenders: {offenders}"
         )
@@ -336,16 +343,24 @@ class TestRule6MaterializationBridgeAcl:
     def test_helper_catches_all_offending_import_shapes(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """The ACL helper must catch every import shape that reaches
-        ``intric.flows.api.flow_models``, including the parent-package
-        form. Without this fixture check, a silent helper regression would
-        leave the production-tree ACL test passing because no offenders
-        exist today — a green that would mask a future real offender.
+        """The ACL helper must catch every import shape that reaches any
+        ``intric.flows.api.*`` module, including the parent-package form
+        and non-`flow_models` leaves (e.g. `flow_assembler`). Without this
+        fixture check, a silent helper regression would leave the
+        production-tree ACL test passing because no offenders exist today
+        — a green that would mask a future real offender.
         """
         shapes = {
             "qualified_from.py": "from intric.flows.api.flow_models import X\n",
             "parent_from.py": "from intric.flows.api import flow_models\n",
             "bare_import.py": "import intric.flows.api.flow_models\n",
+            # Non-`flow_models` leaf under intric.flows.api — pins that the
+            # ACL is a package guard, not a single-module guard. If a future
+            # refactor narrows the helper back to flow_models only, this
+            # fixture goes missing and the test fires.
+            "assembler_from.py": ("from intric.flows.api.flow_assembler import X\n"),
+            # Router leaf — pins that HTTP router imports are also off-limits.
+            "router_from.py": ("from intric.flows.api.flow_router import router\n"),
             # Nested offender also pins the recursive scan + relative-path
             # keying the helper uses. If this drops back to a flat glob, the
             # nested fixture goes missing and the test fires.
@@ -355,7 +370,7 @@ class TestRule6MaterializationBridgeAcl:
             target = tmp_path / rel_name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(src, encoding="utf-8")
-        offenders = _modules_importing_flow_models_api(tmp_path)
+        offenders = _modules_importing_flows_api(tmp_path)
         assert set(offenders) == set(shapes), (
             "Helper missed at least one import shape.\n"
             f"Expected: {set(shapes)}\nGot: {set(offenders)}"

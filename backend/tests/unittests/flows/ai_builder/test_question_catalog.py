@@ -523,6 +523,15 @@ class TestQuestionCatalogPublicApi:
         with pytest.raises(KeyError):
             render_question("no_such_template", "sv")
 
+    def test_render_question_raises_value_error_for_unsupported_locale(
+        self,
+    ) -> None:
+        """Lax callers that slip a non-Literal through at runtime must
+        fail loudly rather than silently rendering English. A silent
+        fallback would mask locale-propagation bugs at the UI boundary."""
+        with pytest.raises(ValueError, match="Unsupported locale"):
+            render_question("terminal_output", "de")  # type: ignore[arg-type]
+
     def test_render_question_returns_frozen_dataclass(self) -> None:
         """The snapshot is read-only. A caller that patches fields in
         place between render and display would cause UI/server drift."""

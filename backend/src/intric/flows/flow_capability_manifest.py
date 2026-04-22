@@ -520,6 +520,11 @@ def supports_step_io_tuple(
     """Engine-truth: is `(input_type, output_type, output_mode)` a legal
     combination at step level?
 
+    Strict enum-only contract: non-enum inputs raise `TypeError` rather
+    than silently falling through the identity checks and returning the
+    wrong answer. Callers that hold stringly-typed data must coerce at
+    their boundary (typically `FlowOutputType(raw_string)`).
+
     Mirrors `supports_step_io_mode_combo` in
     `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a
     parity test. Rules:
@@ -534,6 +539,18 @@ def supports_step_io_tuple(
     `input_type=None` still returns `False` — transcription requires
     `AUDIO` input, never an unknown one.
     """
+    if input_type is not None and not isinstance(input_type, FlowInputType):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"input_type must be FlowInputType or None, got {type(input_type).__name__}"
+        )
+    if not isinstance(output_type, FlowOutputType):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"output_type must be FlowOutputType, got {type(output_type).__name__}"
+        )
+    if not isinstance(output_mode, FlowOutputMode):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"output_mode must be FlowOutputMode, got {type(output_mode).__name__}"
+        )
     if output_mode is FlowOutputMode.TEMPLATE_FILL:
         return output_type is FlowOutputType.DOCX
     if output_mode is FlowOutputMode.TRANSCRIBE_ONLY:
@@ -549,10 +566,20 @@ def resolve_document_generation_mode(
     """Engine-truth: which document-generation pathway a `(output_type,
     output_mode)` pair triggers at runtime, if any.
 
-    Mirrors `resolve_document_generation_mode` in
+    Strict enum-only contract: non-enum inputs raise `TypeError` rather
+    than silently returning `None` via failed identity checks. Mirrors
+    `resolve_document_generation_mode` in
     `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a
     parity test.
     """
+    if not isinstance(output_type, FlowOutputType):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"output_type must be FlowOutputType, got {type(output_type).__name__}"
+        )
+    if not isinstance(output_mode, FlowOutputMode):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"output_mode must be FlowOutputMode, got {type(output_mode).__name__}"
+        )
     if output_type is FlowOutputType.DOCX:
         return (
             "template_fill"
@@ -572,9 +599,11 @@ def is_citation_capable_step(
 ) -> bool:
     """Engine-truth: can this step emit an inline-inref citation sidecar?
 
-    Mirrors `is_citation_capable_step` in
-    `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a
-    parity test.
+    Strict enum-only contract for `output_type` and `output_mode`:
+    non-enum inputs raise `TypeError` rather than silently returning
+    `False` via a failed identity check. Mirrors `is_citation_capable_step`
+    in `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by
+    a parity test.
 
     Capability holds iff:
     - `output_config` is a dict that requests the
@@ -585,12 +614,19 @@ def is_citation_capable_step(
       (template-fill is a docx pathway; transcribe-only has no source
       documents to cite).
 
-    `output_config` is typed as `object` rather than `dict` because
-    `resolve_citation_mode` itself already tolerates any shape — a
-    non-dict payload collapses to `off` and returns `False`. Keeping the
-    wide type matches the legacy signature and covers malformed persisted
-    payloads without the caller having to pre-validate.
+    `output_config` stays typed as `object` because `resolve_citation_mode`
+    itself already tolerates any shape — a non-dict payload collapses to
+    `off` and returns `False`. Keeping the wide type covers malformed
+    persisted payloads without the caller having to pre-validate.
     """
+    if not isinstance(output_type, FlowOutputType):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"output_type must be FlowOutputType, got {type(output_type).__name__}"
+        )
+    if not isinstance(output_mode, FlowOutputMode):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"output_mode must be FlowOutputMode, got {type(output_mode).__name__}"
+        )
     if resolve_citation_mode(output_config) != CITATION_MODE_INLINE_INREF_SIDECAR:
         return False
     if output_type is not FlowOutputType.TEXT:
@@ -646,8 +682,8 @@ class CoverageReport:
     """Summary of :func:`coverage_report`'s cartesian-product walk.
 
     Captures the four classification counts plus any cells whose owning
-    `not_exposed_reason` contains the literal "temporary". Phase-A rule:
-    no temporary exclusions — `has_drift=True` fails CI.
+    `not_exposed_reason` contains the literal "temporary". The manifest
+    forbids temporary exclusions — `has_drift=True` fails CI.
     """
 
     total_cells: int
@@ -660,7 +696,8 @@ class CoverageReport:
 
 
 # Marker used by coverage_report to flag `not_exposed_reason` strings that
-# advertise themselves as temporary. Phase-A rejects temporary exclusions.
+# advertise themselves as temporary. The manifest forbids such entries — they
+# hide real coverage gaps behind a "we'll get back to it" escape hatch.
 _TEMPORARY_REASON_MARKER = "temporary"
 
 

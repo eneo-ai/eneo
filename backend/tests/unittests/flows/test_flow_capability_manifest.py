@@ -518,6 +518,82 @@ def test_is_citation_capable_step_treats_non_dict_config_as_off(
     )
 
 
+def test_supports_step_io_tuple_rejects_string_output_mode() -> None:
+    """The strict enum-only contract must reject stringly-typed callers
+    loudly. A silent fall-through to `return True` on a non-enum
+    `output_mode` would let `(input_type='text', output_type='pdf',
+    output_mode='template_fill')` pretend to be legal."""
+    with pytest.raises(TypeError, match="output_mode must be FlowOutputMode"):
+        supports_step_io_tuple(
+            input_type=FlowInputType.TEXT,
+            output_type=FlowOutputType.PDF,
+            output_mode="template_fill",  # type: ignore[arg-type]
+        )
+
+
+def test_supports_step_io_tuple_rejects_string_output_type() -> None:
+    with pytest.raises(TypeError, match="output_type must be FlowOutputType"):
+        supports_step_io_tuple(
+            input_type=FlowInputType.TEXT,
+            output_type="pdf",  # type: ignore[arg-type]
+            output_mode=FlowOutputMode.PASS_THROUGH,
+        )
+
+
+def test_supports_step_io_tuple_rejects_string_input_type() -> None:
+    with pytest.raises(TypeError, match="input_type must be FlowInputType"):
+        supports_step_io_tuple(
+            input_type="audio",  # type: ignore[arg-type]
+            output_type=FlowOutputType.TEXT,
+            output_mode=FlowOutputMode.TRANSCRIBE_ONLY,
+        )
+
+
+def test_supports_step_io_tuple_accepts_none_input_type() -> None:
+    assert (
+        supports_step_io_tuple(
+            input_type=None,
+            output_type=FlowOutputType.DOCX,
+            output_mode=FlowOutputMode.TEMPLATE_FILL,
+        )
+        is True
+    )
+
+
+def test_resolve_document_generation_mode_rejects_string_output_type() -> None:
+    with pytest.raises(TypeError, match="output_type must be FlowOutputType"):
+        resolve_document_generation_mode(
+            output_type="docx",  # type: ignore[arg-type]
+            output_mode=FlowOutputMode.TEMPLATE_FILL,
+        )
+
+
+def test_resolve_document_generation_mode_rejects_string_output_mode() -> None:
+    with pytest.raises(TypeError, match="output_mode must be FlowOutputMode"):
+        resolve_document_generation_mode(
+            output_type=FlowOutputType.DOCX,
+            output_mode="template_fill",  # type: ignore[arg-type]
+        )
+
+
+def test_is_citation_capable_step_rejects_string_output_type() -> None:
+    with pytest.raises(TypeError, match="output_type must be FlowOutputType"):
+        is_citation_capable_step(
+            output_type="text",  # type: ignore[arg-type]
+            output_mode=FlowOutputMode.PASS_THROUGH,
+            output_config={"citation_mode": "inline_inref_sidecar"},
+        )
+
+
+def test_is_citation_capable_step_rejects_string_output_mode() -> None:
+    with pytest.raises(TypeError, match="output_mode must be FlowOutputMode"):
+        is_citation_capable_step(
+            output_type=FlowOutputType.TEXT,
+            output_mode="pass_through",  # type: ignore[arg-type]
+            output_config={"citation_mode": "inline_inref_sidecar"},
+        )
+
+
 # Output-mode + citation capability registry entries --------------------
 #
 # These tests pin the capability IDs and invariant-ID sets that FCM must
