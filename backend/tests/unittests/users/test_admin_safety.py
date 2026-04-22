@@ -150,7 +150,7 @@ class TestRoleSwapAdminProtection:
 
         # Simulate fetching role_b from DB (it has admin)
         role_b_record = SimpleNamespace(permissions=["admin", "assistants"])
-        service.repo._get_roles.return_value = [role_b_record]
+        service.repo.get_roles_by_ids.return_value = [role_b_record]
 
         service.repo.update.return_value = admin_user.model_copy(
             update={"roles": [role_b]}
@@ -172,7 +172,7 @@ class TestRoleSwapAdminProtection:
 
         # New role does not have admin
         basic_record = SimpleNamespace(permissions=["assistants"])
-        service.repo._get_roles.return_value = [basic_record]
+        service.repo.get_roles_by_ids.return_value = [basic_record]
 
         update = UserUpdatePublic(roles=[ModelId(id=basic_role.id)])
         with pytest.raises(BadRequestException, match="last admin"):
