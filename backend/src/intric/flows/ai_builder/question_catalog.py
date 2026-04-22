@@ -36,12 +36,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Literal
 
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
 
 QUESTION_CATALOG_VERSION: int = 1
+
+Locale = Literal["sv", "en"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -559,3 +562,90 @@ def _build_catalog() -> Mapping[str, QuestionTemplate]:
 
 
 QUESTION_CATALOG: Mapping[str, QuestionTemplate] = _build_catalog()
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedOption:
+    """Locale-resolved option snapshot — what a UI surface displays."""
+
+    id: str
+    label: str
+    description: str
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedQuestion:
+    """Locale-resolved question snapshot — the UX projection of a
+    `QuestionTemplate` at a chosen locale.
+
+    Separate from `QuestionTemplate` on purpose: the template is the
+    bilingual canonical source; `RenderedQuestion` is the flat,
+    single-locale view consumers render. Keeping them distinct prevents
+    UX code from accidentally leaking bilingual fields into the
+    surface layer.
+    """
+
+    id: str
+    locale: Locale
+    question: str
+    help: str
+    options: tuple[RenderedOption, ...]
+    worked_examples: tuple[str, ...]
+
+
+def _project_option(option: QuestionOption, locale: Locale) -> RenderedOption:
+    if locale == "sv":
+        return RenderedOption(
+            id=option.id,
+            label=option.label_sv,
+            description=option.description_sv,
+            value=option.value,
+        )
+    return RenderedOption(
+        id=option.id,
+        label=option.label_en,
+        description=option.description_en,
+        value=option.value,
+    )
+
+
+def render_question(template_id: str, locale: Locale) -> RenderedQuestion:
+    """Snapshot `QUESTION_CATALOG[template_id]` into `locale`.
+
+    Raises `KeyError` for an unknown `template_id` — a typo should
+    surface loudly. Options and worked-example order is preserved from
+    the template; the Literal-typed `locale` parameter is the only
+    branch point.
+    """
+    template = QUESTION_CATALOG[template_id]
+    if locale == "sv":
+        question = template.question_sv
+        help_text = template.help_sv
+        worked_examples = template.worked_examples_sv
+    else:
+        question = template.question_en
+        help_text = template.help_en
+        worked_examples = template.worked_examples_en
+    return RenderedQuestion(
+        id=template.id,
+        locale=locale,
+        question=question,
+        help=help_text,
+        options=tuple(_project_option(option, locale) for option in template.options),
+        worked_examples=worked_examples,
+    )
+
+
+def question_ids_for_slot(slot: str) -> tuple[str, ...]:
+    """Return every question-template id registered against `slot`.
+
+    Today's catalog is one-template-per-slot, so the returned tuple has
+    zero or one element. The plural return shape leaves room for a
+    future slice that wants multiple questions per slot without a
+    signature change. Unknown slot → `()` (the `"has this slot any
+    copy?"` read is valid and must not raise).
+    """
+    if slot not in QUESTION_CATALOG:
+        return ()
+    return (slot,)

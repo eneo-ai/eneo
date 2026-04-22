@@ -26,6 +26,10 @@ from intric.flows.ai_builder.question_catalog import (
     QUESTION_CATALOG_VERSION,
     QuestionOption,
     QuestionTemplate,
+    RenderedOption,
+    RenderedQuestion,
+    question_ids_for_slot,
+    render_question,
 )
 
 
@@ -469,3 +473,95 @@ class TestPatternRegistryBackfill:
                 f"{pattern.id}: negative pattern has non-empty "
                 f"question_template_ids {pattern.question_template_ids}"
             )
+
+
+class TestQuestionCatalogPublicApi:
+    """Public UX/i18n entry points: locale-resolved rendering and
+    slot → id lookup.
+    """
+
+    def test_render_question_in_swedish_projects_sv_fields(self) -> None:
+        """Locale 'sv' snapshots the Swedish question, help, worked
+        examples, and each option's Swedish label/description."""
+        rendered = render_question("primary_runtime_input", "sv")
+        assert isinstance(rendered, RenderedQuestion)
+        assert rendered.id == "primary_runtime_input"
+        assert rendered.locale == "sv"
+        assert rendered.question.startswith("Vilket material")
+        assert rendered.help.startswith("Ett flöde")
+        assert rendered.worked_examples, "expected non-empty worked examples"
+        assert all(isinstance(opt, RenderedOption) for opt in rendered.options)
+        first_option = rendered.options[0]
+        assert first_option.label == "Ljud"
+        assert first_option.description.startswith("Ladda upp")
+        assert first_option.value == "audio"
+
+    def test_render_question_in_english_projects_en_fields(self) -> None:
+        """Locale 'en' snapshots the English fields symmetrically."""
+        rendered = render_question("primary_runtime_input", "en")
+        assert rendered.locale == "en"
+        assert rendered.question.startswith("What source material")
+        assert rendered.help.startswith("A flow has")
+        first_option = rendered.options[0]
+        assert first_option.label == "Audio"
+        assert first_option.description.startswith("Upload an audio")
+        assert first_option.value == "audio"
+
+    def test_render_question_preserves_option_order(self) -> None:
+        """Option order is part of the UX contract — the catalog author
+        ordered options deliberately (e.g. audio, documents, text). The
+        projection must not reorder them."""
+        template = QUESTION_CATALOG["primary_runtime_input"]
+        rendered = render_question("primary_runtime_input", "sv")
+        source_ids = tuple(opt.id for opt in template.options)
+        rendered_ids = tuple(opt.id for opt in rendered.options)
+        assert rendered_ids == source_ids
+
+    def test_render_question_raises_key_error_for_unknown_id(self) -> None:
+        """A typo in `template_id` is programmer error; failing loudly
+        surfaces it instead of returning an empty projection."""
+        with pytest.raises(KeyError):
+            render_question("no_such_template", "sv")
+
+    def test_render_question_returns_frozen_dataclass(self) -> None:
+        """The snapshot is read-only. A caller that patches fields in
+        place between render and display would cause UI/server drift."""
+        rendered = render_question("terminal_output", "sv")
+        with pytest.raises(FrozenInstanceError):
+            rendered.question = "mutated"  # type: ignore[misc]
+
+    def test_render_question_matches_source_worked_examples_by_locale(
+        self,
+    ) -> None:
+        """Worked examples must come from the same locale as the
+        question/help copy — a mixed-locale render would confuse the
+        user."""
+        template = QUESTION_CATALOG["terminal_output"]
+        sv = render_question("terminal_output", "sv")
+        en = render_question("terminal_output", "en")
+        assert sv.worked_examples == template.worked_examples_sv
+        assert en.worked_examples == template.worked_examples_en
+
+    def test_question_ids_for_slot_returns_id_tuple_when_slot_has_template(
+        self,
+    ) -> None:
+        """Current catalog shape is one template per slot; the returned
+        tuple has exactly one entry for every seeded slot."""
+        ids = question_ids_for_slot("primary_runtime_input")
+        assert ids == ("primary_runtime_input",)
+
+    def test_question_ids_for_slot_returns_empty_for_unknown_slot(
+        self,
+    ) -> None:
+        """Unknown slot → empty tuple. Callers use this as the
+        'is there copy for this slot?' read, so raising would force
+        every caller to wrap with try/except."""
+        assert question_ids_for_slot("no_such_slot") == ()
+
+    def test_question_ids_for_slot_covers_every_known_slot(self) -> None:
+        """Contract: every slot name in the live vocabulary resolves to
+        at least one id today. Catches drift if a future catalog change
+        drops a template but leaves the slot in the vocabulary."""
+        for slot in KNOWN_REQUIREMENT_SLOT_NAMES:
+            ids = question_ids_for_slot(slot)
+            assert ids, f"slot {slot!r} has no question ids in the catalog"
