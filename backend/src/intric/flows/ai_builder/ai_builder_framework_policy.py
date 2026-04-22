@@ -645,9 +645,6 @@ def _resolve_direct_output_choice(
     if contains_any_phrase(
         fallback_text,
         (
-            "decision support as text",
-            "decision support text",
-            "decision-support text",
             "text summary",
             "textsammanfattning",
             "kort textsammanfattning",

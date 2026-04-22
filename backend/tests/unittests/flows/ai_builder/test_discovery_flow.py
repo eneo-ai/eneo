@@ -94,7 +94,7 @@ class TestHandleConfirmRequirements:
                 "summary": "A case-material flow.",
                 "key_decisions": [{"topic": "Scope", "decision": "Unclear"}],
                 "input_description": "Case material",
-                "output_description": "Decision support",
+                "output_description": "Summary report",
             },
         )
 
@@ -568,7 +568,7 @@ class TestExtendedClarificationHints:
         conversation = [
             ConversationMessage(
                 role="user",
-                content="I want a flow that helps me process case material and produce decision support",
+                content="I want a flow that helps me process case material and produce a summary report",
             )
         ]
 
@@ -671,7 +671,7 @@ class TestExtendedClarificationHints:
                 role="user",
                 content=(
                     "I want one PDF per run and the flow should always compare multiple "
-                    "documents in the same run and produce decision support."
+                    "documents in the same run and produce a summary report."
                 ),
             )
         ]
@@ -854,7 +854,7 @@ class TestExtendedClarificationHints:
         _, question_data, _assistant_text = followup
         assert question_data["question_id"] == "structured_analysis_need"
 
-    def test_vague_decision_support_prompt_is_resolved_after_full_answers(self) -> None:
+    def test_vague_case_analysis_prompt_is_resolved_after_full_answers(self) -> None:
         """After 5 explicit answers covering scope, input, output mode, and
         DOCX mode, the discovery analysis infers enough context that
         nice_to_have questions (output_reader, final_output_scope) are
@@ -865,7 +865,7 @@ class TestExtendedClarificationHints:
                 role="user",
                 content=(
                     "I want a flow that helps me process case material and "
-                    "produce decision support."
+                    "produce a summary report."
                 ),
             ),
             ConversationMessage(
@@ -1348,7 +1348,7 @@ class TestExtendedClarificationHints:
         conversation = [
             ConversationMessage(
                 role="user",
-                content="I want a flow that summarizes uploaded news articles as decision support text.",
+                content="I want a flow that summarizes uploaded news articles as a text summary.",
                 metadata={"ui_language": "en"},
             )
         ]
@@ -1991,9 +1991,9 @@ class TestPlannerDiscoveryShortCircuit:
 
 
 def test_output_reader_followup_text_mentions_reader_not_output_format() -> None:
-    """A specific prompt mentioning 'decision support text' resolves output
-    mode via auto-inference. The output_reader question is nice_to_have and
-    not raised as a blocking issue. Verify that the followup text for an
+    """A specific prompt mentioning 'text summary' resolves output mode via
+    auto-inference. The output_reader question is nice_to_have and not
+    raised as a blocking issue. Verify that the followup text for an
     output_reader issue (when manually constructed) mentions 'reader'.
     """
     from intric.flows.ai_builder.ai_builder_discovery_models import (

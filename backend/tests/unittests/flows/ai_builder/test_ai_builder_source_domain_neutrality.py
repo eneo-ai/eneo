@@ -1,11 +1,12 @@
-"""Lockdown: banned municipal-specialty tokens must not appear in any
-string literal inside the AI Builder source tree.
+"""Lockdown: banned specialty tokens must not appear in any string
+literal inside the AI Builder source tree.
 
 The AI Builder is general-purpose — it helps users build procurement,
 onboarding, transcription, extraction, comparison, support-triage, and
 template-fill flows. Swedish decision-support / case-management
-vocabulary must not appear in any detection tuple, heuristic phrase
-list, prompt fragment, knowledge-pack section, or code comment inside
+vocabulary AND the English `decision support` compound must not appear
+in any detection tuple, heuristic phrase list, prompt fragment,
+knowledge-pack section, or code comment inside
 `backend/src/intric/flows/ai_builder/`.
 
 User-visible labels are pinned by
@@ -21,12 +22,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Nine tokens mirror the catalog lockdown list. Substring matches
+# Eleven tokens mirror the catalog lockdown list. Substring matches
 # (not whole-word) so compounds like `beslutsunderlagsmall` or
 # `handläggaren` are caught too. Keep in sync with
-# `TestDomainNeutrality._BANNED_MUNICIPAL_TOKENS` in
+# `TestDomainNeutrality._BANNED_SPECIALTY_TOKENS` in
 # `test_question_catalog.py`.
-_BANNED_MUNICIPAL_TOKENS: tuple[str, ...] = (
+_BANNED_SPECIALTY_TOKENS: tuple[str, ...] = (
     "tjänsteskriv",
     "beslutsunderlag",
     "beslutsstöd",
@@ -36,6 +37,8 @@ _BANNED_MUNICIPAL_TOKENS: tuple[str, ...] = (
     "remiss",
     "handläggar",
     "ärendenummer",
+    "decision support",
+    "decision-support",
 )
 
 _AI_BUILDER_SRC = (
@@ -57,7 +60,7 @@ class TestSourceDomainNeutrality:
         for path in sorted(_AI_BUILDER_SRC.rglob("*.py")):
             text = path.read_text(encoding="utf-8")
             lowered = text.casefold()
-            for token in _BANNED_MUNICIPAL_TOKENS:
+            for token in _BANNED_SPECIALTY_TOKENS:
                 if token.casefold() not in lowered:
                     continue
                 for line_no, line in enumerate(text.splitlines(), start=1):

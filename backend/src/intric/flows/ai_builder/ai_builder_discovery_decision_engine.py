@@ -277,7 +277,7 @@ def heuristic_confidence(issue_id: str, profile: DiscoveryProfile) -> str | None
         and profile.output_intent.terminal_output == "pdf_document"
         and implies_structured_report_pdf(profile.text)
     ):
-        return "decision-support phrasing suggests a structured report"
+        return "analytical-report phrasing suggests a structured report"
     if issue_id == "document_kind" and looks_like_case_document_family(profile.text):
         return "case-analysis phrasing suggests case documents"
     return None
@@ -458,7 +458,6 @@ def implies_structured_report_pdf(text: str) -> bool:
             "risker",
             "möjligheter",
             "rekommendationer",
-            "decision support",
             "recommendations",
             "opportunities",
             "risks",

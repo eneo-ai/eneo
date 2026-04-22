@@ -158,7 +158,6 @@ def ultra_vague_output_choice_is_vague(profile: DiscoveryProfile) -> bool:
             "text summary",
             "textsammanfattning",
             "sammanfattning som text",
-            "decision support",
         ),
     ):
         return False

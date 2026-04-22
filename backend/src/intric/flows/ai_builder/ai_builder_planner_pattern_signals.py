@@ -28,7 +28,6 @@ _DOCUMENT_OUTPUT_MARKERS: tuple[str, ...] = (
     "report",
     "slutdokument",
     "slutligt dokument",
-    "decision support",
 )
 
 _STRUCTURED_INTERMEDIATE_MARKERS: tuple[str, ...] = (

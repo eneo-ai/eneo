@@ -65,39 +65,36 @@ def test_resolve_explicit_output_choice_detects_swedish_text_summary_output() ->
     assert output == "structured_text"
 
 
-def test_resolve_explicit_output_choice_detects_generic_english_decision_support_text() -> (
-    None
-):
+def test_resolve_explicit_output_choice_detects_generic_english_text_summary() -> None:
     output = resolve_explicit_output_choice(
-        "I want a flow that summarizes uploaded news articles as decision support text.",
+        "I want a flow that summarizes uploaded news articles as a text summary.",
         {},
     )
 
     assert output == "structured_text"
 
 
-def test_resolve_explicit_output_choice_does_not_detect_municipal_swedish_phrasings() -> (
-    None
-):
+def test_resolve_explicit_output_choice_does_not_detect_specialty_phrasings() -> None:
     """Lockdown for the framework_policy domain-vocabulary purge.
 
-    Municipality-specific Swedish phrasings (`beslutsunderlag som text`,
-    bare `beslutsunderlag`) must not bias the planner toward
-    `structured_text`. Retained generic markers (`text summary`,
-    `textsammanfattning`, `sammanfattning som text`, `rapport`,
-    `report`, `memo`, `sammanfattning`, `summary`, plus the generic
-    English `decision support as text` family) are pinned by sibling
-    tests and cover the same detection surface for any non-municipal
-    phrasing — a Swedish user who reaches for `textsammanfattning` or
-    `rapport` still hits `structured_text` correctly."""
-    municipal_swedish_inputs = (
+    Specialty Swedish phrasings (`beslutsunderlag som text`, bare
+    `beslutsunderlag`) and the English `decision support as text`
+    compound must not bias the planner toward `structured_text`. Generic
+    markers (`text summary`, `textsammanfattning`, `sammanfattning som
+    text`, `rapport`, `report`, `memo`, `sammanfattning`, `summary`) are
+    pinned by sibling tests and cover the same detection surface for
+    any non-specialty phrasing — a Swedish user who reaches for
+    `textsammanfattning` or `rapport` still hits `structured_text`
+    correctly."""
+    specialty_inputs = (
         "Slutresultatet ska vara ett strukturerat beslutsunderlag som text.",
         "Bygg ett flöde som producerar ett beslutsunderlag.",
+        "I want the flow to produce decision support text.",
+        "Generate a decision-support brief.",
     )
-    for prompt in municipal_swedish_inputs:
+    for prompt in specialty_inputs:
         assert resolve_explicit_output_choice(prompt, {}) is None, (
-            f"Municipal Swedish phrasing leaked back into output-shape "
-            f"detection: {prompt!r}"
+            f"Specialty phrasing leaked back into output-shape detection: {prompt!r}"
         )
 
 

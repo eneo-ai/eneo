@@ -579,16 +579,16 @@ class TestQuestionCatalogPublicApi:
 class TestDomainNeutrality:
     """AI Builder is general-purpose: it builds procurement, onboarding,
     transcription, extraction, comparison, and template-fill flows — not
-    just municipal decision-support flows. Swedish case-management
-    vocabulary must not appear in any rendered question, label,
-    description, help copy, or worked example.
+    just decision-support flows. Swedish case-management vocabulary AND
+    the English `decision support` compound must not appear in any
+    rendered question, label, description, help copy, or worked example.
 
     The banned-token list mirrors the domain-neutrality rule in the
     Golden Coverage Matrix. A catalog change that reintroduces any of
     these tokens fails here before landing.
     """
 
-    _BANNED_MUNICIPAL_TOKENS: tuple[str, ...] = (
+    _BANNED_SPECIALTY_TOKENS: tuple[str, ...] = (
         "tjänsteskriv",
         "beslutsunderlag",
         "beslutsstöd",
@@ -598,6 +598,8 @@ class TestDomainNeutrality:
         "remiss",
         "handläggar",
         "ärendenummer",
+        "decision support",
+        "decision-support",
     )
 
     def test_no_banned_tokens_in_any_rendered_template(self) -> None:
@@ -613,8 +615,8 @@ class TestDomainNeutrality:
                     blob_parts.append(option.label)
                     blob_parts.append(option.description)
                 lowered = "\n".join(blob_parts).casefold()
-                for token in self._BANNED_MUNICIPAL_TOKENS:
+                for token in self._BANNED_SPECIALTY_TOKENS:
                     assert token.casefold() not in lowered, (
-                        f"{template_id} [{locale}]: banned municipal "
+                        f"{template_id} [{locale}]: banned specialty "
                         f"token {token!r} found in rendered output"
                     )
