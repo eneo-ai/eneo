@@ -15,10 +15,8 @@ OUTPUT_CHANGE_KEYWORDS: tuple[str, ...] = (
 )
 
 RUNTIME_METADATA_KEYWORDS: tuple[str, ...] = (
-    "ärendenummer",
     "case number",
     "committee",
-    "nämnd",
     "språk",
     "language",
     "fokus",
@@ -112,7 +110,6 @@ PDF_OUTPUT_CONTEXT_MARKERS: tuple[str, ...] = (
     "slutresultat som pdf",
     "resultat som pdf",
     "output as pdf",
-    "beslutsunderlag som pdf",
     "skapa en pdf",
     "skapa pdf",
     "generera en pdf",
