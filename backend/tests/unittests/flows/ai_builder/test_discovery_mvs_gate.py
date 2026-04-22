@@ -45,7 +45,7 @@ class TestQuestionTaxonomy:
             ConversationMessage(
                 role="user",
                 content=(
-                    "Jag vill ha ett flöde som bearbetar kommunärende med dokument "
+                    "Jag vill ha ett flöde som bearbetar ett ärende med dokument "
                     "och producerar rapport med beslutsstöd"
                 ),
             )
@@ -213,7 +213,7 @@ class TestQuestionBudget:
                 role="user",
                 content=(
                     "Jag vill bygga ett flöde som heter Kommunanalys expertz. "
-                    "Flödet ska hjälpa en chef att förstå ett kommunärende. "
+                    "Flödet ska hjälpa en chef att förstå ett ärende. "
                     "Användaren ska kunna ladda upp underlag som PDF, ange "
                     "ärendenummer, kort beskrivning, språk för rapporten och "
                     "fokus för analysen. Flödet ska analysera materialet, "
@@ -250,7 +250,7 @@ class TestQuestionBudget:
                 role="user",
                 content=(
                     "Jag vill bygga ett flöde som heter Kommunanalys expertz. "
-                    "Flödet ska hjälpa en chef att förstå ett kommunärende. "
+                    "Flödet ska hjälpa en chef att förstå ett ärende. "
                     "Användaren ska kunna ladda upp underlag som PDF, ange "
                     "ärendenummer, kort beskrivning, språk för rapporten och "
                     "fokus för analysen. Flödet ska analysera materialet, "

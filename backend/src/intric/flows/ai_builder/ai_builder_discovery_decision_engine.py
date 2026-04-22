@@ -418,9 +418,7 @@ def implies_single_case(text: str) -> bool:
     return mentions_any(
         text,
         (
-            "ett kommunärende",
             "ett ärende",
-            "one municipal case",
             "one case",
             "case number",
         ),
@@ -472,12 +470,10 @@ def looks_like_case_document_family(text: str) -> bool:
     return mentions_any(
         text,
         (
-            "kommunärende",
-            "municipal case",
             "underlag",
             "case material",
-            "tjänsteskrivelse",
-            "remiss",
+            "case files",
+            "official material",
         ),
     )
 

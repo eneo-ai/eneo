@@ -639,7 +639,7 @@ def test_extract_answer_signals_infers_structured_analysis_and_metadata_needs() 
 
 def test_extract_answer_signals_does_not_treat_input_pdfs_as_pdf_output_mode() -> None:
     prompt = (
-        "Bygg ett flöde som tar emot ett dokumentpaket med flera PDF-filer i ett kommunärende. "
+        "Bygg ett flöde som tar emot ett dokumentpaket med flera PDF-filer i ett ärende. "
         "Steg 1 extraherar text ur alla dokument. Steg 2 identifierar juridiska risker som "
         "strukturerad JSON. Steg 3 skriver en strukturerad DOCX-rapport utan mall."
     )

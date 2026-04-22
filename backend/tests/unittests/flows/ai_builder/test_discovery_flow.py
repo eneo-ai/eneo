@@ -79,12 +79,13 @@ class TestHandleConfirmRequirements:
         self,
     ) -> None:
         processor = _make_processor()
-        # Short prompt (vague complexity) with document+case signals but
-        # unresolved output → triggers final_output_mode (blocking level)
+        # Short prompt with document+case signals — the next discovery question
+        # should be one of the early-priority blockers (processing scope,
+        # input mode, or final output) rather than a deeper detail question.
         conversation = [
             ConversationMessage(
                 role="user",
-                content="Analysera kommunärende med dokument",
+                content="Analysera dokument från case material",
             )
         ]
         tool_call = _make_tool_call(
@@ -567,7 +568,7 @@ class TestExtendedClarificationHints:
         conversation = [
             ConversationMessage(
                 role="user",
-                content="I want a flow that helps me process municipal case material and produce decision support",
+                content="I want a flow that helps me process case material and produce decision support",
             )
         ]
 
@@ -818,7 +819,7 @@ class TestExtendedClarificationHints:
                 role="user",
                 content=(
                     "Jag vill bygga ett flöde som heter Kommunanalys Pro. "
-                    "Flödet ska hjälpa en chef att förstå ett kommunärende. "
+                    "Flödet ska hjälpa en chef att förstå ett ärende. "
                     "Användaren ska kunna ladda upp underlag som PDF, ange ärendenummer, "
                     "kort beskrivning, språk för rapporten och fokus för analysen. "
                     "Flödet ska analysera materialet och skapa ett beslutsunderlag."
@@ -863,7 +864,7 @@ class TestExtendedClarificationHints:
             ConversationMessage(
                 role="user",
                 content=(
-                    "I want a flow that helps me process municipal case material and "
+                    "I want a flow that helps me process case material and "
                     "produce decision support."
                 ),
             ),
@@ -1437,7 +1438,7 @@ class TestExtendedClarificationHints:
         conversation = [
             ConversationMessage(
                 role="user",
-                content="Bygg ett flöde för ett kommunärende.",
+                content="Bygg ett flöde för ett ärende.",
                 metadata={"ui_language": "sv"},
             ),
             ConversationMessage(
@@ -1505,7 +1506,7 @@ class TestExtendedClarificationHints:
         conversation = [
             ConversationMessage(
                 role="user",
-                content="Bygg ett flöde för ett kommunärende.",
+                content="Bygg ett flöde för ett ärende.",
                 metadata={"ui_language": "sv"},
             ),
             ConversationMessage(
@@ -1632,7 +1633,7 @@ class TestExtendedClarificationHints:
             ConversationMessage(
                 role="user",
                 content=(
-                    "Bygg ett flöde som tar emot ett dokumentpaket med flera PDF-filer i ett kommunärende. "
+                    "Bygg ett flöde som tar emot ett dokumentpaket med flera PDF-filer i ett ärende. "
                     "Steg 1 extraherar text ur alla dokument. Steg 2 identifierar juridiska risker och "
                     "ekonomiska konsekvenser som strukturerad JSON. Steg 3 kopplar riskerna till "
                     "sociologiska och psykologiska teorier med hjälp av en kunskapsbas. Steg 4 skriver "

@@ -221,7 +221,7 @@ def test_build_discovery_profile_keeps_docx_output_intent_when_input_mentions_pd
             ConversationMessage(
                 role="user",
                 content=(
-                    "Bygg ett flöde som tar emot ett dokumentpaket med flera PDF-filer i ett kommunärende. "
+                    "Bygg ett flöde som tar emot ett dokumentpaket med flera PDF-filer i ett ärende. "
                     "Steg 1 extraherar text ur alla dokument. Steg 2 identifierar juridiska risker som "
                     "strukturerad JSON. Steg 3 genererar en strukturerad DOCX-rapport utan mall."
                 ),

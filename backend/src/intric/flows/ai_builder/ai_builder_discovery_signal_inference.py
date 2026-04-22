@@ -118,16 +118,12 @@ def _infer_document_kind(text: str) -> str | None:
     if _contains_any(
         text,
         (
-            "kommunärende",
-            "municipal case",
-            "tjänsteskrivelse",
-            "tjänsteskrivelser",
-            "remiss",
-            "remisser",
             "officiellt underlag",
             "official material",
             "official case files",
             "case material",
+            "case files",
+            "case package",
             "underlag",
         ),
     ):
@@ -268,7 +264,7 @@ def _infer_processing_scope(text: str) -> str | None:
         (
             "ett ärende åt gången",
             "one case at a time",
-            "one municipal case package",
+            "one case package",
         ),
     ):
         return "single_case"

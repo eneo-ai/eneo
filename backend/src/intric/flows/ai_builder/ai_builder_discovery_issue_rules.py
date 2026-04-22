@@ -84,7 +84,7 @@ def looks_like_case_scope_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     return mentions_any(
         text,
-        ("case material", "kommunärende", "municipal case", "case package"),
+        ("case material", "case package", "official material", "case files"),
     )
 
 
@@ -381,8 +381,6 @@ def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
         text,
         (
             *_DOCUMENT_PACKAGE_PHRASES,
-            "kommunärende",
-            "municipal case",
             "case material",
             "underlag",
             "news article",
@@ -395,8 +393,6 @@ def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
             "agreement",
             "agreements",
             "budget",
-            "remiss",
-            "tjänsteskrivelse",
         ),
     ):
         return False

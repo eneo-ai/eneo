@@ -57,7 +57,7 @@ def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None
             _step(
                 "step_a",
                 "Analysera dokument",
-                "Sammanfatta kommunärendet.",
+                "Sammanfatta ärendet.",
                 input_type=InputType.DOCUMENT,
             )
         ],
