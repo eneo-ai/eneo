@@ -347,20 +347,24 @@ class PatternMatch:
 _WORD_PATTERN: re.Pattern[str] = re.compile(r"\w+", re.UNICODE)
 
 
-def _tokenize_hints(retrieval_hints: tuple[str, ...]) -> tuple[str, ...]:
-    """Flatten retrieval hints into case-folded tokens.
+def _tokenize_hints(retrieval_hints: tuple[str, ...]) -> frozenset[str]:
+    """Collect distinct case-folded tokens from the retrieval hints.
 
-    Each hint line is split on whitespace so a multi-token hint like
-    `"summarize summary summera sammanfatta"` contributes four separate
-    matchable tokens. Empty results are filtered so blank hints (none
-    exist today, but cheap to guard) never inflate a score.
+    Each hint line is split on whitespace and case-folded so a multi-token
+    hint like ``"summarize summary summera sammanfatta"`` contributes four
+    matchable tokens. Duplicates across hint lines collapse because the
+    scorer counts *distinct* overlap with the input text — if a pattern
+    author lists ``"document analysis"`` and ``"input_type=document ..."``
+    and ``"output_type=document ..."``, the single word ``document`` is
+    still one signal, not three. Returning a frozenset makes the scorer
+    invariant to how authors split their hint vocabulary across lines.
     """
-    tokens: list[str] = []
+    tokens: set[str] = set()
     for hint in retrieval_hints:
         for token in hint.casefold().split():
             if token:
-                tokens.append(token)
-    return tuple(tokens)
+                tokens.add(token)
+    return frozenset(tokens)
 
 
 def _word_tokens(text: str) -> frozenset[str]:
@@ -382,7 +386,11 @@ def find_pattern_candidates(text: str) -> tuple[PatternMatch, ...]:
 
     Matching is on whole-word boundaries: a hint token like `form` only
     scores when `form` appears as a standalone word in `text`, never as
-    a substring of `information`. Returns descending by score, ties
+    a substring of `information`. Scoring counts *distinct* hint tokens
+    that also appear in the input text, so a pattern that repeats a
+    token across several hint phrases earns one point for it, not one
+    per phrase — the number of distinct retrieval signals is the ranking
+    signal, not authoring redundancy. Returns descending by score, ties
     broken by ascending pattern id for deterministic ordering across
     process restarts. Zero-score patterns are omitted so a no-signal
     prompt returns `()`. Negative patterns are never scored — they
@@ -397,11 +405,8 @@ def find_pattern_candidates(text: str) -> tuple[PatternMatch, ...]:
     for pattern in PATTERN_REGISTRY.values():
         if pattern.polarity != "positive":
             continue
-        score = sum(
-            1
-            for token in _tokenize_hints(pattern.retrieval_hints)
-            if token in text_tokens
-        )
+        hint_tokens = _tokenize_hints(pattern.retrieval_hints)
+        score = len(hint_tokens & text_tokens)
         if score > 0:
             matches.append(PatternMatch(pattern=pattern, score=score))
 

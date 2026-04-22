@@ -18,7 +18,11 @@ from intric.flows.citation_sidecar import (
     resolve_citation_mode,
 )
 from intric.flows.domain.flow import FlowStep, JsonObject
-from intric.flows.flow_capability_manifest import is_citation_capable_step
+from intric.flows.flow_capability_manifest import (
+    FlowOutputMode,
+    FlowOutputType,
+    is_citation_capable_step,
+)
 from intric.flows.flow_validators_form import (
     normalize_legacy_form_schema,
     validate_form_schema,
@@ -197,8 +201,8 @@ def _validate_citation_mode(step: FlowStep) -> None:
             f"Step {step.step_order}: citation_mode 'inline_inref_sidecar' requires output_type 'text'."
         )
     if not is_citation_capable_step(
-        output_type=step.output_type,
-        output_mode=step.output_mode,
+        output_type=FlowOutputType(step.output_type),
+        output_mode=FlowOutputMode(step.output_mode),
         output_config=step.output_config,
     ):
         raise BadRequestException(

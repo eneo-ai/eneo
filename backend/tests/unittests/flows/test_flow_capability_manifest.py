@@ -594,6 +594,51 @@ def test_is_citation_capable_step_rejects_string_output_mode() -> None:
         )
 
 
+def test_resolve_capability_for_tuple_rejects_string_input_source() -> None:
+    """`resolve_capability_for_tuple` is the public-API boundary for the
+    strict enum contract. A stringly-typed `input_source` would slip past
+    `_source_type_illegality`'s identity/membership checks and silently
+    classify as `"exposed"`, returning capabilities that do not reflect
+    the invalid source. The runtime guard raises instead."""
+    with pytest.raises(TypeError, match="input_source must be FlowInputSource"):
+        resolve_capability_for_tuple(
+            input_source="http",  # type: ignore[arg-type]
+            input_type=FlowInputType.TEXT,
+            output_type=FlowOutputType.TEXT,
+            output_mode=FlowOutputMode.PASS_THROUGH,
+        )
+
+
+def test_resolve_capability_for_tuple_rejects_string_input_type() -> None:
+    with pytest.raises(TypeError, match="input_type must be FlowInputType"):
+        resolve_capability_for_tuple(
+            input_source=FlowInputSource.FLOW_INPUT,
+            input_type="text",  # type: ignore[arg-type]
+            output_type=FlowOutputType.TEXT,
+            output_mode=FlowOutputMode.PASS_THROUGH,
+        )
+
+
+def test_resolve_capability_for_tuple_rejects_string_output_type() -> None:
+    with pytest.raises(TypeError, match="output_type must be FlowOutputType"):
+        resolve_capability_for_tuple(
+            input_source=FlowInputSource.FLOW_INPUT,
+            input_type=FlowInputType.TEXT,
+            output_type="text",  # type: ignore[arg-type]
+            output_mode=FlowOutputMode.PASS_THROUGH,
+        )
+
+
+def test_resolve_capability_for_tuple_rejects_string_output_mode() -> None:
+    with pytest.raises(TypeError, match="output_mode must be FlowOutputMode"):
+        resolve_capability_for_tuple(
+            input_source=FlowInputSource.FLOW_INPUT,
+            input_type=FlowInputType.TEXT,
+            output_type=FlowOutputType.TEXT,
+            output_mode="pass_through",  # type: ignore[arg-type]
+        )
+
+
 # Output-mode + citation capability registry entries --------------------
 #
 # These tests pin the capability IDs and invariant-ID sets that FCM must

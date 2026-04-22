@@ -803,11 +803,34 @@ def resolve_capability_for_tuple(
     for cells classified as ``"exposed"``. Returns ``None`` for
     illegal-IO-triple, illegal-source-type-pair, and not-exposed cells.
 
+    Strict enum-only contract on all four axes — non-enum inputs raise
+    `TypeError` at this public-API boundary so downstream helpers
+    (`_classify_cell`, `_source_type_illegality`) can assume enums and
+    their identity/membership checks cannot silently miss on stringly
+    typed arguments. Callers that hold stringly-typed data must coerce
+    at their own boundary (typically `FlowInputSource(raw_string)`).
+
     `citation_sidecar` and `mcp_policy` capabilities are intentionally
     NOT included — neither is conditioned on the 4-tuple alone.
     `render_critic_invariants` gives the flat "all invariants across all
     caps" view for the critic.
     """
+    if not isinstance(input_source, FlowInputSource):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"input_source must be FlowInputSource, got {type(input_source).__name__}"
+        )
+    if not isinstance(input_type, FlowInputType):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"input_type must be FlowInputType, got {type(input_type).__name__}"
+        )
+    if not isinstance(output_type, FlowOutputType):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"output_type must be FlowOutputType, got {type(output_type).__name__}"
+        )
+    if not isinstance(output_mode, FlowOutputMode):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"output_mode must be FlowOutputMode, got {type(output_mode).__name__}"
+        )
     classification, _reason = _classify_cell(
         input_source, input_type, output_type, output_mode
     )

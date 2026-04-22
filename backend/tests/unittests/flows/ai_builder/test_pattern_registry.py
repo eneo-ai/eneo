@@ -370,6 +370,38 @@ class TestPatternRegistryPublicApi:
                     f"{matches[idx].pattern.id} >= {matches[idx + 1].pattern.id}"
                 )
 
+    def test_find_pattern_candidates_counts_distinct_hint_tokens_not_repeats(
+        self,
+    ) -> None:
+        """Scoring counts the number of *distinct* hint tokens that appear
+        in the input text. A pattern author who repeats the same token
+        across multiple hint lines (e.g. `document analysis`,
+        `input_type=document ...`, `output_type=document ...`) does not
+        earn one point per occurrence — the single input word `document`
+        contributes one signal, not three. Otherwise authoring style would
+        drive ranking instead of content overlap."""
+        # `document_to_structured_report` carries `document` across three
+        # hint lines in the live registry; other document patterns carry
+        # it across one. If scoring counted repeats, the structured-report
+        # pattern would dominate any single-mention-of-document prompt.
+        matches = find_pattern_candidates("I need a document that analyzes inputs")
+        ids = [m.pattern.id for m in matches]
+        assert "document_to_structured_report" in ids, (
+            "document_to_structured_report should still score on 'document' "
+            "+ 'analyzes' overlap"
+        )
+        structured = next(
+            m for m in matches if m.pattern.id == "document_to_structured_report"
+        )
+        # The pattern has distinct hint tokens {document, analysis, report,
+        # input_type=document, output_type=text, output_type=json,
+        # output_mode=pass_through}; the input contributes `document` only
+        # on whole-word match (analyzes != analysis, no report).
+        assert structured.score == 1, (
+            "distinct-token scoring should credit only the unique hit "
+            f"('document'), not three times; got score={structured.score}"
+        )
+
     def test_pattern_match_is_frozen_dataclass(self) -> None:
         """Results must not be mutated by consumers. Freezing guards
         against a caller that patches `score` in place between rank and

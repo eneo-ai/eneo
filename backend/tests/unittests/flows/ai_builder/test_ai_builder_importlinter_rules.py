@@ -123,6 +123,8 @@ def _modules_importing_flows_api(
     - ``from intric.flows.api.<module> import X``
     - ``import intric.flows.api.<module>``
     - ``from intric.flows.api import <module>``   (parent-package form)
+    - ``from intric.flows import api``            (grandparent form; then
+      ``api.flow_models.X`` at the call site)
 
     The whole ``intric.flows.api`` surface is off-limits to non-bridge
     ai_builder modules: DTOs, assemblers, HTTP routers — none of them are
@@ -147,6 +149,10 @@ def _modules_importing_flows_api(
                 elif module.startswith(f"{FLOW_API_PARENT_PACKAGE}."):
                     names = ", ".join(alias.name for alias in node.names)
                     imports.append(f"from {module} import {names}")
+                elif module == "intric.flows":
+                    for alias in node.names:
+                        if alias.name == "api":
+                            imports.append(f"from {module} import {alias.name}")
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     name = alias.name
@@ -361,6 +367,12 @@ class TestRule6MaterializationBridgeAcl:
             "assembler_from.py": ("from intric.flows.api.flow_assembler import X\n"),
             # Router leaf — pins that HTTP router imports are also off-limits.
             "router_from.py": ("from intric.flows.api.flow_router import router\n"),
+            # Grandparent-package form — `from intric.flows import api` hands
+            # the caller the whole subpackage as a module object; a later
+            # attribute access (`api.flow_models.X`) would bypass the other
+            # shapes. Mirrors the Rule 3/4 grandparent guard for
+            # `from intric.flows import ai_builder`.
+            "grandparent_from.py": "from intric.flows import api\n",
             # Nested offender also pins the recursive scan + relative-path
             # keying the helper uses. If this drops back to a flat glob, the
             # nested fixture goes missing and the test fires.
