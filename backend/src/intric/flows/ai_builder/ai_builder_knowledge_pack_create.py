@@ -168,45 +168,15 @@ _KNOWLEDGE_PACK_CREATE_RECIPES = """\
 ```"""
 
 
-_VALIDATION_REPAIR_EXAMPLES = """\
-# Validation Repair Examples
-
-## Felaktigt utkast → valideringsfel → korrigerat utkast
-
-- Bad draft:
-  `{{ step_b.output.text }}` i `instructions`
-- Validation error:
-  `variable references are not allowed in create_flow instructions`
-- Corrected draft:
-  skriv bara vanliga instruktioner och låt backend kompilera underlaget
-
-- Bad draft:
-  `output_type="text"` tillsammans med `output_fields`
-- Validation error:
-  `output_fields require output_type=json`
-- Corrected draft:
-  byt till `output_type="json"` eller ta bort `output_fields`
-
-- Bad draft:
-  `document_delivery_mode="template_fill"` tillsammans med `output_type="pdf"`
-- Validation error:
-  `template_fill requires output_type=docx`
-- Corrected draft:
-  använd genererad PDF eller byt dokumenttypen till DOCX"""
-
-
 KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE = _KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE
 KNOWLEDGE_PACK_CREATE_STEP_DESIGN = _KNOWLEDGE_PACK_CREATE_STEP_DESIGN
 KNOWLEDGE_PACK_CREATE_RECIPES = _KNOWLEDGE_PACK_CREATE_RECIPES
-VALIDATION_REPAIR_EXAMPLES = _VALIDATION_REPAIR_EXAMPLES
 
 __all__ = [
     "_KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE",
     "_KNOWLEDGE_PACK_CREATE_RECIPES",
     "_KNOWLEDGE_PACK_CREATE_STEP_DESIGN",
-    "_VALIDATION_REPAIR_EXAMPLES",
     "KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE",
     "KNOWLEDGE_PACK_CREATE_RECIPES",
     "KNOWLEDGE_PACK_CREATE_STEP_DESIGN",
-    "VALIDATION_REPAIR_EXAMPLES",
 ]
