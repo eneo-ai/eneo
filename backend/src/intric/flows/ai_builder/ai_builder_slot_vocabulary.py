@@ -4,11 +4,9 @@ plan-discovery.
 Pure leaf — imports nothing from any ``intric.flows.ai_builder.*`` sibling;
 stdlib only. Consumers such as ``question_catalog`` and ``pattern_registry``
 may depend on this module without dragging the resolver's transitive
-dependency graph into the leaf layer.
-
-The importlinter rule formalizing this leaf guarantee lands in A.5b; until
-then the docstring and the purity unit test in
-``test_ai_builder_slot_vocabulary.py`` are the enforcement surface.
+dependency graph into the leaf layer. The purity invariant is pinned by
+the unit test in ``test_ai_builder_slot_vocabulary.py`` and by the
+importlinter rule that forbids non-stdlib imports into this module.
 """
 
 from __future__ import annotations

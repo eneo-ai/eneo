@@ -1,12 +1,13 @@
-"""P0.8 — AI Builder baseline benchmark harness.
+"""AI Builder baseline benchmark harness.
 
-The committed ``baseline.json`` is **frozen at Phase 0**. These per-PR tests
-validate the shape of the harness — schema, determinism, archetype coverage,
-archetype-intent invariants — but do NOT assert equality against the frozen
-baseline. Phase A-G landings will move metrics; drift is surfaced by the
-``--diff`` mode of ``runner.py`` (nightly / on-demand), not by this test.
+The committed ``baseline.json`` is a frozen snapshot of current metrics.
+These per-PR tests validate the shape of the harness — schema, determinism,
+archetype coverage, archetype-intent invariants — but do NOT assert equality
+against the frozen baseline. Architectural changes will move metrics; drift
+is surfaced by the ``--diff`` mode of ``runner.py`` (nightly / on-demand),
+not by this test.
 
-Regenerating ``baseline.json`` is an explicit phase-boundary decision and is
+Regenerating ``baseline.json`` is an explicit deliberate decision and is
 not performed as part of normal development; the runner's ``--write-baseline``
 switch is intentionally verbose.
 """
@@ -26,8 +27,8 @@ from tests.integration.flows.ai_builder.benchmark.cases import (
 from tests.integration.flows.ai_builder.benchmark.runner import (
     BASELINE_PATH,
     BASELINE_SCHEMA_VERSION,
+    DEFERRED_EVAL_METRIC_KEYS,
     PATTERN_SIGNAL_KEYS,
-    PHASE_F_METRIC_KEYS,
     _compute_cases_sha256,
     build_current_document,
     compute_case_metrics,
@@ -178,8 +179,10 @@ class TestComputeCaseMetrics:
         assert metrics["question_count"] == len(metrics["selected_question_ids"])
         assert isinstance(metrics["mvs_met"], bool)
         assert isinstance(metrics["ready_for_confirmation"], bool)
-        for key in PHASE_F_METRIC_KEYS:
-            assert metrics[key] is None, f"{key} must be null until Phase F"
+        for key in DEFERRED_EVAL_METRIC_KEYS:
+            assert metrics[key] is None, (
+                f"{key} must be null until the evaluation harness lands"
+            )
 
     @pytest.mark.parametrize("case", BENCHMARK_CASES, ids=lambda c: c.case_id)
     def test_metrics_are_deterministic(self, case: BenchmarkCase) -> None:
@@ -217,14 +220,14 @@ class TestBaselineDocument:
             "baseline.json cases_sha256 does not match its cases content"
         )
 
-    def test_phase_f_fields_null_in_baseline(self) -> None:
+    def test_deferred_eval_fields_null_in_baseline(self) -> None:
         committed = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
         for entry in committed["cases"]:
-            for key in PHASE_F_METRIC_KEYS:
+            for key in DEFERRED_EVAL_METRIC_KEYS:
                 assert entry[key] is None, (
                     f"baseline case {entry['case_id']} has non-null {key}; "
-                    "Phase F metrics should arrive via Phase F commits, not "
-                    "backfilled into the Phase 0 baseline"
+                    "deferred evaluation metrics should arrive via their "
+                    "own commits, not backfilled into the current baseline"
                 )
 
     def test_current_document_produces_valid_sha(self) -> None:

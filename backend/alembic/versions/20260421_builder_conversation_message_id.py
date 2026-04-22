@@ -4,11 +4,12 @@ Revision ID: 20260421_builder_conv_msg_id
 Revises: 20260421_builder_envelope_slim
 Create Date: 2026-04-21 00:10:00.000000
 
-Phase C references conversation messages by stable id instead of positional
-index (indices break after compaction). This migration backfills a random
-UUID on every existing conversation entry that lacks `message_id`. New
-messages get a UUIDv7 from `ConversationMessage._new_message_id`; legacy
-rows get an ordinary v4 — the contract is stability, not time-ordering.
+Downstream consumers reference conversation messages by stable id instead
+of positional index (indices break after compaction). This migration
+backfills a random UUID on every existing conversation entry that lacks
+`message_id`. New messages get a UUIDv7 from
+`ConversationMessage._new_message_id`; legacy rows get an ordinary v4 —
+the contract is stability, not time-ordering.
 
 The migration refuses to run if any row has a non-array `conversation` or
 any element that is not a JSON object. Pre-release: fix by hand, no

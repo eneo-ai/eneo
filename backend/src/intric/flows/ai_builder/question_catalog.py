@@ -1,36 +1,34 @@
 """AI Builder Question Catalog — canonical bilingual user-facing copy.
 
-Phase A.4b scaffold. A `QuestionTemplate` carries everything the UI
-needs to render a discovery question for a single architectural slot:
-a bilingual (sv/en) prompt, a bilingual help paragraph, a tuple of
-bilingual options, and bilingual worked examples. No planner strategy,
-no FCM truth — that surface belongs to Pattern Registry (A.4) and FCM
-(A.0–A.3).
+A `QuestionTemplate` carries everything the UI needs to render a
+discovery question for a single architectural slot: a bilingual (sv/en)
+prompt, a bilingual help paragraph, a tuple of bilingual options, and
+bilingual worked examples. No planner strategy, no FCM truth — that
+surface belongs to the Pattern Registry and the FCM.
 
 Catalog keys are slot names from
 `ai_builder_slot_vocabulary.KNOWN_REQUIREMENT_SLOT_NAMES`. Pattern
 Registry's `question_template_ids` field forward-references these keys;
-Rule 5 of Phase A.5 is the CI-enforced dangling-reference guard — see
+the CI-enforced dangling-reference guard is
 `test_every_question_template_id_resolves_in_catalog` in
 `tests/unittests/flows/ai_builder/test_question_catalog.py`.
 
-`QUESTION_CATALOG_VERSION` starts at `1` and stays there through the
-Phase A epoch. First bump lands with the first persisted consumer
-(Phase C or later).
+`QUESTION_CATALOG_VERSION` is the monotonic integer stamped on persisted
+plans and digests. Any catalog-surface change bumps it.
 
 Copy is transcribed verbatim from the canonical factory functions in
 `ai_builder_discovery_questions.py`. Option ids and values are
 preserved so downstream answer-matching code is untouched, but two
 templates (`primary_runtime_input`, `terminal_output`) keep slot-name
 keys that differ from their legacy `DiscoveryQuestionSuggestion.question_id`
-values (`input_material_mode`, `final_output_mode`). Phase B's rewire
+values (`input_material_mode`, `final_output_mode`); the downstream rewire
 therefore needs a slot-key → legacy-question-id bridge for those two
 rows; the remaining five migrate cleanly.
 
 This module is a pure leaf: its only non-stdlib import is the
 slot-name frozenset from the dedicated leaf module
-`ai_builder_slot_vocabulary.py`. A.5b adds the importlinter rule that
-enforces this boundary.
+`ai_builder_slot_vocabulary.py`. An importlinter rule enforces this
+boundary.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
 """Stability tests for ConversationMessage.message_id.
 
-Phase C will reference conversation messages by stable ID rather than by
-positional index (indices break after conversation compaction). The contract
-this module locks in:
+Downstream consumers reference conversation messages by stable ID rather
+than by positional index (indices break after conversation compaction).
+The contract this module locks in:
 
 - Every newly constructed ConversationMessage has a UUIDv7 `message_id`.
 - Two freshly constructed messages get distinct ids.

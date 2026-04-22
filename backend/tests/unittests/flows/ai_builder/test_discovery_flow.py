@@ -807,7 +807,7 @@ class TestExtendedClarificationHints:
     def test_rich_prompt_uses_full_question_budget_when_slots_remain(
         self,
     ) -> None:
-        """P0.2: rich prompts no longer get fewer questions than short ones.
+        """Rich prompts no longer get fewer questions than short ones.
 
         Budget is 3 for any prompt without an explicit step plan. With 2
         structured answers already given, the 3rd slot is still available

@@ -1,10 +1,9 @@
 """Boundary contract: flows engine must not import AI Builder.
 
-Phase A of the architecture rewrite un-inverts the two existing violations
-(`flow_validators.py:15`, `api/flow_router.py:3`) by hoisting the shared
-primitives into the engine. Until then the `.importlinter` contract locks
-the boundary so no _new_ direct imports from the engine into the plugin
-slip in.
+The architecture keeps the two layers separate by hoisting any shared
+primitives into the engine. The `.importlinter` contract locks the
+boundary so no new direct imports from the engine into the plugin slip
+in.
 
 `allow_indirect_imports = true` scopes the check to direct, textual imports:
 lazy in-function imports that transitively reach `ai_builder` via
@@ -18,7 +17,7 @@ import ast
 import subprocess
 from pathlib import Path
 
-CONTRACT_NAME = "Flows engine must not import AI Builder (Phase A un-inverts)"
+CONTRACT_NAME = "Flows engine must not import AI Builder"
 
 
 def _backend_root() -> Path:
@@ -74,11 +73,11 @@ def test_source_modules_cover_every_flows_sibling() -> None:
 
 
 def test_flow_validators_is_not_coupled_to_ai_builder() -> None:
-    """After A.2's un-inversion, `flow_validators.py` is pure engine code
-    and must not reach into `intric.flows.ai_builder.*`. The FCM's mirror
-    of `is_citation_capable_step` (A.1e) replaces the legacy builder
-    import. This test AST-scans the module so a regression fails at unit
-    test time, not via the slower lint-imports subprocess.
+    """`flow_validators.py` is pure engine code and must not reach into
+    `intric.flows.ai_builder.*`. The FCM's mirror of
+    `is_citation_capable_step` is the engine-side primitive. This test
+    AST-scans the module so a regression fails at unit test time, not via
+    the slower lint-imports subprocess.
     """
     module_path = _backend_root() / "src" / "intric" / "flows" / "flow_validators.py"
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
@@ -96,17 +95,16 @@ def test_flow_validators_is_not_coupled_to_ai_builder() -> None:
                     offenders.append(f"import {alias.name}")
 
     assert not offenders, (
-        "flow_validators.py must not import from intric.flows.ai_builder.*; "
-        "A.2 un-inverted this boundary. Use FCM primitives instead "
-        "(see flow_capability_manifest.py).\n"
+        "flow_validators.py must not import from intric.flows.ai_builder.*. "
+        "Use FCM primitives instead (see flow_capability_manifest.py).\n"
         f"Offending imports: {offenders}"
     )
 
 
 def test_flow_validators_ignore_line_removed_from_importlinter() -> None:
-    """Lock-step assertion for A.2: the `.importlinter` ignore carve-out for
-    `flow_validators -> ai_builder.ai_builder_step_capabilities` must be
-    gone. If someone re-adds it to silence a regressed import, this test
+    """The `.importlinter` ignore carve-out for
+    `flow_validators -> ai_builder.ai_builder_step_capabilities` must not
+    exist. If someone re-adds it to silence a regressed import, this test
     fires before CI.
     """
     import configparser
@@ -125,7 +123,7 @@ def test_flow_validators_ignore_line_removed_from_importlinter() -> None:
     )
     assert forbidden not in lines, (
         "`.importlinter` still carves out "
-        f"`{forbidden}`. Remove the line — A.2 un-inverted this edge."
+        f"`{forbidden}`. Remove the line — this edge is no longer permitted."
     )
 
 

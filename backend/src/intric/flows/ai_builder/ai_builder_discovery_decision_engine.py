@@ -383,7 +383,7 @@ def suppressed_candidate(
 def compute_question_budget(text: str) -> int:
     """Return 1 if user provided an explicit step plan, otherwise 3.
 
-    Rich prompts should not receive fewer questions than short prompts (P0.2).
+    Rich prompts should not receive fewer questions than short prompts.
     """
     return 1 if has_explicit_step_plan(text) else 3
 

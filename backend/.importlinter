@@ -4,10 +4,10 @@ include_external_packages = False
 
 [importlinter:contract:flows-engine-no-ai-builder]
 # The flows engine (everything under `intric.flows` except the AI Builder
-# plugin itself) must not import from the AI Builder. Phase A of the
-# architecture rewrite un-inverts the two existing violations below; this
-# contract locks the boundary so no _new_ ones slip in.
-name = Flows engine must not import AI Builder (Phase A un-inverts)
+# plugin itself) must not import from the AI Builder. This contract locks
+# the boundary so no new direct imports from the engine into the plugin
+# slip in.
+name = Flows engine must not import AI Builder
 type = forbidden
 allow_indirect_imports = true
 source_modules =

@@ -412,6 +412,6 @@
     }
   ],
   "cases_sha256": "096e415eb978c27067e282512a592cbde486e654a428adfe6976838ba32525b1",
-  "note": "Deterministic pre-LLM measurements only. LLM-dependent fields (plan_depth, repair_loop_rate, architecture_chain_correctness, shallow_two_step_incidence) are populated in Phase F. Baseline is frozen at Phase 0; diffs against it are expected as Phase A-G lands.",
+  "note": "Deterministic pre-LLM measurements only. LLM-dependent fields (plan_depth, repair_loop_rate, architecture_chain_correctness, shallow_two_step_incidence) are populated by a later golden-fixture evaluation harness. The committed baseline is a frozen reference; diffs against it are expected as the architecture evolves.",
   "schema_version": 1
 }

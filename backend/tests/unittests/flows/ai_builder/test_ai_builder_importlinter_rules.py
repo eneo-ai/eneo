@@ -1,9 +1,9 @@
 """Boundary contracts: AI Builder plugin-internal leaves have narrow import
 allow-lists.
 
-Phase A of the architecture rewrite codifies the Pattern Registry / Question
-Catalog / FCM layering with three boundary rules. Two different mechanisms
-are used based on where the rule lives:
+The Pattern Registry / Question Catalog / FCM layering is codified via
+three boundary rules. Two different mechanisms are used based on where
+the rule lives:
 
 - **Rule 2 (importlinter)** — the Flow Capability Manifest is engine truth
   and lives outside the plugin namespace, so a dedicated
@@ -211,10 +211,8 @@ class TestRule3PatternRegistryDirectSiblingImports:
     a sibling here (it is a separate allow-list concern — the FCM is
     always importable by anything inside ``intric.flows``).
 
-    In A.5b the Pattern Registry imports nothing from siblings. The rule
-    is pre-positioned so that when A.6 wires Pattern Registry to consume
-    Question Catalog + slot vocabulary, the permitted-sibling set below
-    is extended in the same slice and nothing else slips through.
+    The permitted-sibling allow-list below is the full set; any new
+    sibling import must extend it deliberately, not by accident.
     """
 
     _PERMITTED_SIBLINGS: frozenset[str] = frozenset(
@@ -252,11 +250,9 @@ class TestRule4QuestionCatalogDirectSiblingImports:
     sibling is ``ai_builder_slot_vocabulary``, a stdlib-only taxonomy
     module. FCM imports (outside the plugin package) remain available.
 
-    The plan text for Rule 4 was restated at A.5b from "FCM only" to
-    "FCM + slot vocabulary"; the carve-out is surgical because the
-    slot-vocabulary leaf itself cannot sibling-import anything (its own
-    AST-scan purity test enforces that), so depending on it does not
-    leak the resolver's closure.
+    The carve-out is surgical because the slot-vocabulary leaf itself
+    cannot sibling-import anything (its own AST-scan purity test enforces
+    that), so depending on it does not leak the resolver's closure.
     """
 
     _PERMITTED_SIBLINGS: frozenset[str] = frozenset(
@@ -294,18 +290,18 @@ class TestRule6MaterializationBridgeAcl:
     Inside ``intric.flows.ai_builder``, only
     ``ai_builder_materialization_bridge.py`` is permitted to import from
     ``intric.flows.api.flow_models`` (the flows-domain draft-write
-    surface). The bridge is a docstring-only scaffold in A.5; concrete
-    implementation lands in Phase D.7.
+    surface). The bridge currently carries only a role docstring; any
+    concrete bridge logic added in future must keep the ACL intact.
     """
 
     def _package_root(self) -> pathlib.Path:
         return _backend_root() / "src" / "intric" / "flows" / "ai_builder"
 
     def test_bridge_is_docstring_only_scaffold(self) -> None:
-        """A.5 Rule 6 wants the bridge scaffolded as an empty module with a
-        role-docstring; concrete implementation lands in Phase D.7. Assert
-        both: the file exists, and its top-level body is the module
-        docstring and nothing else.
+        """The bridge is a docstring-only module: its top-level body is the
+        module docstring and nothing else. Assert both the file exists and
+        that shape holds, so any accidental widening of the write-surface
+        seam surfaces here.
         """
         bridge = self._package_root() / f"{BRIDGE_MODULE_NAME}.py"
         assert bridge.exists(), (
@@ -319,10 +315,9 @@ class TestRule6MaterializationBridgeAcl:
         )
         body = tree.body
         assert len(body) == 1 and isinstance(body[0], ast.Expr), (
-            f"{BRIDGE_MODULE_NAME}.py is the A.5 scaffold — keep it "
-            "docstring-only. Concrete bridge logic lands in Phase D.7; "
-            "adding code here now widens the write-surface seam before "
-            "the ACL is ready to guard it.\n"
+            f"{BRIDGE_MODULE_NAME}.py must stay docstring-only until the "
+            "bridge implementation lands. Adding code here now widens the "
+            "write-surface seam before the ACL is ready to guard it.\n"
             f"Found {len(body)} top-level statements: "
             f"{[type(n).__name__ for n in body]}"
         )
@@ -334,8 +329,7 @@ class TestRule6MaterializationBridgeAcl:
             "Only `ai_builder_materialization_bridge.py` may import from "
             f"`{FLOW_MODELS_API_MODULE}` inside the ai_builder plugin. "
             "All other modules must route draft-write type usage through "
-            "the bridge (Rule 6 of Phase A.5; concrete bridge implementation "
-            "lands in Phase D.7).\n"
+            "the bridge.\n"
             f"Offenders: {offenders}"
         )
 

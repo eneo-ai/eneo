@@ -1,9 +1,10 @@
-"""FCM scaffold (Phase A.0).
+"""Flow Capability Manifest tests.
 
 Covers: version constant, dataclass shape (engine-truth fields only),
-registry seeding from `INPUT_TYPE_POLICIES`, and the `not_exposed_reason`
-invariant. Chain validation, tuple-matrix coverage, and critic invariants
-land with A.1 / A.3 and are deliberately out of scope here.
+registry seeding from `INPUT_TYPE_POLICIES`, `not_exposed_reason`
+invariant, chain validation, tuple-matrix coverage guard, FCM_VERSION
+bump-discipline, and the public API (`resolve_capability_for_tuple`,
+`validate_step_chain`, `render_critic_invariants`, `coverage_report`).
 """
 
 from __future__ import annotations
@@ -205,9 +206,9 @@ def test_chain_compatibility_is_frozen_and_typed_with_enums() -> None:
 
 
 def test_chain_compatibility_mirrors_legacy_compatible_type_coercions() -> None:
-    """Parity test. Phase A.1a mirrors `COMPATIBLE_TYPE_COERCIONS` into the
-    FCM without touching consumers; the two sets must stay in lockstep
-    until Phase G deletes the legacy table. A drift here is a bug."""
+    """Parity test. The FCM mirrors `COMPATIBLE_TYPE_COERCIONS` with typed
+    enum entries; the two sets must stay in lockstep. A drift here is a
+    bug."""
     fcm_as_strings = {(out.value, inp.value) for out, inp in CHAIN_COMPATIBILITY}
     assert fcm_as_strings == COMPATIBLE_TYPE_COERCIONS, (
         "CHAIN_COMPATIBILITY has drifted from COMPATIBLE_TYPE_COERCIONS.\n"
@@ -218,9 +219,9 @@ def test_chain_compatibility_mirrors_legacy_compatible_type_coercions() -> None:
 
 @pytest.mark.parametrize("input_key", sorted(INPUT_TYPE_POLICIES.keys()))
 def test_capability_channel_mirrors_policy(input_key: str) -> None:
-    """A.1b: every seeded input capability carries the same `channel` as its
+    """Every seeded input capability carries the same `channel` as its
     `InputTypePolicy`. FCM is the typed mirror; `type_policies.py` remains
-    the editable source until Phase G."""
+    the editable source."""
     policy = INPUT_TYPE_POLICIES[input_key]
     capability = CAPABILITY_REGISTRY[f"input_{input_key}"]
     assert capability.channel == policy.channel
@@ -228,8 +229,8 @@ def test_capability_channel_mirrors_policy(input_key: str) -> None:
 
 @pytest.mark.parametrize("input_key", sorted(INPUT_TYPE_POLICIES.keys()))
 def test_capability_invariants_track_policy_flags(input_key: str) -> None:
-    """A.1b: each of the three policy-derived invariants is present iff
-    the corresponding flag on `InputTypePolicy` demands it. Drift between
+    """Each of the three policy-derived invariants is present iff the
+    corresponding flag on `InputTypePolicy` demands it. Drift between
     seeder and policy is caught here."""
     policy = INPUT_TYPE_POLICIES[input_key]
     capability = CAPABILITY_REGISTRY[f"input_{input_key}"]
@@ -244,11 +245,10 @@ def test_capability_invariants_track_policy_flags(input_key: str) -> None:
 
 
 def test_input_capability_rejects_missing_channel() -> None:
-    """A.1b symmetric guard: every `input_*` capability must declare a
-    channel. `channel=None` is valid for future non-input capabilities
-    (citation, transcription wizard, MCP) but never for an input
-    capability — the runtime uses `channel` to decide whether to forward
-    file bytes to the LLM."""
+    """Every `input_*` capability must declare a channel. `channel=None`
+    is valid for non-input capabilities (citation, transcription wizard,
+    MCP) but never for an input capability — the runtime uses `channel`
+    to decide whether to forward file bytes to the LLM."""
     with pytest.raises(ValueError, match="channel"):
         FlowCapability(
             id="input_fixture",
@@ -275,21 +275,21 @@ def test_input_text_has_no_absorbed_invariants() -> None:
 
 @pytest.mark.parametrize("input_key", sorted(INPUT_TYPE_POLICIES.keys()))
 def test_capability_runtime_input_mode_mirrors_builder_map(input_key: str) -> None:
-    """A.1c: every seeded `input_*` capability carries `runtime_input_mode`
-    matching `BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE.get(key)`. The legacy
-    map covers 5 of 7 input types (image/any are absent) — the capability
-    field must be `None` for those so the typed mirror doesn't invent
-    behaviour the runtime doesn't support."""
+    """Every seeded `input_*` capability carries `runtime_input_mode`
+    matching `BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE.get(key)`. The
+    legacy map covers 5 of 7 input types (image/any are absent) — the
+    capability field must be `None` for those so the typed mirror doesn't
+    invent behaviour the runtime doesn't support."""
     capability = CAPABILITY_REGISTRY[f"input_{input_key}"]
     expected = BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE.get(input_key)
     assert capability.runtime_input_mode == expected
 
 
 def test_final_output_artifact_by_type_mirrors_legacy() -> None:
-    """A.1c parity: `FINAL_OUTPUT_ARTIFACT_BY_TYPE` (typed with `FlowOutputType`
+    """Parity: `FINAL_OUTPUT_ARTIFACT_BY_TYPE` (typed with `FlowOutputType`
     keys + `OutputArtifact` literal values) must stay in lockstep with the
-    legacy `BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE` string-dict until
-    Phase G deletes the legacy source. Drift is a bug."""
+    legacy `BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE` string-dict.
+    Drift is a bug."""
     fcm_as_strings = {
         out_type.value: artifact
         for out_type, artifact in FINAL_OUTPUT_ARTIFACT_BY_TYPE.items()
@@ -301,7 +301,7 @@ def test_final_output_artifact_by_type_mirrors_legacy() -> None:
 
 
 def test_final_output_artifact_by_type_is_frozen_and_typed_with_enums() -> None:
-    """A.1c: the FCM mirror must be an immutable `Mapping` keyed by
+    """The FCM mirror must be an immutable `Mapping` keyed by
     `FlowOutputType` enums — consumers rely on typed dispatch, not string
     lookups. Also covers every enum member so no output type is orphaned."""
     assert set(FINAL_OUTPUT_ARTIFACT_BY_TYPE.keys()) == set(FlowOutputType)
@@ -322,10 +322,11 @@ def test_supports_step_io_tuple_parity_with_legacy(
     output_type: FlowOutputType,
     output_mode: FlowOutputMode,
 ) -> None:
-    """A.1d parity: `supports_step_io_tuple` (enum-typed, engine-side) must
-    agree with legacy `supports_step_io_mode_combo` (string-typed, ai_builder)
-    on every (input_type, output_type, output_mode) triple. Covers None for
-    input_type — the legacy signature allows it, and the FCM must too."""
+    """Parity: `supports_step_io_tuple` (enum-typed, engine-side) must
+    agree with legacy `supports_step_io_mode_combo` (string-typed,
+    ai_builder) on every (input_type, output_type, output_mode) triple.
+    Covers None for input_type — the legacy signature allows it, and the
+    FCM must too."""
     fcm_result = supports_step_io_tuple(
         input_type=input_type, output_type=output_type, output_mode=output_mode
     )
@@ -346,9 +347,9 @@ def test_supports_step_io_tuple_parity_with_legacy(
 def test_resolve_document_generation_mode_parity_with_legacy(
     output_type: FlowOutputType, output_mode: FlowOutputMode
 ) -> None:
-    """A.1d parity: FCM `resolve_document_generation_mode` returns the same
-    `DocumentGenerationMode | None` as the legacy ai_builder version for every
-    (output_type, output_mode) pair."""
+    """Parity: FCM `resolve_document_generation_mode` returns the same
+    `DocumentGenerationMode | None` as the legacy ai_builder version for
+    every (output_type, output_mode) pair."""
     fcm_result = resolve_document_generation_mode(
         output_type=output_type, output_mode=output_mode
     )
@@ -517,13 +518,13 @@ def test_is_citation_capable_step_treats_non_dict_config_as_off(
     )
 
 
-# A.1f — output-mode + citation capability registry entries -------------
+# Output-mode + citation capability registry entries --------------------
 #
 # These tests pin the capability IDs and invariant-ID sets that FCM must
 # declare for each `FlowOutputMode` + the citation sidecar. The invariant
 # IDs are grep-matched against the legacy error phrases in
-# `flow_validators.py:validate_steps` so A.2's un-invert knows which
-# capability carries each rule.
+# `flow_validators.py:validate_steps`, so consumers applying invariants by
+# capability ownership know which capability carries each rule.
 
 
 _EXPECTED_OUTPUT_MODE_CAPABILITIES: dict[FlowOutputMode, tuple[str, frozenset[str]]] = {
@@ -587,8 +588,8 @@ def test_registry_has_citation_sidecar_capability() -> None:
     the three lifted invariants from the legacy `is_citation_capable_step`
     predicate + `_validate_citation_mode` validator: TEXT output required,
     TEMPLATE_FILL / TRANSCRIBE_ONLY forbidden, and the output_config must
-    be citation-capable. Separate from the `is_citation_capable_step` FCM
-    function (A.1e) which is a step-level predicate."""
+    be citation-capable. Distinct from the `is_citation_capable_step` FCM
+    function, which is a step-level predicate."""
     capability = CAPABILITY_REGISTRY.get("citation_sidecar")
     assert capability is not None, "citation_sidecar capability missing"
     assert capability.exposure == "builder", (
@@ -613,9 +614,9 @@ def test_input_audio_owns_transcription_config_invariant() -> None:
     step, not just transcribe-only ones (see `flow_validators.py:261` — the
     guard is `any(step.input_type == "audio" ...)`), so the
     `requires_enabled_flow_transcription_config` invariant belongs on the
-    `input_audio` capability. A.2 consumers that apply invariants by
-    capability ownership must reject pass-through audio steps with
-    disabled transcription just like transcribe-only ones."""
+    `input_audio` capability. Consumers applying invariants by capability
+    ownership must reject pass-through audio steps with disabled
+    transcription just like transcribe-only ones."""
     capability = CAPABILITY_REGISTRY["input_audio"]
     invariant_ids = {inv.id for inv in capability.invariants}
     assert "requires_enabled_flow_transcription_config" in invariant_ids, (
@@ -658,7 +659,7 @@ def test_output_mode_and_citation_capabilities_are_non_input() -> None:
         for cap in CAPABILITY_REGISTRY.values()
         if not cap.id.startswith("input_")
     }
-    assert non_input_ids  # sanity: A.1f actually added entries
+    assert non_input_ids  # sanity: non-input capability entries exist
     for cap_id in non_input_ids:
         capability = CAPABILITY_REGISTRY[cap_id]
         assert capability.channel is None, (
@@ -669,7 +670,7 @@ def test_output_mode_and_citation_capabilities_are_non_input() -> None:
         )
 
 
-# A.1g — mcp_policy capability registry entry ---------------------------
+# mcp_policy capability registry entry ---------------------------------
 #
 # Legacy rule (flow_validators.py:183): `step.mcp_policy not in {INHERIT,
 # RESTRICTED}` raises. A single `mcp_policy` capability captures this
@@ -703,10 +704,10 @@ def test_mcp_policy_allowed_values_parity_with_legacy() -> None:
     the legacy `FLOW_STEP_MCP_POLICY_VALUES` used by
     `flow_validators.py:183`'s `_ALLOWED_FLOW_MCP_POLICIES` set. Drift in
     either direction is a bug — the FCM is the typed mirror; legacy stays
-    editable until Phase G deletes it. Covers both directions of drift:
-    (1) legacy narrowing to a subset, and (2) FCM ever moving off the
-    tautological `frozenset(FlowMcpPolicy)` to an explicit enumeration
-    that misses a member."""
+    the editable source. Covers both directions of drift: (1) legacy
+    narrowing to a subset, and (2) FCM ever moving off the tautological
+    `frozenset(FlowMcpPolicy)` to an explicit enumeration that misses a
+    member."""
     from intric.database.tables.flow_tables import FLOW_STEP_MCP_POLICY_VALUES
     from intric.flows.enums import FlowMcpPolicy
     from intric.flows.flow_capability_manifest import ALLOWED_MCP_POLICIES
@@ -736,9 +737,9 @@ def test_mcp_policy_capability_is_non_input() -> None:
 
 
 def test_fcm_module_has_no_ai_builder_imports() -> None:
-    """Redundant with the P0.7 `importlinter` contract but keeps the invariant
-    obvious in this test module: engine capability truth must not depend on
-    planner strategy."""
+    """Redundant with the `importlinter` contract but keeps the invariant
+    obvious in this test module: engine capability truth must not depend
+    on planner strategy."""
     tree = ast.parse(_flow_capability_manifest_source().read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -754,7 +755,7 @@ def test_fcm_module_has_no_ai_builder_imports() -> None:
 
 
 # ---------------------------------------------------------------------
-# A.3 — FCM CI coverage test.
+# FCM CI coverage test.
 #
 # Walk the full enum cartesian product and classify each cell. Outcomes:
 #   - "illegal_io_triple":        `supports_step_io_tuple(it, ot, om) is False`
@@ -764,7 +765,7 @@ def test_fcm_module_has_no_ai_builder_imports() -> None:
 #                                  `flow_validators_http.py`
 #   - "not_exposed":              owning capability has
 #                                 `exposure="not_exposed"` with a permanent
-#                                 reason (plan §A 1004-1005)
+#                                 reason
 #   - "exposed":                  owning capabilities are all
 #                                 `exposure="builder"`
 #
@@ -786,14 +787,14 @@ def _enumerate_enum_tuples() -> list[
 
 
 def test_every_enum_tuple_is_classified() -> None:
-    """A.3 coverage guard. Every 4-tuple in `FlowInputSource × FlowInputType
+    """Coverage guard. Every 4-tuple in `FlowInputSource × FlowInputType
     × FlowOutputType × FlowOutputMode` must land in one of four buckets:
     exposed, illegal_io_triple, illegal_source_type_pair, or not_exposed
     with a permanent reason.
 
-    A reason containing the literal word "temporary" fails CI — the plan
-    rejects temporary exclusions so nothing can drift into the registry
-    under cover of a placeholder reason."""
+    A reason containing the literal word "temporary" fails CI — temporary
+    exclusions are rejected so nothing can drift into the registry under
+    cover of a placeholder reason."""
     cells = _enumerate_enum_tuples()
     total_expected = (
         len(FlowInputSource)
@@ -820,9 +821,8 @@ def test_every_enum_tuple_is_classified() -> None:
             if _TEMPORARY_REASON_MARKER in (reason or "").lower():
                 temporary_violations.append(
                     f"{cell}: not_exposed_reason contains "
-                    f"{_TEMPORARY_REASON_MARKER!r} — plan §A 1004-1005 "
-                    f"rejects temporary exclusions "
-                    f"(reason={reason!r})"
+                    f"{_TEMPORARY_REASON_MARKER!r} — temporary exclusions "
+                    f"are rejected (reason={reason!r})"
                 )
                 continue
         classified[outcome] += 1
@@ -843,19 +843,18 @@ def test_every_enum_tuple_is_classified() -> None:
 
 
 # ---------------------------------------------------------------------
-# A.3 — widened FCM_VERSION bump-discipline.
+# FCM_VERSION bump-discipline.
 #
-# Compute a structural fingerprint over the bump-relevant fields per
-# plan §A 1052-1058 (keys, applies_to_tuples, FlowCapability / nested
-# fields, invariants, required_config, CHAIN_COMPATIBILITY,
-# FINAL_OUTPUT_ARTIFACT_BY_TYPE, ALLOWED_MCP_POLICIES). Excludes UI
-# prose (label, description, not_exposed_reason body) — rewording
-# permanent reasons or labels must not bump the version.
+# Compute a structural fingerprint over the bump-relevant fields: keys,
+# applies_to_tuples, FlowCapability / nested fields, invariants,
+# required_config, CHAIN_COMPATIBILITY, FINAL_OUTPUT_ARTIFACT_BY_TYPE,
+# ALLOWED_MCP_POLICIES. Excludes UI prose (label, description,
+# not_exposed_reason body) — rewording permanent reasons or labels must
+# not bump the version.
 #
-# Phase A epoch: Phase A tasks update the fingerprint without bumping
-# FCM_VERSION. Post-Phase-A: any fingerprint drift requires BOTH a
-# version bump AND a fingerprint update. The failure message spells
-# both paths out so future authors pick the right one.
+# Any fingerprint drift requires BOTH a version bump AND a fingerprint
+# update. The failure message spells both paths out so future authors
+# pick the right one.
 # ---------------------------------------------------------------------
 
 
@@ -886,9 +885,8 @@ def _capability_fingerprint(
 def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
     """Top-level fingerprint. The first three entries are the dataclass
     field-name tuples for `FlowCapability`, `InvariantSpec`, and
-    `ConfigRequirement` — adding/removing/renaming a field on any of the
-    three is a bump-relevant schema change per plan §A 1052-1058 ("added/
-    changed `FlowCapability` / nested-type fields")."""
+    `ConfigRequirement` — adding, removing, or renaming a field on any of
+    the three is a bump-relevant schema change."""
     return (
         tuple(sorted(FlowCapability.__dataclass_fields__.keys())),
         tuple(sorted(InvariantSpec.__dataclass_fields__.keys())),
@@ -1178,38 +1176,35 @@ _FCM_SURFACE_FINGERPRINT_V1: tuple[object, ...] = (
 
 
 def test_fcm_surface_fingerprint_is_stable() -> None:
-    """A.3 bump-discipline guard (plan §A 1052-1058).
+    """Bump-discipline guard.
 
-    The fingerprint captures bump-relevant fields: dataclass field
-    sets for `FlowCapability`, `InvariantSpec`, and `ConfigRequirement`
-    (so adding/removing a field on any of those shows up), capability
-    keys, exposure, channel, runtime_input_mode, applies_to_tuples,
-    `(invariant_id, invariant_description)` pairs, required_config
-    keys, CHAIN_COMPATIBILITY, FINAL_OUTPUT_ARTIFACT_BY_TYPE,
+    The fingerprint captures bump-relevant fields: dataclass field sets
+    for `FlowCapability`, `InvariantSpec`, and `ConfigRequirement` (so
+    adding/removing a field on any of those shows up), capability keys,
+    exposure, channel, runtime_input_mode, applies_to_tuples,
+    `(invariant_id, invariant_description)` pairs, required_config keys,
+    CHAIN_COMPATIBILITY, FINAL_OUTPUT_ARTIFACT_BY_TYPE,
     ALLOWED_MCP_POLICIES. It intentionally excludes `FlowCapability.label`,
     `FlowCapability.description`, and `not_exposed_reason` bodies so
     rewording UI copy does not force a bump.
 
-    If this test fails with an actual != expected diff:
-    - **Phase A (A.0–A.6)**: copy `actual` into
-      `_FCM_SURFACE_FINGERPRINT_V1` above. `FCM_VERSION` stays at 1;
-      no bump required (Phase A epoch rule).
-    - **Phase B and later**: bump `FCM_VERSION` to the next integer AND
-      update the fingerprint constant. Rename the constant to
-      `_FCM_SURFACE_FINGERPRINT_V<N>` so the history reads cleanly.
+    If this test fails with an actual != expected diff, bump
+    `FCM_VERSION` to the next integer AND update the fingerprint constant.
+    Rename the constant to `_FCM_SURFACE_FINGERPRINT_V<N>` so the history
+    reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
     assert actual == _FCM_SURFACE_FINGERPRINT_V1, (
-        "FCM surface fingerprint drifted. Update the expected constant "
-        "in this test (Phase A epoch: no version bump; Phase B+: bump "
-        f"FCM_VERSION to {FCM_VERSION + 1} too).\n\n"
+        "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
+        f"{FCM_VERSION + 1} and update the expected fingerprint constant "
+        "in this test.\n\n"
         f"Expected: {_FCM_SURFACE_FINGERPRINT_V1}\n\n"
         f"Actual:   {actual}"
     )
 
 
 # ---------------------------------------------------------------------
-# A.6a — FCM public API tests.
+# FCM public API tests.
 #
 # Four public fns: resolve_capability_for_tuple, validate_step_chain,
 # render_critic_invariants, coverage_report. Three public shapes:

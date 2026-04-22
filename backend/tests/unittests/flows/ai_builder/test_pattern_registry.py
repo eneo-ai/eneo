@@ -1,4 +1,4 @@
-"""Pattern Registry scaffold tests (Phase A.4).
+"""Pattern Registry tests.
 
 Covers: `Pattern` dataclass shape (structural planner-strategy fields
 only), registry immutability, version constant, exact seed ids,
@@ -8,7 +8,7 @@ Matches the `test_ai_builder_recipe_selector.py` idiom — plain test
 class, no fixtures beyond scoped helpers, direct imports.
 
 User-facing copy (labels, localized text, help prose) is explicitly NOT
-pinned here; that surface lives on Question Catalog (A.4b) and is never
+pinned here; that surface lives on the Question Catalog and is never
 reachable via `Pattern`.
 """
 
@@ -256,9 +256,9 @@ class TestNegativePatternContract:
 
 class TestQuestionTemplateIdReferences:
     def test_question_template_ids_are_strings(self) -> None:
-        """`question_template_ids` forward-references the A.4b Question
-        Catalog. A.4 pins only the tuple-of-strings shape; live
-        resolution is an A.5 CI test once Question Catalog lands."""
+        """`question_template_ids` forward-references the Question Catalog.
+        This test pins the tuple-of-strings shape; live resolution against
+        the catalog is asserted in `test_question_catalog.py`."""
         for pattern in PATTERN_REGISTRY.values():
             for qid in pattern.question_template_ids:
                 assert isinstance(qid, str), (

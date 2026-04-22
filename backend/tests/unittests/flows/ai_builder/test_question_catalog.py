@@ -1,4 +1,4 @@
-"""Question Catalog scaffold tests (Phase A.4b).
+"""Question Catalog tests.
 
 Covers: `QuestionOption` / `QuestionTemplate` dataclass shape (bilingual
 sv/en fields only), registry immutability, version constant, exact
@@ -8,7 +8,7 @@ presence, and Pattern Registry back-fill (every positive pattern's
 `question_template_ids` resolves in this catalog).
 
 The catalog is user-facing copy — no planner strategy, no FCM truth.
-That surface stays on Pattern Registry (A.4) and FCM (A.0-A.3).
+That surface stays on the Pattern Registry and the FCM.
 """
 
 from __future__ import annotations
@@ -389,8 +389,9 @@ class TestBilingualContract:
 
 class TestPatternRegistryBackfill:
     """Pattern Registry's `question_template_ids` field forward-references
-    this catalog. A.4 left those tuples empty; A.4b back-fills them so
-    A.5's 'dangling reference' CI test has real data to guard.
+    this catalog. The dangling-reference CI test below guards any
+    Pattern-Registry / Question-Catalog change that would leave a
+    reference unresolved.
     """
 
     def test_every_positive_pattern_has_question_template_ids(self) -> None:
@@ -398,8 +399,7 @@ class TestPatternRegistryBackfill:
             if pattern.polarity != "positive":
                 continue
             assert len(pattern.question_template_ids) >= 1, (
-                f"{pattern.id}: positive pattern must have >=1 "
-                "question_template_id after A.4b back-fill"
+                f"{pattern.id}: positive pattern must declare >=1 question_template_id"
             )
 
     def test_question_template_ids_are_an_order_preserving_unique_subset_of_slots(
@@ -407,8 +407,8 @@ class TestPatternRegistryBackfill:
     ) -> None:
         """Durable coupling: every question surfaced for a pattern must
         correspond to an architectural slot the pattern actually cares
-        about. A.4b's seed happens to set them equal, but the contract
-        is order-preserving unique subset — a future pattern may
+        about. The current seeds happen to set them equal, but the
+        contract is order-preserving unique subset — a future pattern may
         legitimately resolve a slot through inference (profile,
         deterministic signal) without surfacing the canonical question.
         The inverse — a `question_template_id` that doesn't map to any
@@ -439,17 +439,16 @@ class TestPatternRegistryBackfill:
             )
 
     def test_every_question_template_id_resolves_in_catalog(self) -> None:
-        """Rule 5 of Phase A.5 — dangling-reference CI guard.
+        """Dangling-reference CI guard.
 
         Every entry in any ``Pattern.question_template_ids`` tuple must
-        resolve to a live ``QUESTION_CATALOG`` row. The rule fires on
-        every CI run, not just A.4b back-fill validation: any future
-        Pattern Registry or Question Catalog change that introduces a
-        dangling reference must fail here before landing.
+        resolve to a live ``QUESTION_CATALOG`` row. Any future Pattern
+        Registry or Question Catalog change that introduces a dangling
+        reference must fail here before landing.
 
-        Rule 5 is a data-reference rule, not an import rule; hence it
-        lives with the Question Catalog data contract rather than with
-        the A.5b importlinter boundary tests.
+        This is a data-reference rule, not an import rule; it lives with
+        the Question Catalog data contract rather than with the
+        importlinter boundary tests.
         """
         for pattern in PATTERN_REGISTRY.values():
             for qid in pattern.question_template_ids:

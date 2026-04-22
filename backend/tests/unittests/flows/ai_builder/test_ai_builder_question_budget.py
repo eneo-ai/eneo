@@ -1,7 +1,7 @@
-"""P0.2 — question-budget helper.
+"""Question-budget helper.
 
-Plan §5 Phase 0: `has_explicit_step_plan → 1`, everything else → 3.
-Rich prompts must not receive FEWER questions than short prompts.
+`has_explicit_step_plan → 1`, everything else → 3. Rich prompts must not
+receive FEWER questions than short prompts.
 """
 
 from __future__ import annotations

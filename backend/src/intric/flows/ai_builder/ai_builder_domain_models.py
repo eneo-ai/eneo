@@ -324,8 +324,8 @@ class ConversationMessage(BaseModel):
     message_id: str = Field(
         default_factory=_new_message_id,
         description=(
-            "Stable id for this conversation turn. Used by Phase C evidence refs "
-            "which must survive conversation compaction (positional indices do not)."
+            "Stable id for this conversation turn. Used by evidence refs that "
+            "must survive conversation compaction (positional indices do not)."
         ),
     )
     role: str

@@ -1,8 +1,8 @@
-"""Canonical benchmark cases for the AI Builder baseline harness (P0.8).
+"""Canonical benchmark cases for the AI Builder baseline harness.
 
 Each case is a single-turn user prompt. The harness runs the deterministic
 discovery pipeline against each and records structural metrics. Coverage
-spans the archetypes listed in plan §5 Phase 0 P0.8.
+spans the documented archetypes (vague, rich, ambiguous, etc.).
 """
 
 from __future__ import annotations

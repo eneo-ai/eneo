@@ -1,30 +1,23 @@
 """Flow Capability Manifest (FCM) — engine truth about what is possible.
 
-A.0 scope: scaffold only. Declares the `FlowCapability` shape, seeds the
-registry with one entry per key in `INPUT_TYPE_POLICIES`, and pins
-`FCM_VERSION` to `1`. Rule absorption (chain compatibility, citation,
-transcription wizard, etc.) lands in A.1; the public API
+Declares the `FlowCapability` shape, seeds one entry per key in
+`INPUT_TYPE_POLICIES`, absorbs chain-compatibility / citation /
+transcription-wizard rules, and exposes the public API
 (`resolve_capability_for_tuple`, `validate_step_chain`,
-`render_critic_invariants`, `coverage_report`) lands in A.6.
+`render_critic_invariants`, `coverage_report`).
 
 Engine-truth only: no Pattern Registry, no AI Builder, no planner prose.
-Planner-facing copy and strategy live on the Pattern Registry (A.4) and
-Question Catalog (A.4b).
+Planner-facing copy and strategy live on the Pattern Registry and
+Question Catalog.
 
 Versioning discipline: `FCM_VERSION` is the monotonic integer stamped on
-persisted plans, planning-state snapshots, and digests starting in Phase
-C. Phase A (A.0–A.6) is an unpublished epoch — no consumer reads the
-version yet, so capability-surface changes during Phase A do not bump
-`FCM_VERSION`. Phase A ends with `FCM_VERSION=1`; the first bump lands
-when a later consumer begins persisting the version. After that, any
+persisted plans, planning-state snapshots, and digests. Any
 capability-surface change — new registry key, added/changed
 `applies_to_tuples`, added/changed `FlowCapability` / nested-type field,
 or altered `invariants` content — bumps the version and keeps any retired
-capability resolvable with a deprecation reason for one bump cycle.
-
-A.3's bump-discipline CI test must cover this full surface; the plan's
-original narrow spec (keys + `applies_to_tuples`) misses field additions
-and invariant-content changes. A.3 widens it.
+capability resolvable with a deprecation reason for one bump cycle. The
+bump-discipline CI test covers this full surface, not just keys and
+`applies_to_tuples`.
 """
 
 from __future__ import annotations
@@ -62,12 +55,7 @@ DocumentGenerationMode = Literal["generated", "template_fill"]
 
 @dataclass(frozen=True)
 class ConfigRequirement:
-    """Named config key this capability requires at runtime.
-
-    Minimum viable shape for A.0. A.1 absorbs concrete requirements from
-    `type_policies.py`, `ai_builder_step_capabilities.py`, and the
-    transcription / template-fill wizards.
-    """
+    """Named config key this capability requires at runtime."""
 
     key: str
 
@@ -76,9 +64,6 @@ class ConfigRequirement:
 class InvariantSpec:
     """Capability-semantic invariant — must hold whenever the capability is
     in use.
-
-    Minimum viable shape for A.0. A.1 adds concrete invariants lifted from
-    `flow_validators.py:66` and `ai_builder_validation_flow_parity.py:55`.
     """
 
     id: str
@@ -89,10 +74,9 @@ class InvariantSpec:
 class FlowCapability:
     """Engine-truth capability entry.
 
-    `applies_to_tuples`, `required_config`, and `invariants` are empty
-    tuples in A.0 — the scaffold carries only the shape and the exposure
-    decision. A.1 populates them by absorbing the scattered capability
-    rules listed in the plan's FCM scope section.
+    `applies_to_tuples`, `required_config`, and `invariants` declare the
+    tuple legality, required config keys, and capability-semantic invariants
+    that this capability carries.
     """
 
     id: CapabilityId
@@ -136,11 +120,10 @@ _UNSUPPORTED_REASONS: dict[str, str] = {
 
 # Mirrors `BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE` in
 # `ai_builder/ai_builder_step_capabilities.py`. Engine-truth cannot import
-# from `ai_builder` (P0.7 boundary), so the mapping is duplicated here and
-# held in lockstep by a parity test until Phase G deletes the ai_builder
-# copy. `image` and `any` are intentionally absent — the runtime has no
-# input_mode for those keys, and a capability without a runtime_input_mode
-# simply carries `None`.
+# from `ai_builder`, so the mapping is duplicated here and held in lockstep
+# by a parity test. `image` and `any` are intentionally absent — the runtime
+# has no input_mode for those keys, and a capability without a
+# runtime_input_mode simply carries `None`.
 _RUNTIME_INPUT_MODE_BY_KEY: dict[str, RuntimeInputMode] = {
     "document": "documents",
     "file": "documents",
@@ -383,8 +366,7 @@ def _seed_output_mode_capability(mode: FlowOutputMode) -> FlowCapability:
 # `set(FLOW_STEP_MCP_POLICY_VALUES)` — i.e. every enum value). The FCM
 # copy is typed with the enum rather than strings so consumers can do
 # enum-identity checks without re-parsing string values. Kept in lockstep
-# with `FLOW_STEP_MCP_POLICY_VALUES` by a parity test until Phase G
-# deletes the legacy whitelist.
+# with `FLOW_STEP_MCP_POLICY_VALUES` by a parity test.
 ALLOWED_MCP_POLICIES: frozenset[FlowMcpPolicy] = frozenset(FlowMcpPolicy)
 
 
@@ -491,12 +473,11 @@ CAPABILITY_REGISTRY: Mapping[CapabilityId, FlowCapability] = MappingProxyType(
 # pairs are legal when a step is fed by `input_source='previous_step'`. Only
 # `previous_step` consults this table — `all_previous_steps` has its own rule
 # path in `step_chain_rules.py` (the JSON-over-concatenated-text prohibition)
-# and does not participate in type coercion. A.1a mirrors
-# `COMPATIBLE_TYPE_COERCIONS` from `step_chain_rules.py` into a typed FCM
-# constant so consumers can migrate off the legacy string-tuple table without
-# losing the rule. The legacy table stays in place until Phase G deletes it;
-# a parity test in `test_flow_capability_manifest.py` enforces lockstep until
-# then.
+# and does not participate in type coercion. Mirrors
+# `COMPATIBLE_TYPE_COERCIONS` from `step_chain_rules.py` as a typed FCM
+# constant so consumers can read the rule without parsing the legacy
+# string-tuple table. A parity test in `test_flow_capability_manifest.py`
+# enforces lockstep.
 CHAIN_COMPATIBILITY: frozenset[tuple[FlowOutputType, FlowInputType]] = frozenset(
     {
         (FlowOutputType.TEXT, FlowInputType.TEXT),
@@ -516,8 +497,8 @@ CHAIN_COMPATIBILITY: frozenset[tuple[FlowOutputType, FlowInputType]] = frozenset
 # Engine-truth mapping from output type to the artifact the runtime produces.
 # Mirrors `BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE` in
 # `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a parity
-# test until Phase G deletes the ai_builder copy. Covers every
-# `FlowOutputType` — there is no runtime output type without an artifact.
+# test. Covers every `FlowOutputType` — there is no runtime output type
+# without an artifact.
 FINAL_OUTPUT_ARTIFACT_BY_TYPE: Mapping[FlowOutputType, OutputArtifact] = (
     MappingProxyType(
         {
@@ -541,7 +522,7 @@ def supports_step_io_tuple(
 
     Mirrors `supports_step_io_mode_combo` in
     `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a
-    parity test until Phase G deletes the ai_builder copy. Rules:
+    parity test. Rules:
 
     - `TEMPLATE_FILL` is legal only when `output_type` is `DOCX`.
     - `TRANSCRIBE_ONLY` is legal only for `AUDIO` input → `TEXT` output.
@@ -570,7 +551,7 @@ def resolve_document_generation_mode(
 
     Mirrors `resolve_document_generation_mode` in
     `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a
-    parity test until Phase G deletes the ai_builder copy.
+    parity test.
     """
     if output_type is FlowOutputType.DOCX:
         return (
@@ -593,7 +574,7 @@ def is_citation_capable_step(
 
     Mirrors `is_citation_capable_step` in
     `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a
-    parity test until Phase G deletes the ai_builder copy.
+    parity test.
 
     Capability holds iff:
     - `output_config` is a dict that requests the
@@ -621,7 +602,8 @@ def is_citation_capable_step(
 
 
 # ---------------------------------------------------------------------
-# A.6 public API.
+# Public API — capability resolution, chain validation, invariant render,
+# coverage report.
 # ---------------------------------------------------------------------
 
 
@@ -967,8 +949,8 @@ def render_critic_invariants() -> tuple[tuple[CapabilityId, InvariantSpec], ...]
 def coverage_report() -> CoverageReport:
     """Walk the cartesian product of the four enums and summarize coverage.
 
-    Used by A.3's cell-classification test and by dev-time diagnostics.
-    Every cell lands in exactly one of four buckets; a cell whose owning
+    Used by the cell-classification test and by dev-time diagnostics. Every
+    cell lands in exactly one of four buckets; a cell whose owning
     `not_exposed_reason` contains the literal ``"temporary"`` surfaces in
     ``temporary_reasons`` and flips ``has_drift`` to ``True``.
     """

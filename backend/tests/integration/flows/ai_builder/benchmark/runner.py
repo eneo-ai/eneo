@@ -1,20 +1,21 @@
-"""AI Builder baseline benchmark runner (P0.8).
+"""AI Builder baseline benchmark runner.
 
 Executes the deterministic pre-LLM discovery pipeline against every canonical
-case and produces a structural snapshot. The committed ``baseline.json`` is
-**frozen at Phase 0**: Phase A-G landings are expected to move the numbers, so
+case and produces a structural snapshot. The committed ``baseline.json`` is a
+frozen reference: architectural changes are expected to move the numbers, so
 per-PR tests validate schema, determinism, and coverage, and the drift is
 surfaced by an on-demand / nightly diff against the frozen reference.
 
 Scope
 -----
 
-Phase 0 covers deterministic discovery metrics only — question count and
+This runner covers deterministic discovery metrics only — question count and
 budget, over/under-questioning flag, planner pattern signals, selected
 discovery question IDs, blocking-issue count, MVS and confirmation state.
 LLM-dependent fields (plan depth, repair-loop rate, architecture-chain
 correctness, shallow-two-step incidence) are reserved as ``None`` here and
-populated by the Phase F golden-fixture harness without a schema break.
+populated later by a golden-fixture evaluation harness without a schema
+break.
 
 Usage
 -----
@@ -27,8 +28,8 @@ From ``/workspace/backend`` inside the devcontainer::
     # Diff current measurements against the frozen baseline
     uv run python -m tests.integration.flows.ai_builder.benchmark.runner --diff
 
-    # Re-freeze the baseline (explicit; only at a phase boundary the team
-    # has agreed to re-baseline against, e.g. after Phase G cleanup)
+    # Re-freeze the baseline (explicit; only at deliberate re-baseline
+    # points the team has agreed to)
     uv run python -m tests.integration.flows.ai_builder.benchmark.runner \\
         --write-baseline
 """
@@ -65,7 +66,7 @@ PATTERN_SIGNAL_KEYS: tuple[str, ...] = (
     "rich_document_workflow",
 )
 
-PHASE_F_METRIC_KEYS: tuple[str, ...] = (
+DEFERRED_EVAL_METRIC_KEYS: tuple[str, ...] = (
     "plan_depth",
     "repair_loop_rate",
     "architecture_chain_correctness",
@@ -114,7 +115,7 @@ def compute_case_metrics(case: BenchmarkCase) -> dict[str, Any]:
         "selected_question_ids": selected,
         "mvs_met": analysis.mvs_met,
         "ready_for_confirmation": analysis.ready_for_confirmation,
-        # Phase F slots — filled by golden-fixture replay later.
+        # Deferred eval slots — filled by golden-fixture replay later.
         "plan_depth": None,
         "repair_loop_rate": None,
         "architecture_chain_correctness": None,
@@ -139,9 +140,10 @@ def build_current_document() -> dict[str, Any]:
         "note": (
             "Deterministic pre-LLM measurements only. LLM-dependent fields "
             "(plan_depth, repair_loop_rate, architecture_chain_correctness, "
-            "shallow_two_step_incidence) are populated in Phase F. Baseline "
-            "is frozen at Phase 0; diffs against it are expected as Phase "
-            "A-G lands."
+            "shallow_two_step_incidence) are populated by a later "
+            "golden-fixture evaluation harness. The committed baseline is a "
+            "frozen reference; diffs against it are expected as the "
+            "architecture evolves."
         ),
         "cases_sha256": _compute_cases_sha256(cases),
         "cases": cases,
@@ -183,7 +185,7 @@ def diff_against_baseline() -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="AI Builder P0.8 benchmark runner.",
+        description="AI Builder baseline benchmark runner.",
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(

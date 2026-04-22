@@ -4,7 +4,7 @@ Covers:
 - R1: Vague Swedish triggers free discovery (MVS not met)
 - R9: Free discovery turn limit
 - R10: Mixed architecture → clarification
-- A.0: Question level taxonomy correctness
+- Question level taxonomy correctness
 """
 
 from __future__ import annotations
@@ -15,9 +15,8 @@ from intric.flows.ai_builder.ai_builder_discovery import (
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 
-
 # ---------------------------------------------------------------------------
-# A.0: Question taxonomy — every issue has the correct question_level
+# Question taxonomy — every issue has the correct question_level
 # ---------------------------------------------------------------------------
 
 _EXPECTED_QUESTION_LEVELS: dict[str, str] = {
@@ -90,7 +89,7 @@ class TestQuestionTaxonomy:
 
 
 # ---------------------------------------------------------------------------
-# A.1: MVS gate — Minimum Viable Specification
+# MVS gate — Minimum Viable Specification
 # ---------------------------------------------------------------------------
 
 
@@ -243,7 +242,9 @@ class TestQuestionBudget:
             f"{[i.issue_id for i in blocking]}"
         )
 
-    def test_kommunanalys_prompt_uses_assumptions_for_scope_and_document_shape(self) -> None:
+    def test_kommunanalys_prompt_uses_assumptions_for_scope_and_document_shape(
+        self,
+    ) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -267,8 +268,12 @@ class TestQuestionBudget:
         assert "document_material_scope" not in blocking_ids
         assert "final_output_mode" not in blocking_ids
         assert len(blocking_ids) <= 2
-        assert any("ett ärende åt gången" in assumption for assumption in analysis.assumptions)
-        assert any("ett huvuddokument" in assumption for assumption in analysis.assumptions)
+        assert any(
+            "ett ärende åt gången" in assumption for assumption in analysis.assumptions
+        )
+        assert any(
+            "ett huvuddokument" in assumption for assumption in analysis.assumptions
+        )
 
     def test_vague_prompt_allows_high_value_questions(self) -> None:
         """A short vague prompt should still allow high_value questions."""

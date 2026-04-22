@@ -1,9 +1,9 @@
 """AI Builder Pattern Registry — planner-strategy archetypes.
 
-Phase A.4 scaffold. A `Pattern` is a structural, planner-facing
-archetype: a shape the planner may propose or avoid. It is **not**
-engine truth (that's the FCM) and it carries **no user-facing copy**
-(that's Question Catalog, Phase A.4b).
+A `Pattern` is a structural, planner-facing archetype: a shape the
+planner may propose or avoid. It is **not** engine truth (that's the
+FCM) and it carries **no user-facing copy** (that's the Question
+Catalog).
 
 Each `Pattern` captures:
 
@@ -14,8 +14,8 @@ Each `Pattern` captures:
 - `required_architectural_slots` — slot names from
   `ai_builder_slot_vocabulary.py` that this archetype's discovery
   must resolve before the planner can commit to it.
-- `question_template_ids` — forward-references the Question Catalog
-  (A.4b). Resolution is pinned by Rule 5 of Phase A.5 — see
+- `question_template_ids` — forward-references the Question Catalog.
+  Resolution is pinned by
   `test_every_question_template_id_resolves_in_catalog` in
   `tests/unittests/flows/ai_builder/test_question_catalog.py`; any
   dangling reference fails CI.
@@ -23,17 +23,9 @@ Each `Pattern` captures:
   `"negative"` archetypes are anti-patterns grounded in FCM truth so
   the knowledge pack can tell the planner "don't propose this shape".
 
-`PATTERN_REGISTRY_VERSION` starts at `1`. Phase A is an unpublished
-epoch — the version is not persisted by any consumer yet. Phase B+
-publishes the version; after that, any pattern-surface change bumps
-it by one alongside a fingerprint update (analogous to A.3's FCM
-bump-discipline, deferred to A.6 for the public API).
-
-Out of scope for A.4:
-- Public API (`find_pattern_candidates`, `render_knowledge_pack`) → A.6
-- `importlinter` rule 3 (pattern_registry imports FCM + Question
-  Catalog only) → A.5
-- Consumer rewire (`recipe_selector.py`, `knowledge_pack_create.py`) → Phase B
+`PATTERN_REGISTRY_VERSION` is the monotonic integer persisted alongside
+plans and digests. Any pattern-surface change bumps it by one alongside
+a fingerprint update, mirroring the FCM bump-discipline policy.
 """
 
 from __future__ import annotations
@@ -57,8 +49,8 @@ class Pattern:
     mutated after construction.
 
     Fields are structural only. No labels, descriptions, help text, or
-    localized copy — those belong to the Question Catalog (A.4b) and
-    product surfaces that render patterns to users.
+    localized copy — those belong to the Question Catalog and product
+    surfaces that render patterns to users.
     """
 
     id: str
