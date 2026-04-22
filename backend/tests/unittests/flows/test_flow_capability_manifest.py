@@ -35,19 +35,31 @@ from intric.flows.enums import (
     FlowOutputType,
 )
 from intric.flows.flow_capability_manifest import (
+    _TEMPORARY_REASON_MARKER,
     ALLOWED_MCP_POLICIES,
     CAPABILITY_REGISTRY,
     CHAIN_COMPATIBILITY,
     FCM_VERSION,
     FINAL_OUTPUT_ARTIFACT_BY_TYPE,
+    ChainStep,
+    ChainViolation,
     ConfigRequirement,
+    CoverageReport,
     FlowCapability,
     InvariantSpec,
+    _classify_cell,
+    coverage_report,
     is_citation_capable_step,
+    render_critic_invariants,
+    resolve_capability_for_tuple,
     resolve_document_generation_mode,
     supports_step_io_tuple,
+    validate_step_chain,
 )
-from intric.flows.step_chain_rules import COMPATIBLE_TYPE_COERCIONS
+from intric.flows.step_chain_rules import (
+    COMPATIBLE_TYPE_COERCIONS,
+    find_first_step_chain_violation,
+)
 from intric.flows.type_policies import INPUT_TYPE_POLICIES
 
 
@@ -761,9 +773,6 @@ def test_fcm_module_has_no_ai_builder_imports() -> None:
 # ---------------------------------------------------------------------
 
 
-_TEMPORARY_REASON_MARKER = "temporary"
-
-
 def _enumerate_enum_tuples() -> list[
     tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
 ]:
@@ -774,97 +783,6 @@ def _enumerate_enum_tuples() -> list[
         for ot in FlowOutputType
         for om in FlowOutputMode
     ]
-
-
-# Source-type legality rules mirrored from `step_chain_rules.py` and
-# `flow_validators_http.py`. Single-cell in scope — step-order-dependent
-# rules (e.g. step 1 cannot use `previous_step`) belong to a flow-level
-# validator, not a 4-tuple classifier. `previous_step` chain-compatibility
-# also depends on the prior step's `output_type` and cannot be answered
-# from a single cell; that rule is enforced elsewhere and CHAIN_COMPATIBILITY
-# is already guarded by its own parity test.
-_HTTP_INPUT_SOURCES: frozenset[FlowInputSource] = frozenset(
-    {FlowInputSource.HTTP_GET, FlowInputSource.HTTP_POST}
-)
-_FILE_INPUT_TYPES_BANNED_OVER_HTTP: frozenset[FlowInputType] = frozenset(
-    {
-        FlowInputType.DOCUMENT,
-        FlowInputType.FILE,
-        FlowInputType.IMAGE,
-        FlowInputType.AUDIO,
-    }
-)
-_FLOW_INPUT_ONLY_TYPES: frozenset[FlowInputType] = frozenset(
-    {FlowInputType.DOCUMENT, FlowInputType.AUDIO, FlowInputType.FILE}
-)
-
-
-def _source_type_illegality(
-    input_source: FlowInputSource, input_type: FlowInputType
-) -> str | None:
-    """Return a diagnostic string when `(input_source, input_type)` is
-    illegal, else `None`. Mirrors the three single-cell rules in the
-    flows engine; full set lives in `step_chain_rules.py` and
-    `flow_validators_http.py`."""
-    if (
-        input_source in _HTTP_INPUT_SOURCES
-        and input_type in _FILE_INPUT_TYPES_BANNED_OVER_HTTP
-    ):
-        return (
-            f"input_type {input_type.value!r} is not supported with "
-            f"input_source {input_source.value!r} "
-            "(flow_validators_http.validate_http_input_config)."
-        )
-    if (
-        input_type in _FLOW_INPUT_ONLY_TYPES
-        and input_source is not FlowInputSource.FLOW_INPUT
-    ):
-        return (
-            f"input_type {input_type.value!r} only accepts input_source "
-            "'flow_input' (step_chain_rules.find_first_step_chain_violation)."
-        )
-    if (
-        input_type is FlowInputType.JSON
-        and input_source is FlowInputSource.ALL_PREVIOUS_STEPS
-    ):
-        return (
-            "input_type 'json' is incompatible with input_source "
-            "'all_previous_steps' — concatenated text is not valid JSON."
-        )
-    return None
-
-
-def _classify_cell(
-    input_source: FlowInputSource,
-    input_type: FlowInputType,
-    output_type: FlowOutputType,
-    output_mode: FlowOutputMode,
-) -> tuple[str, str | None]:
-    """Classify an FCM surface cell.
-
-    Returns ``(classification, diagnostic_or_reason)``. Classification is
-    one of: ``"illegal_io_triple"``, ``"illegal_source_type_pair"``,
-    ``"not_exposed"``, ``"exposed"``. Every legal path terminates in one
-    of those four; there is no "unclassified" fallthrough.
-
-    The classifier is source-aware: `input_source` participates in the
-    source-type legality check mirrored from `step_chain_rules.py` and
-    `flow_validators_http.py` (three single-cell rules; step-order- and
-    chain-compatibility-dependent rules live elsewhere)."""
-    if not supports_step_io_tuple(
-        input_type=input_type, output_type=output_type, output_mode=output_mode
-    ):
-        return "illegal_io_triple", None
-    source_type_issue = _source_type_illegality(input_source, input_type)
-    if source_type_issue is not None:
-        return "illegal_source_type_pair", source_type_issue
-    input_cap = CAPABILITY_REGISTRY[f"input_{input_type.value}"]
-    if input_cap.exposure == "not_exposed":
-        return "not_exposed", input_cap.not_exposed_reason
-    mode_cap = CAPABILITY_REGISTRY[f"output_mode_{output_mode.value}"]
-    if mode_cap.exposure == "not_exposed":
-        return "not_exposed", mode_cap.not_exposed_reason
-    return "exposed", None
 
 
 def test_every_enum_tuple_is_classified() -> None:
@@ -1288,3 +1206,504 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
         f"Expected: {_FCM_SURFACE_FINGERPRINT_V1}\n\n"
         f"Actual:   {actual}"
     )
+
+
+# ---------------------------------------------------------------------
+# A.6a — FCM public API tests.
+#
+# Four public fns: resolve_capability_for_tuple, validate_step_chain,
+# render_critic_invariants, coverage_report. Three public shapes:
+# ChainViolation, CoverageReport, ChainStep (Protocol).
+# ---------------------------------------------------------------------
+
+
+def _chain_step(
+    *,
+    step_order: int,
+    input_source: FlowInputSource,
+    input_type: FlowInputType,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode = FlowOutputMode.PASS_THROUGH,
+) -> ChainStep:
+    """Lightweight ChainStep fixture for validate_step_chain tests."""
+    from dataclasses import dataclass
+
+    @dataclass(frozen=True)
+    class _Step:
+        step_order: int
+        input_source: FlowInputSource
+        input_type: FlowInputType
+        output_type: FlowOutputType
+        output_mode: FlowOutputMode
+
+    return _Step(
+        step_order=step_order,
+        input_source=input_source,
+        input_type=input_type,
+        output_type=output_type,
+        output_mode=output_mode,
+    )
+
+
+class TestResolveCapabilityForTuple:
+    """Tuple-to-capability lookup — returns the owning (input, output_mode)
+    capability pair for legal cells; None otherwise."""
+
+    def test_legal_exposed_tuple_returns_owning_caps(self) -> None:
+        caps = resolve_capability_for_tuple(
+            input_source=FlowInputSource.FLOW_INPUT,
+            input_type=FlowInputType.TEXT,
+            output_type=FlowOutputType.TEXT,
+            output_mode=FlowOutputMode.PASS_THROUGH,
+        )
+        assert caps is not None
+        assert len(caps) == 2
+        ids = [cap.id for cap in caps]
+        assert ids == ["input_text", "output_mode_pass_through"]
+
+    def test_illegal_io_triple_returns_none(self) -> None:
+        # TEMPLATE_FILL is only legal on DOCX output.
+        assert (
+            resolve_capability_for_tuple(
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+                output_mode=FlowOutputMode.TEMPLATE_FILL,
+            )
+            is None
+        )
+
+    def test_illegal_source_type_pair_returns_none(self) -> None:
+        # DOCUMENT input requires FLOW_INPUT source.
+        assert (
+            resolve_capability_for_tuple(
+                input_source=FlowInputSource.PREVIOUS_STEP,
+                input_type=FlowInputType.DOCUMENT,
+                output_type=FlowOutputType.TEXT,
+                output_mode=FlowOutputMode.PASS_THROUGH,
+            )
+            is None
+        )
+
+    def test_not_exposed_input_returns_none(self) -> None:
+        # IMAGE input is `not_exposed` — builder must not surface a capability.
+        assert (
+            resolve_capability_for_tuple(
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.IMAGE,
+                output_type=FlowOutputType.TEXT,
+                output_mode=FlowOutputMode.PASS_THROUGH,
+            )
+            is None
+        )
+
+    def test_http_output_mode_legal_tuple_returns_caps(self) -> None:
+        caps = resolve_capability_for_tuple(
+            input_source=FlowInputSource.FLOW_INPUT,
+            input_type=FlowInputType.TEXT,
+            output_type=FlowOutputType.TEXT,
+            output_mode=FlowOutputMode.HTTP_POST,
+        )
+        assert caps is not None
+        ids = [cap.id for cap in caps]
+        assert ids == ["input_text", "output_mode_http_post"]
+
+    def test_transcribe_only_legal_tuple_returns_caps(self) -> None:
+        caps = resolve_capability_for_tuple(
+            input_source=FlowInputSource.FLOW_INPUT,
+            input_type=FlowInputType.AUDIO,
+            output_type=FlowOutputType.TEXT,
+            output_mode=FlowOutputMode.TRANSCRIBE_ONLY,
+        )
+        assert caps is not None
+        ids = [cap.id for cap in caps]
+        assert ids == ["input_audio", "output_mode_transcribe_only"]
+
+    def test_template_fill_docx_legal_tuple_returns_caps(self) -> None:
+        caps = resolve_capability_for_tuple(
+            input_source=FlowInputSource.FLOW_INPUT,
+            input_type=FlowInputType.TEXT,
+            output_type=FlowOutputType.DOCX,
+            output_mode=FlowOutputMode.TEMPLATE_FILL,
+        )
+        assert caps is not None
+        ids = [cap.id for cap in caps]
+        assert ids == ["input_text", "output_mode_template_fill"]
+
+
+class TestValidateStepChain:
+    """Multi-step chain validator — returns typed ChainViolation(s); empty
+    tuple on a valid chain. Mirrors every legacy rule in
+    `step_chain_rules.find_first_step_chain_violation` with enum types."""
+
+    def test_empty_chain_returns_no_violations(self) -> None:
+        assert validate_step_chain([]) == ()
+
+    def test_valid_single_flow_input_step(self) -> None:
+        steps = [
+            _chain_step(
+                step_order=1,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+        ]
+        assert validate_step_chain(steps) == ()
+
+    def test_valid_two_step_chain(self) -> None:
+        steps = [
+            _chain_step(
+                step_order=1,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+            _chain_step(
+                step_order=2,
+                input_source=FlowInputSource.PREVIOUS_STEP,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.JSON,
+            ),
+        ]
+        assert validate_step_chain(steps) == ()
+
+    def test_multiple_flow_input_steps_violation(self) -> None:
+        steps = [
+            _chain_step(
+                step_order=1,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+            _chain_step(
+                step_order=2,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+        ]
+        violations = validate_step_chain(steps)
+        assert any(v.code == "typed_io_multiple_flow_input_steps" for v in violations)
+
+    def test_three_flow_input_steps_report_every_extra(self) -> None:
+        """Three steps using `flow_input` — the rule reports step 2 AND
+        step 3, not just the first extra. Guards against whack-a-mole UX
+        where only one offender surfaces at a time."""
+        steps = [
+            _chain_step(
+                step_order=1,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+            _chain_step(
+                step_order=2,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+            _chain_step(
+                step_order=3,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+        ]
+        violations = validate_step_chain(steps)
+        multi_extras = [
+            v for v in violations if v.code == "typed_io_multiple_flow_input_steps"
+        ]
+        assert {v.step_order for v in multi_extras} == {2, 3}
+
+    def test_flow_input_not_first_position_violation(self) -> None:
+        steps = [
+            _chain_step(
+                step_order=1,
+                input_source=FlowInputSource.PREVIOUS_STEP,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+            _chain_step(
+                step_order=2,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+        ]
+        violations = validate_step_chain(steps)
+        assert any(v.code == "typed_io_flow_input_position_invalid" for v in violations)
+
+    def test_step_one_previous_step_source_violation(self) -> None:
+        steps = [
+            _chain_step(
+                step_order=1,
+                input_source=FlowInputSource.PREVIOUS_STEP,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+        ]
+        violations = validate_step_chain(steps)
+        assert any(
+            v.code == "typed_io_invalid_input_source_position" for v in violations
+        )
+
+    def test_document_input_requires_flow_input_source(self) -> None:
+        steps = [
+            _chain_step(
+                step_order=1,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+            _chain_step(
+                step_order=2,
+                input_source=FlowInputSource.PREVIOUS_STEP,
+                input_type=FlowInputType.DOCUMENT,
+                output_type=FlowOutputType.TEXT,
+            ),
+        ]
+        violations = validate_step_chain(steps)
+        assert any(v.code == "typed_io_document_source_unsupported" for v in violations)
+
+    def test_json_incompatible_with_all_previous_steps(self) -> None:
+        steps = [
+            _chain_step(
+                step_order=1,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.JSON,
+            ),
+            _chain_step(
+                step_order=2,
+                input_source=FlowInputSource.ALL_PREVIOUS_STEPS,
+                input_type=FlowInputType.JSON,
+                output_type=FlowOutputType.TEXT,
+            ),
+        ]
+        violations = validate_step_chain(steps)
+        assert any(
+            v.code == "typed_io_invalid_input_source_combination" for v in violations
+        )
+
+    def test_incompatible_type_chain_violation(self) -> None:
+        # PDF → JSON is not in CHAIN_COMPATIBILITY.
+        steps = [
+            _chain_step(
+                step_order=1,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.DOCUMENT,
+                output_type=FlowOutputType.PDF,
+            ),
+            _chain_step(
+                step_order=2,
+                input_source=FlowInputSource.PREVIOUS_STEP,
+                input_type=FlowInputType.JSON,
+                output_type=FlowOutputType.TEXT,
+            ),
+        ]
+        violations = validate_step_chain(steps)
+        assert any(v.code == "typed_io_incompatible_type_chain" for v in violations)
+
+    def test_missing_previous_step_violation(self) -> None:
+        steps = [
+            _chain_step(
+                step_order=1,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+            _chain_step(
+                step_order=3,
+                input_source=FlowInputSource.PREVIOUS_STEP,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+        ]
+        violations = validate_step_chain(steps)
+        assert any(v.code == "typed_io_missing_previous_step" for v in violations)
+
+    def test_returns_all_violations_not_first_only(self) -> None:
+        """Two independent violations — validate_step_chain surfaces both
+        (diverges from legacy's first-violation-only return)."""
+        steps = [
+            _chain_step(
+                step_order=1,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+            _chain_step(
+                step_order=2,
+                input_source=FlowInputSource.FLOW_INPUT,
+                input_type=FlowInputType.TEXT,
+                output_type=FlowOutputType.TEXT,
+            ),
+            _chain_step(
+                step_order=3,
+                input_source=FlowInputSource.PREVIOUS_STEP,
+                input_type=FlowInputType.DOCUMENT,
+                output_type=FlowOutputType.TEXT,
+            ),
+        ]
+        violations = validate_step_chain(steps)
+        codes = {v.code for v in violations}
+        assert "typed_io_multiple_flow_input_steps" in codes
+        assert "typed_io_document_source_unsupported" in codes
+
+    def test_parity_with_legacy_first_violation(self) -> None:
+        """Every cell that legacy flags must also appear in FCM's violations
+        (converted to enum types). FCM may surface extra violations after the
+        first; legacy only returns one."""
+        scenarios = [
+            [
+                _chain_step(
+                    step_order=1,
+                    input_source=FlowInputSource.FLOW_INPUT,
+                    input_type=FlowInputType.TEXT,
+                    output_type=FlowOutputType.TEXT,
+                ),
+                _chain_step(
+                    step_order=2,
+                    input_source=FlowInputSource.PREVIOUS_STEP,
+                    input_type=FlowInputType.DOCUMENT,
+                    output_type=FlowOutputType.TEXT,
+                ),
+            ],
+            [
+                _chain_step(
+                    step_order=1,
+                    input_source=FlowInputSource.PREVIOUS_STEP,
+                    input_type=FlowInputType.TEXT,
+                    output_type=FlowOutputType.TEXT,
+                ),
+            ],
+        ]
+        for steps in scenarios:
+            legacy_shapes = [
+                type(
+                    "LegacyShape",
+                    (),
+                    {
+                        "step_order": step.step_order,
+                        "input_source": step.input_source.value,
+                        "input_type": step.input_type.value,
+                        "output_type": step.output_type.value,
+                    },
+                )()
+                for step in steps
+            ]
+            legacy_violation = find_first_step_chain_violation(legacy_shapes)
+            fcm_violations = validate_step_chain(steps)
+            if legacy_violation is None:
+                assert fcm_violations == ()
+            else:
+                fcm_codes = {v.code for v in fcm_violations}
+                assert legacy_violation.code in fcm_codes, (
+                    f"legacy code {legacy_violation.code} missing from FCM "
+                    f"violations {fcm_codes}"
+                )
+
+    def test_chain_violation_is_frozen_dataclass(self) -> None:
+        violation = ChainViolation(step_order=1, message="x", code="typed_io_test")
+        with pytest.raises(FrozenInstanceError):
+            violation.step_order = 2  # type: ignore[misc]
+
+
+class TestRenderCriticInvariants:
+    """Flat view over all capability-owned invariants for the critic."""
+
+    def test_returns_tuple_of_capability_invariant_pairs(self) -> None:
+        result = render_critic_invariants()
+        assert isinstance(result, tuple)
+        assert all(
+            isinstance(entry, tuple)
+            and len(entry) == 2
+            and isinstance(entry[0], str)
+            and isinstance(entry[1], InvariantSpec)
+            for entry in result
+        )
+
+    def test_includes_every_registry_invariant(self) -> None:
+        result = render_critic_invariants()
+        expected_pairs: list[tuple[str, InvariantSpec]] = []
+        for cap_id, cap in CAPABILITY_REGISTRY.items():
+            for inv in cap.invariants:
+                expected_pairs.append((cap_id, inv))
+        assert sorted(result, key=lambda e: (e[0], e[1].id)) == sorted(
+            expected_pairs, key=lambda e: (e[0], e[1].id)
+        )
+
+    def test_stable_deterministic_order(self) -> None:
+        """Two calls must return the same order. Order is
+        `(capability_id, invariant.id)` ascending."""
+        first = render_critic_invariants()
+        second = render_critic_invariants()
+        assert first == second
+
+    def test_order_is_by_capability_then_invariant_id(self) -> None:
+        result = render_critic_invariants()
+        expected_pairs: list[tuple[str, InvariantSpec]] = []
+        for cap_id in sorted(CAPABILITY_REGISTRY):
+            cap = CAPABILITY_REGISTRY[cap_id]
+            for inv in sorted(cap.invariants, key=lambda i: i.id):
+                expected_pairs.append((cap_id, inv))
+        assert list(result) == expected_pairs
+
+    def test_preserves_ownership_for_colliding_invariant_ids(self) -> None:
+        """Some invariant IDs (e.g. `input_contract_forbidden`) are emitted
+        by multiple capabilities. The flat view must keep every owner-copy
+        so the critic can disambiguate."""
+        result = render_critic_invariants()
+        by_id: dict[str, list[str]] = {}
+        for cap_id, inv in result:
+            by_id.setdefault(inv.id, []).append(cap_id)
+        # At least one invariant ID is emitted by multiple capabilities
+        # in the current registry; those duplicates must be preserved.
+        duplicates = {
+            inv_id: owners for inv_id, owners in by_id.items() if len(owners) > 1
+        }
+        assert duplicates, (
+            "expected at least one invariant ID shared across capabilities "
+            "(input_contract_forbidden / requires_non_empty_extraction)"
+        )
+        for owners in duplicates.values():
+            assert len(set(owners)) == len(owners)
+
+
+class TestCoverageReport:
+    """Summary of the FCM cell-coverage walk. Used by CI drift guards."""
+
+    def test_total_cells_matches_cartesian(self) -> None:
+        report = coverage_report()
+        assert report.total_cells == (
+            len(FlowInputSource)
+            * len(FlowInputType)
+            * len(FlowOutputType)
+            * len(FlowOutputMode)
+        )
+
+    def test_classification_counts_sum_to_total(self) -> None:
+        report = coverage_report()
+        assert sum(report.by_classification.values()) == report.total_cells
+
+    def test_by_classification_covers_four_buckets(self) -> None:
+        report = coverage_report()
+        assert set(report.by_classification) == {
+            "exposed",
+            "illegal_io_triple",
+            "illegal_source_type_pair",
+            "not_exposed",
+        }
+        for count in report.by_classification.values():
+            assert count > 0
+
+    def test_has_no_drift_on_current_registry(self) -> None:
+        report = coverage_report()
+        assert report.has_drift is False
+        assert report.temporary_reasons == ()
+
+    def test_coverage_report_is_frozen_dataclass(self) -> None:
+        report = coverage_report()
+        assert isinstance(report, CoverageReport)
+        with pytest.raises(FrozenInstanceError):
+            report.total_cells = 0  # type: ignore[misc]

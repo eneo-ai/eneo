@@ -29,10 +29,10 @@ and invariant-content changes. A.3 widens it.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, Protocol
 
 from intric.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
@@ -618,3 +618,390 @@ def is_citation_capable_step(
         FlowOutputMode.TEMPLATE_FILL,
         FlowOutputMode.TRANSCRIBE_ONLY,
     }
+
+
+# ---------------------------------------------------------------------
+# A.6 public API.
+# ---------------------------------------------------------------------
+
+
+class ChainStep(Protocol):
+    """Enum-typed step shape consumed by :func:`validate_step_chain`.
+
+    Structural (Protocol) — any frozen dataclass with these four properties
+    satisfies the contract. The legacy `step_chain_rules.StepChainShape`
+    uses `str` attrs; this Protocol uses enum types so consumers get
+    enum-identity checks instead of string comparisons.
+    """
+
+    @property
+    def step_order(self) -> int: ...
+    @property
+    def input_source(self) -> FlowInputSource: ...
+    @property
+    def input_type(self) -> FlowInputType: ...
+    @property
+    def output_type(self) -> FlowOutputType: ...
+
+
+@dataclass(frozen=True)
+class ChainViolation:
+    """FCM step-chain violation — typed re-expression of
+    `step_chain_rules.StepChainViolation`.
+
+    `code` vocabulary matches the legacy one verbatim for drop-in
+    compatibility (builder UX and logging consumers see the same code
+    strings regardless of which validator surfaces them).
+    """
+
+    step_order: int
+    message: str
+    code: str
+
+
+@dataclass(frozen=True)
+class CoverageReport:
+    """Summary of :func:`coverage_report`'s cartesian-product walk.
+
+    Captures the four classification counts plus any cells whose owning
+    `not_exposed_reason` contains the literal "temporary". Phase-A rule:
+    no temporary exclusions — `has_drift=True` fails CI.
+    """
+
+    total_cells: int
+    by_classification: Mapping[str, int]
+    temporary_reasons: tuple[tuple[TupleSpec, str], ...]
+
+    @property
+    def has_drift(self) -> bool:
+        return bool(self.temporary_reasons)
+
+
+# Marker used by coverage_report to flag `not_exposed_reason` strings that
+# advertise themselves as temporary. Phase-A rejects temporary exclusions.
+_TEMPORARY_REASON_MARKER = "temporary"
+
+
+# Source-type legality rules mirrored from `step_chain_rules.py` and
+# `flow_validators_http.py`. Single-cell in scope — step-order-dependent
+# rules (e.g. step 1 cannot use `previous_step`) belong to a chain-level
+# validator. `previous_step` chain-compat depends on the prior step's
+# `output_type` and is enforced by `validate_step_chain`; the single-cell
+# `CHAIN_COMPATIBILITY` constant is already guarded by its own parity test.
+_HTTP_INPUT_SOURCES: frozenset[FlowInputSource] = frozenset(
+    {FlowInputSource.HTTP_GET, FlowInputSource.HTTP_POST}
+)
+_FILE_INPUT_TYPES_BANNED_OVER_HTTP: frozenset[FlowInputType] = frozenset(
+    {
+        FlowInputType.DOCUMENT,
+        FlowInputType.FILE,
+        FlowInputType.IMAGE,
+        FlowInputType.AUDIO,
+    }
+)
+_FLOW_INPUT_ONLY_TYPES: frozenset[FlowInputType] = frozenset(
+    {FlowInputType.DOCUMENT, FlowInputType.AUDIO, FlowInputType.FILE}
+)
+
+
+def _source_type_illegality(
+    input_source: FlowInputSource, input_type: FlowInputType
+) -> str | None:
+    """Return a diagnostic string when `(input_source, input_type)` is
+    illegal at the single-cell level, else `None`.
+
+    Mirrors the three single-cell rules from `step_chain_rules.py` and
+    `flow_validators_http.py`; the full set of chain-level rules lives in
+    :func:`validate_step_chain`.
+    """
+    if (
+        input_source in _HTTP_INPUT_SOURCES
+        and input_type in _FILE_INPUT_TYPES_BANNED_OVER_HTTP
+    ):
+        return (
+            f"input_type {input_type.value!r} is not supported with "
+            f"input_source {input_source.value!r} "
+            "(flow_validators_http.validate_http_input_config)."
+        )
+    if (
+        input_type in _FLOW_INPUT_ONLY_TYPES
+        and input_source is not FlowInputSource.FLOW_INPUT
+    ):
+        return (
+            f"input_type {input_type.value!r} only accepts input_source "
+            "'flow_input' (step_chain_rules.find_first_step_chain_violation)."
+        )
+    if (
+        input_type is FlowInputType.JSON
+        and input_source is FlowInputSource.ALL_PREVIOUS_STEPS
+    ):
+        return (
+            "input_type 'json' is incompatible with input_source "
+            "'all_previous_steps' — concatenated text is not valid JSON."
+        )
+    return None
+
+
+def _classify_cell(
+    input_source: FlowInputSource,
+    input_type: FlowInputType,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+) -> tuple[str, str | None]:
+    """Classify an FCM surface cell into one of four buckets.
+
+    Returns ``(classification, diagnostic_or_reason)``. Classification is
+    one of ``"illegal_io_triple"``, ``"illegal_source_type_pair"``,
+    ``"not_exposed"``, ``"exposed"`` — every legal path terminates in one
+    of those four.
+    """
+    if not supports_step_io_tuple(
+        input_type=input_type, output_type=output_type, output_mode=output_mode
+    ):
+        return "illegal_io_triple", None
+    source_type_issue = _source_type_illegality(input_source, input_type)
+    if source_type_issue is not None:
+        return "illegal_source_type_pair", source_type_issue
+    input_cap = CAPABILITY_REGISTRY[f"input_{input_type.value}"]
+    if input_cap.exposure == "not_exposed":
+        return "not_exposed", input_cap.not_exposed_reason
+    mode_cap = CAPABILITY_REGISTRY[f"output_mode_{output_mode.value}"]
+    if mode_cap.exposure == "not_exposed":
+        return "not_exposed", mode_cap.not_exposed_reason
+    return "exposed", None
+
+
+def resolve_capability_for_tuple(
+    *,
+    input_source: FlowInputSource,
+    input_type: FlowInputType,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+) -> tuple[FlowCapability, FlowCapability] | None:
+    """Resolve owning capabilities for a legal step tuple, or None.
+
+    Returns ``(input_capability, output_mode_capability)`` in that order
+    for cells classified as ``"exposed"``. Returns ``None`` for
+    illegal-IO-triple, illegal-source-type-pair, and not-exposed cells.
+
+    `citation_sidecar` and `mcp_policy` capabilities are intentionally
+    NOT included — neither is conditioned on the 4-tuple alone.
+    `render_critic_invariants` gives the flat "all invariants across all
+    caps" view for the critic.
+    """
+    classification, _reason = _classify_cell(
+        input_source, input_type, output_type, output_mode
+    )
+    if classification != "exposed":
+        return None
+    input_cap = CAPABILITY_REGISTRY[f"input_{input_type.value}"]
+    mode_cap = CAPABILITY_REGISTRY[f"output_mode_{output_mode.value}"]
+    return (input_cap, mode_cap)
+
+
+def validate_step_chain(
+    steps: Sequence[ChainStep],
+) -> tuple[ChainViolation, ...]:
+    """Validate a step chain, returning every violation surfaced.
+
+    Enum-typed re-expression of
+    `step_chain_rules.find_first_step_chain_violation`. Divergence from
+    the legacy: legacy returns the first violation; this returns all of
+    them so builder UX can fix multi-rule failures in one pass instead of
+    whack-a-mole. Violation codes match the legacy vocabulary verbatim.
+    """
+    if not steps:
+        return ()
+
+    sorted_steps = sorted(steps, key=lambda s: s.step_order)
+    steps_by_order = {s.step_order: s for s in sorted_steps}
+    flow_input_steps = [
+        s for s in sorted_steps if s.input_source is FlowInputSource.FLOW_INPUT
+    ]
+
+    violations: list[ChainViolation] = []
+
+    for extra in flow_input_steps[1:]:
+        violations.append(
+            ChainViolation(
+                step_order=extra.step_order,
+                message="Only one step may use input_source 'flow_input'.",
+                code="typed_io_multiple_flow_input_steps",
+            )
+        )
+    if flow_input_steps and flow_input_steps[0].step_order != 1:
+        misplaced = flow_input_steps[0]
+        violations.append(
+            ChainViolation(
+                step_order=misplaced.step_order,
+                message="input_source 'flow_input' must be step 1 if present.",
+                code="typed_io_flow_input_position_invalid",
+            )
+        )
+
+    for step in sorted_steps:
+        if step.step_order == 1 and step.input_source in {
+            FlowInputSource.PREVIOUS_STEP,
+            FlowInputSource.ALL_PREVIOUS_STEPS,
+        }:
+            violations.append(
+                ChainViolation(
+                    step_order=step.step_order,
+                    message=(
+                        "Step 1 cannot use previous_step/all_previous_steps "
+                        "input source. Use flow_input."
+                    ),
+                    code="typed_io_invalid_input_source_position",
+                )
+            )
+        if (
+            step.input_type is FlowInputType.DOCUMENT
+            and step.input_source is not FlowInputSource.FLOW_INPUT
+        ):
+            violations.append(
+                ChainViolation(
+                    step_order=step.step_order,
+                    message=(
+                        f"Step {step.step_order}: input_type 'document' is only "
+                        "supported with input_source 'flow_input'."
+                    ),
+                    code="typed_io_document_source_unsupported",
+                )
+            )
+        if (
+            step.input_type is FlowInputType.AUDIO
+            and step.input_source is not FlowInputSource.FLOW_INPUT
+        ):
+            violations.append(
+                ChainViolation(
+                    step_order=step.step_order,
+                    message=(
+                        f"Step {step.step_order}: input_type 'audio' is only "
+                        "supported with input_source 'flow_input'."
+                    ),
+                    code="typed_io_audio_source_unsupported",
+                )
+            )
+        if (
+            step.input_type is FlowInputType.FILE
+            and step.input_source is not FlowInputSource.FLOW_INPUT
+        ):
+            violations.append(
+                ChainViolation(
+                    step_order=step.step_order,
+                    message=(
+                        f"Step {step.step_order}: input_type 'file' is only "
+                        "supported with input_source 'flow_input'."
+                    ),
+                    code="typed_io_file_source_unsupported",
+                )
+            )
+        if (
+            step.input_type is FlowInputType.JSON
+            and step.input_source is FlowInputSource.ALL_PREVIOUS_STEPS
+        ):
+            violations.append(
+                ChainViolation(
+                    step_order=step.step_order,
+                    message=(
+                        f"Step {step.step_order}: input_type 'json' is "
+                        "incompatible with input_source 'all_previous_steps' "
+                        "(concatenated text is not valid JSON)."
+                    ),
+                    code="typed_io_invalid_input_source_combination",
+                )
+            )
+        if step.input_source is FlowInputSource.PREVIOUS_STEP and step.step_order > 1:
+            previous = steps_by_order.get(step.step_order - 1)
+            if previous is None:
+                violations.append(
+                    ChainViolation(
+                        step_order=step.step_order,
+                        message=(
+                            f"Step {step.step_order}: input_source "
+                            "'previous_step' requires step "
+                            f"{step.step_order - 1} to exist."
+                        ),
+                        code="typed_io_missing_previous_step",
+                    )
+                )
+            elif (previous.output_type, step.input_type) not in CHAIN_COMPATIBILITY:
+                violations.append(
+                    ChainViolation(
+                        step_order=step.step_order,
+                        message=(
+                            f"Step {step.step_order}: incompatible type "
+                            "chain — previous step output_type "
+                            f"'{previous.output_type.value}' cannot feed "
+                            f"input_type '{step.input_type.value}'."
+                        ),
+                        code="typed_io_incompatible_type_chain",
+                    )
+                )
+
+    return tuple(violations)
+
+
+def render_critic_invariants() -> tuple[tuple[CapabilityId, InvariantSpec], ...]:
+    """Flat view of every capability-owned invariant, for the critic.
+
+    Each entry is ``(capability_id, invariant)``. Ownership is returned
+    explicitly because invariant IDs are not globally unique — e.g.
+    `input_contract_forbidden` is emitted by every input capability that
+    disallows contracts, and `requires_non_empty_extraction` by every
+    capability that requires extraction. Consumers need the owning
+    capability ID to disambiguate.
+
+    Order: sorted by `(capability_id, invariant.id)` ascending so
+    consumer iteration is deterministic across process restarts and
+    across capability additions.
+    """
+    result: list[tuple[CapabilityId, InvariantSpec]] = []
+    for cap_id in sorted(CAPABILITY_REGISTRY):
+        cap = CAPABILITY_REGISTRY[cap_id]
+        for inv in sorted(cap.invariants, key=lambda i: i.id):
+            result.append((cap_id, inv))
+    return tuple(result)
+
+
+def coverage_report() -> CoverageReport:
+    """Walk the cartesian product of the four enums and summarize coverage.
+
+    Used by A.3's cell-classification test and by dev-time diagnostics.
+    Every cell lands in exactly one of four buckets; a cell whose owning
+    `not_exposed_reason` contains the literal ``"temporary"`` surfaces in
+    ``temporary_reasons`` and flips ``has_drift`` to ``True``.
+    """
+    counts: dict[str, int] = {
+        "exposed": 0,
+        "illegal_io_triple": 0,
+        "illegal_source_type_pair": 0,
+        "not_exposed": 0,
+    }
+    temporary: list[tuple[TupleSpec, str]] = []
+    total = 0
+    for input_source in FlowInputSource:
+        for input_type in FlowInputType:
+            for output_type in FlowOutputType:
+                for output_mode in FlowOutputMode:
+                    total += 1
+                    classification, reason = _classify_cell(
+                        input_source, input_type, output_type, output_mode
+                    )
+                    counts[classification] += 1
+                    if (
+                        classification == "not_exposed"
+                        and reason is not None
+                        and _TEMPORARY_REASON_MARKER in reason
+                    ):
+                        temporary.append(
+                            (
+                                (input_source, input_type, output_type, output_mode),
+                                reason,
+                            )
+                        )
+    return CoverageReport(
+        total_cells=total,
+        by_classification=MappingProxyType(counts),
+        temporary_reasons=tuple(temporary),
+    )
