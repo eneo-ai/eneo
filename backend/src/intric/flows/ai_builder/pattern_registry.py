@@ -39,7 +39,7 @@ from typing import Literal
 from intric.flows.ai_builder.question_catalog import QUESTION_CATALOG, QuestionTemplate
 from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY, FlowCapability
 
-PATTERN_REGISTRY_VERSION: int = 3
+PATTERN_REGISTRY_VERSION: int = 4
 
 PatternPolarity = Literal["positive", "negative"]
 _VALID_POLARITIES: frozenset[str] = frozenset({"positive", "negative"})
@@ -335,6 +335,37 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         chain_steps=(
             "flow_input_sectioned_form_fields",
             "compose_sections_step",
+        ),
+    ),
+    # General-purpose counterpart to `sectioned_form_intake`. Matches any
+    # flow shape where the user supplies one or more named runtime
+    # variables alongside the primary input — e.g. "name + role +
+    # description", "language + focus", "reference id + owning unit". The
+    # sectioned variant stays for the narrower rubric-per-field shape.
+    # `recipe_sections=()` because `form` / `fields` / `user` / `provides`
+    # overlap heavily with generic planner vocabulary; score-only
+    # activation would narrow unrelated prompts. The phrase-aware signal
+    # paths in `ai_builder_recipe_selector` keep form-field recipes
+    # routable through `extract_form_intake_recipe_signals` and
+    # `extract_planner_pattern_recipe_signals`.
+    _pattern(
+        id="form_field_runtime_inputs",
+        examples=(
+            "runtime form_field variables alongside the primary input",
+            "flow captures named parameters the user fills in per run",
+        ),
+        retrieval_hints=(
+            "form fields formulärfält inmatningsfält runtime variables",
+            "user provides enters fills parameters",
+            "uses_form_fields variable_name",
+        ),
+        required_architectural_slots=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
         ),
     ),
 )

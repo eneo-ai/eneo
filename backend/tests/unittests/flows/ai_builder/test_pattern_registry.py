@@ -55,6 +55,7 @@ _EXPECTED_POSITIVE_IDS: frozenset[str] = frozenset(
         "multi_step_quality_chain",
         "comparison",
         "sectioned_form_intake",
+        "form_field_runtime_inputs",
     }
 )
 
@@ -131,8 +132,8 @@ _NEGATIVE_FCM_ASSERTIONS: dict[str, Callable[[], None]] = {
 
 
 class TestPatternDataclass:
-    def test_pattern_version_is_three(self) -> None:
-        assert PATTERN_REGISTRY_VERSION == 3
+    def test_pattern_version_is_four(self) -> None:
+        assert PATTERN_REGISTRY_VERSION == 4
 
     def test_pattern_is_frozen_with_structural_fields(self) -> None:
         pattern = Pattern(
@@ -339,6 +340,7 @@ class TestPositivePatternContract:
             "document_to_pdf_report": ("document_analysis",),
             "document_to_structured_report": ("document_analysis",),
             "extract_structured_fields": ("json_pipeline",),
+            "form_field_runtime_inputs": (),
             "multi_step_quality_chain": (),
             "sectioned_form_intake": (),
             "summarize_text": (),
@@ -467,6 +469,24 @@ class TestPatternRegistryPublicApi:
         matched_ids = {match.pattern.id for match in matches}
         assert "summarize_text" in matched_ids, (
             f"summarize_text should match 'summary of my text'; got {matched_ids}"
+        )
+
+    def test_find_pattern_candidates_matches_form_field_runtime_inputs(
+        self,
+    ) -> None:
+        """A prompt that describes runtime form-field variables scores the
+        `form_field_runtime_inputs` archetype. Asserts membership only —
+        scoring order across patterns is exercised by other tests — so
+        this guard survives future pattern reorderings and additional
+        overlapping archetypes. Uses `inmatningsfält` and `uses_form_fields`
+        to anchor on retrieval-hint tokens unique to this pattern."""
+        matches = find_pattern_candidates(
+            "Användaren fyller i inmatningsfält som uses_form_fields läser."
+        )
+        matched_ids = {match.pattern.id for match in matches}
+        assert "form_field_runtime_inputs" in matched_ids, (
+            f"form_field_runtime_inputs should match runtime-variable prose; "
+            f"got {matched_ids}"
         )
 
     def test_find_pattern_candidates_does_not_match_on_substrings(self) -> None:
