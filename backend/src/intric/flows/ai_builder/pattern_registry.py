@@ -39,7 +39,7 @@ from typing import Literal
 from intric.flows.ai_builder.question_catalog import QUESTION_CATALOG, QuestionTemplate
 from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY, FlowCapability
 
-PATTERN_REGISTRY_VERSION: int = 1
+PATTERN_REGISTRY_VERSION: int = 2
 
 PatternPolarity = Literal["positive", "negative"]
 _VALID_POLARITIES: frozenset[str] = frozenset({"positive", "negative"})
@@ -55,6 +55,12 @@ class Pattern:
     Fields are structural only. No labels, descriptions, help text, or
     localized copy — those belong to the Question Catalog and product
     surfaces that render patterns to users.
+
+    `chain_steps` is the ordered token sequence for patterns whose
+    canonical realisation is multi-step. Each entry is a terse
+    non-localized structural token (same vocabulary discipline as
+    `examples` / `retrieval_hints`) naming one step in the chain;
+    single-step shapes leave it empty.
     """
 
     id: str
@@ -64,6 +70,7 @@ class Pattern:
     required_architectural_slots: tuple[str, ...]
     question_template_ids: tuple[str, ...]
     polarity: PatternPolarity
+    chain_steps: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.id or not self.id.strip():
@@ -84,6 +91,7 @@ def _pattern(
     question_template_ids: tuple[str, ...] = (),
     negative_examples: tuple[str, ...] = (),
     polarity: PatternPolarity = "positive",
+    chain_steps: tuple[str, ...] = (),
 ) -> Pattern:
     return Pattern(
         id=id,
@@ -93,6 +101,7 @@ def _pattern(
         required_architectural_slots=required_architectural_slots,
         question_template_ids=question_template_ids,
         polarity=polarity,
+        chain_steps=chain_steps,
     )
 
 
@@ -179,6 +188,11 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "docx_output_mode",
             "document_material_scope",
         ),
+        chain_steps=(
+            "flow_input_document_upload",
+            "extract_template_variables_step",
+            "template_fill_docx_step",
+        ),
     ),
     _pattern(
         id="document_to_pdf_report",
@@ -244,6 +258,12 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "document_material_scope",
             "structured_analysis_need",
         ),
+        chain_steps=(
+            "flow_input_document_upload",
+            "structured_extraction_step",
+            "analysis_or_quality_review_step",
+            "terminal_artifact_step",
+        ),
     ),
     _pattern(
         id="comparison",
@@ -285,6 +305,10 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         question_template_ids=(
             "primary_runtime_input",
             "terminal_output",
+        ),
+        chain_steps=(
+            "flow_input_sectioned_form_fields",
+            "compose_sections_step",
         ),
     ),
 )
@@ -456,6 +480,8 @@ def _render_pattern(pattern: Pattern) -> str:
         lines.append("  examples: " + "; ".join(pattern.examples))
     if pattern.polarity == "negative" and pattern.negative_examples:
         lines.append("  avoid: " + "; ".join(pattern.negative_examples))
+    if pattern.chain_steps:
+        lines.append("  chain_steps: " + " -> ".join(pattern.chain_steps))
     if pattern.retrieval_hints:
         lines.append("  hints: " + "; ".join(pattern.retrieval_hints))
     if pattern.required_architectural_slots:

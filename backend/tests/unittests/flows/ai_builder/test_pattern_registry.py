@@ -91,6 +91,35 @@ def _assert_template_fill_requires_docx() -> None:
         )
 
 
+def _extract_pattern_block(rendered: str, pattern_id: str) -> str:
+    """Return the lines of `rendered` that belong to `pattern_id`'s
+    per-pattern block.
+
+    `render_knowledge_pack` emits one block per pattern: a `- <id>`
+    header followed by indented `  <field>: ...` lines. The block ends
+    at the next unindented line (either another pattern header or a
+    section header). This helper lets a test assert content is
+    *inside* a specific pattern's block rather than merely present
+    somewhere in the pack.
+    """
+    header = f"- {pattern_id}"
+    lines = rendered.splitlines()
+    block_lines: list[str] = []
+    in_block = False
+    for line in lines:
+        if line == header:
+            in_block = True
+            block_lines.append(line)
+            continue
+        if not in_block:
+            continue
+        if line.startswith("  ") or line == "":
+            block_lines.append(line)
+            continue
+        break
+    return "\n".join(block_lines)
+
+
 # Map negative pattern id → live-FCM assertion the test must satisfy.
 # A negative pattern added without a live assertion here fails
 # `test_every_negative_has_live_fcm_assertion`, forcing the author to
@@ -102,8 +131,8 @@ _NEGATIVE_FCM_ASSERTIONS: dict[str, Callable[[], None]] = {
 
 
 class TestPatternDataclass:
-    def test_pattern_version_is_one(self) -> None:
-        assert PATTERN_REGISTRY_VERSION == 1
+    def test_pattern_version_is_two(self) -> None:
+        assert PATTERN_REGISTRY_VERSION == 2
 
     def test_pattern_is_frozen_with_structural_fields(self) -> None:
         pattern = Pattern(
@@ -146,6 +175,24 @@ class TestPatternDataclass:
                 question_template_ids=(),
                 polarity="positive",
             )
+
+    def test_pattern_chain_steps_defaults_to_empty_tuple(self) -> None:
+        """`chain_steps` is an optional structural descriptor for patterns
+        whose canonical realisation is multi-step (e.g. a quality chain,
+        a sectioned intake, a template-fill pipeline). Patterns that
+        describe a single-step shape leave it empty — the default is
+        `()` so adding the field does not require updating the existing
+        single-step seed."""
+        pattern = Pattern(
+            id="fixture",
+            examples=(),
+            retrieval_hints=(),
+            negative_examples=(),
+            required_architectural_slots=(),
+            question_template_ids=(),
+            polarity="positive",
+        )
+        assert pattern.chain_steps == ()
 
 
 class TestRegistryInvariants:
@@ -223,6 +270,28 @@ class TestPositivePatternContract:
                     f"{slot_name!r}; live vocabulary is "
                     f"{sorted(KNOWN_REQUIREMENT_SLOT_NAMES)}"
                 )
+
+    def test_multi_step_patterns_declare_chain_steps(self) -> None:
+        """Patterns whose canonical realisation is a multi-step pipeline
+        must declare their step sequence in `chain_steps` so the
+        knowledge pack can render the shape. Single-step patterns like
+        `summarize_text`, `extract_structured_fields`, `audio_transcription`
+        leave it empty; the seed below is the canonical set and any
+        addition must be a deliberate one-line diff against both registry
+        and this test."""
+        multi_step_seed: frozenset[str] = frozenset(
+            {
+                "multi_step_quality_chain",
+                "sectioned_form_intake",
+                "document_to_docx_template",
+            }
+        )
+        for pattern_id in multi_step_seed:
+            pattern = PATTERN_REGISTRY[pattern_id]
+            assert pattern.chain_steps, (
+                f"{pattern_id}: multi-step canonical pattern must declare "
+                f"non-empty chain_steps; got {pattern.chain_steps!r}"
+            )
 
 
 class TestNegativePatternContract:
@@ -484,3 +553,41 @@ class TestPatternRegistryPublicApi:
         non-deterministic pack would poison LLM prompt caching and
         make planning-state snapshots unreproducible."""
         assert render_knowledge_pack() == render_knowledge_pack()
+
+    def test_render_knowledge_pack_emits_chain_steps_when_present(self) -> None:
+        """Patterns with a non-empty `chain_steps` must surface the chain
+        tokens in the rendered pack — that is the whole point of the
+        field. The existing `multi_step_quality_chain` pattern is the
+        canonical carrier; the rendered block must contain an exact
+        `chain_steps: a -> b -> c -> d` line (sequence preserved, arrow
+        separator pinned) so the LLM reads the sequential shape rather
+        than a flat list."""
+        rendered = render_knowledge_pack()
+        chain_pattern = PATTERN_REGISTRY["multi_step_quality_chain"]
+        assert chain_pattern.chain_steps, (
+            "multi_step_quality_chain must carry chain_steps for this "
+            "test to be meaningful"
+        )
+        block = _extract_pattern_block(rendered, chain_pattern.id)
+        expected_line = "  chain_steps: " + " -> ".join(chain_pattern.chain_steps)
+        assert expected_line in block, (
+            f"rendered block for {chain_pattern.id} must contain the exact "
+            f"chain_steps line {expected_line!r}; block was:\n{block}"
+        )
+
+    def test_render_knowledge_pack_omits_chain_steps_when_absent(self) -> None:
+        """Single-step patterns with empty `chain_steps` must not emit
+        a bare `chain_steps:` header — that would make the pack's
+        per-pattern block inconsistent and leak scaffolding prose to
+        the planner. `summarize_text` is the canonical single-step
+        pattern; its rendered block must not contain the label."""
+        rendered = render_knowledge_pack()
+        summarize = PATTERN_REGISTRY["summarize_text"]
+        assert summarize.chain_steps == (), (
+            "summarize_text must carry empty chain_steps for this test to be meaningful"
+        )
+        summarize_block = _extract_pattern_block(rendered, summarize.id)
+        assert "chain_steps:" not in summarize_block, (
+            f"single-step pattern {summarize.id} leaked `chain_steps:` "
+            f"label; block was:\n{summarize_block}"
+        )
