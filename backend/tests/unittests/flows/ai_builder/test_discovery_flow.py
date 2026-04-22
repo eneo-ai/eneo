@@ -818,11 +818,11 @@ class TestExtendedClarificationHints:
             ConversationMessage(
                 role="user",
                 content=(
-                    "Jag vill bygga ett flöde som heter Kommunanalys Pro. "
+                    "Jag vill bygga ett flöde som heter Dokumentanalys Pro. "
                     "Flödet ska hjälpa en chef att förstå ett ärende. "
-                    "Användaren ska kunna ladda upp underlag som PDF, ange ärendenummer, "
+                    "Användaren ska kunna ladda upp underlag som PDF, ange referensnummer, "
                     "kort beskrivning, språk för rapporten och fokus för analysen. "
-                    "Flödet ska analysera materialet och skapa ett beslutsunderlag."
+                    "Flödet ska analysera materialet och skapa en slutrapport."
                 ),
             ),
             ConversationMessage(
@@ -1144,7 +1144,7 @@ class TestExtendedClarificationHints:
             id=uuid4(),
             tenant_id=uuid4(),
             space_id=uuid4(),
-            name="Kommunanalys",
+            name="Dokumentanalys",
             description="Befintligt dokumentflöde",
             steps=[
                 FlowStep(
@@ -1376,7 +1376,7 @@ class TestExtendedClarificationHints:
                 role="user",
                 content=(
                     "Jag vill bygga ett flöde som analyserar leverantörsavtal i PDF, "
-                    "extraherar leverantörsnamn, avtalsperiod, uppsägningsvillkor, juridiska risker, "
+                    "extraherar leverantörsnamn, avtalsperiod, uppsägningsvillkor, kommersiella risker, "
                     "ekonomiska risker, operativa risker och rekommenderad nästa åtgärd. "
                     "Användaren ska också kunna ange intern referens, prioritet och ansvarig avdelning. "
                     "Jag vill att strukturerad data används där det förbättrar kvaliteten."
@@ -1402,7 +1402,7 @@ class TestExtendedClarificationHints:
                 role="user",
                 content=(
                     "Jag vill bygga ett flöde som analyserar leverantörsavtal i PDF, "
-                    "extraherar leverantörsnamn, avtalsperiod, uppsägningsvillkor, juridiska risker, "
+                    "extraherar leverantörsnamn, avtalsperiod, uppsägningsvillkor, kommersiella risker, "
                     "ekonomiska risker, operativa risker och rekommenderad nästa åtgärd. "
                     "Användaren ska också kunna ange intern referens, prioritet och ansvarig avdelning. "
                     "Jag vill att strukturerad data används där det förbättrar kvaliteten."
@@ -1634,11 +1634,11 @@ class TestExtendedClarificationHints:
                 role="user",
                 content=(
                     "Bygg ett flöde som tar emot ett dokumentpaket med flera PDF-filer i ett ärende. "
-                    "Steg 1 extraherar text ur alla dokument. Steg 2 identifierar juridiska risker och "
-                    "ekonomiska konsekvenser som strukturerad JSON. Steg 3 kopplar riskerna till "
+                    "Steg 1 extraherar text ur alla dokument. Steg 2 identifierar risker och "
+                    "konsekvenser som strukturerad JSON. Steg 3 kopplar riskerna till "
                     "sociologiska och psykologiska teorier med hjälp av en kunskapsbas. Steg 4 skriver "
                     "en grounded sammanfattning med källhänvisningar. Steg 5 genererar en strukturerad "
-                    "DOCX-rapport utan mall. Flödet ska ha formulärfält för ärendenummer och ansvarig nämnd."
+                    "DOCX-rapport utan mall. Flödet ska ha formulärfält för referensnummer och ansvarig enhet."
                 ),
                 metadata={"ui_language": "sv"},
             )
@@ -1780,7 +1780,7 @@ class TestExtendedClarificationHints:
         conversation = [
             ConversationMessage(
                 role="user",
-                content="Jag vill bygga ett flöde som skapar en pdf från flera kommunala dokument.",
+                content="Jag vill bygga ett flöde som skapar en pdf från flera officiella dokument.",
                 metadata={"ui_language": "sv"},
             ),
             ConversationMessage(
@@ -1877,7 +1877,7 @@ class TestPlannerDiscoveryShortCircuit:
         ):
             async for event in planner.send_message(
                 session_id=session_id,
-                message="Jag vill bygga ett flöde som hjälper mig att förstå kommunala underlag.",
+                message="Jag vill bygga ett flöde som hjälper mig att förstå officiella underlag.",
                 ui_language="sv",
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
