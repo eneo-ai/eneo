@@ -15,9 +15,9 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     normalize_discovery_text,
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
+    OutputIntentResolution,
     extract_freeform_user_messages,
     mentions_runtime_metadata,
-    OutputIntentResolution,
     resolve_output_intent,
 )
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
@@ -232,11 +232,13 @@ def resolve_edit_scope(
     if output_changed:
         active_families.add("output_artifact")
 
-    if mentions_runtime_metadata(normalized_text) or active_answer_signals.get(
-        "runtime_metadata_fields"
-    ) or (
-        active_explicit_question_ids is not None
-        and "runtime_metadata_fields" in active_explicit_question_ids
+    if (
+        mentions_runtime_metadata(normalized_text)
+        or active_answer_signals.get("runtime_metadata_fields")
+        or (
+            active_explicit_question_ids is not None
+            and "runtime_metadata_fields" in active_explicit_question_ids
+        )
     ):
         active_families.add("runtime_metadata")
 
@@ -350,7 +352,9 @@ def _input_family_changed(
         return True
     if not capabilities.runtime_input_settled:
         return input_intent.primary_runtime_input != "unknown"
-    if output_changed and not contains_any_phrase(normalized_text, _INPUT_CHANGE_TARGET_PHRASES):
+    if output_changed and not contains_any_phrase(
+        normalized_text, _INPUT_CHANGE_TARGET_PHRASES
+    ):
         return False
     if not has_change_semantics(normalized_text):
         return False
@@ -361,9 +365,14 @@ def _mentions_case_scope_change(
     text: str,
     active_explicit_question_ids: set[str],
 ) -> bool:
-    if "comparison_scope" in active_explicit_question_ids or "processing_scope" in active_explicit_question_ids:
+    if (
+        "comparison_scope" in active_explicit_question_ids
+        or "processing_scope" in active_explicit_question_ids
+    ):
         return True
-    return has_change_semantics(text) and contains_any_phrase(text, _CASE_SCOPE_CHANGE_PHRASES)
+    return has_change_semantics(text) and contains_any_phrase(
+        text, _CASE_SCOPE_CHANGE_PHRASES
+    )
 
 
 def _mentions_output_style_change(
@@ -372,7 +381,7 @@ def _mentions_output_style_change(
 ) -> bool:
     if any(
         key in active_explicit_question_ids
-        for key in ("final_pdf_type", "output_reader", "decision_support_scope")
+        for key in ("final_pdf_type", "output_reader", "final_output_scope")
     ):
         return True
     return has_change_semantics(text) and contains_any_phrase(text, _OUTPUT_STYLE_HINTS)
@@ -384,4 +393,6 @@ def _mentions_structured_reuse_change(
 ) -> bool:
     if "structured_analysis_need" in active_explicit_question_ids:
         return True
-    return has_change_semantics(text) and contains_any_phrase(text, _STRUCTURED_REUSE_HINTS)
+    return has_change_semantics(text) and contains_any_phrase(
+        text, _STRUCTURED_REUSE_HINTS
+    )

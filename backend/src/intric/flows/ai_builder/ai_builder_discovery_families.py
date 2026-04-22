@@ -26,11 +26,13 @@ QUESTION_FAMILY: dict[str, DiscoveryFamily] = {
     "structured_analysis_need": "structured_reuse",
     "runtime_metadata_fields": "runtime_metadata",
     "output_reader": "output_style",
-    "decision_support_scope": "output_style",
+    "final_output_scope": "output_style",
 }
 
 ALL_DISCOVERY_FAMILIES: frozenset[DiscoveryFamily] = frozenset(QUESTION_FAMILY.values())
 
 
-def family_for_issue(issue_id: str, *, default: DiscoveryFamily | None = None) -> DiscoveryFamily | None:
+def family_for_issue(
+    issue_id: str, *, default: DiscoveryFamily | None = None
+) -> DiscoveryFamily | None:
     return cast(DiscoveryFamily | None, QUESTION_FAMILY.get(issue_id, default))

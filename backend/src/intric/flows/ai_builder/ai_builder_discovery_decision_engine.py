@@ -43,7 +43,7 @@ _QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
     "docx_output_mode": "architecture",
     "pdf_generation_mode": "architecture",
     "output_reader": "polish",
-    "decision_support_scope": "polish",
+    "final_output_scope": "polish",
     "final_pdf_type": "quality",
     "structured_analysis_need": "quality",
     "runtime_metadata_fields": "quality",

@@ -31,7 +31,7 @@ _EXPECTED_QUESTION_LEVELS: dict[str, str] = {
     "docx_output_mode": "blocking",
     "pdf_generation_mode": "blocking",
     "output_reader": "nice_to_have",
-    "decision_support_scope": "nice_to_have",
+    "final_output_scope": "nice_to_have",
     "final_pdf_type": "high_value",
     "structured_analysis_need": "high_value",
     "runtime_metadata_fields": "high_value",

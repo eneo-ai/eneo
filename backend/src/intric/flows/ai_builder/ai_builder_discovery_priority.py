@@ -15,7 +15,7 @@ DISCOVERY_ISSUE_PRIORITY: dict[str, int] = {
     "pdf_generation_mode": 72,
     "final_pdf_type": 75,
     "output_reader": 80,
-    "decision_support_scope": 90,
+    "final_output_scope": 90,
     "structured_analysis_need": 95,
     "runtime_metadata_fields": 100,
 }

@@ -7,13 +7,13 @@ from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     comparison_architecture_is_clear as _comparison_architecture_is_clear,
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    decision_support_scope_is_vague as _decision_support_scope_is_vague,
-)
-from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     document_cardinality_is_vague as _document_cardinality_is_vague,
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     document_kind_is_vague as _document_kind_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
+    final_output_scope_is_vague as _final_output_scope_is_vague,
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     final_pdf_type_is_vague as _final_pdf_type_is_vague,
@@ -83,11 +83,11 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
 from intric.flows.ai_builder.ai_builder_discovery_questions import (
     comparison_scope_conflict_question,
     comparison_scope_question,
-    decision_support_scope_question,
     document_kind_question,
     document_material_scope_question,
     docx_output_mode_question,
     final_output_mode_question,
+    final_output_scope_question,
     final_pdf_type_question,
     flow_input_architecture_question,
     input_material_mode_question,
@@ -346,18 +346,18 @@ def analyze_discovery(
             )
         )
 
-    if _decision_support_scope_is_vague(profile):
+    if _final_output_scope_is_vague(profile):
         raw_issues.append(
             DiscoveryIssue(
-                issue_id="decision_support_scope",
+                issue_id="final_output_scope",
                 category="output",
                 severity="blocking",
                 message=localized_text(
                     profile.language,
-                    "Det är fortfarande oklart hur omfattande det slutliga beslutsstödet ska vara.",
-                    "The level of detail in the final decision-support output is still unclear.",
+                    "Det är fortfarande oklart hur detaljerat slutresultatet ska vara.",
+                    "The level of detail in the final output is still unclear.",
                 ),
-                suggestion=decision_support_scope_question(profile.language),
+                suggestion=final_output_scope_question(profile.language),
                 question_level="nice_to_have",
             )
         )
@@ -707,11 +707,11 @@ def build_discovery_followup_text(
             "Jag behöver förstå vem slutresultatet främst är till för innan jag kan sammanfatta lösningen.",
             "I need to understand who the final output is primarily for before I can summarize the solution.",
         )
-    if issue.issue_id == "decision_support_scope":
+    if issue.issue_id == "final_output_scope":
         return localized_text(
             language,
-            "Jag behöver förstå hur omfattande slutresultatet ska vara innan jag kan sammanfatta lösningen.",
-            "I need to understand how extensive the final output should be before I can summarize the solution.",
+            "Jag behöver förstå hur detaljerat slutresultatet ska vara innan jag kan sammanfatta lösningen.",
+            "I need to understand how detailed the final output should be before I can summarize the solution.",
         )
     if issue.issue_id == "final_pdf_type":
         return localized_text(

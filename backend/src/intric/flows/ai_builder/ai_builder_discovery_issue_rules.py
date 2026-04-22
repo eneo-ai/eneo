@@ -42,7 +42,7 @@ def question_category(question_id: str) -> str:
         "docx_output_mode": "output",
         "pdf_generation_mode": "output",
         "output_reader": "output",
-        "decision_support_scope": "output",
+        "final_output_scope": "output",
         "runtime_metadata_fields": "input",
     }.get(question_id, "output")
 
@@ -460,8 +460,8 @@ def reader_and_style_is_vague(profile: DiscoveryProfile) -> bool:
     )
 
 
-def decision_support_scope_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "decision_support_scope"):
+def final_output_scope_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "final_output_scope"):
         return False
     if not profile.final_output_text_or_docx:
         return False
@@ -470,7 +470,7 @@ def decision_support_scope_is_vague(profile: DiscoveryProfile) -> bool:
     if any(
         key in answers
         for key in (
-            "decision_support_scope",
+            "final_output_scope",
             "output_style",
             "detail_level",
             "final_pdf_type",
@@ -481,14 +481,12 @@ def decision_support_scope_is_vague(profile: DiscoveryProfile) -> bool:
     if mentions_any(
         text,
         (
-            "decision proposal",
-            "proposed decision",
-            "assessment",
-            "bedömning",
             "summary only",
             "sammanfattning",
             "recommendation",
             "rekommendation",
+            "assessment",
+            "bedömning",
             "sections",
             "sektioner",
         ),
@@ -501,17 +499,31 @@ def decision_support_scope_is_vague(profile: DiscoveryProfile) -> bool:
             "längre",
             "summary only",
             "bara sammanfattning",
-            "beslutsförslag",
-            "decision proposal",
             "sections",
             "sektioner",
-            "bedömning",
-            "assessment",
+            "more detail",
+            "mer detaljerad",
+            "less detail",
+            "mindre detaljerad",
+            "expand",
+            "shorten",
         ),
     ):
         return False
     return mentions_any(
-        text, ("decision support", "beslutsstöd", "report", "rapport", "memo")
+        text,
+        (
+            "report",
+            "rapport",
+            "memo",
+            "analys",
+            "analysis",
+            "översikt",
+            "overview",
+            "brief",
+            "notat",
+            "utlåtande",
+        ),
     )
 
 

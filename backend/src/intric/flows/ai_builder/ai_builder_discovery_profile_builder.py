@@ -155,7 +155,7 @@ def build_discovery_profile(
             "pdf_generation_mode",
             "final_pdf_type",
             "output_reader",
-            "decision_support_scope",
+            "final_output_scope",
             "structured_analysis_need",
             "runtime_metadata_fields",
         )

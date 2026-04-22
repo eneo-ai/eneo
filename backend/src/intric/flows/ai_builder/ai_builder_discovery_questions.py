@@ -32,7 +32,9 @@ def _option(
     )
 
 
-def processing_scope_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+def processing_scope_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
     return DiscoveryQuestionSuggestion(
         question_id="processing_scope",
         question=localized_text(
@@ -63,7 +65,9 @@ def processing_scope_question(language: DiscoveryLanguage) -> DiscoveryQuestionS
     )
 
 
-def input_material_mode_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+def input_material_mode_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
     return DiscoveryQuestionSuggestion(
         question_id="input_material_mode",
         question=localized_text(
@@ -203,7 +207,9 @@ def document_kind_question(language: DiscoveryLanguage) -> DiscoveryQuestionSugg
     )
 
 
-def document_material_scope_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+def document_material_scope_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
     return DiscoveryQuestionSuggestion(
         question_id="document_material_scope",
         question=localized_text(
@@ -243,7 +249,9 @@ def document_material_scope_question(language: DiscoveryLanguage) -> DiscoveryQu
     )
 
 
-def comparison_scope_conflict_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+def comparison_scope_conflict_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
     return DiscoveryQuestionSuggestion(
         question_id="comparison_scope",
         question=localized_text(
@@ -283,7 +291,9 @@ def comparison_scope_conflict_question(language: DiscoveryLanguage) -> Discovery
     )
 
 
-def comparison_scope_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+def comparison_scope_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
     return DiscoveryQuestionSuggestion(
         question_id="comparison_scope",
         question=localized_text(
@@ -323,7 +333,9 @@ def comparison_scope_question(language: DiscoveryLanguage) -> DiscoveryQuestionS
     )
 
 
-def final_output_mode_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+def final_output_mode_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
     return DiscoveryQuestionSuggestion(
         question_id="final_output_mode",
         question=localized_text(
@@ -372,7 +384,9 @@ def final_output_mode_question(language: DiscoveryLanguage) -> DiscoveryQuestion
     )
 
 
-def docx_output_mode_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+def docx_output_mode_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
     return DiscoveryQuestionSuggestion(
         question_id="docx_output_mode",
         question=localized_text(
@@ -443,13 +457,15 @@ def output_reader_question(language: DiscoveryLanguage) -> DiscoveryQuestionSugg
     )
 
 
-def decision_support_scope_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+def final_output_scope_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
     return DiscoveryQuestionSuggestion(
-        question_id="decision_support_scope",
+        question_id="final_output_scope",
         question=localized_text(
             language,
-            "Vad ska beslutsunderlaget innehålla?",
-            "What should the decision-support output include?",
+            "Hur detaljerat ska slutresultatet vara?",
+            "How detailed should the final output be?",
         ),
         options=(
             _option(
@@ -464,20 +480,20 @@ def decision_support_scope_question(language: DiscoveryLanguage) -> DiscoveryQue
             _option(
                 language=language,
                 id="summary_and_assessment",
-                swedish_label="Sammanfattning + bedömning",
-                english_label="Summary + assessment",
+                swedish_label="Sammanfattning + analys",
+                english_label="Summary + analysis",
                 swedish_description="Kombinera en sammanfattning med analys och slutsatser.",
-                english_description="Combine a case summary with analysis and conclusions.",
+                english_description="Combine a summary with analysis and conclusions.",
                 value="summary_and_assessment",
             ),
             _option(
                 language=language,
-                id="summary_assessment_decision",
-                swedish_label="Sammanfattning + bedömning + beslutsförslag",
-                english_label="Summary + assessment + decision proposal",
-                swedish_description="Inkludera också ett förslag till beslut eller rekommenderad åtgärd.",
-                english_description="Include a proposed decision or recommendation for action.",
-                value="summary_assessment_decision",
+                id="summary_assessment_recommendation",
+                swedish_label="Sammanfattning + analys + rekommendation",
+                english_label="Summary + analysis + recommendation",
+                swedish_description="Inkludera också en rekommendation eller förslag på nästa steg.",
+                english_description="Include a recommendation or next-step proposal.",
+                value="summary_assessment_recommendation",
             ),
             _option(
                 language=language,
@@ -492,7 +508,9 @@ def decision_support_scope_question(language: DiscoveryLanguage) -> DiscoveryQue
     )
 
 
-def runtime_metadata_fields_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+def runtime_metadata_fields_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
     return DiscoveryQuestionSuggestion(
         question_id="runtime_metadata_fields",
         question=localized_text(
@@ -532,7 +550,9 @@ def runtime_metadata_fields_question(language: DiscoveryLanguage) -> DiscoveryQu
     )
 
 
-def structured_analysis_need_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+def structured_analysis_need_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
     return DiscoveryQuestionSuggestion(
         question_id="structured_analysis_need",
         question=localized_text(
@@ -604,7 +624,9 @@ def final_pdf_type_question(language: DiscoveryLanguage) -> DiscoveryQuestionSug
     )
 
 
-def pdf_generation_mode_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+def pdf_generation_mode_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
     return DiscoveryQuestionSuggestion(
         question_id="pdf_generation_mode",
         question=localized_text(
@@ -650,7 +672,7 @@ def question_suggestion_for_id(
         "final_output_mode": final_output_mode_question,
         "docx_output_mode": docx_output_mode_question,
         "output_reader": output_reader_question,
-        "decision_support_scope": decision_support_scope_question,
+        "final_output_scope": final_output_scope_question,
         "runtime_metadata_fields": runtime_metadata_fields_question,
         "structured_analysis_need": structured_analysis_need_question,
         "final_pdf_type": final_pdf_type_question,

@@ -54,7 +54,7 @@ SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = frozenset(
         "final_output_mode",
         "docx_output_mode",
         "output_reader",
-        "decision_support_scope",
+        "final_output_scope",
         "runtime_metadata_fields",
         "structured_analysis_need",
         "output_style",

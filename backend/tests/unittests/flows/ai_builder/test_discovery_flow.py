@@ -857,7 +857,7 @@ class TestExtendedClarificationHints:
     def test_vague_decision_support_prompt_is_resolved_after_full_answers(self) -> None:
         """After 5 explicit answers covering scope, input, output mode, and
         DOCX mode, the discovery analysis infers enough context that
-        nice_to_have questions (output_reader, decision_support_scope) are
+        nice_to_have questions (output_reader, final_output_scope) are
         not generated as blocking issues.
         """
         conversation = [
@@ -1135,7 +1135,7 @@ class TestExtendedClarificationHints:
         assert "runtime_metadata_fields" not in question_ids
         assert "document_kind" not in question_ids
         assert "output_reader" not in question_ids
-        assert "decision_support_scope" not in question_ids
+        assert "final_output_scope" not in question_ids
 
     def test_edit_flow_blocks_on_mixed_audio_and_document_input_architecture(
         self,
