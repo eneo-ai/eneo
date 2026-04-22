@@ -863,3 +863,134 @@ def test_flags_non_terminal_docx_conversion_for_output_only_edit() -> None:
     assert feedback is not None
     assert "mellanliggande" in feedback.casefold()
     assert "template_fill" in feedback
+
+
+class TestCriticInvariantLoop:
+    """The critic delegates to a CRITIC_INVARIANTS registry whose entries
+    carry their own evidence (callable) and remediation (Swedish prose),
+    rather than hard-coded substring checks in the main function body.
+    Covered here: the explicit-PDF-terminal-mismatch invariant.
+    """
+
+    def test_pdf_terminal_alignment_invariant_is_registered(self) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CRITIC_INVARIANTS,
+            CriticInvariant,
+        )
+
+        ids = [inv.id for inv in CRITIC_INVARIANTS]
+        assert "pdf_terminal_output_alignment" in ids
+
+        pdf_inv = next(
+            inv
+            for inv in CRITIC_INVARIANTS
+            if inv.id == "pdf_terminal_output_alignment"
+        )
+        assert isinstance(pdf_inv, CriticInvariant)
+        assert callable(pdf_inv.evidence)
+        assert "PDF" in pdf_inv.remediation
+
+    def test_render_critic_issues_fires_pdf_terminal_alignment_on_mismatch(
+        self,
+    ) -> None:
+        """The loop runs the pdf-terminal-alignment evidence and returns its
+        remediation when the user chose PDF but the terminal step does not
+        output PDF."""
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport",
+            steps=[
+                _step("step_a", "Skriv rapport", "Skriv.", output_type=OutputType.TEXT)
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output="pdf_document"),
+        )
+
+        issues = render_critic_issues(context)
+
+        assert any("PDF" in issue for issue in issues)
+
+    def test_render_critic_issues_stays_silent_when_terminal_matches(self) -> None:
+        """The invariant must not fire when the terminal step already produces PDF."""
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport",
+            steps=[
+                _step(
+                    "step_a",
+                    "Generera PDF",
+                    "Skapa PDF.",
+                    output_type=OutputType.PDF,
+                )
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output="pdf_document"),
+        )
+
+        assert render_critic_issues(context) == []
+
+    def test_render_critic_issues_stays_silent_without_pdf_intent(self) -> None:
+        """The invariant requires explicit PDF intent; absent it, no issue fires."""
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport",
+            steps=[_step("step_a", "Skriv", "Skriv.", output_type=OutputType.TEXT)],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+        )
+
+        assert render_critic_issues(context) == []

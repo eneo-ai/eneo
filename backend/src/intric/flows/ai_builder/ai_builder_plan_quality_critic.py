@@ -3,6 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    CriticContext,
+    render_critic_issues,
+)
 from intric.flows.ai_builder.ai_builder_form_intake_signals import (
     mentions_sectioned_form_intake,
 )
@@ -104,7 +108,6 @@ def build_conversation_aware_quality_feedback(
     *,
     flow: Flow | None = None,
 ) -> str | None:
-    issues: list[str] = []
     answer_signals = extract_answer_signals(conversation)
     text = aggregate_freeform_user_text(conversation)
     requirements_state = resolve_requirements_state(
@@ -123,6 +126,18 @@ def build_conversation_aware_quality_feedback(
     signal_text = "\n".join(part for part in (text, requirements_text) if part)
     planner_patterns = detect_planner_pattern_signals(signal_text)
     output_intent = resolve_output_intent(text, answer_signals)
+
+    context = CriticContext(
+        spec=spec,
+        flow=flow,
+        answer_signals=answer_signals,
+        text=text,
+        requirements_text=requirements_text,
+        signal_text=signal_text,
+        planner_patterns=planner_patterns,
+        output_intent=output_intent,
+    )
+    issues: list[str] = []
 
     if runtime_metadata_requested(answer_signals) and not spec.form_fields:
         issues.append(
@@ -162,14 +177,7 @@ def build_conversation_aware_quality_feedback(
             )
 
     explicit_output = output_intent.terminal_output
-    if (
-        explicit_output == "pdf_document"
-        and spec.steps[-1].output_type != OutputType.PDF
-    ):
-        issues.append(
-            "Användaren har valt PDF som slutartefakt men sista steget producerar inte PDF. "
-            "Justera slutstegets output_type så att det matchar användarens val."
-        )
+    issues.extend(render_critic_issues(context))
     if (
         explicit_output == "docx_document"
         and spec.steps[-1].output_type != OutputType.DOCX
