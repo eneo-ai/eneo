@@ -160,7 +160,7 @@ async def test_resolve_message_metadata_infers_final_output_answer_from_structur
                         "options": [
                             {
                                 "id": "structured_text",
-                                "label": "Strukturerat beslutsunderlag som text",
+                                "label": "Strukturerat textresultat",
                             },
                             {"id": "pdf_document", "label": "PDF-dokument"},
                             {"id": "docx_document", "label": "DOCX-dokument"},

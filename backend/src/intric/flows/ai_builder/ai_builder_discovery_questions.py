@@ -172,8 +172,8 @@ def document_kind_question(language: DiscoveryLanguage) -> DiscoveryQuestionSugg
                 id="case_documents",
                 swedish_label="Ärendedokument och officiellt underlag",
                 english_label="Case documents and official material",
-                swedish_description="Tjänsteskrivelser, beslut, remisser, PM och annat officiellt material.",
-                english_description="Reports, decisions, remisses, memos, and other official case files.",
+                swedish_description="Rapporter, beslut, memo och annat officiellt underlag.",
+                english_description="Reports, decisions, memos, and other official case material.",
                 value="case_documents",
             ),
             _option(
@@ -347,10 +347,10 @@ def final_output_mode_question(
             _option(
                 language=language,
                 id="structured_text",
-                swedish_label="Strukturerat beslutsunderlag som text",
-                english_label="Structured decision support as text",
-                swedish_description="Ett läsbart memo eller beslutsunderlag direkt i flödet.",
-                english_description="A readable memo or decision-support text in the flow output.",
+                swedish_label="Strukturerat textresultat",
+                english_label="Structured text output",
+                swedish_description="Ett läsbart memo, rapport eller sammanfattning direkt i flödet.",
+                english_description="A readable memo, report, or summary in the flow output.",
                 value="structured_text",
             ),
             _option(

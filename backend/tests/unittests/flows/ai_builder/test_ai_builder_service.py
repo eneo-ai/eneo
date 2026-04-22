@@ -3839,7 +3839,7 @@ class TestSendMessageStructuredQuestion:
                                 "options": [
                                     {
                                         "id": "structured_text",
-                                        "label": "Strukturerat beslutsunderlag som text",
+                                        "label": "Strukturerat textresultat",
                                     },
                                     {"id": "pdf_document", "label": "PDF-dokument"},
                                     {"id": "docx_document", "label": "DOCX-dokument"},
@@ -3959,7 +3959,7 @@ class TestSendMessageStructuredQuestion:
                                 "options": [
                                     {
                                         "id": "structured_text",
-                                        "label": "Strukturerat beslutsunderlag som text",
+                                        "label": "Strukturerat textresultat",
                                     },
                                     {"id": "pdf_document", "label": "PDF-dokument"},
                                     {"id": "docx_document", "label": "DOCX-dokument"},

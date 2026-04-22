@@ -838,7 +838,7 @@ class TestExtendedClarificationHints:
             ),
             ConversationMessage(
                 role="user",
-                content="Structured decision support as text",
+                content="Structured text output",
                 metadata={
                     "question_answer": {
                         "question_id": "final_output_mode",
@@ -1411,7 +1411,7 @@ class TestExtendedClarificationHints:
             ),
             ConversationMessage(
                 role="user",
-                content="Strukturerat beslutsunderlag som text.",
+                content="Strukturerat textresultat.",
                 metadata={"ui_language": "sv"},
             ),
             ConversationMessage(
@@ -1479,7 +1479,7 @@ class TestExtendedClarificationHints:
             ),
             ConversationMessage(
                 role="user",
-                content="Strukturerat beslutsunderlag som text.",
+                content="Strukturerat textresultat.",
                 metadata={
                     "question_answer": {
                         "question_id": "final_output_mode",
@@ -1547,7 +1547,7 @@ class TestExtendedClarificationHints:
             ),
             ConversationMessage(
                 role="user",
-                content="Strukturerat beslutsunderlag som text.",
+                content="Strukturerat textresultat.",
                 metadata={
                     "question_answer": {
                         "question_id": "final_output_mode",

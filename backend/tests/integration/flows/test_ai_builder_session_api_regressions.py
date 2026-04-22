@@ -787,7 +787,7 @@ async def test_ai_builder_api_repeated_output_question_after_structured_answer_r
             "options": [
                 {
                     "id": "structured_text",
-                    "label": "Strukturerat beslutsunderlag som text",
+                    "label": "Strukturerat textresultat",
                 },
                 {"id": "pdf_document", "label": "PDF-dokument"},
                 {"id": "docx_document", "label": "DOCX-dokument"},
@@ -903,7 +903,7 @@ async def test_ai_builder_api_repeated_output_question_after_freeform_label_reco
             "options": [
                 {
                     "id": "structured_text",
-                    "label": "Strukturerat beslutsunderlag som text",
+                    "label": "Strukturerat textresultat",
                 },
                 {"id": "pdf_document", "label": "PDF-dokument"},
                 {"id": "docx_document", "label": "DOCX-dokument"},
@@ -1008,7 +1008,7 @@ async def test_ai_builder_api_question_recovery_exhaustion_returns_typed_error_e
             "options": [
                 {
                     "id": "structured_text",
-                    "label": "Strukturerat beslutsunderlag som text",
+                    "label": "Strukturerat textresultat",
                 },
                 {"id": "pdf_document", "label": "PDF-dokument"},
                 {"id": "docx_document", "label": "DOCX-dokument"},
@@ -1188,7 +1188,7 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
             "options": [
                 {
                     "id": "structured_text",
-                    "label": "Strukturerat beslutsunderlag som text",
+                    "label": "Strukturerat textresultat",
                 },
                 {"id": "pdf_document", "label": "PDF-dokument"},
                 {"id": "docx_document", "label": "DOCX-dokument"},
@@ -1272,8 +1272,7 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
                 session_id=session_id,
                 message=(
                     "Skapa ett flöde som tar en ljudfil, transkriberar den och "
-                    "sammanfattar innehållet för en mänsklig läsare. Jag vill köra "
-                    "ett ärende åt gången."
+                    "sammanfattar innehållet för en mänsklig läsare."
                 ),
             )
             second_events = await _send_builder_message(
@@ -1794,7 +1793,7 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
             "options": [
                 {
                     "id": "structured_text",
-                    "label": "Strukturerat beslutsunderlag som text",
+                    "label": "Strukturerat textresultat",
                 },
                 {"id": "pdf_document", "label": "PDF-dokument"},
                 {"id": "docx_document", "label": "DOCX-dokument"},
@@ -1879,8 +1878,7 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
                 session_id=session_id,
                 message=(
                     "Skapa ett flöde som tar en ljudfil, transkriberar den och "
-                    "sammanfattar innehållet för en mänsklig läsare. Jag vill köra "
-                    "ett ärende åt gången."
+                    "sammanfattar innehållet för en mänsklig läsare."
                 ),
             )
             second_events = await _send_builder_message(

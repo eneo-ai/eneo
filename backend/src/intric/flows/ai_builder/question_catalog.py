@@ -217,11 +217,11 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
     ),
     worked_examples_sv=(
         "Uppladdning av mötesinspelning för transkribering.",
-        "Handläggare klistrar in tjänsteskrivelse som text.",
+        "Användaren klistrar in en rapport som text.",
     ),
     worked_examples_en=(
         "Uploading a meeting recording for transcription.",
-        "Case officer pastes a report as text.",
+        "The user pastes a report as text.",
     ),
 )
 
@@ -243,10 +243,10 @@ _TERMINAL_OUTPUT = QuestionTemplate(
     options=(
         _option(
             id="structured_text",
-            label_sv="Strukturerat beslutsunderlag som text",
-            label_en="Structured decision support as text",
-            description_sv="Ett läsbart memo eller beslutsunderlag direkt i flödet.",
-            description_en="A readable memo or decision-support text in the flow output.",
+            label_sv="Strukturerat textresultat",
+            label_en="Structured text output",
+            description_sv="Ett läsbart memo, rapport eller sammanfattning direkt i flödet.",
+            description_en="A readable memo, report, or summary in the flow output.",
             value="structured_text",
         ),
         _option(
@@ -276,11 +276,11 @@ _TERMINAL_OUTPUT = QuestionTemplate(
     ),
     worked_examples_sv=(
         "Sammanfattning och bedömning som läsbart memo.",
-        "Ifylld DOCX-mall till nämnden.",
+        "Ifylld DOCX-mall som levereras till mottagaren.",
     ),
     worked_examples_en=(
         "Summary and assessment as a readable memo.",
-        "Filled DOCX template delivered to the board.",
+        "Filled DOCX template delivered to the recipient.",
     ),
 )
 
@@ -316,12 +316,12 @@ _DOCX_OUTPUT_MODE = QuestionTemplate(
         ),
     ),
     worked_examples_sv=(
-        "Genererad tjänsteskrivelse utan mall.",
-        "Ifyllning av kommunens beslutsmall.",
+        "Genererad rapport utan mall.",
+        "Ifyllning av organisationens DOCX-mall.",
     ),
     worked_examples_en=(
-        "Generated case report without a template.",
-        "Filling the municipality's decision template.",
+        "Generated report without a template.",
+        "Filling the organization's DOCX template.",
     ),
 )
 
@@ -419,12 +419,12 @@ _DOCUMENT_MATERIAL_SCOPE = QuestionTemplate(
         ),
     ),
     worked_examples_sv=(
-        "En tjänsteskrivelse per ärende.",
-        "Ett ärendepaket med remiss, svar och bilagor.",
+        "En rapport per körning.",
+        "Ett ärendepaket med huvuddokument, svar och bilagor.",
     ),
     worked_examples_en=(
-        "One case report per run.",
-        "A case package with referral, response, and attachments.",
+        "One report per run.",
+        "A case package with primary document, response, and attachments.",
     ),
 )
 
@@ -478,13 +478,13 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
     question_sv="Ska användaren också ange metadata vid körning?",
     question_en="Should the user also enter metadata at runtime?",
     help_sv=(
-        "Metadata är återanvändbara fält som handläggaren fyller i utöver "
-        "själva underlaget — till exempel ärendenummer, språk eller "
+        "Metadata är återanvändbara fält som användaren fyller i utöver "
+        "själva underlaget — till exempel referensnummer, språk eller "
         "ansvarig avdelning."
     ),
     help_en=(
-        "Metadata are reusable fields the case officer enters beyond the "
-        "source material itself — for example case number, language, or "
+        "Metadata are reusable fields the user enters beyond the source "
+        "material itself — for example reference number, language, or "
         "responsible department."
     ),
     options=(

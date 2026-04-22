@@ -468,7 +468,7 @@ def test_latest_pending_structured_question_reads_backend_question_payload() -> 
                             "options": [
                                 {
                                     "id": "structured_text",
-                                    "label": "Strukturerat beslutsunderlag som text",
+                                    "label": "Strukturerat textresultat",
                                 }
                             ],
                         },

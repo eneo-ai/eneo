@@ -574,3 +574,47 @@ class TestQuestionCatalogPublicApi:
         for slot in KNOWN_REQUIREMENT_SLOT_NAMES:
             ids = question_ids_for_slot(slot)
             assert ids, f"slot {slot!r} has no question ids in the catalog"
+
+
+class TestDomainNeutrality:
+    """AI Builder is general-purpose: it builds procurement, onboarding,
+    transcription, extraction, comparison, and template-fill flows — not
+    just municipal decision-support flows. Swedish case-management
+    vocabulary must not appear in any rendered question, label,
+    description, help copy, or worked example.
+
+    The banned-token list mirrors the domain-neutrality rule in the
+    Golden Coverage Matrix. A catalog change that reintroduces any of
+    these tokens fails here before landing.
+    """
+
+    _BANNED_MUNICIPAL_TOKENS: tuple[str, ...] = (
+        "tjänsteskriv",
+        "beslutsunderlag",
+        "beslutsstöd",
+        "beslutsförslag",
+        "nämnden",
+        "nämnder",
+        "remiss",
+        "handläggar",
+        "ärendenummer",
+    )
+
+    def test_no_banned_tokens_in_any_rendered_template(self) -> None:
+        for template_id in QUESTION_CATALOG:
+            for locale in ("sv", "en"):
+                rendered = render_question(template_id, locale)  # type: ignore[arg-type]
+                blob_parts = [
+                    rendered.question,
+                    rendered.help,
+                    *rendered.worked_examples,
+                ]
+                for option in rendered.options:
+                    blob_parts.append(option.label)
+                    blob_parts.append(option.description)
+                lowered = "\n".join(blob_parts).casefold()
+                for token in self._BANNED_MUNICIPAL_TOKENS:
+                    assert token.casefold() not in lowered, (
+                        f"{template_id} [{locale}]: banned municipal "
+                        f"token {token!r} found in rendered output"
+                    )
