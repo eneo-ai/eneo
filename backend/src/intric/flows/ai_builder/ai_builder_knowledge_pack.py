@@ -13,7 +13,6 @@ from intric.flows.ai_builder.ai_builder_knowledge_pack_core import (
 from intric.flows.ai_builder.ai_builder_knowledge_pack_create import (
     KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE,
     KNOWLEDGE_PACK_CREATE_RECIPES,
-    KNOWLEDGE_PACK_CREATE_STEP_DESIGN,
 )
 from intric.flows.ai_builder.ai_builder_knowledge_pack_edit import (
     KNOWLEDGE_PACK_EDIT_MODE,
@@ -22,6 +21,7 @@ from intric.flows.ai_builder.ai_builder_knowledge_pack_protocol import (
     build_role_and_protocol,
     build_structured_reference_block,
 )
+from intric.flows.ai_builder.ai_builder_step_design import render_step_design
 from intric.flows.ai_builder.ai_builder_validation_repair import (
     render_validation_repair_examples,
 )
@@ -54,7 +54,7 @@ def build_prompt_knowledge_sections(
     if has_confirmed_requirements:
         sections.extend(
             [
-                KNOWLEDGE_PACK_CREATE_STEP_DESIGN,
+                render_step_design(),
                 KNOWLEDGE_PACK_CREATE_RECIPES,
                 render_validation_repair_examples(),
                 render_knowledge_pack(),
@@ -68,7 +68,6 @@ __all__ = [
     "KNOWLEDGE_PACK_CONTRACTS",
     "KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE",
     "KNOWLEDGE_PACK_CREATE_RECIPES",
-    "KNOWLEDGE_PACK_CREATE_STEP_DESIGN",
     "KNOWLEDGE_PACK_EDIT_MODE",
     "KNOWLEDGE_PACK_FLOW_ARCHITECTURE",
     "KNOWLEDGE_PACK_IO_INTELLIGENCE",

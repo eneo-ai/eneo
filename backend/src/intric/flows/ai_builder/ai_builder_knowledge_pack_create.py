@@ -37,37 +37,6 @@ utkastet till den kanoniska flödesspecifikationen.
 """
 
 
-_KNOWLEDGE_PACK_CREATE_STEP_DESIGN = """\
-# Create-läge: kompilerad datamodell
-
-## Instruktioner
-- `instructions` ska vara ren uppgiftsbeskrivning — inga `{{ ... }}`-variabler
-- Beskriv roll, krav, format och begränsningar tydligt
-- Backend kompilerar underlaget från `input_source`, tidigare steg och formulärfält
-- Backend kompilerar även explicita fältbindningar från `uses_previous_fields`
-- Instruktioner får gärna vara LÅNGA och detaljerade när uppgiften kräver flera regler, formatkrav eller beslutslogik
-
-## JSON-utdata via `output_fields`
-- `output_fields` används bara för `output_type=\"json\"`
-- Max nesting depth 3: toppnivåfält, barnfält och ett barnbarnsled
-- Bra mönster:
-  - objekt med scalar-fält
-  - array med objektposter
-  - objekt/array som innehåller ett extra lager scalar-fält
-- Undvik djupare träd än så; platta hellre ut strukturen
-
-## Formulär och runtime
-- Modellera användarens körningsdata som `form_fields` i stället för dold prompttext
-- Referera till dessa med `uses_form_fields`
-- När ett senare steg bara behöver vissa JSON-fält från ett tidigare steg: använd `uses_previous_fields`
-- Om användaren måste ladda upp filer vid körning: sätt `runtime_upload=true`
-
-## Dokumentleverans
-- `document_delivery_mode=\"generated\"` för vanliga genererade PDF/DOCX-dokument
-- `document_delivery_mode=\"template_fill\"` bara för DOCX
-"""
-
-
 _KNOWLEDGE_PACK_CREATE_RECIPES = """\
 # Create-läge: vanliga mönster
 
@@ -169,14 +138,11 @@ _KNOWLEDGE_PACK_CREATE_RECIPES = """\
 
 
 KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE = _KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE
-KNOWLEDGE_PACK_CREATE_STEP_DESIGN = _KNOWLEDGE_PACK_CREATE_STEP_DESIGN
 KNOWLEDGE_PACK_CREATE_RECIPES = _KNOWLEDGE_PACK_CREATE_RECIPES
 
 __all__ = [
     "_KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE",
     "_KNOWLEDGE_PACK_CREATE_RECIPES",
-    "_KNOWLEDGE_PACK_CREATE_STEP_DESIGN",
     "KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE",
     "KNOWLEDGE_PACK_CREATE_RECIPES",
-    "KNOWLEDGE_PACK_CREATE_STEP_DESIGN",
 ]
