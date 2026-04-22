@@ -243,7 +243,7 @@ def test_build_discovery_profile_exposes_runtime_metadata_and_structured_analysi
                 role="user",
                 content=(
                     "Bygg ett flöde som analyserar flera PDF-dokument i samma ärende. "
-                    "Användaren ska ange ärendenummer och önskat språk. "
+                    "Användaren ska ange intern referens och önskat språk. "
                     "Strukturerad data ska användas där det förbättrar kvaliteten."
                 ),
             )

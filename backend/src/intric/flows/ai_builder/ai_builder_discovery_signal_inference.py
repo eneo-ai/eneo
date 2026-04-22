@@ -124,8 +124,6 @@ def _infer_document_kind(text: str) -> str | None:
             "tjänsteskrivelser",
             "remiss",
             "remisser",
-            "nämndsbeslut",
-            "beslutsunderlag",
             "officiellt underlag",
             "official material",
             "official case files",
@@ -361,7 +359,6 @@ def _infer_pdf_generation_mode(text: str) -> str | None:
 
 def _infer_runtime_metadata_fields(text: str) -> str | None:
     richer_markers = (
-        "ärendenummer",
         "case number",
         "intern referens",
         "internal reference",
@@ -373,7 +370,6 @@ def _infer_runtime_metadata_fields(text: str) -> str | None:
         "language",
         "fokus",
         "focus",
-        "nämnd",
         "committee",
     )
     if sum(1 for marker in richer_markers if marker in text) >= 2:

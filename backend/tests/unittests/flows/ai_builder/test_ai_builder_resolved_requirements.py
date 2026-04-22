@@ -158,7 +158,7 @@ def test_resolved_requirements_state_tracks_document_scope_and_runtime_metadata_
                 role="user",
                 content=(
                     "Bygg ett flöde som analyserar flera PDF-dokument i samma ärende. "
-                    "Användaren ska ange ärendenummer och önskat språk."
+                    "Användaren ska ange intern referens och önskat språk."
                 ),
             )
         ]
