@@ -66,6 +66,7 @@ def _commit_architecture(
     base_version: int = 0,
     tuples_chain: list[dict] | None = None,
     required_capabilities: list[str] | None = None,
+    chosen_patterns: list[str] | None = None,
 ) -> dict:
     hash_hex = "a" * 64
     chain = (
@@ -84,7 +85,11 @@ def _commit_architecture(
             **_empty_delta_dict(base_version=base_version),
             "architecture_commit": {
                 "tuples_chain": chain,
-                "chosen_patterns": ["summarize_text"],
+                "chosen_patterns": (
+                    chosen_patterns
+                    if chosen_patterns is not None
+                    else ["summarize_text"]
+                ),
                 "required_capabilities": required_capabilities or [],
                 "committed_at": datetime(2026, 4, 23, tzinfo=timezone.utc).isoformat(),
                 "architecture_hash": hash_hex,
@@ -400,6 +405,42 @@ class TestCommitArchitectureUnresolvableCapabilityGuardrail:
         assert evaluate_planner_output(output, context) is None
 
 
+class TestCommitArchitectureUnresolvablePatternGuardrail:
+    """Mirrors the capability-unresolvable guardrail for `chosen_patterns`.
+
+    Without this check an unknown pattern id passes the orchestrator
+    and is then silently dropped downstream by the capability-projection
+    module's drift-tolerant filter. Validating here fails loud at the
+    earliest boundary so the planner retry loop can react.
+    """
+
+    def test_rejects_commit_with_pattern_not_in_pattern_registry(self) -> None:
+        output = parse_planner_output(
+            _commit_architecture(chosen_patterns=["definitely_not_a_real_pattern"])
+        )
+        context = _ctx()
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "architecture_commit_unresolvable_pattern"
+        assert "definitely_not_a_real_pattern" in rejection.detail
+
+    def test_accepts_commit_with_patterns_present_in_pattern_registry(self) -> None:
+        output = parse_planner_output(
+            _commit_architecture(chosen_patterns=["summarize_text"])
+        )
+        context = _ctx()
+
+        assert evaluate_planner_output(output, context) is None
+
+    def test_accepts_commit_with_empty_chosen_patterns(self) -> None:
+        output = parse_planner_output(_commit_architecture(chosen_patterns=[]))
+        context = _ctx()
+
+        assert evaluate_planner_output(output, context) is None
+
+
 # ---------------------------------------------------------------------------
 # Guardrail 5 — structural parity between draft_plan and ArchitectureCommit
 # ---------------------------------------------------------------------------
@@ -466,6 +507,7 @@ class TestRejectionCodeExhaustiveness:
             "architecture_commit_premature_unresolved_choices",
             "architecture_commit_illegal_tuple",
             "architecture_commit_unresolvable_capability",
+            "architecture_commit_unresolvable_pattern",
             "propose_plan_without_architecture_commit",
             "propose_plan_draft_plan_structural_mismatch",
             "propose_plan_missing_draft_plan",

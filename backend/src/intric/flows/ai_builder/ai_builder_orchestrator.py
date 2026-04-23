@@ -24,6 +24,7 @@ from typing import Annotated, Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
 
+from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningSignal,
@@ -144,6 +145,7 @@ RejectionCode = Literal[
     "architecture_commit_premature_unresolved_choices",
     "architecture_commit_illegal_tuple",
     "architecture_commit_unresolvable_capability",
+    "architecture_commit_unresolvable_pattern",
     "propose_plan_without_architecture_commit",
     "propose_plan_missing_draft_plan",
     "propose_plan_draft_plan_structural_mismatch",
@@ -309,6 +311,13 @@ def _check_commit_architecture(
                     f"required capability {capability!r} is not in FCM "
                     "CAPABILITY_REGISTRY"
                 ),
+            )
+
+    for pattern_id in commit.chosen_patterns:
+        if pattern_id not in PATTERN_REGISTRY:
+            return RejectionReason(
+                code="architecture_commit_unresolvable_pattern",
+                detail=(f"chosen pattern {pattern_id!r} is not in PATTERN_REGISTRY"),
             )
     return None
 
