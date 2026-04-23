@@ -3382,7 +3382,7 @@ class TestSendMessageStructuredQuestion:
                 ),
                 ConversationMessage(
                     role="user",
-                    content="Ett ärende åt gången",
+                    content="Ett dokument åt gången",
                     metadata={
                         "question_answer": {
                             "question_id": "processing_scope",
@@ -4491,10 +4491,7 @@ class TestSendMessageStructuredQuestion:
 
 
 class TestReasoningLeakRegression:
-    """Reasoning field must never be exposed in public API responses.
-
-    These tests should FAIL before Phase 1.3 fix and PASS after.
-    """
+    """Reasoning field must never be exposed in public API responses."""
 
     def test_plan_event_strips_reasoning(self):
         """Plan SSE events must not include reasoning."""

@@ -925,6 +925,8 @@ class AIBuilderPlanner:
                     tenant_id=self.user.tenant_id,
                     new_messages=conversation[new_messages_start:],
                     planning_state=planning_state,
+                    request_id=request_uuid,
+                    lock_token=lock_token,
                 )
                 yield build_text_event(assistant_message.content)
 

@@ -49,7 +49,7 @@ from intric.flows.ai_builder.planning_state import (
     ResolvedSlot,
 )
 from intric.flows.flow import FlowStep
-from intric.main.exceptions import NotFoundException
+from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.prompts.api.prompt_models import PromptCreate
 
 
@@ -939,6 +939,72 @@ async def test_ai_builder_repo_commit_turn_rolls_back_when_planning_state_drifts
         )
 
     assert fetched.conversation == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_commit_turn_rejects_write_when_lease_is_lost(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """Lease-lost guard: commit_turn must reject the write when the
+    caller's request_id/lock_token no longer matches the row's lease.
+    Otherwise a reclaimed session could land a stale planner turn on top
+    of another worker's active commit.
+    """
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Commit Turn Lease",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        await repo.claim_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            request_id=uuid4(),
+            lock_token=uuid4(),
+            lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+        )
+        stale_request_id = uuid4()
+        stale_lock_token = uuid4()
+        assistant_msg = ConversationMessage(role="assistant", content="Stale lease")
+        state = _planning_state_fixture()
+
+        with pytest.raises(BadRequestException):
+            await repo.commit_turn(
+                session_id=session.id,
+                tenant_id=user.tenant_id,
+                new_messages=[assistant_msg],
+                planning_state=state,
+                request_id=stale_request_id,
+                lock_token=stale_lock_token,
+            )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        fetched = await repo.get_session(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+        loaded = await repo.load_planning_state(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert fetched.conversation == []
+    assert loaded is None
 
 
 def _make_plan_envelope(spec: FlowDraftSpecCore) -> PlannerPlanEnvelope:
