@@ -16,6 +16,7 @@ from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationError
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
+    carry_forward_persisted_planner_state,
 )
 
 if TYPE_CHECKING:
@@ -177,6 +178,9 @@ async def store_plan_and_update_conversation(
         assumptions=assumptions,
     )
     async with repo.savepoint():
+        prior_state = await repo.load_planning_state(
+            session_id=session_id, tenant_id=tenant_id
+        )
         plan = await persist_plan(
             repo=repo,
             tenant_id=tenant_id,
@@ -199,6 +203,7 @@ async def store_plan_and_update_conversation(
         planning_state = build_planning_state_from_conversation(persisted, flow=flow)
         planning_state.draft_plan_id = plan.id
         planning_state.phase = "plan_proposed"
+        carry_forward_persisted_planner_state(planning_state, prior_state)
         await repo.save_planning_state(
             session_id=session_id,
             tenant_id=tenant_id,

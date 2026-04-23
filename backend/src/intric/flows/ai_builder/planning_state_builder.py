@@ -91,6 +91,48 @@ def build_planning_state_from_conversation(
     )
 
 
+_PHASE_RANK: dict[str, int] = {
+    "awaiting_input": 0,
+    "discovering": 1,
+    "ready_to_commit": 2,
+    "plan_proposed": 3,
+}
+
+
+def carry_forward_persisted_planner_state(
+    rebuilt: PlanningState,
+    persisted: PlanningState | None,
+) -> PlanningState:
+    """Carry forward planner-owned fields from the previously persisted
+    state onto a freshly rebuilt state.
+
+    `build_planning_state_from_conversation` reseeds only the
+    deterministic slot surface. Planner-owned fields
+    (`architecture_commit`, `draft_plan_id`) and phase transitions past
+    `discovering` are written by explicit planner actions on prior
+    turns. Without preservation, every later `commit_turn` or proposal
+    save would erase them by overwrite. The caller still owns explicit
+    replacement: if the current turn sets any of these fields on
+    `rebuilt` before calling this helper, the persisted value is not
+    copied over it.
+
+    Phase is monotonic — if persisted advanced past what the rebuild
+    derived, the advanced phase is preserved.
+    """
+    if persisted is None:
+        return rebuilt
+    if (
+        rebuilt.architecture_commit is None
+        and persisted.architecture_commit is not None
+    ):
+        rebuilt.architecture_commit = persisted.architecture_commit
+    if rebuilt.draft_plan_id is None and persisted.draft_plan_id is not None:
+        rebuilt.draft_plan_id = persisted.draft_plan_id
+    if _PHASE_RANK.get(rebuilt.phase, 0) < _PHASE_RANK.get(persisted.phase, 0):
+        rebuilt.phase = persisted.phase
+    return rebuilt
+
+
 def build_planning_state_prompt_block(
     conversation: list[ConversationMessage],
     *,

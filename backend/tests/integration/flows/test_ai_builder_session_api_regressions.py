@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -1366,7 +1368,7 @@ async def test_ai_builder_repo_commit_turn_rolls_back_architecture_commit_on_dri
             "intric.flows.ai_builder.ai_builder_repo.build_planning_state_from_conversation",
             return_value=drifted,
         ):
-            with pytest.raises(Exception):
+            with pytest.raises(ValidationError):
                 await repo.commit_turn(
                     session_id=session.id,
                     tenant_id=user.tenant_id,
@@ -1386,6 +1388,243 @@ async def test_ai_builder_repo_commit_turn_rolls_back_architecture_commit_on_dri
 
     assert fetched.conversation == []
     assert loaded is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_commit_turn_preserves_previously_persisted_architecture_commit(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """Once a commit is persisted, a later `commit_turn` that does
+    NOT pass the `architecture_commit` kwarg must carry it forward.
+    `build_planning_state_from_conversation` seeds only the
+    deterministic slot surface and returns `architecture_commit=None`;
+    without preservation every later turn would erase the commit.
+    """
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Commit Turn Preserve Commit",
+    )
+    commit = _architecture_commit_fixture()
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        await repo.commit_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            new_messages=[
+                ConversationMessage(role="assistant", content="commit turn 1")
+            ],
+            architecture_commit=commit,
+        )
+        await repo.commit_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            new_messages=[
+                ConversationMessage(role="assistant", content="commit turn 2")
+            ],
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        loaded = await repo.load_planning_state(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert loaded is not None
+    assert loaded.architecture_commit is not None
+    assert loaded.architecture_commit.architecture_hash == commit.architecture_hash
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_commit_turn_replaces_persisted_commit_when_kwarg_explicit(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """Explicit replacement still works: a second `commit_turn` that
+    passes its own `architecture_commit` overrides the previously
+    persisted one. Preservation applies only when the kwarg is None.
+    """
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Commit Turn Replace Commit",
+    )
+    first = _architecture_commit_fixture()
+    second = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="text",
+                output_type="text",
+                output_mode="pass_through",
+            ),
+            StepTriple(
+                input_type="text",
+                output_type="json",
+                output_mode="pass_through",
+            ),
+        ],
+        chosen_patterns=["multi_step_quality_chain"],
+        required_capabilities=["input_text", "output_mode_pass_through"],
+        committed_at=datetime(2026, 4, 23, tzinfo=timezone.utc),
+        architecture_hash="d" * 64,
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        await repo.commit_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            new_messages=[
+                ConversationMessage(role="assistant", content="first commit")
+            ],
+            architecture_commit=first,
+        )
+        await repo.commit_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            new_messages=[
+                ConversationMessage(role="assistant", content="second commit")
+            ],
+            architecture_commit=second,
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        loaded = await repo.load_planning_state(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert loaded is not None
+    assert loaded.architecture_commit is not None
+    assert loaded.architecture_commit.architecture_hash == second.architecture_hash
+    assert len(loaded.architecture_commit.tuples_chain) == 2
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_store_plan_and_update_conversation_preserves_persisted_architecture_commit(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """When the planner proposes a plan after a prior commit has
+    landed, the save path inside `store_plan_and_update_conversation`
+    must carry the persisted architecture_commit forward. Otherwise
+    the proposal save erases the commit that gated it.
+    """
+    from intric.flows.ai_builder.ai_builder_plan_store import (
+        store_plan_and_update_conversation,
+    )
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Plan Store Preserve Commit",
+    )
+    commit = _architecture_commit_fixture()
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        await repo.commit_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            new_messages=[
+                ConversationMessage(role="user", content="user prompt"),
+                ConversationMessage(role="assistant", content="architecture committed"),
+            ],
+            architecture_commit=commit,
+        )
+
+        fetched = await repo.get_session(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+        working_conversation = list(fetched.conversation)
+
+        spec = FlowDraftSpecCore(
+            flow_name="Example",
+            flow_description="desc",
+            steps=[
+                StepSpec(
+                    plan_step_ref="step_a",
+                    existing_step_ref=None,
+                    name="Step A",
+                    assistant_spec=AssistantSpec(instructions="Summarize."),
+                    mcp_policy=MCPPolicy.INHERIT,
+                    input_source=InputSource.FLOW_INPUT,
+                    input_type=InputType.TEXT,
+                    output_mode=OutputMode.PASS_THROUGH,
+                    output_type=OutputType.TEXT,
+                )
+            ],
+        )
+        await store_plan_and_update_conversation(
+            repo=repo,
+            tenant_id=user.tenant_id,
+            session_id=session.id,
+            conversation=working_conversation,
+            new_messages_start=len(working_conversation),
+            assistant_content="Here is the plan",
+            assistant_metadata=None,
+            tool_call_id="call_plan",
+            tool_name="propose_plan",
+            arguments={},
+            spec=spec,
+            assumptions=[],
+            plan_rationale=None,
+            reasoning=None,
+            validation=SimpleNamespace(warnings=[]),
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        loaded = await repo.load_planning_state(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert loaded is not None
+    assert loaded.architecture_commit is not None
+    assert loaded.architecture_commit.architecture_hash == commit.architecture_hash
+    assert loaded.draft_plan_id is not None
+    assert loaded.phase == "plan_proposed"
 
 
 @pytest.mark.integration

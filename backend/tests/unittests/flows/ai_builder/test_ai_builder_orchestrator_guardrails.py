@@ -424,11 +424,20 @@ class TestProposePlanDraftPlanStructuralParityGuardrail:
 
         assert evaluate_planner_output(output, context) is None
 
-    def test_skips_parity_check_when_draft_plan_not_in_delta(self) -> None:
+    def test_rejects_propose_plan_when_draft_plan_absent_from_delta(self) -> None:
+        # Previously the check skipped on draft_plan=None, trusting
+        # `plan_reference="latest"` to bind to the current commit. But
+        # persisted plans carry no architecture binding, so a stale
+        # "latest" plan could bypass parity. The tightened rule is:
+        # propose_plan must re-emit the draft_plan in the delta so
+        # parity can run every time.
         output = parse_planner_output(_propose_plan(include_draft_plan=False))
         context = _ctx(session_state=_session_state_with_commit(step_count=1))
 
-        assert evaluate_planner_output(output, context) is None
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "propose_plan_missing_draft_plan"
 
     def test_earlier_commit_presence_guardrail_fires_first_when_session_has_no_commit(
         self,
@@ -459,6 +468,7 @@ class TestRejectionCodeExhaustiveness:
             "architecture_commit_unresolvable_capability",
             "propose_plan_without_architecture_commit",
             "propose_plan_draft_plan_structural_mismatch",
+            "propose_plan_missing_draft_plan",
         }
     )
 

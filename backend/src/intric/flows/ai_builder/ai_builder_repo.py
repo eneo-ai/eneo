@@ -41,6 +41,7 @@ from intric.flows.ai_builder.planning_state import (
 )
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
+    carry_forward_persisted_planner_state,
 )
 from intric.main.exceptions import BadRequestException, NotFoundException
 
@@ -1006,6 +1007,9 @@ class AIBuilderRepository:
         unit.
         """
         async with self.savepoint():
+            prior_state = await self.load_planning_state(
+                session_id=session_id, tenant_id=tenant_id
+            )
             persisted = await self.append_session_messages(
                 session_id=session_id,
                 tenant_id=tenant_id,
@@ -1016,6 +1020,7 @@ class AIBuilderRepository:
             state = build_planning_state_from_conversation(persisted, flow=flow)
             if architecture_commit is not None:
                 state.architecture_commit = architecture_commit
+            carry_forward_persisted_planner_state(state, prior_state)
             return await self.save_planning_state(
                 session_id=session_id,
                 tenant_id=tenant_id,

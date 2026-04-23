@@ -100,6 +100,7 @@ def _make_repo_mock() -> AsyncMock:
     repo.savepoint = _noop_savepoint
     repo.append_session_messages = AsyncMock(return_value=[])
     repo.create_plan = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
+    repo.load_planning_state = AsyncMock(return_value=None)
     return repo
 
 

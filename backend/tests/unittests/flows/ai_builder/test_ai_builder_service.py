@@ -28,6 +28,7 @@ def _make_repo_mock() -> AsyncMock:
     """
     repo = AsyncMock()
     repo.savepoint = _noop_savepoint
+    repo.load_planning_state = AsyncMock(return_value=None)
     return repo
 
 
