@@ -36,8 +36,11 @@ scheme to the model.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Final, Literal
+
+from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_commit_invariance import (
     CommitDriftError,
@@ -52,6 +55,28 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
 from intric.flows.ai_builder.planning_state import ArchitectureCommit
 
 MAX_ORCHESTRATOR_REPAIR_RETRIES: Final[int] = 3
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionMetadata:
+    """Metadata from one LLM completion call.
+
+    Surfaced on `RepairOutcome` so the outer pipeline can track the
+    final call's metadata — the caller needs `finish_reason == "length"`
+    to detect truncation and `*_tokens` for per-turn telemetry.
+    Metadata is extracted BEFORE parse, so truncation that produced
+    malformed JSON still surfaces as a `parse_failed` outcome with
+    metadata populated.
+
+    `None` fields are normal — upstream clients (litellm) may not
+    populate every metric for every provider.
+    """
+
+    finish_reason: str | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+
 
 # Repair-eligible rejection codes. A rejection outside this set means
 # the planner misunderstood the constraint surface (e.g. asked a
@@ -72,6 +97,7 @@ RepairOutcomeKind = Literal[
     "not_repairable",
     "repaired",
     "commit_drift_blocked",
+    "parse_failed",
 ]
 
 
@@ -80,20 +106,33 @@ class RepairOutcome:
     """Result of one repair attempt.
 
     - `kind="not_repairable"`: the rejection was outside the eligible
-      set. `repaired_output` and `drift_rejection` are both `None`.
+      set. `repaired_output`, `drift_rejection`, `completion_metadata`,
+      and the parse-error fields are all `None` (the helper
+      short-circuited without calling the LLM).
     - `kind="repaired"`: LLM produced a valid PlannerOutput that did
       not drift the prior commit. `repaired_output` carries the new
-      output; the outer loop must still re-run
-      `evaluate_planner_output` on it.
+      output; `completion_metadata` carries the LLM call's metadata.
+      The outer loop must still re-run `evaluate_planner_output` on it.
     - `kind="commit_drift_blocked"`: the repaired output mutated the
       prior `architecture_hash` or dropped the commit. `drift_rejection`
       carries a `repair_attempted_commit_drift` reason the outer loop
-      surfaces to telemetry; the retry budget is NOT decremented.
+      surfaces to telemetry; `completion_metadata` is populated because
+      the LLM ran. The retry budget is NOT decremented.
+    - `kind="parse_failed"`: the LLM's response was not a valid
+      PlannerOutput JSON (truncation, schema drift, malformed payload).
+      `completion_metadata` is populated — crucially so the outer loop
+      can detect `finish_reason == "length"` and surface
+      `planner_output_too_long` to the client. `parse_error_raw`
+      carries the unparseable body and `parse_error_message` the
+      validator's complaint string for telemetry.
     """
 
     kind: RepairOutcomeKind
     repaired_output: PlannerOutput | None = None
     drift_rejection: RejectionReason | None = None
+    completion_metadata: CompletionMetadata | None = None
+    parse_error_raw: str | None = None
+    parse_error_message: str | None = None
 
 
 async def repair_planner_turn(
@@ -136,16 +175,45 @@ async def repair_planner_turn(
         **litellm_kwargs,
     )
     raw_content = response.choices[0].message.content or ""
-    repaired_output = parse_planner_output(raw_content)
+    completion_metadata = _extract_completion_metadata(response)
+
+    try:
+        repaired_output = parse_planner_output(raw_content)
+    except (ValidationError, json.JSONDecodeError) as exc:
+        return RepairOutcome(
+            kind="parse_failed",
+            completion_metadata=completion_metadata,
+            parse_error_raw=raw_content,
+            parse_error_message=str(exc),
+        )
 
     drift = _detect_commit_drift(
         prior=prior_architecture_commit,
         after=repaired_output.planning_state_delta.architecture_commit,
     )
     if drift is not None:
-        return RepairOutcome(kind="commit_drift_blocked", drift_rejection=drift)
+        return RepairOutcome(
+            kind="commit_drift_blocked",
+            drift_rejection=drift,
+            completion_metadata=completion_metadata,
+        )
 
-    return RepairOutcome(kind="repaired", repaired_output=repaired_output)
+    return RepairOutcome(
+        kind="repaired",
+        repaired_output=repaired_output,
+        completion_metadata=completion_metadata,
+    )
+
+
+def _extract_completion_metadata(response: Any) -> CompletionMetadata:
+    choice = response.choices[0]
+    usage = getattr(response, "usage", None)
+    return CompletionMetadata(
+        finish_reason=getattr(choice, "finish_reason", None),
+        prompt_tokens=getattr(usage, "prompt_tokens", None) if usage else None,
+        completion_tokens=getattr(usage, "completion_tokens", None) if usage else None,
+        total_tokens=getattr(usage, "total_tokens", None) if usage else None,
+    )
 
 
 def _detect_commit_drift(
@@ -172,6 +240,7 @@ def _detect_commit_drift(
 
 __all__ = [
     "MAX_ORCHESTRATOR_REPAIR_RETRIES",
+    "CompletionMetadata",
     "RepairOutcome",
     "repair_planner_turn",
 ]
