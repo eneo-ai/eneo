@@ -75,7 +75,6 @@ from intric.flows.ai_builder.ai_builder_tools import (
     build_free_discovery_tool_schemas,
 )
 from intric.flows.ai_builder.planning_state_builder import (
-    build_planning_state_from_conversation,
     build_planning_state_prompt_block,
 )
 from intric.main.config import get_settings
@@ -916,15 +915,11 @@ class AIBuilderPlanner:
                         ),
                     )
                 )
-                planning_state = build_planning_state_from_conversation(
-                    conversation,
-                    flow=flow,
-                )
                 await self.repo.commit_turn(
                     session_id=session_id,
                     tenant_id=self.user.tenant_id,
                     new_messages=conversation[new_messages_start:],
-                    planning_state=planning_state,
+                    flow=flow,
                     request_id=request_uuid,
                     lock_token=lock_token,
                 )

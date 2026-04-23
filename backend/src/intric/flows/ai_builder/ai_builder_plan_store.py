@@ -176,7 +176,6 @@ async def store_plan_and_update_conversation(
         spec=spec,
         assumptions=assumptions,
     )
-    planning_state = build_planning_state_from_conversation(conversation, flow=flow)
     async with repo.savepoint():
         plan = await persist_plan(
             repo=repo,
@@ -188,7 +187,7 @@ async def store_plan_and_update_conversation(
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
         )
-        await append_session_messages(
+        persisted = await append_session_messages(
             repo=repo,
             tenant_id=tenant_id,
             session_id=session_id,
@@ -197,6 +196,7 @@ async def store_plan_and_update_conversation(
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
         )
+        planning_state = build_planning_state_from_conversation(persisted, flow=flow)
         await repo.save_planning_state(
             session_id=session_id,
             tenant_id=tenant_id,
@@ -246,8 +246,8 @@ async def append_session_messages(
     start_index: int,
     lease_request_id: UUID | None = None,
     lease_lock_token: UUID | None = None,
-) -> None:
-    await repo.append_session_messages(
+) -> list[ConversationMessage]:
+    return await repo.append_session_messages(
         session_id=session_id,
         tenant_id=tenant_id,
         conversation=conversation[start_index:],

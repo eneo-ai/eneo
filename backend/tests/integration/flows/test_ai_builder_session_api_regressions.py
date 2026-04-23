@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from intric.ai_models.model_enums import (
@@ -15,7 +16,7 @@ from intric.ai_models.model_enums import (
     ModelStability,
 )
 from intric.database.tables.ai_models_table import TranscriptionModels
-from intric.database.tables.flow_tables import Flows
+from intric.database.tables.flow_tables import BuilderSessions, Flows
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.spaces_table import (
     Spaces,
@@ -864,13 +865,11 @@ async def test_ai_builder_repo_commit_turn_persists_conversation_and_planning_st
             flow_id=None,
         )
         assistant_msg = ConversationMessage(role="assistant", content="Hej")
-        state = _planning_state_fixture()
 
         await repo.commit_turn(
             session_id=session.id,
             tenant_id=user.tenant_id,
             new_messages=[assistant_msg],
-            planning_state=state,
         )
 
     async with db_container() as container:
@@ -886,7 +885,10 @@ async def test_ai_builder_repo_commit_turn_persists_conversation_and_planning_st
     assert len(fetched.conversation) == 1
     assert fetched.conversation[0].role == "assistant"
     assert fetched.conversation[0].content == "Hej"
-    assert loaded == state.validated_snapshot()
+    assert loaded is not None
+    assert loaded.evidence.conversation_message_ids == [
+        fetched.conversation[0].message_id
+    ]
 
 
 @pytest.mark.integration
@@ -923,13 +925,16 @@ async def test_ai_builder_repo_commit_turn_rolls_back_when_planning_state_drifts
         # must catch this and roll back the conversation append.
         drifted.signals.append("not a signal")  # type: ignore[arg-type]
 
-        with pytest.raises(Exception):
-            await repo.commit_turn(
-                session_id=session.id,
-                tenant_id=user.tenant_id,
-                new_messages=[assistant_msg],
-                planning_state=drifted,
-            )
+        with patch(
+            "intric.flows.ai_builder.ai_builder_repo.build_planning_state_from_conversation",
+            return_value=drifted,
+        ):
+            with pytest.raises(Exception):
+                await repo.commit_turn(
+                    session_id=session.id,
+                    tenant_id=user.tenant_id,
+                    new_messages=[assistant_msg],
+                )
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -981,14 +986,12 @@ async def test_ai_builder_repo_commit_turn_rejects_write_when_lease_is_lost(
         stale_request_id = uuid4()
         stale_lock_token = uuid4()
         assistant_msg = ConversationMessage(role="assistant", content="Stale lease")
-        state = _planning_state_fixture()
 
         with pytest.raises(BadRequestException):
             await repo.commit_turn(
                 session_id=session.id,
                 tenant_id=user.tenant_id,
                 new_messages=[assistant_msg],
-                planning_state=state,
                 request_id=stale_request_id,
                 lock_token=stale_lock_token,
             )
@@ -1160,6 +1163,99 @@ async def test_store_plan_and_update_conversation_saves_planning_state(
     assert fetched.latest_plan_id == plan.id
     assert loaded_state is not None
     assert loaded_state.planner_contract_version == PLANNER_CONTRACT_VERSION
+    # evidence.conversation_message_ids is built from the compacted list
+    # that was persisted, so it must match the stored conversation.
+    assert loaded_state.evidence.conversation_message_ids == [
+        message.message_id for message in fetched.conversation
+    ]
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        stmt = select(BuilderSessions.planning_state_version).where(
+            BuilderSessions.id == session_id
+        )
+        version = (await repo.session.execute(stmt)).scalar_one()
+    assert version == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_store_plan_and_update_conversation_state_matches_compacted_conversation(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """Long sessions hit the compaction threshold: the persisted
+    conversation is shorter than the caller's in-memory list. The saved
+    PlanningState must reflect the compacted, persisted list — not the
+    full pre-compaction one — so the next turn reads coherent state.
+    """
+    from intric.flows.ai_builder.ai_builder_conversation_compaction import (
+        MAX_SESSION_MESSAGES,
+    )
+    from intric.flows.ai_builder.ai_builder_plan_store import (
+        store_plan_and_update_conversation,
+    )
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Plan Proposal Compaction",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        session_id = session.id
+        tenant_id = user.tenant_id
+
+    pre_compaction_conversation = [
+        ConversationMessage(role="user", content=f"filler {index}")
+        for index in range(MAX_SESSION_MESSAGES + 5)
+    ]
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        spec = _make_builder_plan_spec(existing_step_ref=None)
+        await store_plan_and_update_conversation(
+            repo=repo,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            conversation=list(pre_compaction_conversation),
+            new_messages_start=0,
+            assistant_content="plan ready",
+            tool_call_id="call-cmp-1",
+            tool_name=CREATE_FLOW_TOOL_NAME,
+            arguments={},
+            spec=spec,
+            assumptions=[],
+            plan_rationale=None,
+            reasoning=None,
+            validation=MagicMock(warnings=[]),
+            flow=None,
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+        loaded_state = await repo.load_planning_state(
+            session_id=session_id, tenant_id=tenant_id
+        )
+
+    assert len(fetched.conversation) <= MAX_SESSION_MESSAGES
+    assert len(fetched.conversation) < len(pre_compaction_conversation) + 2
+    assert loaded_state is not None
+    assert loaded_state.evidence.conversation_message_ids == [
+        message.message_id for message in fetched.conversation
+    ]
 
 
 def _make_plan_envelope(spec: FlowDraftSpecCore) -> PlannerPlanEnvelope:

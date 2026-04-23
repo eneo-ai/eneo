@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -36,7 +36,13 @@ from intric.flows.ai_builder.ai_builder_session_transitions import (
     ensure_valid_session_status_transition,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
+from intric.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
+)
 from intric.main.exceptions import BadRequestException, NotFoundException
+
+if TYPE_CHECKING:
+    from intric.flows.flow import Flow
 
 
 class AIBuilderRepository:
@@ -451,9 +457,17 @@ class AIBuilderRepository:
         conversation: list[ConversationMessage],
         request_id: UUID | None = None,
         lock_token: UUID | None = None,
-    ) -> None:
+    ) -> list[ConversationMessage]:
+        """Persist `conversation` messages and return the compacted list that was stored.
+
+        Returning the compacted list lets callers derive side-effects
+        (notably `PlanningState`) from the same view that will be read
+        back on the next turn. Without this, long sessions could save a
+        state whose `evidence.conversation_message_ids` referred to
+        messages that had been compacted away before persist.
+        """
         if not conversation:
-            return
+            return []
 
         async with self._transaction():
             committed_file_ids: list[UUID] = []
@@ -547,6 +561,8 @@ class AIBuilderRepository:
                     index_elements=["session_id", "file_id"]
                 )
                 await self.session.execute(stmt)
+
+            return compacted
 
     async def update_session_latest_plan(
         self,
@@ -924,18 +940,18 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         new_messages: list[ConversationMessage],
-        planning_state: PlanningState,
+        flow: "Flow | None" = None,
         request_id: UUID | None = None,
         lock_token: UUID | None = None,
     ) -> int:
         """Append new conversation messages and save `PlanningState` atomically.
 
-        One outer transaction wraps both writes so a failure in either
-        leaves neither in place. In particular, a post-construction
-        drift in `planning_state` (list append bypassing Pydantic's
-        field validator) raises inside `save_planning_state` and rolls
-        back the conversation append — no split-brain where the turn's
-        text landed but its planning snapshot did not.
+        The `PlanningState` is built from the compacted conversation
+        that `append_session_messages` actually persisted, so
+        `evidence.conversation_message_ids` always matches what the next
+        turn will read back. Building it from the caller's pre-compaction
+        list would drift once a session crosses the compaction
+        threshold.
 
         Returns the new `planning_state_version` (monotonically bumped
         by `save_planning_state`). Callers who don't need it can ignore
@@ -948,17 +964,18 @@ class AIBuilderRepository:
         unit.
         """
         async with self.savepoint():
-            await self.append_session_messages(
+            persisted = await self.append_session_messages(
                 session_id=session_id,
                 tenant_id=tenant_id,
                 conversation=new_messages,
                 request_id=request_id,
                 lock_token=lock_token,
             )
+            state = build_planning_state_from_conversation(persisted, flow=flow)
             return await self.save_planning_state(
                 session_id=session_id,
                 tenant_id=tenant_id,
-                state=planning_state,
+                state=state,
             )
 
 

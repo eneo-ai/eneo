@@ -1320,6 +1320,8 @@ async def test_process_edit_arguments_passes_metadata_to_edit_validator() -> Non
     assert validate_edit.call_args is not None
     assert validate_edit.call_args.kwargs["current_metadata_json"] == flow.metadata_json
     store_plan.assert_awaited_once()
+    assert store_plan.await_args is not None
+    assert store_plan.await_args.kwargs["flow"] is flow
 
 
 @pytest.mark.asyncio
