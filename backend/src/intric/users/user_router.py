@@ -21,8 +21,17 @@ from intric.authentication import auth_dependencies
 from intric.authentication.api_key_router_helpers import (
     error_responses as api_key_error_responses,
 )
-from intric.authentication.auth_dependencies import require_permission
-from intric.authentication.auth_models import AccessToken, ApiKey, OpenIdConnectLogin
+from intric.authentication.auth_dependencies import (
+    require_api_key_permission,
+    require_api_key_scope_check,
+    require_permission,
+)
+from intric.authentication.auth_models import (
+    AccessToken,
+    ApiKey,
+    ApiKeyPermission,
+    OpenIdConnectLogin,
+)
 from intric.main import config
 from intric.main.aiohttp_client import aiohttp_client
 from intric.main.config import validate_public_origin
@@ -672,7 +681,14 @@ async def login_with_mobilityguard(
     return intric_token
 
 
-@router.get("/", response_model=CursorPaginatedResponse[UserSparse])
+@router.get(
+    "/",
+    response_model=CursorPaginatedResponse[UserSparse],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+        Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    ],
+)
 async def get_tenant_users(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     email: Annotated[Optional[str], Query(description="Email of user")] = None,
@@ -690,6 +706,11 @@ async def get_tenant_users(
     of the information any authenticated tenant member can retrieve via
     Microsoft 365 / Outlook GAL. Tenant-scoped at the repo layer; mutations
     on /users/admin/* remain gated on Permission.ADMIN.
+
+    Bearer tokens: any authenticated tenant member may list. API keys: must
+    be tenant-scoped with admin permission — the route-level guards above
+    stash deferred-enforcement state consumed by `_resolve_api_key`, which
+    is a no-op for bearer auth where `request.state.api_key` is unset.
     """
     user = container.user()
     user_assembler = container.user_assembler()

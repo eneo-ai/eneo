@@ -502,6 +502,11 @@ export interface paths {
      *     of the information any authenticated tenant member can retrieve via
      *     Microsoft 365 / Outlook GAL. Tenant-scoped at the repo layer; mutations
      *     on /users/admin/* remain gated on Permission.ADMIN.
+     *
+     *     Bearer tokens: any authenticated tenant member may list. API keys: must
+     *     be tenant-scoped with admin permission — the route-level guards above
+     *     stash deferred-enforcement state consumed by `_resolve_api_key`, which
+     *     is a no-op for bearer auth where `request.state.api_key` is unset.
      */
     get: operations["get_tenant_users_api_v1_users__get"];
     put?: never;

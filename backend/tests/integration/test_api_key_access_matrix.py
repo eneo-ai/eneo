@@ -1240,24 +1240,28 @@ def _build_probes(resource_ids: dict) -> list[dict]:
         # =================================================================
         # SPECIAL: USERS ROUTER (split: admin vs user-facing)
         # =================================================================
-        # users_router (no API key guards): GET /users/ — member-picker
-        # listing. Returns UserSparse (id, email, username, timestamps);
-        # tenant-scoped at the repo layer. Intentionally unguarded so
-        # space-admins without tenant ADMIN can populate the picker.
+        # users_router (route-level API-key admin guards on GET /):
+        # member-picker listing. Returns UserSparse (id, email, username,
+        # timestamps); tenant-scoped at the repo layer. Bearer-token tenant
+        # members (including space-admins without tenant ADMIN) pass
+        # through because the deferred-enforcement guards only run for API
+        # keys. Scoped API keys stay admin-gated to prevent cross-scope
+        # directory enumeration.
         {
             "name": "users-list",
             "method": "GET",
             "path": "/api/v1/users/",
             "resource_type": None,
-            "scope_resource": None,
-            "is_admin_scope": False,
-            "requires_admin_perm": False,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
             "target_resource_key": None,
-            "is_unguarded": True,
             "description": (
-                "users_router GET / mounted without API key guards. "
-                "Exposes UserSparse for member/group pickers; mutations "
-                "on /users/admin/* retain TENANT_ADMIN_API_KEY_GUARDS."
+                "users_router GET / carries route-level "
+                "require_api_key_scope_check('admin') + "
+                "require_api_key_permission(ADMIN). For API keys: admin "
+                "scope + admin permission required. For bearer tokens: "
+                "no-op (any authenticated tenant member passes through)."
             ),
         },
         # users_router (no API key guards): /users/me/

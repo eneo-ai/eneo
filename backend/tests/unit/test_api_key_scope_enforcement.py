@@ -887,11 +887,13 @@ class TestScopeRouteGuardCoverage:
         )
 
     def test_user_admin_endpoints_have_router_level_admin_guards(self):
-        """User admin-mutation endpoints should have router-level admin guards.
+        """User admin-mutation endpoints should have admin guards for API keys.
 
-        GET /users/ is intentionally excluded — it is the member-picker
-        listing endpoint, mounted on the non-admin router. See
-        TestUserListingEndpointOpen in test_api_key_contract_matrix.py.
+        Includes GET /users/ (get_tenant_users): mounted on the non-admin
+        `router` but with *route-level* `_scope_check_dep` +
+        `_api_key_permission_dep` so scoped API keys cannot enumerate the
+        tenant directory. Those guards are no-ops for bearer tokens — see
+        TestUserListingEndpointSplitGate in test_api_key_contract_matrix.py.
         """
         from intric.server.routers import router
 
@@ -899,10 +901,6 @@ class TestScopeRouteGuardCoverage:
         for route in router.routes:
             path = getattr(route, "path", "")
             methods = getattr(route, "methods", set())
-            endpoint_name = getattr(getattr(route, "endpoint", None), "__name__", "")
-            # The listing endpoint on /users/ is deliberately not admin-gated.
-            if path == "/users/" and endpoint_name == "get_tenant_users":
-                continue
             if (
                 path == "/users/"
                 or path.startswith("/users/admin")
@@ -924,8 +922,8 @@ class TestScopeRouteGuardCoverage:
                     (path, sorted(methods), has_scope_dep, has_admin_key_dep)
                 )
 
-        assert len(admin_routes) >= 4, (
-            f"Expected at least 4 user admin-mutation routes, found {len(admin_routes)}"
+        assert len(admin_routes) >= 5, (
+            f"Expected at least 5 user admin-gated routes, found {len(admin_routes)}"
         )
         for path, methods, has_scope_dep, has_admin_key_dep in admin_routes:
             assert has_scope_dep, (

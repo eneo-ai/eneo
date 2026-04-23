@@ -739,18 +739,22 @@ class TestGuardrailPolicyEnforcement:
 # ---------------------------------------------------------------------------
 
 
-class TestUserListingEndpointOpen:
-    """Verify GET /users/ is NOT admin-gated.
+class TestUserListingEndpointSplitGate:
+    """Verify GET /users/ is bearer-open but API-key-admin-gated.
 
     The listing endpoint returns UserSparse (id, email, username, timestamps)
     — a strict subset of the Microsoft 365 GAL already available to every
     authenticated tenant member. It is mounted on the non-admin `router`
-    without router-level scope/permission guards and without an in-body
-    `validate_permission(ADMIN)` call, so that space-admins (who lack the
-    tenant-level admin permission) can populate member/group pickers.
+    with route-level API-key guards that stash deferred-enforcement state
+    consumed by `_resolve_api_key`. Those guards are no-ops for bearer auth
+    (where `request.state.api_key` is never set), so space-admins can
+    populate member/group pickers with their bearer token while scoped API
+    keys (space/assistant/app/etc.) cannot enumerate the tenant directory
+    outside their scope.
 
-    Mutating endpoints on /users/admin/* remain admin-gated; see
-    TestAdminApiKeyGuardContract below.
+    The handler body does NOT call `validate_permission(ADMIN)`; bearer-token
+    tenant members pass through. Mutating endpoints on /users/admin/* remain
+    admin-gated; see TestAdminApiKeyGuardContract below.
     """
 
     def _get_users_listing_route(self):
@@ -774,24 +778,29 @@ class TestUserListingEndpointOpen:
                     return True
         return False
 
-    def test_listing_route_has_no_router_level_scope_guard(self):
-        """GET /users/ must NOT have router-level admin scope guard."""
+    def test_listing_route_has_route_level_scope_guard(self):
+        """GET /users/ must have route-level admin scope guard for API keys."""
         route = self._get_users_listing_route()
-        assert not self._route_has_dependency(route, "_scope_check_dep"), (
-            "GET /users/ unexpectedly has router-level require_api_key_scope_check; "
-            "the endpoint was intentionally relaxed for member-picker use cases"
+        assert self._route_has_dependency(route, "_scope_check_dep"), (
+            "GET /users/ missing route-level require_api_key_scope_check; "
+            "scoped API keys must not enumerate the tenant directory"
         )
 
-    def test_listing_route_has_no_router_level_permission_guard(self):
-        """GET /users/ must NOT have router-level admin permission guard."""
+    def test_listing_route_has_route_level_permission_guard(self):
+        """GET /users/ must have route-level admin permission guard for API keys."""
         route = self._get_users_listing_route()
-        assert not self._route_has_dependency(route, "_api_key_permission_dep"), (
-            "GET /users/ unexpectedly has router-level require_api_key_permission; "
-            "the endpoint was intentionally relaxed for member-picker use cases"
+        assert self._route_has_dependency(route, "_api_key_permission_dep"), (
+            "GET /users/ missing route-level require_api_key_permission; "
+            "API keys below admin must not list the tenant directory"
         )
 
     def test_listing_handler_has_no_validate_permission_call(self):
-        """GET /users/ handler body must not call validate_permission(ADMIN)."""
+        """Handler body must not call validate_permission(ADMIN).
+
+        Bearer-token tenant members (including space-admins without
+        tenant-admin) must pass through. API-key enforcement happens via
+        the route-level guards above and `_resolve_api_key`.
+        """
         import inspect
 
         from intric.users.user_router import get_tenant_users
@@ -799,7 +808,7 @@ class TestUserListingEndpointOpen:
         source = inspect.getsource(get_tenant_users)
         assert "validate_permission" not in source, (
             "get_tenant_users unexpectedly contains validate_permission; "
-            "the endpoint was intentionally relaxed for member-picker use cases"
+            "the endpoint was intentionally relaxed for bearer-auth pickers"
         )
 
 
