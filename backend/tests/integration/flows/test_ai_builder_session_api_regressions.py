@@ -713,6 +713,72 @@ async def test_ai_builder_repo_save_planning_state_bumps_version(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_ai_builder_repo_save_planning_state_rejects_stale_base_version(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """Optimistic concurrency: two writers can both observe version N
+    and build their own updates. Only one can land; the other's save
+    with `base_version=N` must fail because the row is now at N+1. The
+    winning writer commits; the losing writer retries with the fresh
+    version instead of silently clobbering the newer snapshot.
+    """
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Planning Optimistic Concurrency",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        session_id = session.id
+        tenant_id = user.tenant_id
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        first = await repo.save_planning_state(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            state=_planning_state_fixture(),
+            base_version=0,
+        )
+    assert first == 1
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        with pytest.raises(BadRequestException) as exc:
+            await repo.save_planning_state(
+                session_id=session_id,
+                tenant_id=tenant_id,
+                state=_planning_state_fixture(),
+                base_version=0,
+            )
+    assert exc.value.code == "planning_state_version_mismatch"
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        third = await repo.save_planning_state(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            state=_planning_state_fixture(),
+            base_version=1,
+        )
+    assert third == 2
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ai_builder_repo_load_planning_state_returns_none_for_unsaved_session(
     client,
     bearer_token,

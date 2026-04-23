@@ -850,6 +850,7 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         state: PlanningState,
+        base_version: int | None = None,
     ) -> int:
         """Persist the full `PlanningState` snapshot and return the new version.
 
@@ -858,20 +859,33 @@ class AIBuilderRepository:
         raises at serialization time rather than landing as drifted
         JSONB. The version counter is incremented atomically via the
         column expression so concurrent turns cannot collide on read-
-        modify-write; a later concurrency-check slice can pair this
-        with a `base_planning_state_version` guard.
+        modify-write.
+
+        When `base_version` is provided the UPDATE filter additionally
+        requires the row's current `planning_state_version` to equal
+        it. If the row moved on (concurrent writer committed in
+        between), the UPDATE matches zero rows and this raises
+        `BadRequestException(code="planning_state_version_mismatch")`.
+        Callers should reload the state and retry with the fresh
+        version. When `base_version` is `None` the save is
+        unconditional (last-writer-wins), matching the pre-C.4 contract.
 
         Raises `NotFoundException` when `(session_id, tenant_id)` does
         not match a builder session — the caller misrouted the write.
         """
         column_values = _planning_state_for_storage(state)
         async with self._transaction():
+            where_clauses = [
+                BuilderSessions.id == session_id,
+                BuilderSessions.tenant_id == tenant_id,
+            ]
+            if base_version is not None:
+                where_clauses.append(
+                    BuilderSessions.planning_state_version == base_version
+                )
             stmt = (
                 update(BuilderSessions)
-                .where(
-                    BuilderSessions.id == session_id,
-                    BuilderSessions.tenant_id == tenant_id,
-                )
+                .where(*where_clauses)
                 .values(
                     planning_state_jsonb=column_values["planning_state_jsonb"],
                     planning_state_version=BuilderSessions.planning_state_version + 1,
@@ -886,12 +900,30 @@ class AIBuilderRepository:
             )
             result = await self.session.execute(stmt)
             new_version = result.scalar_one_or_none()
-            if new_version is None:
+            if new_version is not None:
+                return int(new_version)
+
+            # Zero rows matched. Distinguish "row missing" (wrong
+            # session/tenant) from "version moved on" (stale caller).
+            exists_stmt = select(BuilderSessions.planning_state_version).where(
+                BuilderSessions.id == session_id,
+                BuilderSessions.tenant_id == tenant_id,
+            )
+            current_version = (
+                await self.session.execute(exists_stmt)
+            ).scalar_one_or_none()
+            if current_version is None:
                 raise NotFoundException(
                     f"Builder session {session_id} not found for tenant "
                     f"{tenant_id}; planning state not saved."
                 )
-            return int(new_version)
+            raise BadRequestException(
+                (
+                    f"Planning state version mismatch: expected base_version="
+                    f"{base_version}, found {current_version}."
+                ),
+                code="planning_state_version_mismatch",
+            )
 
     async def load_planning_state(
         self,
