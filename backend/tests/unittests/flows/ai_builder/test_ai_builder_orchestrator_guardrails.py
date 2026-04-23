@@ -511,6 +511,7 @@ class TestRejectionCodeExhaustiveness:
             "propose_plan_without_architecture_commit",
             "propose_plan_draft_plan_structural_mismatch",
             "propose_plan_missing_draft_plan",
+            "repair_attempted_commit_drift",
         }
     )
 

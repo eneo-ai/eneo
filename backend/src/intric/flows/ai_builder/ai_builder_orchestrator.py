@@ -149,6 +149,7 @@ RejectionCode = Literal[
     "propose_plan_without_architecture_commit",
     "propose_plan_missing_draft_plan",
     "propose_plan_draft_plan_structural_mismatch",
+    "repair_attempted_commit_drift",
 ]
 
 
