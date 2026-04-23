@@ -113,6 +113,14 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 MAX_SELF_CORRECTION_RETRIES = 3
+SUBMISSION_TOOL_NAMES = frozenset({CREATE_FLOW_TOOL_NAME, EDIT_FLOW_TOOL_NAME})
+
+
+def _tool_calls_contain_submission(tool_calls: list[Any]) -> bool:
+    return any(
+        getattr(getattr(call, "function", None), "name", None) in SUBMISSION_TOOL_NAMES
+        for call in tool_calls
+    )
 
 
 @dataclass(frozen=True)
@@ -420,7 +428,7 @@ class AIBuilderProposalProcessor:
             text_content=text_content,
             assistant_metadata=assistant_metadata,
         )
-        if ctx.text_content:
+        if ctx.text_content and not _tool_calls_contain_submission(tool_calls):
             yield build_text_event(ctx.text_content)
 
         for tool_call in tool_calls:
@@ -543,7 +551,7 @@ class AIBuilderProposalProcessor:
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
             arguments=arguments,
-            assistant_content=ctx.text_content or "Här är mitt förslag:",
+            assistant_content="Här är mitt förslag:",
             assistant_metadata=ctx.assistant_metadata,
             tool_call_id=tool_call.id,
             available_model_refs=ctx.available_model_refs,

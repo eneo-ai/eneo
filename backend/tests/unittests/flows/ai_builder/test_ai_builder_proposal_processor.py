@@ -1374,15 +1374,72 @@ async def test_handle_tool_call_builds_proposal_context_for_edit_handler() -> No
         ]
 
     assert events == [
-        {"event": "text", "data": '{"text":"draft"}'},
         {"event": "done", "data": ""},
-    ]
+    ], (
+        "Text content accompanying a submission tool call (EDIT_FLOW) must be "
+        "suppressed from the stream so the user never sees raw planner chatter "
+        "alongside the plan event."
+    )
     assert captured_ctx is not None
     assert captured_ctx.request_id == "req-ctx"
     assert captured_ctx.text_content == "draft"
     assert captured_ctx.flow is flow
     assert captured_ctx.assistant_snapshots == snapshots
     handle_edit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_tool_call_preserves_text_when_tool_is_clarification_only() -> (
+    None
+):
+    """Counterpart to the EDIT/CREATE suppression: when the tool call is a
+    clarification tool (ASK_STRUCTURED_QUESTION), the accompanying text IS a
+    legitimate user-visible message and must still be streamed."""
+    processor = _make_processor()
+    tool_call = _make_tool_call(
+        ASK_STRUCTURED_QUESTION_TOOL_NAME,
+        {"question": "Vilket format?", "options": ["pdf", "docx"]},
+    )
+
+    def _question_handler(*, ctx: ProposalContext, tool_call: MagicMock):
+        async def _events():
+            yield {"event": "done", "data": ""}
+
+        return _events()
+
+    with patch.object(
+        processor,
+        "_handle_structured_question",
+        side_effect=_question_handler,
+    ):
+        events = [
+            event
+            async for event in processor.handle_tool_call(
+                session_id=uuid4(),
+                conversation=[],
+                new_messages_start=0,
+                tool_calls=[tool_call],
+                text_content="Jag behöver en detalj till.",
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                tool_schemas=[
+                    {"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}}
+                ],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={"api_key": "sk-test"},
+                available_model_refs=None,
+                available_kb_refs=None,
+                max_output_tokens=4096,
+                request_id="req-ctx-ask",
+            )
+        ]
+
+    assert events[0] == {
+        "event": "text",
+        "data": '{"text":"Jag behöver en detalj till."}',
+    }, (
+        "Text accompanying a non-submission (clarification) tool call must still "
+        f"be emitted as a text event; got: {events}"
+    )
 
 
 @pytest.mark.asyncio

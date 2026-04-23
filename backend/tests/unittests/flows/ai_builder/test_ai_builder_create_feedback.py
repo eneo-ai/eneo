@@ -24,6 +24,9 @@ def test_format_create_argument_error_guides_output_fields_depth_repairs() -> No
     assert "grandchild" in feedback
     assert "field_type='string'" in feedback
     assert "description" in feedback
+    # The flatten message must lock scope: no step removal/merging/reordering.
+    assert "Do not rename, reorder, merge, or delete steps" in feedback
+    assert "Preserve every step" in feedback
 
 
 def test_format_create_validation_feedback_adds_first_step_source_rule() -> None:

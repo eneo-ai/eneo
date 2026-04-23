@@ -17,15 +17,18 @@ def format_create_argument_error(error: Exception) -> str:
         max_depth = depth_match.group(1)
         return (
             f"Invalid create_flow arguments: {raw_message}\n"
-            "Flatten output_fields and keep only realistic structured fields. "
+            "Fix ONLY the output_fields nesting depth. "
+            "Preserve every step you already emitted (same count, same names, same order, "
+            "same instructions, same input/output_source and input/output_type) and every form_field. "
             f"output_fields may nest at max {max_depth} levels: top-level fields, child fields, "
             "and one grandchild level only.\n"
-            "Flattening recipe when a subtree exceeds the limit: collapse the deepest "
-            "level into a single field_type='string' field whose description captures "
-            "what that deeper structure would have held (e.g., instead of a fourth-level "
-            "'address.country.region.city' object, keep 'address.country' as an object "
+            "Flattening recipe when a subtree exceeds the limit: in the step with the deepest "
+            "subtree, collapse the deepest level into a single field_type='string' field whose "
+            "description captures what that deeper structure would have held (e.g., instead of a "
+            "fourth-level 'address.country.region.city' object, keep 'address.country' as an object "
             "with a child field named 'region_city_description' typed as string). "
-            "Never reintroduce nested objects or arrays below the third level."
+            "Never reintroduce nested objects or arrays below the third level. "
+            "Do not rename, reorder, merge, or delete steps. Do not touch any other step's output_fields."
         )
     return f"Invalid create_flow arguments: {raw_message}"
 

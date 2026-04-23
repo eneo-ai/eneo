@@ -2536,6 +2536,99 @@ class TestSendMessageToolCall:
         assert "?" in json.loads(text_events[0]["data"])["text"]
 
     @pytest.mark.anyio
+    async def test_planner_text_alongside_successful_create_flow_does_not_leak_to_user(
+        self,
+    ):
+        """When the planner returns both conversational text AND a successful create_flow tool call
+        in the same LLM response, the text must not appear as a user-visible text event, and the
+        persisted assistant message must not contain the raw text either."""
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(
+            status=SessionStatus.CHATTING,
+            tenant_id=user.tenant_id,
+            conversation=_make_confirmed_requirements_conversation(),
+        )
+        repo.get_session.return_value = session
+
+        completion_service = AsyncMock()
+        adapter = _make_adapter()
+        completion_service._get_adapter.return_value = adapter
+
+        valid_args = {
+            "flow_name": "Bra flöde",
+            "plan_rationale": "Först extrahera, sen skriv.",
+            "steps": [
+                {
+                    "name": "Extrahera",
+                    "instructions": "Extrahera data.",
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Skriv",
+                    "instructions": "Skriv rapport.",
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_type": "text",
+                },
+            ],
+        }
+        leak_text = (
+            "Jag kan bygga planen, men jag behöver att du bekräftar en designjustering. "
+            "Hur vill du att vi ska hantera sammanvägning? 1) Aggregeringssteg först. "
+            "2) Syntes direkt. Svar med 1 eller 2."
+        )
+        repo.create_plan.return_value = _make_plan(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+        service = _make_service(
+            user=user, repo=repo, completion_service=completion_service
+        )
+
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
+            mock_litellm.acompletion = AsyncMock(
+                side_effect=[
+                    _make_llm_response(
+                        content=leak_text,
+                        tool_calls=[_make_tool_call(arguments=valid_args)],
+                    ),
+                ]
+            )
+            events = await _collect_events(
+                service.send_message(
+                    session_id=session.id,
+                    message="Bygg flödet",
+                    question_answer=_make_requirements_confirmation(),
+                    litellm_model="openai/gpt-4",
+                    litellm_kwargs={"api_key": "sk-test"},
+                )
+            )
+
+        text_events = [e for e in events if e["event"] == SSE_EVENT_TEXT]
+        plan_events = [e for e in events if e["event"] == SSE_EVENT_PLAN]
+        assert plan_events, (
+            f"create_flow should have produced a plan event; got {events}"
+        )
+        assert text_events == [], (
+            "Planner text alongside a successful create_flow tool call must not surface "
+            f"as a user-visible text event; got: {text_events}"
+        )
+
+        persisted = (
+            repo.commit_turn.await_args_list
+            + repo.append_session_messages.await_args_list
+        )
+        combined = json.dumps([c.kwargs for c in persisted], default=str)
+        assert "Säg bara" not in combined and "Svar med 1 eller 2" not in combined, (
+            "Raw planner conversational text must not be persisted as the assistant "
+            f"message content on a submission turn; got: {combined[:500]}"
+        )
+
+    @pytest.mark.anyio
     async def test_self_correction_bail_without_question_mark_emits_error_not_text(
         self,
     ):
