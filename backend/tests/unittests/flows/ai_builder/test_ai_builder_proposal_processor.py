@@ -183,6 +183,107 @@ async def test_process_create_arguments_returns_parse_feedback() -> None:
 
 
 @pytest.mark.asyncio
+async def test_process_create_arguments_rejects_retry_that_shrinks_step_count() -> None:
+    """Depth-repair retries must not collapse a 9-step plan to 2 steps. When the
+    first-attempt arguments had N steps and a retry arrives with < N steps,
+    _process_create_arguments returns a validation failure without calling the
+    downstream parse/compile/validate pipeline."""
+    processor = _make_processor()
+    shrunk_arguments = {
+        "flow_name": "Utredningsflöde",
+        "plan_rationale": "Skulle ha haft nio steg, har bara två.",
+        "steps": [
+            {"name": "Steg A", "instructions": "…"},
+            {"name": "Steg B", "instructions": "…"},
+        ],
+    }
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.parse_create_flow_arguments"
+    ) as parse_mock:
+        result = await processor._process_create_arguments(
+            session_id=uuid4(),
+            conversation=[],
+            new_messages_start=0,
+            arguments=shrunk_arguments,
+            assistant_content="retry",
+            tool_call_id="call_retry",
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            min_step_count=9,
+        )
+
+    parse_mock.assert_not_called()
+    assert result.event is None
+    assert result.failure_kind == "validation"
+    assert result.feedback is not None
+    assert "shrank from 9 to 2" in result.feedback
+    assert "preserve every step" in result.feedback.lower()
+
+
+@pytest.mark.asyncio
+async def test_process_create_arguments_passes_guard_when_step_count_preserved() -> (
+    None
+):
+    """When the retry keeps the same step count as the first attempt, the
+    step-count guard does not short-circuit — the call falls through to the
+    normal parse path."""
+    processor = _make_processor()
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.parse_create_flow_arguments",
+        side_effect=ValueError("unrelated parse issue"),
+    ) as parse_mock:
+        result = await processor._process_create_arguments(
+            session_id=uuid4(),
+            conversation=[],
+            new_messages_start=0,
+            arguments={
+                "flow_name": "Ok",
+                "plan_rationale": "Samma antal steg.",
+                "steps": [
+                    {"name": "A", "instructions": "…"},
+                    {"name": "B", "instructions": "…"},
+                ],
+            },
+            assistant_content="retry",
+            tool_call_id="call_ok",
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            min_step_count=2,
+        )
+
+    parse_mock.assert_called_once()
+    assert result.failure_kind == "parse"
+    assert result.feedback is not None
+    assert "shrank from" not in result.feedback
+
+
+def test_extract_create_retry_kwargs_returns_min_step_count_from_steps_list() -> None:
+    from intric.flows.ai_builder.ai_builder_proposal_processor import (
+        _extract_create_retry_kwargs,
+    )
+
+    arguments = {
+        "flow_name": "Nio steg",
+        "steps": [{"name": f"Steg {i}"} for i in range(9)],
+    }
+    assert _extract_create_retry_kwargs(arguments) == {"min_step_count": 9}
+
+
+def test_extract_create_retry_kwargs_returns_empty_when_steps_missing() -> None:
+    from intric.flows.ai_builder.ai_builder_proposal_processor import (
+        _extract_create_retry_kwargs,
+    )
+
+    assert _extract_create_retry_kwargs({"flow_name": "Tom"}) == {}
+    assert _extract_create_retry_kwargs({"flow_name": "Tom", "steps": []}) == {}
+    assert _extract_create_retry_kwargs({"flow_name": "Tom", "steps": "no"}) == {}
+
+
+@pytest.mark.asyncio
 async def test_process_create_arguments_returns_quality_feedback_without_storing() -> (
     None
 ):

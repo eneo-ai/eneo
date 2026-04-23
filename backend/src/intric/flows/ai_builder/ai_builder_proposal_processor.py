@@ -123,6 +123,16 @@ def _tool_calls_contain_submission(tool_calls: list[Any]) -> bool:
     )
 
 
+def _extract_create_retry_kwargs(arguments: dict[str, Any]) -> dict[str, Any]:
+    raw_steps = arguments.get("steps")
+    if not isinstance(raw_steps, list):
+        return {}
+    steps_list = cast(list[Any], raw_steps)
+    if not steps_list:
+        return {}
+    return {"min_step_count": len(steps_list)}
+
+
 @dataclass(frozen=True)
 class ToolProcessingResult:
     event: dict[str, str] | None = None
@@ -161,6 +171,7 @@ class SubmissionToolHandlerConfig:
     forced_tool_prompt: str
     process_tool_arguments: Callable[..., Awaitable[ToolProcessingResult]]
     include_flow_context: bool = False
+    extract_retry_kwargs: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -232,7 +243,25 @@ class AIBuilderProposalProcessor:
         flow: "Flow | None" = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
+        min_step_count: int | None = None,
     ) -> ToolProcessingResult:
+        if min_step_count is not None:
+            step_count = (
+                len(arguments["steps"])
+                if isinstance(arguments.get("steps"), list)
+                else 0
+            )
+            if step_count < min_step_count:
+                return ToolProcessingResult(
+                    feedback=(
+                        f"Create-flow step scope shrank from {min_step_count} to "
+                        f"{step_count}. The repaired plan must preserve every step "
+                        "from the previous attempt (same count, same names, same "
+                        "order). Only the field that triggered validation is allowed "
+                        "to change — do not merge, drop, or rename any step."
+                    ),
+                    failure_kind="validation",
+                )
         try:
             draft = parse_create_flow_arguments(arguments)
         except RecoverableToolPayloadError as error:
@@ -546,6 +575,10 @@ class AIBuilderProposalProcessor:
                 yield event
             return
 
+        retry_process_kwargs: dict[str, Any] = {}
+        if config.extract_retry_kwargs is not None:
+            retry_process_kwargs = config.extract_retry_kwargs(arguments)
+
         submission_kwargs = self._build_submission_processing_kwargs(
             session_id=ctx.session_id,
             conversation=ctx.conversation,
@@ -580,7 +613,7 @@ class AIBuilderProposalProcessor:
                     target_tool_name=config.target_tool_name,
                     forced_tool_prompt=config.forced_tool_prompt,
                     process_tool_arguments=config.process_tool_arguments,
-                    process_tool_kwargs={},
+                    process_tool_kwargs=retry_process_kwargs,
                 ),
             ):
                 yield event
@@ -644,6 +677,7 @@ class AIBuilderProposalProcessor:
                     "Do not answer with prose."
                 ),
                 process_tool_arguments=self._process_create_arguments,
+                extract_retry_kwargs=_extract_create_retry_kwargs,
             ),
         ):
             yield event
