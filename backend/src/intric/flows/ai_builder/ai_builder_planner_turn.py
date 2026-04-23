@@ -1,0 +1,200 @@
+"""Production glue: run one planner turn and persist its action.
+
+`run_planner_turn` composes the orchestrator v2 stack into the shape
+the builder's request-handling code needs per turn:
+
+1. Call `run_planner_pipeline` for one structured-JSON LLM call, the
+   monotonicity guardrails, and the per-call repair loop.
+2. On accepted, route the action through `dispatch_planner_action` so
+   the conversation append + `PlanningState` save happen atomically.
+3. Return a `PlannerTurnResult` the caller pattern-matches on to emit
+   SSE events, log telemetry, and surface terminal errors.
+
+The helper is the ONLY module that bridges pipeline → dispatcher. It
+does NOT emit SSE, manage session locks, or render assistant messages
+— those are concerns of the caller (`AIBuilderPlanner.send_message`).
+Keeping the bridge pure means tests exercise it with `AsyncMock(repo)`
++ a litellm-shaped stub, and future call sites reuse the same contract
+without re-implementing the accept-and-dispatch dance.
+
+`propose_plan` is a first-class outcome (`propose_plan_pending_adapter`):
+the helper bypasses the dispatcher for `ProposePlanAction` and surfaces
+the accepted output directly, so the caller can route to the proposal-
+processor adapter when it lands. The pipeline still spent an LLM call
+on the turn, so telemetry counts populate on this path, and control
+flow stays on the normal return rather than running through a
+`NotImplementedError` the dispatcher would otherwise raise.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Callable, Literal
+from uuid import UUID
+
+from intric.flows.ai_builder.ai_builder_dispatcher import (
+    PlannerDispatchResult,
+    dispatch_planner_action,
+)
+from intric.flows.ai_builder.ai_builder_orchestration_pipeline import (
+    PipelineOutcome,
+    run_planner_pipeline,
+)
+from intric.flows.ai_builder.ai_builder_orchestrator import (
+    OrchestrationContext,
+    PlannerOutput,
+    ProposePlanAction,
+    RejectionReason,
+)
+from intric.flows.ai_builder.ai_builder_repair import CompletionMetadata
+
+if TYPE_CHECKING:
+    from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+    from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+    from intric.flows.domain.flow import Flow
+
+
+PlannerTurnOutcomeKind = Literal[
+    "dispatched",
+    "rejected",
+    "parse_failed",
+    "propose_plan_pending_adapter",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class PlannerTurnResult:
+    """Caller-facing outcome of one planner turn.
+
+    - `dispatched` — `accepted_output` + `dispatch_result` are both
+      populated. The caller reads `dispatch_result.action_kind` to emit
+      the right SSE event and `new_planning_state_version` so clients
+      can discard stale local state.
+    - `rejected` — terminal rejection from the pipeline's retry loop
+      (monotonicity violation, architecture guard, or exhausted repair
+      budget). `rejection` is populated; nothing was persisted.
+    - `parse_failed` — pipeline could not parse the LLM response as a
+      `PlannerOutput`. `final_completion` is populated so the caller
+      can distinguish truncation (`finish_reason == "length"`) from
+      other parse failures. `parse_error_raw` and `parse_error_message`
+      carry the unparseable body and the validator complaint string.
+    - `propose_plan_pending_adapter` — the pipeline accepted a
+      `propose_plan` action but the dispatcher does not yet route it.
+      `accepted_output` is populated (including the draft-plan
+      envelope) so the caller can hand off to the proposal-processor
+      adapter when it lands. Nothing was persisted. The LLM ran, so
+      telemetry counters still populate.
+
+    `llm_calls_made` / `repair_attempts` mirror the pipeline counters
+    so the caller's telemetry does not have to reach back into the
+    outcome's `PipelineOutcome`.
+    """
+
+    kind: PlannerTurnOutcomeKind
+    accepted_output: PlannerOutput | None = None
+    dispatch_result: PlannerDispatchResult | None = None
+    rejection: RejectionReason | None = None
+    final_completion: CompletionMetadata | None = None
+    parse_error_raw: str | None = None
+    parse_error_message: str | None = None
+    llm_calls_made: int = 0
+    repair_attempts: int = 0
+
+
+async def run_planner_turn(
+    *,
+    repo: "AIBuilderRepository",
+    litellm_client: Any,
+    litellm_model: str,
+    litellm_kwargs: dict[str, Any],
+    session_id: UUID,
+    tenant_id: UUID,
+    flow: "Flow | None",
+    base_messages: list[dict[str, Any]],
+    orchestration_context: OrchestrationContext,
+    build_new_messages: Callable[[PlannerOutput], "list[ConversationMessage]"],
+    request_id: UUID | None = None,
+    lock_token: UUID | None = None,
+) -> PlannerTurnResult:
+    """Run one planner turn end-to-end and persist the result.
+
+    Preconditions: `base_messages` is the chat-completion message list
+    the caller has already assembled (system prompt + prior messages
+    + current user turn). `build_new_messages` is called AFTER the
+    pipeline accepts a `PlannerOutput`; the caller materializes the
+    full conversation delta to persist (user turn + assistant turn
+    rendered from the accepted action) so both land in the same
+    atomic `commit_turn` savepoint. Building post-accept is the only
+    way to include an assistant turn shaped from the LLM's answer
+    without a second write.
+
+    On `dispatched`, the dispatcher has already invoked
+    `repo.commit_turn` in a savepoint; the caller does NOT need to
+    commit again. On every other outcome, NO repo write has happened
+    and `build_new_messages` was NOT called.
+    """
+    pipeline_outcome: PipelineOutcome = await run_planner_pipeline(
+        litellm_client=litellm_client,
+        litellm_model=litellm_model,
+        litellm_kwargs=litellm_kwargs,
+        base_messages=base_messages,
+        orchestration_context=orchestration_context,
+    )
+
+    if pipeline_outcome.kind == "parse_failed":
+        return PlannerTurnResult(
+            kind="parse_failed",
+            final_completion=pipeline_outcome.final_completion,
+            parse_error_raw=pipeline_outcome.parse_error_raw,
+            parse_error_message=pipeline_outcome.parse_error_message,
+            llm_calls_made=pipeline_outcome.llm_calls_made,
+            repair_attempts=pipeline_outcome.repair_attempts,
+        )
+    if pipeline_outcome.kind == "rejected":
+        return PlannerTurnResult(
+            kind="rejected",
+            rejection=pipeline_outcome.rejection,
+            final_completion=pipeline_outcome.final_completion,
+            llm_calls_made=pipeline_outcome.llm_calls_made,
+            repair_attempts=pipeline_outcome.repair_attempts,
+        )
+
+    assert pipeline_outcome.accepted_output is not None
+    accepted = pipeline_outcome.accepted_output
+
+    if isinstance(accepted.planner_action, ProposePlanAction):
+        return PlannerTurnResult(
+            kind="propose_plan_pending_adapter",
+            accepted_output=accepted,
+            final_completion=pipeline_outcome.final_completion,
+            llm_calls_made=pipeline_outcome.llm_calls_made,
+            repair_attempts=pipeline_outcome.repair_attempts,
+        )
+
+    new_messages = build_new_messages(accepted)
+    dispatch_result = await dispatch_planner_action(
+        repo=repo,
+        session_id=session_id,
+        tenant_id=tenant_id,
+        output=accepted,
+        new_messages=new_messages,
+        flow=flow,
+        request_id=request_id,
+        lock_token=lock_token,
+    )
+
+    return PlannerTurnResult(
+        kind="dispatched",
+        accepted_output=accepted,
+        dispatch_result=dispatch_result,
+        final_completion=pipeline_outcome.final_completion,
+        llm_calls_made=pipeline_outcome.llm_calls_made,
+        repair_attempts=pipeline_outcome.repair_attempts,
+    )
+
+
+__all__ = [
+    "PlannerTurnOutcomeKind",
+    "PlannerTurnResult",
+    "run_planner_turn",
+]
