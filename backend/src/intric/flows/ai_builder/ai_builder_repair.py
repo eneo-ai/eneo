@@ -39,6 +39,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
+from intric.flows.ai_builder.ai_builder_commit_invariance import (
+    CommitDriftError,
+    assert_architecture_commit_unchanged,
+)
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     PlannerOutput,
     RejectionCode,
@@ -151,50 +155,17 @@ def _detect_commit_drift(
 ) -> RejectionReason | None:
     """Return a drift rejection if the repaired commit is not the prior.
 
-    Transition matrix:
-      - `prior=None, after=any`: not drift (initial-commit path).
-      - `prior=set, after=None`: drift — commit silently dropped.
-      - `prior=set, after` with different `architecture_hash`: drift —
-        commit hash mutated.
-      - `prior=set, after` with identical hash but non-identical body
-        (tuples_chain / chosen_patterns / required_capabilities /
-        committed_at): drift — server does not rebind the planner-
-        supplied hash to the commit's body, so a matching hash on a
-        different body is a hash forgery, not a preserved commit. The
-        full-body check is the enforceable anti-drift invariant.
-      - `prior=set, after` byte-identical: not drift.
+    Delegates the invariant check to
+    `assert_architecture_commit_unchanged`; the exception message
+    already names the offending field(s), so we forward it as the
+    `RejectionReason.detail` the outer loop surfaces to telemetry.
     """
-    if prior is None:
-        return None
-    if after is None:
+    try:
+        assert_architecture_commit_unchanged(before=prior, after=after)
+    except CommitDriftError as exc:
         return RejectionReason(
             code="repair_attempted_commit_drift",
-            detail=(
-                "repair output dropped the prior architecture_commit; "
-                "the committed architecture is pinned and must be "
-                f"preserved (prior architecture_hash={prior.architecture_hash})"
-            ),
-        )
-    if after.architecture_hash != prior.architecture_hash:
-        return RejectionReason(
-            code="repair_attempted_commit_drift",
-            detail=(
-                "repair output changed architecture_hash from "
-                f"{prior.architecture_hash} to {after.architecture_hash}; "
-                "repair may rewrite draft_plan only, never the commit"
-            ),
-        )
-    if prior.model_dump(mode="json") != after.model_dump(mode="json"):
-        return RejectionReason(
-            code="repair_attempted_commit_drift",
-            detail=(
-                "repair output kept architecture_hash="
-                f"{prior.architecture_hash} but mutated the commit body "
-                "(tuples_chain / chosen_patterns / required_capabilities / "
-                "committed_at). The server does not rebind the "
-                "planner-supplied hash; a matching hash on a different "
-                "body is drift, not preservation"
-            ),
+            detail=str(exc),
         )
     return None
 

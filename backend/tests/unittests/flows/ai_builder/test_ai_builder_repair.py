@@ -423,7 +423,9 @@ class TestCommitDriftBlocked:
         assert outcome.kind == "commit_drift_blocked"
         assert outcome.drift_rejection is not None
         assert outcome.drift_rejection.code == "repair_attempted_commit_drift"
-        assert "mutated the commit body" in outcome.drift_rejection.detail
+        detail = outcome.drift_rejection.detail
+        assert "mutated" in detail
+        assert "commit body" in detail
 
     @pytest.mark.asyncio
     async def test_adding_commit_when_prior_was_none_is_not_drift(self) -> None:
