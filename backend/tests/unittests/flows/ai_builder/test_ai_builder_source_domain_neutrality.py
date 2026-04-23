@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Eleven tokens mirror the catalog lockdown list. Substring matches
+# Banned tokens mirror the catalog lockdown list. Substring matches
 # (not whole-word) so compounds like `beslutsunderlagsmall` or
 # `handläggaren` are caught too. Keep in sync with
 # `TestDomainNeutrality._BANNED_SPECIALTY_TOKENS` in
@@ -39,6 +39,14 @@ _BANNED_SPECIALTY_TOKENS: tuple[str, ...] = (
     "ärendenummer",
     "decision support",
     "decision-support",
+    "kommunärende",
+    "municipal case",
+    "guldexempel",
+    "kommunanalys",
+    "ärendeanalys",
+    "ansvarig_namnd",
+    "juridiska risker",
+    "ekonomiska konsekvenser",
 )
 
 _AI_BUILDER_SRC = (

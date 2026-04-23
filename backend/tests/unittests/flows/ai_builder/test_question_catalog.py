@@ -600,6 +600,14 @@ class TestDomainNeutrality:
         "ärendenummer",
         "decision support",
         "decision-support",
+        "kommunärende",
+        "municipal case",
+        "guldexempel",
+        "kommunanalys",
+        "ärendeanalys",
+        "ansvarig_namnd",
+        "juridiska risker",
+        "ekonomiska konsekvenser",
     )
 
     def test_no_banned_tokens_in_any_rendered_template(self) -> None:
