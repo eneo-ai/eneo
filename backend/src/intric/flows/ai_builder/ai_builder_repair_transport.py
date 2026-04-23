@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_plan_store import append_session_messages
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     append_retry_feedback_turn,
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     build_tool_retry_messages as build_proposal_tool_retry_messages,
 )
+
+if TYPE_CHECKING:
+    from intric.flows.domain.flow import Flow
 
 
 def build_tool_retry_messages(
@@ -56,9 +58,18 @@ async def persist_tool_turn(
     metadata: dict[str, Any] | None = None,
     assistant_content: str | None = None,
     assistant_metadata: dict[str, Any] | None = None,
+    flow: "Flow | None" = None,
     lease_request_id: UUID | None = None,
     lease_lock_token: UUID | None = None,
 ) -> None:
+    """Append an assistant tool call + tool response turn and refresh `PlanningState` atomically.
+
+    Routes through `repo.commit_turn` so the conversation append and the
+    planning-state save land in one savepoint. Tool metadata such as
+    `requirements_summary` feeds signal extraction, so skipping the
+    planning-state refresh would leave the persisted state stale relative
+    to the persisted conversation.
+    """
     conversation.append(
         ConversationMessage(
             role="assistant",
@@ -81,14 +92,13 @@ async def persist_tool_turn(
             metadata=metadata,
         )
     )
-    await append_session_messages(
-        repo=repo,
-        tenant_id=tenant_id,
+    await repo.commit_turn(
         session_id=session_id,
-        conversation=conversation,
-        start_index=new_messages_start,
-        lease_request_id=lease_request_id,
-        lease_lock_token=lease_lock_token,
+        tenant_id=tenant_id,
+        new_messages=conversation[new_messages_start:],
+        flow=flow,
+        request_id=lease_request_id,
+        lock_token=lease_lock_token,
     )
 
 

@@ -1890,7 +1890,7 @@ class TestPlannerDiscoveryShortCircuit:
 
         assert [event["event"] for event in events] == ["text", "question", "done"]
         planner.litellm_client.acompletion.assert_not_awaited()
-        repo.append_session_messages.assert_awaited_once()
+        repo.commit_turn.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_discovery_complete_unconfirmed_phase_only_exposes_confirm_requirements_tool(

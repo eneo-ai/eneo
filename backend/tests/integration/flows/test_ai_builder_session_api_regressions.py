@@ -1038,6 +1038,97 @@ async def test_ai_builder_repo_commit_turn_persists_conversation_and_planning_st
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_persist_tool_turn_refreshes_planning_state_with_requirements_summary(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """`persist_tool_turn` must route append + planning-state refresh through
+    `commit_turn` so that state-affecting tool metadata
+    (`requirements_summary`) lands in one savepoint and the persisted
+    `PlanningState` stays coherent with the persisted conversation.
+    """
+    from intric.flows.ai_builder.ai_builder_repair_transport import (
+        build_persisted_tool_call_stub,
+        persist_tool_turn,
+    )
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder persist_tool_turn state refresh",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        conversation: list[ConversationMessage] = [
+            ConversationMessage(
+                role="user", content="Jag vill bygga en sammanställning."
+            )
+        ]
+        tool_call = build_persisted_tool_call_stub(
+            tool_call_id="call_requirements_1",
+            tool_name="confirm_requirements",
+        )
+
+        await persist_tool_turn(
+            repo=repo,
+            tenant_id=user.tenant_id,
+            session_id=session.id,
+            conversation=conversation,
+            new_messages_start=0,
+            tool_call=tool_call,
+            arguments={"summary": "Kort sammanfattning"},
+            tool_content="Requirements presented to user. Awaiting confirmation.",
+            metadata={
+                "requirements_summary": {
+                    "summary": "Kort sammanfattning",
+                    "assumptions": ["sammanställning från flera dokument"],
+                    "requirements_version": "req-v1",
+                },
+                "requirements_version": "req-v1",
+            },
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        fetched = await repo.get_session(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+        loaded = await repo.load_planning_state(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+        version_row = await container.session().execute(
+            select(BuilderSessions.planning_state_version).where(
+                BuilderSessions.id == session.id
+            )
+        )
+
+    persisted_roles = [message.role for message in fetched.conversation]
+    assert persisted_roles == ["user", "assistant", "tool"]
+    tool_message = fetched.conversation[2]
+    assert tool_message.metadata is not None
+    assert "requirements_summary" in tool_message.metadata
+    assert loaded is not None
+    assert loaded.evidence.conversation_message_ids == [
+        message.message_id for message in fetched.conversation
+    ]
+    assert version_row.scalar_one() == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ai_builder_repo_commit_turn_rolls_back_when_planning_state_drifts(
     client,
     bearer_token,

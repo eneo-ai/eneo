@@ -1072,6 +1072,7 @@ class AIBuilderProposalProcessor:
                     "Structured question payload was invalid; rendered fallback text question."
                 ),
                 assistant_metadata=ctx.assistant_metadata,
+                flow=ctx.flow,
                 lease_request_id=ctx.lease_request_id,
                 lease_lock_token=ctx.lease_lock_token,
             )
@@ -1103,6 +1104,7 @@ class AIBuilderProposalProcessor:
                 tool_content=(
                     "Backend-owned discovery question presented to user after model signal."
                 ),
+                flow=ctx.flow,
                 lease_request_id=ctx.lease_request_id,
                 lease_lock_token=ctx.lease_lock_token,
             ):
@@ -1209,6 +1211,7 @@ class AIBuilderProposalProcessor:
                 "requirements_version": requirements_version,
             },
             assistant_metadata=assistant_metadata,
+            flow=flow,
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
         )

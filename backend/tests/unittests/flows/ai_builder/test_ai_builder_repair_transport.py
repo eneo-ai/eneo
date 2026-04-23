@@ -51,18 +51,23 @@ def test_build_persisted_tool_call_stub_returns_minimal_tool_shape() -> None:
 
 
 @pytest.mark.asyncio
-async def test_persist_tool_turn_appends_messages_and_persists_new_slice() -> None:
+async def test_persist_tool_turn_commits_turn_with_flow_and_lease() -> None:
     repo = AsyncMock()
     conversation = [ConversationMessage(role="user", content="Build a document flow")]
     tool_call = SimpleNamespace(
         id="call_2",
         function=SimpleNamespace(name="confirm_requirements"),
     )
+    session_id = uuid4()
+    tenant_id = uuid4()
+    request_id = uuid4()
+    lock_token = uuid4()
+    flow = SimpleNamespace(id=uuid4())
 
     await persist_tool_turn(
         repo=repo,
-        tenant_id=uuid4(),
-        session_id=uuid4(),
+        tenant_id=tenant_id,
+        session_id=session_id,
         conversation=conversation,
         new_messages_start=1,
         tool_call=tool_call,
@@ -70,6 +75,9 @@ async def test_persist_tool_turn_appends_messages_and_persists_new_slice() -> No
         tool_content="saved",
         assistant_content="Här är sammanfattningen.",
         metadata={"requirements_version": "req-v1"},
+        flow=flow,  # type: ignore[arg-type]
+        lease_request_id=request_id,
+        lease_lock_token=lock_token,
     )
 
     assert len(conversation) == 3
@@ -86,4 +94,13 @@ async def test_persist_tool_turn_appends_messages_and_persists_new_slice() -> No
     assert tool_message.content == "saved"
     assert tool_message.tool_call_id == "call_2"
     assert tool_message.metadata == {"requirements_version": "req-v1"}
-    repo.append_session_messages.assert_awaited_once()
+    repo.commit_turn.assert_awaited_once()
+    kwargs = repo.commit_turn.await_args.kwargs
+    assert kwargs["session_id"] == session_id
+    assert kwargs["tenant_id"] == tenant_id
+    assert kwargs["flow"] is flow
+    assert kwargs["request_id"] == request_id
+    assert kwargs["lock_token"] == lock_token
+    new_messages = kwargs["new_messages"]
+    assert [message.role for message in new_messages] == ["assistant", "tool"]
+    assert new_messages[1].metadata == {"requirements_version": "req-v1"}

@@ -3366,19 +3366,16 @@ class TestSendMessageStructuredQuestion:
         assert data["selection_mode"] == "single"
         assert data["allow_custom"] is True
 
-        repo.append_session_messages.assert_called()
-        saved_conversation = repo.append_session_messages.call_args[1]["conversation"]
-        assert saved_conversation[1].metadata is not None
+        repo.commit_turn.assert_called()
+        saved_messages = repo.commit_turn.call_args[1]["new_messages"]
+        assistant_turn = next(m for m in saved_messages if m.role == "assistant")
+        assert assistant_turn.metadata is not None
+        assert assistant_turn.metadata["planner_telemetry"]["tool_call_count"] == 1
         assert (
-            saved_conversation[1].metadata["planner_telemetry"]["tool_call_count"] == 1
-        )
-        assert (
-            saved_conversation[1].metadata["session_telemetry"][
-                "clarification_question_count"
-            ]
+            assistant_turn.metadata["session_telemetry"]["clarification_question_count"]
             == 1
         )
-        tool_msgs = [m for m in saved_conversation if m.role == "tool"]
+        tool_msgs = [m for m in saved_messages if m.role == "tool"]
         assert len(tool_msgs) >= 1
         assert tool_msgs[-1].tool_call_id.startswith("discovery_")
         repo.update_session_conversation.assert_not_called()
@@ -4360,9 +4357,9 @@ class TestSendMessageStructuredQuestion:
         # No plan should be created
         repo.create_plan.assert_not_called()
 
-        repo.append_session_messages.assert_called()
-        saved_conversation = repo.append_session_messages.call_args[1]["conversation"]
-        tool_msgs = [m for m in saved_conversation if m.role == "tool"]
+        repo.commit_turn.assert_called()
+        saved_messages = repo.commit_turn.call_args[1]["new_messages"]
+        tool_msgs = [m for m in saved_messages if m.role == "tool"]
         assert tool_msgs[-1].tool_call_id == tc.id
         assert "fallback" in (tool_msgs[-1].content or "")
         repo.update_session_conversation.assert_not_called()
