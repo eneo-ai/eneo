@@ -1153,8 +1153,8 @@ class TestSendMessage:
                 )
             )
 
-        call = repo.append_session_messages.call_args
-        conversation = call.kwargs["conversation"]
+        call = repo.commit_turn.call_args
+        conversation = call.kwargs["new_messages"]
         assert len(conversation) == 2
         assert conversation[0].role == "user"
         assert conversation[0].content == "Build a flow"
@@ -1203,7 +1203,7 @@ class TestSendMessage:
                 )
             )
 
-        conversation = repo.append_session_messages.call_args.kwargs["conversation"]
+        conversation = repo.commit_turn.call_args.kwargs["new_messages"]
         assistant_message = conversation[1]
         assert assistant_message.metadata is not None
         planner_telemetry = assistant_message.metadata["planner_telemetry"]
@@ -4479,7 +4479,7 @@ class TestSendMessageStructuredQuestion:
                 )
             )
 
-        conversation = repo.append_session_messages.call_args.kwargs["conversation"]
+        conversation = repo.commit_turn.call_args.kwargs["new_messages"]
         assert conversation[0].metadata == {
             "question_answer": {
                 "question_id": "pdf_count",

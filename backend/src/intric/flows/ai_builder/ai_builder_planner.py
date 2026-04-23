@@ -75,6 +75,7 @@ from intric.flows.ai_builder.ai_builder_tools import (
     build_free_discovery_tool_schemas,
 )
 from intric.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
     build_planning_state_prompt_block,
 )
 from intric.main.config import get_settings
@@ -915,10 +916,15 @@ class AIBuilderPlanner:
                         ),
                     )
                 )
-                await self.repo.append_session_messages(
+                planning_state = build_planning_state_from_conversation(
+                    conversation,
+                    flow=flow,
+                )
+                await self.repo.commit_turn(
                     session_id=session_id,
                     tenant_id=self.user.tenant_id,
-                    conversation=conversation[new_messages_start:],
+                    new_messages=conversation[new_messages_start:],
+                    planning_state=planning_state,
                 )
                 yield build_text_event(assistant_message.content)
 

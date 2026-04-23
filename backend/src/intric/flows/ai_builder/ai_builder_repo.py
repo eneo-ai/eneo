@@ -901,6 +901,54 @@ class AIBuilderRepository:
                 return None
             return PlanningState.model_validate(payload)
 
+    # ---------------------------------------------------------------------------
+    # Turn commit (atomic conversation + planning-state writes)
+    # ---------------------------------------------------------------------------
+
+    async def commit_turn(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        new_messages: list[ConversationMessage],
+        planning_state: PlanningState,
+        request_id: UUID | None = None,
+        lock_token: UUID | None = None,
+    ) -> int:
+        """Append new conversation messages and save `PlanningState` atomically.
+
+        One outer transaction wraps both writes so a failure in either
+        leaves neither in place. In particular, a post-construction
+        drift in `planning_state` (list append bypassing Pydantic's
+        field validator) raises inside `save_planning_state` and rolls
+        back the conversation append — no split-brain where the turn's
+        text landed but its planning snapshot did not.
+
+        Returns the new `planning_state_version` (monotonically bumped
+        by `save_planning_state`). Callers who don't need it can ignore
+        the return value.
+
+        Atomicity is enforced via a savepoint (`begin_nested()`) rather
+        than only the outer transaction, so even a caller that already
+        holds an outer transaction and swallows the exception (such as
+        a test fixture) still sees the inner writes rolled back as one
+        unit.
+        """
+        async with self._transaction():
+            async with self.session.begin_nested():
+                await self.append_session_messages(
+                    session_id=session_id,
+                    tenant_id=tenant_id,
+                    conversation=new_messages,
+                    request_id=request_id,
+                    lock_token=lock_token,
+                )
+                return await self.save_planning_state(
+                    session_id=session_id,
+                    tenant_id=tenant_id,
+                    state=planning_state,
+                )
+
 
 # ---------------------------------------------------------------------------
 # Row → domain model converters

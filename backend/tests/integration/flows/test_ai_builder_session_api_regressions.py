@@ -838,6 +838,109 @@ async def test_ai_builder_repo_save_planning_state_raises_for_wrong_tenant(
             )
 
 
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_commit_turn_persists_conversation_and_planning_state(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Commit Turn Happy",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        assistant_msg = ConversationMessage(role="assistant", content="Hej")
+        state = _planning_state_fixture()
+
+        await repo.commit_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            new_messages=[assistant_msg],
+            planning_state=state,
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        fetched = await repo.get_session(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+        loaded = await repo.load_planning_state(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert len(fetched.conversation) == 1
+    assert fetched.conversation[0].role == "assistant"
+    assert fetched.conversation[0].content == "Hej"
+    assert loaded == state.validated_snapshot()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_commit_turn_rolls_back_when_planning_state_drifts(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Commit Turn Rollback",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        assistant_msg = ConversationMessage(
+            role="assistant", content="Should roll back"
+        )
+        drifted = _planning_state_fixture()
+        # Bypass Pydantic's field validator to simulate post-construction
+        # container-level drift. validated_snapshot() inside commit_turn
+        # must catch this and roll back the conversation append.
+        drifted.signals.append("not a signal")  # type: ignore[arg-type]
+
+        with pytest.raises(Exception):
+            await repo.commit_turn(
+                session_id=session.id,
+                tenant_id=user.tenant_id,
+                new_messages=[assistant_msg],
+                planning_state=drifted,
+            )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        fetched = await repo.get_session(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert fetched.conversation == []
+
+
 def _make_plan_envelope(spec: FlowDraftSpecCore) -> PlannerPlanEnvelope:
     return PlannerPlanEnvelope(
         spec=spec,
