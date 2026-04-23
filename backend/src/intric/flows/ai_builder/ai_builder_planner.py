@@ -11,6 +11,10 @@ from intric.files.file_models import File
 from intric.flows.ai_builder.ai_builder_attachment_context import (
     build_ai_builder_attachment_context,
 )
+from intric.flows.ai_builder.ai_builder_capability_projection import (
+    build_llm_prompt_context,
+    render_llm_prompt_context,
+)
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
@@ -74,9 +78,13 @@ from intric.flows.ai_builder.ai_builder_tools import (
     build_discovery_complete_tool_schemas,
     build_free_discovery_tool_schemas,
 )
+from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
+from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.ai_builder.planning_state_builder import (
-    build_planning_state_prompt_block,
+    build_planning_state_from_conversation,
+    carry_forward_persisted_planner_state,
 )
+from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
@@ -391,6 +399,7 @@ class AIBuilderPlanner:
         budget_policy: AIBuilderBudgetPolicy,
         is_requirements_confirmation: bool,
         allow_discovery_semantic_adjudication: bool = True,
+        persisted_planning_state: PlanningState | None = None,
     ) -> PlannerPreparedRequest:
         requirements_state = resolve_requirements_state(conversation)
         has_requirements_summary = requirements_state.latest_summary is not None
@@ -435,9 +444,19 @@ class AIBuilderPlanner:
             latest_user_message=message,
             flow=flow,
         )
-        planning_state_block = build_planning_state_prompt_block(
+        rebuilt_planning_state = build_planning_state_from_conversation(
             conversation,
             flow=flow,
+        )
+        carry_forward_persisted_planner_state(
+            rebuilt_planning_state, persisted_planning_state
+        )
+        planning_state_block = render_llm_prompt_context(
+            build_llm_prompt_context(
+                rebuilt_planning_state,
+                CAPABILITY_REGISTRY,
+                PATTERN_REGISTRY,
+            )
         )
         confirmed_requirements = latest_confirmed_requirements(conversation)
         attachment_context_result = build_ai_builder_attachment_context(
@@ -629,6 +648,10 @@ class AIBuilderPlanner:
                 )
 
             conversation = list(session.conversation)
+            persisted_planning_state = await self.repo.load_planning_state(
+                session_id=session_id,
+                tenant_id=self.user.tenant_id,
+            )
             metadata_resolution = await self._resolve_message_metadata(
                 conversation=conversation,
                 message=message,
@@ -675,6 +698,7 @@ class AIBuilderPlanner:
                 budget_policy=budget_policy,
                 is_requirements_confirmation=is_requirements_confirmation,
                 allow_discovery_semantic_adjudication=not metadata_resolution.used_auxiliary_llm,
+                persisted_planning_state=persisted_planning_state,
             )
             requirements_state = prepared_request.requirements_state
             ui_language = prepared_request.ui_language

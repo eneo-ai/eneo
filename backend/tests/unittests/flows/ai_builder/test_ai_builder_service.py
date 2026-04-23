@@ -152,6 +152,7 @@ def _make_service(
     if repo is None:
         repo = AsyncMock()
     repo.list_session_file_ids.return_value = []
+    repo.load_planning_state.return_value = None
     return AIBuilderService(
         user=user or _make_user(),
         repo=repo,

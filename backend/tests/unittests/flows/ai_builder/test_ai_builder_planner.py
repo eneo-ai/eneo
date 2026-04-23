@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -13,6 +14,11 @@ from intric.flows.ai_builder.ai_builder_planner import (
     PlannerToolSelection,
 )
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from intric.flows.ai_builder.planning_state import (
+    ArchitectureCommit,
+    PlanningState,
+    StepTriple,
+)
 from intric.main.exceptions import BadRequestException
 
 
@@ -511,6 +517,176 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
     assert any(
         call.args and call.args[0] == "AI Builder planner prompt metrics"
         for call in logger_info.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_prepare_planner_request_projects_pre_commit_into_system_prompt() -> None:
+    """Pre-commit projection reaches the system prompt as a rendered block."""
+    planner = _make_planner()
+    conversation = [ConversationMessage(role="user", content="Build a flow")]
+    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    discovery_analysis = SimpleNamespace(mvs_met=True)
+    tool_selection = PlannerToolSelection(
+        tool_schemas=[{"function": {"name": "confirm_requirements"}}],
+        should_force_requirements_summary=False,
+        is_free_discovery=False,
+        should_emit_forced_followup=False,
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.resolve_requirements_state",
+            return_value=requirements_state,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            new_callable=AsyncMock,
+            return_value=(None, discovery_analysis),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
+            return_value=None,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_system_prompt",
+            return_value="system prompt",
+        ) as build_system_prompt,
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.compute_conversation_token_budget",
+            return_value=256,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.trim_conversation_for_context",
+            return_value=[{"role": "user", "content": "Build a flow"}],
+        ),
+        patch.object(planner, "_select_tool_schemas", return_value=tool_selection),
+    ):
+        await planner._prepare_planner_request(
+            conversation=conversation,
+            message="Build a flow",
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            attachment_files=None,
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+                unknown_model_context_window_tokens=8192,
+            ),
+            is_requirements_confirmation=False,
+            persisted_planning_state=None,
+        )
+
+    planning_state_block = build_system_prompt.call_args.kwargs["planning_state_block"]
+    assert isinstance(planning_state_block, str)
+    assert "pre_commit" in planning_state_block, (
+        "pre-commit projection must label its stage so the planner can "
+        "distinguish unconstrained exploration from post-commit narrowing"
+    )
+    # Every builder-exposed capability must appear in the rendered block
+    # pre-commit — that is the projection contract.
+    assert "input_text" in planning_state_block
+    assert "output_mode_pass_through" in planning_state_block
+
+
+@pytest.mark.asyncio
+async def test_prepare_planner_request_carries_forward_persisted_commit_into_prompt() -> (
+    None
+):
+    """When a prior turn persisted an `architecture_commit`, the next
+    turn's rendered prompt MUST surface that commit's fingerprint.
+
+    This is the integration proof that `carry_forward_persisted_planner_state`
+    runs before the projection and that the projection's post-commit
+    narrowing actually reaches the planner LLM.
+    """
+    planner = _make_planner()
+    conversation = [ConversationMessage(role="user", content="Refine step 1")]
+    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    discovery_analysis = SimpleNamespace(mvs_met=True)
+    tool_selection = PlannerToolSelection(
+        tool_schemas=[{"function": {"name": "ask_structured_question"}}],
+        should_force_requirements_summary=False,
+        is_free_discovery=False,
+        should_emit_forced_followup=False,
+    )
+    committed_hash = "b" * 64
+    persisted = PlanningState.empty()
+    persisted.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="text",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=["summarize_text"],
+        required_capabilities=["input_text", "output_mode_pass_through"],
+        committed_at=datetime(2026, 4, 23, tzinfo=timezone.utc),
+        architecture_hash=committed_hash,
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.resolve_requirements_state",
+            return_value=requirements_state,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            new_callable=AsyncMock,
+            return_value=(None, discovery_analysis),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
+            return_value=None,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_system_prompt",
+            return_value="system prompt",
+        ) as build_system_prompt,
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.compute_conversation_token_budget",
+            return_value=256,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.trim_conversation_for_context",
+            return_value=[{"role": "user", "content": "Refine step 1"}],
+        ),
+        patch.object(planner, "_select_tool_schemas", return_value=tool_selection),
+    ):
+        await planner._prepare_planner_request(
+            conversation=conversation,
+            message="Refine step 1",
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            attachment_files=None,
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+                unknown_model_context_window_tokens=8192,
+            ),
+            is_requirements_confirmation=False,
+            persisted_planning_state=persisted,
+        )
+
+    planning_state_block = build_system_prompt.call_args.kwargs["planning_state_block"]
+    assert isinstance(planning_state_block, str)
+    assert "post_commit" in planning_state_block
+    assert committed_hash in planning_state_block, (
+        "post-commit projection must fingerprint the architecture_hash "
+        "so the planner can verify it did not drift across turns"
     )
 
 

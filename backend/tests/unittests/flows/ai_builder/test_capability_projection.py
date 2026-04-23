@@ -525,5 +525,273 @@ class TestPurity:
         assert list(state.open_questions) == questions_before
 
 
+class TestRenderLLMPromptContext:
+    """Contract tests for `render_llm_prompt_context` — the Markdown
+    renderer that serialises a projection into the system prompt.
+
+    The renderer is deliberately co-located with `build_llm_prompt_context`
+    so compressor + serialiser stay together. Output must be deterministic
+    (byte-identical across calls with equal input) and must respect the
+    projection's stage-dependent narrowing.
+    """
+
+    def test_render_pre_commit_contains_every_builder_capability_id(self) -> None:
+        from intric.flows.ai_builder.ai_builder_capability_projection import (
+            build_llm_prompt_context,
+            render_llm_prompt_context,
+        )
+
+        ctx = build_llm_prompt_context(
+            _empty_pre_commit_state(),
+            CAPABILITY_REGISTRY,
+            PATTERN_REGISTRY,
+        )
+        rendered = render_llm_prompt_context(ctx)
+        assert isinstance(rendered, str)
+        for cap in CAPABILITY_REGISTRY.values():
+            if cap.exposure != "builder":
+                continue
+            assert cap.id in rendered, (
+                f"pre-commit render must surface every builder-exposed "
+                f"capability — missing {cap.id!r}"
+            )
+
+    def test_render_post_commit_narrows_to_required_capabilities(self) -> None:
+        from intric.flows.ai_builder.ai_builder_capability_projection import (
+            build_llm_prompt_context,
+            render_llm_prompt_context,
+        )
+
+        state = _committed_state(
+            required_capabilities=["input_text", "output_mode_pass_through"],
+            chosen_patterns=["summarize_text"],
+        )
+        ctx = build_llm_prompt_context(state, CAPABILITY_REGISTRY, PATTERN_REGISTRY)
+        rendered = render_llm_prompt_context(ctx)
+
+        assert "input_text" in rendered
+        assert "output_mode_pass_through" in rendered
+        # Any builder-exposed capability outside the required set must be
+        # absent from the post-commit render.
+        for cap in CAPABILITY_REGISTRY.values():
+            if cap.exposure != "builder":
+                continue
+            if cap.id in {"input_text", "output_mode_pass_through"}:
+                continue
+            assert cap.id not in rendered, (
+                f"post-commit render leaked a non-required capability "
+                f"{cap.id!r} — narrowing must match the commit"
+            )
+
+    def test_render_post_commit_surfaces_committed_architecture_block(self) -> None:
+        from intric.flows.ai_builder.ai_builder_capability_projection import (
+            build_llm_prompt_context,
+            render_llm_prompt_context,
+        )
+
+        architecture_hash = "c" * 64
+        state = PlanningState.empty()
+        state.architecture_commit = ArchitectureCommit(
+            tuples_chain=[
+                StepTriple(
+                    input_type="text",
+                    output_type="json",
+                    output_mode="pass_through",
+                ),
+                StepTriple(
+                    input_type="json",
+                    output_type="text",
+                    output_mode="pass_through",
+                ),
+            ],
+            chosen_patterns=["summarize_text"],
+            required_capabilities=["input_text", "output_mode_pass_through"],
+            committed_at=datetime(2026, 4, 23, 12, 0, tzinfo=timezone.utc),
+            architecture_hash=architecture_hash,
+        )
+        ctx = build_llm_prompt_context(state, CAPABILITY_REGISTRY, PATTERN_REGISTRY)
+        rendered = render_llm_prompt_context(ctx)
+
+        assert architecture_hash in rendered, (
+            "post-commit render must fingerprint the architecture_hash "
+            "so the planner can detect drift between turns"
+        )
+        assert "2026-04-23" in rendered, (
+            "post-commit render must surface committed_at so the planner "
+            "can reason about recency"
+        )
+        # Every tuple in tuples_chain must be visible.
+        assert "text" in rendered
+        assert "json" in rendered
+        assert "pass_through" in rendered
+
+    def test_render_post_commit_does_not_leak_unknown_required_capability(
+        self,
+    ) -> None:
+        """The projection drops committed capabilities that no longer
+        resolve in the FCM (drift-tolerant policy at
+        `_post_commit_capability_ids`). The renderer must honor that
+        narrowing instead of rendering the raw commit fields — otherwise
+        a stale / non-builder capability could leak into the prompt.
+        """
+        from intric.flows.ai_builder.ai_builder_capability_projection import (
+            build_llm_prompt_context,
+            render_llm_prompt_context,
+        )
+
+        unknown_cap_id = "legacy_removed_capability_id"
+        unknown_pattern_id = "legacy_removed_pattern_id"
+        state = PlanningState.empty()
+        state.architecture_commit = ArchitectureCommit(
+            tuples_chain=[
+                StepTriple(
+                    input_type="text",
+                    output_type="text",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["summarize_text", unknown_pattern_id],
+            required_capabilities=[
+                "input_text",
+                "output_mode_pass_through",
+                unknown_cap_id,
+            ],
+            committed_at=datetime(2026, 4, 23, tzinfo=timezone.utc),
+            architecture_hash="d" * 64,
+        )
+        ctx = build_llm_prompt_context(state, CAPABILITY_REGISTRY, PATTERN_REGISTRY)
+        rendered = render_llm_prompt_context(ctx)
+
+        assert unknown_cap_id not in rendered, (
+            "renderer leaked a non-builder required capability — it "
+            "must consume the projection's narrowed ctx.capabilities, "
+            "not commit.required_capabilities directly"
+        )
+        assert unknown_pattern_id not in rendered, (
+            "renderer leaked a chosen_pattern that no longer resolves "
+            "in the Pattern Registry — same narrowing rule applies"
+        )
+        # Sanity: the valid entries DO reach the render.
+        assert "input_text" in rendered
+        assert "summarize_text" in rendered
+
+    def test_render_pre_commit_includes_open_questions(self) -> None:
+        from intric.flows.ai_builder.ai_builder_capability_projection import (
+            build_llm_prompt_context,
+            render_llm_prompt_context,
+        )
+
+        state = _empty_pre_commit_state()
+        state.open_questions.append(
+            OpenQuestion(
+                question_id="final_output_mode",
+                slot_name="final_output_mode",
+                priority=1,
+                reason="output artefact undecided",
+            )
+        )
+        ctx = build_llm_prompt_context(state, CAPABILITY_REGISTRY, PATTERN_REGISTRY)
+        rendered = render_llm_prompt_context(ctx)
+
+        assert "final_output_mode" in rendered
+        assert "output artefact undecided" in rendered
+
+    def test_render_post_commit_omits_open_questions(self) -> None:
+        from intric.flows.ai_builder.ai_builder_capability_projection import (
+            build_llm_prompt_context,
+            render_llm_prompt_context,
+        )
+
+        state = _committed_state(
+            required_capabilities=["input_text", "output_mode_pass_through"],
+            chosen_patterns=["summarize_text"],
+        )
+        # open_questions on the source state should be dropped by the
+        # projection; the renderer must not resurrect them from anywhere.
+        state.open_questions.append(
+            OpenQuestion(
+                question_id="final_output_mode",
+                slot_name="final_output_mode",
+                priority=1,
+                reason="stale after commit",
+            )
+        )
+        ctx = build_llm_prompt_context(state, CAPABILITY_REGISTRY, PATTERN_REGISTRY)
+        rendered = render_llm_prompt_context(ctx)
+
+        assert "stale after commit" not in rendered, (
+            "post-commit render must not resurrect open questions the "
+            "projection already dropped — the architecture is pinned"
+        )
+
+    def test_render_labels_stage_header(self) -> None:
+        from intric.flows.ai_builder.ai_builder_capability_projection import (
+            build_llm_prompt_context,
+            render_llm_prompt_context,
+        )
+
+        pre = build_llm_prompt_context(
+            _empty_pre_commit_state(),
+            CAPABILITY_REGISTRY,
+            PATTERN_REGISTRY,
+        )
+        post = build_llm_prompt_context(
+            _committed_state(
+                required_capabilities=["input_text"],
+                chosen_patterns=["summarize_text"],
+            ),
+            CAPABILITY_REGISTRY,
+            PATTERN_REGISTRY,
+        )
+        assert "pre_commit" in render_llm_prompt_context(pre)
+        assert "post_commit" in render_llm_prompt_context(post)
+
+    def test_render_is_deterministic(self) -> None:
+        from intric.flows.ai_builder.ai_builder_capability_projection import (
+            build_llm_prompt_context,
+            render_llm_prompt_context,
+        )
+
+        state = _committed_state(
+            required_capabilities=["input_text", "output_mode_pass_through"],
+            chosen_patterns=["summarize_text"],
+        )
+        state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+            name="primary_runtime_input",
+            value="documents",
+            source="structured_answer",
+            evidence=["question_answer:input_material_mode"],
+            confidence="high",
+        )
+        ctx1 = build_llm_prompt_context(state, CAPABILITY_REGISTRY, PATTERN_REGISTRY)
+        ctx2 = build_llm_prompt_context(state, CAPABILITY_REGISTRY, PATTERN_REGISTRY)
+        assert render_llm_prompt_context(ctx1) == render_llm_prompt_context(ctx2), (
+            "renderer must be byte-identical across calls with equal "
+            "projections — prompt stability is load-bearing for prompt "
+            "caching downstream"
+        )
+
+    def test_render_includes_resolved_slots(self) -> None:
+        from intric.flows.ai_builder.ai_builder_capability_projection import (
+            build_llm_prompt_context,
+            render_llm_prompt_context,
+        )
+
+        state = _empty_pre_commit_state()
+        state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+            name="primary_runtime_input",
+            value="documents",
+            source="structured_answer",
+            evidence=["question_answer:input_material_mode"],
+            confidence="high",
+        )
+        ctx = build_llm_prompt_context(state, CAPABILITY_REGISTRY, PATTERN_REGISTRY)
+        rendered = render_llm_prompt_context(ctx)
+
+        assert "primary_runtime_input" in rendered
+        assert "documents" in rendered
+        assert "structured_answer" in rendered
+
+
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-x", "-v"])

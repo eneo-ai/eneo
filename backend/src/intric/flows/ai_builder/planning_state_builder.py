@@ -136,37 +136,6 @@ def carry_forward_persisted_planner_state(
         rebuilt.phase = persisted.phase
 
 
-def build_planning_state_prompt_block(
-    conversation: list[ConversationMessage],
-    *,
-    flow: Flow | None = None,
-) -> str | None:
-    """Render the backend-grounded slot block the planner LLM reads.
-
-    Returns `None` when no slots resolved so the planner does not
-    receive an empty section.
-    """
-    state = build_planning_state_from_conversation(conversation, flow=flow)
-    if not state.resolved_slots:
-        return None
-
-    lines = [
-        "## Backend-resolved requirements state",
-        "",
-        "Use these backend-grounded slots before re-reading the raw "
-        "transcript. Structured answers and confirmed summaries should "
-        "outweigh weaker heuristic inference.",
-        "",
-    ]
-    for slot in state.resolved_slots.values():
-        evidence = "; ".join(slot.evidence)
-        lines.append(
-            f"- {slot.name}: {slot.value} (source={slot.source}, "
-            f"confidence={slot.confidence}, evidence={evidence})"
-        )
-    return "\n".join(lines)
-
-
 def _resolve_slots(
     conversation: list[ConversationMessage],
     *,

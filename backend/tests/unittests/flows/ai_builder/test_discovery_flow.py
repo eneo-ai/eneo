@@ -1866,6 +1866,7 @@ class TestPlannerDiscoveryShortCircuit:
             status=SessionStatus.CHATTING,
             conversation=[],
         )
+        repo.load_planning_state.return_value = None
 
         planner = AIBuilderPlanner(
             user=MagicMock(tenant_id=uuid4()),
@@ -1910,6 +1911,7 @@ class TestPlannerDiscoveryShortCircuit:
             status=SessionStatus.CHATTING,
             conversation=[],
         )
+        repo.load_planning_state.return_value = None
 
         litellm_client = AsyncMock()
         tool_call = MagicMock()

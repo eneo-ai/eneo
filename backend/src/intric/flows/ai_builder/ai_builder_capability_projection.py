@@ -199,8 +199,108 @@ def _invariants_for(
     return tuple(sorted(pairs))
 
 
+def render_llm_prompt_context(ctx: LLMPromptContext) -> str:
+    """Serialise the projection into a deterministic Markdown block.
+
+    The output is pasted verbatim into the planner LLM's system prompt
+    and must therefore be:
+
+    - **Stage-labelled.** A `pre_commit` vs `post_commit` header keeps
+      the LLM from hallucinating a commit it has not made, or from
+      ignoring one it must honor.
+    - **Byte-identical across equal inputs.** The renderer consumes
+      tuples the projection already sorted; it adds no further iteration
+      over dicts or sets. Downstream prompt-cache keys rely on this.
+    - **Empty-section-free.** Sections with zero entries are skipped so
+      the rendered block stays proportional to information actually
+      present.
+
+    The post-commit block fingerprints the `architecture_hash` verbatim
+    so the planner can detect (and the test suite can assert)
+    drift-free carry-forward turn over turn.
+    """
+    lines: list[str] = [f"## Planner context — {ctx.stage}"]
+
+    if ctx.capabilities:
+        header = (
+            f"### Builder capabilities ({len(ctx.capabilities)})"
+            if ctx.stage == "pre_commit"
+            else (
+                f"### Builder capabilities ({len(ctx.capabilities)}) "
+                "[narrowed to required_capabilities]"
+            )
+        )
+        lines.extend(["", header])
+        lines.extend(f"- {cap_id}" for cap_id in ctx.capabilities)
+
+    if ctx.pattern_ids:
+        header = (
+            f"### Positive patterns ({len(ctx.pattern_ids)})"
+            if ctx.stage == "pre_commit"
+            else (
+                f"### Positive patterns ({len(ctx.pattern_ids)}) "
+                "[narrowed to chosen_patterns]"
+            )
+        )
+        lines.extend(["", header])
+        lines.extend(f"- {pattern_id}" for pattern_id in ctx.pattern_ids)
+
+    if ctx.critic_invariants:
+        lines.extend(["", f"### Critic invariants ({len(ctx.critic_invariants)})"])
+        lines.extend(
+            f"- {cap_id} :: {inv_id}" for cap_id, inv_id in ctx.critic_invariants
+        )
+
+    if ctx.resolved_slots:
+        lines.extend(["", f"### Resolved slots ({len(ctx.resolved_slots)})"])
+        for slot in ctx.resolved_slots:
+            evidence = "; ".join(slot.evidence) if slot.evidence else "—"
+            lines.append(
+                f"- {slot.name}: {slot.value} "
+                f"(source={slot.source}, confidence={slot.confidence}, "
+                f"evidence={evidence})"
+            )
+
+    if ctx.signals:
+        lines.extend(["", f"### Active signals ({len(ctx.signals)})"])
+        for signal in ctx.signals:
+            lines.append(
+                f"- question_id={signal.question_id}, value={signal.value}, "
+                f"source={signal.source}, confidence={signal.confidence}"
+            )
+
+    if ctx.open_questions:
+        lines.extend(["", f"### Open questions ({len(ctx.open_questions)})"])
+        for question in ctx.open_questions:
+            lines.append(
+                f"- {question.question_id} → slot={question.slot_name}, "
+                f"priority={question.priority} — {question.reason}"
+            )
+
+    if ctx.architecture_commit is not None:
+        commit = ctx.architecture_commit
+        # Render chosen_patterns / required_capabilities via the narrowed
+        # sections above (`ctx.pattern_ids` / `ctx.capabilities`) — NOT
+        # from `commit.*` directly. The projection drops any commit entry
+        # that no longer resolves in the FCM / Pattern Registry; bypassing
+        # it here would re-introduce drift that would otherwise surface
+        # only at orchestrator-level validation.
+        lines.extend(["", "### Committed architecture"])
+        lines.append(f"- architecture_hash: {commit.architecture_hash}")
+        lines.append(f"- committed_at: {commit.committed_at.isoformat()}")
+        lines.append(f"- tuples_chain ({len(commit.tuples_chain)}):")
+        for index, triple in enumerate(commit.tuples_chain, start=1):
+            lines.append(
+                f"  {index}. input={triple.input_type} → "
+                f"output={triple.output_type} (mode={triple.output_mode})"
+            )
+
+    return "\n".join(lines)
+
+
 __all__ = [
     "LLMPromptContext",
     "ProjectionStage",
     "build_llm_prompt_context",
+    "render_llm_prompt_context",
 ]
