@@ -35,6 +35,7 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_session_transitions import (
     ensure_valid_session_status_transition,
 )
+from intric.flows.ai_builder.planning_state import PlanningState
 from intric.main.exceptions import BadRequestException, NotFoundException
 
 
@@ -810,6 +811,81 @@ class AIBuilderRepository:
             )
             await self.session.execute(stmt)
 
+    # ---------------------------------------------------------------------------
+    # Planning state (jsonb-discipline: enforced writes + reads)
+    # ---------------------------------------------------------------------------
+
+    async def save_planning_state(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        state: PlanningState,
+    ) -> int:
+        """Persist the full `PlanningState` snapshot and return the new version.
+
+        The column values are sourced from `_planning_state_for_storage`,
+        so a container mutation that bypassed Pydantic's field validator
+        raises at serialization time rather than landing as drifted
+        JSONB. The version counter is incremented atomically via the
+        column expression so concurrent turns cannot collide on read-
+        modify-write; a later concurrency-check slice can pair this
+        with a `base_planning_state_version` guard.
+
+        Raises `NotFoundException` when `(session_id, tenant_id)` does
+        not match a builder session — the caller misrouted the write.
+        """
+        column_values = _planning_state_for_storage(state)
+        async with self._transaction():
+            stmt = (
+                update(BuilderSessions)
+                .where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                )
+                .values(
+                    planning_state_jsonb=column_values["planning_state_jsonb"],
+                    planning_state_version=BuilderSessions.planning_state_version + 1,
+                    planning_phase=column_values["planning_phase"],
+                    architecture_hash=column_values["architecture_hash"],
+                    planning_state_updated_at=column_values[
+                        "planning_state_updated_at"
+                    ],
+                    updated_at=datetime.now(timezone.utc),
+                )
+                .returning(BuilderSessions.planning_state_version)
+            )
+            result = await self.session.execute(stmt)
+            new_version = result.scalar_one_or_none()
+            if new_version is None:
+                raise NotFoundException(
+                    f"Builder session {session_id} not found for tenant "
+                    f"{tenant_id}; planning state not saved."
+                )
+            return int(new_version)
+
+    async def load_planning_state(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+    ) -> PlanningState | None:
+        """Return the persisted `PlanningState` or `None` if never saved.
+
+        `None` distinguishes a fresh session from one that has a
+        validated zero-value state — callers stamp a new state with
+        `PlanningState.empty()` only on the `None` branch.
+        """
+        async with self._transaction():
+            stmt = select(BuilderSessions.planning_state_jsonb).where(
+                BuilderSessions.id == session_id,
+                BuilderSessions.tenant_id == tenant_id,
+            )
+            payload = (await self.session.execute(stmt)).scalar_one_or_none()
+            if payload is None:
+                return None
+            return PlanningState.model_validate(payload)
+
 
 # ---------------------------------------------------------------------------
 # Row → domain model converters
@@ -971,3 +1047,33 @@ def _plan_from_row(row: Any) -> BuilderPlan:
         created_at=data["created_at"],
         updated_at=data["updated_at"],
     )
+
+
+# jsonb-discipline: enforced (writes + reads)
+#
+# `planning_state_jsonb` is written and read exclusively through these
+# two helpers plus their calling repo methods. Partial JSONB operators
+# (`jsonb_set`, `||`, path updates) and raw JSONB reads from elsewhere
+# in the codebase are forbidden so the column never drifts out of
+# Pydantic's typed world.
+
+
+def _planning_state_for_storage(state: PlanningState) -> dict[str, object]:
+    """Return the full column-values map for persisting `state`.
+
+    `validated_snapshot()` re-runs Pydantic's validators so container
+    mutations that bypassed the field validator (list appends, dict
+    inserts) raise here rather than silently landing in JSONB.
+    """
+    snapshot = state.validated_snapshot()
+    architecture_hash = (
+        snapshot.architecture_commit.architecture_hash
+        if snapshot.architecture_commit is not None
+        else None
+    )
+    return {
+        "planning_state_jsonb": snapshot.model_dump(mode="json"),
+        "planning_phase": snapshot.phase,
+        "architecture_hash": architecture_hash,
+        "planning_state_updated_at": datetime.now(timezone.utc),
+    }
