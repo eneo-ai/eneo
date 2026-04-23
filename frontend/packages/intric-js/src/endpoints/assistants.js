@@ -134,7 +134,7 @@ export function initAssistants(client) {
      * @param  {{id: string} | Assistant} params.assistant Which assistant to ask
      * @param {{id: string | null} | AssistantSession | undefined} params.session Session Id of a session to continue, `null` to start a new session
      * @param {string} params.question Question to ask
-     * @param {{id: string}[] | undefined} params.files Question to ask
+     * @param {string[] | undefined} params.files IDs of files to attach to the question
      * @param {(partialResponse: AssistantResponse, controller: AbortController) => void} [params.onAnswer] Callback to run when a new token/word of the answer is received
      * @param {(response: Response) => Promise<void>} [params.onOpen] Callback to run once the initial response of the backend is received
      * @param {AbortController} [params.abortController] Optionally pass in an AbortController that can abort the stream

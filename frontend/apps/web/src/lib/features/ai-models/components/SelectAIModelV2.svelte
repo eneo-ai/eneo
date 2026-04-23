@@ -124,7 +124,7 @@
     {#each availableModels as model (model.id)}
       <div
         class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between border-b px-4 hover:cursor-pointer"
-        {...$option({ value: model, label: model.nickname })}
+        {...$option({ value: model, label: model.nickname ?? undefined })}
         use:option
       >
         <ModelNameAndVendor {model}></ModelNameAndVendor>

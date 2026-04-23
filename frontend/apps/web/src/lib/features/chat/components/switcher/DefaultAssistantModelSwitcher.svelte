@@ -17,6 +17,11 @@
 
   const chat = getChatService();
 
+  // This component only renders when chat.partner.type === "default-assistant",
+  // which guarantees $currentSpace.default_assistant is present.
+  const defaultAssistant = $derived($currentSpace.default_assistant!);
+  const initialDefaultAssistant = $currentSpace.default_assistant!;
+
   const {
     elements: { trigger, menu, option },
     helpers: { isSelected }
@@ -25,14 +30,16 @@
       placement: "bottom-start",
       fitViewport: true
     },
-    defaultSelected: $currentSpace.default_assistant.completion_model
-      ? { value: { id: $currentSpace.default_assistant.completion_model.id } }
+    defaultSelected: initialDefaultAssistant.completion_model
+      ? { value: { id: initialDefaultAssistant.completion_model.id } }
       : undefined,
     onSelectedChange: ({ next }) => {
       if (next) {
         updateDefaultAssistant({ completionModel: next.value }).then(() => {
           // We also need to make the chat manager aware of the model change
-          chat.changeChatPartner($currentSpace.default_assistant);
+          if ($currentSpace.default_assistant) {
+            chat.changeChatPartner($currentSpace.default_assistant);
+          }
         });
       }
       return next;
@@ -47,8 +54,8 @@
   class=" group border-default text-primary hover:border-dimmer hover:bg-hover-default flex max-w-[calc(100%_-_4rem)] cursor-pointer items-center justify-between gap-2 overflow-hidden rounded-lg border py-1 pr-1 pl-2 text-[1.4rem] leading-normal font-extrabold"
 >
   <span class="truncate text-base font-medium">
-    {#if $currentSpace.default_assistant.completion_model}
-      {$currentSpace.default_assistant.completion_model.nickname}
+    {#if defaultAssistant.completion_model}
+      {defaultAssistant.completion_model.nickname}
     {:else}
       {m.select_a_model()}
     {/if}

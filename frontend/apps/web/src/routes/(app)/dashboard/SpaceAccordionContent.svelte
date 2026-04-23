@@ -13,10 +13,10 @@
   // Combine regular assistants with default_assistant (only for personal spaces)
   const allAssistants = [
     ...(space.personal && space.default_assistant ? [space.default_assistant] : []),
-    ...space.applications.assistants.items
+    ...(space.applications?.assistants.items ?? [])
   ];
   const hasAssistants = allAssistants.length > 0;
-  const hasApps = space.applications.apps.count > 0;
+  const hasApps = (space.applications?.apps.count ?? 0) > 0;
 
   const defaultSections: string[] = [];
   if (hasAssistants) defaultSections.push(`${space.id}-assistants`);
@@ -71,7 +71,7 @@
         {...$trigger(`${space.id}-apps`)}
         use:trigger
       >
-        <span>Apps ({space.applications.apps.count})</span>
+        <span>Apps ({space.applications?.apps.count ?? 0})</span>
         <IconChevronRight
           class={$isSelected(`${space.id}-apps`)
             ? "h-4 w-4 rotate-90 transition-all"
@@ -86,7 +86,7 @@
           transition:slide
           class="grid grid-cols-2 gap-4 px-4 pb-4 md:grid-cols-3 lg:grid-cols-4"
         >
-          {#each space.applications.apps.items as app (app.id)}
+          {#each space.applications?.apps.items ?? [] as app (app.id)}
             <DashboardAppTile {app} />
           {/each}
         </div>

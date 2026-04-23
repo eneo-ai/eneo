@@ -30,7 +30,7 @@
 
   type Props = {
     /** Array of MCP server objects that are selected. Uses index signature for schema compatibility. */
-    selectedMCPServers: { [key: string]: unknown }[];
+    selectedMCPServers: { [key: string]: unknown }[] | undefined;
     /** Optional: MCP tool settings to track tool-level overrides */
     selectedMCPTools?: Array<{ tool_id: string; is_enabled: boolean }>;
     /** Optional: Currently selected completion model to check tool calling support */
@@ -44,7 +44,7 @@
   }: Props = $props();
 
   /** Type-safe view of selectedMCPServers */
-  let servers = $derived(selectedMCPServers as unknown as MCPServer[]);
+  let servers = $derived((selectedMCPServers ?? []) as unknown as MCPServer[]);
 
   let modelSupportsTools = $derived(selectedModel?.supports_tool_calling !== false);
 
