@@ -2827,6 +2827,6 @@
   "permission_admin": "Administratör",
   "permission_admin_description": "Organisationsägare. Hantering av användare, roller och grupper.",
   "permission_shared_spaces": "Delade ytor",
-  "permission_shared_spaces_description": "Hantering av delade ytor. Skapa, uppdatera och radera delade ytor.",
+  "permission_shared_spaces_description": "Skapa delade ytor. Visning, redigering och borttagning av delade ytor styrs av ytmedlemskap.",
   "permissions_selected_count": "{selected} av {total} valda"
 }

@@ -14,5 +14,5 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.INTEGRATIONS: "Management of Integrations. Create, Update, and Delete Integration Knowledge.",
     Permission.AI: "More in-depth AI configuration.",
     Permission.ADMIN: "Organization owner. Management of Users, Roles, and Groups.",
-    Permission.SHARED_SPACES: "Management of shared Spaces. Create, Update, and Delete shared Spaces.",
+    Permission.SHARED_SPACES: "Create shared Spaces. Viewing, editing, and deleting shared Spaces are governed by space membership.",
 }

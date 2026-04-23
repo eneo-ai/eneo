@@ -2791,6 +2791,6 @@
   "permission_admin": "Admin",
   "permission_admin_description": "Organization owner. Management of users, roles, and groups.",
   "permission_shared_spaces": "Shared spaces",
-  "permission_shared_spaces_description": "Management of shared spaces. Create, update, and delete shared spaces.",
+  "permission_shared_spaces_description": "Create shared spaces. Viewing, editing, and deleting shared spaces are governed by space membership.",
   "permissions_selected_count": "{selected} of {total} selected"
 }

@@ -205,16 +205,9 @@ export function initSpaces(client) {
       },
 
       /**
-       * Add a user group to a space. Attach always succeeds.
-       *
-       * The response is a structural superset of `SpaceGroupMember` with
-       * three advisory fields for users whose tenant role lacks
-       * `shared_spaces` (they won't see the space at runtime until an
-       * admin upgrades their role): `inert_member_count` (FULL count —
-       * use for totals), `inert_members` (server-capped sample — use for
-       * names), `inert_truncated` (true when the sample was capped).
+       * Add a user group to a space.
        * @param {{spaceId: string, group: {id: string, role: "editor" | "admin" | "viewer"}}} params - Space ID and group with role
-       * @returns `SpaceGroupMember` + `{ inert_members, inert_member_count, inert_truncated }`
+       * @returns `SpaceGroupMember`
        * @throws {IntricError}
        * */
       add: async ({ spaceId, group }) => {
