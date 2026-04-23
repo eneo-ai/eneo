@@ -430,13 +430,46 @@ class TenantModelAdapter(CompletionModelAdapter):
                     ),
                 }
             )
-            # Assistant response
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": msg.answer or "[image generated]",
-                }
-            )
+            # Assistant response. If the turn invoked tools, emit the assistant
+            # message with OpenAI-style `tool_calls` followed by a `role: tool`
+            # entry per call so the model can see its prior tool use on replay.
+            if msg.tool_calls:
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": msg.answer or None,
+                        "tool_calls": [
+                            {
+                                "id": tc.tool_call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.tool_name,
+                                    "arguments": (
+                                        json.dumps(tc.arguments)
+                                        if tc.arguments is not None
+                                        else ""
+                                    ),
+                                },
+                            }
+                            for tc in msg.tool_calls
+                        ],
+                    }
+                )
+                for tc in msg.tool_calls:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.tool_call_id,
+                            "content": tc.result,
+                        }
+                    )
+            else:
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": msg.answer or "[image generated]",
+                    }
+                )
 
         # Add current question with images
         messages.append(
@@ -1114,6 +1147,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 tool_name=tname,
                                 arguments=args,
                                 tool_call_id=tc["id"],
+                                mcp_tool_name=name,
                             )
                         )
                     tool_args_by_call_id: dict[str, dict[str, Any] | None] = {}
@@ -1175,6 +1209,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         tool_call_id=tm.tool_call_id,
                                         approved=False,
                                         result_status="timeout_denied",
+                                        mcp_tool_name=tm.mcp_tool_name,
                                     )
                                     for tm in tool_metadata
                                 ],
@@ -1200,6 +1235,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                             "timeout_denied" if timed_out else "denied"
                                         )
                                     ),
+                                    mcp_tool_name=tm.mcp_tool_name,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -1226,6 +1262,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     tool_call_id=tm.tool_call_id,
                                     approved=tm.approved,
                                     result_status="approved",
+                                    mcp_tool_name=tm.mcp_tool_name,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -1308,6 +1345,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     tool_call_id=tc["id"],
                                     approved=True,
                                     result_status=result_status,
+                                    result=text,
+                                    mcp_tool_name=tc["function"]["name"],
                                 )
                             )
 
@@ -1352,6 +1391,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 result_status=(
                                     "timeout_denied" if timed_out else "denied"
                                 ),
+                                result=json.dumps(denial_payload),
+                                mcp_tool_name=tc["function"]["name"],
                             )
                         )
 

@@ -71,6 +71,15 @@ class ToolCallInfo(BaseModel):
     )
     # Additive execution status for newer clients. Keep `approved` for compatibility.
     result_status: Optional[str] = None
+    # Text extraction of the tool result. Required to replay tool use to the LLM
+    # on later turns. Absent on rows persisted before this field was introduced;
+    # such rows fall back to text-only replay (the model won't see the tool use).
+    result: Optional[str] = None
+    # The prefixed tool identifier the LLM sees when calling (e.g.
+    # `server__tool`). Needed for replay so the tool_use name matches the
+    # currently-registered tools. `tool_name` above is the unprefixed/display
+    # form used by the UI.
+    mcp_tool_name: Optional[str] = None
 
 
 class QuestionAdd(QuestionBase):
