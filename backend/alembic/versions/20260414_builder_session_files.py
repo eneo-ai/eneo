@@ -1,7 +1,7 @@
 """add builder session file associations
 
 Revision ID: 20260414_builder_files
-Revises: 20260414_merge_api_flow
+Revises: 20260412_flow_exec_timing
 Create Date: 2026-04-14 00:00:00.000000
 """
 
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision = "20260414_builder_files"
-down_revision = "20260414_merge_api_flow"
+down_revision = "20260412_flow_exec_timing"
 branch_labels = None
 depends_on = None
 

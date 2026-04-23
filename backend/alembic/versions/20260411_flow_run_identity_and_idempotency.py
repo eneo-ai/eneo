@@ -1,16 +1,21 @@
-"""add flow service-principal foundation
+"""flow run identity and idempotency foundation
 
-Revision ID: 20260411_flow_service_principal
-Revises: 20260411_flow_run_idempotency
-Create Date: 2026-04-11 13:40:00.000000
+Adds service-principal identity columns (principal_type, principal_user_id,
+principal_api_key_id) and idempotency columns (idempotency_key,
+request_fingerprint) to flow_runs in a single step, plus owner identity
+columns on files and actor_api_key_id on audit_logs.
+
+Revision ID: 20260411_flow_run_identity
+Revises: 202603311430
+Create Date: 2026-04-11 13:05:00.000000
 """
 
 import sqlalchemy as sa
 
 from alembic import op
 
-revision = "20260411_flow_service_principal"
-down_revision = "20260411_flow_run_idempotency"
+revision = "20260411_flow_run_identity"
+down_revision = "202603311430"
 branch_labels = None
 depends_on = None
 
@@ -34,26 +39,28 @@ def _add_constraint_if_missing(name: str, ddl: str) -> None:
 
 
 def upgrade() -> None:
-    op.execute(
-        """
-        ALTER TABLE flow_runs
-        ADD COLUMN IF NOT EXISTS principal_type VARCHAR(32) NOT NULL DEFAULT 'user'
-        """
+    # flow_runs: identity + idempotency columns
+    op.add_column(
+        "flow_runs",
+        sa.Column(
+            "principal_type",
+            sa.String(length=32),
+            nullable=False,
+            server_default="user",
+        ),
     )
-    op.execute(
-        """
-        ALTER TABLE flow_runs
-        ADD COLUMN IF NOT EXISTS principal_user_id UUID
-        """
+    op.add_column("flow_runs", sa.Column("principal_user_id", sa.UUID(), nullable=True))
+    op.add_column("flow_runs", sa.Column("principal_api_key_id", sa.UUID(), nullable=True))
+    op.add_column(
+        "flow_runs",
+        sa.Column("idempotency_key", sa.String(length=255), nullable=True),
     )
-    op.execute(
-        """
-        ALTER TABLE flow_runs
-        ADD COLUMN IF NOT EXISTS principal_api_key_id UUID
-        """
+    op.add_column(
+        "flow_runs",
+        sa.Column("request_fingerprint", sa.String(length=64), nullable=True),
     )
     op.execute("UPDATE flow_runs SET principal_user_id = user_id WHERE user_id IS NOT NULL")
-    op.execute("DROP INDEX IF EXISTS uq_flow_runs_idempotency_key")
+
     _add_constraint_if_missing(
         "fk_flow_runs_principal_user_id",
         """
@@ -116,24 +123,18 @@ def upgrade() -> None:
         """,
     )
 
-    op.execute(
-        """
-        ALTER TABLE files
-        ADD COLUMN IF NOT EXISTS owner_type VARCHAR(32) NOT NULL DEFAULT 'user'
-        """
+    # files: owner identity columns
+    op.add_column(
+        "files",
+        sa.Column(
+            "owner_type",
+            sa.String(length=32),
+            nullable=False,
+            server_default="user",
+        ),
     )
-    op.execute(
-        """
-        ALTER TABLE files
-        ADD COLUMN IF NOT EXISTS owner_user_id UUID
-        """
-    )
-    op.execute(
-        """
-        ALTER TABLE files
-        ADD COLUMN IF NOT EXISTS owner_api_key_id UUID
-        """
-    )
+    op.add_column("files", sa.Column("owner_user_id", sa.UUID(), nullable=True))
+    op.add_column("files", sa.Column("owner_api_key_id", sa.UUID(), nullable=True))
     op.execute("UPDATE files SET owner_user_id = user_id WHERE user_id IS NOT NULL")
     op.alter_column("files", "user_id", existing_type=sa.UUID(), nullable=True)
     _add_constraint_if_missing(
@@ -184,12 +185,8 @@ def upgrade() -> None:
         """,
     )
 
-    op.execute(
-        """
-        ALTER TABLE audit_logs
-        ADD COLUMN IF NOT EXISTS actor_api_key_id UUID
-        """
-    )
+    # audit_logs: service-key actor
+    op.add_column("audit_logs", sa.Column("actor_api_key_id", sa.UUID(), nullable=True))
     _add_constraint_if_missing(
         "fk_audit_logs_actor_api_key_id",
         """
@@ -228,13 +225,6 @@ def downgrade() -> None:
     op.drop_constraint("ck_flow_runs_principal_type", "flow_runs", type_="check")
     op.drop_constraint("fk_flow_runs_principal_api_key_id", "flow_runs", type_="foreignkey")
     op.drop_constraint("fk_flow_runs_principal_user_id", "flow_runs", type_="foreignkey")
-    op.create_index(
-        "uq_flow_runs_idempotency_key",
-        "flow_runs",
-        ["tenant_id", "flow_id", "user_id", "idempotency_key"],
-        unique=True,
-        postgresql_where=sa.text("idempotency_key IS NOT NULL"),
-    )
     op.drop_column("flow_runs", "request_fingerprint")
     op.drop_column("flow_runs", "idempotency_key")
     op.drop_column("flow_runs", "principal_api_key_id")

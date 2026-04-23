@@ -5,17 +5,17 @@ the plan spec so that it survives page reloads and can be served via
 REST GET /plans/{plan_id} without requiring the SSE stream.
 
 Revision ID: 202603191930
-Revises: 202603151045
+Revises: 202603121400
 Create Date: 2026-03-19 19:30:00.000000
 """
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
 
 revision = "202603191930"
-down_revision = "202603151045"
+down_revision = "202603121400"
 branch_labels = None
 depends_on = None
 

@@ -1,18 +1,18 @@
-"""consolidated flow foundation migration
+"""flow foundation migration
 
 Revision ID: 579199d395dd
-Revises: 202602131000, 9d2a6c01f3e7
+Revises: 202604101000
 Create Date: 2026-03-01 11:15:44.279045
 """
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "579199d395dd"
-down_revision = ("202602131000", "9d2a6c01f3e7")
+down_revision = "202604101000"
 branch_labels = None
 depends_on = None
 

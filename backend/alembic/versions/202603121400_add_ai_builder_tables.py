@@ -1,11 +1,10 @@
-"""add_ai_builder_and_completion_model_token_fields
+"""add AI builder tables
 
 Add draft_revision counter to flows table, and create
 builder_sessions + builder_plans tables for the AI flow builder.
-Also add max_input_tokens and max_output_tokens to completion_models.
 
 Revision ID: 202603121400
-Revises: 202603091335
+Revises: 579199d395dd
 Create Date: 2026-03-12 14:00:00.000000
 
 """
@@ -39,103 +38,8 @@ BUILDER_PLAN_STATUS_VALUES = (
 BUILDER_TARGET_KIND_VALUES = ("create", "edit")
 
 
-def _lookup_model_cost_defaults(litellm_module, *model_names: str | None):
-    def _build(info):
-        return (
-            info.get("max_input_tokens"),
-            info.get("max_output_tokens"),
-        )
-
-    for model_name in model_names:
-        if not model_name:
-            continue
-        info = litellm_module.model_cost.get(model_name)
-        if info is not None:
-            return _build(info)
-
-    prefixes = {
-        key.split("/", 1)[0]
-        for key in litellm_module.model_cost
-        if "/" in key
-    }
-    for model_name in model_names:
-        if not model_name or "/" in model_name:
-            continue
-        for prefix in sorted(prefixes):
-            info = litellm_module.model_cost.get(f"{prefix}/{model_name}")
-            if info is not None:
-                return _build(info)
-
-    return (None, None)
-
-
 def upgrade() -> None:
-    # 1. Add completion-model token fields and backfill from LiteLLM metadata.
-    conn = op.get_bind()
-    inspector = sa.inspect(conn)
-    completion_model_columns = {
-        column["name"] for column in inspector.get_columns("completion_models")
-    }
-    if "max_input_tokens" not in completion_model_columns:
-        op.add_column(
-            "completion_models",
-            sa.Column("max_input_tokens", sa.Integer(), nullable=True),
-        )
-    if "max_output_tokens" not in completion_model_columns:
-        op.add_column(
-            "completion_models",
-            sa.Column("max_output_tokens", sa.Integer(), nullable=True),
-        )
-
-    try:
-        import litellm
-
-        rows = conn.execute(
-            sa.text(
-                "SELECT id, name, litellm_model_name, token_limit "
-                "FROM completion_models"
-            )
-        ).fetchall()
-
-        for row in rows:
-            max_input = None
-            max_output = None
-
-            candidate_input, candidate_output = _lookup_model_cost_defaults(
-                litellm, row.litellm_model_name, row.name
-            )
-            if isinstance(candidate_input, int):
-                max_input = candidate_input
-            if isinstance(candidate_output, int):
-                max_output = candidate_output
-
-            if max_input is None:
-                max_input = row.token_limit
-            if max_output is None:
-                continue
-
-            conn.execute(
-                sa.text(
-                    "UPDATE completion_models "
-                    "SET max_input_tokens = :max_input, max_output_tokens = :max_output "
-                    "WHERE id = :id"
-                ),
-                {
-                    "max_input": max_input,
-                    "max_output": max_output,
-                    "id": row.id,
-                },
-            )
-    except ImportError:
-        conn.execute(
-            sa.text(
-                "UPDATE completion_models "
-                "SET max_input_tokens = token_limit "
-                "WHERE max_input_tokens IS NULL"
-            )
-        )
-
-    # 2. Add draft_revision counter to flows table
+    # 1. Add draft_revision counter to flows table
     op.add_column(
         "flows",
         sa.Column(
@@ -147,7 +51,7 @@ def upgrade() -> None:
         ),
     )
 
-    # 3. Create builder_sessions table
+    # 2. Create builder_sessions table
     op.create_table(
         "builder_sessions",
         sa.Column(
@@ -259,7 +163,7 @@ def upgrade() -> None:
         ["actor_user_id"],
     )
 
-    # 4. Create builder_plans table
+    # 3. Create builder_plans table
     op.create_table(
         "builder_plans",
         sa.Column(
@@ -342,7 +246,7 @@ def upgrade() -> None:
         ["tenant_id"],
     )
 
-    # Add FK from builder_sessions.latest_plan_id to builder_plans.id
+    # 4. Add FK from builder_sessions.latest_plan_id to builder_plans.id
     # (deferred since builder_plans didn't exist when builder_sessions was created)
     op.create_foreign_key(
         "fk_builder_sessions_latest_plan",
@@ -355,16 +259,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    conn = op.get_bind()
-    inspector = sa.inspect(conn)
-    completion_model_columns = {
-        column["name"] for column in inspector.get_columns("completion_models")
-    }
     op.drop_constraint("fk_builder_sessions_latest_plan", "builder_sessions", type_="foreignkey")
     op.drop_table("builder_plans")
     op.drop_table("builder_sessions")
     op.drop_column("flows", "draft_revision")
-    if "max_output_tokens" in completion_model_columns:
-        op.drop_column("completion_models", "max_output_tokens")
-    if "max_input_tokens" in completion_model_columns:
-        op.drop_column("completion_models", "max_input_tokens")
