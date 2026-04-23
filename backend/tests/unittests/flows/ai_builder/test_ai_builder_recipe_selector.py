@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from intric.flows.ai_builder.ai_builder_create_recipes import (
+    KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS,
     render_knowledge_pack_create_recipes,
 )
-from intric.flows.ai_builder.ai_builder_recipe_selector import select_relevant_recipes
+from intric.flows.ai_builder.ai_builder_recipe_selector import (
+    SIGNAL_TO_RECIPES,
+    select_relevant_recipes,
+)
+from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 
 
 class TestRecipeSelection:
@@ -216,3 +221,89 @@ class TestRecipeSelection:
         assert "## Audio -> text -> analys -> rapport" in result
         assert "## Dokumentflöde med formulärkomplettering" in result
         assert "## Sektionerad insamling via formulärfält" in result
+
+
+class TestSignalToRecipesDriftGuard:
+    """`SIGNAL_TO_RECIPES` and `Pattern.recipe_sections` are two parallel
+    inputs into `select_relevant_recipes`. A typo or rename on either
+    side would silently stop narrowing the recipe pack — the selector
+    would fall through to the full-pack fallback and the caller would
+    never know. These tests pin the shared invariant: both inputs must
+    reference `RecipeSection.section_id` values that actually exist.
+    """
+
+    def _known_section_keys(self) -> frozenset[str]:
+        return frozenset(
+            section.section_id for section in KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS
+        )
+
+    def test_every_signal_maps_to_a_real_recipe_section(self) -> None:
+        known = self._known_section_keys()
+        for signal, sections in SIGNAL_TO_RECIPES.items():
+            assert sections, (
+                f"SIGNAL_TO_RECIPES[{signal!r}] is empty — leave the entry "
+                "off the map rather than map a signal to nothing"
+            )
+            unknown = frozenset(sections) - known
+            assert not unknown, (
+                f"SIGNAL_TO_RECIPES[{signal!r}] references unknown "
+                f"section_id(s) {sorted(unknown)}; must be a subset of "
+                f"{sorted(known)}"
+            )
+
+    def test_freeform_trigger_signals_exist_in_map(self) -> None:
+        """`select_relevant_recipes` looks up these four signal keys via
+        `.get(..., [])` when scanning freeform text. Removing one from
+        the map would make the freeform path silently stop contributing
+        recipes, so pin the contract here."""
+        freeform_signal_keys = {
+            "audio",
+            "docx_document",
+            "comparison",
+            "structured_json",
+        }
+        missing = freeform_signal_keys - SIGNAL_TO_RECIPES.keys()
+        assert not missing, (
+            f"select_relevant_recipes references signal keys that are no "
+            f"longer in SIGNAL_TO_RECIPES: {sorted(missing)}"
+        )
+
+    def test_pattern_recipe_sections_agree_on_section_universe(self) -> None:
+        """Same invariant, pattern side: every `Pattern.recipe_sections`
+        value is a real section_id. The pattern-registry suite already
+        pins exact seeds, but this cross-module check catches the case
+        where a section is renamed in recipes and the pattern seed
+        happens to match the new name coincidentally."""
+        known = self._known_section_keys()
+        for pattern in PATTERN_REGISTRY.values():
+            unknown = frozenset(pattern.recipe_sections) - known
+            assert not unknown, (
+                f"Pattern {pattern.id!r}: recipe_sections references "
+                f"unknown section_id(s) {sorted(unknown)}"
+            )
+
+    def test_signal_and_pattern_sections_cover_same_section_universe(
+        self,
+    ) -> None:
+        """The union of both sources must be a subset of the known
+        sections — and at least one side must reference every dedicated
+        section (today every one of them flows through at least one of
+        the two paths, so a section added without a route is likely
+        dead weight)."""
+        known = self._known_section_keys()
+        routed_via_signals: set[str] = set()
+        for sections in SIGNAL_TO_RECIPES.values():
+            routed_via_signals.update(sections)
+        routed_via_patterns: set[str] = set()
+        for pattern in PATTERN_REGISTRY.values():
+            routed_via_patterns.update(pattern.recipe_sections)
+        routed = routed_via_signals | routed_via_patterns
+        # `golden_example` is always added by `select_relevant_recipes`
+        # once any narrowing fires, so it has no explicit signal or
+        # pattern route and is expected to be absent from `routed`.
+        unroutable = known - routed - {"golden_example"}
+        assert not unroutable, (
+            f"Recipe sections {sorted(unroutable)} are not reachable via "
+            "any signal or pattern — they would never activate the "
+            "filtered pack and are dead weight"
+        )
