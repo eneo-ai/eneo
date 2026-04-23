@@ -3899,10 +3899,7 @@ export interface paths {
     put?: never;
     /**
      * Add Space Group Member
-     * @description Add a user group to a space with the specified role.
-     *
-     *     All members of the group will gain access to the space at that role level.
-     *     Groups cannot be added to personal spaces.
+     * @description Attach a user group to a space. Groups cannot be attached to personal spaces.
      */
     post: operations["add_space_group_member_api_v1_spaces__id__group_members__post"];
     delete?: never;
