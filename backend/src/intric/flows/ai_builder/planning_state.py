@@ -15,19 +15,31 @@ Three first-class version stamps travel on every persisted state:
 policy compares stamps at load time. `pattern_registry_version` and
 `question_catalog_version` are module-internal hygiene counters owned
 by their respective modules and are NOT stamped here.
+
+Mutability vs revalidation: models are mutable because full-snapshot
+discipline mutates in Python before re-serializing. Direct attribute
+reassignment is revalidated (`validate_assignment=True`). Container
+mutations (list/dict edits that bypass the validator) can still
+introduce drift, so the save path must call `validated_snapshot()`
+before writing.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Literal, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 FCM_VERSION: int = 1
 PLANNER_CONTRACT_VERSION: int = 1
 BUILDER_SCHEMA_VERSION: int = 1
 PLANNING_STATE_PAYLOAD_CAP_BYTES: int = 128 * 1024
+ARCHITECTURE_HASH_HEX_LENGTH: int = 64
+
+_ARCHITECTURE_HASH_RE = re.compile(rf"^[0-9a-f]{{{ARCHITECTURE_HASH_HEX_LENGTH}}}$")
 
 PlanningPhase = Literal[
     "awaiting_input",
@@ -58,20 +70,32 @@ SlotConfidence = Literal["high", "medium"]
 
 InvariantResult = Literal["pass", "fail", "warning"]
 
+StepInputType = Literal["text", "json", "image", "audio", "document", "file", "any"]
+StepOutputType = Literal["text", "json", "pdf", "docx"]
+StepOutputMode = Literal[
+    "pass_through",
+    "http_post",
+    "transcribe_only",
+    "template_fill",
+]
+
 
 class _PlanningModel(BaseModel):
     """Strict base for every persisted PlanningState model.
 
-    Unknown fields raise — the JSONB column must round-trip cleanly
-    through the typed shape, so drift is caught at load time.
+    `extra="forbid"` fails on unknown fields so JSONB drift is caught
+    at load time. `validate_assignment=True` re-runs validators on
+    direct attribute reassignment — container-level mutations (list
+    appends, dict sets) are still the caller's responsibility; the
+    save path must revalidate via `PlanningState.validated_snapshot`.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
 
 class EvidenceRef(_PlanningModel):
-    conversation_message_ids: list[str] = Field(default_factory=list)
-    attachment_digest_hashes: list[str] = Field(default_factory=list)
+    conversation_message_ids: list[str] = Field(default_factory=list[str])
+    attachment_digest_hashes: list[str] = Field(default_factory=list[str])
     raw_prompt_hash: str = ""
 
 
@@ -80,22 +104,38 @@ class PlanningSignal(_PlanningModel):
     value: str
     confidence: SignalConfidence
     source: SignalSource
-    provenance: list[str] = Field(default_factory=list)
+    provenance: list[str] = Field(default_factory=list[str])
 
 
 class ResolvedSlot(_PlanningModel):
     name: str
     value: str
     source: SlotSource
-    evidence: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list[str])
     confidence: SlotConfidence
 
 
+class StepTriple(_PlanningModel):
+    input_type: StepInputType
+    output_type: StepOutputType
+    output_mode: StepOutputMode
+
+
 class ArchitectureCommit(_PlanningModel):
-    tuples_chain: list[list[str]]
+    tuples_chain: list[StepTriple]
     chosen_patterns: list[str]
     committed_at: datetime
     architecture_hash: str
+
+    @field_validator("architecture_hash")
+    @classmethod
+    def _hash_is_64_hex(cls, value: str) -> str:
+        if not _ARCHITECTURE_HASH_RE.fullmatch(value):
+            raise ValueError(
+                f"architecture_hash must be {ARCHITECTURE_HASH_HEX_LENGTH} "
+                "lowercase hex characters (no prefix)"
+            )
+        return value
 
 
 class OpenQuestion(_PlanningModel):
@@ -114,7 +154,7 @@ class InvariantEvaluation(_PlanningModel):
 class PlanningState(_PlanningModel):
     fcm_version: int
     planner_contract_version: int
-    builder_schema_version: int = BUILDER_SCHEMA_VERSION
+    builder_schema_version: int
     phase: PlanningPhase
     evidence: EvidenceRef
     signals: list[PlanningSignal] = Field(default_factory=list[PlanningSignal])
@@ -123,7 +163,7 @@ class PlanningState(_PlanningModel):
     )
     architecture_commit: Optional[ArchitectureCommit] = None
     open_questions: list[OpenQuestion] = Field(default_factory=list[OpenQuestion])
-    draft_plan_id: Optional[int] = None
+    draft_plan_id: Optional[UUID] = None
     validation: list[InvariantEvaluation] = Field(
         default_factory=list[InvariantEvaluation]
     )
@@ -138,3 +178,12 @@ class PlanningState(_PlanningModel):
             phase="awaiting_input",
             evidence=EvidenceRef(),
         )
+
+    def validated_snapshot(self) -> PlanningState:
+        """Return a freshly revalidated copy suitable for the save path.
+
+        Container-level mutations (list appends, dict inserts) bypass
+        Pydantic's field validators. The save path calls this before
+        writing so drift fails loudly instead of persisting.
+        """
+        return type(self).model_validate(self.model_dump(mode="json"))
