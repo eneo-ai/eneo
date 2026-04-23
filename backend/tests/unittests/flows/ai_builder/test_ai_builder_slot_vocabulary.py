@@ -12,7 +12,6 @@ from __future__ import annotations
 import ast
 import pathlib
 
-import intric.flows.ai_builder.ai_builder_resolved_requirements as resolved_requirements
 import intric.flows.ai_builder.ai_builder_slot_vocabulary as slot_vocabulary
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
@@ -35,14 +34,6 @@ class TestSlotVocabularyShape:
 
     def test_frozenset_is_truly_frozen(self) -> None:
         assert isinstance(KNOWN_REQUIREMENT_SLOT_NAMES, frozenset)
-
-
-class TestReExportParity:
-    def test_resolved_requirements_re_exports_the_same_object(self) -> None:
-        assert (
-            resolved_requirements.KNOWN_REQUIREMENT_SLOT_NAMES
-            is KNOWN_REQUIREMENT_SLOT_NAMES
-        )
 
 
 class TestLeafPurity:

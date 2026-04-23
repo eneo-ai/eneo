@@ -302,7 +302,7 @@ def has_same_run_comparison_contradiction(
 def document_cardinality_is_vague(profile: DiscoveryProfile) -> bool:
     if _family_inactive(profile, "document_material_scope"):
         return False
-    if profile.resolved_requirements.slot("document_material_scope") is not None:
+    if profile.planning_state.resolved_slots.get("document_material_scope") is not None:
         return False
     answers = profile.answers
     text = profile.text
@@ -409,7 +409,7 @@ def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
         and not profile.comparison_requested
     ):
         return False
-    resolved_document_scope = profile.resolved_requirements.slot(
+    resolved_document_scope = profile.planning_state.resolved_slots.get(
         "document_material_scope"
     )
     if (
@@ -561,7 +561,10 @@ def final_pdf_type_is_vague(profile: DiscoveryProfile) -> bool:
 
 
 def structured_analysis_need_is_vague(profile: DiscoveryProfile) -> bool:
-    if profile.resolved_requirements.slot("structured_analysis_need") is not None:
+    if (
+        profile.planning_state.resolved_slots.get("structured_analysis_need")
+        is not None
+    ):
         return False
     answers = profile.answers
     text = profile.text
@@ -597,7 +600,7 @@ def runtime_metadata_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if not profile.case_like_flow:
         return False
-    if profile.resolved_requirements.slot("runtime_metadata_fields") is not None:
+    if profile.planning_state.resolved_slots.get("runtime_metadata_fields") is not None:
         return False
     answers = profile.answers
     text = profile.text
@@ -624,7 +627,7 @@ def _runtime_metadata_prerequisites_resolved(profile: DiscoveryProfile) -> bool:
         return False
     if (
         profile.document_like_input
-        and profile.resolved_requirements.slot("document_material_scope") is None
+        and profile.planning_state.resolved_slots.get("document_material_scope") is None
         and "document_material_scope" not in profile.answers
         and "document_material_scope" not in profile.flow_defaults
     ):

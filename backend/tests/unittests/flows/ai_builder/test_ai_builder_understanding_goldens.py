@@ -11,8 +11,8 @@ import pytest
 
 from intric.flows.ai_builder.ai_builder_discovery import analyze_discovery
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_resolved_requirements import (
-    build_resolved_requirements_state,
+from intric.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
 )
 
 
@@ -111,10 +111,10 @@ def test_docx_output_characterization_slots(
         )
     ]
 
-    state = build_resolved_requirements_state(conversation)
+    state = build_planning_state_from_conversation(conversation)
 
     assert [
-        (slot.name, slot.value, slot.source) for slot in state.slots
+        (slot.name, slot.value, slot.source) for slot in state.resolved_slots.values()
     ] == expected_slots
 
 

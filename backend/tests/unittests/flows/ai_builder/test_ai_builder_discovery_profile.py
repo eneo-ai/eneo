@@ -231,7 +231,9 @@ def test_build_discovery_profile_keeps_docx_output_intent_when_input_mentions_pd
 
     assert profile.output_intent.terminal_output == "docx_document"
     assert profile.output_intent.docx_output_mode == "generated_docx"
-    assert profile.resolved_requirements.slot("document_material_scope") is not None
+    assert (
+        profile.planning_state.resolved_slots.get("document_material_scope") is not None
+    )
 
 
 def test_build_discovery_profile_exposes_runtime_metadata_and_structured_analysis_slots() -> (
@@ -250,8 +252,12 @@ def test_build_discovery_profile_exposes_runtime_metadata_and_structured_analysi
         ]
     )
 
-    runtime_metadata = profile.resolved_requirements.slot("runtime_metadata_fields")
-    structured_analysis = profile.resolved_requirements.slot("structured_analysis_need")
+    runtime_metadata = profile.planning_state.resolved_slots.get(
+        "runtime_metadata_fields"
+    )
+    structured_analysis = profile.planning_state.resolved_slots.get(
+        "structured_analysis_need"
+    )
 
     assert runtime_metadata is not None
     assert structured_analysis is not None

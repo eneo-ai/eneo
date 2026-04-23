@@ -86,7 +86,7 @@ def build_system_prompt(
     available_knowledge_bases: list[dict[str, str]] | None = None,
     attachment_context: str | None = None,
     planner_hints: str | None = None,
-    resolved_requirements_block: str | None = None,
+    planning_state_block: str | None = None,
     ui_language: str | None = None,
     confirmed_requirements: dict[str, Any] | None = None,
     is_edit_mode: bool = False,
@@ -103,8 +103,8 @@ def build_system_prompt(
         has_confirmed_requirements=confirmed_requirements is not None,
     )
     sections.insert(2, build_framework_guardrails_block())
-    if resolved_requirements_block:
-        sections.append(resolved_requirements_block)
+    if planning_state_block:
+        sections.append(planning_state_block)
 
     if confirmed_requirements and not is_edit_mode:
         full_create_recipes = render_knowledge_pack_create_recipes()

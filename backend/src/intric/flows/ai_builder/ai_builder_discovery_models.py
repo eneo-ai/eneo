@@ -16,9 +16,7 @@ if TYPE_CHECKING:
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     InputIntentResolution,
 )
-from intric.flows.ai_builder.ai_builder_resolved_requirements import (
-    ResolvedRequirementsState,
-)
+from intric.flows.ai_builder.planning_state import PlanningState
 
 DiscoverySeverity = Literal["blocking", "info"]
 DiscoveryLanguage = Literal["sv", "en"]
@@ -126,7 +124,7 @@ class DiscoveryProfile:
     edit_scope: "EditScopeResolution"
     input_intent: InputIntentResolution
     output_intent: "OutputIntentResolution"
-    resolved_requirements: ResolvedRequirementsState
+    planning_state: PlanningState
     flow: Flow | None
     edit_mode: bool
     comparison_requested: bool

@@ -766,7 +766,8 @@ def _should_surface_structured_analysis_question(profile: DiscoveryProfile) -> b
     return (
         pattern.rich_document_workflow
         and not profile.edit_mode
-        and profile.resolved_requirements.slot("structured_analysis_need") is None
+        and profile.planning_state.resolved_slots.get("structured_analysis_need")
+        is None
         and "structured_analysis_need" not in profile.answers
     )
 
