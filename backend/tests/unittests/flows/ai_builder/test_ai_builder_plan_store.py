@@ -99,6 +99,7 @@ def _make_repo_mock() -> AsyncMock:
     repo = AsyncMock()
     repo.savepoint = _noop_savepoint
     repo.append_session_messages = AsyncMock(return_value=[])
+    repo.create_plan = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
     return repo
 
 
@@ -148,6 +149,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
 
     repo.save_planning_state.assert_awaited_once()
     assert repo.save_planning_state.await_args is not None
-    assert isinstance(
-        repo.save_planning_state.await_args.kwargs["state"], PlanningState
-    )
+    saved_state = repo.save_planning_state.await_args.kwargs["state"]
+    assert isinstance(saved_state, PlanningState)
+    assert saved_state.draft_plan_id == repo.create_plan.return_value.id
+    assert saved_state.phase == "plan_proposed"

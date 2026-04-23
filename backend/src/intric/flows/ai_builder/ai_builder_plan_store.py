@@ -197,6 +197,8 @@ async def store_plan_and_update_conversation(
             lease_lock_token=lease_lock_token,
         )
         planning_state = build_planning_state_from_conversation(persisted, flow=flow)
+        planning_state.draft_plan_id = plan.id
+        planning_state.phase = "plan_proposed"
         await repo.save_planning_state(
             session_id=session_id,
             tenant_id=tenant_id,
