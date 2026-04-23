@@ -40,7 +40,16 @@ from intric.flows.ai_builder.ai_builder_models import (
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.planning_state import (
+    BUILDER_SCHEMA_VERSION,
+    FCM_VERSION,
+    PLANNER_CONTRACT_VERSION,
+    EvidenceRef,
+    PlanningState,
+    ResolvedSlot,
+)
 from intric.flows.flow import FlowStep
+from intric.main.exceptions import NotFoundException
 from intric.prompts.api.prompt_models import PromptCreate
 
 
@@ -637,6 +646,195 @@ async def test_ai_builder_repo_create_session_rejects_cross_tenant_flow_referenc
                 actor_user_id=user.id,
                 target_kind=TargetKind.EDIT,
                 flow_id=other_flow_id,
+            )
+
+
+def _planning_state_fixture() -> PlanningState:
+    return PlanningState(
+        fcm_version=FCM_VERSION,
+        planner_contract_version=PLANNER_CONTRACT_VERSION,
+        builder_schema_version=BUILDER_SCHEMA_VERSION,
+        phase="discovering",
+        evidence=EvidenceRef(conversation_message_ids=["msg-1"]),
+        resolved_slots={
+            "primary_runtime_input": ResolvedSlot(
+                name="primary_runtime_input",
+                value="documents",
+                source="heuristic",
+                evidence=["heuristic:role-aware freeform analysis"],
+                confidence="medium",
+            )
+        },
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_save_planning_state_bumps_version(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Planning Save Version",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        state = _planning_state_fixture()
+
+        first = await repo.save_planning_state(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            state=state,
+        )
+        second = await repo.save_planning_state(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            state=state,
+        )
+
+    assert first == 1
+    assert second == 2
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_load_planning_state_returns_none_for_unsaved_session(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Planning Load Unsaved",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+
+        loaded = await repo.load_planning_state(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+
+    assert loaded is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_load_planning_state_round_trips_saved_state(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Planning Round Trip",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        state = _planning_state_fixture()
+        await repo.save_planning_state(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            state=state,
+        )
+
+        loaded = await repo.load_planning_state(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+
+    assert loaded == state.validated_snapshot()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_load_planning_state_raises_for_missing_session(
+    db_container,
+):
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+
+        with pytest.raises(NotFoundException):
+            await repo.load_planning_state(
+                session_id=uuid4(),
+                tenant_id=uuid4(),
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_save_planning_state_raises_for_wrong_tenant(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Planning Wrong Tenant",
+    )
+    other_tenant_id = await _create_extra_tenant(
+        db_container=db_container,
+        name=f"planning-other-tenant-{uuid4()}",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        state = _planning_state_fixture()
+
+        with pytest.raises(NotFoundException):
+            await repo.save_planning_state(
+                session_id=session.id,
+                tenant_id=other_tenant_id,
+                state=state,
             )
 
 

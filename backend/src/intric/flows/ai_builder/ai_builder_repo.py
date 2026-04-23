@@ -872,16 +872,31 @@ class AIBuilderRepository:
     ) -> PlanningState | None:
         """Return the persisted `PlanningState` or `None` if never saved.
 
-        `None` distinguishes a fresh session from one that has a
-        validated zero-value state — callers stamp a new state with
-        `PlanningState.empty()` only on the `None` branch.
+        Three distinct outcomes are kept separate so callers don't
+        confuse a caller bug with a fresh session:
+
+        - Row missing (wrong tenant or unknown session): raise
+          `NotFoundException`.
+        - Row present but `planning_state_jsonb IS NULL`: return `None`
+          so the caller knows to stamp a new `PlanningState`.
+        - Row present with a payload: return the validated model; any
+          drifted JSONB raises Pydantic's `ValidationError` rather than
+          silently reverting to a default.
         """
         async with self._transaction():
-            stmt = select(BuilderSessions.planning_state_jsonb).where(
+            stmt = select(
+                BuilderSessions.id,
+                BuilderSessions.planning_state_jsonb,
+            ).where(
                 BuilderSessions.id == session_id,
                 BuilderSessions.tenant_id == tenant_id,
             )
-            payload = (await self.session.execute(stmt)).scalar_one_or_none()
+            row = (await self.session.execute(stmt)).one_or_none()
+            if row is None:
+                raise NotFoundException(
+                    f"Builder session {session_id} not found for tenant {tenant_id}."
+                )
+            payload = row[1]
             if payload is None:
                 return None
             return PlanningState.model_validate(payload)
