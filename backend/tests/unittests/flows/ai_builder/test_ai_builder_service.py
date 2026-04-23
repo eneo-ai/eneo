@@ -4,10 +4,32 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
+
+
+@asynccontextmanager
+async def _noop_savepoint() -> AsyncIterator[None]:
+    """Drop-in async context manager so AsyncMock repos can satisfy
+    `async with repo.savepoint():` in unit tests without needing a live
+    database.
+    """
+    yield
+
+
+def _make_repo_mock() -> AsyncMock:
+    """Return an `AsyncMock` repo wired with a working `savepoint()`
+    context manager so tests exercising the plan-proposal orchestrator
+    can enter its savepoint without tripping the async-CM protocol.
+    """
+    repo = AsyncMock()
+    repo.savepoint = _noop_savepoint
+    return repo
+
 
 import pytest
 
@@ -1267,7 +1289,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_valid_tool_call_yields_plan_event(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -1321,7 +1343,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_plan_event_includes_rationale(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -1374,7 +1396,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_plan_event_excludes_reasoning(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -1425,7 +1447,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_plan_event_defaults_runtime_upload_for_document_flow_input(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -1495,7 +1517,7 @@ class TestSendMessageToolCall:
         self,
     ):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(status=SessionStatus.CHATTING, tenant_id=user.tenant_id)
         repo.get_session.return_value = session
 
@@ -1530,7 +1552,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_tool_call_supersedes_existing_plans(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -1578,7 +1600,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_tool_call_updates_latest_plan(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -1630,7 +1652,7 @@ class TestSendMessageToolCall:
     async def test_tool_call_appends_tool_result_to_conversation(self):
         """Verify that a tool result message is appended after the plan is stored."""
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -1719,7 +1741,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_invalid_json_arguments_yields_error(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -1769,7 +1791,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_unknown_tool_calls_are_ignored(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -1817,7 +1839,7 @@ class TestSendMessageToolCall:
     async def test_validation_failure_triggers_self_correction(self):
         """When the spec has validation errors, the service asks the LLM to fix it."""
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -1893,7 +1915,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_quality_warning_triggers_self_correction(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -1991,7 +2013,7 @@ class TestSendMessageToolCall:
         self,
     ):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -2173,7 +2195,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_primary_planner_call_uses_lower_temperature(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -2222,7 +2244,7 @@ class TestSendMessageToolCall:
     async def test_parse_failure_triggers_self_correction(self):
         """When create_flow misses required fields, the service asks the LLM to fix it."""
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -2295,7 +2317,7 @@ class TestSendMessageToolCall:
     async def test_self_correction_failure_yields_error(self):
         """When self-correction also fails validation, yield error event."""
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -2363,7 +2385,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_self_correction_retries_once_more_before_erroring(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -2457,7 +2479,7 @@ class TestSendMessageToolCall:
     async def test_self_correction_text_fallback(self):
         """When correction still ends in text after a forced retry, yield text."""
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -2516,7 +2538,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_self_correction_text_retry_can_still_produce_plan(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,

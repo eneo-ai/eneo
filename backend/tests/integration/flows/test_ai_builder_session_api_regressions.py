@@ -1007,6 +1007,85 @@ async def test_ai_builder_repo_commit_turn_rejects_write_when_lease_is_lost(
     assert loaded is None
 
 
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_store_plan_and_update_conversation_rolls_back_when_append_fails(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """store_plan_and_update_conversation must roll back every repo
+    write as one unit: if the conversation append fails after the plan
+    writes succeed, there must be no orphaned plan row and the session
+    must remain in its pre-turn state.
+    """
+    from intric.flows.ai_builder.ai_builder_plan_store import (
+        store_plan_and_update_conversation,
+    )
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Plan Proposal Rollback",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        session_id = session.id
+        tenant_id = user.tenant_id
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        spec = _make_builder_plan_spec(existing_step_ref=None)
+        original_append = repo.append_session_messages
+
+        async def raising_append(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("simulated append failure")
+
+        repo.append_session_messages = raising_append  # type: ignore[method-assign]
+        try:
+            with pytest.raises(RuntimeError):
+                await store_plan_and_update_conversation(
+                    repo=repo,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    conversation=[],
+                    new_messages_start=0,
+                    assistant_content="simulated",
+                    tool_call_id="call-1",
+                    tool_name=CREATE_FLOW_TOOL_NAME,
+                    arguments={},
+                    spec=spec,
+                    assumptions=[],
+                    plan_rationale=None,
+                    reasoning=None,
+                    validation=MagicMock(warnings=[]),
+                )
+        finally:
+            repo.append_session_messages = original_append  # type: ignore[method-assign]
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        plans = await repo.list_session_plans(
+            session_id=session_id, tenant_id=tenant_id
+        )
+        fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+
+    assert plans == []
+    assert fetched.status == SessionStatus.CHATTING
+    assert fetched.latest_plan_id is None
+
+
 def _make_plan_envelope(spec: FlowDraftSpecCore) -> PlannerPlanEnvelope:
     return PlannerPlanEnvelope(
         spec=spec,

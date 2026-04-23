@@ -59,6 +59,19 @@ class AIBuilderRepository:
             async with self.session.begin():
                 yield
 
+    @contextlib.asynccontextmanager
+    async def savepoint(self) -> AsyncIterator[None]:
+        """Yield a SAVEPOINT-scoped nested transaction.
+
+        Guarantees that writes performed inside the block either all
+        land together or are all rolled back, independent of whether
+        the caller owns an outer transaction. Used by turn orchestrators
+        that must unify several repo writes into one atomic unit.
+        """
+        async with self._transaction():
+            async with self.session.begin_nested():
+                yield
+
     # ---------------------------------------------------------------------------
     # Sessions
     # ---------------------------------------------------------------------------
@@ -928,26 +941,25 @@ class AIBuilderRepository:
         by `save_planning_state`). Callers who don't need it can ignore
         the return value.
 
-        Atomicity is enforced via a savepoint (`begin_nested()`) rather
+        Atomicity is enforced via a savepoint (`savepoint()`) rather
         than only the outer transaction, so even a caller that already
         holds an outer transaction and swallows the exception (such as
         a test fixture) still sees the inner writes rolled back as one
         unit.
         """
-        async with self._transaction():
-            async with self.session.begin_nested():
-                await self.append_session_messages(
-                    session_id=session_id,
-                    tenant_id=tenant_id,
-                    conversation=new_messages,
-                    request_id=request_id,
-                    lock_token=lock_token,
-                )
-                return await self.save_planning_state(
-                    session_id=session_id,
-                    tenant_id=tenant_id,
-                    state=planning_state,
-                )
+        async with self.savepoint():
+            await self.append_session_messages(
+                session_id=session_id,
+                tenant_id=tenant_id,
+                conversation=new_messages,
+                request_id=request_id,
+                lock_token=lock_token,
+            )
+            return await self.save_planning_state(
+                session_id=session_id,
+                tenant_id=tenant_id,
+                state=planning_state,
+            )
 
 
 # ---------------------------------------------------------------------------

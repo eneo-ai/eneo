@@ -159,16 +159,6 @@ async def store_plan_and_update_conversation(
         reasoning=reasoning,
         validation=validation,
     )
-    plan = await persist_plan(
-        repo=repo,
-        tenant_id=tenant_id,
-        session_id=session_id,
-        spec=spec,
-        envelope=envelope,
-        edit_result_json=edit_result_json,
-        lease_request_id=lease_request_id,
-        lease_lock_token=lease_lock_token,
-    )
     append_plan_messages(
         conversation=conversation,
         assistant_content=assistant_content,
@@ -179,15 +169,26 @@ async def store_plan_and_update_conversation(
         spec=spec,
         assumptions=assumptions,
     )
-    await append_session_messages(
-        repo=repo,
-        tenant_id=tenant_id,
-        session_id=session_id,
-        conversation=conversation,
-        start_index=new_messages_start,
-        lease_request_id=lease_request_id,
-        lease_lock_token=lease_lock_token,
-    )
+    async with repo.savepoint():
+        plan = await persist_plan(
+            repo=repo,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            spec=spec,
+            envelope=envelope,
+            edit_result_json=edit_result_json,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
+        )
+        await append_session_messages(
+            repo=repo,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            conversation=conversation,
+            start_index=new_messages_start,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
+        )
     return plan, envelope
 
 
