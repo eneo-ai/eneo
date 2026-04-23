@@ -302,23 +302,26 @@ class TestRule6MaterializationBridgeAcl:
     Inside ``intric.flows.ai_builder``, only
     ``ai_builder_materialization_bridge.py`` is permitted to import from
     the ``intric.flows.api`` package — the flows-domain write surface
-    covering DTOs, assemblers, and routers. The bridge currently carries
-    only a role docstring; any concrete bridge logic added in future
-    must keep the ACL intact.
+    covering DTOs, assemblers, and routers. The bridge exposes a narrow
+    public surface via ``__all__`` so additional helpers land with an
+    explicit review of the seam rather than by accident.
     """
+
+    _EXPECTED_BRIDGE_ALL: frozenset[str] = frozenset(
+        {
+            "MaterializationError",
+            "MaterializedDraft",
+            "materialize",
+        }
+    )
 
     def _package_root(self) -> pathlib.Path:
         return _backend_root() / "src" / "intric" / "flows" / "ai_builder"
 
-    def test_bridge_is_docstring_only_scaffold(self) -> None:
-        """The bridge is a docstring-only module: its top-level body is the
-        module docstring and nothing else. Assert both the file exists and
-        that shape holds, so any accidental widening of the write-surface
-        seam surfaces here.
-        """
+    def test_bridge_has_role_docstring(self) -> None:
         bridge = self._package_root() / f"{BRIDGE_MODULE_NAME}.py"
         assert bridge.exists(), (
-            "Expected Materialization Bridge scaffold at "
+            "Expected Materialization Bridge module at "
             f"{bridge.relative_to(_backend_root())}."
         )
         tree = ast.parse(bridge.read_text(encoding="utf-8"))
@@ -326,13 +329,26 @@ class TestRule6MaterializationBridgeAcl:
             f"{BRIDGE_MODULE_NAME}.py must have a module docstring declaring "
             "its bridge role."
         )
-        body = tree.body
-        assert len(body) == 1 and isinstance(body[0], ast.Expr), (
-            f"{BRIDGE_MODULE_NAME}.py must stay docstring-only until the "
-            "bridge implementation lands. Adding code here now widens the "
-            "write-surface seam before the ACL is ready to guard it.\n"
-            f"Found {len(body)} top-level statements: "
-            f"{[type(n).__name__ for n in body]}"
+
+    def test_bridge_public_surface_is_narrow(self) -> None:
+        """The bridge exposes only the sanctioned public names via
+        ``__all__``. Any new public symbol must land here deliberately
+        so the write-surface seam does not widen silently.
+        """
+        from intric.flows.ai_builder import (
+            ai_builder_materialization_bridge as bridge,
+        )
+
+        declared = getattr(bridge, "__all__", None)
+        assert declared is not None, (
+            f"{BRIDGE_MODULE_NAME}.py must declare an `__all__` tuple to "
+            "pin its public surface."
+        )
+        assert frozenset(declared) == self._EXPECTED_BRIDGE_ALL, (
+            f"{BRIDGE_MODULE_NAME}.py `__all__` drifted from the sanctioned "
+            "bridge surface.\n"
+            f"Expected: {sorted(self._EXPECTED_BRIDGE_ALL)}\n"
+            f"Found:    {sorted(declared)}"
         )
 
     def test_only_bridge_imports_flows_api(self) -> None:
