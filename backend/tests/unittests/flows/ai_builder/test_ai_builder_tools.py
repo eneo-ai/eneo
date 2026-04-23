@@ -333,6 +333,113 @@ class TestParseArguments:
                 }
             )
 
+    def test_parse_create_flow_arguments_rejects_input_bindings_in_step(self) -> None:
+        """The tool schema forbids input_bindings — the compiler owns underlag
+        composition. Silently ignoring the key let planner templates smuggle
+        their own {{ step_n.output.text }} templates past the authoring IR and
+        break the compiler's XML-wrap attribution contract. Reject at parse
+        time with an actionable message so the repair loop can re-emit.
+        """
+        with pytest.raises(
+            Exception,
+            match=r"steps\[0\] contains forbidden key 'input_bindings'",
+        ):
+            parse_create_flow_arguments(
+                {
+                    "flow_name": "Dokumentanalys",
+                    "plan_rationale": "Struktur först.",
+                    "steps": [
+                        {
+                            "name": "Extrahera risker",
+                            "instructions": "Extrahera risker från dokumentet.",
+                            "input_source": "flow_input",
+                            "input_type": "document",
+                            "output_type": "text",
+                            "input_bindings": {
+                                "question": "{{ step_1.output.text }}",
+                            },
+                        }
+                    ],
+                }
+            )
+
+    def test_parse_create_flow_arguments_rejects_plan_step_ref_in_step(self) -> None:
+        """plan_step_ref is a builder-internal reference. It has no place in the
+        authoring IR and was already excluded by build_create_flow_tool_schema.
+        Make the exclusion hard — a planner that smuggles it gets a parse-time
+        rejection, not silent acceptance.
+        """
+        with pytest.raises(
+            Exception,
+            match=r"steps\[0\] contains forbidden key 'plan_step_ref'",
+        ):
+            parse_create_flow_arguments(
+                {
+                    "flow_name": "Dokumentanalys",
+                    "plan_rationale": "Struktur först.",
+                    "steps": [
+                        {
+                            "name": "Extrahera risker",
+                            "instructions": "Extrahera risker från dokumentet.",
+                            "input_source": "flow_input",
+                            "input_type": "document",
+                            "output_type": "text",
+                            "plan_step_ref": "step_1",
+                        }
+                    ],
+                }
+            )
+
+    def test_parse_create_flow_arguments_rejects_template_tokens_in_plan_rationale(
+        self,
+    ) -> None:
+        """plan_rationale is free-form prose. Template-variable substrings there
+        indicate the planner leaked authoring templates into the rationale
+        instead of delegating to the compiler.
+        """
+        with pytest.raises(
+            Exception,
+            match=r"plan_rationale must not contain template variables",
+        ):
+            parse_create_flow_arguments(
+                {
+                    "flow_name": "Dokumentanalys",
+                    "plan_rationale": "Vi bygger på {{ step_1.output.text }}.",
+                    "steps": [
+                        {
+                            "name": "Extrahera risker",
+                            "instructions": "Extrahera risker från dokumentet.",
+                            "input_source": "flow_input",
+                            "input_type": "document",
+                            "output_type": "text",
+                        }
+                    ],
+                }
+            )
+
+    def test_parse_create_flow_arguments_rejects_top_level_input_bindings(self) -> None:
+        """Top-level input_bindings (sibling to steps) is also not permitted."""
+        with pytest.raises(
+            Exception,
+            match=r"Flow draft contains forbidden key 'input_bindings'",
+        ):
+            parse_create_flow_arguments(
+                {
+                    "flow_name": "Dokumentanalys",
+                    "plan_rationale": "Struktur först.",
+                    "input_bindings": {"question": "underlag"},
+                    "steps": [
+                        {
+                            "name": "Extrahera risker",
+                            "instructions": "Extrahera risker från dokumentet.",
+                            "input_source": "flow_input",
+                            "input_type": "document",
+                            "output_type": "text",
+                        }
+                    ],
+                }
+            )
+
 
 class TestExtractAssumptions:
     def test_extracts_strings(self) -> None:

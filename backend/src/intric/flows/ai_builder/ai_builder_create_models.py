@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Literal, cast
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from intric.flows.ai_builder.ai_builder_flow_name import normalize_flow_name
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
+)
+from intric.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft as _StructuredFieldDraft,
 )
 
@@ -14,6 +16,8 @@ CreateFormFieldType = Literal["text", "number", "date", "select", "multiselect"]
 
 
 class CreateFormFieldDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     variable_name: str
     label: str
     field_type: CreateFormFieldType
@@ -43,6 +47,8 @@ class CreateFormFieldDraft(BaseModel):
 
 
 class FlowCreateDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     flow_name: str
     flow_description: str | None = None
     plan_rationale: str
@@ -58,6 +64,12 @@ class FlowCreateDraft(BaseModel):
         normalized = value.strip()
         if not normalized:
             raise ValueError("Flow draft fields must not be empty.")
+        if "{{" in normalized or "}}" in normalized:
+            raise ValueError(
+                "plan_rationale must not contain template variables. "
+                "Describe the design in plain prose; the backend compiler "
+                "synthesises any {{ step_n.output }} / underlag templates."
+            )
         return normalized
 
     @field_validator("flow_name")
@@ -71,6 +83,8 @@ class FlowCreateDraft(BaseModel):
         if value is None:
             return None
         normalized = value.strip()
+        if normalized and ("{{" in normalized or "}}" in normalized):
+            raise ValueError("flow_description must not contain template variables.")
         return normalized or None
 
     @field_validator("assumptions")

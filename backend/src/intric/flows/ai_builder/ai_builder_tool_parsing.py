@@ -201,9 +201,21 @@ def _describe_create_draft_validation_error(error: ValidationError) -> str | Non
         path = list(loc)
         if len(path) >= 2 and path[0] == "steps" and isinstance(path[1], int):
             step_index = path[1]
+            payload = item.get("input")
+            if (
+                item["type"] == "extra_forbidden"
+                and len(path) >= 3
+                and isinstance(path[2], str)
+            ):
+                messages.append(
+                    _describe_forbidden_step_key(
+                        step_index=step_index,
+                        forbidden_key=path[2],
+                    )
+                )
+                continue
             if step_index in handled_step_indexes:
                 continue
-            payload = item.get("input")
             if isinstance(payload, dict):
                 misplaced_message = _describe_misplaced_create_step_payload(
                     step_index=step_index,
@@ -212,9 +224,54 @@ def _describe_create_draft_validation_error(error: ValidationError) -> str | Non
                 if misplaced_message is not None:
                     messages.append(misplaced_message)
                     handled_step_indexes.add(step_index)
+        elif (
+            item["type"] == "extra_forbidden"
+            and len(path) == 1
+            and isinstance(path[0], str)
+        ):
+            messages.append(_describe_forbidden_draft_key(forbidden_key=path[0]))
     if messages:
         return "\n".join(messages)
     return None
+
+
+_BUILDER_SYNTHESIZED_STEP_KEYS = frozenset(
+    {
+        "input_bindings",
+        "plan_step_ref",
+        "output_mode",
+        "output_contract",
+    }
+)
+
+
+def _describe_forbidden_step_key(*, step_index: int, forbidden_key: str) -> str:
+    if forbidden_key in _BUILDER_SYNTHESIZED_STEP_KEYS:
+        return (
+            f"steps[{step_index}] contains forbidden key '{forbidden_key}'. "
+            "The backend compiler owns this field; do not emit it from create_flow. "
+            "Rebuild the step using only the documented authoring keys "
+            "(name, instructions, input_source, input_type, output_type, "
+            "uses_form_fields, uses_previous_fields, output_fields, …) and re-emit."
+        )
+    return (
+        f"steps[{step_index}] contains forbidden key '{forbidden_key}'. "
+        "Use only keys defined in the create_flow tool schema."
+    )
+
+
+def _describe_forbidden_draft_key(*, forbidden_key: str) -> str:
+    if forbidden_key == "input_bindings":
+        return (
+            "Flow draft contains forbidden key 'input_bindings'. "
+            "Underlag composition is compiled from each step's input_source / "
+            "uses_form_fields / uses_previous_fields. Remove input_bindings "
+            "from the top level and let the backend compile the template."
+        )
+    return (
+        f"Flow draft contains forbidden key '{forbidden_key}'. "
+        "Use only keys defined in the create_flow tool schema."
+    )
 
 
 def _describe_misplaced_create_step_payload(

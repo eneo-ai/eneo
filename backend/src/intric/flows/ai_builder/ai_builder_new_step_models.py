@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, cast
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from intric.flows.ai_builder.ai_builder_domain_models import AssistantSpec
 from intric.flows.ai_builder.ai_builder_models import InputSource, InputType, OutputType
@@ -14,6 +14,8 @@ MAX_STRUCTURED_FIELD_DEPTH = 3
 
 
 class PreviousFieldRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     from_step: int
     field_path: str
     label: str | None = None
@@ -47,6 +49,8 @@ class PreviousFieldRef(BaseModel):
 
 
 class StructuredFieldDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     field_type: StructuredFieldType
     description: str
@@ -77,6 +81,8 @@ class StructuredFieldDraft(BaseModel):
 
 class NewStepDraft(BaseModel):
     """Shared authoring contract for a brand-new step."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     instructions: str | None = None
