@@ -237,6 +237,7 @@ def build_discovery_profile(
                 "case material",
                 "case package",
                 "ärende",
+                "underlag",
                 "ticket",
                 "tickets",
                 "support ticket",

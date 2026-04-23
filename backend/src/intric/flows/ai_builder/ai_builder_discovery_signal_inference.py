@@ -125,6 +125,12 @@ def _infer_document_kind(text: str) -> str | None:
             "case files",
             "case package",
             "underlag",
+            "kommunärende",
+            "municipal case",
+            "tjänsteskrivelse",
+            "tjänsteskrivelser",
+            "remiss",
+            "remisser",
         ),
     ):
         return "case_documents"

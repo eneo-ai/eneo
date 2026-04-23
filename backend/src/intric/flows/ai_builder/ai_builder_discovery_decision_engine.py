@@ -419,7 +419,9 @@ def implies_single_case(text: str) -> bool:
         text,
         (
             "ett ärende",
+            "ett kommunärende",
             "one case",
+            "one municipal case",
             "case number",
         ),
     )
@@ -473,6 +475,10 @@ def looks_like_case_document_family(text: str) -> bool:
             "case material",
             "case files",
             "official material",
+            "kommunärende",
+            "municipal case",
+            "tjänsteskrivelse",
+            "remiss",
         ),
     )
 
