@@ -20,6 +20,10 @@ def test_format_create_argument_error_guides_output_fields_depth_repairs() -> No
     assert "Invalid create_flow arguments" in feedback
     assert "output_fields" in feedback
     assert "max 3 levels" in feedback
+    assert "top-level fields, child fields" in feedback
+    assert "grandchild" in feedback
+    assert "field_type='string'" in feedback
+    assert "description" in feedback
 
 
 def test_format_create_validation_feedback_adds_first_step_source_rule() -> None:

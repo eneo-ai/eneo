@@ -2476,8 +2476,8 @@ class TestSendMessageToolCall:
         assert not any(event["event"] == SSE_EVENT_ERROR for event in events)
 
     @pytest.mark.anyio
-    async def test_self_correction_text_fallback(self):
-        """When correction still ends in text after a forced retry, yield text."""
+    async def test_self_correction_surfaces_legitimate_info_request_as_text(self):
+        """When correction responds with a genuine clarifying question, yield it as text."""
         user = _make_user()
         repo = _make_repo_mock()
         session = _make_session(
@@ -2517,8 +2517,8 @@ class TestSendMessageToolCall:
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[
                     _make_llm_response(content=None, tool_calls=[bad_tc]),
-                    _make_llm_response(content="I need more information."),
-                    _make_llm_response(content="I still need more information."),
+                    _make_llm_response(content="Vilken modell ska jag använda?"),
+                    _make_llm_response(content="Ska jag fortsätta?"),
                 ]
             )
             events = await _collect_events(
@@ -2533,7 +2533,79 @@ class TestSendMessageToolCall:
 
         text_events = [e for e in events if e["event"] == SSE_EVENT_TEXT]
         assert len(text_events) >= 1
-        assert "more information" in json.loads(text_events[0]["data"])["text"]
+        assert "?" in json.loads(text_events[0]["data"])["text"]
+
+    @pytest.mark.anyio
+    async def test_self_correction_bail_without_question_mark_emits_error_not_text(
+        self,
+    ):
+        """Planner bail text (no question mark, no action intent) must not leak as a conversational text event."""
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(
+            status=SessionStatus.CHATTING,
+            tenant_id=user.tenant_id,
+            conversation=_make_confirmed_requirements_conversation(),
+        )
+        repo.get_session.return_value = session
+
+        completion_service = AsyncMock()
+        adapter = _make_adapter()
+        completion_service._get_adapter.return_value = adapter
+
+        bad_args = {
+            "flow_name": "Bad",
+            "steps": [
+                {
+                    "plan_step_ref": "step_a",
+                    "name": "Bad Step",
+                    "assistant_spec": {"instructions": "X"},
+                    "input_source": "previous_step",
+                }
+            ],
+        }
+        bad_tc = _make_tool_call(arguments=bad_args)
+
+        service = _make_service(
+            user=user,
+            repo=repo,
+            completion_service=completion_service,
+        )
+
+        bail_text = (
+            "Jag försökte skapa flödet men backend-valideringen stoppade mig: "
+            "flera av mina output_fields överskrider max-nästningsnivån. "
+            "Säg bara 'OK, platta ut JSON-fälten' så fortsätter jag."
+        )
+
+        with patch(
+            "intric.flows.ai_builder.ai_builder_service.litellm"
+        ) as mock_litellm:
+            mock_litellm.acompletion = AsyncMock(
+                side_effect=[
+                    _make_llm_response(content=None, tool_calls=[bad_tc]),
+                    _make_llm_response(content=bail_text),
+                    _make_llm_response(content=bail_text),
+                ]
+            )
+            events = await _collect_events(
+                service.send_message(
+                    session_id=session.id,
+                    message="Build it",
+                    question_answer=_make_requirements_confirmation(),
+                    litellm_model="openai/gpt-4",
+                    litellm_kwargs={"api_key": "sk-test"},
+                )
+            )
+
+        text_events = [e for e in events if e["event"] == SSE_EVENT_TEXT]
+        error_events = [e for e in events if e["event"] == SSE_EVENT_ERROR]
+        assert text_events == [], (
+            f"Planner bail must not reach the user as text; got: {text_events}"
+        )
+        assert error_events, (
+            f"Planner bail must surface as an error event; got: {events}"
+        )
 
     @pytest.mark.anyio
     async def test_self_correction_text_retry_can_still_produce_plan(self):

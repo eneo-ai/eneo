@@ -239,6 +239,140 @@ async def test_request_self_correction_bumps_temperature_from_first_retry_onward
 
 
 @pytest.mark.asyncio
+async def test_request_self_correction_emits_error_event_when_planner_bails_to_conversational_text() -> (
+    None
+):
+    text_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=(
+                        "Jag försökte skapa flödet men backend-valideringen stoppade mig: "
+                        "flera av output_fields överskrider max-nästningsnivån. "
+                        "Säg bara 'OK, platta ut JSON-fälten' så bygger jag om planen."
+                    ),
+                    tool_calls=None,
+                )
+            )
+        ]
+    )
+
+    async def call_repair_completion(**_: Any) -> SimpleNamespace:
+        return text_response
+
+    async def process_tool_arguments(**_: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            event=None, feedback="still bad", failure_kind="validation"
+        )
+
+    events: list[dict[str, str]] = []
+    async for event in request_self_correction(
+        session_id=uuid4(),
+        conversation=[],
+        new_messages_start=0,
+        error_message="Structured field nesting depth cannot exceed 3.",
+        llm_messages=[{"role": "user", "content": "build flow"}],
+        tool_call=_original_tool_call(),
+        tool_schemas=[{"function": {"name": "create_flow"}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=3,
+        call_repair_completion=call_repair_completion,
+        process_tool_arguments=process_tool_arguments,
+        target_tool_name="create_flow",
+        forced_tool_prompt="Call create_flow.",
+        build_self_correction_error_event=lambda *, feedback, failure_kind: {
+            "event": "error",
+            "data": feedback or "",
+        },
+        retry_forced_tool_after_text=AsyncMock(return_value=None),
+        process_tool_kwargs=None,
+        flow=None,
+    ):
+        events.append(event)
+
+    text_events = [event for event in events if event.get("event") == "text"]
+    error_events = [event for event in events if event.get("event") == "error"]
+
+    assert text_events == [], (
+        "Self-correction must not leak conversational bail text to the user; "
+        f"found text events: {text_events}"
+    )
+    assert error_events, (
+        "Self-correction must emit an error event when forced-retry cannot recover; "
+        f"got events: {events}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_request_self_correction_still_yields_text_for_legitimate_info_request() -> (
+    None
+):
+    info_request_text = "Vilken modell ska jag använda?"
+    text_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=info_request_text,
+                    tool_calls=None,
+                )
+            )
+        ]
+    )
+
+    async def call_repair_completion(**_: Any) -> SimpleNamespace:
+        return text_response
+
+    async def process_tool_arguments(**_: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            event=None, feedback="still bad", failure_kind="validation"
+        )
+
+    events: list[dict[str, str]] = []
+    async for event in request_self_correction(
+        session_id=uuid4(),
+        conversation=[],
+        new_messages_start=0,
+        error_message="original invalid",
+        llm_messages=[{"role": "user", "content": "go"}],
+        tool_call=_original_tool_call(),
+        tool_schemas=[{"function": {"name": "create_flow"}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=3,
+        call_repair_completion=call_repair_completion,
+        process_tool_arguments=process_tool_arguments,
+        target_tool_name="create_flow",
+        forced_tool_prompt="Call create_flow.",
+        build_self_correction_error_event=lambda *, feedback, failure_kind: {
+            "event": "error",
+            "data": feedback or "",
+        },
+        retry_forced_tool_after_text=AsyncMock(return_value=None),
+        process_tool_kwargs=None,
+        flow=None,
+    ):
+        events.append(event)
+
+    text_events = [event for event in events if event.get("event") == "text"]
+    assert text_events, (
+        "Short, question-mark-bearing planner text without action keywords "
+        "is a legitimate clarification request and must still surface to the user; "
+        f"got events: {events}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_request_self_correction_applies_stronger_prompt_on_second_retry() -> (
     None
 ):

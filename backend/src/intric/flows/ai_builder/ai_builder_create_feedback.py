@@ -19,7 +19,13 @@ def format_create_argument_error(error: Exception) -> str:
             f"Invalid create_flow arguments: {raw_message}\n"
             "Flatten output_fields and keep only realistic structured fields. "
             f"output_fields may nest at max {max_depth} levels: top-level fields, child fields, "
-            "and one grandchild level only."
+            "and one grandchild level only.\n"
+            "Flattening recipe when a subtree exceeds the limit: collapse the deepest "
+            "level into a single field_type='string' field whose description captures "
+            "what that deeper structure would have held (e.g., instead of a fourth-level "
+            "'address.country.region.city' object, keep 'address.country' as an object "
+            "with a child field named 'region_city_description' typed as string). "
+            "Never reintroduce nested objects or arrays below the third level."
         )
     return f"Invalid create_flow arguments: {raw_message}"
 

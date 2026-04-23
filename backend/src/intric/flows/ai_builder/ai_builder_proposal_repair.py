@@ -300,6 +300,9 @@ async def request_self_correction(
                 continue
 
         if assistant_text:
+            if looks_like_information_request(assistant_text):
+                yield build_text_event(assistant_text)
+                return
             forced_event = await retry_forced_tool_after_text(
                 correction_messages=correction_messages,
                 assistant_text=assistant_text,
@@ -322,7 +325,10 @@ async def request_self_correction(
                 yield forced_event
                 return
 
-            yield build_text_event(assistant_text)
+            yield build_self_correction_error_event(
+                feedback=assistant_text,
+                failure_kind="validation",
+            )
             return
 
         yield build_error_event(
