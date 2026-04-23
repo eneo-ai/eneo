@@ -18492,6 +18492,8 @@ export interface operations {
         cursor?: string | null;
         /** @description Show previous page */
         previous?: boolean | null;
+        /** @description Restrict to users whose aggregated role permissions include this permission. Useful when building pickers that only show users assignable to a resource. */
+        permission?: components["schemas"]["Permission"] | null;
       };
       header?: never;
       path?: never;

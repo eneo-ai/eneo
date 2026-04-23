@@ -128,7 +128,9 @@
           </ul>
           {#if truncated && remaining > 0}
             <p class="text-secondary px-3 py-1.5 text-xs tabular-nums">
-              {m.inert_notice_more_members({ count: remaining })}
+              {remaining === 1
+                ? m.inert_notice_more_members({ count: remaining })
+                : m.inert_notice_more_members_plural({ count: remaining })}
             </p>
           {/if}
         </div>

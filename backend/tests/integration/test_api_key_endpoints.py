@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
+
 import pytest
 import sqlalchemy as sa
 
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
-from intric.spaces.api.space_models import SpaceRoleValue
 from intric.main.config import get_settings, set_settings
+from intric.spaces.api.space_models import SpaceRoleValue
 from intric.users.user import UserAdd, UserState
 
 # Authenticated endpoint for guardrail/enforcement tests.
@@ -110,6 +111,26 @@ async def _add_space_member_role(
                 "user_id": str(user_id),
                 "role": role,
             },
+        )
+        await session.commit()
+
+
+async def _grant_shared_spaces_tenant_role(
+    db_container, *, user_id: UUID, tenant_id: UUID
+) -> None:
+    """Attach the seeded 'User' predefined role so the user has tenant-level
+    `shared_spaces`. Without this, SpaceActor denies space access before
+    domain-policy checks run — which would mask the RBAC assertions these
+    tests actually care about."""
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.text(
+                "INSERT INTO users_roles (user_id, role_id) "
+                "SELECT :uid, id FROM roles "
+                "WHERE name = 'User' AND tenant_id = :tid LIMIT 1"
+            ),
+            {"uid": str(user_id), "tid": str(tenant_id)},
         )
         await session.commit()
 
@@ -1528,6 +1549,11 @@ async def test_domain_policy_publish_assistant_denial_returns_actionable_error(
         user_id=regular_user.id,
         role=SpaceRoleValue.VIEWER.value,
     )
+    await _grant_shared_spaces_tenant_role(
+        db_container,
+        user_id=regular_user.id,
+        tenant_id=regular_user.tenant_id,
+    )
 
     response = await client.post(
         f"/api/v1/assistants/{assistant_id}/publish/?published=true",
@@ -1569,6 +1595,11 @@ async def test_domain_policy_app_create_denial_returns_actionable_error(
         space_id=space_id,
         user_id=regular_user.id,
         role=SpaceRoleValue.VIEWER.value,
+    )
+    await _grant_shared_spaces_tenant_role(
+        db_container,
+        user_id=regular_user.id,
+        tenant_id=regular_user.tenant_id,
     )
 
     response = await client.post(

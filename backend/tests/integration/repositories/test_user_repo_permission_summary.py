@@ -191,14 +191,14 @@ async def test_summary_excludes_soft_deleted_and_non_loginable(db_container):
         deleted = await _insert_user(
             session, tenant_id=tid, email="del@x", username="del", deleted=True
         )
-        pending = await _insert_user(
+        inactive = await _insert_user(
             session,
             tenant_id=tid,
-            email="pend@x",
-            username="pend",
-            state=UserState.PENDING,
+            email="inactive@x",
+            username="inactive",
+            state=UserState.INACTIVE,
         )
-        for uid in (active, deleted, pending):
+        for uid in (active, deleted, inactive):
             await _attach_role(session, uid, role_plain)
             await _add_to_group(session, uid, gid)
 
@@ -207,7 +207,7 @@ async def test_summary_excludes_soft_deleted_and_non_loginable(db_container):
             group_id=gid, tenant_id=tid, permission=SHARED_SPACES
         )
         # Only the active user counts in the loginable pool; deleted and
-        # pending are filtered from both total and missing.
+        # inactive are filtered from both total and missing.
         assert total == 1
         assert missing_count == 1
         assert [row.id for row in sample] == [active]

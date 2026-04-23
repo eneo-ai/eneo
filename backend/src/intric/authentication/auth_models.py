@@ -58,8 +58,13 @@ def is_service_api_key(user: "UserInDB") -> bool:
     Service keys resolve to a synthetic UserInDB with no roles. Callers that
     need to bypass role-based gates (because service keys authorize via
     scope+permission instead) should use this check.
+
+    Accepts any user-like object — raw SQLAlchemy `Users` rows (e.g. from
+    test fixtures constructing a SpaceActor directly) lack `active_api_key`
+    entirely, so the getattr guard avoids AttributeError and correctly
+    reports "not a service key" for those paths.
     """
-    key = user.active_api_key
+    key = getattr(user, "active_api_key", None)
     if key is None:
         return False
     return key.ownership == ApiKeyOwnership.SERVICE
