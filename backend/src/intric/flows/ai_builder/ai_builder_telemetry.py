@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+
+if TYPE_CHECKING:
+    from intric.flows.ai_builder.ai_builder_planner_turn import TurnTelemetry
 
 PLANNER_TELEMETRY_KEY = "planner_telemetry"
 SESSION_TELEMETRY_KEY = "session_telemetry"
@@ -30,6 +33,47 @@ def build_planner_telemetry(
         "total_tokens": _safe_int(total_tokens),
         "tool_call_count": tool_call_count,
         "used_auxiliary_llm": used_auxiliary_llm,
+    }
+
+
+def build_planner_telemetry_from_turn(
+    telemetry: "TurnTelemetry",
+    *,
+    used_auxiliary_llm: bool = False,
+    tool_call_count: int = 0,
+) -> dict[str, Any]:
+    """Render a `TurnTelemetry` dataclass into the persisted dict shape.
+
+    The per-turn record on assistant-message metadata has lived as a
+    dict since the legacy function-calling transport. This helper
+    keeps that shape stable across the orchestrator migration while
+    adding the new per-turn fields (`wall_clock_ms`, `llm_calls_made`,
+    `repair_attempts`, `architecture_commit_populated`,
+    `outcome_kind`) so the session aggregator can reason about
+    commit-populated rate and repair-loop trigger rate without
+    peeking at domain objects.
+
+    `used_auxiliary_llm` and `tool_call_count` carry their legacy
+    meaning — they are set by the caller's own bookkeeping (auxiliary
+    adjudication LLM for free-form answers, and any structured-question
+    assistant messages the caller materializes from ask_question
+    actions). Both default to ``False`` / ``0`` when the caller does
+    not populate them.
+    """
+    return {
+        "request_id": telemetry.request_id,
+        "model": telemetry.model,
+        "finish_reason": telemetry.finish_reason,
+        "prompt_tokens": telemetry.prompt_tokens,
+        "completion_tokens": telemetry.completion_tokens,
+        "total_tokens": telemetry.total_tokens,
+        "tool_call_count": tool_call_count,
+        "used_auxiliary_llm": used_auxiliary_llm,
+        "outcome_kind": telemetry.outcome_kind,
+        "wall_clock_ms": telemetry.wall_clock_ms,
+        "llm_calls_made": telemetry.llm_calls_made,
+        "repair_attempts": telemetry.repair_attempts,
+        "architecture_commit_populated": telemetry.architecture_commit_populated,
     }
 
 
@@ -111,9 +155,14 @@ def _empty_session_telemetry() -> dict[str, Any]:
         "total_tokens_total": 0,
         "tool_call_count_total": 0,
         "auxiliary_llm_call_count": 0,
+        "architecture_commit_count": 0,
+        "repair_attempts_total": 0,
+        "wall_clock_ms_total": 0,
+        "llm_calls_made_total": 0,
         "last_request_id": None,
         "last_model": None,
         "last_finish_reason": None,
+        "last_outcome_kind": None,
     }
 
 
@@ -134,20 +183,29 @@ def _latest_session_telemetry(
 
 def _sanitize_session_telemetry(value: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        "planner_request_count": _safe_int(value.get("planner_request_count")) or 0,
-        "clarification_question_count": _safe_int(
+        "planner_request_count": _non_negative_int(value.get("planner_request_count")),
+        "clarification_question_count": _non_negative_int(
             value.get("clarification_question_count")
-        )
-        or 0,
-        "prompt_tokens_total": _safe_int(value.get("prompt_tokens_total")) or 0,
-        "completion_tokens_total": _safe_int(value.get("completion_tokens_total")) or 0,
-        "total_tokens_total": _safe_int(value.get("total_tokens_total")) or 0,
-        "tool_call_count_total": _safe_int(value.get("tool_call_count_total")) or 0,
-        "auxiliary_llm_call_count": _safe_int(value.get("auxiliary_llm_call_count"))
-        or 0,
+        ),
+        "prompt_tokens_total": _non_negative_int(value.get("prompt_tokens_total")),
+        "completion_tokens_total": _non_negative_int(
+            value.get("completion_tokens_total")
+        ),
+        "total_tokens_total": _non_negative_int(value.get("total_tokens_total")),
+        "tool_call_count_total": _non_negative_int(value.get("tool_call_count_total")),
+        "auxiliary_llm_call_count": _non_negative_int(
+            value.get("auxiliary_llm_call_count")
+        ),
+        "architecture_commit_count": _non_negative_int(
+            value.get("architecture_commit_count")
+        ),
+        "repair_attempts_total": _non_negative_int(value.get("repair_attempts_total")),
+        "wall_clock_ms_total": _non_negative_int(value.get("wall_clock_ms_total")),
+        "llm_calls_made_total": _non_negative_int(value.get("llm_calls_made_total")),
         "last_request_id": _safe_str(value.get("last_request_id")),
         "last_model": _safe_str(value.get("last_model")),
         "last_finish_reason": _safe_str(value.get("last_finish_reason")),
+        "last_outcome_kind": _safe_str(value.get("last_outcome_kind")),
     }
 
 
@@ -156,23 +214,35 @@ def _apply_planner_telemetry(
     planner_telemetry: Mapping[str, Any],
 ) -> None:
     summary["planner_request_count"] += 1
-    summary["prompt_tokens_total"] += (
-        _safe_int(planner_telemetry.get("prompt_tokens")) or 0
+    summary["prompt_tokens_total"] += _non_negative_int(
+        planner_telemetry.get("prompt_tokens")
     )
-    summary["completion_tokens_total"] += (
-        _safe_int(planner_telemetry.get("completion_tokens")) or 0
+    summary["completion_tokens_total"] += _non_negative_int(
+        planner_telemetry.get("completion_tokens")
     )
-    summary["total_tokens_total"] += (
-        _safe_int(planner_telemetry.get("total_tokens")) or 0
+    summary["total_tokens_total"] += _non_negative_int(
+        planner_telemetry.get("total_tokens")
     )
-    summary["tool_call_count_total"] += (
-        _safe_int(planner_telemetry.get("tool_call_count")) or 0
+    summary["tool_call_count_total"] += _non_negative_int(
+        planner_telemetry.get("tool_call_count")
     )
     if planner_telemetry.get("used_auxiliary_llm") is True:
         summary["auxiliary_llm_call_count"] += 1
+    if planner_telemetry.get("architecture_commit_populated") is True:
+        summary["architecture_commit_count"] += 1
+    summary["repair_attempts_total"] += _non_negative_int(
+        planner_telemetry.get("repair_attempts")
+    )
+    summary["wall_clock_ms_total"] += _non_negative_int(
+        planner_telemetry.get("wall_clock_ms")
+    )
+    summary["llm_calls_made_total"] += _non_negative_int(
+        planner_telemetry.get("llm_calls_made")
+    )
     summary["last_request_id"] = _safe_str(planner_telemetry.get("request_id"))
     summary["last_model"] = _safe_str(planner_telemetry.get("model"))
     summary["last_finish_reason"] = _safe_str(planner_telemetry.get("finish_reason"))
+    summary["last_outcome_kind"] = _safe_str(planner_telemetry.get("outcome_kind"))
 
 
 def _planner_telemetry_from_metadata(
@@ -224,6 +294,13 @@ def _clarification_question_count(tool_calls: Sequence[object] | None) -> int:
 
 def _safe_int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _non_negative_int(value: object) -> int:
+    parsed = _safe_int(value)
+    if parsed is None or parsed < 0:
+        return 0
+    return parsed
 
 
 def _safe_str(value: object) -> str | None:

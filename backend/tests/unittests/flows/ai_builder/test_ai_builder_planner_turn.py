@@ -33,6 +33,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_orchestrator import OrchestrationContext
 from intric.flows.ai_builder.ai_builder_planner_turn import (
     PlannerTurnResult,
+    TurnTelemetry,
     run_planner_turn,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
@@ -450,3 +451,255 @@ class TestPublicSurface:
         assert "run_planner_turn" in module.__all__
         assert "PlannerTurnResult" in module.__all__
         assert "PlannerTurnOutcomeKind" in module.__all__
+        assert "TurnTelemetry" in module.__all__
+
+
+@pytest.mark.asyncio
+class TestTurnTelemetry:
+    async def test_dispatched_commit_populates_turn_telemetry(self) -> None:
+        repo = _autospec_repo()
+        repo.commit_turn.return_value = 4
+        commit = _make_commit()
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            _planner_output_json(
+                kind="commit_architecture", architecture_commit=commit
+            ),
+            prompt_tokens=321,
+            completion_tokens=87,
+            total_tokens=408,
+        )
+        request_id = uuid4()
+
+        result = await run_planner_turn(
+            repo=repo,
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.5",
+            litellm_kwargs={},
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            flow=None,
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=_ctx(),
+            build_new_messages=lambda _a: [
+                ConversationMessage(role="user", content="Commit")
+            ],
+            request_id=request_id,
+        )
+
+        assert result.kind == "dispatched"
+        assert result.turn_telemetry is not None
+        t: TurnTelemetry = result.turn_telemetry
+        assert t.outcome_kind == "dispatched"
+        assert t.request_id == str(request_id)
+        assert t.model == "openai/gpt-5.5"
+        assert t.prompt_tokens == 321
+        assert t.completion_tokens == 87
+        assert t.total_tokens == 408
+        assert t.finish_reason == "stop"
+        assert t.llm_calls_made == 1
+        assert t.repair_attempts == 0
+        assert t.architecture_commit_populated is True
+        assert t.wall_clock_ms >= 0
+
+    async def test_dispatched_ask_question_marks_commit_not_populated(self) -> None:
+        repo = _autospec_repo()
+        repo.commit_turn.return_value = 1
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            _planner_output_json(kind="ask_question")
+        )
+
+        result = await run_planner_turn(
+            repo=repo,
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.5",
+            litellm_kwargs={},
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            flow=None,
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=_ctx(
+                required_slot_names=frozenset({"primary_runtime_input"})
+            ),
+            build_new_messages=lambda _a: [
+                ConversationMessage(role="user", content="Q")
+            ],
+        )
+
+        assert result.turn_telemetry is not None
+        assert result.turn_telemetry.architecture_commit_populated is False
+        assert result.turn_telemetry.outcome_kind == "dispatched"
+
+    async def test_rejected_outcome_populates_telemetry_without_dispatch_fields(
+        self,
+    ) -> None:
+        repo = _autospec_repo()
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            _planner_output_json(kind="confirm_requirements", base_version=99),
+            prompt_tokens=200,
+            completion_tokens=40,
+            total_tokens=240,
+        )
+
+        def _should_not_build(_a: Any) -> list[ConversationMessage]:
+            raise AssertionError("rejected outcome must not invoke the builder")
+
+        result = await run_planner_turn(
+            repo=repo,
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.5",
+            litellm_kwargs={},
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            flow=None,
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=_ctx(current_version=3),
+            build_new_messages=_should_not_build,
+        )
+
+        assert result.kind == "rejected"
+        assert result.turn_telemetry is not None
+        assert result.turn_telemetry.outcome_kind == "rejected"
+        assert result.turn_telemetry.prompt_tokens == 200
+        assert result.turn_telemetry.architecture_commit_populated is False
+
+    async def test_parse_failed_outcome_populates_telemetry_with_length_finish_reason(
+        self,
+    ) -> None:
+        repo = _autospec_repo()
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            '{"partial":',
+            finish_reason="length",
+            completion_tokens=1024,
+        )
+
+        def _should_not_build(_a: Any) -> list[ConversationMessage]:
+            raise AssertionError("parse_failed outcome must not invoke the builder")
+
+        result = await run_planner_turn(
+            repo=repo,
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.5",
+            litellm_kwargs={},
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            flow=None,
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=_ctx(),
+            build_new_messages=_should_not_build,
+        )
+
+        assert result.kind == "parse_failed"
+        assert result.turn_telemetry is not None
+        assert result.turn_telemetry.outcome_kind == "parse_failed"
+        assert result.turn_telemetry.finish_reason == "length"
+        assert result.turn_telemetry.completion_tokens == 1024
+
+    async def test_propose_plan_pending_adapter_populates_telemetry(self) -> None:
+        repo = _autospec_repo()
+        commit = _make_commit()
+        state = _make_state(architecture_commit=commit)
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            _planner_output_json(
+                kind="propose_plan",
+                architecture_commit=commit,
+                draft_plan=_single_step_draft_plan(),
+            )
+        )
+
+        def _should_not_build(_a: Any) -> list[ConversationMessage]:
+            raise AssertionError("propose_plan_pending_adapter must not build")
+
+        result = await run_planner_turn(
+            repo=repo,
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.5",
+            litellm_kwargs={},
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            flow=None,
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=_ctx(state=state),
+            build_new_messages=_should_not_build,
+        )
+
+        assert result.kind == "propose_plan_pending_adapter"
+        assert result.turn_telemetry is not None
+        assert result.turn_telemetry.outcome_kind == "propose_plan_pending_adapter"
+        assert result.turn_telemetry.llm_calls_made == 1
+        # The committed architecture is already on the session state;
+        # the planner's propose_plan delta does not _populate_ a new commit.
+        assert result.turn_telemetry.architecture_commit_populated is False
+
+    async def test_injectable_clock_produces_deterministic_wall_clock(self) -> None:
+        """`telemetry_now_ms` overrides the default `time.perf_counter` source.
+
+        A deterministic tick sequence (start, end) lets the test assert
+        `wall_clock_ms == end - start` exactly, so a future refactor that
+        silently stops honoring the hook regresses here.
+        """
+        repo = _autospec_repo()
+        repo.commit_turn.return_value = 1
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            _planner_output_json(kind="ask_question")
+        )
+
+        ticks = iter([1_000, 1_725])
+
+        result = await run_planner_turn(
+            repo=repo,
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.5",
+            litellm_kwargs={},
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            flow=None,
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=_ctx(
+                required_slot_names=frozenset({"primary_runtime_input"})
+            ),
+            build_new_messages=lambda _a: [
+                ConversationMessage(role="user", content="Q")
+            ],
+            telemetry_now_ms=lambda: next(ticks),
+        )
+
+        assert result.turn_telemetry is not None
+        assert result.turn_telemetry.wall_clock_ms == 725
+
+    async def test_injectable_clock_clamps_backwards_drift_to_zero(self) -> None:
+        """A backwards clock (end < start) must not produce a negative wall_clock."""
+        repo = _autospec_repo()
+        repo.commit_turn.return_value = 1
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            _planner_output_json(kind="ask_question")
+        )
+
+        ticks = iter([5_000, 4_000])
+
+        result = await run_planner_turn(
+            repo=repo,
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.5",
+            litellm_kwargs={},
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            flow=None,
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=_ctx(
+                required_slot_names=frozenset({"primary_runtime_input"})
+            ),
+            build_new_messages=lambda _a: [
+                ConversationMessage(role="user", content="Q")
+            ],
+            telemetry_now_ms=lambda: next(ticks),
+        )
+
+        assert result.turn_telemetry is not None
+        assert result.turn_telemetry.wall_clock_ms == 0

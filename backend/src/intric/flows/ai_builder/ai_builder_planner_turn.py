@@ -28,6 +28,7 @@ flow stays on the normal return rather than running through a
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Literal
 from uuid import UUID
@@ -41,6 +42,7 @@ from intric.flows.ai_builder.ai_builder_orchestration_pipeline import (
     run_planner_pipeline,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import (
+    CommitArchitectureAction,
     OrchestrationContext,
     PlannerOutput,
     ProposePlanAction,
@@ -60,6 +62,40 @@ PlannerTurnOutcomeKind = Literal[
     "parse_failed",
     "propose_plan_pending_adapter",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class TurnTelemetry:
+    """Per-turn observability record attached to every outcome.
+
+    Captures what the caller needs for logs, SSE telemetry frames, and
+    the session-level aggregator (`ai_builder_telemetry.summarize_session_telemetry`).
+
+    `wall_clock_ms` is the end-to-end turn duration measured around the
+    pipeline + dispatcher composition; on v2 this is dominated by LLM
+    latency so we do not separate a per-call timing yet. `llm_calls_made`
+    and `repair_attempts` are forwarded from `PipelineOutcome` unchanged.
+
+    `architecture_commit_populated` is the per-turn rate signal the
+    metric contract requires: `True` iff the turn was a successfully
+    dispatched `commit_architecture` action. It is NOT set when the
+    session already had a committed architecture and the planner
+    proposed a plan against it — that turn neither populates nor
+    changes the commit, so the rate tracks freshly-persisted commits
+    only.
+    """
+
+    request_id: str | None
+    model: str
+    outcome_kind: PlannerTurnOutcomeKind
+    wall_clock_ms: int
+    llm_calls_made: int
+    repair_attempts: int
+    architecture_commit_populated: bool
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    finish_reason: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +127,7 @@ class PlannerTurnResult:
     """
 
     kind: PlannerTurnOutcomeKind
+    turn_telemetry: TurnTelemetry
     accepted_output: PlannerOutput | None = None
     dispatch_result: PlannerDispatchResult | None = None
     rejection: RejectionReason | None = None
@@ -115,6 +152,7 @@ async def run_planner_turn(
     build_new_messages: Callable[[PlannerOutput], "list[ConversationMessage]"],
     request_id: UUID | None = None,
     lock_token: UUID | None = None,
+    telemetry_now_ms: Callable[[], int] | None = None,
 ) -> PlannerTurnResult:
     """Run one planner turn end-to-end and persist the result.
 
@@ -132,7 +170,15 @@ async def run_planner_turn(
     `repo.commit_turn` in a savepoint; the caller does NOT need to
     commit again. On every other outcome, NO repo write has happened
     and `build_new_messages` was NOT called.
+
+    `telemetry_now_ms` is an injectable millisecond clock used for
+    `wall_clock_ms`; defaults to a `time.perf_counter`-based source.
+    Tests override it to assert deterministic timings; production
+    callers omit it.
     """
+    now_ms = telemetry_now_ms if telemetry_now_ms is not None else _default_now_ms
+    turn_started_ms = now_ms()
+
     pipeline_outcome: PipelineOutcome = await run_planner_pipeline(
         litellm_client=litellm_client,
         litellm_model=litellm_model,
@@ -140,6 +186,28 @@ async def run_planner_turn(
         base_messages=base_messages,
         orchestration_context=orchestration_context,
     )
+
+    def _telemetry(
+        outcome_kind: PlannerTurnOutcomeKind,
+        *,
+        architecture_commit_populated: bool,
+    ) -> TurnTelemetry:
+        completion = pipeline_outcome.final_completion
+        return TurnTelemetry(
+            request_id=str(request_id) if request_id is not None else None,
+            model=litellm_model,
+            outcome_kind=outcome_kind,
+            wall_clock_ms=max(0, now_ms() - turn_started_ms),
+            llm_calls_made=pipeline_outcome.llm_calls_made,
+            repair_attempts=pipeline_outcome.repair_attempts,
+            architecture_commit_populated=architecture_commit_populated,
+            prompt_tokens=completion.prompt_tokens if completion is not None else None,
+            completion_tokens=(
+                completion.completion_tokens if completion is not None else None
+            ),
+            total_tokens=completion.total_tokens if completion is not None else None,
+            finish_reason=completion.finish_reason if completion is not None else None,
+        )
 
     if pipeline_outcome.kind == "parse_failed":
         return PlannerTurnResult(
@@ -149,6 +217,9 @@ async def run_planner_turn(
             parse_error_message=pipeline_outcome.parse_error_message,
             llm_calls_made=pipeline_outcome.llm_calls_made,
             repair_attempts=pipeline_outcome.repair_attempts,
+            turn_telemetry=_telemetry(
+                "parse_failed", architecture_commit_populated=False
+            ),
         )
     if pipeline_outcome.kind == "rejected":
         return PlannerTurnResult(
@@ -157,6 +228,7 @@ async def run_planner_turn(
             final_completion=pipeline_outcome.final_completion,
             llm_calls_made=pipeline_outcome.llm_calls_made,
             repair_attempts=pipeline_outcome.repair_attempts,
+            turn_telemetry=_telemetry("rejected", architecture_commit_populated=False),
         )
 
     assert pipeline_outcome.accepted_output is not None
@@ -169,6 +241,10 @@ async def run_planner_turn(
             final_completion=pipeline_outcome.final_completion,
             llm_calls_made=pipeline_outcome.llm_calls_made,
             repair_attempts=pipeline_outcome.repair_attempts,
+            turn_telemetry=_telemetry(
+                "propose_plan_pending_adapter",
+                architecture_commit_populated=False,
+            ),
         )
 
     new_messages = build_new_messages(accepted)
@@ -190,11 +266,22 @@ async def run_planner_turn(
         final_completion=pipeline_outcome.final_completion,
         llm_calls_made=pipeline_outcome.llm_calls_made,
         repair_attempts=pipeline_outcome.repair_attempts,
+        turn_telemetry=_telemetry(
+            "dispatched",
+            architecture_commit_populated=isinstance(
+                accepted.planner_action, CommitArchitectureAction
+            ),
+        ),
     )
+
+
+def _default_now_ms() -> int:
+    return int(time.perf_counter() * 1000)
 
 
 __all__ = [
     "PlannerTurnOutcomeKind",
     "PlannerTurnResult",
+    "TurnTelemetry",
     "run_planner_turn",
 ]
