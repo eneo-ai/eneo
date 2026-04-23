@@ -91,20 +91,24 @@ def build_planning_state_from_conversation(
     )
 
 
-_PHASE_RANK: dict[str, int] = {
-    "awaiting_input": 0,
-    "discovering": 1,
-    "ready_to_commit": 2,
-    "plan_proposed": 3,
-}
+# PlanningPhase advance order. Stored as a tuple (not a dict with a get-default)
+# so adding a new PlanningPhase Literal without updating this tuple raises
+# ValueError on .index() instead of silently ranking the unknown phase at 0 —
+# preservation must never silently degrade when the state machine grows.
+_PHASE_ORDER: tuple[str, ...] = (
+    "awaiting_input",
+    "discovering",
+    "ready_to_commit",
+    "plan_proposed",
+)
 
 
 def carry_forward_persisted_planner_state(
     rebuilt: PlanningState,
     persisted: PlanningState | None,
-) -> PlanningState:
+) -> None:
     """Carry forward planner-owned fields from the previously persisted
-    state onto a freshly rebuilt state.
+    state onto a freshly rebuilt state — mutation-only, no return.
 
     `build_planning_state_from_conversation` reseeds only the
     deterministic slot surface. Planner-owned fields
@@ -120,7 +124,7 @@ def carry_forward_persisted_planner_state(
     derived, the advanced phase is preserved.
     """
     if persisted is None:
-        return rebuilt
+        return
     if (
         rebuilt.architecture_commit is None
         and persisted.architecture_commit is not None
@@ -128,9 +132,8 @@ def carry_forward_persisted_planner_state(
         rebuilt.architecture_commit = persisted.architecture_commit
     if rebuilt.draft_plan_id is None and persisted.draft_plan_id is not None:
         rebuilt.draft_plan_id = persisted.draft_plan_id
-    if _PHASE_RANK.get(rebuilt.phase, 0) < _PHASE_RANK.get(persisted.phase, 0):
+    if _PHASE_ORDER.index(rebuilt.phase) < _PHASE_ORDER.index(persisted.phase):
         rebuilt.phase = persisted.phase
-    return rebuilt
 
 
 def build_planning_state_prompt_block(
