@@ -391,6 +391,39 @@ class TestBilingualContract:
                 )
 
 
+class TestQuestionExposure:
+    """Every `QuestionTemplate` must declare whether the question surfaces
+    as a user-visible requirement or stays internal to the planner. The
+    Pattern Registry and discovery decision engine read this field to
+    decide which questions the UI renders — the legacy
+    ``DiscoveryQuestionSuggestion`` copies it today via
+    ``question_exposure_for_id`` but only one source of truth should
+    own the mapping.
+    """
+
+    def test_every_template_has_declared_exposure(self) -> None:
+        for template in QUESTION_CATALOG.values():
+            assert template.exposure in {"user_requirement", "planner_internal"}, (
+                f"{template.id}: exposure must be user_requirement or "
+                f"planner_internal, got {template.exposure!r}"
+            )
+
+    def test_structured_analysis_need_is_planner_internal(self) -> None:
+        template = QUESTION_CATALOG["structured_analysis_need"]
+        assert template.exposure == "planner_internal", (
+            "structured_analysis_need is a planner-internal follow-up; "
+            "it must not surface as a user-visible requirement"
+        )
+
+    def test_user_facing_slots_default_to_user_requirement(self) -> None:
+        user_facing_slots = KNOWN_REQUIREMENT_SLOT_NAMES - {"structured_analysis_need"}
+        for slot in user_facing_slots:
+            template = QUESTION_CATALOG[slot]
+            assert template.exposure == "user_requirement", (
+                f"{slot}: expected user_requirement exposure, got {template.exposure!r}"
+            )
+
+
 class TestPatternRegistryBackfill:
     """Pattern Registry's `question_template_ids` field forward-references
     this catalog. The dangling-reference CI test below guards any

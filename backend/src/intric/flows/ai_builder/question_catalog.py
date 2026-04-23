@@ -50,6 +50,8 @@ QUESTION_CATALOG_VERSION: int = 1
 
 Locale = Literal["sv", "en"]
 
+QuestionExposure = Literal["user_requirement", "planner_internal"]
+
 
 @dataclass(frozen=True, slots=True)
 class QuestionOption:
@@ -105,6 +107,7 @@ class QuestionTemplate:
     options: tuple[QuestionOption, ...]
     worked_examples_sv: tuple[str, ...]
     worked_examples_en: tuple[str, ...]
+    exposure: QuestionExposure = "user_requirement"
 
     def __post_init__(self) -> None:
         if not self.id or not self.id.strip():
@@ -474,6 +477,7 @@ _STRUCTURED_ANALYSIS_NEED = QuestionTemplate(
         "Extract party, date, and amount before the final report.",
         "Write the analysis directly as prose without an intermediate step.",
     ),
+    exposure="planner_internal",
 )
 
 

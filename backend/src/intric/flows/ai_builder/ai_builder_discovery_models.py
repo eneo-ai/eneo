@@ -17,13 +17,13 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     InputIntentResolution,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
+from intric.flows.ai_builder.question_catalog import QuestionExposure
 
 DiscoverySeverity = Literal["blocking", "info"]
 DiscoveryLanguage = Literal["sv", "en"]
 QuestionLevel = Literal["blocking", "high_value", "nice_to_have"]
 DiscoveryImpact = Literal["architecture", "quality", "polish"]
 DiscoveryConfidence = Literal["high", "medium", "low"]
-QuestionExposure = Literal["user_requirement", "planner_internal"]
 DiscoveryResolvedBy = Literal[
     "structured_answer",
     "deterministic_inference",
