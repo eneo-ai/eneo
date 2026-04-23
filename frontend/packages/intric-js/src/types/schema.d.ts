@@ -936,64 +936,6 @@ export interface paths {
     patch: operations["update_provisioning_setting_api_v1_settings_provisioning_patch"];
     trace?: never;
   };
-  "/api/v1/settings/scope-enforcement": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    /**
-     * Toggle API key scope enforcement
-     * @description Toggle API key scope enforcement for your tenant.
-     *
-     *     **Admin Only:** Requires admin permissions.
-     *
-     *     **Behavior:**
-     *     - Updates the `api_key_scope_enforcement` feature flag for your tenant
-     *     - When enabled: API keys are restricted to resources within their configured scope
-     *     - When disabled: All API keys can access resources beyond their configured scope
-     *     - Disabling scope enforcement also disables strict mode for consistency
-     *     - Change takes effect immediately for all API key requests
-     */
-    patch: operations["update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch"];
-    trace?: never;
-  };
-  "/api/v1/settings/strict-mode": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    /**
-     * Toggle API key strict mode
-     * @description Toggle API key strict mode for your tenant.
-     *
-     *     **Admin Only:** Requires admin permissions.
-     *
-     *     **Behavior:**
-     *     - Updates the `api_key_strict_mode` feature flag for your tenant
-     *     - When enabled: scoped API keys are enforced with strict fail-closed semantics
-     *     - When disabled: default scope enforcement behavior applies
-     *     - Enabling strict mode requires `api_key_scope_enforcement` to be enabled
-     *     - Change takes effect immediately for API key requests
-     */
-    patch: operations["update_strict_mode_setting_api_v1_settings_strict_mode_patch"];
-    trace?: never;
-  };
   "/api/v1/settings/api-key-expiry-notifications": {
     parameters: {
       query?: never;
@@ -6639,6 +6581,11 @@ export interface components {
       /** Token Type */
       token_type: string;
     };
+    /** AccessTokenResponse */
+    AccessTokenResponse: {
+      /** Access Token */
+      access_token: string;
+    };
     /**
      * ActionConfig
      * @description Configuration for a single action type with metadata for UI display.
@@ -7024,17 +6971,6 @@ export interface components {
       api_key: components["schemas"]["ApiKeyV2"];
       /** @default exact_secret */
       match_reason?: components["schemas"]["ApiKeySearchMatchReason"];
-    };
-    /** ApiKeyInDB */
-    ApiKeyInDB: {
-      /** Truncated Key */
-      truncated_key: string;
-      /** Key */
-      key: string;
-      /** User Id */
-      user_id: string | null;
-      /** Assistant Id */
-      assistant_id: string | null;
     };
     /**
      * ApiKeyListResponse
@@ -7845,11 +7781,8 @@ export interface components {
       question: string;
       /** Session Id */
       session_id?: string | null;
-      /**
-       * Files
-       * @default []
-       */
-      files?: components["schemas"]["ModelId"][];
+      /** Files */
+      files?: string[];
       /**
        * Stream
        * @default false
@@ -7922,28 +7855,24 @@ export interface components {
        * Groups
        * @deprecated
        * @description This field is deprecated and will be ignored
-       * @default []
        */
       groups?: components["schemas"]["ModelId"][];
       /**
        * Websites
        * @deprecated
        * @description This field is deprecated and will be ignored
-       * @default []
        */
       websites?: components["schemas"]["ModelId"][];
       /**
        * Integration Knowledge List
        * @deprecated
        * @description This field is deprecated and will be ignored
-       * @default []
        */
       integration_knowledge_list?: components["schemas"]["ModelId"][];
       /**
        * Mcp Servers
        * @deprecated
        * @description This field is deprecated and will be ignored
-       * @default []
        */
       mcp_servers?: components["schemas"]["ModelId"][];
       /**
@@ -8045,7 +7974,7 @@ export interface components {
       space_id: string;
       completion_model_kwargs: components["schemas"]["ModelKwargs"];
       /** Logging Enabled */
-      logging_enabled: boolean;
+      logging_enabled: boolean | null;
       /** Attachments */
       attachments: components["schemas"]["FilePublic"][];
       allowed_attachments: components["schemas"]["FileRestrictions"];
@@ -8056,9 +7985,7 @@ export interface components {
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
       /** Mcp Servers */
-      mcp_servers: {
-        [key: string]: unknown;
-      }[];
+      mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
       /** Mcp Tools */
       mcp_tools?: components["schemas"]["MCPToolSetting"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
@@ -8113,12 +8040,12 @@ export interface components {
       id: string;
       /** Name */
       name: string;
-      completion_model_kwargs?: components["schemas"]["ModelKwargs"];
+      completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
       /**
        * Logging Enabled
        * @default false
        */
-      logging_enabled?: boolean;
+      logging_enabled?: boolean | null;
       /**
        * Permissions
        * @default []
@@ -8706,7 +8633,7 @@ export interface components {
       /** Name */
       name: string;
       /** Nickname */
-      nickname: string;
+      nickname?: string | null;
       /** Family */
       family?: string | null;
       /** Max Input Tokens */
@@ -8769,7 +8696,7 @@ export interface components {
       /** Name */
       name: string;
       /** Nickname */
-      nickname: string;
+      nickname?: string | null;
       /** Family */
       family?: string | null;
       /** Max Input Tokens */
@@ -8822,7 +8749,7 @@ export interface components {
       /** Name */
       name: string;
       /** Nickname */
-      nickname: string;
+      nickname?: string | null;
       /** Family */
       family?: string | null;
       /** Max Input Tokens */
@@ -8929,7 +8856,7 @@ export interface components {
       /** Name */
       name: string;
       /** Nickname */
-      nickname: string;
+      nickname?: string | null;
       /** Family */
       family?: string | null;
       /** Max Input Tokens */
@@ -9022,7 +8949,7 @@ export interface components {
       /** Name */
       name: string;
       /** Nickname */
-      nickname: string;
+      nickname?: string | null;
       /** Family */
       family?: string | null;
       /** Max Input Tokens */
@@ -9171,10 +9098,7 @@ export interface components {
     CrawlerHealthResponse: {
       /** Status */
       status: string;
-      /**
-       * Status Flags
-       * @default []
-       */
+      /** Status Flags */
       status_flags?: string[];
       /**
        * Status Reason
@@ -9183,55 +9107,12 @@ export interface components {
       status_reason?: string;
       /** Response Timestamp Utc */
       response_timestamp_utc: string;
-      /**
-       * @default {
-       *       "db_query_ok": true,
-       *       "arq_ongoing": 0
-       *     }
-       */
       crawler_activity?: components["schemas"]["CrawlerActivity"];
-      /**
-       * @default {
-       *       "j_complete": 0,
-       *       "j_failed": 0,
-       *       "j_retried": 0,
-       *       "j_ongoing": 0,
-       *       "queued": 0
-       *     }
-       */
       arq?: components["schemas"]["ARQHealth"];
-      /**
-       * @default {
-       *       "zombies_reconciled": 0,
-       *       "expired_killed": 0,
-       *       "rescued": 0,
-       *       "early_zombies_failed": 0,
-       *       "long_running_failed": 0,
-       *       "slots_released": 0
-       *     }
-       */
       watchdog?: components["schemas"]["WatchdogMetrics"];
-      /**
-       * @default {
-       *       "status": "UNKNOWN"
-       *     }
-       */
       feeder?: components["schemas"]["FeederLeader"];
-      /**
-       * @default {
-       *       "total": 0,
-       *       "tenant_count": 0,
-       *       "top_tenants": {}
-       *     }
-       */
       pending?: components["schemas"]["PendingQueueSummary"];
       thresholds: components["schemas"]["HealthThresholds"];
-      /**
-       * @default {
-       *       "arq_raw": "",
-       *       "queue_name": "arq:queue"
-       *     }
-       */
       debug?: components["schemas"]["DebugInfo"];
     };
     /**
@@ -9719,7 +9600,7 @@ export interface components {
       space_id: string;
       completion_model_kwargs: components["schemas"]["ModelKwargs"];
       /** Logging Enabled */
-      logging_enabled: boolean;
+      logging_enabled: boolean | null;
       /** Attachments */
       attachments: components["schemas"]["FilePublic"][];
       allowed_attachments: components["schemas"]["FileRestrictions"];
@@ -9730,9 +9611,7 @@ export interface components {
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
       /** Mcp Servers */
-      mcp_servers: {
-        [key: string]: unknown;
-      }[];
+      mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
       /** Mcp Tools */
       mcp_tools?: components["schemas"]["MCPToolSetting"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
@@ -10231,7 +10110,8 @@ export interface components {
       | 9034
       | 9035
       | 9036
-      | 9037;
+      | 9037
+      | 9038;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -11034,10 +10914,7 @@ export interface components {
       wrapper_id?: string | null;
       /** Wrapper Name */
       wrapper_name?: string | null;
-      /**
-       * Permissions
-       * @default []
-       */
+      /** Permissions */
       permissions?: components["schemas"]["ResourcePermission"][];
       metadata: components["schemas"]["IntegrationKnowledgeMetaData"];
       /**
@@ -11252,6 +11129,31 @@ export interface components {
       /** Documentation Url */
       documentation_url: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+    };
+    /** MCPServerPublicDict */
+    MCPServerPublicDict: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Http Url */
+      http_url: string | null;
+      /** Http Auth Type */
+      http_auth_type: string | null;
+      /** Tags */
+      tags: string[] | null;
+      /** Icon Url */
+      icon_url: string | null;
+      /** Security Classification */
+      security_classification: {
+        [key: string]: unknown;
+      } | null;
+      /** Tools */
+      tools: {
+        [key: string]: unknown;
+      }[];
     };
     /**
      * MCPServerSettingsCreate
@@ -12737,29 +12639,13 @@ export interface components {
       /** Space Id */
       space_id?: string | null;
       prompt?: components["schemas"]["PromptCreate"] | null;
-      /**
-       * Groups
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
+      /** Groups */
       groups?: components["schemas"]["ModelId"][] | null;
-      /**
-       * Websites
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
+      /** Websites */
       websites?: components["schemas"]["ModelId"][] | null;
-      /**
-       * Integration Knowledge List
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
+      /** Integration Knowledge List */
       integration_knowledge_list?: components["schemas"]["ModelId"][] | null;
-      /**
-       * Mcp Servers
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
+      /** Mcp Servers */
       mcp_servers?: components["schemas"]["ModelId"][] | null;
       /**
        * @deprecated
@@ -13000,10 +12886,7 @@ export interface components {
        * @default 0
        */
       tenant_count?: number;
-      /**
-       * Top Tenants
-       * @default {}
-       */
+      /** Top Tenants */
       top_tenants?: {
         [key: string]: number;
       };
@@ -13186,7 +13069,12 @@ export interface components {
     ResourcePermissionLevel: "none" | "read" | "write" | "admin";
     /**
      * ResourcePermissions
-     * @description Per-resource-type permission overrides. Each level must not exceed the key's simple permission.
+     * @description Per-resource-type permission overrides for sk_ keys.
+     *
+     *     For sk_ keys, the top-level ``permission`` field is derived automatically
+     *     as ``max(assistants, apps, spaces, knowledge)`` by
+     *     :func:`derive_permission_from_resource_permissions`.  pk_ keys do not
+     *     support fine-grained permissions.
      */
     ResourcePermissions: {
       /** @default none */
@@ -13773,10 +13661,7 @@ export interface components {
     };
     /** SettingsPublic */
     SettingsPublic: {
-      /**
-       * Chatbot Widget
-       * @default {}
-       */
+      /** Chatbot Widget */
       chatbot_widget?: {
         [key: string]: unknown;
       };
@@ -13800,16 +13685,6 @@ export interface components {
        * @default false
        */
       provisioning?: boolean;
-      /**
-       * Api Key Scope Enforcement
-       * @default true
-       */
-      api_key_scope_enforcement?: boolean;
-      /**
-       * Api Key Strict Mode
-       * @default false
-       */
-      api_key_strict_mode?: boolean;
       /**
        * Api Key Expiry Notifications
        * @default true
@@ -13917,6 +13792,13 @@ export interface components {
       /** Expires At */
       expires_at: number;
     };
+    /** SkippedDetail */
+    SkippedDetail: {
+      /** File */
+      file: string;
+      /** Reason */
+      reason: string;
+    };
     /**
      * SortField
      * @description Allowed fields for sorting user lists
@@ -13958,7 +13840,7 @@ export interface components {
        * @description Icon ID referencing an uploaded icon
        */
       icon_id?: string | null;
-      applications: components["schemas"]["Applications"];
+      applications?: components["schemas"]["Applications"] | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
@@ -14035,8 +13917,8 @@ export interface components {
        * @description Icon ID referencing an uploaded icon
        */
       icon_id?: string | null;
-      applications: components["schemas"]["Applications"];
-      default_assistant: components["schemas"]["DefaultAssistant"];
+      applications?: components["schemas"]["Applications"] | null;
+      default_assistant?: components["schemas"]["DefaultAssistant"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /** Embedding Models */
@@ -14046,9 +13928,7 @@ export interface components {
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
       /** Mcp Servers */
-      mcp_servers: {
-        [key: string]: unknown;
-      }[];
+      mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
       knowledge: components["schemas"]["Knowledge"];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];
       group_members: components["schemas"]["PaginatedPermissions_SpaceGroupMember_"];
@@ -14156,16 +14036,10 @@ export interface components {
     };
     /** StorageSpaceMemberModel */
     StorageSpaceMemberModel: {
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string;
-      /**
-       * Updated At
-       * Format: date-time
-       */
-      updated_at: string;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
       /**
        * Id
        * Format: uuid
@@ -14245,10 +14119,7 @@ export interface components {
       sync_type: string;
       /** Status */
       status: string;
-      /** Metadata */
-      metadata?: {
-        [key: string]: unknown;
-      } | null;
+      metadata?: components["schemas"]["SyncMetadata"] | null;
       /** Error Message */
       error_message?: string | null;
       /**
@@ -14292,9 +14163,7 @@ export interface components {
        * Skipped Details
        * @description Get skipped file details from metadata.
        */
-      readonly skipped_details: {
-        [key: string]: unknown;
-      }[];
+      readonly skipped_details: components["schemas"]["SkippedDetail"][];
       /**
        * Duration Seconds
        * @description Calculate sync duration in seconds.
@@ -14305,6 +14174,21 @@ export interface components {
        * @description Total items processed in this sync.
        */
       readonly total_items_processed: number;
+    };
+    /** SyncMetadata */
+    SyncMetadata: {
+      /** Files Processed */
+      files_processed?: number;
+      /** Files Deleted */
+      files_deleted?: number;
+      /** Pages Processed */
+      pages_processed?: number;
+      /** Folders Processed */
+      folders_processed?: number;
+      /** Skipped Items */
+      skipped_items?: number;
+      /** Skipped Details */
+      skipped_details?: components["schemas"]["SkippedDetail"][];
     };
     /**
      * Task
@@ -14404,128 +14288,75 @@ export interface components {
       /**
        * Provider Id
        * Format: uuid
-       * @description Model provider ID
        */
       provider_id: string;
-      /**
-       * Name
-       * @description Model identifier (e.g., 'gpt-4o', 'meta-llama/Meta-Llama-3-70B-Instruct')
-       */
+      /** Name */
       name: string;
-      /**
-       * Display Name
-       * @description User-friendly display name
-       */
+      /** Display Name */
       display_name: string;
-      /**
-       * Max Input Tokens
-       * @description Maximum input context tokens
-       */
+      /** Max Input Tokens */
       max_input_tokens: number;
-      /**
-       * Max Output Tokens
-       * @description Maximum output tokens
-       */
+      /** Max Output Tokens */
       max_output_tokens: number;
       /**
        * Vision
-       * @description Supports vision/image inputs
        * @default false
        */
       vision?: boolean;
       /**
        * Reasoning
-       * @description Supports extended reasoning
        * @default false
        */
       reasoning?: boolean;
       /**
        * Supports Tool Calling
-       * @description Supports function/tool calling
        * @default false
        */
       supports_tool_calling?: boolean;
       /**
        * Hosting
-       * @description Hosting location (swe, eu, usa)
        * @default swe
        */
       hosting?: string;
       /**
        * Family
-       * @description Model family (e.g., 'openai', 'anthropic', 'deepseek')
        * @default openai
        */
       family?: string;
       /**
        * Is Active
-       * @description Enable in organization
        * @default true
        */
       is_active?: boolean;
       /**
        * Is Default
-       * @description Set as default model
        * @default false
        */
       is_default?: boolean;
     };
     /** TenantCompletionModelUpdate */
     TenantCompletionModelUpdate: {
-      /**
-       * Name
-       * @description Model identifier (e.g., 'gpt-4o', 'claude-3-sonnet')
-       */
+      /** Name */
       name?: string | null;
-      /**
-       * Display Name
-       * @description User-friendly display name
-       */
+      /** Display Name */
       display_name?: string | null;
-      /**
-       * Description
-       * @description Model description
-       */
+      /** Description */
       description?: string | null;
-      /**
-       * Max Input Tokens
-       * @description Maximum input context tokens
-       */
+      /** Max Input Tokens */
       max_input_tokens?: number | null;
-      /**
-       * Max Output Tokens
-       * @description Maximum output tokens
-       */
+      /** Max Output Tokens */
       max_output_tokens?: number | null;
-      /**
-       * Vision
-       * @description Supports vision/image inputs
-       */
+      /** Vision */
       vision?: boolean | null;
-      /**
-       * Reasoning
-       * @description Supports extended reasoning
-       */
+      /** Reasoning */
       reasoning?: boolean | null;
-      /**
-       * Supports Tool Calling
-       * @description Supports function/tool calling
-       */
+      /** Supports Tool Calling */
       supports_tool_calling?: boolean | null;
-      /**
-       * Hosting
-       * @description Hosting location (swe, eu, usa)
-       */
+      /** Hosting */
       hosting?: string | null;
-      /**
-       * Open Source
-       * @description Is the model open source
-       */
+      /** Open Source */
       open_source?: boolean | null;
-      /**
-       * Stability
-       * @description Model stability (stable, experimental)
-       */
+      /** Stability */
       stability?: string | null;
     };
     /** TenantEmbeddingModelCreate */
@@ -14704,8 +14535,11 @@ export interface components {
     };
     /** TenantIntegration */
     TenantIntegration: {
-      /** Id */
-      id?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id?: string;
       /** Name */
       name: string;
       /** Description */
@@ -15362,13 +15196,8 @@ export interface components {
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
-      /**
-       * Mcp Servers
-       * @default []
-       */
-      mcp_servers?: {
-        [key: string]: unknown;
-      }[];
+      /** Mcp Servers */
+      mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
     };
     /** UpdateSpaceGroupMemberRequest */
     UpdateSpaceGroupMemberRequest: {
@@ -15532,11 +15361,20 @@ export interface components {
        * @example john.doe
        */
       username?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
       /**
        * Id
        * Format: uuid
        */
       id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
       /** Password */
       password?: string | null;
       /** Salt */
@@ -15557,13 +15395,16 @@ export interface components {
        */
       is_active?: boolean;
       state: components["schemas"]["UserState"];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
       /** Quota Limit */
       quota_limit?: number | null;
+      /**
+       * User Groups
+       * @default []
+       */
+      user_groups?: components["schemas"]["UserGroupInDBRead"][];
+      tenant: components["schemas"]["TenantInDB"];
+      api_key?: components["schemas"]["ApiKey"] | null;
+      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
       /**
        * Roles
        * @default []
@@ -15574,18 +15415,6 @@ export interface components {
        * @default []
        */
       predefined_roles?: components["schemas"]["PredefinedRoleInDB"][];
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * User Groups
-       * @default []
-       */
-      user_groups?: components["schemas"]["UserGroupInDBRead"][];
-      tenant: components["schemas"]["TenantInDB"];
-      api_key: components["schemas"]["ApiKey"] | null;
-      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
       /**
        * Quota Used
        * @default 0
@@ -15596,7 +15425,7 @@ export interface components {
        * @description Timestamp when user was soft-deleted (null for active users)
        */
       deleted_at?: string | null;
-      access_token: components["schemas"]["AccessToken"] | null;
+      access_token?: components["schemas"]["AccessToken"] | null;
       /** Modules */
       readonly modules: string[];
       /** User Groups Ids */
@@ -15675,11 +15504,10 @@ export interface components {
       state: string;
       /**
        * Deleted At
-       * Format: date-time
        * @description When the user was deleted (for external tracking)
        * @example 2025-08-15T14:20:00Z
        */
-      deleted_at: string;
+      deleted_at: string | null;
     };
     /** UserGroupCreateRequest */
     UserGroupCreateRequest: {
@@ -15758,11 +15586,20 @@ export interface components {
        * @example john.doe
        */
       username?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
       /**
        * Id
        * Format: uuid
        */
       id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
       /** Password */
       password?: string | null;
       /** Salt */
@@ -15783,13 +15620,16 @@ export interface components {
        */
       is_active?: boolean;
       state: components["schemas"]["UserState"];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
       /** Quota Limit */
       quota_limit?: number | null;
+      /**
+       * User Groups
+       * @default []
+       */
+      user_groups?: components["schemas"]["UserGroupInDBRead"][];
+      tenant: components["schemas"]["TenantInDB"];
+      api_key?: components["schemas"]["ApiKey"] | null;
+      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
       /**
        * Roles
        * @default []
@@ -15800,18 +15640,6 @@ export interface components {
        * @default []
        */
       predefined_roles?: components["schemas"]["PredefinedRoleInDB"][];
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * User Groups
-       * @default []
-       */
-      user_groups?: components["schemas"]["UserGroupInDBRead"][];
-      tenant: components["schemas"]["TenantInDB"];
-      api_key?: components["schemas"]["ApiKeyInDB"] | null;
-      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
       /**
        * Quota Used
        * @default 0
@@ -15831,8 +15659,11 @@ export interface components {
     };
     /** UserIntegration */
     UserIntegration: {
-      /** Id */
-      id?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id?: string;
       /** Name */
       name: string;
       /** Description */
@@ -15997,11 +15828,10 @@ export interface components {
       state: string;
       /**
        * State Changed At
-       * Format: date-time
        * @description When the user state was last changed
        * @example 2025-09-10T08:30:00Z
        */
-      state_changed_at: string;
+      state_changed_at: string | null;
     };
     /** UserTokenUsage */
     UserTokenUsage: {
@@ -18621,7 +18451,7 @@ export interface operations {
         /** @description Email of user */
         email?: string | null;
         /** @description Users per page */
-        limit?: number;
+        limit?: number | null;
         /** @description Current cursor */
         cursor?: string | null;
         /** @description Show previous page */
@@ -19803,72 +19633,6 @@ export interface operations {
       };
     };
   };
-  update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ToggleSettingUpdate"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["SettingsPublic"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  update_strict_mode_setting_api_v1_settings_strict_mode_patch: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ToggleSettingUpdate"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["SettingsPublic"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
   update_api_key_expiry_notifications_setting_api_v1_settings_api_key_expiry_notifications_patch: {
     parameters: {
       query?: never;
@@ -19905,7 +19669,7 @@ export interface operations {
   get_assistants_api_v1_assistants__get: {
     parameters: {
       query?: {
-        name?: string;
+        name?: string | null;
         for_tenant?: boolean;
       };
       header?: never;
@@ -20128,8 +19892,8 @@ export interface operations {
   get_assistant_sessions_api_v1_assistants__id__sessions__get: {
     parameters: {
       query?: {
-        limit?: number;
-        cursor?: string;
+        limit?: number | null;
+        cursor?: string | null;
         previous?: boolean;
       };
       header?: never;
@@ -20237,7 +20001,7 @@ export interface operations {
                 /** Name */
                 name: string;
                 /** Nickname */
-                nickname: string;
+                nickname?: string | null;
                 /** Family */
                 family?: string | null;
                 /** Max Input Tokens */
@@ -20557,7 +20321,7 @@ export interface operations {
                 /** Name */
                 name: string;
                 /** Nickname */
-                nickname: string;
+                nickname?: string | null;
                 /** Family */
                 family?: string | null;
                 /** Max Input Tokens */
@@ -21361,8 +21125,8 @@ export interface operations {
         assistant_id?: string | null;
         /** @description The UUID of the group chat */
         group_chat_id?: string | null;
-        limit?: number;
-        cursor?: string;
+        limit?: number | null;
+        cursor?: string | null;
         previous?: boolean;
       };
       header?: never;
@@ -22095,7 +21859,7 @@ export interface operations {
   get_services_api_v1_services__get: {
     parameters: {
       query?: {
-        name?: string;
+        name?: string | null;
       };
       header?: never;
       path?: never;
@@ -22892,19 +22656,12 @@ export interface operations {
   get_users_api_v1_admin_users__get: {
     parameters: {
       query?: {
-        /** @description Page number (1-100) */
         page?: number;
-        /** @description Users per page (1-100) */
         page_size?: number;
-        /** @description Search by email (case-insensitive, partial match) */
         search_email?: string | null;
-        /** @description Search by username (case-insensitive, partial match) */
         search_name?: string | null;
-        /** @description Sort field (default: alphabetical by email) */
         sort_by?: components["schemas"]["SortField"];
-        /** @description Sort order (default: ascending A-Z) */
         sort_order?: components["schemas"]["SortOrder"];
-        /** @description Filter by user state (active includes invited, inactive for temporary leave) */
         state_filter?: components["schemas"]["StateFilter"] | null;
       };
       header?: never;
@@ -23835,29 +23592,17 @@ export interface operations {
   list_api_keys_admin_api_v1_admin_api_keys_get: {
     parameters: {
       query?: {
-        /** @description Keys per page */
-        limit?: number | null;
-        /** @description Current cursor */
+        limit?: number;
         cursor?: string | null;
-        /** @description Show previous page */
         previous?: boolean;
-        /** @description Scope type filter */
         scope_type?: components["schemas"]["ApiKeyScopeType"] | null;
-        /** @description Scope id filter */
         scope_id?: string | null;
-        /** @description State filter */
         state?: components["schemas"]["ApiKeyState"] | null;
-        /** @description Key type filter */
         key_type?: components["schemas"]["ApiKeyType"] | null;
-        /** @description Owner user id filter */
         owner_user_id?: string | null;
-        /** @description Creator user id filter */
         created_by_user_id?: string | null;
-        /** @description How UI user filter should be interpreted when a single user filter is provided. */
         user_relation?: components["schemas"]["ApiKeyUserRelation"];
-        /** @description Case-insensitive search over key name, suffix, description, owner, and creator identity. */
         search?: string | null;
-        /** @description Filter to keys with expires_at within this many days. */
         expires_within_days?: number | null;
       };
       header?: never;
@@ -23945,7 +23690,6 @@ export interface operations {
   get_expiring_keys_admin_api_v1_admin_api_keys_expiring_soon_get: {
     parameters: {
       query?: {
-        /** @description Look-ahead window in days */
         days?: number;
       };
       header?: never;
@@ -24107,9 +23851,7 @@ export interface operations {
   get_api_key_usage_admin_api_v1_admin_api_keys__id__usage_get: {
     parameters: {
       query?: {
-        /** @description Usage events per page. */
         limit?: number;
-        /** @description Usage pagination cursor. */
         cursor?: string | null;
       };
       header?: never;
@@ -26464,14 +26206,7 @@ export interface operations {
   };
   get_model_usage_details_api_v1_completion_models__model_id__usage_details_get: {
     parameters: {
-      query?: {
-        /** @description Filter by entity type */
-        entity_type?: string | null;
-        /** @description Cursor for pagination */
-        cursor?: string | null;
-        /** @description Number of results per page */
-        limit?: number;
-      };
+      query?: never;
       header?: never;
       path: {
         model_id: string;
@@ -26593,12 +26328,7 @@ export interface operations {
   };
   get_model_migration_history_api_v1_completion_models__model_id__migration_history_get: {
     parameters: {
-      query?: {
-        /** @description Number of results per page */
-        limit?: number;
-        /** @description Offset for pagination */
-        offset?: number;
-      };
+      query?: never;
       header?: never;
       path: {
         model_id: string;
@@ -26638,12 +26368,7 @@ export interface operations {
   };
   get_all_migration_history_api_v1_completion_models_migration_history_get: {
     parameters: {
-      query?: {
-        /** @description Number of results per page */
-        limit?: number;
-        /** @description Offset for pagination */
-        offset?: number;
-      };
+      query?: never;
       header?: never;
       path?: never;
       cookie?: never;
@@ -26657,15 +26382,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModelMigrationHistory"][];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -26955,7 +26671,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
     };
@@ -26975,7 +26693,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: string[];
+          };
         };
       };
     };
@@ -26999,7 +26719,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: string[];
+          };
         };
       };
       /** @description Validation Error */
@@ -27030,7 +26752,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Validation Error */
@@ -27154,7 +26878,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: string;
+          };
         };
       };
       /** @description Not Found */
@@ -27194,7 +26920,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          }[];
         };
       };
       /** @description Not Found */
@@ -27234,7 +26962,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Not Found */
@@ -27278,7 +27008,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Not Found */
@@ -27933,7 +27665,7 @@ export interface operations {
         token: string;
       };
       header?: {
-        range?: string;
+        range?: string | null;
       };
       path: {
         id: string;
@@ -33660,7 +33392,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: string | boolean;
+          };
         };
       };
       /** @description Not Found */
@@ -33698,7 +33432,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: string | boolean;
+          };
         };
       };
       /** @description Internal Server Error */
@@ -34750,7 +34486,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["AccessTokenResponse"];
         };
       };
       /** @description Invalid or expired state */
