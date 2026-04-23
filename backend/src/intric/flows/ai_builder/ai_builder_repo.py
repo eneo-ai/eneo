@@ -868,7 +868,7 @@ class AIBuilderRepository:
         `BadRequestException(code="planning_state_version_mismatch")`.
         Callers should reload the state and retry with the fresh
         version. When `base_version` is `None` the save is
-        unconditional (last-writer-wins), matching the pre-C.4 contract.
+        unconditional (last-writer-wins).
 
         Raises `NotFoundException` when `(session_id, tenant_id)` does
         not match a builder session — the caller misrouted the write.
