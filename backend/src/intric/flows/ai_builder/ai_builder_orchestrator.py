@@ -145,6 +145,7 @@ RejectionCode = Literal[
     "architecture_commit_illegal_tuple",
     "architecture_commit_unresolvable_capability",
     "propose_plan_without_architecture_commit",
+    "propose_plan_draft_plan_structural_mismatch",
 ]
 
 
@@ -215,7 +216,7 @@ def evaluate_planner_output(
     if isinstance(action, CommitArchitectureAction):
         return _check_commit_architecture(output, context)
     if isinstance(action, ProposePlanAction):
-        return _check_propose_plan(context)
+        return _check_propose_plan(output, context)
     return None
 
 
@@ -311,8 +312,11 @@ def _check_commit_architecture(
     return None
 
 
-def _check_propose_plan(context: OrchestrationContext) -> RejectionReason | None:
-    if context.session_state.architecture_commit is None:
+def _check_propose_plan(
+    output: PlannerOutput, context: OrchestrationContext
+) -> RejectionReason | None:
+    commit = context.session_state.architecture_commit
+    if commit is None:
         return RejectionReason(
             code="propose_plan_without_architecture_commit",
             detail=(
@@ -320,6 +324,20 @@ def _check_propose_plan(context: OrchestrationContext) -> RejectionReason | None
                 "is populated via a prior commit_architecture turn"
             ),
         )
+
+    draft_plan = output.planning_state_delta.draft_plan
+    if draft_plan is not None:
+        draft_step_count = len(draft_plan.steps)
+        commit_step_count = len(commit.tuples_chain)
+        if draft_step_count != commit_step_count:
+            return RejectionReason(
+                code="propose_plan_draft_plan_structural_mismatch",
+                detail=(
+                    f"draft_plan has {draft_step_count} step(s) but "
+                    f"architecture_commit.tuples_chain has {commit_step_count}; "
+                    "proposed plan must honor the committed tuple-chain length"
+                ),
+            )
     return None
 
 

@@ -97,12 +97,17 @@ def _commit_architecture(
     }
 
 
-def _propose_plan(*, base_version: int = 0) -> dict:
+def _propose_plan(
+    *,
+    base_version: int = 0,
+    step_count: int = 1,
+    include_draft_plan: bool = True,
+) -> dict:
+    delta: dict = {**_empty_delta_dict(base_version=base_version)}
+    if include_draft_plan:
+        delta["draft_plan"] = {"steps": [{"id": f"s{i}"} for i in range(step_count)]}
     return {
-        "planning_state_delta": {
-            **_empty_delta_dict(base_version=base_version),
-            "draft_plan": {"steps": []},
-        },
+        "planning_state_delta": delta,
         "planner_action": {
             "kind": "propose_plan",
             "payload": {"plan_reference": "latest"},
@@ -114,7 +119,7 @@ def _empty_session_state() -> PlanningState:
     return PlanningState.empty()
 
 
-def _session_state_with_commit() -> PlanningState:
+def _session_state_with_commit(*, step_count: int = 1) -> PlanningState:
     state = PlanningState.empty()
     state.architecture_commit = ArchitectureCommit(
         tuples_chain=[
@@ -123,6 +128,7 @@ def _session_state_with_commit() -> PlanningState:
                 output_type="text",
                 output_mode="pass_through",
             )
+            for _ in range(step_count)
         ],
         chosen_patterns=["summarize_text"],
         committed_at=datetime(2026, 4, 23, tzinfo=timezone.utc),
@@ -395,6 +401,48 @@ class TestCommitArchitectureUnresolvableCapabilityGuardrail:
 
 
 # ---------------------------------------------------------------------------
+# Guardrail 5 — structural parity between draft_plan and ArchitectureCommit
+# ---------------------------------------------------------------------------
+
+
+class TestProposePlanDraftPlanStructuralParityGuardrail:
+    def test_rejects_propose_plan_when_draft_plan_step_count_differs_from_commit(
+        self,
+    ) -> None:
+        output = parse_planner_output(_propose_plan(step_count=2))
+        context = _ctx(session_state=_session_state_with_commit(step_count=1))
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "propose_plan_draft_plan_structural_mismatch"
+        assert "2" in rejection.detail and "1" in rejection.detail
+
+    def test_accepts_propose_plan_with_matching_multi_step_draft_plan(self) -> None:
+        output = parse_planner_output(_propose_plan(step_count=3))
+        context = _ctx(session_state=_session_state_with_commit(step_count=3))
+
+        assert evaluate_planner_output(output, context) is None
+
+    def test_skips_parity_check_when_draft_plan_not_in_delta(self) -> None:
+        output = parse_planner_output(_propose_plan(include_draft_plan=False))
+        context = _ctx(session_state=_session_state_with_commit(step_count=1))
+
+        assert evaluate_planner_output(output, context) is None
+
+    def test_earlier_commit_presence_guardrail_fires_first_when_session_has_no_commit(
+        self,
+    ) -> None:
+        output = parse_planner_output(_propose_plan(step_count=5))
+        context = _ctx(session_state=_empty_session_state())
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "propose_plan_without_architecture_commit"
+
+
+# ---------------------------------------------------------------------------
 # RejectionCode is the single source of truth for rejection branches.
 # If a new guardrail adds a code, the Literal must grow with it.
 # ---------------------------------------------------------------------------
@@ -410,6 +458,7 @@ class TestRejectionCodeExhaustiveness:
             "architecture_commit_illegal_tuple",
             "architecture_commit_unresolvable_capability",
             "propose_plan_without_architecture_commit",
+            "propose_plan_draft_plan_structural_mismatch",
         }
     )
 
