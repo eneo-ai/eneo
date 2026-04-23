@@ -2,18 +2,24 @@
     Displays a role name with optional Default badge and Template icon.
 -->
 <script lang="ts">
+  import { Label } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
+
   export let name: string;
   export let isDefault = false;
   export let templateSource: string | null = null;
 </script>
 
 <div class="flex items-center gap-2">
-  <span>{name}</span>
+  <span class="font-medium">{name}</span>
   {#if isDefault}
-    <span class="rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-700">Default</span>
+    <Label.Single item={{ label: m.default_label(), color: "blue" }} capitalize={false} />
   {/if}
   {#if templateSource}
-    <span title="Template role — can be reset to &quot;{templateSource}&quot;">
+    <span
+      title={m.template_role_tooltip({ name: templateSource })}
+      aria-label={m.template_role_tooltip({ name: templateSource })}
+    >
       <svg
         xmlns="http://www.w3.org/2000/svg"
         fill="none"

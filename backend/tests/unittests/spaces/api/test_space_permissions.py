@@ -42,11 +42,13 @@ def _make_user(permissions: list[Permission]) -> UserInDB:
     )
 
 
-def _make_space(personal: bool = False):
+def _make_space(personal: bool = False, organization: bool = False):
     return SimpleNamespace(
         id=uuid4(),
         name="Test Space",
         is_personal=lambda: personal,
+        is_organization=lambda: organization,
+        is_shared=lambda: (not personal) and (not organization),
     )
 
 
@@ -102,16 +104,24 @@ class TestUpdateSpacePermission:
             await space_router.update_space(
                 id=shared_space.id,
                 update_space_req=SimpleNamespace(
-                    name=None, description=None, embedding_models=None,
-                    completion_models=None, transcription_models=None,
-                    mcp_servers=None, mcp_tools=None, security_classification=None,
-                    data_retention_days=None, icon_id=None,
+                    name=None,
+                    description=None,
+                    embedding_models=None,
+                    completion_models=None,
+                    transcription_models=None,
+                    mcp_servers=None,
+                    mcp_tools=None,
+                    security_classification=None,
+                    data_retention_days=None,
+                    icon_id=None,
                     model_dump=lambda exclude_unset: {},
                 ),
                 container=container,
             )
 
-    async def test_update_personal_space_without_permission_allowed(self, personal_space):
+    async def test_update_personal_space_without_permission_allowed(
+        self, personal_space
+    ):
         user = _make_user([Permission.ASSISTANTS])  # no SPACES
         service = AsyncMock()
         service.get_space.return_value = personal_space
@@ -131,10 +141,16 @@ class TestUpdateSpacePermission:
         await space_router.update_space(
             id=personal_space.id,
             update_space_req=SimpleNamespace(
-                name=None, description=None, embedding_models=None,
-                completion_models=None, transcription_models=None,
-                mcp_servers=None, mcp_tools=None, security_classification=None,
-                data_retention_days=None, icon_id=None,
+                name=None,
+                description=None,
+                embedding_models=None,
+                completion_models=None,
+                transcription_models=None,
+                mcp_servers=None,
+                mcp_tools=None,
+                security_classification=None,
+                data_retention_days=None,
+                icon_id=None,
                 model_dump=lambda exclude_unset: {},
             ),
             container=container,

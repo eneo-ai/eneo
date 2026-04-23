@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import TYPE_CHECKING, Optional, Union
 
+from intric.authentication.auth_models import is_service_api_key
 from intric.main.models import ResourcePermission
 from intric.modules.module import Modules
 from intric.roles.permissions import Permission
@@ -434,22 +435,21 @@ class SpaceActor:
                 return SpaceRole.OWNER
             return None
 
-        # Shared / organization space: highest of direct + group membership.
+        # Shared (Delat-tab) spaces require the tenant-level `shared_spaces`
+        # permission — membership alone cannot bypass it. Org-space access
+        # is governed by ORG_SPACE_PERMISSIONS and is orthogonal.
+        if (
+            self.space.is_shared()
+            and Permission.SHARED_SPACES not in self.user.permissions
+        ):
+            return None
+
         direct_role = self._get_direct_role()
         group_role = self._get_highest_group_role()
         return self._get_highest_role(direct_role, group_role)
 
     def _is_service_api_key(self) -> bool:
-        key = getattr(self.user, "active_api_key", None)
-        if key is None:
-            return False
-        ownership_raw = getattr(key, "ownership", "user")
-        ownership = (
-            ownership_raw.value
-            if isinstance(ownership_raw, Enum)
-            else str(ownership_raw)
-        )
-        return ownership == "service"
+        return is_service_api_key(self.user)
 
     def _get_api_key_role(self) -> SpaceRole | None:
         """Derive a space role from the active API key's scope and permission.

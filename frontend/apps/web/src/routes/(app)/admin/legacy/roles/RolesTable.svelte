@@ -10,6 +10,8 @@
   import { createRender } from "svelte-headless-table";
   import RoleActions from "./RoleActions.svelte";
   import RoleName from "./RoleName.svelte";
+  import { m } from "$lib/paraglide/messages";
+  import { getPermissionCopy } from "./permission-labels";
 
   export let roles: Role[];
   export let permissions: Array<{ name: Permission; description: string }>;
@@ -35,7 +37,7 @@
   const viewModel = table.createViewModel([
     table.column({
       accessor: (role) => role,
-      header: "Role",
+      header: m.role(),
       cell: (item) => {
         const role = item.value;
         const isDefault = defaultRoleId != null && role.id === defaultRoleId;
@@ -53,16 +55,19 @@
     }),
     table.column({
       accessor: "permissions",
-      header: "Permissions",
+      header: m.permissions(),
       cell: (item) => {
         const content = item.value.map((perm) => {
+          const copy = getPermissionCopy(perm, permissionDict[perm] ?? "");
           return {
-            label: perm,
-            tooltip: permissionDict[perm],
+            label: copy.label,
+            tooltip: copy.description,
             color: "blue" as Label.LabelColor
           };
         });
-        return createRender(Label.List, { content });
+        // capitalize={false} preserves Swedish casing like "Delade ytor";
+        // the default would force each word to title-case ("Delade Ytor").
+        return createRender(Label.List, { content, capitalize: false });
       },
       plugins: {
         sort: {
@@ -84,4 +89,4 @@
   $: table.update(sortedRoles);
 </script>
 
-<Table.Root {viewModel} resourceName="role"></Table.Root>
+<Table.Root {viewModel} resourceName={m.resource_roles()}></Table.Root>

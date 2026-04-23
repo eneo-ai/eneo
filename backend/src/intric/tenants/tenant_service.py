@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from intric.ai_models.embedding_models.embedding_models_repo import (
         AdminEmbeddingModelsService,
     )
+    from intric.audit.application.audit_service import AuditService
     from intric.roles.roles_repo import RolesRepository
     from intric.transcription_models.infrastructure import (
         TranscriptionModelEnableService,
@@ -38,6 +39,7 @@ class TenantService:
         embedding_model_repo: "AdminEmbeddingModelsService",
         transcription_model_enable_service: "TranscriptionModelEnableService",
         role_repo: "RolesRepository | None" = None,
+        audit_service: "AuditService | None" = None,
     ):
         super().__init__()
         self.repo = repo
@@ -45,6 +47,7 @@ class TenantService:
         self.embedding_model_repo = embedding_model_repo
         self.transcription_models_enable_service = transcription_model_enable_service
         self.role_repo = role_repo
+        self.audit_service = audit_service
 
     @staticmethod
     def _validate(tenant: TenantInDB | None, id: UUID):
@@ -67,6 +70,9 @@ class TenantService:
 
         # Seed default roles from predefined templates
         if self.role_repo is not None:
+            from intric.audit.domain.action_types import ActionType
+            from intric.audit.domain.actor_types import ActorType
+            from intric.audit.domain.entity_types import EntityType
             from intric.roles.role import RoleCreate
             from intric.server.dependencies.predefined_roles import (
                 load_predefined_roles_from_config,
@@ -84,6 +90,33 @@ class TenantService:
                 created = await self.role_repo.create_role(role)
                 if template["name"] == "User":
                     user_role_id = created.id
+                if self.audit_service is not None:
+                    # Sync log() binds to the current DB session so the audit
+                    # row commits atomically with the role write. log_async
+                    # enqueues to Redis independently and would leave a ghost
+                    # audit row if the request rolls back after enqueue.
+                    await self.audit_service.log(
+                        tenant_id=tenant_in_db.id,
+                        actor_id=None,
+                        actor_type=ActorType.SYSTEM,
+                        action=ActionType.ROLE_CREATED,
+                        entity_type=EntityType.ROLE,
+                        entity_id=created.id,
+                        description=(
+                            f"Tenant-provisioning seeded predefined role "
+                            f"'{template['name']}'"
+                        ),
+                        metadata={
+                            "actor": {"type": "system", "via": "tenant_provisioning"},
+                            "target": {
+                                "tenant_id": str(tenant_in_db.id),
+                                "role_id": str(created.id),
+                                "role_name": template["name"],
+                                "predefined_source": template["name"],
+                                "permissions": list(template["permissions"]),
+                            },
+                        },
+                    )
 
             # Set "User" as default role for new tenants
             if user_role_id:
@@ -93,6 +126,32 @@ class TenantService:
                     TenantUpdate(id=tenant_in_db.id, default_role_id=user_role_id)
                 )
                 tenant_in_db.default_role_id = user_role_id
+                if self.audit_service is not None:
+                    await self.audit_service.log(
+                        tenant_id=tenant_in_db.id,
+                        actor_id=None,
+                        actor_type=ActorType.SYSTEM,
+                        action=ActionType.TENANT_SETTINGS_UPDATED,
+                        entity_type=EntityType.TENANT_SETTINGS,
+                        entity_id=tenant_in_db.id,
+                        description=(
+                            "Tenant-provisioning set default_role_id to the "
+                            "'User' predefined role"
+                        ),
+                        metadata={
+                            "actor": {"type": "system", "via": "tenant_provisioning"},
+                            "target": {
+                                "tenant_id": str(tenant_in_db.id),
+                                "default_role_id": str(user_role_id),
+                            },
+                            "changes": {
+                                "default_role_id": {
+                                    "before": None,
+                                    "after": str(user_role_id),
+                                },
+                            },
+                        },
+                    )
 
         return tenant_in_db
 

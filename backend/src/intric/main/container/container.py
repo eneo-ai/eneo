@@ -814,20 +814,6 @@ class Container(containers.DeclarativeContainer):
         api_key_repo=api_key_repo,
         api_key_v2_repo=api_key_v2_repo,
     )
-    tenant_service = providers.Factory(
-        TenantService,
-        repo=tenant_repo,
-        completion_model_repo=completion_model_repo,
-        embedding_model_repo=embedding_model_repo,
-        transcription_model_enable_service=transcription_model_enable_service,
-        role_repo=role_repo,
-    )
-    security_classification_service = providers.Factory(
-        SecurityClassificationService,
-        user=user,
-        repo=security_classification_repo,
-        tenant_service=tenant_service,
-    )
     # Feature flag service for audit logging and other toggles
     feature_flag_service = providers.Factory(
         FeatureFlagService,
@@ -838,6 +824,21 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    tenant_service = providers.Factory(
+        TenantService,
+        repo=tenant_repo,
+        completion_model_repo=completion_model_repo,
+        embedding_model_repo=embedding_model_repo,
+        transcription_model_enable_service=transcription_model_enable_service,
+        role_repo=role_repo,
+        audit_service=audit_service,
+    )
+    security_classification_service = providers.Factory(
+        SecurityClassificationService,
+        user=user,
+        repo=security_classification_repo,
+        tenant_service=tenant_service,
     )
     api_key_scope_revoker = providers.Factory(
         ApiKeyScopeRevoker,

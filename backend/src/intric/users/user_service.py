@@ -541,9 +541,19 @@ class UserService:
                     },
                 )
             else:
-                logger.info(
-                    "OIDC: No default role configured, creating user without role",
-                    extra={"correlation_id": correlation_id},
+                # WARNING (not INFO): a role-less user cannot create
+                # shared spaces, use assistants, apps, or any other
+                # permission-gated feature. This almost always indicates
+                # a misconfigured tenant or a seeder failure — operators
+                # should see it in log alerting.
+                logger.warning(
+                    "OIDC: No default role configured; creating user "
+                    "without role — user will have zero permissions "
+                    "until an admin assigns roles",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "tenant_id": str(tenant_id),
+                    },
                 )
 
             new_user = UserAdd(
@@ -651,8 +661,18 @@ class UserService:
         # Apply tenant default role when caller didn't specify any.
         # Mirrors the federated-login path so sysadmin-created users can
         # operate on shared spaces out of the box.
-        if not payload.get("roles") and tenant.default_role_id is not None:
-            payload["roles"] = [ModelId(id=tenant.default_role_id)]
+        if not payload.get("roles"):
+            if tenant.default_role_id is not None:
+                payload["roles"] = [ModelId(id=tenant.default_role_id)]
+            else:
+                # See S7 rationale in the OIDC path — a role-less user
+                # hits 403 on every permission-gated feature.
+                logger.warning(
+                    "Admin create-user: no default role configured on "
+                    "tenant and no roles passed; user will have zero "
+                    "permissions until an admin assigns roles",
+                    extra={"tenant_id": str(tenant.id)},
+                )
 
         user_add = UserAdd(
             **payload,
@@ -1757,9 +1777,14 @@ class UserService:
         await self.repo.update(user_update)
 
     async def get_total_count(
-        self, tentant_id: Optional[UUID] = None, filters: Optional[str] = None
+        self,
+        tentant_id: Optional[UUID] = None,
+        filters: Optional[str] = None,
+        permission: Optional[str] = None,
     ) -> int:
-        count = await self.repo.get_total_count(tenant_id=tentant_id, filters=filters)
+        count = await self.repo.get_total_count(
+            tenant_id=tentant_id, filters=filters, permission=permission
+        )
         return count or 0
 
     async def get_all_users(
@@ -1769,6 +1794,7 @@ class UserService:
         previous: bool = False,
         limit: Optional[int] = None,
         filters: Optional[str] = None,
+        permission: Optional[str] = None,
     ) -> list["UserInDB"]:
         """
         Retrieves a paginated list of users for a specific tenant,
@@ -1781,6 +1807,7 @@ class UserService:
             cursor=cursor,
             previous=previous,
             filters=filters,
+            permission=permission,
         )
 
     async def invite_user(self, user_invite: PropUserInvite, tenant_id: UUID):

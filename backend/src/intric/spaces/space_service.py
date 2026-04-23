@@ -14,6 +14,7 @@ from intric.completion_models.application.completion_model_crud_service import (
 from intric.completion_models.domain.completion_model_service import (
     CompletionModelService,
 )
+from intric.database.tables.users_table import Users
 from intric.embedding_models.application.embedding_model_crud_service import (
     EmbeddingModelCRUDService,
 )
@@ -27,6 +28,7 @@ from intric.main.exceptions import (
 from intric.main.logging import get_logger
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+from intric.roles.permissions import Permission
 from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
@@ -38,8 +40,8 @@ from intric.transcription_models.domain.transcription_model_service import (
     TranscriptionModelService,
 )
 from intric.user_groups.user_groups_repo import UserGroupsRepository
-from intric.users.user import UserInDB
-from intric.users.user_repo import UsersRepository
+from intric.users.user import UserInDB, UserState
+from intric.users.user_repo import InertMemberPreview, UsersRepository
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
@@ -72,6 +74,21 @@ class SpaceSecurityClassificationImpactAnalysis:
     affected_mcp_servers: list[MCPServer] = field(
         default_factory=_empty_mcp_server_list
     )
+
+
+@dataclass(frozen=True)
+class GroupAttachResult:
+    """Return shape for `SpaceService.add_group_member`.
+
+    `missing_count` is the FULL number of loginable group members whose
+    role lacks the relevant permission; `inert_sample` is a server-capped
+    preview (see `INERT_SAMPLE_SIZE`). The router converts each
+    `InertMemberPreview` to the API-layer `InertSpaceGroupMember`.
+    """
+
+    member: SpaceGroupMember
+    missing_count: int
+    inert_sample: list[InertMemberPreview]
 
 
 TENANT_SPACE_NAME = "Organization space"
@@ -610,6 +627,12 @@ class SpaceService:
         if user is None:
             raise NotFoundException("User not found")
 
+        if space.is_shared() and Permission.SHARED_SPACES not in user.permissions:
+            raise BadRequestException(
+                "User's role is missing the 'shared_spaces' permission "
+                "and cannot be added to a shared space."
+            )
+
         member = SpaceMember(
             id=member_id,
             username=user.username,
@@ -705,21 +728,17 @@ class SpaceService:
 
     async def add_group_member(
         self, space_id: UUID, group_id: UUID, role: SpaceRoleValue
-    ) -> SpaceGroupMember:
-        """Add a user group to a space with the specified role.
+    ) -> GroupAttachResult:
+        """Attach a user group to a space with the specified role.
 
-        Args:
-            space_id: ID of the space
-            group_id: ID of the user group to add
-            role: Role to assign to the group (admin, editor, viewer)
-
-        Returns:
-            The created SpaceGroupMember
+        `SpaceActor._get_role` is the authoritative runtime gate — this
+        method only records the attachment and reports which loginable
+        members won't pass that gate under their current tenant role.
 
         Raises:
-            UnauthorizedException: If user doesn't have permission to add group members
-            BadRequestException: If trying to add to a personal space or group already exists
-            NotFoundException: If group not found or not in same tenant
+            UnauthorizedException: caller lacks admin on the space.
+            BadRequestException: personal space, or group already attached.
+            NotFoundException: group not found, or belongs to another tenant.
         """
         space = await self.get_space(space_id)
         actor = self._get_actor(space)
@@ -732,22 +751,49 @@ class SpaceService:
         if space.is_personal():
             raise BadRequestException("Cannot add group members to personal spaces")
 
-        # Fetch the user group and validate it belongs to same tenant
         user_group = await self.user_groups_repo.get_user_group(group_id)
         if user_group is None or user_group.tenant_id != self.user.tenant_id:
             raise NotFoundException(f"User group {group_id} not found")
+
+        inert_sample: list[InertMemberPreview] = []
+        loginable_total = 0
+        missing_count = 0
+        if space.is_shared():
+            (
+                loginable_total,
+                missing_count,
+                inert_sample,
+            ) = await self.user_repo.get_group_members_permission_summary(
+                group_id=group_id,
+                tenant_id=self.user.tenant_id,
+                permission=Permission.SHARED_SPACES.value,
+            )
+        else:
+            # Router deps forbid non-shared spaces here; kept for consistency if that changes.
+            users = cast(list[Users], user_group.users or [])
+            loginable_total = sum(
+                1
+                for u in users
+                if u.deleted_at is None
+                and u.state in (UserState.ACTIVE, UserState.INVITED)
+            )
 
         group_member = SpaceGroupMember(
             id=user_group.id,
             name=user_group.name,
             role=role,
             user_count=len(user_group.users) if user_group.users else 0,
+            loginable_count=loginable_total,
         )
 
         space.add_group_member(group_member)
         space = await self.repo.update(space)
 
-        return space.get_group_member(group_id)
+        return GroupAttachResult(
+            member=space.get_group_member(group_id),
+            missing_count=missing_count,
+            inert_sample=inert_sample,
+        )
 
     async def remove_group_member(self, space_id: UUID, group_id: UUID):
         """Remove a user group from a space.

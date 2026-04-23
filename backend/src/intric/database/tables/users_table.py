@@ -63,4 +63,7 @@ usergroups_users_table = Table(
     Column(
         "user_group_id", ForeignKey(UserGroups.id, ondelete="CASCADE"), primary_key=True
     ),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
+    # PK leads with user_id, so group-scoped queries (e.g. "who's in this
+    # group") can't seek it. This secondary index makes them index-seeks.
+    Index("idx_usergroups_users_group_user", "user_group_id", "user_id"),
 )

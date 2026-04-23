@@ -89,6 +89,15 @@ class RolesService:
                     "At least one user must retain admin permissions."
                 )
 
+    def _is_tenant_default_role(self, role_id: UUID) -> bool:
+        """True if this role is the tenant's default — the role newly-
+        provisioned users are assigned. Deletion is guarded so new users
+        don't become role-less; edits are allowed so admins can manage
+        permissions from one place (e.g. remove `shared_spaces` from the
+        'User' role to restrict space creation).
+        """
+        return self.user.tenant.default_role_id == role_id
+
     @validate_permissions(Permission.ADMIN)
     async def update_role(self, role_update: RoleUpdateRequest, role_id: UUID):
         role = await self.get_role_by_uuid(role_id)
@@ -112,7 +121,7 @@ class RolesService:
         await self._ensure_admin_survives(role, removing_admin=False, deleting=True)
 
         # Prevent deleting the tenant's default role
-        if self.user.tenant and self.user.tenant.default_role_id == role_id:
+        if self._is_tenant_default_role(role_id):
             raise BadRequestException(
                 "Cannot delete the tenant's default role. Change the default role first."
             )

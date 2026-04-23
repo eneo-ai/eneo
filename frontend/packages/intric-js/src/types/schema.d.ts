@@ -6864,6 +6864,32 @@ export interface components {
      */
     ActorType: "user" | "system" | "api_key";
     /** AddSpaceGroupMemberRequest */
+    /**
+     * SpaceGroupMemberAddResponse
+     * @description Structural superset of `SpaceGroupMember`. `inert_member_count` is
+     *     the FULL count of members whose tenant role lacks the required
+     *     permission; `inert_members` is a server-capped sample (see
+     *     backend `INERT_SAMPLE_SIZE`); `inert_truncated` flags when the
+     *     sample was capped so the UI can render "…and N more".
+     */
+    SpaceGroupMemberAddResponse: components["schemas"]["SpaceGroupMember"] & {
+      /**
+       * Inert Members
+       * @default []
+       */
+      inert_members?: components["schemas"]["InertSpaceGroupMember"][];
+      /**
+       * Inert Member Count
+       * @default 0
+       */
+      inert_member_count?: number;
+      /**
+       * Inert Truncated
+       * @default false
+       */
+      inert_truncated?: boolean;
+    };
+    /** AddSpaceGroupMemberRequest */
     AddSpaceGroupMemberRequest: {
       /**
        * Id
@@ -13876,6 +13902,11 @@ export interface components {
     /**
      * SpaceGroupMember
      * @description A user group that is a member of a space with a specific role.
+     *
+     *     `user_count` is the raw size of the group (matches the group picker).
+     *     `loginable_count` is the subset of that group whose users are active or
+     *     invited and not soft-deleted — the denominator that must line up with
+     *     `inert_members` when admins read "N of M members lack a permission".
      */
     SpaceGroupMember: {
       /** Created At */
@@ -13895,6 +13926,11 @@ export interface components {
        * @default 0
        */
       user_count?: number;
+      /**
+       * Loginable Count
+       * @default 0
+       */
+      loginable_count?: number;
     };
     /** SpaceMember */
     SpaceMember: {
@@ -29026,7 +29062,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["SpaceGroupMember"];
+          "application/json": components["schemas"]["SpaceGroupMemberAddResponse"];
         };
       };
       /** @description Bad Request */

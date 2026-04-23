@@ -14,7 +14,14 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
+  import { announceGroupAttachResult } from "$lib/features/spaces/announceGroupAttachResult";
+  import type { InertNoticePayload } from "$lib/features/spaces/inertNotice";
   import { IconPeople } from "@intric/icons/people";
+
+  // `null` signals a clean attach so the parent can clear any banner from
+  // a previous attach that had inert members.
+  type Props = { oninert?: (payload: InertNoticePayload | null) => void };
+  const { oninert }: Props = $props();
 
   const {
     refreshCurrentSpace,
@@ -22,7 +29,7 @@
   } = getSpacesManager();
 
   const {
-    elements: { menu, input, option },
+    elements: { menu, input, option, label },
     states: { open, inputValue, selected }
   } = createCombobox<UserGroup>({
     portal: null,
@@ -65,16 +72,38 @@
   }
 
   const addGroupMember = createAsyncState(async () => {
-    const id = $selected?.value.id;
-    if (!id) return;
+    const selectedGroup = $selected?.value;
+    if (!selectedGroup) return;
     try {
-      await intric.spaces.groupMembers.add({
+      const response = await intric.spaces.groupMembers.add({
         spaceId: $currentSpace.id,
-        group: { id, role: selectedRole.value }
+        group: { id: selectedGroup.id, role: selectedRole.value }
       });
       refreshCurrentSpace();
       $showDialog = false;
       $selected = undefined;
+
+      announceGroupAttachResult({ groupName: selectedGroup.name });
+
+      if (oninert) {
+        const inertSample = response.inert_members ?? [];
+        const missingCount = response.inert_member_count ?? inertSample.length;
+        if (missingCount > 0) {
+          oninert({
+            groupName: selectedGroup.name,
+            loginableTotal: response.loginable_count ?? response.user_count ?? 0,
+            missingCount,
+            missing: inertSample.map((m) => ({
+              id: m.id,
+              email: m.email,
+              username: m.username ?? null
+            })),
+            truncated: response.inert_truncated ?? missingCount > inertSample.length
+          });
+        } else {
+          oninert(null);
+        }
+      }
     } catch (e) {
       toastError(e, m.could_not_add_group());
       console.error(e);
@@ -94,7 +123,7 @@
       <div class="hover:bg-hover-dimmer flex items-center rounded-md">
         <div class="flex flex-grow flex-col gap-1 rounded-md pt-2 pr-2 pb-4 pl-4">
           <div>
-            <span class="pl-3 font-medium">{m.user_group()}</span>
+            <label use:label {...$label} class="pl-3 font-medium">{m.user_group()}</label>
           </div>
 
           <div class="relative flex flex-grow">

@@ -12,6 +12,8 @@
   import { PageLoadBar } from "$lib/components/layout";
   import { browser } from "$app/environment";
   import { onDestroy } from "svelte";
+  import { goto } from "$app/navigation";
+  import { toast } from "$lib/components/toast";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { IconEneo } from "@intric/icons/eneo";
   import { initAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
@@ -50,6 +52,16 @@
   $: isPersonal = currentRoute.startsWith("/spaces/personal");
   $: isOrganization = currentRoute.startsWith("/spaces/organization");
   $: isSpacesGeneric = currentRoute.startsWith("/spaces") && !isPersonal && !isOrganization;
+
+  // Reactive so mid-session redirects (not only cold loads) surface the toast.
+  // Strip the flag first, then toast, to prevent a re-entry loop.
+  $: if (browser && $page.url.searchParams.get("blocked") === "shared_spaces") {
+    const url = new URL($page.url);
+    url.searchParams.delete("blocked");
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- rewriting the current URL
+    goto(url.pathname + url.search + url.hash, { replaceState: true, noScroll: true });
+    toast.warning(m.no_permission_shared_spaces());
+  }
 </script>
 
 <!-- eslint-disable svelte/no-navigation-without-resolve -- in-page anchor -->
@@ -108,9 +120,11 @@
       <a href={localizeHref("/spaces/personal/chat")} data-current={isPersonal ? "page" : undefined}
         >{m.personal()}</a
       >
-      <a href={localizeHref("/spaces/list")} data-current={isSpacesGeneric ? "page" : undefined}
-        >{m.spaces()}</a
-      >
+      {#if user.hasPermission("shared_spaces")}
+        <a href={localizeHref("/spaces/list")} data-current={isSpacesGeneric ? "page" : undefined}
+          >{m.spaces()}</a
+        >
+      {/if}
       {#if user.hasPermission("admin")}
         <a
           href={localizeHref("/spaces/organization/knowledge")}

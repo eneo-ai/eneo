@@ -12,7 +12,7 @@ from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.authentication.auth_dependencies import get_scope_filter, require_permission
-from intric.authentication.auth_models import ApiKeyOwnership
+from intric.authentication.auth_models import is_service_api_key
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
 from intric.integration.presentation.assemblers.integration_knowledge_assembler import (
@@ -40,8 +40,10 @@ from intric.spaces.api.space_models import (
     CreateSpaceRequest,
     CreateSpaceServiceRequest,
     CreateSpaceServiceResponse,
+    InertSpaceGroupMember,
     Knowledge,
     SpaceGroupMember,
+    SpaceGroupMemberAddResponse,
     SpaceMember,
     SpacePublic,
     SpaceSparse,
@@ -52,19 +54,11 @@ from intric.spaces.api.space_models import (
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
 )
-from intric.users.user import UserInDB
 from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def _is_service_api_key(user: UserInDB) -> bool:
-    key = user.active_api_key
-    if key is None:
-        return False
-    return key.ownership == ApiKeyOwnership.SERVICE
 
 
 async def forbid_org_space(
@@ -91,7 +85,6 @@ async def forbid_org_space(
     "/",
     response_model=SpacePublic,
     status_code=201,
-    dependencies=[Depends(require_permission(Permission.SHARED_SPACES))],
 )
 async def create_space(
     create_space_req: CreateSpaceRequest,
@@ -100,6 +93,22 @@ async def create_space(
     space_creation_service = container.space_init_service()
     space_assembler = container.space_assembler()
     current_user = container.user()
+
+    # Service keys cannot create spaces: space_init_service creates a default
+    # assistant with `user_id = current_user.id`, but the service-key synthetic
+    # user has no row in `users`. That would violate `assistants_users_fkey`
+    # and surface as a 500. Reject with a clear 403 instead, matching the
+    # scope-intent of service keys (act on existing resources, not provision).
+    if is_service_api_key(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Service API keys cannot create shared spaces. "
+                "Create the space with a user account; the service key can "
+                "then operate on it via its scope."
+            ),
+        )
+    validate_permission(current_user, Permission.SHARED_SPACES)
 
     # Create space
     space = await space_creation_service.create_space(name=create_space_req.name)
@@ -134,8 +143,14 @@ async def get_space(
 ):
     service = container.space_init_service()
     assembler = container.space_assembler()
+    current_user = container.user()
 
     space = await service.get_space(id)
+
+    # Route-level 403 for shared spaces; SpaceActor is the authoritative gate.
+    # Service keys authorize via scope+permission.
+    if space.is_shared() and not is_service_api_key(current_user):
+        validate_permission(current_user, Permission.SHARED_SPACES)
 
     return assembler.from_space_to_model(space)
 
@@ -155,11 +170,8 @@ async def update_space(
     assembler = container.space_assembler()
     current_user = container.user()
 
-    # Require spaces permission for shared spaces.
-    # Service API keys authorize via scope+permission and have no user roles,
-    # so the SpaceActor enforces their access — skip the role gate for them.
     old_space = await service.get_space(id)
-    if not old_space.is_personal() and not _is_service_api_key(current_user):
+    if old_space.is_shared() and not is_service_api_key(current_user):
         validate_permission(current_user, Permission.SHARED_SPACES)
 
     def _get_model_ids_or_none(models: list[ModelId] | None):
@@ -337,10 +349,8 @@ async def delete_space(
     service = container.space_service()
     user = container.user()
 
-    # Require spaces permission for shared spaces.
-    # Service API keys authorize via scope+permission — skip the role gate.
     space = await service.get_space(id)
-    if not space.is_personal() and not _is_service_api_key(user):
+    if space.is_shared() and not is_service_api_key(user):
         validate_permission(user, Permission.SHARED_SPACES)
 
     # Delete space
@@ -376,11 +386,19 @@ async def get_spaces(
 ):
     service = container.space_service()
     assembler = container.space_assembler()
+    current_user = container.user()
 
     spaces = await service.get_spaces(
         include_personal=include_personal,
         include_applications=include_applications,
     )
+
+    # Hide Delat-tab spaces from users who lack the permission.
+    # Service keys authorize via scope+permission.
+    if not is_service_api_key(current_user) and (
+        Permission.SHARED_SPACES not in current_user.permissions
+    ):
+        spaces = [s for s in spaces if not s.is_shared()]
 
     # Scope filtering: space-scoped key sees only its scoped space
     scope_filter = get_scope_filter(request)
@@ -1288,7 +1306,7 @@ async def get_space_group_members(
 
 @router.post(
     "/{id}/group-members/",
-    response_model=SpaceGroupMember,
+    response_model=SpaceGroupMemberAddResponse,
     status_code=201,
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
@@ -1298,21 +1316,20 @@ async def add_space_group_member(
     request: AddSpaceGroupMemberRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    """Add a user group to a space with the specified role.
-
-    All members of the group will gain access to the space at that role level.
-    Groups cannot be added to personal spaces.
+    """Attach a user group to a space. Members whose tenant role lacks
+    `shared_spaces` are returned as `inert_members`; they remain in the group
+    but are denied at runtime by `SpaceActor`. Groups cannot be attached to
+    personal spaces.
     """
     service = container.space_service()
     current_user = container.user()
 
-    group_member = await service.add_group_member(
+    result = await service.add_group_member(
         space_id=id,
         group_id=request.id,
         role=request.role,
     )
 
-    # Get space for context (graceful degradation if space fetch fails)
     space = None
     try:
         space = await service.get_space(id)
@@ -1322,10 +1339,11 @@ async def add_space_group_member(
     extra = {
         "group": {
             "id": str(request.id),
-            "name": group_member.name,
-            "user_count": group_member.user_count,
+            "name": result.member.name,
+            "user_count": result.member.user_count,
         },
         "role": request.role,
+        "inert_member_count": result.missing_count,
     }
 
     audit_service = container.audit_service()
@@ -1335,16 +1353,24 @@ async def add_space_group_member(
         action=ActionType.SPACE_MEMBER_ADDED,
         entity_type=EntityType.SPACE,
         entity_id=id,
-        description=f"Added group '{group_member.name}' to space '{space.name if space else 'unknown'}' with role '{request.role}'",
+        description=f"Added group '{result.member.name}' to space '{space.name if space else 'unknown'}' with role '{request.role}'",
         metadata=AuditMetadata.standard(
             actor=current_user,
-            target=space if space else group_member,
+            target=space if space else result.member,
             space=space,
             extra=extra,
         ),
     )
 
-    return group_member
+    return SpaceGroupMemberAddResponse(
+        **result.member.model_dump(),
+        inert_members=[
+            InertSpaceGroupMember(id=row.id, email=row.email, username=row.username)
+            for row in result.inert_sample
+        ],
+        inert_member_count=result.missing_count,
+        inert_truncated=result.missing_count > len(result.inert_sample),
+    )
 
 
 @router.patch(

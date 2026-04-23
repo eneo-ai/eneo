@@ -11,7 +11,7 @@ from intric.database.tables.tenant_table import Tenants
 
 class Roles(BasePublic):
     name: Mapped[str] = mapped_column()
-    permissions: Mapped[list[str]] = mapped_column(ARRAY(String))
+    permissions: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False)
     predefined_source: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))

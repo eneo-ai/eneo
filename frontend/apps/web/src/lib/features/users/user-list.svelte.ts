@@ -1,23 +1,33 @@
 import { PAGINATION } from "$lib/core/constants";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { getIntric } from "$lib/core/Intric";
-import type { Intric, UserSparse } from "@intric/intric-js";
+import type { Intric, Permission, UserSparse } from "@intric/intric-js";
 import { onMount } from "svelte";
 
 const DEBOUNCE_DURATION_MILLISECONDS = 250;
 
+/**
+ * Paginated, filterable tenant user list used by pickers.
+ *
+ * Pass `permission` to narrow the result set to users whose tenant role grants
+ * that permission (e.g. the space member picker uses `shared_spaces` so only
+ * addable candidates appear). Omit for a capability-neutral list (e.g. the
+ * user-groups admin picker, where groups are just bags of users).
+ */
 export class UserList {
   #intric: Intric;
   #cursor: string | undefined = undefined;
   #limit = PAGINATION.PAGE_SIZE;
   #filter = "";
+  #permission: Permission | undefined;
   #debounceTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
 
   totalCount = $state(0);
   filteredUsers = $state<UserSparse[]>([]);
 
-  constructor(intric = getIntric()) {
-    this.#intric = intric;
+  constructor(options?: { intric?: Intric; permission?: Permission }) {
+    this.#intric = options?.intric ?? getIntric();
+    this.#permission = options?.permission;
     onMount(this.loadUsers);
   }
 
@@ -25,7 +35,8 @@ export class UserList {
     const res = await this.#intric.users.list({
       filter: this.#filter,
       limit: this.#limit,
-      cursor: append ? this.#cursor : undefined
+      cursor: append ? this.#cursor : undefined,
+      permission: this.#permission
     });
     this.#cursor = res.next_cursor ?? undefined;
     this.totalCount = res.total_count;

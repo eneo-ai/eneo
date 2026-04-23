@@ -12,7 +12,7 @@
   import type { UserSparse } from "@intric/intric-js";
   import { createCombobox } from "@melt-ui/svelte";
   import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
-  import { UserList } from "./AddMember.svelte.ts";
+  import { UserList } from "$lib/features/users/user-list.svelte";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
@@ -34,7 +34,9 @@
     }
   });
 
-  let userList = new UserList();
+  // Space member picker: only show users whose tenant role carries
+  // `shared_spaces`; the backend add_member endpoint would reject others.
+  let userList = new UserList({ permission: "shared_spaces" });
   let selectedRole = $state.raw($currentSpace.available_roles[0]);
   const memberIds = $derived($currentSpace.members.map((member) => member.id));
   const intric = getIntric();

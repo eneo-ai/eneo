@@ -208,9 +208,17 @@ async def _jit_provision_user(
             },
         )
     else:
-        logger.info(
-            "JIT provisioning: No default role configured, creating user without role",
-            extra={"correlation_id": correlation_id},
+        # WARNING (not INFO): a role-less user cannot create shared
+        # spaces, use assistants, apps, or any other permission-gated
+        # feature. See S7 rationale in user_service.py.
+        logger.warning(
+            "JIT provisioning: No default role configured; creating user "
+            "without role — user will have zero permissions until an "
+            "admin assigns roles",
+            extra={
+                "correlation_id": correlation_id,
+                "tenant_id": str(tenant_id),
+            },
         )
 
     username = email.split("@")[0].lower()

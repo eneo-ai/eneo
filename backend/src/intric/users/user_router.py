@@ -681,6 +681,16 @@ async def get_tenant_users(
     previous: Annotated[
         Optional[bool], Query(description="Show previous page")
     ] = False,
+    permission: Annotated[
+        Optional[Permission],
+        Query(
+            description=(
+                "Restrict to users whose aggregated role permissions "
+                "include this permission. Useful when building pickers "
+                "that only show users assignable to a resource."
+            )
+        ),
+    ] = None,
 ):
     validate_permission(container.user(), Permission.ADMIN)
 
@@ -690,15 +700,20 @@ async def get_tenant_users(
 
     previous = bool(previous)
 
+    permission_value = permission.value if permission is not None else None
+
     paginated_users = await user_service.get_all_users(
         tenant_id=user.tenant_id,
         limit=limit,
         cursor=cursor,
         previous=previous,
         filters=email,
+        permission=permission_value,
     )
 
-    total_count = await user_service.get_total_count(user.tenant_id, filters=email)
+    total_count = await user_service.get_total_count(
+        user.tenant_id, filters=email, permission=permission_value
+    )
 
     public_paginated_users = user_assembler.users_to_paginated_response(
         users=paginated_users,

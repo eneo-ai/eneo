@@ -10,6 +10,7 @@ from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.group_chats_table import GroupChatsTable
 from intric.database.tables.service_table import Services
 from intric.database.tables.spaces_table import Spaces
+from intric.database.tables.users_table import Users
 from intric.group_chat.domain.factories.group_chat_factory import GroupChatFactory
 from intric.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
@@ -20,7 +21,7 @@ from intric.security_classifications.domain.entities.security_classification imp
 from intric.services.service import Service
 from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from intric.spaces.space import Space
-from intric.users.user import UserInDBBase, UserSparse
+from intric.users.user import UserInDBBase, UserSparse, UserState
 from intric.websites.domain.website import Website
 
 if TYPE_CHECKING:
@@ -179,16 +180,27 @@ class SpaceFactory:
             if space_user.user.deleted_at is None
         }
 
-        # Build group members from database
+        # `user_group.users` is eager-loaded via `SpaceRepository._options`, so
+        # computing `loginable_count` here avoids a per-group query.
         group_members: dict[UUID, SpaceGroupMember] = {}
         for space_group in getattr(space_in_db, "group_members", []) or []:
             user_group = space_group.user_group
             if user_group:
+                # SQLAlchemy relationship typing is opaque to pyright here,
+                # so cast once and compute both counts over the typed list.
+                users = cast(list[Users], user_group.users or [])
+                loginable_count = sum(
+                    1
+                    for u in users
+                    if u.deleted_at is None
+                    and u.state in (UserState.ACTIVE, UserState.INVITED)
+                )
                 group_members[user_group.id] = SpaceGroupMember(
                     id=user_group.id,
                     name=user_group.name,
                     role=cast(SpaceRoleValue, space_group.role),
-                    user_count=len(user_group.users) if user_group.users else 0,
+                    user_count=len(users),
+                    loginable_count=loginable_count,
                 )
 
         space_collections: list[Collection] = []

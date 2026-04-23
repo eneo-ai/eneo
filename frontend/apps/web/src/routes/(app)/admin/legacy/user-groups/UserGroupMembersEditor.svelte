@@ -16,7 +16,7 @@
   import { IconTrash } from "@intric/icons/trash";
   import { IconCheck } from "@intric/icons/check";
   import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
-  import { UserList } from "../../../spaces/[spaceId]/members/AddMember.svelte.ts";
+  import { UserList } from "$lib/features/users/user-list.svelte";
 
   const intric = getIntric();
 
