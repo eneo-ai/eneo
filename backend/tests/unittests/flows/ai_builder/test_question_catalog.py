@@ -616,6 +616,8 @@ class TestDomainNeutrality:
         "ärendeintag",
         "ärendesammanfattning",
         "ärende åt gången",
+        "diarienummer",
+        "case number",
     )
 
     def test_no_banned_tokens_in_any_rendered_template(self) -> None:

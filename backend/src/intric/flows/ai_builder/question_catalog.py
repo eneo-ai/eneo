@@ -524,11 +524,11 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
         ),
     ),
     worked_examples_sv=(
-        "Fält för diarienummer och ansvarig enhet vid körning.",
+        "Fält för referensnummer och ansvarig enhet vid körning.",
         "Ingen extra metadata — flödet arbetar enbart med det uppladdade materialet.",
     ),
     worked_examples_en=(
-        "Runtime fields for case number and responsible unit.",
+        "Runtime fields for reference number and responsible unit.",
         "No extra metadata — the flow works only with the uploaded material.",
     ),
 )

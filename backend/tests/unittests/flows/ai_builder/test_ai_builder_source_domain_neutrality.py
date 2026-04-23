@@ -47,11 +47,12 @@ from intric.flows.ai_builder.ai_builder_discovery_questions import (
     structured_analysis_need_question,
 )
 
-# Banned tokens mirror the catalog lockdown list. Substring matches
+# Banned specialty tokens for the source-wide scan. Substring matches
 # (not whole-word) so compounds like `beslutsunderlagsmall` or
-# `handläggaren` are caught too. Keep in sync with
-# `TestDomainNeutrality._BANNED_SPECIALTY_TOKENS` in
-# `test_question_catalog.py`.
+# `handläggaren` are caught too. Tokens that are safe to appear in
+# input-recognizer tuples but unsafe in user-facing rendered output
+# live in `_BANNED_RENDER_ONLY_TOKENS` below. The render-surface tests
+# combine both lists; the source-wide scan uses only this one.
 _BANNED_SPECIALTY_TOKENS: tuple[str, ...] = (
     "tjänsteskriv",
     "beslutsunderlag",
@@ -80,6 +81,16 @@ _BANNED_SPECIALTY_TOKENS: tuple[str, ...] = (
     "ärendeintag",
     "ärendesammanfattning",
     "ärende åt gången",
+)
+
+# Render-surface-only banned tokens. These are safe to appear in
+# input-recognizer tuples (where the builder must still understand the
+# user's words) but must never appear in user-facing rendered output —
+# question labels, option descriptions, knowledge-pack copy, benchmark
+# prompts. Catalog-render coverage lives in `test_question_catalog.py`.
+_BANNED_RENDER_ONLY_TOKENS: tuple[str, ...] = (
+    "diarienummer",
+    "case number",
 )
 
 _AI_BUILDER_SRC = (
@@ -148,7 +159,7 @@ class TestSourceDomainNeutrality:
         text = _BENCHMARK_CASES_FILE.read_text(encoding="utf-8")
         offenders: list[tuple[int, str, str]] = []
         lowered = text.casefold()
-        for token in _BANNED_SPECIALTY_TOKENS:
+        for token in _BANNED_SPECIALTY_TOKENS + _BANNED_RENDER_ONLY_TOKENS:
             if token.casefold() not in lowered:
                 continue
             for line_no, line in enumerate(text.splitlines(), start=1):
@@ -211,7 +222,7 @@ class TestDiscoveryQuestionsRenderNeutrality:
         offenders: list[tuple[str, str, str]] = []
         for builder_name, locale, blob in self._all_rendered_strings():
             lowered = blob.casefold()
-            for token in _BANNED_SPECIALTY_TOKENS:
+            for token in _BANNED_SPECIALTY_TOKENS + _BANNED_RENDER_ONLY_TOKENS:
                 if token.casefold() in lowered:
                     offenders.append((builder_name, locale, token))
         assert not offenders, (
