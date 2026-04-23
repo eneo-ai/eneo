@@ -787,6 +787,85 @@ async def test_ai_builder_repo_load_planning_state_round_trips_saved_state(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_ai_builder_repo_planning_state_round_trip_byte_identical(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """load → no-op re-save → reload must produce a byte-identical
+    serialized payload modulo the version bump. This pins the
+    full-snapshot discipline: save cannot silently reshape the JSONB.
+    """
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Planning Byte Identical",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        session_id = session.id
+        tenant_id = user.tenant_id
+        await repo.save_planning_state(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            state=_planning_state_fixture(),
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        first_loaded = await repo.load_planning_state(
+            session_id=session_id, tenant_id=tenant_id
+        )
+        first_version = (
+            await repo.session.execute(
+                select(BuilderSessions.planning_state_version).where(
+                    BuilderSessions.id == session_id
+                )
+            )
+        ).scalar_one()
+
+    assert first_loaded is not None
+    first_payload = first_loaded.model_dump(mode="json")
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        await repo.save_planning_state(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            state=first_loaded,
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        second_loaded = await repo.load_planning_state(
+            session_id=session_id, tenant_id=tenant_id
+        )
+        second_version = (
+            await repo.session.execute(
+                select(BuilderSessions.planning_state_version).where(
+                    BuilderSessions.id == session_id
+                )
+            )
+        ).scalar_one()
+
+    assert second_loaded is not None
+    assert second_loaded.model_dump(mode="json") == first_payload
+    assert second_version == first_version + 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ai_builder_repo_load_planning_state_raises_for_missing_session(
     db_container,
 ):
