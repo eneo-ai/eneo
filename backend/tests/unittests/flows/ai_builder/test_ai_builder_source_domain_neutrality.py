@@ -1,32 +1,29 @@
-"""Lockdown: banned specialty tokens must not appear in any string
-literal inside the AI Builder source tree, nor in the rendered output
-of the `ai_builder_discovery_questions` question builders.
+"""Default-surface domain-neutrality for AI Builder discovery questions.
 
-The AI Builder is general-purpose — it helps users build procurement,
-onboarding, transcription, extraction, comparison, support-triage, and
-template-fill flows. Swedish decision-support / case-management
-vocabulary AND the English `decision support` compound must not appear
-in any detection tuple, heuristic phrase list, prompt fragment,
-knowledge-pack section, or code comment inside
-`backend/src/intric/flows/ai_builder/`.
+AI Builder is a general-purpose flow builder. It supports specialty
+flows — decision-support memos, tjänsteskrivelse drafting, remiss
+processing — alongside procurement, onboarding, transcription,
+extraction, comparison, template fill, and everything else the Flow
+Capability Manifest can express. Specialty support means the builder
+must be free to recognize specialty vocabulary in user input, describe
+it in knowledge-pack copy, and serve it through its recipes.
 
-User-visible labels are pinned in three places:
-- `TestDomainNeutrality::test_no_banned_tokens_in_any_rendered_template`
-  in `test_question_catalog.py` covers the `QUESTION_CATALOG` registry.
-- `TestDiscoveryQuestionsRenderNeutrality` below covers the
-  `ai_builder_discovery_questions` builders, which produce the
-  user-facing options/labels/descriptions the discovery flow asks at
-  runtime.
-- `TestSourceDomainNeutrality` below scans every source file for
-  banned-token substrings as a belt-and-braces source-level guard.
+What the builder must NOT do is assume specialty framing as the
+default. The discovery flow asks the same seed questions to every
+user, independent of scenario. Those seed questions, and the options
+they offer, must stay domain-neutral so a procurement user is not
+nudged toward decision-support framing before stating intent.
 
-Any future change that reintroduces specialty vocabulary fails here
-before landing.
+This module fences the discovery-question render surface: every option
+label and description for every builder in
+`ai_builder_discovery_questions`, in both Swedish and English. The
+`QUESTION_CATALOG` render surface has the equivalent fence in
+`test_question_catalog.py`. Render-surface fences are the *only*
+lockdown that remains — recognizer tuples, knowledge-pack prose, and
+benchmark cases are free to reference specialty vocabulary.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryLanguage
 from intric.flows.ai_builder.ai_builder_discovery_questions import (
@@ -47,13 +44,14 @@ from intric.flows.ai_builder.ai_builder_discovery_questions import (
     structured_analysis_need_question,
 )
 
-# Banned specialty tokens for the source-wide scan. Substring matches
-# (not whole-word) so compounds like `beslutsunderlagsmall` or
-# `handläggaren` are caught too. Tokens that are safe to appear in
-# input-recognizer tuples but unsafe in user-facing rendered output
-# live in `_BANNED_RENDER_ONLY_TOKENS` below. The render-surface tests
-# combine both lists; the source-wide scan uses only this one.
-_BANNED_SPECIALTY_TOKENS: tuple[str, ...] = (
+# Tokens that must not appear in the default-surface discovery questions
+# (the seed questions shown before the builder has learned the user's
+# scenario). Substring matches (not whole-word) so compounds like
+# `beslutsunderlagsmall` or `handläggaren` are caught too. Specialty
+# vocabulary is welcome in recognizer tuples, knowledge-pack examples,
+# and benchmark cases — it is banned here because the default options
+# must be neutral.
+_BANNED_DEFAULT_RENDER_TOKENS: tuple[str, ...] = (
     "tjänsteskriv",
     "beslutsunderlag",
     "beslutsstöd",
@@ -67,12 +65,6 @@ _BANNED_SPECIALTY_TOKENS: tuple[str, ...] = (
     "decision-support",
     "kommunärende",
     "municipal case",
-    "guldexempel",
-    "kommunanalys",
-    "ärendeanalys",
-    "ansvarig_namnd",
-    "juridiska risker",
-    "ekonomiska konsekvenser",
     "ärendedokument",
     "ärendeunderlag",
     "kommunala handlingar",
@@ -81,107 +73,17 @@ _BANNED_SPECIALTY_TOKENS: tuple[str, ...] = (
     "ärendeintag",
     "ärendesammanfattning",
     "ärende åt gången",
-)
-
-# Render-surface-only banned tokens. These are safe to appear in
-# input-recognizer tuples (where the builder must still understand the
-# user's words) but must never appear in user-facing rendered output —
-# question labels, option descriptions, knowledge-pack copy, benchmark
-# prompts. Catalog-render coverage lives in `test_question_catalog.py`.
-_BANNED_RENDER_ONLY_TOKENS: tuple[str, ...] = (
     "diarienummer",
     "case number",
 )
 
-_AI_BUILDER_SRC = (
-    Path(__file__).resolve().parent.parent.parent.parent.parent
-    / "src"
-    / "intric"
-    / "flows"
-    / "ai_builder"
-)
-
-_BENCHMARK_CASES_FILE = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / "integration"
-    / "flows"
-    / "ai_builder"
-    / "benchmark"
-    / "cases.py"
-)
-
-
-class TestSourceDomainNeutrality:
-    def test_no_banned_tokens_in_any_ai_builder_source_file(self) -> None:
-        assert _AI_BUILDER_SRC.is_dir(), (
-            f"AI Builder source directory not found: {_AI_BUILDER_SRC}"
-        )
-
-        offenders: list[tuple[str, int, str, str]] = []
-        for path in sorted(_AI_BUILDER_SRC.rglob("*.py")):
-            text = path.read_text(encoding="utf-8")
-            lowered = text.casefold()
-            for token in _BANNED_SPECIALTY_TOKENS:
-                if token.casefold() not in lowered:
-                    continue
-                for line_no, line in enumerate(text.splitlines(), start=1):
-                    if token.casefold() in line.casefold():
-                        offenders.append(
-                            (
-                                str(
-                                    path.relative_to(
-                                        _AI_BUILDER_SRC.parent.parent.parent
-                                    )
-                                ),
-                                line_no,
-                                token,
-                                line.strip(),
-                            )
-                        )
-
-        assert not offenders, (
-            "Banned specialty tokens found in AI Builder source:\n"
-            + "\n".join(
-                f"  {path}:{line_no} [{token}] {snippet}"
-                for path, line_no, token, snippet in offenders
-            )
-        )
-
-    def test_no_banned_tokens_in_benchmark_cases(self) -> None:
-        """Benchmark prompts are the worked-example set the evaluation
-        harness feeds to the planner. A specialty token in a benchmark
-        prompt teaches the LLM that specialty framing is normal, even
-        when the source tree is clean. Fence benchmarks alongside source.
-        """
-        assert _BENCHMARK_CASES_FILE.is_file(), (
-            f"Benchmark cases file not found: {_BENCHMARK_CASES_FILE}"
-        )
-        text = _BENCHMARK_CASES_FILE.read_text(encoding="utf-8")
-        offenders: list[tuple[int, str, str]] = []
-        lowered = text.casefold()
-        for token in _BANNED_SPECIALTY_TOKENS + _BANNED_RENDER_ONLY_TOKENS:
-            if token.casefold() not in lowered:
-                continue
-            for line_no, line in enumerate(text.splitlines(), start=1):
-                if token.casefold() in line.casefold():
-                    offenders.append((line_no, token, line.strip()))
-        assert not offenders, (
-            "Banned specialty tokens found in benchmark cases.py:\n"
-            + "\n".join(
-                f"  {_BENCHMARK_CASES_FILE.name}:{line_no} [{token}] {snippet}"
-                for line_no, token, snippet in offenders
-            )
-        )
-
 
 class TestDiscoveryQuestionsRenderNeutrality:
     """The discovery-question builders return `DiscoveryQuestionSuggestion`
-    values whose labels/descriptions reach the user at runtime in both
-    Swedish and English. A future edit that reintroduces a banned token
-    into any option copy or question prompt must fail here before
-    landing — this guards the render surface complementarily to the
-    source-level scan above and to the `QUESTION_CATALOG` render
-    lockdown in `test_question_catalog.py`.
+    values whose labels and descriptions reach the user at runtime in
+    both Swedish and English, before any scenario has been established.
+    A future edit that surfaces specialty framing in those default
+    options must fail here before landing.
     """
 
     @staticmethod
@@ -218,15 +120,16 @@ class TestDiscoveryQuestionsRenderNeutrality:
                 rendered.append((name, locale, "\n".join(parts)))
         return rendered
 
-    def test_no_banned_tokens_in_any_rendered_discovery_question(self) -> None:
+    def test_no_specialty_framing_in_default_discovery_questions(self) -> None:
         offenders: list[tuple[str, str, str]] = []
         for builder_name, locale, blob in self._all_rendered_strings():
             lowered = blob.casefold()
-            for token in _BANNED_SPECIALTY_TOKENS + _BANNED_RENDER_ONLY_TOKENS:
+            for token in _BANNED_DEFAULT_RENDER_TOKENS:
                 if token.casefold() in lowered:
                     offenders.append((builder_name, locale, token))
         assert not offenders, (
-            "Banned specialty tokens found in rendered discovery questions:\n"
+            "Specialty framing leaked into default discovery-question "
+            "options:\n"
             + "\n".join(
                 f"  {builder_name} [{locale}] [{token}]"
                 for builder_name, locale, token in offenders

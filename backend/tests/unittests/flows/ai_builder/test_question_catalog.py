@@ -577,18 +577,24 @@ class TestQuestionCatalogPublicApi:
 
 
 class TestDomainNeutrality:
-    """AI Builder is general-purpose: it builds procurement, onboarding,
-    transcription, extraction, comparison, and template-fill flows — not
-    just decision-support flows. Swedish case-management vocabulary AND
-    the English `decision support` compound must not appear in any
-    rendered question, label, description, help copy, or worked example.
+    """Default-surface neutrality for the `QUESTION_CATALOG` render.
 
-    The banned-token list mirrors the domain-neutrality rule in the
-    Golden Coverage Matrix. A catalog change that reintroduces any of
-    these tokens fails here before landing.
+    AI Builder supports specialty flows — decision-support memos,
+    tjänsteskrivelse drafting, remiss processing — alongside
+    procurement, onboarding, transcription, extraction, comparison, and
+    template fill. Specialty vocabulary is welcome in recognizer tuples,
+    knowledge-pack sections keyed on a scenario, and benchmark cases.
+    What must not happen is specialty framing leaking into the default
+    template render, because the catalog's seed questions reach every
+    user before scenario is known.
+
+    A catalog edit that surfaces specialty framing in the default
+    rendering must fail here before landing. Generic business terms
+    (`juridiska risker`, `ekonomiska konsekvenser`, `guldexempel`, etc.)
+    are NOT banned — those serve every domain.
     """
 
-    _BANNED_SPECIALTY_TOKENS: tuple[str, ...] = (
+    _BANNED_DEFAULT_RENDER_TOKENS: tuple[str, ...] = (
         "tjänsteskriv",
         "beslutsunderlag",
         "beslutsstöd",
@@ -602,12 +608,6 @@ class TestDomainNeutrality:
         "decision-support",
         "kommunärende",
         "municipal case",
-        "guldexempel",
-        "kommunanalys",
-        "ärendeanalys",
-        "ansvarig_namnd",
-        "juridiska risker",
-        "ekonomiska konsekvenser",
         "ärendedokument",
         "ärendeunderlag",
         "kommunala handlingar",
@@ -620,7 +620,7 @@ class TestDomainNeutrality:
         "case number",
     )
 
-    def test_no_banned_tokens_in_any_rendered_template(self) -> None:
+    def test_no_specialty_framing_in_default_template_render(self) -> None:
         for template_id in QUESTION_CATALOG:
             for locale in ("sv", "en"):
                 rendered = render_question(template_id, locale)  # type: ignore[arg-type]
@@ -633,10 +633,10 @@ class TestDomainNeutrality:
                     blob_parts.append(option.label)
                     blob_parts.append(option.description)
                 lowered = "\n".join(blob_parts).casefold()
-                for token in self._BANNED_SPECIALTY_TOKENS:
+                for token in self._BANNED_DEFAULT_RENDER_TOKENS:
                     assert token.casefold() not in lowered, (
-                        f"{template_id} [{locale}]: banned specialty "
-                        f"token {token!r} found in rendered output"
+                        f"{template_id} [{locale}]: specialty framing "
+                        f"token {token!r} leaked into default rendered output"
                     )
 
 
