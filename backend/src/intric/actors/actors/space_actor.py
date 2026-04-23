@@ -435,15 +435,6 @@ class SpaceActor:
                 return SpaceRole.OWNER
             return None
 
-        # Shared (Delat-tab) spaces require the tenant-level `shared_spaces`
-        # permission — membership alone cannot bypass it. Org-space access
-        # is governed by ORG_SPACE_PERMISSIONS and is orthogonal.
-        if (
-            self.space.is_shared()
-            and Permission.SHARED_SPACES not in self.user.permissions
-        ):
-            return None
-
         direct_role = self._get_direct_role()
         group_role = self._get_highest_group_role()
         return self._get_highest_role(direct_role, group_role)

@@ -6,11 +6,8 @@
 
 <script lang="ts">
   import { getAppContext } from "$lib/core/AppContext";
-  import { hasPermission } from "$lib/core/hasPermission";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
-  import InertMembersNotice from "$lib/features/spaces/components/InertMembersNotice.svelte";
-  import type { InertNoticePayload } from "$lib/features/spaces/inertNotice";
   import AddMember from "./AddMember.svelte";
   import AddGroupMember from "./AddGroupMember.svelte";
   import MemberRole from "./MemberRole.svelte";
@@ -20,14 +17,10 @@
   import { IconPeople } from "@intric/icons/people";
 
   const { user } = getAppContext();
-  const canManageRoles = hasPermission(user)("admin");
 
   const {
     state: { currentSpace }
   } = getSpacesManager();
-
-  // Session-scoped; source of truth is the POST response, not a refetch.
-  let inertNotice: InertNoticePayload | null = null;
 
   const isViewerRoleAvailable = $currentSpace.available_roles.some(
     (role) => role.value === "viewer"
@@ -52,7 +45,7 @@
     <Page.Title title={m.members()}></Page.Title>
     <Page.Flex>
       {#if hasGroupMemberPermission}
-        <AddGroupMember oninert={(payload) => (inertNotice = payload)}></AddGroupMember>
+        <AddGroupMember></AddGroupMember>
       {/if}
       {#if $currentSpace.hasPermission("add", "member")}
         <AddMember></AddMember>
@@ -60,17 +53,6 @@
     </Page.Flex>
   </Page.Header>
   <Page.Main>
-    {#if inertNotice}
-      <InertMembersNotice
-        groupName={inertNotice.groupName}
-        loginableTotal={inertNotice.loginableTotal}
-        missingCount={inertNotice.missingCount}
-        missing={inertNotice.missing}
-        truncated={inertNotice.truncated}
-        {canManageRoles}
-        ondismiss={() => (inertNotice = null)}
-      ></InertMembersNotice>
-    {/if}
     <Settings.Page>
       <Settings.Group title={m.current_members()}>
         <Settings.Row title={m.admins_editors()} description={m.admins_editors_description()}>

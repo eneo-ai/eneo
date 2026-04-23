@@ -2266,16 +2266,6 @@
   "user_group": "Användargrupp",
   "add_group": "Lägg till grupp",
   "add_group_to_space": "Lägg till grupp i utrymme",
-  "group_added_to_space": "Gruppen {groupName} har lagts till i utrymmet.",
-  "inert_notice_partial_title": "{count} av {total} medlemmar i {groupName} kan inte se detta utrymme ännu",
-  "inert_notice_all_title": "Ingen i {groupName} kan se detta utrymme ännu ({total} medlemmar påverkas)",
-  "inert_notice_help": "Dessa användare saknar behörigheten \"Delade ytor\". Be en organisationsadministratör att uppgradera deras roll.",
-  "inert_notice_show_members": "Visa berörda medlemmar",
-  "inert_notice_hide_members": "Dölj berörda medlemmar",
-  "inert_notice_more_members": "…och {count} medlem till.",
-  "inert_notice_more_members_plural": "…och {count} medlemmar till.",
-  "inert_notice_manage_roles": "Hantera roller",
-  "inert_notice_dismiss": "Stäng",
   "find_group": "Hitta grupp...",
   "no_user_groups_found": "Inga användargrupper hittades",
   "no_matching_groups_found": "Inga matchande grupper hittades",
@@ -2838,7 +2828,5 @@
   "permission_admin_description": "Organisationsägare. Hantering av användare, roller och grupper.",
   "permission_shared_spaces": "Delade ytor",
   "permission_shared_spaces_description": "Hantering av delade ytor. Skapa, uppdatera och radera delade ytor.",
-  "permissions_selected_count": "{selected} av {total} valda",
-  "no_permission_shared_spaces": "Din roll saknar behörigheten 'Delade ytor'. Kontakta en administratör om du behöver åtkomst.",
-  "user_lacks_shared_spaces_permission": "Användaren saknar behörighet för delade ytor"
+  "permissions_selected_count": "{selected} av {total} valda"
 }

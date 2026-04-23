@@ -2230,16 +2230,6 @@
   "user_group": "User group",
   "add_group": "Add group",
   "add_group_to_space": "Add group to space",
-  "group_added_to_space": "Group {groupName} has been added to the space.",
-  "inert_notice_partial_title": "{count} of {total} members in {groupName} can't see this space yet",
-  "inert_notice_all_title": "No one in {groupName} can see this space yet ({total} members affected)",
-  "inert_notice_help": "These users are missing the \"Shared spaces\" permission. Ask an organization administrator to upgrade their role.",
-  "inert_notice_show_members": "Show affected members",
-  "inert_notice_hide_members": "Hide affected members",
-  "inert_notice_more_members": "…and {count} more member.",
-  "inert_notice_more_members_plural": "…and {count} more members.",
-  "inert_notice_manage_roles": "Manage roles",
-  "inert_notice_dismiss": "Dismiss",
   "find_group": "Find group...",
   "no_user_groups_found": "No user groups found",
   "no_matching_groups_found": "No matching groups found",
@@ -2802,7 +2792,5 @@
   "permission_admin_description": "Organization owner. Management of users, roles, and groups.",
   "permission_shared_spaces": "Shared spaces",
   "permission_shared_spaces_description": "Management of shared spaces. Create, update, and delete shared spaces.",
-  "permissions_selected_count": "{selected} of {total} selected",
-  "no_permission_shared_spaces": "Your role is missing the 'Shared spaces' permission. Contact an administrator if you need access.",
-  "user_lacks_shared_spaces_permission": "User lacks the shared spaces permission"
+  "permissions_selected_count": "{selected} of {total} selected"
 }

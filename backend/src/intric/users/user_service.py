@@ -1780,11 +1780,8 @@ class UserService:
         self,
         tentant_id: Optional[UUID] = None,
         filters: Optional[str] = None,
-        permission: Optional[str] = None,
     ) -> int:
-        count = await self.repo.get_total_count(
-            tenant_id=tentant_id, filters=filters, permission=permission
-        )
+        count = await self.repo.get_total_count(tenant_id=tentant_id, filters=filters)
         return count or 0
 
     async def get_all_users(
@@ -1794,7 +1791,6 @@ class UserService:
         previous: bool = False,
         limit: Optional[int] = None,
         filters: Optional[str] = None,
-        permission: Optional[str] = None,
     ) -> list["UserInDB"]:
         """
         Retrieves a paginated list of users for a specific tenant,
@@ -1807,7 +1803,6 @@ class UserService:
             cursor=cursor,
             previous=previous,
             filters=filters,
-            permission=permission,
         )
 
     async def invite_user(self, user_invite: PropUserInvite, tenant_id: UUID):

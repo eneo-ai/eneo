@@ -58,10 +58,10 @@ export function initUser(client) {
      * @return {Promise<import('../types/resources').Paginated<User>>}
      *
      * @overload
-     * @param {{includeDetails?: false, filter?: string, limit?: number, cursor?: string, permission?: import('../types/resources').Permission}} [options]
+     * @param {{includeDetails?: false, filter?: string, limit?: number, cursor?: string}} [options]
      * @return {Promise<import('../types/resources').Paginated<UserSparse>> }
      *
-     * @param {{includeDetails: boolean, filter?: string, limit?: number, cursor?: string, permission?: import('../types/resources').Permission, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: "active" | "inactive"}} [options]
+     * @param {{includeDetails: boolean, filter?: string, limit?: number, cursor?: string, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: "active" | "inactive"}} [options]
      * @throws {IntricError}
      * */
     list: async (options) => {
@@ -90,8 +90,7 @@ export function initUser(client) {
           query: {
             email: options?.filter,
             limit: options?.limit,
-            cursor: options?.cursor,
-            permission: options?.permission
+            cursor: options?.cursor
           }
         }
       });

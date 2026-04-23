@@ -34,9 +34,7 @@
     }
   });
 
-  // Space member picker: only show users whose tenant role carries
-  // `shared_spaces`; the backend add_member endpoint would reject others.
-  let userList = new UserList({ permission: "shared_spaces" });
+  let userList = new UserList({});
   let selectedRole = $state.raw($currentSpace.available_roles[0]);
   const memberIds = $derived($currentSpace.members.map((member) => member.id));
   const intric = getIntric();

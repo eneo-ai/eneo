@@ -14,14 +14,7 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
-  import { announceGroupAttachResult } from "$lib/features/spaces/announceGroupAttachResult";
-  import type { InertNoticePayload } from "$lib/features/spaces/inertNotice";
   import { IconPeople } from "@intric/icons/people";
-
-  // `null` signals a clean attach so the parent can clear any banner from
-  // a previous attach that had inert members.
-  type Props = { oninert?: (payload: InertNoticePayload | null) => void };
-  const { oninert }: Props = $props();
 
   const {
     refreshCurrentSpace,
@@ -75,35 +68,13 @@
     const selectedGroup = $selected?.value;
     if (!selectedGroup) return;
     try {
-      const response = await intric.spaces.groupMembers.add({
+      await intric.spaces.groupMembers.add({
         spaceId: $currentSpace.id,
         group: { id: selectedGroup.id, role: selectedRole.value }
       });
       refreshCurrentSpace();
       $showDialog = false;
       $selected = undefined;
-
-      announceGroupAttachResult({ groupName: selectedGroup.name });
-
-      if (oninert) {
-        const inertSample = response.inert_members ?? [];
-        const missingCount = response.inert_member_count ?? inertSample.length;
-        if (missingCount > 0) {
-          oninert({
-            groupName: selectedGroup.name,
-            loginableTotal: response.loginable_count ?? response.user_count ?? 0,
-            missingCount,
-            missing: inertSample.map((m) => ({
-              id: m.id,
-              email: m.email,
-              username: m.username ?? null
-            })),
-            truncated: response.inert_truncated ?? missingCount > inertSample.length
-          });
-        } else {
-          oninert(null);
-        }
-      }
     } catch (e) {
       toastError(e, m.could_not_add_group());
       console.error(e);

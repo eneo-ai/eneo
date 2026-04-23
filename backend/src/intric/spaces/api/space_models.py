@@ -77,45 +77,9 @@ class SpaceMember(UserSparse):
 
 
 class SpaceGroupMember(InDB):
-    """A user group that is a member of a space with a specific role.
-
-    `user_count` is the raw size of the group (matches the group picker).
-    `loginable_count` is the subset of that group whose users are active or
-    invited and not soft-deleted — the denominator that must line up with
-    `inert_members` when admins read "N of M members lack a permission".
-    """
-
     name: str
     role: SpaceRoleValue
     user_count: int = 0
-    loginable_count: int = 0
-
-
-class InertSpaceGroupMember(BaseModel):
-    """A user in an attached group who cannot access the space because their
-    tenant role lacks `shared_spaces`. Surfaced to admins on attach so they can
-    promote roles or trim the group. Runtime `SpaceActor` remains authoritative."""
-
-    id: UUID
-    email: str
-    username: Optional[str] = None
-
-
-class SpaceGroupMemberAddResponse(SpaceGroupMember):
-    """Response for attaching a user group to a space.
-
-    Structural superset of `SpaceGroupMember`: callers that only need the
-    attached member can treat it as one. The three additional fields carry
-    attach-time advisory data about users who won't gain runtime access at
-    their current tenant role — `inert_member_count` is the FULL count,
-    `inert_members` is a server-capped sample (see
-    `users.user_repo.INERT_SAMPLE_SIZE`), `inert_truncated` flags when the
-    sample was capped so the UI can render "…and N more".
-    """
-
-    inert_members: list[InertSpaceGroupMember] = []
-    inert_member_count: int = 0
-    inert_truncated: bool = False
 
 
 # Apps

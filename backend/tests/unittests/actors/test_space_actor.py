@@ -18,9 +18,6 @@ class MockUser:
     ):
         self.id = id
         if permissions is None:
-            # Every user in these tests can participate in shared spaces by
-            # default — the shared_spaces tenant gate is exercised by its own
-            # targeted tests, not as a precondition of unrelated cases.
             self.permissions = {Permission.SHARED_SPACES}
         else:
             self.permissions = permissions
@@ -1008,23 +1005,42 @@ def test_group_admin_can_create_integration_knowledge(
     )
 
 
-# shared_spaces tenant-permission gate on shared (Delat) spaces
+# shared_spaces tenant permission — gates space CREATION only, not viewing.
+# Membership alone is the authoritative read/edit gate on a shared space.
 
 
 def _permissions_without_shared_spaces():
     return {p for p in ALL_PERMISSIONS if p != Permission.SHARED_SPACES}
 
 
-def test_user_without_shared_spaces_has_no_role_on_shared_space(
+def test_member_without_shared_spaces_can_read_shared_space(
     shared_space: MockSpace,
 ):
-    """Membership must not grant a role if the tenant role lacks shared_spaces."""
+    """A direct member of a shared space retains access even without the
+    tenant-level `shared_spaces` permission — the permission gates creation
+    only. This is the post-narrowing semantic (April 2026)."""
     user = MockUser(
         id=42,
         role=MockSpaceRole.ADMIN,
         permissions=_permissions_without_shared_spaces(),
     )
     shared_space.members = {user.id: user}
+    actor = SpaceActor(user, shared_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.READ, resource_type=SpaceResourceType.SPACE
+    )
+
+
+def test_non_member_without_shared_spaces_has_no_role_on_shared_space(
+    shared_space: MockSpace,
+):
+    """A non-member still cannot access a shared space regardless of the
+    tenant permission — the permission was never the authorizer; membership is."""
+    user = MockUser(
+        id=43,
+        role=MockSpaceRole.ADMIN,
+        permissions=_permissions_without_shared_spaces(),
+    )
     actor = SpaceActor(user, shared_space)
     assert (
         actor.can_perform_action(
