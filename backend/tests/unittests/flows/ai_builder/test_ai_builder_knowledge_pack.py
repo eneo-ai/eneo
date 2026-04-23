@@ -76,17 +76,19 @@ def test_build_prompt_knowledge_sections_omits_registry_pack_without_confirmed_r
     ), "registry-rendered pack must not leak into the pre-requirements discovery prompt"
 
 
-def test_build_prompt_knowledge_sections_omits_registry_pack_in_edit_mode() -> None:
+def test_build_prompt_knowledge_sections_includes_registry_pack_in_edit_mode() -> None:
     sections = build_prompt_knowledge_sections(
         is_edit_mode=True,
         has_confirmed_requirements=False,
     )
 
-    assert not any(
-        "Flow capabilities (engine truth)" in section for section in sections
-    ), (
-        "registry-rendered pack is create-mode only; edit-mode prompt must not include it"
+    assert any("Flow capabilities (engine truth)" in section for section in sections), (
+        "edit-mode prompt must include the registry-rendered pack so edits stay "
+        "consistent with create-mode guarantees"
     )
+    assert any(
+        "Planner patterns (positive archetypes)" in section for section in sections
+    ), "edit-mode prompt must include planner archetypes alongside capabilities"
 
 
 def test_role_and_reference_blocks_switch_submission_tool_by_mode() -> None:

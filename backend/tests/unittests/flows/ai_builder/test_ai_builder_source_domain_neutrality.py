@@ -76,6 +76,10 @@ _BANNED_SPECIALTY_TOKENS: tuple[str, ...] = (
     "ärendeunderlag",
     "kommunala handlingar",
     "huvudärende",
+    "ärendepaket",
+    "ärendeintag",
+    "ärendesammanfattning",
+    "ärende åt gången",
 )
 
 _AI_BUILDER_SRC = (
@@ -84,6 +88,15 @@ _AI_BUILDER_SRC = (
     / "intric"
     / "flows"
     / "ai_builder"
+)
+
+_BENCHMARK_CASES_FILE = (
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "integration"
+    / "flows"
+    / "ai_builder"
+    / "benchmark"
+    / "cases.py"
 )
 
 
@@ -120,6 +133,32 @@ class TestSourceDomainNeutrality:
             + "\n".join(
                 f"  {path}:{line_no} [{token}] {snippet}"
                 for path, line_no, token, snippet in offenders
+            )
+        )
+
+    def test_no_banned_tokens_in_benchmark_cases(self) -> None:
+        """Benchmark prompts are the worked-example set the evaluation
+        harness feeds to the planner. A specialty token in a benchmark
+        prompt teaches the LLM that specialty framing is normal, even
+        when the source tree is clean. Fence benchmarks alongside source.
+        """
+        assert _BENCHMARK_CASES_FILE.is_file(), (
+            f"Benchmark cases file not found: {_BENCHMARK_CASES_FILE}"
+        )
+        text = _BENCHMARK_CASES_FILE.read_text(encoding="utf-8")
+        offenders: list[tuple[int, str, str]] = []
+        lowered = text.casefold()
+        for token in _BANNED_SPECIALTY_TOKENS:
+            if token.casefold() not in lowered:
+                continue
+            for line_no, line in enumerate(text.splitlines(), start=1):
+                if token.casefold() in line.casefold():
+                    offenders.append((line_no, token, line.strip()))
+        assert not offenders, (
+            "Banned specialty tokens found in benchmark cases.py:\n"
+            + "\n".join(
+                f"  {_BENCHMARK_CASES_FILE.name}:{line_no} [{token}] {snippet}"
+                for line_no, token, snippet in offenders
             )
         )
 

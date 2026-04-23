@@ -38,9 +38,11 @@ class TestRecipeBulletDataclass:
 class TestRecipeSectionDataclass:
     def test_section_dataclass_is_frozen_with_heading_and_optional_bodies(self) -> None:
         section = RecipeSection(
+            section_id="fixture",
             heading="Numbered section",
             numbered_items=("step one", "step two"),
         )
+        assert section.section_id == "fixture"
         assert section.heading == "Numbered section"
         assert section.numbered_items == ("step one", "step two")
         assert section.bullets == ()
@@ -51,6 +53,7 @@ class TestRecipeSectionDataclass:
 
     def test_section_accepts_bulleted_body(self) -> None:
         section = RecipeSection(
+            section_id="bulleted_fixture",
             heading="Bulleted section",
             bullets=(RecipeBullet(text="first"), RecipeBullet(text="second")),
         )
@@ -60,6 +63,7 @@ class TestRecipeSectionDataclass:
 
     def test_section_accepts_code_block_body(self) -> None:
         section = RecipeSection(
+            section_id="code_fixture",
             heading="Code section",
             code_block='{"a": 1}',
             code_language="json",
@@ -77,6 +81,25 @@ class TestRecipeRegistryContract:
         alongside the `RECIPE_SECTIONS['comparison']` marker cut-over so
         the `comparison` signal no longer resolves to a no-op."""
         assert len(KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS) == 7
+
+    def test_registry_section_ids_are_canonical_and_unique(self) -> None:
+        """The selector filters recipes by `section_id`, not heading
+        substring. Pin the canonical id set and uniqueness so a rename
+        in the recipes module or a silent duplication cannot detach a
+        section from its signal trigger."""
+        ids = [section.section_id for section in KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS]
+        assert len(ids) == len(set(ids)), (
+            f"RecipeSection section_id values must be unique; got {ids}"
+        )
+        assert set(ids) == {
+            "document_analysis",
+            "transcription",
+            "json_pipeline",
+            "rich_document_workflow",
+            "sectioned_form_intake",
+            "comparison",
+            "golden_example",
+        }
 
     def test_registry_covers_canonical_headings(self) -> None:
         """Pin each expected section heading by content, not index, so a

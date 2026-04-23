@@ -267,7 +267,7 @@ class TestQuestionBudget:
         assert "final_output_mode" not in blocking_ids
         assert len(blocking_ids) <= 2
         assert any(
-            "ett ärende åt gången" in assumption for assumption in analysis.assumptions
+            "en körning åt gången" in assumption for assumption in analysis.assumptions
         )
         assert any(
             "ett huvuddokument" in assumption for assumption in analysis.assumptions

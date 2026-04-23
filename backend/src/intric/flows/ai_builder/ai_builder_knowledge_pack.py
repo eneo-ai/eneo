@@ -44,6 +44,7 @@ def build_prompt_knowledge_sections(
             [
                 KNOWLEDGE_PACK_FLOW_ARCHITECTURE,
                 KNOWLEDGE_PACK_VARIABLE_SYSTEM,
+                render_knowledge_pack(),
                 KNOWLEDGE_PACK_EDIT_MODE,
                 KNOWLEDGE_PACK_CONTRACTS,
                 KNOWLEDGE_PACK_STEP_DESIGN,

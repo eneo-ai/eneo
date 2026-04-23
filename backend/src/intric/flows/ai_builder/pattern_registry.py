@@ -206,7 +206,7 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "extract_template_variables_step",
             "template_fill_docx_step",
         ),
-        recipe_sections=("docx_template",),
+        recipe_sections=("document_analysis",),
     ),
     _pattern(
         id="document_to_pdf_report",
@@ -362,10 +362,12 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         required_architectural_slots=(
             "primary_runtime_input",
             "terminal_output",
+            "runtime_metadata_fields",
         ),
         question_template_ids=(
             "primary_runtime_input",
             "terminal_output",
+            "runtime_metadata_fields",
         ),
     ),
 )

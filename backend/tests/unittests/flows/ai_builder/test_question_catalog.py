@@ -612,6 +612,10 @@ class TestDomainNeutrality:
         "ärendeunderlag",
         "kommunala handlingar",
         "huvudärende",
+        "ärendepaket",
+        "ärendeintag",
+        "ärendesammanfattning",
+        "ärende åt gången",
     )
 
     def test_no_banned_tokens_in_any_rendered_template(self) -> None:
@@ -632,3 +636,85 @@ class TestDomainNeutrality:
                         f"{template_id} [{locale}]: banned specialty "
                         f"token {token!r} found in rendered output"
                     )
+
+
+class TestQuestionCopyParity:
+    """The `QUESTION_CATALOG` and `ai_builder_discovery_questions` each
+    render the same user-facing question surface. Both are live — the
+    catalog feeds the create-mode knowledge pack, the builders feed the
+    discovery runtime. Any drift between them means the planner and the
+    runtime disagree on what to call the same slot. Pin exact parity
+    per (template_id, locale) across question text, help text, options,
+    and worked examples so a future edit to one source blows up here
+    before shipping.
+    """
+
+    @staticmethod
+    def _builders_by_template_id():
+        from intric.flows.ai_builder.ai_builder_discovery_questions import (
+            comparison_scope_question,
+            document_kind_question,
+            document_material_scope_question,
+            docx_output_mode_question,
+            final_output_mode_question,
+            final_output_scope_question,
+            final_pdf_type_question,
+            flow_input_architecture_question,
+            input_material_mode_question,
+            output_reader_question,
+            pdf_generation_mode_question,
+            processing_scope_question,
+            runtime_metadata_fields_question,
+            structured_analysis_need_question,
+        )
+
+        return {
+            "processing_scope": processing_scope_question,
+            "input_material_mode": input_material_mode_question,
+            "flow_input_architecture": flow_input_architecture_question,
+            "document_kind": document_kind_question,
+            "document_material_scope": document_material_scope_question,
+            "comparison_scope": comparison_scope_question,
+            "final_output_mode": final_output_mode_question,
+            "docx_output_mode": docx_output_mode_question,
+            "output_reader": output_reader_question,
+            "final_output_scope": final_output_scope_question,
+            "runtime_metadata_fields": runtime_metadata_fields_question,
+            "structured_analysis_need": structured_analysis_need_question,
+            "final_pdf_type": final_pdf_type_question,
+            "pdf_generation_mode": pdf_generation_mode_question,
+        }
+
+    @pytest.mark.parametrize("locale", ["sv", "en"])
+    def test_catalog_matches_discovery_builder_surface(self, locale: str) -> None:
+        builders = self._builders_by_template_id()
+        for template_id, builder in builders.items():
+            if template_id not in QUESTION_CATALOG:
+                continue
+            rendered = render_question(template_id, locale)  # type: ignore[arg-type]
+            suggestion = builder(locale)  # type: ignore[arg-type]
+            assert rendered.question == suggestion.question, (
+                f"{template_id} [{locale}]: question text diverged "
+                f"between catalog and discovery builder"
+            )
+            catalog_options = {option.id: option for option in rendered.options}
+            builder_options = {option.id: option for option in suggestion.options}
+            assert set(catalog_options) == set(builder_options), (
+                f"{template_id} [{locale}]: option id set diverged "
+                f"between catalog and discovery builder"
+            )
+            for option_id, catalog_option in catalog_options.items():
+                builder_option = builder_options[option_id]
+                assert catalog_option.label == builder_option.label, (
+                    f"{template_id} [{locale}] option {option_id!r}: "
+                    f"label diverged between catalog and discovery builder"
+                )
+                assert catalog_option.description == builder_option.description, (
+                    f"{template_id} [{locale}] option {option_id!r}: "
+                    f"description diverged between catalog and discovery "
+                    f"builder"
+                )
+                assert catalog_option.value == builder_option.value, (
+                    f"{template_id} [{locale}] option {option_id!r}: "
+                    f"value diverged between catalog and discovery builder"
+                )

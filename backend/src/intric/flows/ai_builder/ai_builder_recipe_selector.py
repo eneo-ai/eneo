@@ -7,6 +7,11 @@ that match the user's flow requirements.
 
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_create_recipes import (
+    KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS,
+    RecipeSection,
+    render_knowledge_pack_create_recipes,
+)
 from intric.flows.ai_builder.ai_builder_form_intake_signals import (
     extract_form_intake_recipe_signals,
 )
@@ -15,32 +20,21 @@ from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
 )
 from intric.flows.ai_builder.pattern_registry import find_pattern_candidates
 
-# Recipe section markers — these map to section headers in the recipes block
-RECIPE_SECTIONS: dict[str, tuple[str, ...]] = {
-    "transcription": ("Transkribering", "Audio -> text -> analys -> rapport"),
-    "document_analysis": (
-        "Dokumentanalys",
-        "Dokumentpaket -> JSON -> grounded text -> DOCX/PDF",
-    ),
-    "golden_example": ("Exempel",),
-    "docx_template": ("DOCX",),
-    "json_pipeline": ("JSON", "JSON-steg"),
-    "comparison": ("Jämför",),
-    "sectioned_form_intake": ("Sektionerad insamling via formulärfält",),
-    "rich_document_workflow": (
-        "Dokumentflöde med formulärkomplettering och kvalitetssteg",
-    ),
-}
-
-# Signal → required recipe sections.
-# `golden_example` is intentionally absent — `select_relevant_recipes` adds it
-# unconditionally once any signal triggers a narrowing, so listing it per
-# signal would only invite drift between this map and that single source of
-# truth.
+# Signal → required recipe section_ids.
+#
+# `docx_template` is kept as a signal key for legacy callers, but the
+# recipes registry no longer ships a dedicated `docx_template` section —
+# the DOCX path lives inside `document_analysis` today. A future slice
+# that reintroduces a DOCX-specific section registers it here.
+#
+# `golden_example` is intentionally absent — `select_relevant_recipes`
+# adds it unconditionally once any signal triggers a narrowing, so
+# listing it per signal would only invite drift between this map and
+# that single source of truth.
 SIGNAL_TO_RECIPES: dict[str, list[str]] = {
     "audio": ["transcription"],
     "documents": ["document_analysis"],
-    "docx_document": ["docx_template"],
+    "docx_document": ["document_analysis"],
     "pdf_document": ["document_analysis"],
     "structured_json": ["json_pipeline"],
     "structured_text": ["document_analysis"],
@@ -67,6 +61,12 @@ def select_relevant_recipes(
     ``render_knowledge_pack_create_recipes()``). Requiring it avoids a
     silent cut-over to a legacy prose block when a new caller forgets
     to pass one; the selector stays out of the pack-source business.
+
+    Filtering resolves signals to canonical ``section_id`` values and
+    picks the matching entries from
+    ``KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS`` directly — heading prose
+    is UI copy, not a stable key, so matching by heading substring
+    would drift the moment a rename lands in the recipes module.
 
     Args:
         answer_signals: Extracted answer signals from the conversation.
@@ -132,36 +132,20 @@ def select_relevant_recipes(
 
 
 def _filter_recipe_sections(full_recipes: str, needed: set[str]) -> str:
-    """Extract only the needed sections from the recipes block.
+    """Return a rendered recipe pack narrowed to the ``needed`` section_ids.
 
-    Sections are identified by their headers (## N. ...) and selected
-    if any of their marker keywords appear in the needed sections.
+    Filters the structured registry by ``section_id`` and renders the
+    subset. Falls back to ``full_recipes`` when the filter set is empty
+    or matches no known section so the planner always sees a usable
+    pack rather than a blank one.
     """
-    lines = full_recipes.split("\n")
-    result_lines: list[str] = []
-    in_relevant_section = False
-
-    # Always include the title
-    for line in lines:
-        if line.startswith("# ") and not line.startswith("## "):
-            result_lines.append(line)
-            continue
-
-        if line.startswith("## "):
-            # Check if this section is needed
-            in_relevant_section = False
-            for recipe_key, markers in RECIPE_SECTIONS.items():
-                if recipe_key in needed:
-                    if any(marker in line for marker in markers):
-                        in_relevant_section = True
-                        break
-            if in_relevant_section:
-                result_lines.append("")
-                result_lines.append(line)
-            continue
-
-        if in_relevant_section:
-            result_lines.append(line)
-
-    filtered = "\n".join(result_lines).strip()
-    return filtered if filtered else full_recipes
+    if not needed:
+        return full_recipes
+    subset: tuple[RecipeSection, ...] = tuple(
+        section
+        for section in KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS
+        if section.section_id in needed
+    )
+    if not subset:
+        return full_recipes
+    return render_knowledge_pack_create_recipes(sections=subset)

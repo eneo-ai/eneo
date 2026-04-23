@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -13,6 +15,9 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
 )
+
+if TYPE_CHECKING:
+    from intric.flows.ai_builder.ai_builder_critic_invariants import CriticContext
 
 
 def _step(
@@ -1112,3 +1117,285 @@ class TestCriticInvariantRegistry:
         )
 
         assert has_json_contract_step(spec) is False
+
+
+class TestRichWorkflowInvariants:
+    """Fire/quiet coverage for the rich-workflow invariants declared at
+    `ai_builder_critic_invariants.py:334/358/384`.
+
+    The id-order lockdown in `TestCriticInvariantRegistry` pins *which*
+    invariants exist; these tests pin their *behavior* — each invariant
+    fires only when all of its planner-pattern signals agree AND the
+    spec is missing the required structure, and stays silent the moment
+    any precondition flips. The `generated_docx_without_structure` case
+    exists because a user who asks for a plain generated DOCX must not
+    be nagged about JSON steps or quality chains — that is the most
+    common false-positive shape for these three.
+    """
+
+    def _context_with_signals(
+        self,
+        spec: FlowDraftSpecCore,
+        *,
+        rich: bool = True,
+        needs_form_fields: bool = False,
+        prefers_structured_intermediate: bool = False,
+        prefers_quality_step: bool = False,
+    ) -> CriticContext:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        return CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(
+                needs_form_fields=needs_form_fields,
+                prefers_structured_intermediate=prefers_structured_intermediate,
+                prefers_quality_step=prefers_quality_step,
+                rich_document_workflow=rich,
+            ),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+    def test_rich_workflow_requires_form_fields_fires_when_form_fields_missing(
+        self,
+    ) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            render_critic_issues,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport",
+            steps=[
+                _step(
+                    "step_a",
+                    "Analysera dokument",
+                    "Läs dokumentet och skriv rapport.",
+                    input_type=InputType.DOCUMENT,
+                )
+            ],
+        )
+        context = self._context_with_signals(spec, needs_form_fields=True)
+
+        issues = render_critic_issues(context)
+
+        assert any("form_fields" in issue for issue in issues)
+
+    def test_rich_workflow_requires_form_fields_silent_when_form_fields_declared(
+        self,
+    ) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            render_critic_issues,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport",
+            form_fields=[
+                FormFieldSpec(
+                    name="ansvarig_enhet", type="text", label="Ansvarig enhet"
+                )
+            ],
+            steps=[
+                _step(
+                    "step_a",
+                    "Analysera dokument",
+                    "Läs dokumentet och skriv rapport.",
+                    input_type=InputType.DOCUMENT,
+                )
+            ],
+        )
+        context = self._context_with_signals(spec, needs_form_fields=True)
+
+        issues = render_critic_issues(context)
+
+        assert not any(
+            "formulärfält" in issue or "form_fields" in issue for issue in issues
+        )
+
+    def test_rich_workflow_requires_json_contract_step_fires_when_missing(
+        self,
+    ) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            render_critic_issues,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport",
+            steps=[
+                _step(
+                    "step_a",
+                    "Analysera dokument",
+                    "Läs och skriv rapport direkt.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.DOCX,
+                )
+            ],
+        )
+        context = self._context_with_signals(spec, prefers_structured_intermediate=True)
+
+        issues = render_critic_issues(context)
+
+        assert any(
+            "output_contract" in issue or "JSON-steg" in issue for issue in issues
+        )
+
+    def test_rich_workflow_requires_json_contract_step_silent_for_generated_docx_without_structure(
+        self,
+    ) -> None:
+        """Edge case: a plain generated DOCX with no structured-intermediate
+        signal must not be nagged about JSON steps. This is the most
+        common false-positive shape — user wants a simple
+        document-in/document-out workflow, planner obliged, no
+        downstream reuse was ever requested.
+        """
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            render_critic_issues,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport",
+            steps=[
+                _step(
+                    "step_a",
+                    "Analysera dokument",
+                    "Skriv rapport direkt från dokumentet.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.DOCX,
+                )
+            ],
+        )
+        context = self._context_with_signals(
+            spec, prefers_structured_intermediate=False
+        )
+
+        issues = render_critic_issues(context)
+
+        assert not any("output_contract" in issue for issue in issues)
+        assert not any("JSON-steg" in issue for issue in issues)
+
+    def test_rich_workflow_requires_multiple_steps_fires_below_three_steps(
+        self,
+    ) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            render_critic_issues,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport",
+            steps=[
+                _step(
+                    "step_a",
+                    "Analysera dokument",
+                    "Analysera.",
+                    input_type=InputType.DOCUMENT,
+                ),
+                _step(
+                    "step_b",
+                    "Skriv rapport",
+                    "Skriv.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        )
+        context = self._context_with_signals(spec, prefers_quality_step=True)
+
+        issues = render_critic_issues(context)
+
+        assert any("mellanliggande" in issue.casefold() for issue in issues)
+
+    def test_rich_workflow_requires_multiple_steps_silent_when_three_steps_present(
+        self,
+    ) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            render_critic_issues,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport",
+            steps=[
+                _step(
+                    "step_a",
+                    "Analysera dokument",
+                    "Analysera.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                    output_contract={"type": "object"},
+                ),
+                _step(
+                    "step_b",
+                    "Granska analysen",
+                    "Granska.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_c",
+                    "Skriv rapport",
+                    "Skriv.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        )
+        context = self._context_with_signals(spec, prefers_quality_step=True)
+
+        issues = render_critic_issues(context)
+
+        assert not any("mellanliggande" in issue.casefold() for issue in issues)
+
+    def test_rich_workflow_invariants_all_silent_when_not_a_rich_workflow(
+        self,
+    ) -> None:
+        """When `rich_document_workflow` is False, none of the three
+        invariants may fire — even if the underlying sub-signals are set.
+        This guards against a regression where a sub-signal alone (e.g.
+        a stray quality keyword on a non-document flow) re-triggers the
+        nags.
+        """
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            render_critic_issues,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Kort sammanfattning",
+            steps=[
+                _step(
+                    "step_a",
+                    "Skriv sammanfattning",
+                    "Sammanfatta texten.",
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                )
+            ],
+        )
+        context = self._context_with_signals(
+            spec,
+            rich=False,
+            needs_form_fields=True,
+            prefers_structured_intermediate=True,
+            prefers_quality_step=True,
+        )
+
+        issues = render_critic_issues(context)
+
+        assert not any("rich" in issue.casefold() for issue in issues)
+        assert not any("mellanliggande" in issue.casefold() for issue in issues)
+        assert not any(
+            "återanvända strukturerad" in issue.casefold() for issue in issues
+        )

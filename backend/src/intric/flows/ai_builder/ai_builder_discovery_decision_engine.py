@@ -267,7 +267,7 @@ def candidate_confidence(
 
 def heuristic_confidence(issue_id: str, profile: DiscoveryProfile) -> str | None:
     if issue_id == "case_scope" and implies_single_case(profile.text):
-        return "singular case phrasing suggests one case per run"
+        return "singular phrasing suggests one item per run"
     if issue_id == "document_material_scope" and implies_single_primary_document(
         profile.text
     ):
@@ -319,8 +319,8 @@ def assumption_for_candidate(
     if candidate.issue_id == "case_scope" and implies_single_case(profile.text):
         return localized_text(
             language,
-            "Antar ett ärende åt gången per körning tills du säger att flera ärenden ska hanteras tillsammans.",
-            "Assuming one case per run unless you later say multiple cases should be handled together.",
+            "Antar en körning åt gången tills du säger att flera paket ska hanteras tillsammans.",
+            "Assuming one run at a time unless you later say multiple packages should be handled together.",
         )
     if (
         candidate.issue_id == "document_material_scope"

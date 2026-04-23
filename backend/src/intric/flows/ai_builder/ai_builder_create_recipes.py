@@ -11,6 +11,7 @@ class RecipeBullet:
 
 @dataclass(frozen=True, slots=True)
 class RecipeSection:
+    section_id: str
     heading: str
     numbered_items: tuple[str, ...] = ()
     bullets: tuple[RecipeBullet, ...] = ()
@@ -80,6 +81,7 @@ _RISK_ANALYSIS_EXAMPLE = """\
 
 KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS: tuple[RecipeSection, ...] = (
     RecipeSection(
+        section_id="document_analysis",
         heading="Dokumentpaket -> JSON -> grounded text -> DOCX/PDF",
         numbered_items=(
             'Steg 1: `flow_input` + `input_type="document"` + `runtime_upload=true`',
@@ -97,6 +99,7 @@ KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS: tuple[RecipeSection, ...] = (
         ),
     ),
     RecipeSection(
+        section_id="transcription",
         heading="Audio -> text -> analys -> rapport",
         numbered_items=(
             'Första steget: `input_type="audio"`, `output_type="text"`',
@@ -105,6 +108,7 @@ KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS: tuple[RecipeSection, ...] = (
         ),
     ),
     RecipeSection(
+        section_id="json_pipeline",
         heading="JSON-steg",
         bullets=(
             RecipeBullet(
@@ -122,6 +126,7 @@ KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS: tuple[RecipeSection, ...] = (
         ),
     ),
     RecipeSection(
+        section_id="rich_document_workflow",
         heading="Dokumentflöde med formulärkomplettering och kvalitetssteg",
         bullets=(
             RecipeBullet(
@@ -168,6 +173,7 @@ KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS: tuple[RecipeSection, ...] = (
         ),
     ),
     RecipeSection(
+        section_id="sectioned_form_intake",
         heading="Sektionerad insamling via formulärfält",
         bullets=(
             RecipeBullet(
@@ -200,6 +206,7 @@ KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS: tuple[RecipeSection, ...] = (
         ),
     ),
     RecipeSection(
+        section_id="comparison",
         heading="Jämförelseflöden med flera indata",
         bullets=(
             RecipeBullet(
@@ -238,6 +245,7 @@ KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS: tuple[RecipeSection, ...] = (
         ),
     ),
     RecipeSection(
+        section_id="golden_example",
         heading="Exempel: dokumentgranskning med riskanalys",
         code_block=_RISK_ANALYSIS_EXAMPLE,
         code_language="json",
@@ -248,9 +256,22 @@ KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS: tuple[RecipeSection, ...] = (
 _HEADER = "# Create-läge: vanliga mönster"
 
 
-def render_knowledge_pack_create_recipes() -> str:
+def render_knowledge_pack_create_recipes(
+    *,
+    sections: tuple[RecipeSection, ...] | None = None,
+) -> str:
+    """Render the create-mode recipes knowledge pack as a single string.
+
+    ``sections`` defaults to the full canonical registry. Callers that
+    want a filtered subset (e.g., the signal-aware recipe selector)
+    pass an explicit tuple — the filtering happens on structured data,
+    the renderer stays dumb.
+    """
+    ordered = (
+        sections if sections is not None else KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS
+    )
     lines: list[str] = [_HEADER]
-    for section in KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS:
+    for section in ordered:
         lines.append("")
         lines.append(f"## {section.heading}")
         if section.numbered_items:

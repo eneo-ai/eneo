@@ -233,8 +233,8 @@ def analyze_discovery(
                 severity="blocking",
                 message=localized_text(
                     profile.language,
-                    "Det är fortfarande oklart om ett ärende normalt består av ett dokument eller ett dokumentpaket med flera filer.",
-                    "It is still unclear whether one case normally contains one source document or a document package with several files.",
+                    "Det är fortfarande oklart om varje körning normalt består av ett dokument eller ett dokumentpaket med flera filer.",
+                    "It is still unclear whether one run normally contains one source document or a document package with several files.",
                 ),
                 suggestion=document_material_scope_question(profile.language),
                 question_level="high_value",

@@ -87,9 +87,9 @@ BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
         archetype="form_centric",
         ui_language="sv",
         prompt=(
-            "Ärendeintag med sektionerade formulärfält: bakgrund, mål, "
+            "Formulärintag med sektionerade formulärfält: bakgrund, mål, "
             "prioritet, riskbedömning. Flödet skriver en kort "
-            "ärendesammanfattning i text."
+            "sammanfattning i text."
         ),
     ),
     BenchmarkCase(
@@ -138,7 +138,7 @@ BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
         archetype="rich",
         ui_language="en",
         prompt=(
-            "Users upload multiple case PDFs. The flow should extract "
+            "Users upload multiple document PDFs. The flow should extract "
             "structured JSON fields, compose a policy summary with risk "
             "assessment, and generate a DOCX output with the analyst's "
             "name attached."
@@ -160,7 +160,7 @@ BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
         ui_language="en",
         prompt=(
             "Fill a DOCX template with data from structured JSON input. "
-            "The template has placeholders for case id, applicant name, "
+            "The template has placeholders for reference id, applicant name, "
             "and decision rationale."
         ),
     ),

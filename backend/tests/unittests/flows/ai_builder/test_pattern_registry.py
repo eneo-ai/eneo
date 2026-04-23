@@ -336,7 +336,7 @@ class TestPositivePatternContract:
         canonical_seed: dict[str, tuple[str, ...]] = {
             "audio_transcription": ("transcription",),
             "comparison": ("comparison",),
-            "document_to_docx_template": ("docx_template",),
+            "document_to_docx_template": ("document_analysis",),
             "document_to_pdf_report": ("document_analysis",),
             "document_to_structured_report": ("document_analysis",),
             "extract_structured_fields": ("json_pipeline",),
@@ -361,15 +361,17 @@ class TestPositivePatternContract:
         )
 
         # Cross-module contract: every declared recipe-section key must
-        # exist in the selector's `RECIPE_SECTIONS` registry. A typo
-        # (`"json_pipline"`) on a Pattern would otherwise silently
+        # resolve to a real `RecipeSection.section_id` in the registry.
+        # A typo (`"json_pipline"`) on a Pattern would otherwise silently
         # fall through `_filter_recipe_sections` without activating
         # anything.
-        from intric.flows.ai_builder.ai_builder_recipe_selector import (
-            RECIPE_SECTIONS,
+        from intric.flows.ai_builder.ai_builder_create_recipes import (
+            KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS,
         )
 
-        known_section_keys = frozenset(RECIPE_SECTIONS.keys())
+        known_section_keys = frozenset(
+            section.section_id for section in KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS
+        )
 
         for pattern_id, expected in canonical_seed.items():
             pattern = PATTERN_REGISTRY[pattern_id]
@@ -380,7 +382,7 @@ class TestPositivePatternContract:
             unknown = frozenset(pattern.recipe_sections) - known_section_keys
             assert not unknown, (
                 f"{pattern_id}: recipe_sections references unknown "
-                f"selector keys {sorted(unknown)}; must be a subset of "
+                f"section_id(s) {sorted(unknown)}; must be a subset of "
                 f"{sorted(known_section_keys)}"
             )
 
@@ -736,4 +738,40 @@ class TestPatternRegistryPublicApi:
         assert "chain_steps:" not in summarize_block, (
             f"single-step pattern {summarize.id} leaked `chain_steps:` "
             f"label; block was:\n{summarize_block}"
+        )
+
+    def test_form_field_runtime_inputs_declares_runtime_metadata_slot(
+        self,
+    ) -> None:
+        """The `form_field_runtime_inputs` archetype is the canonical
+        home for runtime-input metadata questions. Dropping
+        `runtime_metadata_fields` from either its architectural slots
+        or its `question_template_ids` silently strips the one
+        dedicated runtime-metadata question from the pack — the planner
+        would then never see it for the exact pattern where it matters.
+        Pin both tuples so a future edit that drops the slot fails here.
+        """
+        pattern = PATTERN_REGISTRY["form_field_runtime_inputs"]
+        assert "runtime_metadata_fields" in pattern.required_architectural_slots, (
+            "form_field_runtime_inputs lost `runtime_metadata_fields` from "
+            "required_architectural_slots"
+        )
+        assert "runtime_metadata_fields" in pattern.question_template_ids, (
+            "form_field_runtime_inputs lost `runtime_metadata_fields` from "
+            "question_template_ids"
+        )
+
+    def test_render_knowledge_pack_exposes_runtime_metadata_for_form_field_pattern(
+        self,
+    ) -> None:
+        """The rendered pack must reference `runtime_metadata_fields`
+        inside the `form_field_runtime_inputs` block — otherwise the
+        planner reads the archetype without seeing the only dedicated
+        runtime-metadata question, undercutting the form-fields
+        first-class contract."""
+        rendered = render_knowledge_pack()
+        block = _extract_pattern_block(rendered, "form_field_runtime_inputs")
+        assert "runtime_metadata_fields" in block, (
+            "form_field_runtime_inputs block must reference "
+            "runtime_metadata_fields; block was:\n" + block
         )

@@ -262,9 +262,10 @@ def _infer_processing_scope(text: str) -> str | None:
     if _contains_any(
         text,
         (
-            "ett ärende åt gången",
-            "one case at a time",
-            "one case package",
+            "en körning åt gången",
+            "ett paket åt gången",
+            "one run at a time",
+            "one package per run",
         ),
     ):
         return "single_case"

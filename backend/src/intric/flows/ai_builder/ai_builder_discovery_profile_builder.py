@@ -294,14 +294,14 @@ def default_discovery_assumptions(
         and "processing_scope" not in selected_question_ids
         and implies_single_case(profile.text)
         and not any(
-            "ärende åt gången" in assumption for assumption in existing_assumptions
+            "körning åt gången" in assumption for assumption in existing_assumptions
         )
     ):
         assumptions.append(
             localized_text(
                 profile.language,
-                "Antar ett ärende åt gången per körning tills du säger att flera ärenden ska hanteras tillsammans.",
-                "Assuming one case per run unless you later say multiple cases should be handled together.",
+                "Antar en körning åt gången tills du säger att flera paket ska hanteras tillsammans.",
+                "Assuming one run at a time unless you later say multiple packages should be handled together.",
             )
         )
     if (

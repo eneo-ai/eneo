@@ -381,35 +381,35 @@ _PDF_GENERATION_MODE = QuestionTemplate(
 
 _DOCUMENT_MATERIAL_SCOPE = QuestionTemplate(
     id="document_material_scope",
-    question_sv="Hur brukar underlaget för ett ärende se ut?",
-    question_en="For one case, what should the uploaded source material usually look like?",
+    question_sv="Hur brukar underlaget per körning se ut?",
+    question_en="For one run, what should the uploaded source material usually look like?",
     help_sv=(
-        "Ett eller flera dokument per ärende påverkar både uppladdnings"
+        "Ett eller flera dokument per körning påverkar både uppladdnings"
         "steget och hur flödet läser materialet."
     ),
     help_en=(
-        "One document or several per case affects both the upload step "
+        "One document or several per run affects both the upload step "
         "and how the flow reads the material."
     ),
     options=(
         _option(
             id="single_document_case",
-            label_sv="Ett huvuddokument per ärende",
-            label_en="One main document per case",
+            label_sv="Ett huvuddokument per körning",
+            label_en="One main document per run",
             description_sv="Varje körning analyserar normalt ett primärt dokument.",
             description_en="Each run usually analyzes one primary PDF or document.",
             value="single_document_case",
         ),
         _option(
             id="multiple_documents_case",
-            label_sv="Flera dokument för samma ärende",
-            label_en="Several documents for the same case",
+            label_sv="Flera dokument i samma körning",
+            label_en="Several documents in the same run",
             description_sv=(
                 "Varje körning ska kunna hantera ett dokumentpaket med "
                 "flera relaterade filer."
             ),
             description_en=(
-                "Each run should handle a case package with multiple related files."
+                "Each run should handle a document package with multiple related files."
             ),
             value="multiple_documents_case",
         ),
@@ -418,17 +418,17 @@ _DOCUMENT_MATERIAL_SCOPE = QuestionTemplate(
             label_sv="Ibland ett, ibland flera dokument",
             label_en="Either one or several documents",
             description_sv="Flödet ska fungera både för en enskild fil och ett dokumentpaket.",
-            description_en="The flow should work for both a single file and a case package.",
+            description_en="The flow should work for both a single file and a document package.",
             value="flexible_document_case",
         ),
     ),
     worked_examples_sv=(
         "En rapport per körning.",
-        "Ett ärendepaket med huvuddokument, svar och bilagor.",
+        "Ett dokumentpaket med huvuddokument, svar och bilagor.",
     ),
     worked_examples_en=(
         "One report per run.",
-        "A case package with primary document, response, and attachments.",
+        "A document package with primary document, response, and attachments.",
     ),
 )
 
