@@ -1,4 +1,4 @@
-"""Tests for the AI Builder orchestrator JSON contract (D.0 scaffold).
+"""Parse-time tests for the AI Builder orchestrator JSON contract.
 
 The orchestrator's public contract is a single structured JSON product
 per planner turn:
@@ -20,9 +20,9 @@ per planner turn:
 }
 ```
 
-These tests pin the shape at parse time. Dispatch / monotonicity
-guardrails / architecture-commit semantics land in D.1 / D.2 and get
-their own tests.
+These tests pin the shape at parse time. Monotonicity-guardrail and
+architecture-commit-semantics tests live alongside in
+`test_ai_builder_orchestrator_guardrails.py`.
 """
 
 from __future__ import annotations
@@ -180,10 +180,9 @@ class TestPlannerOutputParsesEveryActionKind:
         assert isinstance(output.planner_action, ProposePlanAction)
         assert output.planner_action.kind == "propose_plan"
         assert isinstance(output.planner_action.payload, ProposePlanPayload)
-        assert output.planning_state_delta.draft_plan == {
-            "steps": [],
-            "form_fields": [],
-        }
+        assert output.planning_state_delta.draft_plan is not None
+        assert output.planning_state_delta.draft_plan.steps == []
+        assert output.planning_state_delta.draft_plan.form_fields == []
 
 
 class TestPlannerOutputIngestsSignalsAndSlotsIntoDelta:
@@ -295,3 +294,22 @@ class TestPlannerOutputRejectsMalformedShapes:
 
         output = parse_planner_output(json.dumps(_ask_question_output()))
         assert output.planner_action.kind == "ask_question"
+
+    def test_draft_plan_envelope_rejects_invented_top_level_keys(self) -> None:
+        raw = _propose_plan_output()
+        raw["planning_state_delta"]["draft_plan"]["plan_rationale"] = "hallucinated"
+
+        with pytest.raises(ValidationError):
+            parse_planner_output(raw)
+
+    def test_draft_plan_envelope_accepts_declared_keys_only(self) -> None:
+        raw = _propose_plan_output()
+        raw["planning_state_delta"]["draft_plan"] = {
+            "plan_id": "draft-1",
+            "steps": [{"id": "s1"}],
+            "form_fields": [{"name": "subject"}],
+        }
+
+        output = parse_planner_output(raw)
+        assert output.planning_state_delta.draft_plan is not None
+        assert output.planning_state_delta.draft_plan.plan_id == "draft-1"

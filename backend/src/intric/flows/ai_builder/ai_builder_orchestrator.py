@@ -31,7 +31,10 @@ from intric.flows.ai_builder.planning_state import (
     ResolvedSlot,
 )
 from intric.flows.enums import FlowInputType, FlowOutputMode, FlowOutputType
-from intric.flows.flow_capability_manifest import supports_step_io_tuple
+from intric.flows.flow_capability_manifest import (
+    CAPABILITY_REGISTRY,
+    supports_step_io_tuple,
+)
 
 
 class _OrchestratorModel(BaseModel):
@@ -44,12 +47,27 @@ class _OrchestratorModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class DraftPlanEnvelope(_OrchestratorModel):
+    """Top-level envelope for a planner-proposed draft plan.
+
+    The fine-grained shape of `steps` and `form_fields` lands with the
+    materialization bridge and its consumers. The envelope here is
+    strict so the orchestrator rejects invented top-level keys, which
+    are the drift the planner hits first when the LLM hallucinates a
+    "plan_rationale" or "summary" sibling.
+    """
+
+    plan_id: Optional[str] = None
+    steps: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
+    form_fields: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
+
+
 class PlanningStateDelta(_OrchestratorModel):
     base_planning_state_version: NonNegativeInt
     signals_added: list[PlanningSignal] = Field(default_factory=list[PlanningSignal])
     slots_resolved: list[ResolvedSlot] = Field(default_factory=list[ResolvedSlot])
     architecture_commit: Optional[ArchitectureCommit] = None
-    draft_plan: Optional[dict[str, Any]] = None
+    draft_plan: Optional[DraftPlanEnvelope] = None
 
 
 class AskQuestionPayload(_OrchestratorModel):
@@ -125,6 +143,7 @@ RejectionCode = Literal[
     "off_topic_question",
     "architecture_commit_premature_unresolved_choices",
     "architecture_commit_illegal_tuple",
+    "architecture_commit_unresolvable_capability",
     "propose_plan_without_architecture_commit",
 ]
 
@@ -279,6 +298,16 @@ def _check_commit_architecture(
                     f"output_mode={triple.output_mode!r}"
                 ),
             )
+
+    for capability in commit.required_capabilities:
+        if capability not in CAPABILITY_REGISTRY:
+            return RejectionReason(
+                code="architecture_commit_unresolvable_capability",
+                detail=(
+                    f"required capability {capability!r} is not in FCM "
+                    "CAPABILITY_REGISTRY"
+                ),
+            )
     return None
 
 
@@ -332,6 +361,7 @@ __all__ = [
     "CommitArchitecturePayload",
     "ConfirmRequirementsAction",
     "ConfirmRequirementsPayload",
+    "DraftPlanEnvelope",
     "OrchestrationContext",
     "PlannerAction",
     "PlannerOutput",

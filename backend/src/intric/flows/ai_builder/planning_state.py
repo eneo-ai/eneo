@@ -124,6 +124,7 @@ class StepTriple(_PlanningModel):
 class ArchitectureCommit(_PlanningModel):
     tuples_chain: list[StepTriple]
     chosen_patterns: list[str]
+    required_capabilities: list[str] = Field(default_factory=list[str])
     committed_at: datetime
     architecture_hash: str
 

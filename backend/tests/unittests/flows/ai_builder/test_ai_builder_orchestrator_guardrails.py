@@ -1,4 +1,4 @@
-"""Tests for AI Builder orchestrator monotonicity guardrails (D.1).
+"""Tests for AI Builder orchestrator monotonicity guardrails.
 
 The orchestrator rejects planner output when any of the monotonicity
 guardrails fires. Rejection produces a structured `RejectionReason`
@@ -11,10 +11,12 @@ tightened guardrail starts rejecting legal output.
 
 from __future__ import annotations
 
+import typing
 from datetime import datetime, timezone
 
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     OrchestrationContext,
+    RejectionCode,
     RejectionReason,
     evaluate_planner_output,
     parse_planner_output,
@@ -63,6 +65,7 @@ def _commit_architecture(
     *,
     base_version: int = 0,
     tuples_chain: list[dict] | None = None,
+    required_capabilities: list[str] | None = None,
 ) -> dict:
     hash_hex = "a" * 64
     chain = (
@@ -82,6 +85,7 @@ def _commit_architecture(
             "architecture_commit": {
                 "tuples_chain": chain,
                 "chosen_patterns": ["summarize_text"],
+                "required_capabilities": required_capabilities or [],
                 "committed_at": datetime(2026, 4, 23, tzinfo=timezone.utc).isoformat(),
                 "architecture_hash": hash_hex,
             },
@@ -353,3 +357,62 @@ class TestRejectionReasonSurface:
         rejection = evaluate_planner_output(output, context)
         assert isinstance(rejection, RejectionReason)
         assert rejection.code == "version_mismatch"
+
+
+# ---------------------------------------------------------------------------
+# Guardrail 3 (capability branch) — unresolvable required_capabilities
+# ---------------------------------------------------------------------------
+
+
+class TestCommitArchitectureUnresolvableCapabilityGuardrail:
+    def test_rejects_commit_with_capability_not_in_fcm_registry(self) -> None:
+        output = parse_planner_output(
+            _commit_architecture(required_capabilities=["not_a_real_capability"])
+        )
+        context = _ctx()
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "architecture_commit_unresolvable_capability"
+        assert "not_a_real_capability" in rejection.detail
+
+    def test_accepts_commit_with_capabilities_present_in_fcm_registry(self) -> None:
+        output = parse_planner_output(
+            _commit_architecture(
+                required_capabilities=["input_text", "output_mode_pass_through"]
+            )
+        )
+        context = _ctx()
+
+        assert evaluate_planner_output(output, context) is None
+
+    def test_accepts_commit_with_empty_required_capabilities(self) -> None:
+        output = parse_planner_output(_commit_architecture(required_capabilities=[]))
+        context = _ctx()
+
+        assert evaluate_planner_output(output, context) is None
+
+
+# ---------------------------------------------------------------------------
+# RejectionCode is the single source of truth for rejection branches.
+# If a new guardrail adds a code, the Literal must grow with it.
+# ---------------------------------------------------------------------------
+
+
+class TestRejectionCodeExhaustiveness:
+    _expected_codes = frozenset(
+        {
+            "version_mismatch",
+            "duplicate_question",
+            "off_topic_question",
+            "architecture_commit_premature_unresolved_choices",
+            "architecture_commit_illegal_tuple",
+            "architecture_commit_unresolvable_capability",
+            "propose_plan_without_architecture_commit",
+        }
+    )
+
+    def test_rejection_code_literal_matches_expected_set(self) -> None:
+        literal_args = frozenset(typing.get_args(RejectionCode))
+        assert literal_args == self._expected_codes
