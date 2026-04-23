@@ -45,9 +45,11 @@ from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
+    ArchitectureCommit,
     EvidenceRef,
     PlanningState,
     ResolvedSlot,
+    StepTriple,
 )
 from intric.flows.flow import FlowStep
 from intric.main.exceptions import BadRequestException, NotFoundException
@@ -1231,6 +1233,146 @@ async def test_ai_builder_repo_commit_turn_rejects_write_when_lease_is_lost(
                 request_id=stale_request_id,
                 lock_token=stale_lock_token,
             )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        fetched = await repo.get_session(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+        loaded = await repo.load_planning_state(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert fetched.conversation == []
+    assert loaded is None
+
+
+def _architecture_commit_fixture() -> ArchitectureCommit:
+    return ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="text",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=["summarize_text"],
+        required_capabilities=["input_text", "output_mode_pass_through"],
+        committed_at=datetime(2026, 4, 23, tzinfo=timezone.utc),
+        architecture_hash="c" * 64,
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_commit_turn_persists_architecture_commit_atomically(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """commit_turn must stamp a planner-supplied architecture_commit on
+    the persisted PlanningState, inside the same savepoint as the
+    conversation append. A later load sees the commit exactly as
+    provided.
+    """
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Commit Turn Architecture Commit",
+    )
+    commit = _architecture_commit_fixture()
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        assistant_msg = ConversationMessage(
+            role="assistant", content="Commit the architecture"
+        )
+
+        await repo.commit_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            new_messages=[assistant_msg],
+            architecture_commit=commit,
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        loaded = await repo.load_planning_state(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert loaded is not None
+    assert loaded.architecture_commit is not None
+    assert loaded.architecture_commit.architecture_hash == commit.architecture_hash
+    assert loaded.architecture_commit.chosen_patterns == commit.chosen_patterns
+    assert (
+        loaded.architecture_commit.required_capabilities == commit.required_capabilities
+    )
+    assert [
+        (t.input_type, t.output_type, t.output_mode)
+        for t in loaded.architecture_commit.tuples_chain
+    ] == [("text", "text", "pass_through")]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_commit_turn_rolls_back_architecture_commit_on_drift(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """If the planning-state validation inside the savepoint fails, the
+    architecture_commit must roll back alongside the conversation
+    append — never landing as a partial half-write.
+    """
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Commit Turn Architecture Commit Rollback",
+    )
+    commit = _architecture_commit_fixture()
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        assistant_msg = ConversationMessage(
+            role="assistant", content="Should roll back"
+        )
+        drifted = _planning_state_fixture()
+        drifted.signals.append("not a signal")  # type: ignore[arg-type]
+
+        with patch(
+            "intric.flows.ai_builder.ai_builder_repo.build_planning_state_from_conversation",
+            return_value=drifted,
+        ):
+            with pytest.raises(Exception):
+                await repo.commit_turn(
+                    session_id=session.id,
+                    tenant_id=user.tenant_id,
+                    new_messages=[assistant_msg],
+                    architecture_commit=commit,
+                )
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())

@@ -35,7 +35,10 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_session_transitions import (
     ensure_valid_session_status_transition,
 )
-from intric.flows.ai_builder.planning_state import PlanningState
+from intric.flows.ai_builder.planning_state import (
+    ArchitectureCommit,
+    PlanningState,
+)
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
@@ -975,6 +978,7 @@ class AIBuilderRepository:
         flow: "Flow | None" = None,
         request_id: UUID | None = None,
         lock_token: UUID | None = None,
+        architecture_commit: ArchitectureCommit | None = None,
     ) -> int:
         """Append new conversation messages and save `PlanningState` atomically.
 
@@ -984,6 +988,12 @@ class AIBuilderRepository:
         turn will read back. Building it from the caller's pre-compaction
         list would drift once a session crosses the compaction
         threshold.
+
+        When `architecture_commit` is provided, it is stamped on the
+        rebuilt state inside the savepoint so the commit lands as one
+        unit with the conversation append. This is the only path through
+        which the planner's `commit_architecture` action persists to
+        `PlanningState.architecture_commit`.
 
         Returns the new `planning_state_version` (monotonically bumped
         by `save_planning_state`). Callers who don't need it can ignore
@@ -1004,6 +1014,8 @@ class AIBuilderRepository:
                 lock_token=lock_token,
             )
             state = build_planning_state_from_conversation(persisted, flow=flow)
+            if architecture_commit is not None:
+                state.architecture_commit = architecture_commit
             return await self.save_planning_state(
                 session_id=session_id,
                 tenant_id=tenant_id,
