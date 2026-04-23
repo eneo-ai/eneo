@@ -7,7 +7,7 @@ import {
   classifyVariable,
   parsePromptSegments,
   getChipClasses,
-  type VariableClassificationContext,
+  type VariableClassificationContext
 } from "./flowVariableTokens";
 
 describe("replaceExactTemplateToken", () => {
@@ -24,7 +24,7 @@ describe("remapStepOrderTemplateTokens", () => {
     const remap = new Map<number, number>([
       [1, 2],
       [2, 1],
-      [3, 3],
+      [3, 3]
     ]);
     const result = remapStepOrderTemplateTokens(input, remap, new Set());
     expect(result.text).toBe("Ta {{step_2.output.text}} och {{step_3.output.text}}");
@@ -43,22 +43,32 @@ describe("remapStepOrderTemplateTokens", () => {
 
 describe("collectUnresolvedTemplateTokens", () => {
   it("accepts friendly and technical tokens, flags unknown aliases", () => {
-    const input = "{{Namn på brukare}} {{flow_input.text}} {{step_1.output.text}} {{okänd_variabel}}";
-    const unresolved = collectUnresolvedTemplateTokens(
-      input,
-      new Set(["Namn på brukare"]),
-    );
+    const input =
+      "{{Namn på brukare}} {{flow_input.text}} {{step_1.output.text}} {{okänd_variabel}}";
+    const unresolved = collectUnresolvedTemplateTokens(input, new Set(["Namn på brukare"]));
     expect(unresolved).toEqual(["okänd_variabel"]);
+  });
+
+  it("treats step_input.* as a resolved technical token on document-input steps", () => {
+    const input = "{{step_input.text}} och {{step_input.file_ids}}";
+    const unresolved = collectUnresolvedTemplateTokens(input, new Set());
+    expect(unresolved).toEqual([]);
   });
 });
 
 describe("classifyVariable", () => {
   const baseContext: VariableClassificationContext = {
     knownFieldNames: new Set(["Namn", "Personnummer"]),
-    knownStepNames: new Map([[1, "Sammanfattning"], [2, "Analys"]]),
-    stepOutputTypes: new Map([[1, "text"], [2, "json"]]),
+    knownStepNames: new Map([
+      [1, "Sammanfattning"],
+      [2, "Analys"]
+    ]),
+    stepOutputTypes: new Map([
+      [1, "text"],
+      [2, "json"]
+    ]),
     transcriptionEnabled: true,
-    currentStepOrder: 3,
+    currentStepOrder: 3
   };
 
   it("classifies form field names as 'field'", () => {
@@ -95,6 +105,11 @@ describe("classifyVariable", () => {
     expect(classifyVariable("flow.input.text", baseContext)).toBe("technical");
   });
 
+  it("classifies step_input.* references as 'technical'", () => {
+    expect(classifyVariable("step_input.text", baseContext)).toBe("technical");
+    expect(classifyVariable("step_input.file_ids", baseContext)).toBe("technical");
+  });
+
   it("classifies unknown tokens as 'unknown'", () => {
     expect(classifyVariable("okänd_variabel", baseContext)).toBe("unknown");
   });
@@ -102,7 +117,7 @@ describe("classifyVariable", () => {
   it("does not match step names from the current or later steps", () => {
     const ctx: VariableClassificationContext = {
       ...baseContext,
-      currentStepOrder: 1,
+      currentStepOrder: 1
     };
     // Step 1 ("Sammanfattning") is not before step 1, so should not match as step alias
     expect(classifyVariable("Sammanfattning", ctx)).toBe("unknown");
@@ -115,14 +130,19 @@ describe("parsePromptSegments", () => {
     knownStepNames: new Map(),
     stepOutputTypes: new Map(),
     transcriptionEnabled: true,
-    currentStepOrder: 1,
+    currentStepOrder: 1
   };
 
   it("parses text and variables into segments", () => {
     const segments = parsePromptSegments("Hej {{Namn}}, detta är test", context);
     expect(segments).toHaveLength(3);
     expect(segments[0]).toEqual({ type: "text", value: "Hej " });
-    expect(segments[1]).toEqual({ type: "variable", value: "{{Namn}}", token: "Namn", category: "field" });
+    expect(segments[1]).toEqual({
+      type: "variable",
+      value: "{{Namn}}",
+      token: "Namn",
+      category: "field"
+    });
     expect(segments[2]).toEqual({ type: "text", value: ", detta är test" });
   });
 
@@ -136,18 +156,18 @@ describe("collectInvalidStructuredOutputReferences", () => {
     const issues = collectInvalidStructuredOutputReferences(
       "Hej {{step_1.output.structured.name}}",
       [
-        { step_order: 1, output_type: "text" } as any,
-        { step_order: 2, output_type: "json" } as any,
+        { step_order: 1, output_type: "text" },
+        { step_order: 2, output_type: "json" }
       ],
-      3,
+      3
     );
 
     expect(issues).toEqual([
       {
         token: "step_1.output.structured.name",
         stepOrder: 1,
-        reason: "non_json_output",
-      },
+        reason: "non_json_output"
+      }
     ]);
   });
 
@@ -155,18 +175,18 @@ describe("collectInvalidStructuredOutputReferences", () => {
     const issues = collectInvalidStructuredOutputReferences(
       "Hej {{step_2.output.structured.name}}",
       [
-        { step_order: 1, output_type: "json" } as any,
-        { step_order: 2, output_type: "json" } as any,
+        { step_order: 1, output_type: "json" },
+        { step_order: 2, output_type: "json" }
       ],
-      2,
+      2
     );
 
     expect(issues).toEqual([
       {
         token: "step_2.output.structured.name",
         stepOrder: 2,
-        reason: "unavailable_step",
-      },
+        reason: "unavailable_step"
+      }
     ]);
   });
 });

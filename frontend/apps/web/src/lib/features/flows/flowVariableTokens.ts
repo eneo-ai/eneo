@@ -3,7 +3,8 @@ const STEP_ORDER_TOKEN_PATTERN = /^step_(\d+)(\..+)?$/;
 const TECHNICAL_TOKEN_PATTERNS = [
   /^flow_input\./,
   /^flow\.input\./,
-  /^step_\d+(\..+)?$/,
+  /^step_input\./,
+  /^step_\d+(\..+)?$/
 ];
 
 export type StepOrderRemapResult = {
@@ -24,7 +25,7 @@ export function extractTemplateTokens(text: string): string[] {
 export function replaceExactTemplateToken(
   text: string,
   fromToken: string,
-  toToken: string,
+  toToken: string
 ): string {
   const fromNormalized = fromToken.trim();
   const toNormalized = toToken.trim();
@@ -40,7 +41,7 @@ export function replaceExactTemplateToken(
 export function remapStepOrderTemplateTokens(
   text: string,
   remapByOldOrder: Map<number, number>,
-  deletedOrders: Set<number>,
+  deletedOrders: Set<number>
 ): StepOrderRemapResult {
   const rewrittenDeletedReferences = new Set<number>();
   let changed = false;
@@ -68,13 +69,13 @@ export function remapStepOrderTemplateTokens(
   return {
     text: rewritten,
     changed,
-    rewrittenDeletedReferences: [...rewrittenDeletedReferences],
+    rewrittenDeletedReferences: [...rewrittenDeletedReferences]
   };
 }
 
 export function collectUnresolvedTemplateTokens(
   text: string,
-  availableFriendlyTokens: Set<string>,
+  availableFriendlyTokens: Set<string>
 ): string[] {
   const unresolved = new Set<string>();
   for (const token of extractTemplateTokens(text)) {
@@ -96,12 +97,36 @@ type VariableCategoryClasses = {
 };
 
 export const VARIABLE_CATEGORY_CLASSES: Record<VariableCategory, VariableCategoryClasses> = {
-  field:      { chip: "label-blue bg-label-dimmer text-label-stronger",      text: "text-label-stronger", scopeClass: "label-blue" },
-  system:     { chip: "label-amethyst bg-label-dimmer text-label-stronger",  text: "text-label-stronger", scopeClass: "label-amethyst" },
-  step:       { chip: "label-green bg-label-dimmer text-label-stronger",     text: "text-label-stronger", scopeClass: "label-green" },
-  structured: { chip: "label-amethyst bg-label-dimmer text-label-stronger",  text: "text-label-stronger", scopeClass: "label-amethyst" },
-  technical:  { chip: "label-blue bg-label-dimmer text-label-stronger",      text: "text-label-stronger", scopeClass: "label-blue" },
-  unknown:    { chip: "label-red bg-label-dimmer text-label-stronger",       text: "text-label-stronger", scopeClass: "label-red" },
+  field: {
+    chip: "label-blue bg-label-dimmer text-label-stronger",
+    text: "text-label-stronger",
+    scopeClass: "label-blue"
+  },
+  system: {
+    chip: "label-amethyst bg-label-dimmer text-label-stronger",
+    text: "text-label-stronger",
+    scopeClass: "label-amethyst"
+  },
+  step: {
+    chip: "label-green bg-label-dimmer text-label-stronger",
+    text: "text-label-stronger",
+    scopeClass: "label-green"
+  },
+  structured: {
+    chip: "label-amethyst bg-label-dimmer text-label-stronger",
+    text: "text-label-stronger",
+    scopeClass: "label-amethyst"
+  },
+  technical: {
+    chip: "label-blue bg-label-dimmer text-label-stronger",
+    text: "text-label-stronger",
+    scopeClass: "label-blue"
+  },
+  unknown: {
+    chip: "label-red bg-label-dimmer text-label-stronger",
+    text: "text-label-stronger",
+    scopeClass: "label-red"
+  }
 };
 
 export function getChipClasses(category: VariableCategory): string {
@@ -110,7 +135,7 @@ export function getChipClasses(category: VariableCategory): string {
 
 export type VariableClassificationContext = {
   knownFieldNames: Set<string>;
-  knownStepNames: Map<number, string>;  // stepOrder -> user_description
+  knownStepNames: Map<number, string>; // stepOrder -> user_description
   stepOutputTypes: Map<number, string>;
   transcriptionEnabled: boolean;
   currentStepOrder: number;
@@ -118,7 +143,7 @@ export type VariableClassificationContext = {
 
 export function classifyVariable(
   token: string,
-  context: VariableClassificationContext,
+  context: VariableClassificationContext
 ): VariableCategory {
   // 1. Form field name match
   if (context.knownFieldNames.has(token)) return "field";
@@ -145,8 +170,13 @@ export function classifyVariable(
   const stepMatch = /^step_(\d+)(\.|$)/.exec(token);
   if (stepMatch) return "step";
 
-  // 6. Technical flow_input references
-  if (token.startsWith("flow_input.") || token.startsWith("flow.input.")) return "technical";
+  // 6. Technical flow_input / step_input references
+  if (
+    token.startsWith("flow_input.") ||
+    token.startsWith("flow.input.") ||
+    token.startsWith("step_input.")
+  )
+    return "technical";
 
   // 7. Unknown
   return "unknown";
@@ -158,7 +188,7 @@ export type PromptSegment =
 
 export function parsePromptSegments(
   text: string,
-  context: VariableClassificationContext,
+  context: VariableClassificationContext
 ): PromptSegment[] {
   const segments: PromptSegment[] = [];
   const regex = /\{\{\s*([^{}]+?)\s*\}\}/g;
@@ -175,7 +205,7 @@ export function parsePromptSegments(
       type: "variable",
       value: `{{${token}}}`,
       token,
-      category: classifyVariable(token, context),
+      category: classifyVariable(token, context)
     });
 
     lastIndex = regex.lastIndex;
@@ -197,7 +227,7 @@ export type StructuredOutputReferenceIssue = {
 export function collectInvalidStructuredOutputReferences(
   text: string,
   steps: Array<{ step_order: number; output_type: string }>,
-  currentStepOrder: number,
+  currentStepOrder: number
 ): StructuredOutputReferenceIssue[] {
   const stepOutputTypes = new Map(steps.map((step) => [step.step_order, step.output_type]));
   const issues: StructuredOutputReferenceIssue[] = [];
