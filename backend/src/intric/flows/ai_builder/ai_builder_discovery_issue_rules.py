@@ -115,7 +115,14 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if profile.flow_defaults.get("final_output_mode"):
         return False
-    output_intent = mentions_any(
+    if (
+        profile.document_like_input
+        or profile.audio_like_input
+        or profile.case_like_flow
+        or profile.final_output_text_or_docx
+    ):
+        return True
+    return mentions_any(
         text,
         (
             "report",
@@ -129,15 +136,6 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
             "generera",
         ),
     )
-    if not output_intent and not profile.final_output_text_or_docx:
-        return False
-    if (
-        profile.document_like_input
-        or profile.audio_like_input
-        or profile.case_like_flow
-    ):
-        return True
-    return output_intent
 
 
 def ultra_vague_output_choice_is_vague(profile: DiscoveryProfile) -> bool:

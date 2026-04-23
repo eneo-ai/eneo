@@ -603,9 +603,10 @@ class TestExtendedClarificationHints:
     def test_conflicting_single_file_and_same_run_compare_resolved_by_answer(
         self,
     ) -> None:
-        """When the user explicitly answers comparison_scope with
-        same_run_multiple_documents, the contradiction is considered resolved
-        and confirmation is no longer blocked.
+        """Answering comparison_scope with same_run_multiple_documents clears the
+        contradiction block. Other unresolved families (e.g. the final output
+        format, which is still ambiguous here) can still block — the guarantee
+        is only that the comparison-contradiction question no longer blocks.
         """
         conversation = [
             ConversationMessage(
@@ -623,8 +624,14 @@ class TestExtendedClarificationHints:
             )
         ]
 
-        block_message = build_discovery_block_message(conversation)
-        assert block_message is None
+        analysis = analyze_discovery(conversation)
+        blocking_question_ids = {
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        }
+        assert "comparison_scope_conflict" not in blocking_question_ids
+        assert "comparison_scope" not in blocking_question_ids
 
     def test_conflicting_single_pdf_and_same_run_compare_blocks_confirmation_in_swedish(
         self,
@@ -954,7 +961,7 @@ class TestExtendedClarificationHints:
             ConversationMessage(
                 role="user",
                 content=(
-                    "Jag vill ladda upp flera pdf filer och i slutändan vill jag ha en ny pdf med detaljerna."
+                    "Jag vill ladda upp flera pdf filer och skapa en ny pdf med detaljerna."
                 ),
             )
         ]

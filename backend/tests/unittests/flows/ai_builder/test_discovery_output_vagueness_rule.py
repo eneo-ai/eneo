@@ -1,12 +1,12 @@
 """Unit tests for the output-vagueness detector in the AI Builder discovery flow.
 
 The detector `looks_like_output_is_vague` decides whether a user message should
-block on the `final_output_mode` question. It keys off a list of trigger words
-that describe an output artifact. Generic creation verbs like "skapa",
-"create", and "producera" describe the act of building the flow itself, not an
-output artifact, so they should not cause the detector to fire on their own.
-When a real output-intent word ("resultat", "rapport", …) is present the
-detector should still fire.
+block on the `final_output_mode` question. It fires whenever the flow carries a
+structural signal that the output format matters (document/audio/case-like
+input, or a text/docx default) OR the user mentions an output artifact
+explicitly. For pure text-only descriptions with no artifact nouns, generic
+creation verbs ("skapa", "create", "producera") alone should not fire it —
+those describe the act of building the flow, not the artifact it delivers.
 """
 
 from __future__ import annotations
@@ -33,30 +33,56 @@ def _profile_for(text: str, ui_language: str = "sv"):
     )
 
 
-def test_skapa_alone_does_not_trigger_output_vagueness() -> None:
-    profile = _profile_for(
-        "Jag vill skapa ett flöde som analyserar mina kommunala dokument för mig."
-    )
+def test_skapa_on_plain_text_does_not_trigger_output_vagueness() -> None:
+    profile = _profile_for("Jag vill skapa ett flöde som bearbetar min text för mig.")
     assert looks_like_output_is_vague(profile) is False
 
 
-def test_create_alone_does_not_trigger_output_vagueness() -> None:
+def test_create_on_plain_text_does_not_trigger_output_vagueness() -> None:
     profile = _profile_for(
-        "I want to create a flow that analyzes my municipal documents for me.",
+        "I want to create a flow that processes my text for me.",
         ui_language="en",
     )
     assert looks_like_output_is_vague(profile) is False
 
 
-def test_producera_alone_does_not_trigger_output_vagueness() -> None:
-    profile = _profile_for(
-        "Jag vill producera något från mina kommunala dokument som hjälper mig."
-    )
+def test_producera_on_plain_text_does_not_trigger_output_vagueness() -> None:
+    profile = _profile_for("Jag vill producera något från min text.")
     assert looks_like_output_is_vague(profile) is False
 
 
 def test_real_output_word_still_triggers_vagueness() -> None:
     profile = _profile_for(
         "Jag vill få ett resultat från mina kommunala dokument som jag kan använda."
+    )
+    assert looks_like_output_is_vague(profile) is True
+
+
+def test_document_like_flow_without_output_keyword_triggers_vagueness() -> None:
+    """A document-analysis description without explicit output nouns should fire.
+
+    This is the class of case the detector used to miss: the user describes a
+    flow that takes documents and does something with them, but never says the
+    word "rapport"/"summary"/etc. The planner would then auto-pick a final
+    output type instead of asking, producing surprising results for multi-step
+    flows. The gate now fires on structural signals alone.
+    """
+    profile = _profile_for(
+        "Jag vill bygga ett flöde som analyserar mina uppladdade dokument i "
+        "flera steg och levererar något till handläggaren."
+    )
+    assert looks_like_output_is_vague(profile) is True
+
+
+def test_case_like_flow_without_output_keyword_triggers_vagueness() -> None:
+    """Case-like flows (ärende / case material) without output nouns also fire.
+
+    Covers the IBIC-shaped conversation: the user describes a case-handling
+    flow in Swedish without ever naming the output artifact, and the planner
+    previously silently committed to JSON. The detector now asks instead.
+    """
+    profile = _profile_for(
+        "Jag vill skapa ett ärendeflöde i flera steg som hjälper mig bedöma "
+        "underlaget innan jag skickar vidare."
     )
     assert looks_like_output_is_vague(profile) is True
