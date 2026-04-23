@@ -2606,6 +2606,15 @@ class TestSendMessageToolCall:
         assert error_events, (
             f"Planner bail must surface as an error event; got: {events}"
         )
+        combined_payload = " ".join(str(e.get("data", "")) for e in error_events)
+        assert "Säg bara" not in combined_payload, (
+            "Planner bail text must not appear inside the user-visible error; "
+            f"got: {combined_payload}"
+        )
+        assert "platta ut JSON-fälten" not in combined_payload, (
+            "Planner bail phrasing must not leak into the error payload; "
+            f"got: {combined_payload}"
+        )
 
     @pytest.mark.anyio
     async def test_self_correction_text_retry_can_still_produce_plan(self):

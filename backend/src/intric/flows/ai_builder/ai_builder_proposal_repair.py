@@ -325,8 +325,12 @@ async def request_self_correction(
                 yield forced_event
                 return
 
+            logger.warning(
+                "Self-correction bailed to conversational text after forced retry: %s",
+                assistant_text,
+            )
             yield build_self_correction_error_event(
-                feedback=assistant_text,
+                feedback=None,
                 failure_kind="validation",
             )
             return

@@ -307,6 +307,14 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
         "Self-correction must emit an error event when forced-retry cannot recover; "
         f"got events: {events}"
     )
+    combined_payload = " ".join(str(event.get("data", "")) for event in error_events)
+    assert "Säg bara" not in combined_payload, (
+        "The planner's conversational bail must not be surfaced inside the "
+        f"error event payload; got: {combined_payload}"
+    )
+    assert "platta ut JSON-fälten" not in combined_payload, (
+        f"The planner's bail phrasing must not reach the user; got: {combined_payload}"
+    )
 
 
 @pytest.mark.asyncio
