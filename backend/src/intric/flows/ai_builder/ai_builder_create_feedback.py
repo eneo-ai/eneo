@@ -43,13 +43,18 @@ def format_create_validation_feedback(validation: SpecValidationResult) -> str:
         repair_rules.append(
             "audio/document/file inputs require input_source='flow_input' on the entry step."
         )
+    if "json_incompatible_with_all_previous_steps" in codes:
+        repair_rules.append(
+            "input_type='json' cannot be combined with input_source='all_previous_steps' "
+            "because concatenated text from multiple steps is not valid JSON. "
+            "Pick one: (a) set input_source='previous_step' and reference specific fields "
+            "via uses_previous_fields when the step consumes structured JSON from the "
+            "immediately preceding step; or (b) set input_type='text' when the step "
+            "should summarize or synthesize concatenated text from all earlier steps."
+        )
     if not repair_rules:
         return base_feedback
-    return (
-        f"{base_feedback}\n"
-        "Create-flow repair rules:\n- "
-        + "\n- ".join(repair_rules)
-    )
+    return f"{base_feedback}\nCreate-flow repair rules:\n- " + "\n- ".join(repair_rules)
 
 
 def format_create_quality_feedback(feedback: str | None) -> str | None:
@@ -81,8 +86,6 @@ def format_create_quality_feedback(feedback: str | None) -> str | None:
         )
     if not repair_rules:
         return feedback
-    return (
-        f"{feedback}\n\n"
-        "Create-flow quality repair rules:\n- "
-        + "\n- ".join(repair_rules)
+    return f"{feedback}\n\nCreate-flow quality repair rules:\n- " + "\n- ".join(
+        repair_rules
     )

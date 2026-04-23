@@ -1004,6 +1004,184 @@ class TestCriticInvariantLoop:
         assert render_critic_issues(context) == []
 
 
+class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
+    """When any step declares `input_type=json` with
+    `input_source=all_previous_steps`, the critic must surface a remediation
+    before the validator catches it. The concatenation the runtime performs on
+    `all_previous_steps` produces plain text, which is not valid JSON, so this
+    combination cannot run under any circumstance.
+    """
+
+    def test_invariant_is_registered(self) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CRITIC_INVARIANTS,
+            CriticInvariant,
+        )
+
+        ids = [inv.id for inv in CRITIC_INVARIANTS]
+        assert "json_input_rejects_all_previous_steps_source" in ids
+        inv = next(
+            item
+            for item in CRITIC_INVARIANTS
+            if item.id == "json_input_rejects_all_previous_steps_source"
+        )
+        assert isinstance(inv, CriticInvariant)
+        assert callable(inv.evidence)
+        assert "all_previous_steps" in inv.remediation
+        assert "json" in inv.remediation.casefold()
+
+    def test_render_critic_issues_fires_on_json_all_previous_steps_combo(
+        self,
+    ) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Sammanställning",
+            steps=[
+                _step(
+                    "step_a",
+                    "Hämta struktur",
+                    "Läs struktur.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                ),
+                _step(
+                    "step_b",
+                    "Sammanfatta",
+                    "Sammanfatta tidigare JSON.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        issues = render_critic_issues(context)
+
+        assert any("all_previous_steps" in issue for issue in issues)
+        assert any("json" in issue.casefold() for issue in issues)
+
+    def test_render_critic_issues_silent_when_json_step_uses_previous_step(
+        self,
+    ) -> None:
+        """`input_type=json` with `input_source=previous_step` is the sanctioned
+        alternative and must not trigger the invariant."""
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Sammanställning",
+            steps=[
+                _step(
+                    "step_a",
+                    "Strukturera",
+                    "Producera JSON.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                ),
+                _step(
+                    "step_b",
+                    "Sammanfatta",
+                    "Sammanfatta JSON.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        assert render_critic_issues(context) == []
+
+    def test_render_critic_issues_silent_when_text_step_uses_all_previous_steps(
+        self,
+    ) -> None:
+        """`input_type=text` with `input_source=all_previous_steps` is legal
+        (concatenated text is still text) and must not trigger the invariant."""
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Sammanställning",
+            steps=[
+                _step(
+                    "step_a",
+                    "Analysera",
+                    "Analysera dokument.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Sammanfatta",
+                    "Sammanfatta alla tidigare steg.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        assert render_critic_issues(context) == []
+
+
 class TestCriticInvariantRegistry:
     """The flat `CRITIC_INVARIANTS` tuple is the sole public registry.
 
@@ -1035,6 +1213,7 @@ class TestCriticInvariantRegistry:
             "standalone_audio_requires_transcription_step",
             "field_reuse_requires_input_bindings",
             "multi_document_compare_requires_all_previous_steps",
+            "json_input_rejects_all_previous_steps_source",
             "template_fill_docx_requires_template_fill_step",
             "generated_docx_rejects_template_fill",
             "mixed_audio_doc_rejects_file_degradation",

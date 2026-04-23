@@ -626,6 +626,38 @@ _MULTI_DOCUMENT_COMPARE_REQUIRES_ALL_PREVIOUS_STEPS = CriticInvariant(
 )
 
 
+# ── JSON input rejects all_previous_steps source ────────────────────────
+
+
+def _json_input_rejects_all_previous_steps_source_evidence(
+    context: CriticContext,
+) -> bool:
+    return any(
+        step.input_type == InputType.JSON
+        and step.input_source == InputSource.ALL_PREVIOUS_STEPS
+        for step in context.spec.steps
+    )
+
+
+_JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE = CriticInvariant(
+    id="json_input_rejects_all_previous_steps_source",
+    description=(
+        "A step declaring `input_type=json` cannot read from "
+        "`input_source=all_previous_steps` because the runtime concatenates "
+        "prior step output as text, which is not valid JSON."
+    ),
+    evidence=_json_input_rejects_all_previous_steps_source_evidence,
+    remediation=(
+        'Ett steg har `input_type="json"` tillsammans med `input_source="all_previous_steps"`, '
+        "vilket inte kan köras eftersom sammanslagen text från tidigare steg inte är giltig JSON. "
+        'Välj en av: (a) sätt `input_source="previous_step"` och hänvisa till specifika fält '
+        "via `uses_previous_fields` när steget ska läsa strukturerad JSON från det omedelbart "
+        'föregående steget; eller (b) sätt `input_type="text"` när steget ska sammanfatta '
+        "eller syntetisera textinnehållet från alla tidigare steg."
+    ),
+)
+
+
 # ── DOCX output-mode alignment ───────────────────────────────────────────
 
 
@@ -765,6 +797,7 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP,
     _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
     _MULTI_DOCUMENT_COMPARE_REQUIRES_ALL_PREVIOUS_STEPS,
+    _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE,
     _TEMPLATE_FILL_DOCX_REQUIRES_TEMPLATE_FILL_STEP,
     _GENERATED_DOCX_REJECTS_TEMPLATE_FILL,
     _MIXED_AUDIO_DOC_REJECTS_FILE_DEGRADATION,

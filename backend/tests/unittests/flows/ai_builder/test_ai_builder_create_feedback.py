@@ -37,10 +37,31 @@ def test_format_create_validation_feedback_adds_first_step_source_rule() -> None
     assert "flow_input" in feedback
 
 
-def test_format_create_quality_feedback_adds_terminal_artifact_and_aggregation_rules() -> None:
+def test_format_create_validation_feedback_adds_json_all_previous_steps_rule() -> None:
+    validation = SpecValidationResult()
+    validation.add_error(
+        step_ref="step_b",
+        code="json_incompatible_with_all_previous_steps",
+        message=(
+            "input_type 'json' is incompatible with input_source 'all_previous_steps'."
+        ),
+    )
+
+    feedback = format_create_validation_feedback(validation)
+
+    assert "Create draft validation failed" in feedback
+    assert "Create-flow repair rules" in feedback
+    assert "input_source='previous_step'" in feedback
+    assert "uses_previous_fields" in feedback
+    assert "input_type='text'" in feedback
+
+
+def test_format_create_quality_feedback_adds_terminal_artifact_and_aggregation_rules() -> (
+    None
+):
     feedback = format_create_quality_feedback(
         "Du har valt DOCX som slutartefakt men sista steget producerar inte DOCX. "
-        "När flera dokument ska sammanställas bör du använda `input_source=\"all_previous_steps\"`."
+        'När flera dokument ska sammanställas bör du använda `input_source="all_previous_steps"`.'
     )
 
     assert feedback is not None
