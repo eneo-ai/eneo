@@ -345,6 +345,7 @@ class AIBuilderProposalProcessor:
             validation=validation,
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
+            flow=flow,
         )
         return ToolProcessingResult(
             event=build_plan_event(plan_id=plan.id, envelope=envelope)
@@ -1387,6 +1388,7 @@ class AIBuilderProposalProcessor:
             edit_result_json=serialized_edit_result,
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
+            flow=flow,
         )
         return ToolProcessingResult(
             event=build_plan_event(

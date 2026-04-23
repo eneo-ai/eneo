@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_models import (
@@ -14,6 +14,12 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_prompts import build_plan_summary
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationError
+from intric.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
+)
+
+if TYPE_CHECKING:
+    from intric.flows.flow import Flow
 
 
 def build_lint_warnings(validation: Any) -> list[LintWarning]:
@@ -151,6 +157,7 @@ async def store_plan_and_update_conversation(
     edit_result_json: dict[str, Any] | None = None,
     lease_request_id: UUID | None = None,
     lease_lock_token: UUID | None = None,
+    flow: "Flow | None" = None,
 ) -> tuple[BuilderPlan, PlannerPlanEnvelope]:
     envelope = build_plan_envelope(
         spec=spec,
@@ -169,6 +176,7 @@ async def store_plan_and_update_conversation(
         spec=spec,
         assumptions=assumptions,
     )
+    planning_state = build_planning_state_from_conversation(conversation, flow=flow)
     async with repo.savepoint():
         plan = await persist_plan(
             repo=repo,
@@ -188,6 +196,11 @@ async def store_plan_and_update_conversation(
             start_index=new_messages_start,
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
+        )
+        await repo.save_planning_state(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            state=planning_state,
         )
     return plan, envelope
 
