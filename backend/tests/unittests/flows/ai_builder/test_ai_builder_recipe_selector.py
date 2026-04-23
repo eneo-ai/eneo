@@ -10,51 +10,81 @@ from intric.flows.ai_builder.ai_builder_recipe_selector import select_relevant_r
 
 class TestRecipeSelection:
     def test_no_signals_returns_full_recipes(self):
-        """With no signals, return all recipes (safe fallback)."""
-        result = select_relevant_recipes({})
-        assert "Transkribering" in result
-        assert "Dokumentanalys" in result
-        assert "Exempel" in result
+        """With no signals, return the full recipe source unchanged."""
+        source = render_knowledge_pack_create_recipes()
+        result = select_relevant_recipes({}, recipe_source=source)
+        assert result == source
 
     def test_audio_signal_includes_transcription(self):
         signals = {"final_output_mode": {"structured_text"}}
         text = "jag vill transkribera ljudfiler"
-        result = select_relevant_recipes(signals, text)
-        assert "Transkribering" in result
+        result = select_relevant_recipes(
+            signals, text, recipe_source=render_knowledge_pack_create_recipes()
+        )
+        assert "## Audio -> text -> analys -> rapport" in result
 
     def test_docx_signal_includes_template_recipe(self):
         signals = {"final_output_mode": {"docx_document"}}
-        result = select_relevant_recipes(signals)
-        assert "DOCX" in result or "Exempel" in result
+        result = select_relevant_recipes(
+            signals, recipe_source=render_knowledge_pack_create_recipes()
+        )
+        assert "DOCX" in result and "Exempel" in result
 
     def test_json_signal_includes_json_pipeline(self):
         signals = {"final_output_mode": {"structured_json"}}
-        result = select_relevant_recipes(signals)
-        assert "JSON" in result or "Exempel" in result
+        result = select_relevant_recipes(
+            signals, recipe_source=render_knowledge_pack_create_recipes()
+        )
+        assert "## JSON-steg" in result and "Exempel" in result
 
     def test_golden_example_always_included_with_signals(self):
         signals = {"final_output_mode": {"structured_text"}}
         text = "analysera dokument"
-        result = select_relevant_recipes(signals, text)
+        result = select_relevant_recipes(
+            signals, text, recipe_source=render_knowledge_pack_create_recipes()
+        )
         assert "Exempel" in result
 
     def test_filtered_result_is_shorter_than_full(self):
         """Filtered recipes should be shorter than full recipes."""
-        full = select_relevant_recipes({})
+        source = render_knowledge_pack_create_recipes()
+        full = select_relevant_recipes({}, recipe_source=source)
         filtered = select_relevant_recipes(
             {"final_output_mode": {"structured_text"}},
             "transkribera ljud",
+            recipe_source=source,
         )
         # Filtered should be notably shorter (at least 20% less)
         assert len(filtered) < len(full) * 0.9
 
     def test_freeform_text_triggers_audio_recipes(self):
-        result = select_relevant_recipes({}, "vi behöver transkribera ljudinspelningar")
-        assert "Transkribering" in result
+        result = select_relevant_recipes(
+            {},
+            "vi behöver transkribera ljudinspelningar",
+            recipe_source=render_knowledge_pack_create_recipes(),
+        )
+        assert "## Audio -> text -> analys -> rapport" in result
 
     def test_freeform_text_triggers_docx_recipes(self):
-        result = select_relevant_recipes({}, "output should be a DOCX file")
-        assert "DOCX" in result or "Exempel" in result
+        result = select_relevant_recipes(
+            {},
+            "output should be a DOCX file",
+            recipe_source=render_knowledge_pack_create_recipes(),
+        )
+        assert "DOCX" in result and "Exempel" in result
+
+    def test_comparison_signal_includes_comparison_recipe(self):
+        """The comparison signal must resolve to the structured comparison
+        section, not silently no-op. Before this slice, `RECIPE_SECTIONS`
+        advertised `comparison` but the structured pack had no matching
+        section — the marker matched nothing, so the signal fired without
+        effect. Pins that the section exists and is selected."""
+        result = select_relevant_recipes(
+            {},
+            "jämför två offerter sida vid sida",
+            recipe_source=render_knowledge_pack_create_recipes(),
+        )
+        assert "## Jämförelseflöden med flera indata" in result
 
     def test_sectioned_form_intake_text_selects_dedicated_recipe(self):
         result = select_relevant_recipes(

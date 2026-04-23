@@ -13,8 +13,12 @@ the CI-enforced dangling-reference guard is
 `test_every_question_template_id_resolves_in_catalog` in
 `tests/unittests/flows/ai_builder/test_question_catalog.py`.
 
-`QUESTION_CATALOG_VERSION` is the monotonic integer stamped on persisted
-plans and digests. Any catalog-surface change bumps it.
+`QUESTION_CATALOG_VERSION` is a monotonic integer reserved for future
+plan/digest persistence — no consumer reads it yet. The value only
+advances when a catalog-surface change requires downstream invalidation,
+and today that requirement is not live. Incrementing with no consumer
+wires a stamp to a value nothing checks, so the integer intentionally
+lags until a persisted artefact actually depends on it.
 
 Copy is transcribed verbatim from the canonical factory functions in
 `ai_builder_discovery_questions.py`. Option ids and values are
@@ -195,7 +199,7 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
             label_sv="Dokument",
             label_en="Documents",
             description_sv="Ladda upp dokument som PDF, Word eller liknande filer.",
-            description_en="Upload case documents such as PDF or Word files.",
+            description_en="Upload documents such as PDF or Word files.",
             value="documents",
         ),
         _option(

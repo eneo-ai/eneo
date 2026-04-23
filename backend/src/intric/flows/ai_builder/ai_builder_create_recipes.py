@@ -200,6 +200,44 @@ KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS: tuple[RecipeSection, ...] = (
         ),
     ),
     RecipeSection(
+        heading="Jämförelseflöden med flera indata",
+        bullets=(
+            RecipeBullet(
+                text=(
+                    "När användaren vill ställa två eller fler indata sida vid "
+                    "sida (dokument mot dokument, text mot text, mall mot "
+                    "mall) ska varje indata extraheras till samma strukturerade "
+                    "form innan jämförelsen sker"
+                ),
+            ),
+            RecipeBullet(
+                text="Typisk kedja:",
+                numbered_subitems=(
+                    (
+                        "ett `flow_input` eller `form_fields`-steg per indata, så "
+                        "att varje källa är en tydlig variabel"
+                    ),
+                    (
+                        "ett JSON-steg som extraherar samma fält ur varje indata "
+                        "via `output_fields`"
+                    ),
+                    (
+                        "ett jämförelsesteg som läser varje extrakt via "
+                        "`uses_previous_fields` och producerar en tabell eller "
+                        "sammanställning i `text`, `json` eller `docx`"
+                    ),
+                ),
+            ),
+            RecipeBullet(
+                text=(
+                    "Håll fältuppsättningen identisk per indata — annars blir "
+                    "jämförelsen skev och det slutliga steget måste kompensera "
+                    "för asymmetrier"
+                ),
+            ),
+        ),
+    ),
+    RecipeSection(
         heading="Exempel: dokumentgranskning med riskanalys",
         code_block=_RISK_ANALYSIS_EXAMPLE,
         code_language="json",

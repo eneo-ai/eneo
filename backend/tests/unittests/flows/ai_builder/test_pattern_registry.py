@@ -517,6 +517,28 @@ class TestPatternRegistryPublicApi:
                 f"{doc_pattern_id} in {matched_ids}"
             )
 
+    def test_find_pattern_candidates_scores_on_structural_hint_components(
+        self,
+    ) -> None:
+        """Structural retrieval hints like ``"output_mode=template_fill"``
+        must participate as live scoring tokens on their component words
+        (`output_mode`, `template_fill`) — not stay locked as a single
+        token that no input text could ever match. Otherwise the
+        structural tuple hints advertised by patterns are dead code and
+        the pattern layer is quietly less expressive than its contract.
+        """
+        # `template_fill` is a distinctive token unique to the docx
+        # template pattern's `output_mode=template_fill` hint, not present
+        # as a standalone word in any other pattern. An input mentioning
+        # `template_fill` should therefore score the pattern. If the hint
+        # tokenizer left `output_mode=template_fill` as one opaque token,
+        # score would be zero and the pattern would never surface.
+        matches = find_pattern_candidates("i want an output_mode of template_fill")
+        matched_ids = {match.pattern.id for match in matches}
+        assert "document_to_docx_template" in matched_ids, (
+            f"structural hint components did not score: got {matched_ids}"
+        )
+
     def test_find_pattern_candidates_excludes_zero_score_patterns(self) -> None:
         """Patterns with zero token hits are not emitted. A planner
         consumer iterating the tuple should see only the archetypes that
@@ -585,10 +607,11 @@ class TestPatternRegistryPublicApi:
         structured = next(
             m for m in matches if m.pattern.id == "document_to_structured_report"
         )
-        # The pattern has distinct hint tokens {document, analysis, report,
-        # input_type=document, output_type=text, output_type=json,
-        # output_mode=pass_through}; the input contributes `document` only
-        # on whole-word match (analyzes != analysis, no report).
+        # The pattern's retrieval hints contribute the distinct word
+        # tokens {document, analysis, report, input_type, output_type,
+        # text, json, output_mode, pass_through}. The input
+        # contributes `document` only on whole-word match
+        # (analyzes != analysis, no report).
         assert structured.score == 1, (
             "distinct-token scoring should credit only the unique hit "
             f"('document'), not three times; got score={structured.score}"

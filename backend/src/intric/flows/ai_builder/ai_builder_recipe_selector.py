@@ -10,9 +10,6 @@ from __future__ import annotations
 from intric.flows.ai_builder.ai_builder_form_intake_signals import (
     extract_form_intake_recipe_signals,
 )
-from intric.flows.ai_builder.ai_builder_knowledge_pack import (
-    KNOWLEDGE_PACK_RECIPES,
-)
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     extract_planner_pattern_recipe_signals,
 )
@@ -59,15 +56,22 @@ SIGNAL_TO_RECIPES: dict[str, list[str]] = {
 def select_relevant_recipes(
     answer_signals: dict[str, set[str]],
     freeform_text: str = "",
-    recipe_source: str | None = None,
+    *,
+    recipe_source: str,
 ) -> str:
     """Select and return only the recipe sections relevant to the user's flow.
 
-    If no signals are detected, returns the full recipe block (safe fallback).
+    If no signals are detected, returns ``recipe_source`` unchanged (safe
+    fallback). ``recipe_source`` is keyword-only and required — callers
+    pass the fully rendered recipe pack they want filtered (typically
+    ``render_knowledge_pack_create_recipes()``). Requiring it avoids a
+    silent cut-over to a legacy prose block when a new caller forgets
+    to pass one; the selector stays out of the pack-source business.
 
     Args:
         answer_signals: Extracted answer signals from the conversation.
         freeform_text: Aggregated freeform user text.
+        recipe_source: Fully rendered recipe pack the selector filters.
 
     Returns:
         Filtered recipe content string.
@@ -117,15 +121,14 @@ def select_relevant_recipes(
             needed.update(top.pattern.recipe_sections)
 
     # If no signals detected, return full recipes (safe fallback)
-    source = recipe_source or KNOWLEDGE_PACK_RECIPES
     if not needed:
-        return source
+        return recipe_source
 
     # Always include golden example when we have any signal
     needed.add("golden_example")
 
     # Filter recipe sections
-    return _filter_recipe_sections(source, needed)
+    return _filter_recipe_sections(recipe_source, needed)
 
 
 def _filter_recipe_sections(full_recipes: str, needed: set[str]) -> str:
@@ -161,4 +164,4 @@ def _filter_recipe_sections(full_recipes: str, needed: set[str]) -> str:
             result_lines.append(line)
 
     filtered = "\n".join(result_lines).strip()
-    return filtered if filtered else KNOWLEDGE_PACK_RECIPES
+    return filtered if filtered else full_recipes

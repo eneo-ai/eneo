@@ -234,10 +234,8 @@ def build_discovery_profile(
         case_like_flow=mentions_any(
             text,
             (
-                "case",
                 "case material",
                 "case package",
-                "underlag",
                 "ärende",
                 "ticket",
                 "tickets",

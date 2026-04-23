@@ -434,94 +434,6 @@ DÅLIGT: "Analysera texten och returnera strukturerad data."
 - Undvik att göra ALLA fält required — låt AI:n skipa fält den inte hittar information för"""
 
 
-_KNOWLEDGE_PACK_RECIPES = """\
-# Beprövade flödesrecept
-
-## 1. Transkribering → Sammanfattning (2 steg)
-```
-Steg 1: Transkribera ljud (flow_input, audio, transcribe_only, text)
-Steg 2: Sammanfatta transkription (previous_step, text, pass_through, text)
-```
-
-## 2. Dokumentanalys: Extrahera → Bedöm → Producera (3 steg)
-```
-Steg 1: Extrahera fakta (flow_input, document/text, pass_through, text)
-Steg 2: Bedöm konsekvenser (previous_step, text, pass_through, text)
-Steg 3: Skriv rapport (all_previous_steps ELLER previous_step med bindings)
-```
-Steg 3 kan använda `input_bindings.question` för att kombinera:
-`{{ step_a.output.text }}` (fakta) + `{{ step_b.output.text }}` (bedömning)
-
-## 3. Exempel: Kontraktsdriven dokumentgranskning (komplett create_flow)
-
-Följande visar exakt hur ett `create_flow`-anrop ska se ut — med formulär, \
-typed `output_fields`, runtime-uppladdning och detaljerade instruktioner:
-
-```json
-{
-  "flow_name": "Dokumentanalys med rekommendation",
-  "flow_description": "Analyserar uppladdade dokumentpaket och producerar strukturerad bedömning med rekommendation",
-  "plan_rationale": "Extraherar först strukturerad riskdata och skriver sedan en läsbar rekommendation.",
-  "assumptions": [
-    "Användaren laddar upp dokument vid körning",
-    "Risknivå räcker som enum i den strukturerade analysen"
-  ],
-  "form_fields": [
-    {"variable_name": "referens_id", "field_type": "text", "label": "Referens-ID", "required": true},
-    {"variable_name": "kategori", "field_type": "select", "label": "Kategori", "required": true,
-     "options": ["kontrakt", "riktlinje", "rapport"]}
-  ],
-  "steps": [
-    {
-      "name": "Extrahera och strukturera",
-      "instructions": "Du är en dokumentanalytiker. Extrahera en kort sammanfattning, en risknivå och relevanta nyckelord från dokumentpaketet. Returnera enbart strukturerad JSON som matchar de begärda fälten.",
-      "input_source": "flow_input",
-      "input_type": "document",
-      "output_type": "json",
-      "runtime_upload": true,
-      "runtime_required": true,
-      "uses_form_fields": ["referens_id", "kategori"],
-      "output_fields": [
-        {"name": "sammanfattning", "field_type": "string", "description": "Sammanfattning av dokumentet i 2-3 meningar", "required": true},
-        {"name": "risk", "field_type": "string", "description": "Bedömd risknivå som låg, medel eller hög", "required": true},
-        {"name": "nyckelord", "field_type": "array", "description": "Relevanta nyckelord", "required": false, "item_fields": [
-          {"name": "värde", "field_type": "string", "description": "Ett nyckelord", "required": true}
-        ]}
-      ]
-    },
-    {
-      "name": "Skriv rekommendation",
-      "instructions": "Du är en granskare som skriver rekommendationer. Skriv en tydlig rekommendation med inledning, analysens slutsatser, rekommenderad åtgärd och riskhantering. Skriv på formell svenska och håll dig under 500 ord.",
-      "input_source": "previous_step",
-      "input_type": "json",
-      "output_type": "text",
-      "uses_form_fields": ["referens_id", "kategori"]
-    }
-  ]
-}
-```
-
-OBS: Bara ETT steg kan använda `flow_input`. Använd formulärfält för att samla \
-flera indata. Backend genererar sedan stegrefar, underlag, kontrakt och variabelkopplingar.
-
-## 4. JSON-pipeline med kontrakt (3 steg)
-```
-Steg 1: Parsa indata (flow_input, json, pass_through, json) med input_contract OCH output_contract
-Steg 2: Berika data (previous_step, text, pass_through, json) med output_contract — \
-         underlag: {{ step_a.output.structured.fält1 }}, {{ step_a.output.structured.fält2 }}
-Steg 3: Formatera svar (previous_step, text, pass_through, text) — \
-         underlag: {{ step_b.output.structured.resultat }}
-```
-
-## 5. Flerspråkig produktion (3 steg)
-```
-Steg 1: Analysera text (flow_input, text, pass_through, text)
-Steg 2: Skriv svensk version (previous_step, text, pass_through, text)
-Steg 3: Skriv engelsk version (previous_step, text, pass_through, text) — med underlag \
-         {{ step_a.output.text }} för originaltexten
-```"""
-
-
 _KNOWLEDGE_PACK_ANTI_PATTERNS = """\
 # Antimönster — undvik dessa
 
@@ -640,7 +552,6 @@ KNOWLEDGE_PACK_FLOW_ARCHITECTURE = _KNOWLEDGE_PACK_FLOW_ARCHITECTURE
 KNOWLEDGE_PACK_VARIABLE_SYSTEM = _KNOWLEDGE_PACK_VARIABLE_SYSTEM
 KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG = _KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG
 KNOWLEDGE_PACK_CONTRACTS = _KNOWLEDGE_PACK_CONTRACTS
-KNOWLEDGE_PACK_RECIPES = _KNOWLEDGE_PACK_RECIPES
 KNOWLEDGE_PACK_ANTI_PATTERNS = _KNOWLEDGE_PACK_ANTI_PATTERNS
 KNOWLEDGE_PACK_STEP_DESIGN = _KNOWLEDGE_PACK_STEP_DESIGN
 KNOWLEDGE_PACK_IO_INTELLIGENCE = _KNOWLEDGE_PACK_IO_INTELLIGENCE
@@ -651,7 +562,6 @@ __all__ = [
     "_KNOWLEDGE_PACK_FLOW_ARCHITECTURE",
     "_KNOWLEDGE_PACK_IO_INTELLIGENCE",
     "_KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG",
-    "_KNOWLEDGE_PACK_RECIPES",
     "_KNOWLEDGE_PACK_STEP_DESIGN",
     "_KNOWLEDGE_PACK_VARIABLE_SYSTEM",
     "KNOWLEDGE_PACK_ANTI_PATTERNS",
@@ -659,7 +569,6 @@ __all__ = [
     "KNOWLEDGE_PACK_FLOW_ARCHITECTURE",
     "KNOWLEDGE_PACK_IO_INTELLIGENCE",
     "KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG",
-    "KNOWLEDGE_PACK_RECIPES",
     "KNOWLEDGE_PACK_STEP_DESIGN",
     "KNOWLEDGE_PACK_VARIABLE_SYSTEM",
 ]

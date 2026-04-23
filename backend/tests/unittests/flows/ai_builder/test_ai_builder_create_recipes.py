@@ -71,12 +71,14 @@ class TestRecipeSectionDataclass:
 
 
 class TestRecipeRegistryContract:
-    def test_registry_contains_six_canonical_sections(self) -> None:
-        """Pin the six hand-prose section headings from the replaced
-        constant so a silent drop or merge trips CI."""
-        assert len(KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS) == 6
+    def test_registry_contains_canonical_section_count(self) -> None:
+        """Pin the seven canonical section entries so a silent drop or
+        merge trips CI. The seventh — the comparison recipe — was added
+        alongside the `RECIPE_SECTIONS['comparison']` marker cut-over so
+        the `comparison` signal no longer resolves to a no-op."""
+        assert len(KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS) == 7
 
-    def test_registry_covers_six_canonical_headings(self) -> None:
+    def test_registry_covers_canonical_headings(self) -> None:
         """Pin each expected section heading by content, not index, so a
         future reorder for pedagogical reasons does not break the
         contract."""
@@ -88,6 +90,7 @@ class TestRecipeRegistryContract:
         assert "JSON-steg" in headings
         assert "Dokumentflöde med formulärkomplettering och kvalitetssteg" in headings
         assert "Sektionerad insamling via formulärfält" in headings
+        assert "Jämförelseflöden med flera indata" in headings
         assert "Exempel: dokumentgranskning med riskanalys" in headings
 
     def test_registry_entries_have_exactly_one_populated_body(self) -> None:
@@ -147,6 +150,7 @@ class TestRenderKnowledgePackCreateRecipes:
             "## Dokumentflöde med formulärkomplettering och kvalitetssteg" in rendered
         )
         assert "## Sektionerad insamling via formulärfält" in rendered
+        assert "## Jämförelseflöden med flera indata" in rendered
         assert "## Exempel: dokumentgranskning med riskanalys" in rendered
 
     def test_render_includes_every_registered_body_fragment(self) -> None:
@@ -290,6 +294,33 @@ class TestRenderKnowledgePackCreateRecipes:
                 (
                     "- Slutsteget ska använda de insamlade formulärfälten för att "
                     "skapa sammanställningen med samma rubriker"
+                ),
+                "",
+                "## Jämförelseflöden med flera indata",
+                (
+                    "- När användaren vill ställa två eller fler indata sida vid "
+                    "sida (dokument mot dokument, text mot text, mall mot "
+                    "mall) ska varje indata extraheras till samma strukturerade "
+                    "form innan jämförelsen sker"
+                ),
+                "- Typisk kedja:",
+                (
+                    "  1. ett `flow_input` eller `form_fields`-steg per indata, så "
+                    "att varje källa är en tydlig variabel"
+                ),
+                (
+                    "  2. ett JSON-steg som extraherar samma fält ur varje indata "
+                    "via `output_fields`"
+                ),
+                (
+                    "  3. ett jämförelsesteg som läser varje extrakt via "
+                    "`uses_previous_fields` och producerar en tabell eller "
+                    "sammanställning i `text`, `json` eller `docx`"
+                ),
+                (
+                    "- Håll fältuppsättningen identisk per indata — annars blir "
+                    "jämförelsen skev och det slutliga steget måste kompensera "
+                    "för asymmetrier"
                 ),
                 "",
                 "## Exempel: dokumentgranskning med riskanalys",

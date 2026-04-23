@@ -279,7 +279,7 @@ def heuristic_confidence(issue_id: str, profile: DiscoveryProfile) -> str | None
     ):
         return "analytical-report phrasing suggests a structured report"
     if issue_id == "document_kind" and looks_like_case_document_family(profile.text):
-        return "case-analysis phrasing suggests case documents"
+        return "formal-document phrasing suggests reports and official material"
     return None
 
 
@@ -346,8 +346,8 @@ def assumption_for_candidate(
     ):
         return localized_text(
             language,
-            "Antar att flödet främst ska arbeta med ärendeunderlag och andra kommunala handlingar.",
-            "Assuming the flow primarily handles case material and related municipal documents.",
+            "Antar att flödet främst ska arbeta med rapporter, beslut och formella dokument.",
+            "Assuming the flow primarily handles reports, decisions, and formal documents.",
         )
     if (
         candidate.issue_id == "structured_analysis_need"

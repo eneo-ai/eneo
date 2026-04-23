@@ -429,22 +429,22 @@ _WORD_PATTERN: re.Pattern[str] = re.compile(r"\w+", re.UNICODE)
 
 
 def _tokenize_hints(retrieval_hints: tuple[str, ...]) -> frozenset[str]:
-    """Collect distinct case-folded tokens from the retrieval hints.
+    """Collect distinct case-folded Unicode word tokens from the hints.
 
-    Each hint line is split on whitespace and case-folded so a multi-token
-    hint like ``"summarize summary summera sammanfatta"`` contributes four
-    matchable tokens. Duplicates across hint lines collapse because the
-    scorer counts *distinct* overlap with the input text — if a pattern
-    author lists ``"document analysis"`` and ``"input_type=document ..."``
-    and ``"output_type=document ..."``, the single word ``document`` is
-    still one signal, not three. Returning a frozenset makes the scorer
-    invariant to how authors split their hint vocabulary across lines.
+    Uses the same `_WORD_PATTERN` regex the input side uses in
+    `_word_tokens`, so structural hints like ``"input_type=document"`` and
+    ``"output_mode=template_fill"`` contribute their component word
+    tokens (`input_type`, `document`, `output_mode`, `template_fill`) to
+    the scorer instead of staying locked as single tokens that an input
+    text could never match. Duplicates across hint lines collapse because
+    the scorer counts *distinct* overlap — authoring style should not
+    drive ranking. Returning a frozenset keeps scoring invariant to how
+    authors split their hint vocabulary across lines.
     """
     tokens: set[str] = set()
     for hint in retrieval_hints:
-        for token in hint.casefold().split():
-            if token:
-                tokens.add(token)
+        for match in _WORD_PATTERN.finditer(hint.casefold()):
+            tokens.add(match.group(0))
     return frozenset(tokens)
 
 

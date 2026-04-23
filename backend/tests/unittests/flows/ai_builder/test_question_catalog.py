@@ -608,6 +608,10 @@ class TestDomainNeutrality:
         "ansvarig_namnd",
         "juridiska risker",
         "ekonomiska konsekvenser",
+        "ärendedokument",
+        "ärendeunderlag",
+        "kommunala handlingar",
+        "huvudärende",
     )
 
     def test_no_banned_tokens_in_any_rendered_template(self) -> None:

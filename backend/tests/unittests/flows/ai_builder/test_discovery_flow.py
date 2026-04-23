@@ -934,13 +934,13 @@ class TestExtendedClarificationHints:
             == "Vilken typ av dokument ska flödet främst arbeta med?"
         )
         first_option = question["options"][0]
-        assert first_option["label"] == "Ärendedokument och officiellt underlag"
+        assert first_option["label"] == "Rapporter och formella dokument"
         assert all(
             option["label"] != english
             for option, english in zip(
                 question["options"],
                 [
-                    "Case documents and official material",
+                    "Reports and formal documents",
                     "News or article-like material",
                     "Contracts or agreements",
                     "A mixed document package",
@@ -1877,7 +1877,7 @@ class TestPlannerDiscoveryShortCircuit:
         ):
             async for event in planner.send_message(
                 session_id=session_id,
-                message="Jag vill bygga ett flöde som hjälper mig att förstå officiella underlag.",
+                message="Jag vill bygga ett flöde som hjälper mig att förstå officiella dokument.",
                 ui_language="sv",
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
