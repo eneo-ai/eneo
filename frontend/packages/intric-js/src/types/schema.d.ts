@@ -371,23 +371,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/users/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Get Tenant Users */
-    get: operations["get_tenant_users_api_v1_users__get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/users/api-keys/": {
     parameters: {
       query?: never;
@@ -498,6 +481,31 @@ export interface paths {
      * @description OpenID Connect Login (generic OIDC provider).
      */
     post: operations["login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Tenant Users
+     * @description List tenant members for member/group pickers.
+     *
+     *     Returns `UserSparse` (id, email, username, timestamps) — a strict subset
+     *     of the information any authenticated tenant member can retrieve via
+     *     Microsoft 365 / Outlook GAL. Tenant-scoped at the repo layer; mutations
+     *     on /users/admin/* remain gated on Permission.ADMIN.
+     */
+    get: operations["get_tenant_users_api_v1_users__get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -15552,7 +15560,7 @@ export interface components {
        * Users
        * @default []
        */
-      users?: components["schemas"]["UserPublicBase"][];
+      users?: components["schemas"]["UserSparse"][];
     };
     /** UserGroupRead */
     UserGroupRead: {
@@ -18439,44 +18447,6 @@ export interface operations {
       };
     };
   };
-  get_tenant_users_api_v1_users__get: {
-    parameters: {
-      query?: {
-        /** @description Email of user */
-        email?: string | null;
-        /** @description Users per page */
-        limit?: number | null;
-        /** @description Current cursor */
-        cursor?: string | null;
-        /** @description Show previous page */
-        previous?: boolean | null;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["CursorPaginatedResponse_UserSparse_"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
   generate_api_key_api_v1_users_api_keys__post: {
     parameters: {
       query?: never;
@@ -18729,6 +18699,44 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AccessToken"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_tenant_users_api_v1_users__get: {
+    parameters: {
+      query?: {
+        /** @description Email of user */
+        email?: string | null;
+        /** @description Users per page */
+        limit?: number | null;
+        /** @description Current cursor */
+        cursor?: string | null;
+        /** @description Show previous page */
+        previous?: boolean | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_UserSparse_"];
         };
       };
       /** @description Validation Error */

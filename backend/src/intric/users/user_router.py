@@ -672,18 +672,25 @@ async def login_with_mobilityguard(
     return intric_token
 
 
-@users_admin_router.get("/", response_model=CursorPaginatedResponse[UserSparse])
+@router.get("/", response_model=CursorPaginatedResponse[UserSparse])
 async def get_tenant_users(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     email: Annotated[Optional[str], Query(description="Email of user")] = None,
-    limit: Annotated[Optional[int], Query(description="Users per page", ge=1)] = None,
+    limit: Annotated[
+        Optional[int], Query(description="Users per page", ge=1, le=100)
+    ] = None,
     cursor: Annotated[Optional[str], Query(description="Current cursor")] = None,
     previous: Annotated[
         Optional[bool], Query(description="Show previous page")
     ] = False,
 ):
-    validate_permission(container.user(), Permission.ADMIN)
+    """List tenant members for member/group pickers.
 
+    Returns `UserSparse` (id, email, username, timestamps) — a strict subset
+    of the information any authenticated tenant member can retrieve via
+    Microsoft 365 / Outlook GAL. Tenant-scoped at the repo layer; mutations
+    on /users/admin/* remain gated on Permission.ADMIN.
+    """
     user = container.user()
     user_assembler = container.user_assembler()
     user_service = container.user_service()

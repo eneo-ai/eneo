@@ -1240,20 +1240,24 @@ def _build_probes(resource_ids: dict) -> list[dict]:
         # =================================================================
         # SPECIAL: USERS ROUTER (split: admin vs user-facing)
         # =================================================================
-        # users_admin_router: TENANT_ADMIN_API_KEY_GUARDS → /users
+        # users_router (no API key guards): GET /users/ — member-picker
+        # listing. Returns UserSparse (id, email, username, timestamps);
+        # tenant-scoped at the repo layer. Intentionally unguarded so
+        # space-admins without tenant ADMIN can populate the picker.
         {
-            "name": "users-admin-list",
+            "name": "users-list",
             "method": "GET",
             "path": "/api/v1/users/",
             "resource_type": None,
-            "scope_resource": "admin",
-            "is_admin_scope": True,
-            "requires_admin_perm": True,
+            "scope_resource": None,
+            "is_admin_scope": False,
+            "requires_admin_perm": False,
             "target_resource_key": None,
+            "is_unguarded": True,
             "description": (
-                "users_admin_router GET / mounted with "
-                "TENANT_ADMIN_API_KEY_GUARDS. Note: also has "
-                "users_router GET /me/ and /tenant/ without guards."
+                "users_router GET / mounted without API key guards. "
+                "Exposes UserSparse for member/group pickers; mutations "
+                "on /users/admin/* retain TENANT_ADMIN_API_KEY_GUARDS."
             ),
         },
         # users_router (no API key guards): /users/me/
