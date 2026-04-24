@@ -1,3 +1,30 @@
+"""AI Builder turn + session telemetry.
+
+The session aggregator here reads metrics out of persisted assistant
+messages. By design it covers **committed turns only** — turns that
+became part of the durable conversation history the user sees.
+
+Rejected planner outputs and parse failures never persist assistant-
+message metadata. Their metrics therefore do not appear in
+``summarize_session_telemetry`` and do not influence session health
+scores. That is intentional: the session aggregator is the contract
+for "what the user experienced," not "what the planner attempted."
+
+Observability for failed turns lives on the structured log stream
+(``logger.info`` lines emitted around ``run_planner_turn`` already
+record every outcome including ``rejected`` / ``parse_failed`` with
+their ``TurnTelemetry``). Operators who need failed-turn aggregates
+consume those logs.
+
+Extending the session aggregator to include failed-turn metrics is
+tracked as deferred work; the trigger is the first downstream
+consumer that needs failed-turn counts inline with committed-turn
+metrics (e.g. a future observability dashboard that cannot join
+against the log stream). That enhancement must add a dedicated
+side-channel rather than mutate the current committed-turns-only
+contract.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -103,6 +130,13 @@ def build_assistant_message_metadata(
 def summarize_session_telemetry(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
 ) -> dict[str, Any] | None:
+    """Aggregate committed-turn metrics from the persisted conversation.
+
+    Only turns that became assistant messages contribute; rejected and
+    parse-failed turns are absent from the conversation history and
+    therefore from this summary. See the module docstring for the
+    committed-turns-only contract.
+    """
     latest = _latest_session_telemetry(conversation)
     if latest is not None:
         return latest
