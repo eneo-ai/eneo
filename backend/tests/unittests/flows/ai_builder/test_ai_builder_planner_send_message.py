@@ -453,6 +453,15 @@ async def test_send_message_rejected_emits_planner_rejected_error() -> None:
     assert [event["event"] for event in events] == ["error", "done"]
     payload = json.loads(events[0]["data"])
     assert payload["code"] == "planner_rejected"
+    # The user-facing message must not leak internal vocabulary
+    # (orchestrator / invariant / rejection / planner-implementation terms).
+    # Stable codes cover that information surface; the message is a
+    # plain-language recovery hint.
+    message = payload["message"].lower()
+    for leaked in ("orchestrator", "invariant", "rejection", "monotonicity"):
+        assert leaked not in message, (
+            f"user-facing rejection message must not leak {leaked!r}"
+        )
 
 
 @pytest.mark.asyncio
@@ -503,6 +512,11 @@ async def test_send_message_propose_plan_pending_adapter_emits_transient_error()
     assert payload["code"] == "propose_plan_adapter_unavailable"
     assert payload["phase"] == "planner"
     planner.repo.commit_turn.assert_not_called()
+    message = payload["message"].lower()
+    for leaked in ("materialization", "adapter", "bridge", "processor"):
+        assert leaked not in message, (
+            f"user-facing pending-adapter message must not leak {leaked!r}"
+        )
 
 
 @pytest.mark.asyncio

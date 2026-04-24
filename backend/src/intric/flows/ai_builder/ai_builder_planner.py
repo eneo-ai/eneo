@@ -1029,8 +1029,8 @@ class AIBuilderPlanner:
             elif turn_result.kind == "rejected":
                 yield build_error_event(
                     message=(
-                        "The AI planner's output violated an orchestrator "
-                        "invariant and was rejected. Please try again."
+                        "The assistant couldn't complete that step. "
+                        "Please rephrase your request or try again."
                     ),
                     code="planner_rejected",
                     phase="planner",
@@ -1039,8 +1039,8 @@ class AIBuilderPlanner:
             elif turn_result.kind == "propose_plan_pending_adapter":
                 yield build_error_event(
                     message=(
-                        "Plan proposal requires the materialization adapter, "
-                        "which is not yet available. Please try again shortly."
+                        "The assistant isn't ready to propose a plan yet. "
+                        "Please try again in a moment."
                     ),
                     code="propose_plan_adapter_unavailable",
                     phase="planner",
