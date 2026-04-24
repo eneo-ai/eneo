@@ -79,8 +79,16 @@ from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
     build_planner_telemetry_from_turn,
 )
-from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
-from intric.flows.ai_builder.planning_state import PlanningState
+from intric.flows.ai_builder.pattern_registry import (
+    PATTERN_REGISTRY,
+    PATTERN_REGISTRY_VERSION,
+)
+from intric.flows.ai_builder.planning_state import (
+    BUILDER_SCHEMA_VERSION,
+    FCM_VERSION,
+    PLANNER_CONTRACT_VERSION,
+    PlanningState,
+)
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
@@ -90,12 +98,26 @@ from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.model_providers.domain.model_defaults import lookup_model_defaults
+from intric.observability.failure_events import (
+    log_failure_event,
+    make_failure_fingerprint,
+    schema_fingerprint,
+    stable_hash,
+)
 
 if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
     from intric.users.user import UserInDB
 
 logger = get_logger(__name__)
+
+# Stable hash of the PlannerOutput JSON schema, computed once at import so
+# turn-metrics logs carry the contract shape under which a turn ran. A
+# silent Pydantic-schema drift — say, a field becoming optional, or an
+# enum gaining a value — flips this hash and shows up as a population
+# shift in log queries, making schema drift diagnosable without running
+# a diff against an older deploy.
+_PLANNER_OUTPUT_SCHEMA_HASH: str = schema_fingerprint(PlannerOutput.model_json_schema())
 
 
 @dataclass(frozen=True)
@@ -899,6 +921,16 @@ class AIBuilderPlanner:
                 and turn_result.parse_failure_diagnostics is not None
             ):
                 parse_failure_diagnostics = turn_result.parse_failure_diagnostics
+
+            system_prompt_content = next(
+                (
+                    msg.get("content", "")
+                    for msg in prepared_request.llm_messages
+                    if msg.get("role") == "system"
+                ),
+                "",
+            )
+            planner_prompt_hash = stable_hash(str(system_prompt_content))
             logger.info(
                 "AI Builder planner turn metrics",
                 extra={
@@ -915,10 +947,30 @@ class AIBuilderPlanner:
                     "total_tokens": turn_result.turn_telemetry.total_tokens,
                     "finish_reason": turn_result.turn_telemetry.finish_reason,
                     "request_id": request_id,
+                    "planner_prompt_hash": planner_prompt_hash,
+                    "planner_output_schema_hash": _PLANNER_OUTPUT_SCHEMA_HASH,
+                    "pattern_registry_version": PATTERN_REGISTRY_VERSION,
+                    "fcm_version": FCM_VERSION,
+                    "planner_contract_version": PLANNER_CONTRACT_VERSION,
+                    "builder_schema_version": BUILDER_SCHEMA_VERSION,
+                    "planning_state_version": session.planning_state_version,
+                    "response_format_requested": "json_object",
+                    "drop_params": True,
                     "json_mode_requested": True,
                     **parse_failure_diagnostics,
                 },
             )
+
+            if turn_result.kind in ("parse_failed", "rejected"):
+                _emit_planner_failure_event(
+                    turn_result=turn_result,
+                    request_id=request_id,
+                    session_id=session_id,
+                    tenant_id=self.user.tenant_id,
+                    planning_state_version=session.planning_state_version,
+                    planner_prompt_hash=planner_prompt_hash,
+                    parse_failure_diagnostics=parse_failure_diagnostics,
+                )
 
             if turn_result.kind == "parse_failed":
                 completion = turn_result.final_completion
@@ -1003,6 +1055,96 @@ class AIBuilderPlanner:
                 request_id=request_uuid,
                 lock_token=lock_token,
             )
+
+
+def _extract_first_validation_loc(locs: Any) -> str | None:
+    """Pull a locus string off the first entry of `validation_locs` if any.
+
+    `summarize_parse_failure` emits `validation_locs` as a list of
+    `{"loc": "...", "type": "..."}` dicts on ValidationError, or omits
+    the field entirely otherwise. A single best-effort locus feeds the
+    failure fingerprint; the loop is bounded at one entry because
+    fingerprint stability matters more than completeness.
+    """
+    if not isinstance(locs, list) or not locs:
+        return None
+    first = cast(Any, locs[0])
+    if not isinstance(first, dict):
+        return None
+    loc_value = cast(Any, first).get("loc")
+    return None if loc_value is None else str(loc_value)
+
+
+def _emit_planner_failure_event(
+    *,
+    turn_result: Any,
+    request_id: Any,
+    session_id: UUID,
+    tenant_id: UUID,
+    planning_state_version: int,
+    planner_prompt_hash: str,
+    parse_failure_diagnostics: dict[str, Any],
+) -> None:
+    """Emit one structured failure event per terminal non-success turn.
+
+    The turn-metrics log carries the outcome; this adds the "why" in a
+    grep-friendly shape. `failure_code` is the `RejectionCode` on
+    `rejected`, or the `parse_error_kind` on `parse_failed` — the fine
+    discriminator a human or an agent pivots on. `failure_fingerprint`
+    clusters recurring failures by `(kind, code, locus)` so repeated
+    incidents hash to the same 12-char id without carrying any raw
+    body. `safe_detail` is always sanitized by upstream producers
+    (`summarize_parse_failure` / `RejectionReason.detail`) — never the
+    raw LLM response.
+    """
+    failure_kind = turn_result.kind
+    failure_code: str | None = None
+    fingerprint_locus: str | None = None
+    safe_detail: dict[str, Any] = {}
+
+    if failure_kind == "parse_failed":
+        parse_error_kind = parse_failure_diagnostics.get("parse_error_kind")
+        failure_code = str(parse_error_kind) if parse_error_kind is not None else None
+        fingerprint_locus = _extract_first_validation_loc(
+            parse_failure_diagnostics.get("validation_locs")
+        )
+        safe_detail = dict(parse_failure_diagnostics)
+    elif failure_kind == "rejected" and turn_result.rejection is not None:
+        rejection = turn_result.rejection
+        failure_code = rejection.code
+        fingerprint_locus = rejection.code
+        safe_detail = {
+            "rejection_code": rejection.code,
+            "rejection_detail": rejection.detail,
+            "current_version": rejection.current_version,
+        }
+
+    log_failure_event(
+        logger,
+        event="ai_builder.failure",
+        component="ai_builder",
+        operation="planner_turn",
+        failure_kind=failure_kind,
+        failure_code=failure_code,
+        failure_fingerprint=make_failure_fingerprint(
+            failure_kind, failure_code, fingerprint_locus
+        ),
+        request_id=str(request_id) if request_id is not None else None,
+        session_id=str(session_id),
+        tenant_id=str(tenant_id),
+        replay_handle={
+            "session_id": str(session_id),
+            "request_id": str(request_id) if request_id is not None else None,
+            "planning_state_version": planning_state_version,
+            "planner_prompt_hash": planner_prompt_hash,
+            "planner_output_schema_hash": _PLANNER_OUTPUT_SCHEMA_HASH,
+            "pattern_registry_version": PATTERN_REGISTRY_VERSION,
+            "fcm_version": FCM_VERSION,
+            "planner_contract_version": PLANNER_CONTRACT_VERSION,
+            "builder_schema_version": BUILDER_SCHEMA_VERSION,
+        },
+        safe_detail=safe_detail,
+    )
 
 
 def _resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:
