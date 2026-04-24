@@ -36,11 +36,21 @@ Call surface:
   This slice is create-only. Edit-mode materialization (carrying a
   ``current_flow`` through) lands in a follow-up slice alongside
   edit-specific validation.
+
+- ``apply_to_draft(*, repo, session_id, tenant_id, materialized,
+  plan_rationale, ...)`` is the write path. It wraps the materialized
+  spec in a ``PlannerPlanEnvelope`` (the post-acceptance shape the
+  ``builder_plans`` row stores) and delegates persistence to
+  ``AIBuilderRepository.create_plan``. The helper is deliberately
+  thin: no retry policy, no catalog resolution, no conversation-turn
+  composition. Callers orchestrate those; the bridge owns only the
+  create-path shape translation and the persistence call.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from pydantic import ValidationError
 
@@ -50,6 +60,10 @@ from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
 from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
+    PlannerPlanEnvelope,
+)
 from intric.flows.ai_builder.ai_builder_materializer import compile_changeset
 from intric.flows.ai_builder.ai_builder_models import (
     FlowChangeSet,
@@ -57,6 +71,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import DraftPlanEnvelope
+from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.planning_state import ArchitectureCommit
 
 
@@ -78,10 +93,19 @@ class MaterializedDraft:
     Callers that only need the spec (e.g. to render a preview) can ignore
     ``changeset``; callers that intend to apply the draft get the
     already-compiled changeset so execution skips re-compilation.
+
+    ``plan_rationale`` rides with the materialized output so the write
+    path cannot persist a rationale that drifted from what was validated
+    during ``materialize()``. Without this, a caller could validate one
+    rationale through the bridge's semantic gate and then hand a
+    different string to ``apply_to_draft`` — the two would diverge
+    silently. Pinning the validated value to the dataclass collapses
+    the API to one source of truth.
     """
 
     spec: FlowDraftSpecCore
     changeset: FlowChangeSet
+    plan_rationale: str
 
 
 # Output modes the create-draft compile path cannot realise. Orchestrator
@@ -146,7 +170,11 @@ def materialize(
     prepared_spec = _run_compiled_spec_validator(spec)
 
     changeset = compile_changeset(prepared_spec, None)
-    return MaterializedDraft(spec=prepared_spec, changeset=changeset)
+    return MaterializedDraft(
+        spec=prepared_spec,
+        changeset=changeset,
+        plan_rationale=plan_rationale,
+    )
 
 
 def _validate_commit_supports_create_materialization(
@@ -333,8 +361,59 @@ def _tuple_mismatch_message(
     )
 
 
+async def apply_to_draft(
+    *,
+    repo: AIBuilderRepository,
+    session_id: UUID,
+    tenant_id: UUID,
+    materialized: MaterializedDraft,
+    assumptions: list[str] | None = None,
+    risk_acknowledgments: list[str] | None = None,
+    reasoning: str | None = None,
+) -> BuilderPlan:
+    """Persist a ``MaterializedDraft`` as a ``builder_plans`` row.
+
+    Thin async wrapper over ``AIBuilderRepository.create_plan`` that
+    constructs the ``PlannerPlanEnvelope`` the repo expects. The
+    envelope carries the spec plus the post-acceptance metadata a
+    builder session needs to render the plan card (assumptions,
+    risk acknowledgments, reasoning, plan_rationale).
+
+    ``plan_rationale`` rides on the ``MaterializedDraft`` rather than
+    accepting a separate kwarg so it cannot drift from the value
+    ``materialize()`` validated. ``lint_warnings`` is left to the
+    envelope's default factory because this slice has no consumer
+    plumbed yet — adding it speculatively would create dead API
+    surface.
+
+    Lists are copied defensively — a caller that recycles its
+    assumptions / risk buffer across turns must not retroactively
+    mutate what was persisted.
+
+    Edit-mode materialization (``edit_result_json``) is intentionally
+    not forwarded: this slice is create-only, and ``create_plan``'s
+    edit parameter is for the proposal-processor's edit adapter.
+    """
+    envelope = PlannerPlanEnvelope(
+        spec=materialized.spec,
+        assumptions=list(assumptions) if assumptions is not None else [],
+        risk_acknowledgments=(
+            list(risk_acknowledgments) if risk_acknowledgments is not None else []
+        ),
+        reasoning=reasoning,
+        plan_rationale=materialized.plan_rationale,
+    )
+    return await repo.create_plan(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        spec=materialized.spec,
+        envelope=envelope,
+    )
+
+
 __all__: list[str] = [
     "MaterializationError",
     "MaterializedDraft",
+    "apply_to_draft",
     "materialize",
 ]

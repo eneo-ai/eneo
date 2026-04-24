@@ -18,16 +18,21 @@ contract the bridge exposes to its callers:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import create_autospec
+from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_domain_models import PlannerPlanEnvelope
 from intric.flows.ai_builder.ai_builder_materialization_bridge import (
     MaterializationError,
     MaterializedDraft,
+    apply_to_draft,
     materialize,
 )
 from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore
 from intric.flows.ai_builder.ai_builder_orchestrator import DraftPlanEnvelope
+from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.planning_state import ArchitectureCommit, StepTriple
 
 _FIXED_COMMIT_TIMESTAMP = datetime(2026, 4, 23, 12, 0, tzinfo=timezone.utc)
@@ -491,11 +496,158 @@ class TestCompiledSpecValidatorGate:
         assert "duplicate_step_name" in str(exc_info.value)
 
 
+class TestApplyToDraft:
+    """``apply_to_draft`` is the bridge's write path. It wraps the
+    materialized spec in a ``PlannerPlanEnvelope`` (spec-bearing,
+    post-acceptance shape) and calls ``AIBuilderRepository.create_plan``.
+    The helper is deliberately thin — the bridge is not the right place
+    to carry retry budgets, cataloged resource resolution, or plan-store
+    eviction policy; callers own that.
+    """
+
+    def _canonical_materialized(self) -> MaterializedDraft:
+        """A real ``MaterializedDraft`` produced by ``materialize`` so
+        the test exercises the write path against the canonical shape,
+        not a hand-mocked spec that could drift from what the compiler
+        emits.
+        """
+        return materialize(
+            architecture_commit=_architecture_commit(),
+            draft_plan=DraftPlanEnvelope(
+                plan_id="plan_apply_to_draft_contract",
+                steps=[_summarize_text_step_dict()],
+                form_fields=[],
+            ),
+            flow_name="Apply-to-draft flow",
+            flow_description="Canonical MaterializedDraft for the write-path tests.",
+            plan_rationale="apply-to-draft contract test",
+        )
+
+    @pytest.mark.asyncio
+    async def test_passes_spec_and_envelope_through_to_repo(self) -> None:
+        repo = create_autospec(AIBuilderRepository, instance=True)
+        sentinel_plan = object()
+        repo.create_plan.return_value = sentinel_plan
+        session_id = uuid4()
+        tenant_id = uuid4()
+        materialized = self._canonical_materialized()
+
+        result = await apply_to_draft(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            materialized=materialized,
+        )
+
+        assert result is sentinel_plan
+        repo.create_plan.assert_awaited_once()
+        kwargs = repo.create_plan.call_args.kwargs
+        assert kwargs["session_id"] == session_id
+        assert kwargs["tenant_id"] == tenant_id
+        assert kwargs["spec"] is materialized.spec
+        envelope = kwargs["envelope"]
+        assert isinstance(envelope, PlannerPlanEnvelope)
+        assert envelope.spec is materialized.spec
+        # Rationale flows from MaterializedDraft, not a separate kwarg —
+        # one source of truth prevents silent drift between the value
+        # validated by materialize() and the value persisted here.
+        assert envelope.plan_rationale == materialized.plan_rationale
+        assert envelope.assumptions == []
+        assert envelope.risk_acknowledgments == []
+        assert envelope.reasoning is None
+
+    @pytest.mark.asyncio
+    async def test_forwards_optional_fields_to_envelope(self) -> None:
+        repo = create_autospec(AIBuilderRepository, instance=True)
+        materialized = self._canonical_materialized()
+
+        await apply_to_draft(
+            repo=repo,
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            materialized=materialized,
+            assumptions=["User supplied input text."],
+            risk_acknowledgments=["Redaction not applied."],
+            reasoning="Chose summarize_text because single-step.",
+        )
+
+        envelope = repo.create_plan.call_args.kwargs["envelope"]
+        assert envelope.assumptions == ["User supplied input text."]
+        assert envelope.risk_acknowledgments == ["Redaction not applied."]
+        assert envelope.reasoning == "Chose summarize_text because single-step."
+
+    @pytest.mark.asyncio
+    async def test_envelope_assumptions_do_not_alias_caller_list(self) -> None:
+        """Caller mutating the assumptions list after the await must not
+        bleed into the persisted envelope. The helper must take a defensive
+        copy — otherwise a caller that recycles its assumptions buffer
+        across turns would retroactively mutate what was persisted.
+        """
+        repo = create_autospec(AIBuilderRepository, instance=True)
+        materialized = self._canonical_materialized()
+        caller_assumptions = ["first", "second"]
+        caller_risks = ["initial-risk"]
+
+        await apply_to_draft(
+            repo=repo,
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            materialized=materialized,
+            assumptions=caller_assumptions,
+            risk_acknowledgments=caller_risks,
+        )
+        caller_assumptions.append("third")
+        caller_risks.append("added-after-apply")
+
+        envelope = repo.create_plan.call_args.kwargs["envelope"]
+        assert envelope.assumptions == ["first", "second"]
+        assert envelope.risk_acknowledgments == ["initial-risk"]
+
+    @pytest.mark.asyncio
+    async def test_does_not_forward_edit_result_json(self) -> None:
+        """``apply_to_draft`` is create-scope. ``edit_result_json`` is
+        an edit-mode parameter on ``create_plan`` and must not leak from
+        the bridge until edit-path materialization exists.
+        """
+        repo = create_autospec(AIBuilderRepository, instance=True)
+        materialized = self._canonical_materialized()
+
+        await apply_to_draft(
+            repo=repo,
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            materialized=materialized,
+        )
+
+        kwargs = repo.create_plan.call_args.kwargs
+        assert "edit_result_json" not in kwargs
+
+    def test_materialize_stamps_plan_rationale_on_draft(self) -> None:
+        """The rationale passed to ``materialize`` must ride back on the
+        returned ``MaterializedDraft`` so the write path has exactly one
+        source of truth and cannot drift.
+        """
+        materialized = materialize(
+            architecture_commit=_architecture_commit(),
+            draft_plan=DraftPlanEnvelope(
+                plan_id="plan_rationale_stamp",
+                steps=[_summarize_text_step_dict()],
+                form_fields=[],
+            ),
+            flow_name="Flow",
+            plan_rationale="Chosen because the user needs a quick summary.",
+        )
+        assert materialized.plan_rationale == (
+            "Chosen because the user needs a quick summary."
+        )
+
+
 class TestPublicSurface:
     def test_module_exports_materialize_and_error(self) -> None:
         from intric.flows.ai_builder import ai_builder_materialization_bridge as bridge
 
         assert hasattr(bridge, "materialize")
+        assert hasattr(bridge, "apply_to_draft")
         assert hasattr(bridge, "MaterializationError")
         assert hasattr(bridge, "MaterializedDraft")
         assert issubclass(bridge.MaterializationError, ValueError)

@@ -311,6 +311,7 @@ class TestRule6MaterializationBridgeAcl:
         {
             "MaterializationError",
             "MaterializedDraft",
+            "apply_to_draft",
             "materialize",
         }
     )
