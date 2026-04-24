@@ -146,6 +146,46 @@ def _check_constraint_names(cur: psycopg2.extensions.cursor) -> set[str]:
     return {row[0] for row in cur.fetchall()}
 
 
+def _check_constraint_def(cur: psycopg2.extensions.cursor, name: str) -> str | None:
+    cur.execute(
+        """
+        SELECT pg_get_constraintdef(c.oid)
+        FROM pg_constraint c
+        JOIN pg_class t ON c.conrelid = t.oid
+        WHERE t.relname = %s AND c.conname = %s
+        """,
+        (_TABLE_NAME, name),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def _column_data_type(cur: psycopg2.extensions.cursor, column: str) -> str | None:
+    cur.execute(
+        """
+        SELECT data_type
+        FROM information_schema.columns
+        WHERE table_name = %s AND column_name = %s
+        """,
+        (_TABLE_NAME, column),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def _column_default(cur: psycopg2.extensions.cursor, column: str) -> str | None:
+    cur.execute(
+        """
+        SELECT column_default
+        FROM information_schema.columns
+        WHERE table_name = %s AND column_name = %s
+        """,
+        (_TABLE_NAME, column),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
 def _current_revision(cur: psycopg2.extensions.cursor) -> str | None:
     cur.execute("SELECT version_num FROM alembic_version LIMIT 1")
     row = cur.fetchone()
@@ -197,6 +237,17 @@ def migration_round_trip(test_settings):
             first_up_lru = _index_exists(cur, _LRU_INDEX_NAME)
             first_up_fk_cascade = _tenants_fk_is_cascade(cur)
             first_up_checks = _check_constraint_names(cur)
+            first_up_sha256_check_def = _check_constraint_def(
+                cur, "ck_builder_attachment_obs_sha256_format"
+            )
+            first_up_json_types = {
+                col: _column_data_type(cur, col)
+                for col in ("observation_json", "deterministic_signals_json")
+            }
+            first_up_timestamp_defaults = {
+                col: _column_default(cur, col)
+                for col in ("created_at", "last_accessed_at")
+            }
 
         command.downgrade(cfg, "-1")
         with conn.cursor() as cur:
@@ -219,6 +270,9 @@ def migration_round_trip(test_settings):
                 "lru_index": first_up_lru,
                 "fk_cascade": first_up_fk_cascade,
                 "check_constraints": first_up_checks,
+                "sha256_check_def": first_up_sha256_check_def,
+                "json_types": first_up_json_types,
+                "timestamp_defaults": first_up_timestamp_defaults,
             },
             "after_downgrade": {"exists": down_exists},
             "after_second_upgrade": {
@@ -264,7 +318,7 @@ class TestAttachmentObservationsMigration:
     ):
         checks = migration_round_trip["after_first_upgrade"]["check_constraints"]
         expected = {
-            "ck_builder_attachment_obs_sha256_length",
+            "ck_builder_attachment_obs_sha256_format",
             "ck_builder_attachment_obs_digest_version",
             "ck_builder_attachment_obs_fcm_version",
             "ck_builder_attachment_obs_pattern_registry_version",
@@ -272,6 +326,32 @@ class TestAttachmentObservationsMigration:
         assert expected.issubset(checks), (
             f"Missing check constraints: {expected - checks}"
         )
+
+    def test_sha256_check_enforces_hex_regex(self, migration_round_trip):
+        defn = migration_round_trip["after_first_upgrade"]["sha256_check_def"]
+        assert defn is not None, "ck_builder_attachment_obs_sha256_format must exist"
+        assert "^[0-9a-f]{64}$" in defn, (
+            "sha256 CHECK must enforce 64 lowercase hex characters; "
+            f"got constraint definition {defn!r}"
+        )
+
+    def test_jsonb_columns_are_jsonb_type(self, migration_round_trip):
+        types = migration_round_trip["after_first_upgrade"]["json_types"]
+        assert types["observation_json"] == "jsonb", (
+            f"observation_json must be jsonb; got {types['observation_json']!r}"
+        )
+        assert types["deterministic_signals_json"] == "jsonb", (
+            "deterministic_signals_json must be jsonb; "
+            f"got {types['deterministic_signals_json']!r}"
+        )
+
+    def test_timestamp_columns_default_to_now(self, migration_round_trip):
+        defaults = migration_round_trip["after_first_upgrade"]["timestamp_defaults"]
+        for col in ("created_at", "last_accessed_at"):
+            assert defaults[col] is not None, f"{col} must have a server default"
+            assert "now()" in defaults[col], (
+                f"{col} default must reference now(); got {defaults[col]!r}"
+            )
 
     def test_downgrade_drops_table(self, migration_round_trip):
         assert not migration_round_trip["after_downgrade"]["exists"], (

@@ -1,15 +1,15 @@
-"""RED tests pinning the AttachmentObservation Pydantic surface.
+"""Contract tests for `AttachmentObservation` and its nested models.
 
-These tests drive the shape of `AttachmentObservation` + siblings before
-implementation. They assert:
+Pin the Pydantic surface callers rely on:
 
-- required + optional fields are validated at construction,
-- boundary rules (sha256 length/charset, score unit-interval, version
-  positivity, literal membership, non-empty reason) fail loudly,
-- strict `extra="forbid"` behaviour traps JSONB drift at load,
-- `validated_snapshot()` revalidates container mutations and catches
-  assignment-level drift,
-- the model round-trips through `model_dump(mode="json")` →
+- construction requires the full set of mandatory fields,
+- boundary rules (sha256 length/charset, unit-interval scores, positive
+  version stamps, literal membership, non-empty rationale) reject
+  invalid input loudly,
+- strict `extra="forbid"` protects JSONB payloads from field drift,
+- `validated_snapshot()` revalidates container mutations before the
+  save path so list/dict edits cannot silently poison the cache,
+- a full observation round-trips through `model_dump(mode="json")` →
   `model_validate(...)` unchanged.
 """
 

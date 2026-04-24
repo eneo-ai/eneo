@@ -73,7 +73,7 @@ class Pattern:
     pattern) leave it empty to opt out.
     """
 
-    id: str
+    id: PatternId
     examples: tuple[str, ...]
     retrieval_hints: tuple[str, ...]
     negative_examples: tuple[str, ...]
@@ -95,7 +95,7 @@ class Pattern:
 
 def _pattern(
     *,
-    id: str,
+    id: PatternId,
     examples: tuple[str, ...],
     retrieval_hints: tuple[str, ...],
     required_architectural_slots: tuple[str, ...],

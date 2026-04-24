@@ -65,8 +65,8 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.CheckConstraint(
-            "char_length(content_sha256) = 64",
-            name="ck_builder_attachment_obs_sha256_length",
+            "content_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_builder_attachment_obs_sha256_format",
         ),
         sa.CheckConstraint(
             "digest_version > 0",
