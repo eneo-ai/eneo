@@ -43,11 +43,15 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     RejectionReason,
     evaluate_planner_output,
     parse_planner_output,
+    summarize_parse_failure,
 )
 from intric.flows.ai_builder.ai_builder_repair import (
     MAX_ORCHESTRATOR_REPAIR_RETRIES,
+    MAX_PARSE_REPAIR_RETRIES,
     CompletionMetadata,
+    ParseRepairOutcome,
     RepairOutcome,
+    repair_parse_failure,
     repair_planner_turn,
 )
 
@@ -90,9 +94,11 @@ class PipelineOutcome:
     rejection: RejectionReason | None = None
     llm_calls_made: int = 0
     repair_attempts: int = 0
+    parse_repair_attempts: int = 0
     final_completion: CompletionMetadata | None = None
     parse_error_raw: str | None = None
     parse_error_message: str | None = None
+    parse_failure_diagnostics: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +107,7 @@ class _InitialCallOutcome:
     metadata: CompletionMetadata
     parsed: PlannerOutput | None
     parse_error: str | None
+    parse_failure_diagnostics: dict[str, Any] | None
 
 
 async def _call_planner(
@@ -132,12 +139,14 @@ async def _call_planner(
             metadata=metadata,
             parsed=None,
             parse_error=str(exc),
+            parse_failure_diagnostics=summarize_parse_failure(raw, exc),
         )
     return _InitialCallOutcome(
         raw=raw,
         metadata=metadata,
         parsed=parsed,
         parse_error=None,
+        parse_failure_diagnostics=None,
     )
 
 
@@ -172,20 +181,51 @@ async def run_planner_pipeline(
     )
     llm_calls_made = 1
     repair_attempts = 0
+    parse_repair_attempts = 0
     final_metadata = initial.metadata
 
     if initial.parsed is None:
-        return PipelineOutcome(
-            kind="parse_failed",
-            llm_calls_made=llm_calls_made,
-            repair_attempts=repair_attempts,
-            final_completion=final_metadata,
-            parse_error_raw=initial.raw,
-            parse_error_message=initial.parse_error,
+        # Truncation skips parse-repair: a corrective turn would just be
+        # a second chance to be truncated. Surface the existing
+        # `planner_output_too_long` path via the caller unchanged.
+        if final_metadata.finish_reason == "length":
+            return PipelineOutcome(
+                kind="parse_failed",
+                llm_calls_made=llm_calls_made,
+                repair_attempts=repair_attempts,
+                parse_repair_attempts=parse_repair_attempts,
+                final_completion=final_metadata,
+                parse_error_raw=initial.raw,
+                parse_error_message=initial.parse_error,
+                parse_failure_diagnostics=initial.parse_failure_diagnostics,
+            )
+        parse_repair_result = await _run_parse_repair_loop(
+            litellm_client=litellm_client,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            base_messages=base_messages,
+            failed_raw=initial.raw,
+            failed_error=initial.parse_error or "",
         )
-
-    output: PlannerOutput = initial.parsed
-    raw = initial.raw
+        llm_calls_made += parse_repair_result.attempts
+        parse_repair_attempts = parse_repair_result.attempts
+        final_metadata = parse_repair_result.final_metadata
+        if parse_repair_result.repaired_output is None:
+            return PipelineOutcome(
+                kind="parse_failed",
+                llm_calls_made=llm_calls_made,
+                repair_attempts=repair_attempts,
+                parse_repair_attempts=parse_repair_attempts,
+                final_completion=final_metadata,
+                parse_error_raw=parse_repair_result.failed_raw,
+                parse_error_message=parse_repair_result.failed_error,
+                parse_failure_diagnostics=parse_repair_result.failed_diagnostics,
+            )
+        output: PlannerOutput = parse_repair_result.repaired_output
+        raw = output.model_dump_json()
+    else:
+        output = initial.parsed
+        raw = initial.raw
 
     rejection = evaluate_planner_output(output, orchestration_context)
 
@@ -205,6 +245,7 @@ async def run_planner_pipeline(
                 rejection=rejection,
                 llm_calls_made=llm_calls_made,
                 repair_attempts=repair_attempts,
+                parse_repair_attempts=parse_repair_attempts,
                 final_completion=final_metadata,
             )
         llm_calls_made += 1
@@ -215,9 +256,11 @@ async def run_planner_pipeline(
                 kind="parse_failed",
                 llm_calls_made=llm_calls_made,
                 repair_attempts=repair_attempts,
+                parse_repair_attempts=parse_repair_attempts,
                 final_completion=final_metadata,
                 parse_error_raw=repair_outcome.parse_error_raw,
                 parse_error_message=repair_outcome.parse_error_message,
+                parse_failure_diagnostics=repair_outcome.parse_failure_diagnostics,
             )
         if repair_outcome.kind == "commit_drift_blocked":
             return PipelineOutcome(
@@ -225,6 +268,7 @@ async def run_planner_pipeline(
                 rejection=repair_outcome.drift_rejection,
                 llm_calls_made=llm_calls_made,
                 repair_attempts=repair_attempts,
+                parse_repair_attempts=parse_repair_attempts,
                 final_completion=final_metadata,
             )
         assert repair_outcome.repaired_output is not None
@@ -239,6 +283,7 @@ async def run_planner_pipeline(
             rejection=rejection,
             llm_calls_made=llm_calls_made,
             repair_attempts=repair_attempts,
+            parse_repair_attempts=parse_repair_attempts,
             final_completion=final_metadata,
         )
 
@@ -247,7 +292,91 @@ async def run_planner_pipeline(
         accepted_output=output,
         llm_calls_made=llm_calls_made,
         repair_attempts=repair_attempts,
+        parse_repair_attempts=parse_repair_attempts,
         final_completion=final_metadata,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _ParseRepairResult:
+    """Internal result of the parse-repair loop.
+
+    `repaired_output` is ``None`` when every attempt still failed to
+    parse; the caller turns that into a `parse_failed` outcome with
+    the last attempt's sanitized failure data. `final_metadata` is
+    always the metadata of the last LLM call the loop made — initial
+    if no attempts ran, or the last repair attempt's completion.
+    """
+
+    attempts: int
+    repaired_output: PlannerOutput | None
+    final_metadata: CompletionMetadata
+    failed_raw: str
+    failed_error: str
+    failed_diagnostics: dict[str, Any] | None
+
+
+async def _run_parse_repair_loop(
+    *,
+    litellm_client: Any,
+    litellm_model: str,
+    litellm_kwargs: dict[str, Any],
+    base_messages: list[dict[str, Any]],
+    failed_raw: str,
+    failed_error: str,
+) -> _ParseRepairResult:
+    attempts = 0
+    last_raw = failed_raw
+    last_error = failed_error
+    last_diagnostics: dict[str, Any] | None = None
+    last_metadata: CompletionMetadata = CompletionMetadata(
+        finish_reason=None,
+        prompt_tokens=None,
+        completion_tokens=None,
+        total_tokens=None,
+    )
+    while attempts < MAX_PARSE_REPAIR_RETRIES:
+        outcome: ParseRepairOutcome = await repair_parse_failure(
+            litellm_client=litellm_client,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            base_messages=base_messages,
+            failed_output_raw=last_raw,
+            parse_error_message=last_error,
+        )
+        attempts += 1
+        metadata = outcome.completion_metadata
+        assert metadata is not None
+        last_metadata = metadata
+        if outcome.kind == "repaired":
+            assert outcome.repaired_output is not None
+            return _ParseRepairResult(
+                attempts=attempts,
+                repaired_output=outcome.repaired_output,
+                final_metadata=last_metadata,
+                failed_raw=last_raw,
+                failed_error=last_error,
+                failed_diagnostics=None,
+            )
+        last_raw = outcome.parse_error_raw or ""
+        last_error = outcome.parse_error_message or ""
+        last_diagnostics = outcome.parse_failure_diagnostics
+        if last_metadata.finish_reason == "length":
+            return _ParseRepairResult(
+                attempts=attempts,
+                repaired_output=None,
+                final_metadata=last_metadata,
+                failed_raw=last_raw,
+                failed_error=last_error,
+                failed_diagnostics=last_diagnostics,
+            )
+    return _ParseRepairResult(
+        attempts=attempts,
+        repaired_output=None,
+        final_metadata=last_metadata,
+        failed_raw=last_raw,
+        failed_error=last_error,
+        failed_diagnostics=last_diagnostics if attempts > 0 else None,
     )
 
 

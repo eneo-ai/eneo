@@ -96,6 +96,7 @@ class TurnTelemetry:
     completion_tokens: int | None
     total_tokens: int | None
     finish_reason: str | None
+    parse_repair_attempts: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,8 +135,10 @@ class PlannerTurnResult:
     final_completion: CompletionMetadata | None = None
     parse_error_raw: str | None = None
     parse_error_message: str | None = None
+    parse_failure_diagnostics: dict[str, Any] | None = None
     llm_calls_made: int = 0
     repair_attempts: int = 0
+    parse_repair_attempts: int = 0
 
 
 async def run_planner_turn(
@@ -202,6 +205,7 @@ async def run_planner_turn(
             wall_clock_ms=max(0, now_ms() - turn_started_ms),
             llm_calls_made=pipeline_outcome.llm_calls_made,
             repair_attempts=pipeline_outcome.repair_attempts,
+            parse_repair_attempts=pipeline_outcome.parse_repair_attempts,
             architecture_commit_populated=architecture_commit_populated,
             prompt_tokens=completion.prompt_tokens if completion is not None else None,
             completion_tokens=(
@@ -217,8 +221,10 @@ async def run_planner_turn(
             final_completion=pipeline_outcome.final_completion,
             parse_error_raw=pipeline_outcome.parse_error_raw,
             parse_error_message=pipeline_outcome.parse_error_message,
+            parse_failure_diagnostics=pipeline_outcome.parse_failure_diagnostics,
             llm_calls_made=pipeline_outcome.llm_calls_made,
             repair_attempts=pipeline_outcome.repair_attempts,
+            parse_repair_attempts=pipeline_outcome.parse_repair_attempts,
             turn_telemetry=_telemetry(
                 "parse_failed", architecture_commit_populated=False
             ),
@@ -230,6 +236,7 @@ async def run_planner_turn(
             final_completion=pipeline_outcome.final_completion,
             llm_calls_made=pipeline_outcome.llm_calls_made,
             repair_attempts=pipeline_outcome.repair_attempts,
+            parse_repair_attempts=pipeline_outcome.parse_repair_attempts,
             turn_telemetry=_telemetry("rejected", architecture_commit_populated=False),
         )
 
@@ -243,6 +250,7 @@ async def run_planner_turn(
             final_completion=pipeline_outcome.final_completion,
             llm_calls_made=pipeline_outcome.llm_calls_made,
             repair_attempts=pipeline_outcome.repair_attempts,
+            parse_repair_attempts=pipeline_outcome.parse_repair_attempts,
             turn_telemetry=_telemetry(
                 "propose_plan_pending_adapter",
                 architecture_commit_populated=False,
@@ -276,6 +284,7 @@ async def run_planner_turn(
         final_completion=pipeline_outcome.final_completion,
         llm_calls_made=pipeline_outcome.llm_calls_made,
         repair_attempts=pipeline_outcome.repair_attempts,
+        parse_repair_attempts=pipeline_outcome.parse_repair_attempts,
         turn_telemetry=dispatched_telemetry,
     )
 

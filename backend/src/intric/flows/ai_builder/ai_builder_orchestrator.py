@@ -19,11 +19,12 @@ caller responsibilities — see `ai_builder_dispatcher` and
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
+from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, ValidationError
 
 from intric.flows.ai_builder.ai_builder_commit_invariance import (
     CommitDriftError,
@@ -146,9 +147,108 @@ def parse_planner_output(raw: str | dict[str, Any]) -> PlannerOutput:
     `pydantic.ValidationError` on any shape violation — unknown keys,
     unknown action kinds, negative version stamps, or payload shapes
     that don't match the declared `kind`.
+
+    When the input is a string, an exact whole-response markdown code
+    fence (``` ``` ```json\\n...\\n``` ``` ``` or ``` ``` ```\\n...\\n``` ```)
+    is unwrapped first. This matches a real failure mode — some models
+    wrap their JSON response in a fenced block despite JSON-mode being
+    requested. Partial fences inside prose are NOT extracted: the strict
+    contract is "one JSON object per turn," and extracting from prose
+    would let a rationale block be accepted as the planner output.
     """
-    payload = json.loads(raw) if isinstance(raw, str) else raw
+    if isinstance(raw, str):
+        payload = json.loads(_unwrap_json_fence(raw))
+    else:
+        payload = raw
     return PlannerOutput.model_validate(payload)
+
+
+_JSON_FENCE_LANG_PREFIX = "```json"
+_JSON_FENCE_BARE_PREFIX = "```"
+_JSON_FENCE_SUFFIX = "```"
+
+
+def _unwrap_json_fence(raw: str) -> str:
+    """Strip an exact whole-response markdown code fence, if present.
+
+    Accepts ``` ``` ```json\\n{...}\\n``` ``` ``` and the language-less
+    ``` ``` ```\\n{...}\\n``` ``` ``` shape after whitespace trim. Any
+    other position of the fence tokens leaves `raw` unchanged — we do
+    NOT extract the first fenced region from inside prose, because the
+    model could echo an example payload as a rationale and a greedy
+    extractor would accept it as the real planner output.
+    """
+    stripped = raw.strip()
+    if not stripped.startswith(_JSON_FENCE_BARE_PREFIX):
+        return raw
+    if not stripped.endswith(_JSON_FENCE_SUFFIX):
+        return raw
+    if stripped.startswith(_JSON_FENCE_LANG_PREFIX):
+        body = stripped[len(_JSON_FENCE_LANG_PREFIX) : -len(_JSON_FENCE_SUFFIX)]
+    else:
+        body = stripped[len(_JSON_FENCE_BARE_PREFIX) : -len(_JSON_FENCE_SUFFIX)]
+    return body.strip()
+
+
+def summarize_parse_failure(raw: str, exc: Exception) -> dict[str, Any]:
+    """Build a privacy-safe diagnostic summary of a parse failure.
+
+    Callers use this to log what went wrong WITHOUT emitting the raw
+    LLM body. Raw bodies may carry user prompts, attachment-derived
+    content, or PII; we fingerprint instead of logging.
+
+    Returned keys:
+
+    - `parse_error_kind`: ``"json_decode_error"`` |
+      ``"validation_error"`` | ``"unknown_error"``.
+    - `raw_length`: byte length of the original response.
+    - `raw_sha256_prefix`: first 16 hex chars of the sha256 digest —
+      enough to cluster recurring failures in logs without carrying
+      the body.
+    - `first_non_ws_char` / `last_non_ws_char`: single characters that
+      signal common malformations (``{`` vs ``\\``` vs prose letter).
+    - `looks_like_markdown_fence`: the stripped response opens with
+      ``` ``` ``` ```. Distinguishes fence-wrap from real parse errors.
+    - `starts_with_json_object`: the stripped response opens with
+      ``{``. A ``false`` here with a JSON-decode error almost always
+      means prose preamble.
+    - `validation_locs`: on Pydantic validation errors, a compact list
+      of ``{"loc": "a.b.c", "type": "extra_forbidden"}`` dicts with no
+      input values. This captures schema-drift shape without leaking
+      what the model invented.
+    - `json_decode_message`: on JSON-decode errors, the short message
+      from the exception (position, token). Safe to log because it
+      only describes the failure syntax, not the surrounding bytes.
+    """
+    raw_bytes = raw.encode("utf-8", errors="replace")
+    digest_prefix = hashlib.sha256(raw_bytes).hexdigest()[:16]
+    stripped = raw.strip()
+
+    summary: dict[str, Any] = {
+        "raw_length": len(raw_bytes),
+        "raw_sha256_prefix": digest_prefix,
+        "first_non_ws_char": stripped[0] if stripped else None,
+        "last_non_ws_char": stripped[-1] if stripped else None,
+        "looks_like_markdown_fence": stripped.startswith(_JSON_FENCE_BARE_PREFIX),
+        "starts_with_json_object": stripped.startswith("{"),
+    }
+
+    if isinstance(exc, ValidationError):
+        summary["parse_error_kind"] = "validation_error"
+        summary["validation_locs"] = [
+            {
+                "loc": ".".join(str(part) for part in error.get("loc", ())),
+                "type": str(error.get("type", "")),
+            }
+            for error in exc.errors()
+        ]
+    elif isinstance(exc, json.JSONDecodeError):
+        summary["parse_error_kind"] = "json_decode_error"
+        summary["json_decode_message"] = exc.msg
+    else:
+        summary["parse_error_kind"] = "unknown_error"
+
+    return summary
 
 
 RejectionCode = Literal[
@@ -509,4 +609,5 @@ __all__ = [
     "RejectionReason",
     "evaluate_planner_output",
     "parse_planner_output",
+    "summarize_parse_failure",
 ]

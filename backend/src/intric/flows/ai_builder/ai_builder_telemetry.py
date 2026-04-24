@@ -75,10 +75,19 @@ def build_planner_telemetry_from_turn(
     dict since the legacy function-calling transport. This helper
     keeps that shape stable across the orchestrator migration while
     adding the new per-turn fields (`wall_clock_ms`, `llm_calls_made`,
-    `repair_attempts`, `architecture_commit_populated`,
-    `outcome_kind`) so the session aggregator can reason about
-    commit-populated rate and repair-loop trigger rate without
-    peeking at domain objects.
+    `repair_attempts`, `parse_repair_attempts`,
+    `architecture_commit_populated`, `outcome_kind`) so the session
+    aggregator can reason about commit-populated rate, repair-loop
+    trigger rate, and parse-repair trigger rate without peeking at
+    domain objects.
+
+    `repair_attempts` and `parse_repair_attempts` are intentionally
+    separate counters. `repair_attempts` counts evaluator-domain
+    corrective turns (the planner's parsed output violated an
+    invariant). `parse_repair_attempts` counts parse-domain corrective
+    turns (the LLM's raw bytes could not be decoded into a
+    PlannerOutput at all). Conflating the two would obscure whether a
+    session is hitting schema drift vs. transport-level malformation.
 
     `used_auxiliary_llm` and `tool_call_count` carry their legacy
     meaning — they are set by the caller's own bookkeeping (auxiliary
@@ -100,6 +109,7 @@ def build_planner_telemetry_from_turn(
         "wall_clock_ms": telemetry.wall_clock_ms,
         "llm_calls_made": telemetry.llm_calls_made,
         "repair_attempts": telemetry.repair_attempts,
+        "parse_repair_attempts": telemetry.parse_repair_attempts,
         "architecture_commit_populated": telemetry.architecture_commit_populated,
     }
 
@@ -191,6 +201,7 @@ def _empty_session_telemetry() -> dict[str, Any]:
         "auxiliary_llm_call_count": 0,
         "architecture_commit_count": 0,
         "repair_attempts_total": 0,
+        "parse_repair_attempts_total": 0,
         "wall_clock_ms_total": 0,
         "llm_calls_made_total": 0,
         "last_request_id": None,
@@ -234,6 +245,9 @@ def _sanitize_session_telemetry(value: Mapping[str, Any]) -> dict[str, Any]:
             value.get("architecture_commit_count")
         ),
         "repair_attempts_total": _non_negative_int(value.get("repair_attempts_total")),
+        "parse_repair_attempts_total": _non_negative_int(
+            value.get("parse_repair_attempts_total")
+        ),
         "wall_clock_ms_total": _non_negative_int(value.get("wall_clock_ms_total")),
         "llm_calls_made_total": _non_negative_int(value.get("llm_calls_made_total")),
         "last_request_id": _safe_str(value.get("last_request_id")),
@@ -266,6 +280,9 @@ def _apply_planner_telemetry(
         summary["architecture_commit_count"] += 1
     summary["repair_attempts_total"] += _non_negative_int(
         planner_telemetry.get("repair_attempts")
+    )
+    summary["parse_repair_attempts_total"] += _non_negative_int(
+        planner_telemetry.get("parse_repair_attempts")
     )
     summary["wall_clock_ms_total"] += _non_negative_int(
         planner_telemetry.get("wall_clock_ms")

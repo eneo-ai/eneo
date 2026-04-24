@@ -893,12 +893,19 @@ class AIBuilderPlanner:
                 yield {"event": SSE_EVENT_DONE, "data": ""}
                 return
 
+            parse_failure_diagnostics: dict[str, Any] = {}
+            if (
+                turn_result.kind == "parse_failed"
+                and turn_result.parse_failure_diagnostics is not None
+            ):
+                parse_failure_diagnostics = turn_result.parse_failure_diagnostics
             logger.info(
                 "AI Builder planner turn metrics",
                 extra={
                     "outcome_kind": turn_result.kind,
                     "llm_calls_made": turn_result.llm_calls_made,
                     "repair_attempts": turn_result.repair_attempts,
+                    "parse_repair_attempts": turn_result.parse_repair_attempts,
                     "architecture_commit_populated": (
                         turn_result.turn_telemetry.architecture_commit_populated
                     ),
@@ -908,6 +915,8 @@ class AIBuilderPlanner:
                     "total_tokens": turn_result.turn_telemetry.total_tokens,
                     "finish_reason": turn_result.turn_telemetry.finish_reason,
                     "request_id": request_id,
+                    "json_mode_requested": True,
+                    **parse_failure_diagnostics,
                 },
             )
 

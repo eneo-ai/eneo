@@ -54,10 +54,21 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     RejectionCode,
     RejectionReason,
     parse_planner_output,
+    summarize_parse_failure,
 )
 from intric.flows.ai_builder.planning_state import ArchitectureCommit
 
 MAX_ORCHESTRATOR_REPAIR_RETRIES: Final[int] = 3
+
+# Parse-repair is a separate budget from evaluator-repair because the
+# failure domains are disjoint — a parse failure means the LLM produced
+# bytes we could not turn into a PlannerOutput at all, so there is no
+# evaluator context to preserve across retries. One corrective turn is
+# enough in practice (the corrective prompt pastes the parse error back
+# to the LLM); two+ retries start looking like a prose-mode model that
+# cannot honor the contract, at which point falling through to the
+# user-facing error is the honest move.
+MAX_PARSE_REPAIR_RETRIES: Final[int] = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +147,7 @@ class RepairOutcome:
     completion_metadata: CompletionMetadata | None = None
     parse_error_raw: str | None = None
     parse_error_message: str | None = None
+    parse_failure_diagnostics: dict[str, Any] | None = None
 
 
 async def repair_planner_turn(
@@ -188,6 +200,7 @@ async def repair_planner_turn(
             completion_metadata=completion_metadata,
             parse_error_raw=raw_content,
             parse_error_message=str(exc),
+            parse_failure_diagnostics=summarize_parse_failure(raw_content, exc),
         )
 
     drift = _detect_commit_drift(
@@ -202,6 +215,99 @@ async def repair_planner_turn(
         )
 
     return RepairOutcome(
+        kind="repaired",
+        repaired_output=repaired_output,
+        completion_metadata=completion_metadata,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ParseRepairOutcome:
+    """Result of one parse-repair corrective LLM call.
+
+    - `kind="repaired"`: the corrective call produced a parseable
+      PlannerOutput. `repaired_output` + `completion_metadata` are
+      populated. The caller re-enters the evaluator path with the
+      repaired output — a repaired parse does NOT bypass invariant
+      checks.
+    - `kind="parse_failed"`: the corrective call still produced
+      unparseable bytes. `completion_metadata`, `parse_error_raw`, and
+      `parse_error_message` mirror the initial parse-failure surface
+      so the outer loop can surface `finish_reason == "length"` (if
+      the corrective turn got truncated) and log the sanitized parse
+      diagnostics.
+    """
+
+    kind: Literal["repaired", "parse_failed"]
+    repaired_output: PlannerOutput | None = None
+    completion_metadata: CompletionMetadata | None = None
+    parse_error_raw: str | None = None
+    parse_error_message: str | None = None
+    parse_failure_diagnostics: dict[str, Any] | None = None
+
+
+async def repair_parse_failure(
+    *,
+    litellm_client: Any,
+    litellm_model: str,
+    litellm_kwargs: dict[str, Any],
+    base_messages: list[dict[str, Any]],
+    failed_output_raw: str,
+    parse_error_message: str,
+) -> ParseRepairOutcome:
+    """Run one corrective turn when the LLM produced unparseable bytes.
+
+    The corrective conversation echoes the failed body back to the
+    model and states the parse error verbatim (validator message or
+    JSON-decode message). This is deliberate: empirically, showing
+    the model its own malformed output next to the decoder's
+    complaint is the single most effective correction signal. The
+    corrective user-turn directive reminds the model of the shape
+    contract — raw JSON object, no markdown fences, no prose.
+
+    Unlike `repair_planner_turn`, there is no rejection code to gate
+    on — a raw parse failure has no `RejectionReason`. The caller is
+    responsible for skipping this helper when the failed completion
+    was truncation (``finish_reason == "length"``), because a
+    corrective turn would just be a second chance to be truncated.
+    """
+    messages: list[dict[str, Any]] = [
+        *base_messages,
+        {"role": "assistant", "content": failed_output_raw},
+        {
+            "role": "user",
+            "content": (
+                "The previous response could not be parsed as a "
+                "PlannerOutput JSON object. Parser error: "
+                f"{parse_error_message}. Re-emit the response as a "
+                "single raw JSON object matching the PlannerOutput "
+                "schema. Do NOT wrap the JSON in markdown code fences. "
+                "Do NOT add prose before or after the JSON. Do NOT "
+                "invent keys not declared in the schema."
+            ),
+        },
+    ]
+
+    response = await litellm_client.acompletion(
+        model=litellm_model,
+        messages=messages,
+        **litellm_kwargs,
+    )
+    raw_content = response.choices[0].message.content or ""
+    completion_metadata = _extract_completion_metadata(response)
+
+    try:
+        repaired_output = parse_planner_output(raw_content)
+    except (ValidationError, json.JSONDecodeError) as exc:
+        return ParseRepairOutcome(
+            kind="parse_failed",
+            completion_metadata=completion_metadata,
+            parse_error_raw=raw_content,
+            parse_error_message=str(exc),
+            parse_failure_diagnostics=summarize_parse_failure(raw_content, exc),
+        )
+
+    return ParseRepairOutcome(
         kind="repaired",
         repaired_output=repaired_output,
         completion_metadata=completion_metadata,
@@ -252,7 +358,10 @@ def _detect_commit_drift(
 
 __all__ = [
     "MAX_ORCHESTRATOR_REPAIR_RETRIES",
+    "MAX_PARSE_REPAIR_RETRIES",
     "CompletionMetadata",
+    "ParseRepairOutcome",
     "RepairOutcome",
+    "repair_parse_failure",
     "repair_planner_turn",
 ]
