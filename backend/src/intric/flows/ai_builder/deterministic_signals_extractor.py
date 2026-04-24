@@ -4,8 +4,8 @@ The observation pipeline asks this module, before any LLM call, what
 the raw bytes alone can tell us: the canonical MIME, a filename
 extension, the size in bytes, and — for text-like payloads — a
 bullet-line density that hints at whether the content is dense prose
-or a list. Per-mime extractors for XLSX / CSV / media plug into the dispatcher
-below; text, markdown, DOCX, and PDF are handled here.
+or a list. Per-mime extractors for CSV / media plug into the dispatcher
+below; text, markdown, DOCX, PDF, and XLSX are handled here.
 
 Unsupported or legacy MIMEs still produce a ``DeterministicSignals``
 with the file-level fields populated and per-mime fields at their
@@ -18,6 +18,7 @@ that reaches the pipeline.
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 import zipfile
 from io import BytesIO
@@ -25,6 +26,7 @@ from io import BytesIO
 import pdfplumber
 from docx import Document
 from docx.opc.exceptions import PackageNotFoundError
+from openpyxl import load_workbook
 
 from intric.files.extensions import MIMETYPE_EXTENSIONS_MAPPER
 from intric.files.mime_support import canonicalize_mime
@@ -39,6 +41,7 @@ _DOCX_MIME: str = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
 _PDF_MIME: str = "application/pdf"
+_XLSX_MIME: str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _BULLET_LINE = re.compile(r"^\s*[-*+•·]\s+\S")
 # Jinja-style `{{ var }}` placeholder tokens. The surrounding pattern
 # is deliberately permissive (identifier + optional whitespace) so the
@@ -75,6 +78,14 @@ def extract_deterministic_signals(
 
     if canonical_mime == _PDF_MIME:
         return _pdf_signals(
+            raw_bytes=raw_bytes,
+            canonical_mime=canonical_mime,
+            extension=extension,
+            size_bytes=size_bytes,
+        )
+
+    if canonical_mime == _XLSX_MIME:
+        return _xlsx_signals(
             raw_bytes=raw_bytes,
             canonical_mime=canonical_mime,
             extension=extension,
@@ -198,6 +209,105 @@ def _pdf_signals(
         page_count=page_count,
         is_scanned_pdf=not any_text,
     )
+
+
+def _xlsx_signals(
+    *,
+    raw_bytes: bytes,
+    canonical_mime: str,
+    extension: str,
+    size_bytes: int,
+) -> DeterministicSignals:
+    """Extract XLSX headers, per-column types, and data row count.
+
+    Headers are the first row's values, column types are inferred from
+    the data rows, and `row_count` excludes the header. Only the
+    active sheet is inspected — the multi-sheet case is deferred until
+    a golden requires it, since conflating sheets into a single header
+    list would misrepresent the document's structure to the planner.
+    """
+    try:
+        workbook = load_workbook(BytesIO(raw_bytes), read_only=True, data_only=True)
+    except (zipfile.BadZipFile, KeyError, ValueError, OSError):
+        return DeterministicSignals(
+            mime_type=canonical_mime,
+            extension=extension,
+            size_bytes=size_bytes,
+        )
+
+    try:
+        sheet = workbook.active
+        if sheet is None:
+            return DeterministicSignals(
+                mime_type=canonical_mime,
+                extension=extension,
+                size_bytes=size_bytes,
+            )
+
+        rows_iter = sheet.iter_rows(values_only=True)
+        header_row = next(rows_iter, None)
+        if header_row is None:
+            return DeterministicSignals(
+                mime_type=canonical_mime,
+                extension=extension,
+                size_bytes=size_bytes,
+                spreadsheet_headers=[],
+                spreadsheet_column_types=[],
+                row_count=0,
+            )
+
+        headers = [str(cell) if cell is not None else "" for cell in header_row]
+        column_values: list[list[object]] = [[] for _ in headers]
+        row_count = 0
+        for data_row in rows_iter:
+            row_count += 1
+            for index, value in enumerate(data_row):
+                if index < len(column_values):
+                    column_values[index].append(value)
+
+        column_types = [_infer_column_type(values) for values in column_values]
+
+        return DeterministicSignals(
+            mime_type=canonical_mime,
+            extension=extension,
+            size_bytes=size_bytes,
+            spreadsheet_headers=headers,
+            spreadsheet_column_types=column_types,
+            row_count=row_count,
+        )
+    finally:
+        workbook.close()
+
+
+def _infer_column_type(values: list[object]) -> str:
+    """Classify a spreadsheet column by scanning its non-empty cell values.
+
+    All-empty → `"empty"`. All values of a single inferred type →
+    that type's name. Any mix of types → `"mixed"`, because a
+    JSON-schema extraction flow cannot safely claim a single type for
+    a column that contains divergent cell kinds.
+    """
+    seen: set[str] = set()
+    for value in values:
+        if value is None or (isinstance(value, str) and value == ""):
+            continue
+        # bool must be checked before int — `isinstance(True, int)` is True
+        # in Python, which would misclassify booleans as numeric.
+        if isinstance(value, bool):
+            seen.add("boolean")
+        elif isinstance(value, (int, float)):
+            seen.add("numeric")
+        elif isinstance(value, (dt.datetime, dt.date)):
+            seen.add("date")
+        elif isinstance(value, str):
+            seen.add("text")
+        else:
+            seen.add("other")
+    if not seen:
+        return "empty"
+    if len(seen) == 1:
+        return next(iter(seen))
+    return "mixed"
 
 
 def _heading_level_from_style(style_name: str) -> int | None:

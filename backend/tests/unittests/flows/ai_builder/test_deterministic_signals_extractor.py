@@ -20,6 +20,7 @@ from io import BytesIO
 
 from docx import Document
 from fpdf import FPDF
+from openpyxl import Workbook
 
 from intric.flows.ai_builder.attachment_observation import DeterministicSignals
 from intric.flows.ai_builder.deterministic_signals_extractor import (
@@ -28,6 +29,7 @@ from intric.flows.ai_builder.deterministic_signals_extractor import (
 
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _PDF_MIME = "application/pdf"
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def _bytes(text: str) -> bytes:
@@ -435,3 +437,129 @@ class TestPdfExtractor:
 
         assert signals.extension == "pdf"
         assert signals.page_count == 1
+
+
+def _build_xlsx(*, rows: list[list[object]]) -> bytes:
+    """Build a minimal in-memory XLSX with the given row values.
+
+    Row 0 is treated as the header row by the extractor; subsequent
+    rows are data. Cell types preserve through openpyxl: `str` stays
+    string, `int` / `float` stays numeric, `datetime` stays datetime,
+    `bool` stays boolean. Round-tripping through openpyxl's writer +
+    reader ensures the extractor reads the same byte format the
+    production pipeline would receive.
+    """
+    workbook = Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    for row in rows:
+        sheet.append(row)
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+class TestXlsxExtractor:
+    """XLSX attachments are the dominant source for `extract_structured_fields`
+    archetype routing. Column headers and per-column type inference let
+    the planner decide whether to offer a JSON-schema extraction plan
+    versus a text summary, without ever rendering the sheet.
+    """
+
+    def test_headers_extracted_from_first_row(self) -> None:
+        raw = _build_xlsx(
+            rows=[
+                ["name", "age", "signup_date"],
+                ["Alice", 30, "2024-01-01"],
+            ]
+        )
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_XLSX_MIME,
+            filename="users.xlsx",
+        )
+
+        assert signals.spreadsheet_headers == ["name", "age", "signup_date"]
+
+    def test_row_count_excludes_header(self) -> None:
+        raw = _build_xlsx(
+            rows=[
+                ["col"],
+                ["a"],
+                ["b"],
+                ["c"],
+            ]
+        )
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_XLSX_MIME,
+            filename="three-rows.xlsx",
+        )
+
+        assert signals.row_count == 3
+
+    def test_column_types_inferred_from_data_rows(self) -> None:
+        raw = _build_xlsx(
+            rows=[
+                ["name", "age", "active"],
+                ["Alice", 30, True],
+                ["Bob", 25, False],
+            ]
+        )
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_XLSX_MIME,
+            filename="types.xlsx",
+        )
+
+        assert signals.spreadsheet_column_types == ["text", "numeric", "boolean"]
+
+    def test_mixed_type_column_reports_mixed(self) -> None:
+        """Columns with divergent cell types across data rows cannot be
+        safely claimed for a single JSON-schema type — the planner
+        needs to know so it doesn't emit a schema that rejects half
+        the attachment's own data.
+        """
+        raw = _build_xlsx(
+            rows=[
+                ["value"],
+                ["text here"],
+                [42],
+            ]
+        )
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_XLSX_MIME,
+            filename="mixed.xlsx",
+        )
+
+        assert signals.spreadsheet_column_types == ["mixed"]
+
+    def test_empty_column_reports_empty_type(self) -> None:
+        raw = _build_xlsx(
+            rows=[
+                ["header_with_no_data"],
+            ]
+        )
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_XLSX_MIME,
+            filename="header-only.xlsx",
+        )
+
+        assert signals.spreadsheet_headers == ["header_with_no_data"]
+        assert signals.row_count == 0
+        assert signals.spreadsheet_column_types == ["empty"]
+
+    def test_malformed_xlsx_falls_back_to_file_level_signals(self) -> None:
+        signals = extract_deterministic_signals(
+            raw_bytes=b"not a real xlsx file",
+            mime=_XLSX_MIME,
+            filename="broken.xlsx",
+        )
+
+        assert signals.mime_type == _XLSX_MIME
+        assert signals.extension == "xlsx"
+        assert signals.spreadsheet_headers is None
+        assert signals.spreadsheet_column_types is None
+        assert signals.row_count is None
