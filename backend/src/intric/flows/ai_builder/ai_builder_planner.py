@@ -119,6 +119,29 @@ logger = get_logger(__name__)
 # a diff against an older deploy.
 _PLANNER_OUTPUT_SCHEMA_HASH: str = schema_fingerprint(PlannerOutput.model_json_schema())
 
+# Core architectural slots that MUST resolve before `commit_architecture`
+# can land. The stricter pattern-specific gate runs inside the orchestrator
+# against `commit.chosen_patterns.required_architectural_slots` once the
+# planner has declared which patterns it's committing to.
+_CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(
+    {"primary_runtime_input", "terminal_output"}
+)
+
+
+def _compute_unresolved_core_slots(
+    planning_state: PlanningState,
+) -> frozenset[str]:
+    """Conservative commit gate: which core slots are still unresolved.
+
+    Both the prompt-side phase lock (rendered into the system prompt by
+    `build_system_prompt`) and the orchestrator-side rejection
+    (`_check_commit_architecture`) consume this same predicate, so the
+    surface the LLM sees and the surface that rejects it can never
+    disagree on which slots block commit.
+    """
+    resolved = frozenset(planning_state.resolved_slots.keys())
+    return _CORE_ARCHITECTURAL_SLOTS - resolved
+
 
 @dataclass(frozen=True)
 class PlannerMetadataResolution:
@@ -148,6 +171,12 @@ class PlannerPreparedRequest:
     # reject `commit_architecture` one turn after the user resolved the
     # last core slot even though the prompt already shows it resolved.
     rebuilt_planning_state: PlanningState | None = None
+    # Stable hash of the assembled system prompt, computed where the
+    # prompt is built so the hash is tied to the literal bytes. Logging
+    # it out of the prepared request instead of re-walking
+    # `llm_messages` at log time keeps the hash honest if future
+    # assembly inserts non-system messages ahead of the system turn.
+    system_prompt_hash: str = ""
 
 
 class AIBuilderPlanner:
@@ -456,6 +485,9 @@ class AIBuilderPlanner:
                 PATTERN_REGISTRY,
             )
         )
+        unresolved_architectural_choices = _compute_unresolved_core_slots(
+            rebuilt_planning_state
+        )
         confirmed_requirements = latest_confirmed_requirements(conversation)
         attachment_context_result = build_ai_builder_attachment_context(
             attachment_files or []
@@ -479,6 +511,7 @@ class AIBuilderPlanner:
                 else None
             ),
             is_edit_mode=is_edit_mode,
+            unresolved_architectural_choices=unresolved_architectural_choices,
         )
         system_prompt_tokens = max(1, len(system_prompt) // 3)
         conversation_budget = compute_conversation_token_budget(
@@ -547,6 +580,7 @@ class AIBuilderPlanner:
             llm_messages=[{"role": "system", "content": system_prompt}] + trimmed,
             should_emit_forced_followup=should_emit_forced_followup,
             rebuilt_planning_state=rebuilt_planning_state,
+            system_prompt_hash=stable_hash(system_prompt),
         )
 
     async def send_message(
@@ -769,14 +803,7 @@ class AIBuilderPlanner:
             # `ask_question`. Once the pattern-scope narrows at commit time,
             # the post-commit projection takes over.
             required_slot_names = all_pattern_slots - resolved_slot_names
-            # `unresolved_architectural_choices` is the conservative commit
-            # gate: these minimum pattern-agnostic slots MUST resolve before
-            # any architecture_commit can land. The stricter pattern-specific
-            # gate runs inside the orchestrator against
-            # `commit.chosen_patterns.required_architectural_slots` once the
-            # planner has declared which patterns it's committing to.
-            core_slots = frozenset({"primary_runtime_input", "terminal_output"})
-            unresolved_core_slots = core_slots - resolved_slot_names
+            unresolved_core_slots = _compute_unresolved_core_slots(session_state)
             asked_question_ids, has_new_evidence = _derive_asked_question_state(
                 conversation
             )

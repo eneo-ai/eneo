@@ -346,6 +346,85 @@ class TestBuildSystemPrompt:
         assert "endast bygga giltiga Eneo-flöden" in prompt
 
 
+class TestAllowedActionsPhaseLock:
+    """Server-side phase lock: when required architectural slots are still
+    unresolved, the prompt must explicitly restrict the allowed planner actions
+    for this turn so the LLM cannot even attempt `commit_architecture`.
+
+    The orchestrator-side rejection (`architecture_commit_premature_unresolved_choices`
+    in `ai_builder_orchestrator.py`) catches the violation post-hoc, but by
+    then an LLM call has been wasted and the user has seen a rejected turn.
+    Moving the invariant to the prompt surface prevents the attempt entirely.
+    """
+
+    def test_commit_blocked_when_core_slots_unresolved(self) -> None:
+        prompt = build_system_prompt(
+            unresolved_architectural_choices=frozenset(
+                {"primary_runtime_input", "terminal_output"}
+            ),
+        )
+        assert "Tillåtna handlingar denna tur" in prompt, (
+            "prompt must render an explicit allowed-actions section when "
+            "commit is blocked"
+        )
+        assert "commit_architecture" in prompt
+        lowered = prompt.lower()
+        assert "primary_runtime_input" in prompt
+        assert "terminal_output" in prompt
+        assert "inte tillåtet" in lowered or "ej tillåtet" in lowered, (
+            "the section must say commit_architecture is not allowed this turn"
+        )
+        assert "ask_question" in prompt
+        assert "propose_plan" in prompt
+
+    def test_commit_allowed_when_no_slots_unresolved(self) -> None:
+        prompt = build_system_prompt(
+            unresolved_architectural_choices=frozenset(),
+        )
+        assert "Tillåtna handlingar denna tur" not in prompt, (
+            "prompt must not render the restriction section when all core "
+            "slots are resolved — the default protocol allows all actions"
+        )
+
+    def test_commit_blocked_section_names_each_unresolved_slot(self) -> None:
+        prompt = build_system_prompt(
+            unresolved_architectural_choices=frozenset({"terminal_output"}),
+        )
+        assert "Tillåtna handlingar denna tur" in prompt
+        assert "terminal_output" in prompt
+        assert (
+            "primary_runtime_input"
+            not in prompt.split("Tillåtna handlingar denna tur")[1].split("\n\n")[0]
+        ), (
+            "the blocking-slots list must enumerate only the slots still "
+            "unresolved, not every slot name"
+        )
+
+    def test_commit_blocked_directive_is_unambiguous_and_unified(self) -> None:
+        """Anti-confusion rail: the directive must co-locate the forbidden
+        action, the allowed alternatives, and the blocking slots in one
+        section so the LLM has no gap where it can guess.
+        """
+        prompt = build_system_prompt(
+            unresolved_architectural_choices=frozenset({"primary_runtime_input"}),
+        )
+        start = prompt.find("Tillåtna handlingar denna tur")
+        assert start != -1
+        # Grab a bounded window after the header
+        window = prompt[start : start + 1500]
+        # All anti-confusion anchors must appear inside the same section
+        for token in (
+            "commit_architecture",
+            "ask_question",
+            "propose_plan",
+            "primary_runtime_input",
+        ):
+            assert token in window, (
+                f"`{token}` must appear inside the phase-lock section so the "
+                "LLM sees the full contract in one place"
+            )
+
+
 class TestAdditionalClarificationHints:
     def test_edit_flow_hints_do_not_reopen_resolved_output_format(self) -> None:
         flow = _make_flow(

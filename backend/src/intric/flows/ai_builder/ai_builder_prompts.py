@@ -91,6 +91,7 @@ def build_system_prompt(
     ui_language: str | None = None,
     confirmed_requirements: dict[str, Any] | None = None,
     is_edit_mode: bool = False,
+    unresolved_architectural_choices: frozenset[str] | None = None,
 ) -> str:
     """Build the complete system prompt for the AI builder LLM.
 
@@ -116,6 +117,25 @@ def build_system_prompt(
             f"`base_planning_state_version` för denna tur = `{base_planning_state_version}`. "
             "Kopiera EXAKT detta värde in i "
             "`planning_state_delta.base_planning_state_version`."
+        )
+
+    if unresolved_architectural_choices:
+        # Server-side phase lock: when core architectural slots are still
+        # unresolved, `commit_architecture` is rejected by the orchestrator.
+        # Surfacing that contract in the prompt prevents the wasted LLM call
+        # that a post-hoc rejection costs.
+        slot_bullets = "\n".join(
+            f"- `{slot}`" for slot in sorted(unresolved_architectural_choices)
+        )
+        sections.append(
+            "## Tillåtna handlingar denna tur\n\n"
+            "`commit_architecture` är **inte tillåtet** denna tur — följande "
+            "arkitekturval är fortfarande oresolverade och måste klarna "
+            "först:\n\n"
+            f"{slot_bullets}\n\n"
+            "Tillåtna handlingar denna tur: `ask_question`, "
+            "`confirm_requirements`, `propose_plan`. Ställ en fråga som "
+            "resolver en av ovanstående slots innan arkitekturen kan pinnas."
         )
 
     if confirmed_requirements and not is_edit_mode:

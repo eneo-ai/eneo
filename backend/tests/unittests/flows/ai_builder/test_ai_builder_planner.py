@@ -555,6 +555,81 @@ async def test_prepare_planner_request_projects_pre_commit_into_system_prompt() 
 
 
 @pytest.mark.asyncio
+async def test_prepare_planner_request_threads_unresolved_core_slots_into_system_prompt() -> (
+    None
+):
+    """Server-side phase lock: `_prepare_planner_request` must compute
+    the core-slot commit gate from the rebuilt planning state and pass
+    it into `build_system_prompt` so the prompt can restrict allowed
+    actions BEFORE the LLM is called.
+
+    This is the anti-regression rail for the
+    `architecture_commit_premature_unresolved_choices` failure class
+    (fingerprint `560a95ddd270`): a post-hoc orchestrator rejection is
+    wasted work; the prompt must refuse the attempt in the first place.
+    """
+    planner = _make_planner()
+    conversation = [ConversationMessage(role="user", content="Build a flow")]
+    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    discovery_analysis = SimpleNamespace(mvs_met=True)
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.resolve_requirements_state",
+            return_value=requirements_state,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            new_callable=AsyncMock,
+            return_value=(None, discovery_analysis),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
+            return_value=None,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_system_prompt",
+            return_value="system prompt",
+        ) as build_system_prompt,
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.compute_conversation_token_budget",
+            return_value=256,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.trim_conversation_for_context",
+            return_value=[{"role": "user", "content": "Build a flow"}],
+        ),
+    ):
+        await planner._prepare_planner_request(
+            conversation=conversation,
+            message="Build a flow",
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            attachment_files=None,
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+                unknown_model_context_window_tokens=8192,
+            ),
+            is_requirements_confirmation=False,
+            persisted_planning_state=None,
+        )
+
+    unresolved = build_system_prompt.call_args.kwargs[
+        "unresolved_architectural_choices"
+    ]
+    # A fresh conversation with one generic user message resolves no
+    # core slots, so both core slots must block commit at this turn.
+    assert unresolved == frozenset({"primary_runtime_input", "terminal_output"})
+
+
+@pytest.mark.asyncio
 async def test_prepare_planner_request_carries_forward_persisted_commit_into_prompt() -> (
     None
 ):
