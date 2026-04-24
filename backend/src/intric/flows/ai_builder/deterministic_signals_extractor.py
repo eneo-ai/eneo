@@ -4,9 +4,8 @@ The observation pipeline asks this module, before any LLM call, what
 the raw bytes alone can tell us: the canonical MIME, a filename
 extension, the size in bytes, and — for text-like payloads — a
 bullet-line density that hints at whether the content is dense prose
-or a list. Per-mime extractors for DOCX / PDF / XLSX / CSV / media
-plug into the dispatcher below; text, markdown, and DOCX are handled
-here.
+or a list. Per-mime extractors for XLSX / CSV / media plug into the dispatcher
+below; text, markdown, DOCX, and PDF are handled here.
 
 Unsupported or legacy MIMEs still produce a ``DeterministicSignals``
 with the file-level fields populated and per-mime fields at their
@@ -23,6 +22,7 @@ import re
 import zipfile
 from io import BytesIO
 
+import pdfplumber
 from docx import Document
 from docx.opc.exceptions import PackageNotFoundError
 
@@ -38,6 +38,7 @@ _TEXT_MIMES: frozenset[str] = frozenset({"text/plain", "text/markdown"})
 _DOCX_MIME: str = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
+_PDF_MIME: str = "application/pdf"
 _BULLET_LINE = re.compile(r"^\s*[-*+•·]\s+\S")
 # Jinja-style `{{ var }}` placeholder tokens. The surrounding pattern
 # is deliberately permissive (identifier + optional whitespace) so the
@@ -66,6 +67,14 @@ def extract_deterministic_signals(
 
     if canonical_mime == _DOCX_MIME:
         return _docx_signals(
+            raw_bytes=raw_bytes,
+            canonical_mime=canonical_mime,
+            extension=extension,
+            size_bytes=size_bytes,
+        )
+
+    if canonical_mime == _PDF_MIME:
+        return _pdf_signals(
             raw_bytes=raw_bytes,
             canonical_mime=canonical_mime,
             extension=extension,
@@ -143,6 +152,51 @@ def _docx_signals(
         table_count=len(table_dimensions),
         table_dimensions=table_dimensions,
         placeholder_tokens=placeholder_tokens,
+    )
+
+
+def _pdf_signals(
+    *,
+    raw_bytes: bytes,
+    canonical_mime: str,
+    extension: str,
+    size_bytes: int,
+) -> DeterministicSignals:
+    """Extract PDF-specific signals without OCR.
+
+    Page count is authoritative from the page list. `is_scanned_pdf`
+    is a proxy — True when no page returns any extractable text, which
+    covers image-only scans and genuinely empty PDFs alike. The
+    planner uses this flag to avoid asking a scanned attachment to
+    populate a text-summary archetype without a user acknowledgement;
+    distinguishing a true scan from a blank PDF requires OCR and is
+    explicitly out of scope here.
+    """
+    try:
+        with pdfplumber.open(BytesIO(raw_bytes)) as pdf:
+            page_count = len(pdf.pages)
+            any_text = any((page.extract_text() or "").strip() for page in pdf.pages)
+    except Exception:
+        # pdfplumber + pdfminer raise a wide variety of exceptions on
+        # malformed bytes (PdfminerException, PDFSyntaxError,
+        # ValueError, AssertionError from the underlying parser).
+        # Catching the umbrella here matches the upstream-permissive
+        # MIME classification contract: the dispatcher must never
+        # crash on bytes that reached it, and downstream code is
+        # cache-keyed on file-level signals alone when per-mime
+        # parsing fails.
+        return DeterministicSignals(
+            mime_type=canonical_mime,
+            extension=extension,
+            size_bytes=size_bytes,
+        )
+
+    return DeterministicSignals(
+        mime_type=canonical_mime,
+        extension=extension,
+        size_bytes=size_bytes,
+        page_count=page_count,
+        is_scanned_pdf=not any_text,
     )
 
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 from io import BytesIO
 
 from docx import Document
+from fpdf import FPDF
 
 from intric.flows.ai_builder.attachment_observation import DeterministicSignals
 from intric.flows.ai_builder.deterministic_signals_extractor import (
@@ -26,6 +27,7 @@ from intric.flows.ai_builder.deterministic_signals_extractor import (
 )
 
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_PDF_MIME = "application/pdf"
 
 
 def _bytes(text: str) -> bytes:
@@ -346,3 +348,90 @@ class TestDocxExtractor:
         assert signals.heading_tree is None
         assert signals.table_count is None
         assert signals.placeholder_tokens == []
+
+
+def _build_pdf(*, pages: list[str]) -> bytes:
+    """Build a minimal in-memory PDF with the given page texts.
+
+    Empty-string page entries produce blank pages (no rendered text),
+    which is how the tests exercise the scanned-PDF signal. fpdf2 is
+    already a backend dep; round-tripping through fpdf2 → pdfplumber
+    means the test covers the same reader the extractor uses in
+    production, not a hand-rolled fake.
+    """
+    pdf = FPDF()
+    pdf.set_font("Helvetica", size=12)
+    for text in pages:
+        pdf.add_page()
+        if text:
+            pdf.cell(0, 10, text)
+    return bytes(pdf.output())
+
+
+class TestPdfExtractor:
+    """PDF page_count and is_scanned_pdf are the structural signals the
+    planner uses to decide whether to expect text-rich content or to
+    offer an OCR / upload-retry cue — a scanned PDF with zero
+    extractable text should not be asked to fill a text summary
+    archetype without a user acknowledgement.
+    """
+
+    def test_page_count_matches_document(self) -> None:
+        raw = _build_pdf(pages=["first", "second", "third"])
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_PDF_MIME,
+            filename="three-pages.pdf",
+        )
+
+        assert signals.page_count == 3
+
+    def test_text_pdf_is_not_marked_scanned(self) -> None:
+        raw = _build_pdf(pages=["Hello world, this is page one."])
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_PDF_MIME,
+            filename="textual.pdf",
+        )
+
+        assert signals.is_scanned_pdf is False
+
+    def test_blank_pdf_is_marked_scanned(self) -> None:
+        """A PDF with no extractable text is the proxy for image-only
+        or scanned content — pdfplumber returns empty strings for
+        every page. The extractor cannot distinguish a truly scanned
+        PDF from a deliberately blank one without OCR, but either way
+        the planner should treat the attachment as text-less.
+        """
+        raw = _build_pdf(pages=["", ""])
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_PDF_MIME,
+            filename="blank.pdf",
+        )
+
+        assert signals.is_scanned_pdf is True
+        assert signals.page_count == 2
+
+    def test_malformed_pdf_falls_back_to_file_level_signals(self) -> None:
+        signals = extract_deterministic_signals(
+            raw_bytes=b"not a real pdf",
+            mime=_PDF_MIME,
+            filename="broken.pdf",
+        )
+
+        assert signals.mime_type == _PDF_MIME
+        assert signals.extension == "pdf"
+        assert signals.page_count is None
+        assert signals.is_scanned_pdf is None
+
+    def test_pdf_extension_inferred_when_filename_has_no_suffix(self) -> None:
+        raw = _build_pdf(pages=["page one text"])
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_PDF_MIME,
+            filename="no-extension",
+        )
+
+        assert signals.extension == "pdf"
+        assert signals.page_count == 1
