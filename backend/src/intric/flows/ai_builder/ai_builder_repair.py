@@ -265,10 +265,13 @@ def build_parse_repair_user_message(*, parse_error_message: str) -> str:
         "response as a single raw JSON object matching the "
         "PlannerOutput schema. Do NOT wrap the JSON in markdown code "
         "fences. Do NOT add prose before or after the JSON. Do NOT "
-        "invent keys not declared in the schema. Reminder: "
+        "invent keys not declared in the schema. Reminders: "
         "`plan_reference` belongs in `planner_action.payload` when "
         "`kind` is `propose_plan`; it is NEVER a field of "
-        "`planning_state_delta.draft_plan`."
+        "`planning_state_delta.draft_plan`. "
+        "`architecture_commit` has FIVE required fields — `tuples_chain`, "
+        "`chosen_patterns`, `required_capabilities`, `architecture_hash`, "
+        "`committed_at` — all MUST be present when the object is emitted."
     )
 
 

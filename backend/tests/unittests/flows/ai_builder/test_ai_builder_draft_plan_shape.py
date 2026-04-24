@@ -148,6 +148,65 @@ class TestParserAcceptsCorrectlyPlacedPlanReference:
         ), "extra_forbidden guard on draft_plan must stay live"
 
 
+class TestKnowledgePackDeclaresCommitArchitectureShape:
+    """Second repeat of the same root-cause pattern: prompt describes
+    `architecture_commit` fields in prose but only shows `tuples_chain`
+    as a concrete JSON example. Production parse_failed
+    (failure_fingerprint `1f4868485395`) dropped `chosen_patterns`,
+    `committed_at`, and `architecture_hash`. The fix — same shape as
+    the `propose_plan` block — adds a complete `commit_architecture`
+    example so the LLM has the full JSON template, not a prose checklist.
+    """
+
+    def test_prompt_shows_commit_architecture_full_shape(self) -> None:
+        prompt = build_role_and_protocol(is_edit_mode=False)
+        assert "tuples_chain" in prompt
+        assert "chosen_patterns" in prompt
+        assert "required_capabilities" in prompt
+        assert "architecture_hash" in prompt
+        assert "committed_at" in prompt
+
+    def test_prompt_shows_commit_architecture_in_compositional_json_example(
+        self,
+    ) -> None:
+        """The prose listing was not enough — the LLM dropped required
+        fields. A single compositional JSON object showing all five
+        fields under `planning_state_delta.architecture_commit` must be
+        present so the model has the full template to fill, not a prose
+        checklist to reconstruct.
+        """
+        prompt = build_role_and_protocol(is_edit_mode=False)
+        # A JSON example block containing the architecture_commit key
+        # alongside all five required fields must exist as a single
+        # contiguous piece — the fields co-located within one example.
+        # Anchor on the opening brace of the architecture_commit
+        # object body (`"architecture_commit": {`) so we match the
+        # actual JSON example, not a prose mention earlier in the
+        # prompt.
+        start = prompt.find('"architecture_commit": {')
+        assert start != -1, (
+            "prompt must contain an architecture_commit JSON example "
+            '(literal `"architecture_commit": {` opening the object body)'
+        )
+        # Search within a bounded window after the object opens
+        window = prompt[start : start + 2000]
+        missing = [
+            field
+            for field in (
+                "tuples_chain",
+                "chosen_patterns",
+                "required_capabilities",
+                "architecture_hash",
+                "committed_at",
+            )
+            if field not in window
+        ]
+        assert not missing, (
+            "architecture_commit JSON example must contain all five "
+            f"declared fields co-located; missing in the example window: {missing}"
+        )
+
+
 class TestParseRepairPromptCarriesLayoutReminder:
     """Parse-repair is defense-in-depth; a short layout reminder rescues
     the retry when the system prompt fix hasn't taken effect yet (e.g. a
@@ -164,6 +223,30 @@ class TestParseRepairPromptCarriesLayoutReminder:
         assert "plan_reference" in message
         assert "planner_action.payload" in message
         assert "draft_plan" in message
+
+    def test_repair_user_message_mentions_architecture_commit_required_fields(
+        self,
+    ) -> None:
+        """Second confusion pattern (failure_fingerprint `1f4868485395`):
+        LLM emitted an `architecture_commit` dropping `chosen_patterns`,
+        `committed_at`, and `architecture_hash`. The retry reminder
+        enumerates the five required fields explicitly.
+        """
+        message = build_parse_repair_user_message(
+            parse_error_message="Field required",
+        )
+        assert "architecture_commit" in message
+        for field in (
+            "tuples_chain",
+            "chosen_patterns",
+            "required_capabilities",
+            "architecture_hash",
+            "committed_at",
+        ):
+            assert field in message, (
+                f"repair reminder must enumerate `{field}` so the retry "
+                "knows which fields are required"
+            )
 
     def test_repair_user_message_echoes_parse_error(self) -> None:
         message = build_parse_repair_user_message(

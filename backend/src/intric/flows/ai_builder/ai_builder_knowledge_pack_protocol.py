@@ -98,18 +98,37 @@ kodblock.
 är godkänd och systemet visar att `architecture_commit` saknas i planer\
 kontexten):
 1. Emittera FÖRST `commit_architecture` med komplett `architecture_commit`\
--kropp i `planning_state_delta.architecture_commit`. Fält och format:
-   - `tuples_chain`: lista av JSON-OBJEKT (INTE arrayer/tupler), ett per planerat steg i ordning. Varje objekt har EXAKT nycklarna `input_type`, `output_type`, `output_mode`. Exempel:
-     ```json
-     "tuples_chain": [
-       {{"input_type": "text", "output_type": "text", "output_mode": "pass_through"}}
-     ]
-     ```
-     Arrayer som `["text", "text", "pass_through"]` förkastas av parsern ("Input should be a valid dictionary or instance of StepTriple").
-   - `chosen_patterns`: lista av mönster-id från de tillgängliga positiva mönstren.
-   - `required_capabilities`: lista av FCM-kapabilitets-id som planen behöver.
-   - `architecture_hash`: EXAKT 64 tecken, små bokstäver, hex (`[0-9a-f]{{64}}`). Beräkna deterministiskt från `tuples_chain` + `chosen_patterns` + `required_capabilities` (t.ex. SHA-256 över en kanonisk JSON-serialisering) så att samma arkitektur alltid får samma hash.
-   - `committed_at`: ISO-8601-tidsstämpel (t.ex. `2026-04-24T18:35:00Z`).
+-kropp i `planning_state_delta.architecture_commit`. ALLA fem fält är \
+OBLIGATORISKA — utelämnade fält ger `extra_forbidden` eller `missing` i \
+parsern. Fullständig layout:
+
+```json
+{{
+  "planning_state_delta": {{
+    "base_planning_state_version": <kopiera aktuellt värde>,
+    "architecture_commit": {{
+      "tuples_chain": [
+        {{"input_type": "text", "output_type": "text", "output_mode": "pass_through"}}
+      ],
+      "chosen_patterns": ["<mönster-id från tillgängliga positiva mönster>"],
+      "required_capabilities": ["<FCM-kapabilitets-id>"],
+      "architecture_hash": "<64 tecken, små bokstäver, hex>",
+      "committed_at": "2026-04-24T18:35:00Z"
+    }}
+  }},
+  "planner_action": {{
+    "kind": "commit_architecture",
+    "payload": {{ "note": "" }}
+  }}
+}}
+```
+
+Fält-för-fält:
+   - `tuples_chain`: lista av JSON-OBJEKT (INTE arrayer/tupler), ett per planerat steg i ordning. Varje objekt har EXAKT nycklarna `input_type`, `output_type`, `output_mode`. Arrayer som `["text", "text", "pass_through"]` förkastas av parsern ("Input should be a valid dictionary or instance of StepTriple").
+   - `chosen_patterns`: lista av mönster-id från de tillgängliga positiva mönstren. OBLIGATORISK.
+   - `required_capabilities`: lista av FCM-kapabilitets-id som planen behöver. Valfri (tom lista OK).
+   - `architecture_hash`: EXAKT 64 tecken, små bokstäver, hex (`[0-9a-f]{{64}}`). Beräkna deterministiskt från `tuples_chain` + `chosen_patterns` + `required_capabilities` (t.ex. SHA-256 över en kanonisk JSON-serialisering) så att samma arkitektur alltid får samma hash. OBLIGATORISK.
+   - `committed_at`: ISO-8601-tidsstämpel (t.ex. `2026-04-24T18:35:00Z`). OBLIGATORISK.
 2. Emittera DÄREFTER `propose_plan` (vanligen i nästa tur) för att \
 leverera ändrings- eller nystaplingsplanen mot den nyss committade \
 arkitekturen. `propose_plan` utan tidigare commit förkastas av \
