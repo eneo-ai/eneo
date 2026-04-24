@@ -30,6 +30,7 @@ from intric.flows.ai_builder.deterministic_signals_extractor import (
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _PDF_MIME = "application/pdf"
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_CSV_MIME = "text/csv"
 
 
 def _bytes(text: str) -> bytes:
@@ -563,3 +564,104 @@ class TestXlsxExtractor:
         assert signals.spreadsheet_headers is None
         assert signals.spreadsheet_column_types is None
         assert signals.row_count is None
+
+
+class TestCsvExtractor:
+    """CSV attachments surface the same structural signals as XLSX — the
+    planner can't tell from file contents alone whether the user
+    exported a spreadsheet or a database query result. Column types
+    are inferred heuristically because every CSV value arrives as a
+    string; the extractor tries numeric / boolean / date parsing
+    before falling back to `"text"`.
+    """
+
+    def test_headers_from_first_line(self) -> None:
+        raw = b"name,age,active\nAlice,30,true\nBob,25,false\n"
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_CSV_MIME,
+            filename="users.csv",
+        )
+
+        assert signals.spreadsheet_headers == ["name", "age", "active"]
+
+    def test_row_count_excludes_header(self) -> None:
+        raw = b"col\na\nb\nc\n"
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_CSV_MIME,
+            filename="three-rows.csv",
+        )
+
+        assert signals.row_count == 3
+
+    def test_column_types_inferred_heuristically(self) -> None:
+        raw = b"name,age,active,signup\nAlice,30,true,2024-01-01\nBob,25,false,2024-02-15\n"
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_CSV_MIME,
+            filename="typed.csv",
+        )
+
+        assert signals.spreadsheet_column_types == [
+            "text",
+            "numeric",
+            "boolean",
+            "date",
+        ]
+
+    def test_mixed_numeric_and_text_reports_mixed(self) -> None:
+        raw = b"value\n42\nhello world\n"
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_CSV_MIME,
+            filename="mixed.csv",
+        )
+
+        assert signals.spreadsheet_column_types == ["mixed"]
+
+    def test_empty_column_reports_empty_type(self) -> None:
+        raw = b"only_header\n"
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_CSV_MIME,
+            filename="header-only.csv",
+        )
+
+        assert signals.spreadsheet_headers == ["only_header"]
+        assert signals.row_count == 0
+        assert signals.spreadsheet_column_types == ["empty"]
+
+    def test_application_csv_mime_handled_same_as_text_csv(self) -> None:
+        """Browsers send either `text/csv` or `application/csv` for the
+        same file; both must reach the CSV extractor branch so the
+        pipeline signal set is stable across browser quirks.
+        """
+        raw = b"x,y\n1,2\n"
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime="application/csv",
+            filename="nums.csv",
+        )
+
+        assert signals.spreadsheet_headers == ["x", "y"]
+        assert signals.spreadsheet_column_types == ["numeric", "numeric"]
+
+    def test_malformed_csv_bytes_do_not_crash(self) -> None:
+        """CSV is permissive — stray quotes / unterminated fields pass
+        through the stdlib parser as best-effort lines. The extractor
+        should not crash on invalid UTF-8 either; `errors='replace'`
+        produces best-effort cells rather than losing the file.
+        """
+        raw = b"col\n\xff\xfe garbled"
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_CSV_MIME,
+            filename="garbled.csv",
+        )
+
+        assert signals.mime_type == _CSV_MIME
+        assert signals.extension == "csv"
+        # Header round-trips as-is; garbled data row still counted
+        assert signals.spreadsheet_headers == ["col"]
+        assert signals.row_count == 1

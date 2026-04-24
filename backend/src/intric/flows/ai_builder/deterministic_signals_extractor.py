@@ -4,8 +4,8 @@ The observation pipeline asks this module, before any LLM call, what
 the raw bytes alone can tell us: the canonical MIME, a filename
 extension, the size in bytes, and — for text-like payloads — a
 bullet-line density that hints at whether the content is dense prose
-or a list. Per-mime extractors for CSV / media plug into the dispatcher
-below; text, markdown, DOCX, PDF, and XLSX are handled here.
+or a list. Per-mime extractors for media plug into the dispatcher
+below; text, markdown, DOCX, PDF, XLSX, and CSV are handled here.
 
 Unsupported or legacy MIMEs still produce a ``DeterministicSignals``
 with the file-level fields populated and per-mime fields at their
@@ -18,7 +18,9 @@ that reaches the pipeline.
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
+import io
 import re
 import zipfile
 from io import BytesIO
@@ -42,6 +44,9 @@ _DOCX_MIME: str = (
 )
 _PDF_MIME: str = "application/pdf"
 _XLSX_MIME: str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_CSV_MIMES: frozenset[str] = frozenset({"text/csv", "application/csv"})
+_BOOLEAN_LITERALS: frozenset[str] = frozenset({"true", "false", "yes", "no"})
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$")
 _BULLET_LINE = re.compile(r"^\s*[-*+•·]\s+\S")
 # Jinja-style `{{ var }}` placeholder tokens. The surrounding pattern
 # is deliberately permissive (identifier + optional whitespace) so the
@@ -86,6 +91,14 @@ def extract_deterministic_signals(
 
     if canonical_mime == _XLSX_MIME:
         return _xlsx_signals(
+            raw_bytes=raw_bytes,
+            canonical_mime=canonical_mime,
+            extension=extension,
+            size_bytes=size_bytes,
+        )
+
+    if canonical_mime in _CSV_MIMES:
+        return _csv_signals(
             raw_bytes=raw_bytes,
             canonical_mime=canonical_mime,
             extension=extension,
@@ -277,6 +290,98 @@ def _xlsx_signals(
         )
     finally:
         workbook.close()
+
+
+def _csv_signals(
+    *,
+    raw_bytes: bytes,
+    canonical_mime: str,
+    extension: str,
+    size_bytes: int,
+) -> DeterministicSignals:
+    """Extract CSV headers, per-column types, and row count.
+
+    Every CSV value arrives as a string, so column typing is a
+    heuristic try-cast ladder: int → numeric, float → numeric,
+    boolean literal → boolean, ISO date → date, otherwise text. The
+    "mixed" label follows the same rule as XLSX — divergent cell
+    classifications collapse to `"mixed"` because a JSON-schema
+    extraction flow can't safely claim a single type for the column.
+
+    Invalid UTF-8 bytes decode with `errors="replace"` so a
+    partially-corrupt CSV still produces a best-effort header +
+    row count rather than losing the file entirely.
+    """
+    text = raw_bytes.decode("utf-8", errors="replace")
+    reader = csv.reader(io.StringIO(text))
+    try:
+        header_row = next(reader)
+    except StopIteration:
+        return DeterministicSignals(
+            mime_type=canonical_mime,
+            extension=extension,
+            size_bytes=size_bytes,
+        )
+
+    headers = [cell for cell in header_row]
+    column_values: list[list[str]] = [[] for _ in headers]
+    row_count = 0
+    for data_row in reader:
+        row_count += 1
+        for index, value in enumerate(data_row):
+            if index < len(column_values):
+                column_values[index].append(value)
+
+    column_types = [_infer_csv_column_type(values) for values in column_values]
+
+    return DeterministicSignals(
+        mime_type=canonical_mime,
+        extension=extension,
+        size_bytes=size_bytes,
+        spreadsheet_headers=headers,
+        spreadsheet_column_types=column_types,
+        row_count=row_count,
+    )
+
+
+def _infer_csv_column_type(values: list[str]) -> str:
+    """Classify a CSV column by try-casting each non-empty string cell.
+
+    Ladder: int → numeric, float → numeric, `true/false/yes/no` →
+    boolean, ISO date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM[:SS]`) →
+    date, otherwise → text. Divergent classifications across the
+    column collapse to `"mixed"`.
+    """
+    seen: set[str] = set()
+    for raw_value in values:
+        value = raw_value.strip()
+        if value == "":
+            continue
+        seen.add(_classify_csv_cell(value))
+    if not seen:
+        return "empty"
+    if len(seen) == 1:
+        return next(iter(seen))
+    return "mixed"
+
+
+def _classify_csv_cell(value: str) -> str:
+    lowered = value.lower()
+    if lowered in _BOOLEAN_LITERALS:
+        return "boolean"
+    try:
+        int(value)
+        return "numeric"
+    except ValueError:
+        pass
+    try:
+        float(value)
+        return "numeric"
+    except ValueError:
+        pass
+    if _ISO_DATE.match(value):
+        return "date"
+    return "text"
 
 
 def _infer_column_type(values: list[object]) -> str:
