@@ -352,6 +352,46 @@ class TestDispatchedHappyPaths:
         assert len(commit_kwargs["new_messages"]) == 2
         assert commit_kwargs["new_messages"][1].content == "note=''"
 
+    async def test_threads_orchestration_context_version_as_commit_turn_base_version(
+        self,
+    ) -> None:
+        """`OrchestrationContext.current_version` must thread through to
+        `commit_turn(base_version=...)` so the repo's CAS closes the
+        read-modify-write window between pipeline validation and the
+        atomic dispatch write. Dropping it leaves last-writer-wins at
+        the DB layer, defeating the purpose of the monotonicity guard."""
+        repo = _autospec_repo()
+        repo.commit_turn.return_value = 5
+        commit = _make_commit()
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            _planner_output_json(
+                kind="commit_architecture",
+                architecture_commit=commit,
+                base_version=4,
+            )
+        )
+
+        result = await run_planner_turn(
+            repo=repo,
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            flow=None,
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=_ctx(current_version=4),
+            build_new_messages=lambda _a, _t: [
+                ConversationMessage(role="user", content="trigger"),
+                ConversationMessage(role="assistant", content="ack"),
+            ],
+        )
+
+        assert result.kind == "dispatched"
+        commit_kwargs = repo.commit_turn.await_args.kwargs
+        assert commit_kwargs["base_version"] == 4
+
 
 @pytest.mark.asyncio
 class TestProposePlanPendingAdapter:

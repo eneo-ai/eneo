@@ -699,3 +699,178 @@ async def test_send_message_orchestration_context_blocks_commit_until_core_slots
     assert ctx.unresolved_architectural_choices == frozenset({"terminal_output"})
     assert "terminal_output" in ctx.required_slot_names
     assert "primary_runtime_input" not in ctx.required_slot_names
+
+
+@pytest.mark.asyncio
+async def test_send_message_derives_asked_question_ids_and_new_evidence() -> None:
+    """Duplicate-question guard must be live in production.
+
+    `OrchestrationContext.asked_question_ids` and `has_new_evidence`
+    drive the orchestrator's `duplicate_question` rejection — without
+    them the guard is dead code and the LLM can infinite-loop the same
+    question. `send_message` must derive both inputs from the
+    persisted conversation before instantiating the context:
+
+    - `asked_question_ids` = union of `question_id` metadata on prior
+      assistant messages (persisted by `_build_new_messages` whenever
+      an `ask_question` action lands).
+    - `has_new_evidence` = True if the latest user message (the one
+      being processed this turn) carries `question_answer` metadata.
+    """
+    from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+
+    planner = _make_planner()
+    session_id = uuid4()
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Build a summarizer",
+            metadata=None,
+        ),
+        ConversationMessage(
+            role="assistant",
+            content="Vad ska flödet ta emot?",
+            metadata={"question_id": "primary_runtime_input"},
+        ),
+    ]
+    planner.repo.get_session.return_value = BuilderSession(
+        id=session_id,
+        tenant_id=planner.user.tenant_id,
+        space_id=uuid4(),
+        actor_user_id=uuid4(),
+        target_kind=TargetKind.CREATE,
+        status=SessionStatus.CHATTING,
+        conversation=conversation,
+        planning_state_version=0,
+    )
+    prepared = _make_prepared_request()
+    action = AskQuestionAction(
+        kind="ask_question",
+        payload=AskQuestionPayload(
+            question_id="terminal_output",
+            slot_name="terminal_output",
+            prompt="Vad ska flödet leverera?",
+        ),
+    )
+    turn_result = _dispatched_result(
+        action_kind="ask_question",
+        planner_output=_planner_output(action),
+    )
+
+    captured: dict[str, Any] = {}
+
+    async def _capture_turn(**kwargs: Any) -> PlannerTurnResult:
+        captured["orchestration_context"] = kwargs["orchestration_context"]
+        return turn_result
+
+    with (
+        patch.object(
+            planner,
+            "_resolve_message_metadata",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    metadata={
+                        "question_answer": {"question_id": "primary_runtime_input"}
+                    },
+                    is_requirements_confirmation=False,
+                    used_auxiliary_llm=False,
+                )
+            ),
+        ),
+        patch.object(
+            planner,
+            "_prepare_planner_request",
+            new=AsyncMock(return_value=prepared),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
+            new=AsyncMock(side_effect=_capture_turn),
+        ),
+    ):
+        await _collect_events(planner, **_send_kwargs())
+
+    ctx = captured["orchestration_context"]
+    assert ctx.asked_question_ids == frozenset({"primary_runtime_input"})
+    assert ctx.has_new_evidence is True
+
+
+@pytest.mark.asyncio
+async def test_send_message_has_new_evidence_false_when_last_user_message_plain() -> (
+    None
+):
+    """Free-form user chat does not count as new evidence.
+
+    Only a structured `question_answer` payload proves a slot moved.
+    A plain chat message since the last ask leaves the guard blocking
+    a repeat — the LLM must surface new signal before asking again.
+    """
+    from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+
+    planner = _make_planner()
+    conversation = [
+        ConversationMessage(role="user", content="Build it", metadata=None),
+        ConversationMessage(
+            role="assistant",
+            content="Vad ska flödet ta emot?",
+            metadata={"question_id": "primary_runtime_input"},
+        ),
+        ConversationMessage(role="user", content="kanske text", metadata=None),
+    ]
+    planner.repo.get_session.return_value = BuilderSession(
+        id=uuid4(),
+        tenant_id=planner.user.tenant_id,
+        space_id=uuid4(),
+        actor_user_id=uuid4(),
+        target_kind=TargetKind.CREATE,
+        status=SessionStatus.CHATTING,
+        conversation=conversation,
+        planning_state_version=0,
+    )
+    prepared = _make_prepared_request()
+    turn_result = _dispatched_result(
+        action_kind="ask_question",
+        planner_output=_planner_output(
+            AskQuestionAction(
+                kind="ask_question",
+                payload=AskQuestionPayload(
+                    question_id="terminal_output",
+                    slot_name="terminal_output",
+                    prompt="Vad ska flödet leverera?",
+                ),
+            )
+        ),
+    )
+
+    captured: dict[str, Any] = {}
+
+    async def _capture_turn(**kwargs: Any) -> PlannerTurnResult:
+        captured["orchestration_context"] = kwargs["orchestration_context"]
+        return turn_result
+
+    with (
+        patch.object(
+            planner,
+            "_resolve_message_metadata",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    metadata=None,
+                    is_requirements_confirmation=False,
+                    used_auxiliary_llm=False,
+                )
+            ),
+        ),
+        patch.object(
+            planner,
+            "_prepare_planner_request",
+            new=AsyncMock(return_value=prepared),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
+            new=AsyncMock(side_effect=_capture_turn),
+        ),
+    ):
+        await _collect_events(planner, **_send_kwargs())
+
+    ctx = captured["orchestration_context"]
+    assert ctx.asked_question_ids == frozenset({"primary_runtime_input"})
+    assert ctx.has_new_evidence is False

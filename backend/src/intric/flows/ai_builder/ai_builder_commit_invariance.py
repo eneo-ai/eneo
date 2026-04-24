@@ -37,7 +37,7 @@ def assert_architecture_commit_unchanged(
 ) -> None:
     """Raise `CommitDriftError` if `after` does not preserve `before`.
 
-    Transition matrix:
+    Transition matrix (atomic — callers compose policy on top):
       - `before=None, after=any`: no raise (initial-commit path).
       - `before=set, after=None`: raise (commit silently dropped).
       - `before=set, after` with different `architecture_hash`: raise.
@@ -47,6 +47,17 @@ def assert_architecture_commit_unchanged(
         planner-supplied hash to the body, so a matching hash on a
         different body is forgery, not preservation.
       - `before=set, after` byte-identical: no raise.
+
+    Caller composition: the evaluator's `_check_commit_preservation`
+    and the repair helper's `_detect_commit_drift` implement
+    preservation-by-absence on top of this strict contract — they
+    short-circuit on `after is None` before invoking this helper
+    because the planner-protocol teaches the model to populate
+    `planning_state_delta.architecture_commit` only on
+    `commit_architecture` turns. The `after=None` raise path stays
+    in the helper as a defensive default for any future caller that
+    needs strict preservation (so forgetting to short-circuit fails
+    loud rather than silently accepting a dropped commit).
     """
     if before is None:
         return

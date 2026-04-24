@@ -134,6 +134,7 @@ _ALLOWED_COMMIT_TURN_KWARGS: frozenset[str] = frozenset(
         "request_id",
         "lock_token",
         "architecture_commit",
+        "base_version",
     }
 )
 
@@ -244,6 +245,37 @@ class TestCommitArchitectureDispatch:
         assert kwargs["flow"] is flow_stub
         assert kwargs["request_id"] == request_id
         assert kwargs["lock_token"] == lock_token
+
+    @pytest.mark.asyncio
+    async def test_forwards_base_version_to_commit_turn(self) -> None:
+        """`base_version` must thread through to `commit_turn` so the repo
+        enforces optimistic concurrency at the DB layer.
+
+        The Python-side `_check_version` rejects a stale `PlannerOutput`
+        whose `planning_state_delta.base_planning_state_version` does not
+        match `OrchestrationContext.current_version`. That guard catches
+        the LLM reading stale state. It does NOT catch another process
+        (admin write, concurrent session) mutating `PlanningState`
+        between the pipeline's read and the dispatcher's write. The
+        `base_version` CAS on `save_planning_state` closes that window;
+        dropping it on the dispatch path leaves the Python guard as the
+        only defence against lost writes.
+        """
+        repo = _mock_repo()
+        output = parse_planner_output(_commit_architecture_output_dict())
+
+        await dispatch_planner_action(
+            repo=repo,
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            output=output,
+            new_messages=[_assistant_msg()],
+            base_version=7,
+        )
+
+        kwargs = repo.commit_turn.call_args.kwargs
+        assert kwargs["base_version"] == 7
+        _assert_commit_turn_kwargs_bounded(repo.commit_turn)
 
     @pytest.mark.asyncio
     async def test_raises_when_commit_architecture_action_has_no_commit(

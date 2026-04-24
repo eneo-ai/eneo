@@ -980,6 +980,7 @@ class AIBuilderRepository:
         request_id: UUID | None = None,
         lock_token: UUID | None = None,
         architecture_commit: ArchitectureCommit | None = None,
+        base_version: int | None = None,
     ) -> int:
         """Append new conversation messages and save `PlanningState` atomically.
 
@@ -995,6 +996,16 @@ class AIBuilderRepository:
         unit with the conversation append. This is the only path through
         which the planner's `commit_architecture` action persists to
         `PlanningState.architecture_commit`.
+
+        When `base_version` is provided, it is forwarded to
+        `save_planning_state` so the UPDATE applies a CAS filter on
+        `planning_state_version == base_version`. The dispatcher passes
+        the `OrchestrationContext.current_version` the orchestrator
+        validated against, closing the read-modify-write window between
+        pipeline validation and the atomic write. A concurrent writer
+        that moved the row between the guardrail's Python-side check
+        and this UPDATE raises `planning_state_version_mismatch`
+        instead of silently overwriting committed state.
 
         Returns the new `planning_state_version` (monotonically bumped
         by `save_planning_state`). Callers who don't need it can ignore
@@ -1025,6 +1036,7 @@ class AIBuilderRepository:
                 session_id=session_id,
                 tenant_id=tenant_id,
                 state=state,
+                base_version=base_version,
             )
 
 

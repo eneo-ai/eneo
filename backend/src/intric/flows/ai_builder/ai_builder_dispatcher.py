@@ -83,6 +83,7 @@ async def dispatch_planner_action(
     flow: "Flow | None" = None,
     request_id: UUID | None = None,
     lock_token: UUID | None = None,
+    base_version: int | None = None,
 ) -> PlannerDispatchResult:
     """Atomically persist the planner's turn.
 
@@ -132,6 +133,7 @@ async def dispatch_planner_action(
         request_id=request_id,
         lock_token=lock_token,
         architecture_commit=architecture_commit,
+        base_version=base_version,
     )
 
     return PlannerDispatchResult(

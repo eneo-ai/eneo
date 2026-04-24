@@ -755,11 +755,16 @@ class AIBuilderPlanner:
             # planner has declared which patterns it's committing to.
             core_slots = frozenset({"primary_runtime_input", "terminal_output"})
             unresolved_core_slots = core_slots - resolved_slot_names
+            asked_question_ids, has_new_evidence = _derive_asked_question_state(
+                conversation
+            )
             orchestration_context = OrchestrationContext(
                 current_version=session.planning_state_version,
                 session_state=session_state,
                 unresolved_architectural_choices=unresolved_core_slots,
                 required_slot_names=required_slot_names,
+                asked_question_ids=asked_question_ids,
+                has_new_evidence=has_new_evidence,
             )
 
             def _build_new_messages(
@@ -767,9 +772,14 @@ class AIBuilderPlanner:
                 telemetry: TurnTelemetry,
             ) -> list[ConversationMessage]:
                 action = accepted.planner_action
-                requirements_metadata: dict[str, Any] | None = None
+                base_metadata: dict[str, Any] | None = None
                 if isinstance(action, AskQuestionAction):
                     assistant_content = action.payload.prompt
+                    # Persist the question_id so a future turn's
+                    # OrchestrationContext can derive asked_question_ids
+                    # and block the LLM from repeating the same question
+                    # without new evidence.
+                    base_metadata = {"question_id": action.payload.question_id}
                 elif isinstance(action, CommitArchitectureAction):
                     assistant_content = action.payload.note or "Architecture committed."
                 elif isinstance(action, ConfirmRequirementsAction):
@@ -777,7 +787,7 @@ class AIBuilderPlanner:
                     requirements_payload = RequirementsSummaryPayload.model_validate(
                         action.payload.model_dump()
                     )
-                    requirements_metadata = {
+                    base_metadata = {
                         "requirements_summary": requirements_payload.model_dump(
                             mode="json"
                         ),
@@ -805,7 +815,7 @@ class AIBuilderPlanner:
                         metadata=build_assistant_message_metadata(
                             conversation,
                             planner_telemetry=planner_telemetry,
-                            base_metadata=requirements_metadata,
+                            base_metadata=base_metadata,
                         ),
                     ),
                 ]
@@ -995,6 +1005,51 @@ def _resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:
         if ui_language in {"sv", "en"}:
             return ui_language
     return None
+
+
+def _derive_asked_question_state(
+    conversation: list[ConversationMessage],
+) -> tuple[frozenset[str], bool]:
+    """Derive the `asked_question_ids` + `has_new_evidence` guardrail inputs.
+
+    The orchestrator's `duplicate_question` guard rejects a repeated
+    `ask_question` for a previously asked `question_id` unless new
+    evidence arrived since. In production, these fields are sourced
+    from the conversation:
+
+    - `asked_question_ids`: the union of `question_id` values on prior
+      assistant messages whose metadata carries the key. The planner
+      persists the question_id on every `ask_question` turn through
+      `_build_new_messages`, so a pre-migration conversation (no
+      question_id metadata) contributes nothing — it fails open rather
+      than blocking the LLM from asking.
+    - `has_new_evidence`: `True` if the latest user message carries a
+      `question_answer` metadata payload. A structured answer is
+      concrete new signal; a plain user message (free-form chat) is
+      not. This matches how the downstream planning-state deriver
+      treats structured answers.
+    """
+    asked: set[str] = set()
+    for message in conversation:
+        if message.role != "assistant":
+            continue
+        metadata = message.metadata if isinstance(message.metadata, dict) else None
+        if metadata is None:
+            continue
+        question_id = metadata.get("question_id")
+        if isinstance(question_id, str) and question_id:
+            asked.add(question_id)
+
+    has_new_evidence = False
+    for message in reversed(conversation):
+        if message.role != "user":
+            continue
+        metadata = message.metadata if isinstance(message.metadata, dict) else None
+        if metadata and metadata.get("question_answer"):
+            has_new_evidence = True
+        break
+
+    return frozenset(asked), has_new_evidence
 
 
 def _count_free_discovery_turns(conversation: list[ConversationMessage]) -> int:

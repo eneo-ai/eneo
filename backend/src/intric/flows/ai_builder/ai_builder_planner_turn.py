@@ -266,6 +266,7 @@ async def run_planner_turn(
         flow=flow,
         request_id=request_id,
         lock_token=lock_token,
+        base_version=orchestration_context.current_version,
     )
 
     return PlannerTurnResult(
