@@ -12,15 +12,17 @@ from intric.apps.apps.api.app_models import (
 )
 from intric.apps.apps.app import App
 from intric.completion_models.presentation import CompletionModelAssembler
-from intric.files.audio import AudioMimeTypes
 from intric.files.file_models import (
     AcceptedFileType,
     FilePublic,
     FileRestrictions,
     Limit,
 )
-from intric.files.image import ImageMimeTypes
-from intric.files.text import TextMimeTypes
+from intric.files.mime_support import (
+    supported_audio_mimes,
+    supported_image_mimes,
+    supported_text_mimes,
+)
 from intric.main.config import get_settings
 from intric.prompts.api.prompt_assembler import PromptAssembler
 from intric.transcription_models.presentation import TranscriptionModelPublic
@@ -55,7 +57,7 @@ class AppAssembler:
                         mimetype=mimetype,
                         size_limit=settings.upload_file_to_session_max_size,
                     )
-                    for mimetype in TextMimeTypes.values()
+                    for mimetype in supported_text_mimes()
                 ]
             case InputFieldType.AUDIO_UPLOAD:
                 return [
@@ -63,7 +65,7 @@ class AppAssembler:
                         mimetype=mimetype,
                         size_limit=settings.transcription_max_file_size,
                     )
-                    for mimetype in AudioMimeTypes.values()
+                    for mimetype in supported_audio_mimes()
                 ]
             case InputFieldType.AUDIO_RECORDER:
                 return [
@@ -71,7 +73,7 @@ class AppAssembler:
                         mimetype=mimetype,
                         size_limit=settings.transcription_max_file_size,
                     )
-                    for mimetype in AudioMimeTypes.values()
+                    for mimetype in supported_audio_mimes()
                 ]
             case InputFieldType.IMAGE_UPLOAD:
                 return [
@@ -79,7 +81,7 @@ class AppAssembler:
                         mimetype=mimetype,
                         size_limit=settings.upload_image_to_session_max_size,
                     )
-                    for mimetype in ImageMimeTypes.values()
+                    for mimetype in supported_image_mimes()
                 ]
 
     def _get_limit(self, input_type: InputFieldType) -> Limit:
@@ -159,7 +161,7 @@ class AppAssembler:
                     mimetype=mimetype,
                     size_limit=settings.upload_file_to_session_max_size,
                 )
-                for mimetype in TextMimeTypes.values()
+                for mimetype in supported_text_mimes()
             ],
             limit=Limit(
                 max_files=_TEXT_MAX_FILES,

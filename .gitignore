@@ -83,3 +83,7 @@ tmp/
 
 # Local gate-work helpers (AI Builder hardening toil reduction — never committed)
 scripts/gate-local/
+
+# Internal scratch directory — working documents and review artifacts
+# kept in-repo for stability across /tmp wipes but never committed.
+plan/

@@ -10,7 +10,12 @@ from intric.base.base_entity import Entity
 from intric.completion_models.domain.completion_model import CompletionModel
 from intric.completion_models.infrastructure.completion_service import CompletionService
 from intric.files.file_models import File, FileType
-from intric.files.text import TextMimeTypes
+from intric.files.mime_support import (
+    MimeSupport,
+    canonicalize_mime,
+    classify_mime,
+    supported_text_mimes,
+)
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.exceptions import (
     BadRequestException,
@@ -177,9 +182,14 @@ class Assistant(Entity):
 
     @attachments.setter
     def attachments(self, attachments: list[File]):
+        supported_text = frozenset(supported_text_mimes())
         for attachment in attachments:
-            mimetype = attachment.mimetype or ""
-            if mimetype.split(";")[0].strip() not in TextMimeTypes.values():
+            state, reason = classify_mime(attachment.mimetype)
+            if state is MimeSupport.LEGACY_REJECTED:
+                raise BadRequestException(
+                    reason or "Attachments can only be text files"
+                )
+            if canonicalize_mime(attachment.mimetype) not in supported_text:
                 raise BadRequestException("Attachements can only be text files")
 
         if sum(attachment.size for attachment in attachments) > 26214400:

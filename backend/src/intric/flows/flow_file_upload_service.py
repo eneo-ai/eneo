@@ -10,11 +10,14 @@ from uuid import UUID
 import magic
 from fastapi import UploadFile
 
-from intric.files.audio import AudioMimeTypes
 from intric.files.file_models import File
 from intric.files.file_service import FileService
-from intric.files.image import ImageMimeTypes
-from intric.files.text import TextMimeTypes
+from intric.files.mime_support import (
+    canonicalize_mime,
+    supported_audio_mimes,
+    supported_image_mimes,
+    supported_text_mimes,
+)
 from intric.flows.domain.flow import Flow, FlowStep, FlowTemplateAsset, FlowVersion
 from intric.flows.flow_input_limits import (
     FlowInputLimits,
@@ -37,25 +40,6 @@ logger = logging.getLogger(__name__)
 _FILE_UPLOAD_INPUT_TYPES = {"audio", "document", "image", "file"}
 _SNIFF_BYTES = 8192
 _UNKNOWN_SNIFFED_TYPES = {"application/octet-stream"}
-_MIMETYPE_CANONICAL_ALIASES = {
-    "audio/mp3": "audio/mpeg",
-    "audio/x-m4a": "audio/mp4",
-    "video/mp4": "audio/mp4",
-    "video/webm": "audio/webm",
-}
-
-
-def _normalize_mimetype(value: str | None) -> str:
-    if not value:
-        return ""
-    return value.split(";", 1)[0].strip().lower()
-
-
-def _canonicalize_mimetype(value: str | None) -> str:
-    normalized = _normalize_mimetype(value)
-    if not normalized:
-        return ""
-    return _MIMETYPE_CANONICAL_ALIASES.get(normalized, normalized)
 
 
 def _sniff_mimetype(upload_file: UploadFile) -> str | None:
@@ -89,7 +73,7 @@ def _sniff_mimetype(upload_file: UploadFile) -> str | None:
         chunk = chunk.encode("utf-8", errors="ignore")
 
     try:
-        return _normalize_mimetype(magic.from_buffer(chunk, mime=True))
+        return canonicalize_mime(magic.from_buffer(chunk, mime=True))
     except Exception:
         logger.debug("Failed to sniff file MIME type from content.", exc_info=True)
         return None
@@ -185,11 +169,11 @@ def _first_flow_input_step(flow: Flow) -> FlowStep | None:
 
 def _accepted_mimetypes_for_input_type(input_type: str) -> list[str]:
     if input_type == "audio":
-        return AudioMimeTypes.values()
+        return supported_audio_mimes()
     if input_type == "image":
-        return ImageMimeTypes.values()
+        return supported_image_mimes()
     if input_type in {"document", "file"}:
-        return TextMimeTypes.values()
+        return supported_text_mimes()
     return []
 
 
@@ -568,13 +552,13 @@ class FlowFileUploadService:
                 context={"flow_id": str(flow_id)},
             )
 
-        declared_type = _normalize_mimetype(upload_file.content_type)
-        declared_canonical = _canonicalize_mimetype(declared_type)
+        declared_type = canonicalize_mime(upload_file.content_type)
+        declared_canonical = declared_type
         allowed_canonical_types = {
-            _canonicalize_mimetype(mimetype) for mimetype in policy.accepted_mimetypes
+            canonicalize_mime(mimetype) for mimetype in policy.accepted_mimetypes
         }
         sniffed_type = await _sniff_mimetype_async(upload_file)
-        sniffed_canonical = _canonicalize_mimetype(sniffed_type) if sniffed_type else ""
+        sniffed_canonical = canonicalize_mime(sniffed_type) if sniffed_type else ""
 
         if sniffed_type in _UNKNOWN_SNIFFED_TYPES:
             sniffed_type = None

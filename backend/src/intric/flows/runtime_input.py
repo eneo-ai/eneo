@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from intric.files.audio import AudioMimeTypes
-from intric.files.text import TextMimeTypes
+from intric.files.mime_support import supported_audio_mimes, supported_text_mimes
 from intric.flows.domain.flow import FlowRuntimeInputConfig
 from intric.main.exceptions import BadRequestException
 
 _DEFAULT_RUNTIME_LABEL = "Indata"
 
 
-def parse_runtime_input_config(input_config: dict[str, Any] | None) -> FlowRuntimeInputConfig:
+def parse_runtime_input_config(
+    input_config: dict[str, Any] | None,
+) -> FlowRuntimeInputConfig:
     if not isinstance(input_config, dict):
         return FlowRuntimeInputConfig()
 
@@ -25,10 +26,14 @@ def parse_runtime_input_config(input_config: dict[str, Any] | None) -> FlowRunti
     try:
         parsed = FlowRuntimeInputConfig.model_validate(raw_runtime_input)
     except Exception as exc:
-        raise BadRequestException("Step input_config.runtime_input is invalid.") from exc
+        raise BadRequestException(
+            "Step input_config.runtime_input is invalid."
+        ) from exc
 
     if parsed.max_files is not None and parsed.max_files <= 0:
-        raise BadRequestException("Step input_config.runtime_input.max_files must be greater than zero.")
+        raise BadRequestException(
+            "Step input_config.runtime_input.max_files must be greater than zero."
+        )
 
     return parsed
 
@@ -52,5 +57,5 @@ def runtime_input_accept_mimetypes(config: FlowRuntimeInputConfig) -> list[str]:
     if config.accepted_mimetypes_override:
         return list(config.accepted_mimetypes_override)
     if config.input_format == "audio":
-        return AudioMimeTypes.values()
-    return TextMimeTypes.values()
+        return supported_audio_mimes()
+    return supported_text_mimes()

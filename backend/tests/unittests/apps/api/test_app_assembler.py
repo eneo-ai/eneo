@@ -8,10 +8,10 @@ from intric.ai_models.completion_models.completion_model import (
 )
 from intric.apps.apps.api import app_assembler as app_assembler_module
 from intric.apps.apps.api.app_assembler import (
-    AppAssembler,
     _AUDIO_MAX_FILES,
     _IMAGE_MAX_FILES,
     _TEXT_MAX_FILES,
+    AppAssembler,
 )
 from intric.apps.apps.api.app_models import InputField, InputFieldType
 from intric.apps.apps.app import App
@@ -19,7 +19,7 @@ from intric.completion_models.domain import CompletionModel
 from intric.files.audio import AudioMimeTypes
 from intric.files.file_models import AcceptedFileType, Limit
 from intric.files.image import ImageMimeTypes
-from intric.files.text import TextMimeTypes
+from intric.files.mime_support import supported_text_mimes
 from intric.transcription_models.domain import TranscriptionModel
 from tests.fixtures import TEST_USER, TEST_UUID
 
@@ -41,7 +41,7 @@ _FAKE_SETTINGS = SimpleNamespace(
 
 def _text_uploads(limit: int = CUSTOM_TEXT_LIMIT):
     return [
-        AcceptedFileType(mimetype=m, size_limit=limit) for m in TextMimeTypes.values()
+        AcceptedFileType(mimetype=m, size_limit=limit) for m in supported_text_mimes()
     ]
 
 

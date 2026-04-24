@@ -7,6 +7,7 @@ from uuid import UUID
 from intric.admin.quota_service import QuotaService
 from intric.files.audio import AudioMimeTypes
 from intric.files.file_size_service import FileSizeService
+from intric.files.mime_support import MimeSupport, classify_mime
 from intric.files.text import TextMimeTypes
 from intric.jobs.job_models import JobInDb, Task
 from intric.jobs.job_service import JobService
@@ -34,12 +35,16 @@ class TaskService:
 
     @staticmethod
     def get_task_type(mimetype: str):
+        state, reason = classify_mime(mimetype)
+        if state is MimeSupport.LEGACY_REJECTED:
+            raise FileNotSupportedException(reason or f"{mimetype} not supported.")
+        if state is MimeSupport.UNKNOWN:
+            raise FileNotSupportedException(f"{mimetype} not supported.")
         if TextMimeTypes.has_value(mimetype):
             return Task.UPLOAD_FILE
-        elif AudioMimeTypes.has_value(mimetype):
+        if AudioMimeTypes.has_value(mimetype):
             return Task.TRANSCRIPTION
-        else:
-            raise FileNotSupportedException(f"{mimetype} not supported.")
+        raise FileNotSupportedException(f"{mimetype} not supported.")
 
     @staticmethod
     def get_max_size(task: Task):

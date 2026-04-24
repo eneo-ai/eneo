@@ -1,7 +1,9 @@
-from intric.files.audio import AudioMimeTypes
 from intric.files.extensions import MIMETYPE_EXTENSIONS_MAPPER
-from intric.files.image import ImageMimeTypes
-from intric.files.text import TextMimeTypes
+from intric.files.mime_support import (
+    supported_audio_mimes,
+    supported_image_mimes,
+    supported_text_mimes,
+)
 from intric.limits.limit import AttachmentLimits, FormatLimit, InfoBlobLimits, Limits
 from intric.main.config import get_settings
 
@@ -10,7 +12,7 @@ class LimitService:
     def _get_info_blob_limits(self) -> InfoBlobLimits:
         formats: list[FormatLimit] = []
 
-        for item in TextMimeTypes.values():
+        for item in supported_text_mimes():
             formats.append(
                 FormatLimit(
                     mimetype=item,
@@ -20,7 +22,7 @@ class LimitService:
                 )
             )
 
-        for item in AudioMimeTypes.values():
+        for item in supported_audio_mimes():
             formats.append(
                 FormatLimit(
                     mimetype=item,
@@ -35,7 +37,7 @@ class LimitService:
     def _get_attachment_limits(self) -> AttachmentLimits:
         formats: list[FormatLimit] = []
 
-        for item in TextMimeTypes.values():
+        for item in supported_text_mimes():
             formats.append(
                 FormatLimit(
                     mimetype=item,
@@ -45,7 +47,7 @@ class LimitService:
                 )
             )
 
-        for item in ImageMimeTypes.values():
+        for item in supported_image_mimes():
             formats.append(
                 FormatLimit(
                     mimetype=item,

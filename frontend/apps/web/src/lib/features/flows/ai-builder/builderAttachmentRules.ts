@@ -11,8 +11,6 @@ const AI_BUILDER_SUPPORTED_MIMETYPES = new Set([
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-excel",
-  "application/msword",
-  "application/vnd.ms-powerpoint",
   "application/json"
 ]);
 

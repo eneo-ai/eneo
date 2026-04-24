@@ -3,9 +3,7 @@ from typing import Annotated, Protocol, cast
 from fastapi import APIRouter, Depends
 
 from intric.authentication import auth_dependencies
-from intric.files.audio import AudioMimeTypes
-from intric.files.image import ImageMimeTypes
-from intric.files.text import TextMimeTypes
+from intric.files.mime_support import supported_mimes
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.main.models import PaginatedResponse
@@ -100,9 +98,7 @@ async def get_models(
     dependencies=[Depends(auth_dependencies.get_current_active_user)],
 )
 def get_formats():
-    return to_paginated_response(
-        TextMimeTypes.values() + AudioMimeTypes.values() + ImageMimeTypes.values()
-    )
+    return to_paginated_response(supported_mimes())
 
 
 @settings_admin_router.get(

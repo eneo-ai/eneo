@@ -18,7 +18,7 @@ from intric.files.file_models import (
     FileRestrictions,
     Limit,
 )
-from intric.files.text import TextMimeTypes
+from intric.files.mime_support import supported_text_mimes
 from intric.integration.presentation.assemblers.integration_knowledge_assembler import (
     IntegrationKnowledgeAssembler,
 )
@@ -76,7 +76,7 @@ class AssistantAssembler:
         return FileRestrictions(
             accepted_file_types=[
                 AcceptedFileType(mimetype=mimetype, size_limit=26214400)
-                for mimetype in TextMimeTypes.values()
+                for mimetype in supported_text_mimes()
             ],
             limit=Limit(max_files=3, max_size=26214400),
         )
