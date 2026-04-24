@@ -351,6 +351,39 @@ class TestRule6MaterializationBridgeAcl:
             f"Found:    {sorted(declared)}"
         )
 
+    def test_bridge_has_no_non_underscored_top_level_defs_outside_all(
+        self,
+    ) -> None:
+        """``__all__`` parity: every non-private top-level ``def`` / ``class``
+        in the bridge must also appear in ``__all__``. The runtime
+        ``__all__`` check catches drift in the declared list; this static
+        AST scan catches the opposite drift — a new public helper sneaking
+        in via a ``def debug_bridge_state(): ...`` without being listed
+        in ``__all__`` would otherwise slip past the runtime check because
+        ``__all__`` alone says nothing about what else the module exports.
+        """
+        bridge_path = self._package_root() / f"{BRIDGE_MODULE_NAME}.py"
+        tree = ast.parse(bridge_path.read_text(encoding="utf-8"))
+
+        top_level_public_names: list[str] = []
+        for node in tree.body:
+            if isinstance(
+                node,
+                (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+            ):
+                if not node.name.startswith("_"):
+                    top_level_public_names.append(node.name)
+
+        unsanctioned = set(top_level_public_names) - self._EXPECTED_BRIDGE_ALL
+        assert not unsanctioned, (
+            f"{BRIDGE_MODULE_NAME}.py exposes top-level public symbols that "
+            "are not in the sanctioned `__all__` surface. Either prefix them "
+            "with `_` to mark them private, or add them to "
+            "`_EXPECTED_BRIDGE_ALL` (and the module's `__all__`) with an "
+            "explicit review of the write-surface seam.\n"
+            f"Unsanctioned public symbols: {sorted(unsanctioned)}"
+        )
+
     def test_only_bridge_imports_flows_api(self) -> None:
         offenders = _modules_importing_flows_api(self._package_root())
         offenders.pop(f"{BRIDGE_MODULE_NAME}.py", None)

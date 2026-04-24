@@ -21,9 +21,21 @@ Call surface:
   ``ArchitectureCommit`` + the strict-envelope ``DraftPlanEnvelope``)
   and produces a ``MaterializedDraft`` carrying the canonical
   ``FlowDraftSpecCore`` plus the already-compiled ``FlowChangeSet``.
-  Drift between envelope and commit (mismatched step count or tuple
-  at any index) is a hard ``MaterializationError`` — the commit is
-  authoritative.
+  Drift between envelope and commit (step count, per-step tuple,
+  unsupported output_mode) and semantic errors surfaced by the
+  create-draft validator (``first_step_invalid_source``,
+  ``file_flow_input_requires_runtime_upload``, form-field reference
+  errors, etc.) are hard ``MaterializationError``s — the commit plus
+  the existing create-path contract are both authoritative. After
+  compile, the bridge also runs the proposal-processor's compiled-spec
+  acceptance gate (``prepare_compiled_spec_for_session`` →
+  ``validate_spec``) so duplicate step names, chaining-rule violations,
+  and other hard errors block materialization instead of silently
+  producing a spec the write surface would reject.
+
+  This slice is create-only. Edit-mode materialization (carrying a
+  ``current_flow`` through) lands in a follow-up slice alongside
+  edit-specific validation.
 """
 
 from __future__ import annotations
@@ -32,13 +44,20 @@ from dataclasses import dataclass
 
 from pydantic import ValidationError
 
+from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
+    prepare_compiled_spec_for_session,
+)
 from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
+from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
 from intric.flows.ai_builder.ai_builder_materializer import compile_changeset
-from intric.flows.ai_builder.ai_builder_models import FlowChangeSet, FlowDraftSpecCore
+from intric.flows.ai_builder.ai_builder_models import (
+    FlowChangeSet,
+    FlowDraftSpecCore,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_orchestrator import DraftPlanEnvelope
 from intric.flows.ai_builder.planning_state import ArchitectureCommit
-from intric.flows.domain.flow import Flow
 
 
 class MaterializationError(ValueError):
@@ -46,8 +65,9 @@ class MaterializationError(ValueError):
 
     Distinct from generic ``ValueError`` so callers can differentiate
     bridge-detected drift (step-count mismatch, per-step tuple divergence,
-    envelope-shape hallucination) from unrelated value errors raised by
-    downstream compilers.
+    envelope-shape hallucination, unsupported commit output_mode, or
+    semantic rejection from ``validate_create_draft``) from unrelated
+    value errors raised by downstream compilers.
     """
 
 
@@ -64,6 +84,15 @@ class MaterializedDraft:
     changeset: FlowChangeSet
 
 
+# Output modes the create-draft compile path cannot realise. Orchestrator
+# v2's StepTriple accepts a broader set (e.g. ``http_post``) because the
+# planner emits it, but the create compiler has no branch to produce
+# those modes from (input_type, output_type, document_delivery_mode).
+# Rejecting them up-front gives a clear error instead of a confusing
+# "post-compile output_mode mismatch" message.
+_CREATE_UNSUPPORTED_OUTPUT_MODES: frozenset[str] = frozenset({"http_post"})
+
+
 def materialize(
     *,
     architecture_commit: ArchitectureCommit,
@@ -71,7 +100,6 @@ def materialize(
     flow_name: str,
     flow_description: str | None = None,
     plan_rationale: str,
-    current_flow: Flow | None = None,
 ) -> MaterializedDraft:
     """Translate an orchestrator v2 planner output into flows-domain types.
 
@@ -81,8 +109,17 @@ def materialize(
     that index. ``output_mode`` is derived by the create compiler from
     per-step fields; the post-compile check enforces that derivation
     lands on the commit's expected mode.
+
+    The create-draft validator (``validate_create_draft``) is the same
+    gate the existing proposal-processor path runs before compile —
+    invoked here so semantic errors (``first_step_invalid_source``,
+    ``file_flow_input_requires_runtime_upload``, duplicate form fields,
+    out-of-range ``uses_previous_fields``, and the rest) surface
+    consistently regardless of which caller reaches the compile path.
     """
+    _validate_commit_supports_create_materialization(architecture_commit)
     _validate_step_count(architecture_commit, draft_plan)
+    _require_explicit_tuple_axes_per_envelope_step(draft_plan)
 
     try:
         draft = FlowCreateDraft.model_validate(
@@ -97,17 +134,32 @@ def materialize(
         )
     except ValidationError as exc:
         raise MaterializationError(
-            f"Draft envelope failed strict validation: {exc}"
+            f"Draft envelope failed strict structural validation: {exc}"
         ) from exc
 
     _validate_pre_compile_tuples(architecture_commit, draft)
+    _run_create_draft_semantic_validator(draft)
 
     spec = compile_create_draft(draft)
 
     _validate_post_compile_output_modes(architecture_commit, spec)
+    prepared_spec = _run_compiled_spec_validator(spec)
 
-    changeset = compile_changeset(spec, current_flow)
-    return MaterializedDraft(spec=spec, changeset=changeset)
+    changeset = compile_changeset(prepared_spec, None)
+    return MaterializedDraft(spec=prepared_spec, changeset=changeset)
+
+
+def _validate_commit_supports_create_materialization(
+    commit: ArchitectureCommit,
+) -> None:
+    for index, triple in enumerate(commit.tuples_chain):
+        if triple.output_mode in _CREATE_UNSUPPORTED_OUTPUT_MODES:
+            raise MaterializationError(
+                f"architecture_commit.tuples_chain[{index}].output_mode "
+                f"{triple.output_mode!r} is unsupported by the create "
+                "materializer. The upstream planner contract should "
+                "reject this commit before reaching the bridge."
+            )
 
 
 def _validate_step_count(
@@ -121,6 +173,33 @@ def _validate_step_count(
             f"draft_plan step count {actual} does not match "
             f"architecture_commit.tuples_chain length {expected}"
         )
+
+
+_REQUIRED_ENVELOPE_STEP_TUPLE_KEYS: frozenset[str] = frozenset(
+    {"input_type", "output_type"}
+)
+
+
+def _require_explicit_tuple_axes_per_envelope_step(
+    envelope: DraftPlanEnvelope,
+) -> None:
+    """Force the envelope to declare every tuple axis explicitly.
+
+    ``NewStepDraft`` defaults ``input_type`` / ``output_type`` to
+    ``text``. Without this check, a text/text commit would silently
+    accept an envelope step that omits both axes — the envelope would
+    pretend to declare the tuple but actually just rely on defaults.
+    Requiring explicit keys keeps the commit-authoritative contract
+    honest.
+    """
+    for index, step_dict in enumerate(envelope.steps):
+        missing = _REQUIRED_ENVELOPE_STEP_TUPLE_KEYS - step_dict.keys()
+        if missing:
+            raise MaterializationError(
+                f"draft_plan.steps[{index}] is missing required tuple "
+                f"axes: {sorted(missing)}. The envelope must declare the "
+                "same (input_type, output_type) as the architecture commit."
+            )
 
 
 def _validate_pre_compile_tuples(
@@ -148,6 +227,19 @@ def _validate_pre_compile_tuples(
             )
 
 
+def _run_create_draft_semantic_validator(draft: FlowCreateDraft) -> None:
+    result = validate_create_draft(draft)
+    if result.valid:
+        return
+    rendered = "; ".join(
+        f"{error.code} at {error.step_ref or 'draft'}: {error.message}"
+        for error in result.errors
+    )
+    raise MaterializationError(
+        f"Draft envelope failed create-draft semantic validation: {rendered}"
+    )
+
+
 def _validate_post_compile_output_modes(
     commit: ArchitectureCommit,
     spec: FlowDraftSpecCore,
@@ -162,6 +254,70 @@ def _validate_post_compile_output_modes(
                     actual=step.output_mode.value,
                 )
             )
+
+
+def _run_compiled_spec_validator(spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
+    """Mirror the create-path compiled-spec acceptance gate.
+
+    The proposal processor runs ``prepare_compiled_spec_for_session``
+    after ``compile_create_draft`` so the hard ``validate_spec`` checks
+    (duplicate step names, chaining rules, type compatibility, enum
+    guards, contract parity) block malformed plans before they reach
+    the write surface. The bridge must preserve that contract — without
+    it, a spec with e.g. ``["Same", "same"]`` step names materializes
+    into a changeset that would be rejected the moment the proposal
+    processor tries to accept it.
+
+    The preparer also runs two normalizations
+    (``normalize_compiled_spec_for_session``,
+    ``normalize_ai_builder_spec``); the prepared spec, not the raw
+    compiler output, is what we emit so the downstream ``compile_changeset``
+    and any caller-side rendering sees the canonical shape.
+
+    Resource / model / knowledge-base refs stay ``None`` at this seam:
+    the bridge is a pure translator. Callers that need catalog
+    resolution must run it upstream or downstream; baking it in here
+    would force the bridge to carry context it has no business knowing
+    about.
+
+    Scope note: this mirrors structural, semantic, and hard
+    compiled-spec validation — not the proposal processor's
+    quality-retry policy (the retryable-warning filter in
+    ``_format_quality_feedback``). Quality retry is a policy concern
+    that needs caller context (retry budgets, conversation history,
+    which warnings are retryable) and is a caller responsibility when
+    exact acceptance parity is required.
+    """
+    prepared = prepare_compiled_spec_for_session(
+        spec=spec,
+        target_kind=TargetKind.CREATE,
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+        valid_existing_step_refs=None,
+    )
+    # resource_catalog=None guarantees the preparer never takes the
+    # ``failure_feedback`` branch, which is the only path that returns
+    # spec=None / validation=None. Raising ``MaterializationError`` (not
+    # ``assert``) so the invariant survives ``python -O`` and the check
+    # remains a runtime contract at the module boundary.
+    if prepared.spec is None or prepared.validation is None:
+        raise MaterializationError(
+            "prepare_compiled_spec_for_session returned an incomplete "
+            "result (spec or validation missing). The bridge invokes it "
+            "with resource_catalog=None, which should never trigger the "
+            "failure_feedback branch — a refactor has widened the failure "
+            "surface without updating the bridge's contract."
+        )
+    if not prepared.validation.valid:
+        rendered = "; ".join(
+            f"{error.code} at {error.step_ref or 'spec'}: {error.message}"
+            for error in prepared.validation.errors
+        )
+        raise MaterializationError(
+            f"Compiled spec failed create-path validation: {rendered}"
+        )
+    return prepared.spec
 
 
 def _tuple_mismatch_message(

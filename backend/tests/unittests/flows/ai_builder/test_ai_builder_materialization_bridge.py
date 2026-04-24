@@ -236,6 +236,10 @@ class TestOutputModeDerivationMismatch:
                     "input_source": "flow_input",
                     "input_type": "audio",
                     "output_type": "text",
+                    # Audio flow_input requires runtime_upload=True — passes
+                    # semantic validation so the post-compile output_mode
+                    # guard can fire on the inconsistent StepTriple.
+                    "runtime_upload": True,
                 },
             ],
             form_fields=[],
@@ -270,6 +274,221 @@ class TestEnvelopeExtraFieldRejection:
                 flow_name="Flow",
                 plan_rationale="Extra-field drift test.",
             )
+
+
+class TestCreateDraftSemanticValidator:
+    """The bridge must run ``validate_create_draft`` before compile so
+    semantic rejections (``first_step_invalid_source``, ``empty_steps``,
+    ``file_flow_input_requires_runtime_upload``, and friends) surface
+    consistently with the proposal-processor path instead of silently
+    materialising into a structurally-valid-but-semantically-broken
+    draft.
+    """
+
+    def test_first_step_with_previous_step_source_is_rejected(self) -> None:
+        """First envelope step declaring ``previous_step`` input_source
+        structurally coerces through ``FlowCreateDraft`` but is a
+        semantic error — there is no previous step at index 0.
+        ``validate_create_draft`` raises ``first_step_invalid_source``.
+        """
+        commit = _architecture_commit()
+        envelope_step = _summarize_text_step_dict()
+        envelope_step["input_source"] = "previous_step"
+        envelope = DraftPlanEnvelope(
+            plan_id="plan_1",
+            steps=[envelope_step],
+            form_fields=[],
+        )
+
+        with pytest.raises(MaterializationError) as exc_info:
+            materialize(
+                architecture_commit=commit,
+                draft_plan=envelope,
+                flow_name="Flow",
+                plan_rationale="First-step invalid-source test.",
+            )
+
+        assert "first_step_invalid_source" in str(exc_info.value)
+
+    def test_empty_envelope_and_empty_commit_are_rejected(self) -> None:
+        """A commit with no tuples_chain entries and an envelope with no
+        steps pass step-count parity but are semantically empty — the
+        create validator rejects ``empty_steps``.
+        """
+        commit = ArchitectureCommit(
+            tuples_chain=[],
+            chosen_patterns=["summarize_text"],
+            required_capabilities=["summarize_text"],
+            committed_at=_FIXED_COMMIT_TIMESTAMP,
+            architecture_hash="c" * 64,
+        )
+        envelope = DraftPlanEnvelope(
+            plan_id="plan_1",
+            steps=[],
+            form_fields=[],
+        )
+
+        with pytest.raises(MaterializationError) as exc_info:
+            materialize(
+                architecture_commit=commit,
+                draft_plan=envelope,
+                flow_name="Flow",
+                plan_rationale="Empty-steps test.",
+            )
+
+        assert "empty_steps" in str(exc_info.value)
+
+
+class TestUnsupportedCommitOutputMode:
+    """Commits carrying an output_mode the create compiler cannot derive
+    (``http_post`` today) are rejected up-front by the bridge. The
+    alternative — letting them through — surfaces as a misleading
+    post-compile ``output_mode`` mismatch. This guard gives a clear,
+    create-specific error that names the unsupported mode.
+    """
+
+    def test_http_post_commit_is_rejected_with_explicit_message(self) -> None:
+        commit = ArchitectureCommit(
+            tuples_chain=[
+                StepTriple(
+                    input_type="text",
+                    output_type="text",
+                    output_mode="http_post",
+                ),
+            ],
+            chosen_patterns=["http_post_call"],
+            required_capabilities=["http_post_call"],
+            committed_at=_FIXED_COMMIT_TIMESTAMP,
+            architecture_hash="d" * 64,
+        )
+        envelope = DraftPlanEnvelope(
+            plan_id="plan_1",
+            steps=[_summarize_text_step_dict()],
+            form_fields=[],
+        )
+
+        with pytest.raises(MaterializationError) as exc_info:
+            materialize(
+                architecture_commit=commit,
+                draft_plan=envelope,
+                flow_name="Flow",
+                plan_rationale="Unsupported-mode test.",
+            )
+
+        message = str(exc_info.value)
+        assert "http_post" in message
+        assert "unsupported" in message.lower()
+
+
+class TestEnvelopeStepMustDeclareTupleAxes:
+    """``NewStepDraft`` defaults ``input_type`` and ``output_type`` to
+    ``text``. Without an explicit-key requirement, a text/text commit
+    would silently accept an envelope step that omits both axes — the
+    envelope would pretend to declare the tuple but actually lean on
+    defaults. The bridge forces the envelope to name the axes so the
+    "commit is authoritative" contract stays honest.
+    """
+
+    def test_missing_input_type_is_rejected(self) -> None:
+        commit = _architecture_commit()
+        envelope_step = _summarize_text_step_dict()
+        del envelope_step["input_type"]
+        envelope = DraftPlanEnvelope(
+            plan_id="plan_1",
+            steps=[envelope_step],
+            form_fields=[],
+        )
+
+        with pytest.raises(MaterializationError) as exc_info:
+            materialize(
+                architecture_commit=commit,
+                draft_plan=envelope,
+                flow_name="Flow",
+                plan_rationale="Missing-input-type test.",
+            )
+
+        assert "input_type" in str(exc_info.value)
+
+    def test_missing_output_type_is_rejected(self) -> None:
+        commit = _architecture_commit()
+        envelope_step = _summarize_text_step_dict()
+        del envelope_step["output_type"]
+        envelope = DraftPlanEnvelope(
+            plan_id="plan_1",
+            steps=[envelope_step],
+            form_fields=[],
+        )
+
+        with pytest.raises(MaterializationError) as exc_info:
+            materialize(
+                architecture_commit=commit,
+                draft_plan=envelope,
+                flow_name="Flow",
+                plan_rationale="Missing-output-type test.",
+            )
+
+        assert "output_type" in str(exc_info.value)
+
+
+class TestCompiledSpecValidatorGate:
+    """After compile, the bridge runs the same compiled-spec acceptance
+    gate the proposal processor uses — duplicate step names, chaining
+    violations, and other hard errors block materialization instead of
+    silently producing a spec the write surface would reject.
+    """
+
+    def test_duplicate_step_name_case_insensitive_is_rejected(self) -> None:
+        """Two steps with names differing only in case (``"Same"`` /
+        ``"same"``) pass strict structural validation, tuple parity, and
+        the create-draft semantic validator, but the compiled-spec
+        validator rejects them as ``duplicate_step_name``. Without the
+        gate, the bridge would hand callers a spec that the proposal
+        processor would reject the moment it tried to accept it.
+        """
+        commit = _architecture_commit(
+            tuples_chain=[
+                StepTriple(
+                    input_type="text",
+                    output_type="text",
+                    output_mode="pass_through",
+                ),
+                StepTriple(
+                    input_type="text",
+                    output_type="text",
+                    output_mode="pass_through",
+                ),
+            ]
+        )
+        envelope = DraftPlanEnvelope(
+            plan_id="plan_1",
+            steps=[
+                {
+                    "name": "Same",
+                    "instructions": "Första steget.",
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_type": "text",
+                },
+                {
+                    "name": "same",
+                    "instructions": "Andra steget.",
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_type": "text",
+                },
+            ],
+            form_fields=[],
+        )
+
+        with pytest.raises(MaterializationError) as exc_info:
+            materialize(
+                architecture_commit=commit,
+                draft_plan=envelope,
+                flow_name="Duplicate-name flow",
+                plan_rationale="Compiled-spec validator test.",
+            )
+
+        assert "duplicate_step_name" in str(exc_info.value)
 
 
 class TestPublicSurface:
