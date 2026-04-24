@@ -14,7 +14,11 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.base_class import BaseCrossReference, BasePublic
+from intric.database.tables.base_class import (
+    BaseCrossReference,
+    BasePublic,
+    BaseWithTableName,
+)
 from intric.database.tables.files_table import Files
 from intric.database.tables.job_table import Jobs
 from intric.database.tables.mcp_server_table import MCPServerTools
@@ -832,5 +836,70 @@ class BuilderPlans(BasePublic):
         CheckConstraint(
             f"status IN ({','.join(repr(v) for v in BUILDER_PLAN_STATUS_VALUES)})",
             name="ck_builder_plans_status",
+        ),
+    )
+
+
+class BuilderAttachmentObservations(BaseWithTableName):
+    """Tenant-scoped cache of structured planning evidence per attachment.
+
+    Composite natural key `(tenant_id, content_sha256, digest_version,
+    fcm_version, pattern_registry_version)`: a bump to any version
+    invalidates prior rows. `last_accessed_at` drives per-tenant LRU
+    eviction; the tenant-prefixed index keeps eviction scans cheap.
+    """
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+    )
+    content_sha256: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    digest_version: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    fcm_version: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    pattern_registry_version: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    observation_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    deterministic_signals_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True),
+        server_default=sa.text("now()"),
+        nullable=False,
+    )
+    last_accessed_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True),
+        server_default=sa.text("now()"),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        sa.PrimaryKeyConstraint(
+            "tenant_id",
+            "content_sha256",
+            "digest_version",
+            "fcm_version",
+            "pattern_registry_version",
+            name="pk_builder_attachment_observations",
+        ),
+        CheckConstraint(
+            "char_length(content_sha256) = 64",
+            name="ck_builder_attachment_obs_sha256_length",
+        ),
+        CheckConstraint(
+            "digest_version > 0",
+            name="ck_builder_attachment_obs_digest_version",
+        ),
+        CheckConstraint(
+            "fcm_version > 0",
+            name="ck_builder_attachment_obs_fcm_version",
+        ),
+        CheckConstraint(
+            "pattern_registry_version > 0",
+            name="ck_builder_attachment_obs_pattern_registry_version",
+        ),
+        Index(
+            "ix_builder_attachment_obs_tenant_last_accessed",
+            "tenant_id",
+            "last_accessed_at",
         ),
     )

@@ -41,6 +41,8 @@ from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY, FlowCapab
 
 PATTERN_REGISTRY_VERSION: int = 4
 
+PatternId = str
+
 PatternPolarity = Literal["positive", "negative"]
 _VALID_POLARITIES: frozenset[str] = frozenset({"positive", "negative"})
 
