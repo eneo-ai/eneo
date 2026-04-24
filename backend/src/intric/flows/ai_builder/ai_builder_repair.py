@@ -19,10 +19,13 @@ The helper is deliberately narrow:
   LLM once, parses the reply via `parse_planner_output`, and:
   * Returns `RepairOutcome(kind="commit_drift_blocked", ...)` with a
     new `RejectionReason(code="repair_attempted_commit_drift", ...)`
-    when the repaired output mutates the prior `architecture_hash` or
-    drops the commit entirely after a prior commit existed. This is a
-    hard failure — the outer loop does NOT decrement its retry budget
-    on drift because drift is not a retry-eligible condition.
+    when the repaired output mutates the prior `architecture_hash`
+    (by hash divergence or body-forgery with matching hash). A
+    repaired delta that omits `architecture_commit` is preservation-
+    by-absence, not drift — the evaluator only inspects the delta
+    when it is populated. This is a hard failure — the outer loop
+    does NOT decrement its retry budget on drift because drift is
+    not a retry-eligible condition.
   * Returns `RepairOutcome(kind="repaired", repaired_output=...)`
     otherwise. The outer loop re-runs `evaluate_planner_output` on the
     repaired output; if it still rejects, the outer loop calls this

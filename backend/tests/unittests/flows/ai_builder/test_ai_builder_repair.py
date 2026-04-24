@@ -10,10 +10,12 @@ the multi-attempt bookkeeping. Per-call it returns exactly one
 - `not_repairable` when the rejection code is outside the
   `_REPAIR_ELIGIBLE_CODES` set (LLM not called).
 - `repaired` when the LLM returned a `PlannerOutput` whose architecture
-  commit, if any, still matches the session's prior commit hash.
-- `commit_drift_blocked` when the LLM's repaired output either
-  mutates the prior `architecture_hash` or drops the commit entirely
-  after a prior commit existed. Budget is NOT decremented in this
+  commit, if any, still matches the session's prior commit hash, OR
+  whose delta omits `architecture_commit` entirely (preservation-by-
+  absence — the evaluator only inspects the delta when populated).
+- `commit_drift_blocked` when the LLM's repaired output mutates the
+  prior `architecture_hash` — either by hash divergence or by body-
+  forgery with a matching hash. Budget is NOT decremented in this
   branch — drift is a hard failure, not a retry candidate.
 """
 
