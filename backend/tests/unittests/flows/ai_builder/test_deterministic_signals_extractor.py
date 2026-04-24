@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from io import BytesIO
 
+import numpy as np
+import soundfile
 from docx import Document
 from fpdf import FPDF
 from openpyxl import Workbook
@@ -31,6 +33,8 @@ _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.doc
 _PDF_MIME = "application/pdf"
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _CSV_MIME = "text/csv"
+_WAV_MIME = "audio/wav"
+_OGG_MIME = "audio/ogg"
 
 
 def _bytes(text: str) -> bytes:
@@ -665,3 +669,122 @@ class TestCsvExtractor:
         # Header round-trips as-is; garbled data row still counted
         assert signals.spreadsheet_headers == ["col"]
         assert signals.row_count == 1
+
+
+def _build_wav(
+    *, duration_seconds: float, channels: int, samplerate: int = 44100
+) -> bytes:
+    """Build an in-memory WAV with the given duration and channel count.
+
+    Round-tripping through soundfile's writer + reader means the test
+    exercises the same decoder the extractor uses in production.
+    """
+    sample_count = int(duration_seconds * samplerate)
+    shape = (sample_count, channels) if channels > 1 else (sample_count,)
+    data = np.zeros(shape, dtype="float32")
+    buffer = BytesIO()
+    soundfile.write(buffer, data, samplerate, format="WAV")
+    return buffer.getvalue()
+
+
+def _build_ogg(*, duration_seconds: float, samplerate: int = 44100) -> bytes:
+    sample_count = int(duration_seconds * samplerate)
+    data = np.zeros(sample_count, dtype="float32")
+    buffer = BytesIO()
+    soundfile.write(buffer, data, samplerate, format="OGG", subtype="VORBIS")
+    return buffer.getvalue()
+
+
+class TestAudioExtractor:
+    """Audio attachments feed the `audio_transcription` capability. The
+    extractor reads duration and channel count without decoding the
+    full stream so the planner can size the transcription budget
+    before any LLM call. Language detection requires transcription
+    and stays out of scope here.
+    """
+
+    def test_duration_in_seconds_matches_wav_header(self) -> None:
+        raw = _build_wav(duration_seconds=2.5, channels=1)
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_WAV_MIME,
+            filename="clip.wav",
+        )
+
+        assert signals.duration_seconds is not None
+        assert 2.4 <= signals.duration_seconds <= 2.6
+
+    def test_channel_count_reflects_mono_vs_stereo(self) -> None:
+        mono = _build_wav(duration_seconds=0.5, channels=1)
+        stereo = _build_wav(duration_seconds=0.5, channels=2)
+        mono_signals = extract_deterministic_signals(
+            raw_bytes=mono,
+            mime=_WAV_MIME,
+            filename="mono.wav",
+        )
+        stereo_signals = extract_deterministic_signals(
+            raw_bytes=stereo,
+            mime=_WAV_MIME,
+            filename="stereo.wav",
+        )
+
+        assert mono_signals.channel_count == 1
+        assert stereo_signals.channel_count == 2
+
+    def test_ogg_vorbis_duration_extracted(self) -> None:
+        """OGG Vorbis is one of the registered audio MIMEs; the extractor
+        must handle it without a WAV-specific code path.
+        """
+        raw = _build_ogg(duration_seconds=1.0)
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_OGG_MIME,
+            filename="clip.ogg",
+        )
+
+        assert signals.duration_seconds is not None
+        assert 0.9 <= signals.duration_seconds <= 1.1
+        assert signals.channel_count == 1
+
+    def test_language_hint_is_not_populated(self) -> None:
+        """Language detection requires transcription — out of scope for
+        the deterministic extractor. The field must stay None so the
+        planner doesn't confuse "we haven't checked" with "we know
+        it's null".
+        """
+        raw = _build_wav(duration_seconds=0.5, channels=1)
+        signals = extract_deterministic_signals(
+            raw_bytes=raw,
+            mime=_WAV_MIME,
+            filename="clip.wav",
+        )
+
+        assert signals.language_hint is None
+
+    def test_malformed_audio_bytes_fall_back_to_file_level_signals(self) -> None:
+        signals = extract_deterministic_signals(
+            raw_bytes=b"not a real wav file",
+            mime=_WAV_MIME,
+            filename="broken.wav",
+        )
+
+        assert signals.mime_type == _WAV_MIME
+        assert signals.extension == "wav"
+        assert signals.duration_seconds is None
+        assert signals.channel_count is None
+
+    def test_unsupported_audio_format_falls_back_without_crash(self) -> None:
+        """MP4 / WEBM containers require ffmpeg and are not covered by
+        soundfile. The extractor should not crash — file-level signals
+        still populate and the missing duration is the cue to upstream
+        cache logic that deeper inspection is needed elsewhere.
+        """
+        signals = extract_deterministic_signals(
+            raw_bytes=b"not a decodable m4a payload",
+            mime="audio/mp4",
+            filename="clip.m4a",
+        )
+
+        assert signals.mime_type == "audio/mp4"
+        assert signals.duration_seconds is None
+        assert signals.channel_count is None

@@ -4,8 +4,8 @@ The observation pipeline asks this module, before any LLM call, what
 the raw bytes alone can tell us: the canonical MIME, a filename
 extension, the size in bytes, and — for text-like payloads — a
 bullet-line density that hints at whether the content is dense prose
-or a list. Per-mime extractors for media plug into the dispatcher
-below; text, markdown, DOCX, PDF, XLSX, and CSV are handled here.
+or a list. Text, markdown, DOCX, PDF, XLSX, CSV, and soundfile-readable
+audio (WAV, MP3, OGG, FLAC) plug into the dispatcher below.
 
 Unsupported or legacy MIMEs still produce a ``DeterministicSignals``
 with the file-level fields populated and per-mime fields at their
@@ -26,10 +26,12 @@ import zipfile
 from io import BytesIO
 
 import pdfplumber
+import soundfile
 from docx import Document
 from docx.opc.exceptions import PackageNotFoundError
 from openpyxl import load_workbook
 
+from intric.files.audio import AudioMimeTypes
 from intric.files.extensions import MIMETYPE_EXTENSIONS_MAPPER
 from intric.files.mime_support import canonicalize_mime
 from intric.flows.ai_builder.attachment_observation import (
@@ -99,6 +101,14 @@ def extract_deterministic_signals(
 
     if canonical_mime in _CSV_MIMES:
         return _csv_signals(
+            raw_bytes=raw_bytes,
+            canonical_mime=canonical_mime,
+            extension=extension,
+            size_bytes=size_bytes,
+        )
+
+    if AudioMimeTypes.has_value(canonical_mime):
+        return _audio_signals(
             raw_bytes=raw_bytes,
             canonical_mime=canonical_mime,
             extension=extension,
@@ -290,6 +300,45 @@ def _xlsx_signals(
         )
     finally:
         workbook.close()
+
+
+def _audio_signals(
+    *,
+    raw_bytes: bytes,
+    canonical_mime: str,
+    extension: str,
+    size_bytes: int,
+) -> DeterministicSignals:
+    """Extract audio duration and channel count from the header only.
+
+    soundfile reads the metadata without decoding samples, which keeps
+    the signal cheap even for long recordings. Covers WAV, MP3, OGG,
+    FLAC natively; M4A / MP4 / WEBM containers require ffmpeg and
+    fall back to file-level signals — the missing duration is the cue
+    for upstream cache logic that deeper inspection is needed
+    elsewhere. Language detection requires transcription and stays
+    out of scope here; `language_hint` must stay None so the planner
+    doesn't confuse "we haven't checked" with "we know it's null".
+    """
+    try:
+        # soundfile's type stubs only declare `file: str | Path`, but the
+        # runtime accepts any file-like object (BytesIO is documented in
+        # the soundfile README). Using BytesIO avoids a tmpfile roundtrip.
+        info = soundfile.info(BytesIO(raw_bytes))  # type: ignore[arg-type]
+    except Exception:
+        return DeterministicSignals(
+            mime_type=canonical_mime,
+            extension=extension,
+            size_bytes=size_bytes,
+        )
+
+    return DeterministicSignals(
+        mime_type=canonical_mime,
+        extension=extension,
+        size_bytes=size_bytes,
+        duration_seconds=float(info.duration),
+        channel_count=int(info.channels),
+    )
 
 
 def _csv_signals(
