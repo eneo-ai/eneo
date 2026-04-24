@@ -382,7 +382,7 @@ async def apply_to_draft(
     ``plan_rationale`` rides on the ``MaterializedDraft`` rather than
     accepting a separate kwarg so it cannot drift from the value
     ``materialize()`` validated. ``lint_warnings`` is left to the
-    envelope's default factory because this slice has no consumer
+    envelope's default factory because the bridge has no consumer
     plumbed yet — adding it speculatively would create dead API
     surface.
 
@@ -391,7 +391,7 @@ async def apply_to_draft(
     mutate what was persisted.
 
     Edit-mode materialization (``edit_result_json``) is intentionally
-    not forwarded: this slice is create-only, and ``create_plan``'s
+    not forwarded: this translator is create-only, and ``create_plan``'s
     edit parameter is for the proposal-processor's edit adapter.
     """
     envelope = PlannerPlanEnvelope(

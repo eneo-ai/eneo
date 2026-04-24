@@ -25,6 +25,10 @@ from typing import Annotated, Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
 
+from intric.flows.ai_builder.ai_builder_commit_invariance import (
+    CommitDriftError,
+    assert_architecture_commit_unchanged,
+)
 from intric.flows.ai_builder.ai_builder_event_models import KeyDecisionPayload
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import (
@@ -155,6 +159,7 @@ RejectionCode = Literal[
     "architecture_commit_illegal_tuple",
     "architecture_commit_unresolvable_capability",
     "architecture_commit_unresolvable_pattern",
+    "architecture_commit_drift_from_pinned",
     "propose_plan_without_architecture_commit",
     "propose_plan_missing_draft_plan",
     "propose_plan_draft_plan_structural_mismatch",
@@ -222,6 +227,10 @@ def evaluate_planner_output(
     if version_violation is not None:
         return version_violation
 
+    preservation_violation = _check_commit_preservation(output, context)
+    if preservation_violation is not None:
+        return preservation_violation
+
     action = output.planner_action
 
     if isinstance(action, AskQuestionAction):
@@ -230,6 +239,36 @@ def evaluate_planner_output(
         return _check_commit_architecture(output, context)
     if isinstance(action, ProposePlanAction):
         return _check_propose_plan(output, context)
+    return None
+
+
+def _check_commit_preservation(
+    output: PlannerOutput, context: OrchestrationContext
+) -> RejectionReason | None:
+    """Reject any turn that would drift an already-pinned architecture commit.
+
+    Once a commit is pinned on the session state, it is the canonical
+    contract between the planner's discovery phase and downstream
+    persistence. A follow-up turn may carry the pinned commit verbatim
+    in `planning_state_delta.architecture_commit` (identity preservation)
+    or omit it entirely (preservation by absence). A divergent body —
+    different hash, different tuples_chain, different chosen_patterns —
+    is drift, not progress: the repair helper rejects it post-hoc, but
+    by then the accepted turn has already been dispatched.
+    """
+    pinned = context.session_state.architecture_commit
+    if pinned is None:
+        return None
+    delta_commit = output.planning_state_delta.architecture_commit
+    if delta_commit is None:
+        return None
+    try:
+        assert_architecture_commit_unchanged(before=pinned, after=delta_commit)
+    except CommitDriftError as exc:
+        return RejectionReason(
+            code="architecture_commit_drift_from_pinned",
+            detail=str(exc),
+        )
     return None
 
 
@@ -283,6 +322,17 @@ def _check_ask_question(
 def _check_commit_architecture(
     output: PlannerOutput, context: OrchestrationContext
 ) -> RejectionReason | None:
+    if context.session_state.architecture_commit is not None:
+        return RejectionReason(
+            code="architecture_commit_drift_from_pinned",
+            detail=(
+                "architecture was already pinned on this session; a second "
+                "commit_architecture would overwrite the canonical contract. "
+                "Emit confirm_requirements or propose_plan to advance the "
+                "turn, or start a new session if the commitment is stale"
+            ),
+        )
+
     if context.unresolved_architectural_choices:
         return RejectionReason(
             code="architecture_commit_premature_unresolved_choices",
@@ -338,6 +388,17 @@ def _check_commit_architecture(
             return RejectionReason(
                 code="architecture_commit_unresolvable_pattern",
                 detail=(f"chosen pattern {pattern_id!r} is not in PATTERN_REGISTRY"),
+            )
+        pattern = PATTERN_REGISTRY[pattern_id]
+        if pattern.polarity != "positive":
+            return RejectionReason(
+                code="architecture_commit_unresolvable_pattern",
+                detail=(
+                    f"chosen pattern {pattern_id!r} has polarity "
+                    f"{pattern.polarity!r}; only positive patterns are "
+                    "committable. Negative patterns are anti-patterns the "
+                    "knowledge pack teaches the planner to avoid, not commit"
+                ),
             )
 
     resolved_slot_names = frozenset(context.session_state.resolved_slots.keys())

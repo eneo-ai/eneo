@@ -749,9 +749,10 @@ class AIBuilderPlanner:
             required_slot_names = all_pattern_slots - resolved_slot_names
             # `unresolved_architectural_choices` is the conservative commit
             # gate: these minimum pattern-agnostic slots MUST resolve before
-            # any architecture_commit can land. A stricter pattern-specific
-            # gate is follow-up debt — needs a pattern-choice signal we
-            # don't carry pre-commit.
+            # any architecture_commit can land. The stricter pattern-specific
+            # gate runs inside the orchestrator against
+            # `commit.chosen_patterns.required_architectural_slots` once the
+            # planner has declared which patterns it's committing to.
             core_slots = frozenset({"primary_runtime_input", "terminal_output"})
             unresolved_core_slots = core_slots - resolved_slot_names
             orchestration_context = OrchestrationContext(

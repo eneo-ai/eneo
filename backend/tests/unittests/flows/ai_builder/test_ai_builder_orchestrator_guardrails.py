@@ -550,6 +550,159 @@ class TestProposePlanDraftPlanStructuralParityGuardrail:
 
 
 # ---------------------------------------------------------------------------
+# Commit-preservation: a pinned commit is the canonical contract and
+# cannot be re-emitted, replaced, or drifted by any later turn.
+# ---------------------------------------------------------------------------
+
+
+class TestCommitPreservationGuardrail:
+    """Once a commit lands, every later turn must either preserve it
+    byte-identically in its delta or omit the ``architecture_commit``
+    field entirely. A second ``commit_architecture`` action rejects even
+    when it replays the pinned body, because the atomic dispatch path
+    would create a second audit turn and signal planner confusion.
+    """
+
+    def test_rejects_second_commit_architecture_when_session_has_pinned_commit(
+        self,
+    ) -> None:
+        output = parse_planner_output(
+            _commit_architecture(chosen_patterns=["summarize_text"])
+        )
+        context = _ctx(session_state=_session_state_with_commit(step_count=1))
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "architecture_commit_drift_from_pinned"
+
+    def test_rejects_propose_plan_with_delta_commit_that_drifts_from_pinned(
+        self,
+    ) -> None:
+        drifted_raw = _propose_plan(step_count=1)
+        drifted_raw["planning_state_delta"]["architecture_commit"] = {
+            "tuples_chain": [
+                {
+                    "input_type": "text",
+                    "output_type": "text",
+                    "output_mode": "pass_through",
+                }
+            ],
+            "chosen_patterns": ["summarize_text"],
+            "required_capabilities": [],
+            "committed_at": datetime(2026, 4, 23, tzinfo=timezone.utc).isoformat(),
+            "architecture_hash": "c" * 64,
+        }
+        output = parse_planner_output(drifted_raw)
+        context = _ctx(session_state=_session_state_with_commit(step_count=1))
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "architecture_commit_drift_from_pinned"
+
+    def test_rejects_ask_question_when_delta_carries_drifted_architecture_commit(
+        self,
+    ) -> None:
+        drifted_raw = _ask_question(
+            question_id="final_output_mode", slot_name="final_output_mode"
+        )
+        drifted_raw["planning_state_delta"]["architecture_commit"] = {
+            "tuples_chain": [
+                {
+                    "input_type": "text",
+                    "output_type": "text",
+                    "output_mode": "pass_through",
+                },
+                {
+                    "input_type": "text",
+                    "output_type": "text",
+                    "output_mode": "pass_through",
+                },
+            ],
+            "chosen_patterns": ["summarize_text"],
+            "required_capabilities": [],
+            "committed_at": datetime(2026, 4, 23, tzinfo=timezone.utc).isoformat(),
+            "architecture_hash": "b" * 64,
+        }
+        output = parse_planner_output(drifted_raw)
+        context = _ctx(
+            session_state=_session_state_with_commit(step_count=1),
+            required_slot_names=frozenset({"final_output_mode"}),
+        )
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "architecture_commit_drift_from_pinned"
+
+    def test_accepts_propose_plan_with_byte_identical_delta_commit(self) -> None:
+        preserved_raw = _propose_plan(step_count=1)
+        preserved_raw["planning_state_delta"]["architecture_commit"] = {
+            "tuples_chain": [
+                {
+                    "input_type": "text",
+                    "output_type": "text",
+                    "output_mode": "pass_through",
+                }
+            ],
+            "chosen_patterns": ["summarize_text"],
+            "required_capabilities": [],
+            "committed_at": datetime(2026, 4, 23, tzinfo=timezone.utc).isoformat(),
+            "architecture_hash": "b" * 64,
+        }
+        output = parse_planner_output(preserved_raw)
+        context = _ctx(session_state=_session_state_with_commit(step_count=1))
+
+        assert evaluate_planner_output(output, context) is None
+
+    def test_accepts_ask_question_without_delta_commit_when_session_is_pinned(
+        self,
+    ) -> None:
+        output = parse_planner_output(
+            _ask_question(
+                question_id="final_output_mode", slot_name="final_output_mode"
+            )
+        )
+        context = _ctx(
+            session_state=_session_state_with_commit(step_count=1),
+            required_slot_names=frozenset({"final_output_mode"}),
+        )
+
+        assert evaluate_planner_output(output, context) is None
+
+
+# ---------------------------------------------------------------------------
+# Negative-polarity patterns are anti-patterns — they must never be
+# committed even though they live in PATTERN_REGISTRY alongside positive
+# archetypes for knowledge-pack teaching purposes.
+# ---------------------------------------------------------------------------
+
+
+class TestNegativePolarityPatternGuardrail:
+    def test_rejects_commit_with_negative_polarity_pattern(self) -> None:
+        output = parse_planner_output(
+            _commit_architecture(chosen_patterns=["template_fill_non_docx"])
+        )
+        context = _ctx(session_state=_session_state_with_core_slots_resolved())
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "architecture_commit_unresolvable_pattern"
+        assert "negative" in rejection.detail
+        assert "template_fill_non_docx" in rejection.detail
+
+    def test_accepts_commit_with_only_positive_polarity_patterns(self) -> None:
+        output = parse_planner_output(
+            _commit_architecture(chosen_patterns=["summarize_text"])
+        )
+        context = _ctx(session_state=_session_state_with_core_slots_resolved())
+
+        assert evaluate_planner_output(output, context) is None
+
+
+# ---------------------------------------------------------------------------
 # RejectionCode is the single source of truth for rejection branches.
 # If a new guardrail adds a code, the Literal must grow with it.
 # ---------------------------------------------------------------------------
@@ -565,6 +718,7 @@ class TestRejectionCodeExhaustiveness:
             "architecture_commit_illegal_tuple",
             "architecture_commit_unresolvable_capability",
             "architecture_commit_unresolvable_pattern",
+            "architecture_commit_drift_from_pinned",
             "propose_plan_without_architecture_commit",
             "propose_plan_draft_plan_structural_mismatch",
             "propose_plan_missing_draft_plan",

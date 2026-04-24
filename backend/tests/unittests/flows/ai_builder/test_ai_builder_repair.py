@@ -147,11 +147,10 @@ class TestNotRepairable:
 
     @pytest.mark.asyncio
     async def test_architecture_commit_rejection_is_not_repair_eligible(self) -> None:
-        """Per the intent doc, only propose_plan_* rejections are
-        repair-eligible in this slice. Architecture commit rejections
-        indicate the planner misunderstood the constraint surface, not
-        that the plan shape drifted; they need a fresh turn, not a
-        corrective loop."""
+        """Only ``propose_plan_*`` rejections are repair-eligible.
+        Architecture commit rejections indicate the planner misunderstood
+        the constraint surface, not that the plan shape drifted; they
+        need a fresh turn, not a corrective loop."""
         from intric.flows.ai_builder.ai_builder_repair import (
             repair_planner_turn,
         )
@@ -483,8 +482,7 @@ class TestPublicSurface:
         ):
             assert hasattr(ai_builder_repair, symbol), (
                 f"public surface must expose {symbol} — consumed by "
-                "the outer send_message loop in the upcoming transport "
-                "migration slice"
+                "the outer send_message loop's transport helper"
             )
 
 

@@ -1214,7 +1214,7 @@ class TestBridgeEditModeDelegation:
 
     ``materialize`` is create-only today: it always invokes
     ``compile_changeset(spec, current_flow=None)``. The edit-mode entry
-    point is a follow-up slice and will dispatch on ``target_kind``.
+    point is future work and will dispatch on ``target_kind``.
     These tests pin the compile-changeset delegation contract at the
     bridge's seam so that when edit-mode materialisation lands, the
     downstream routing (modified → ``assistants_to_update``, unreferenced
