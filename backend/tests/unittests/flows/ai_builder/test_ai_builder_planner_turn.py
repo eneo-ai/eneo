@@ -40,8 +40,26 @@ from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
+    ResolvedSlot,
     StepTriple,
 )
+
+
+def _resolved_core_slots() -> dict[str, ResolvedSlot]:
+    return {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="text",
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
 
 
 def _make_commit(*, architecture_hash: str = "a" * 64) -> ArchitectureCommit:
@@ -61,11 +79,15 @@ def _make_commit(*, architecture_hash: str = "a" * 64) -> ArchitectureCommit:
 
 
 def _make_state(
-    *, architecture_commit: ArchitectureCommit | None = None
+    *,
+    architecture_commit: ArchitectureCommit | None = None,
+    resolve_core_slots: bool = True,
 ) -> PlanningState:
     state = PlanningState.empty()
     if architecture_commit is not None:
         state.architecture_commit = architecture_commit
+    if resolve_core_slots:
+        state.resolved_slots = _resolved_core_slots()
     return state
 
 

@@ -62,7 +62,7 @@ def resolve_requirements_state(
                 latest_summary_index = index
 
         metadata = message.metadata if isinstance(message.metadata, dict) else None
-        if message.role != "tool" or metadata is None:
+        if metadata is None or message.role not in ("tool", "assistant"):
             continue
         summary_data = metadata.get("requirements_summary")
         version = metadata.get("requirements_version")

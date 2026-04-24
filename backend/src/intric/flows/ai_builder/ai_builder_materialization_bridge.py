@@ -33,9 +33,9 @@ Call surface:
   and other hard errors block materialization instead of silently
   producing a spec the write surface would reject.
 
-  This slice is create-only. Edit-mode materialization (carrying a
-  ``current_flow`` through) lands in a follow-up slice alongside
-  edit-specific validation.
+  This seam is create-only. Edit-mode materialization (carrying a
+  ``current_flow`` through) will add an explicit ``target_kind`` /
+  ``current_flow`` entry point alongside edit-specific validation.
 
 - ``apply_to_draft(*, repo, session_id, tenant_id, materialized,
   plan_rationale, ...)`` is the write path. It wraps the materialized

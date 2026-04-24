@@ -27,6 +27,7 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.ai_builder.ai_builder_domain_models import BuilderSession
+from intric.flows.ai_builder.ai_builder_event_models import KeyDecisionPayload
 from intric.flows.ai_builder.ai_builder_models import SessionStatus, TargetKind
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     AskQuestionAction,
@@ -280,23 +281,34 @@ async def test_send_message_dispatched_commit_architecture_emits_status_plus_don
 
 
 @pytest.mark.asyncio
-async def test_send_message_dispatched_confirm_requirements_emits_summary_text() -> (
+async def test_send_message_dispatched_confirm_requirements_emits_versioned_summary_event() -> (
     None
 ):
-    """`dispatched` + `confirm_requirements` → text SSE with the summary.
+    """`dispatched` + `confirm_requirements` → `requirements_summary` SSE.
 
-    `ConfirmRequirementsPayload.summary` is the prose the planner
-    assembled from resolved slots. The client renders it verbatim; the
-    richer structured-summary payload (key decisions, assumptions) is
-    reconstructed from `PlanningState` rather than inlined into the
-    stream.
+    The confirm turn is the primitive that unblocks every downstream
+    architecture + plan turn. The client needs the full structured
+    summary (summary prose, key decisions, input/output descriptions,
+    assumptions, manual-setup notes) AND a stable `requirements_version`
+    so a later user confirmation can be matched against the exact
+    summary it was shown. A plain text SSE would drop that contract and
+    the frontend would have to reconstruct the summary from
+    conversation state, racing against turn-compaction.
     """
     planner = _make_planner()
     prepared = _make_prepared_request()
     action = ConfirmRequirementsAction(
         kind="confirm_requirements",
         payload=ConfirmRequirementsPayload(
-            summary="Ett flöde som sammanfattar mötestranskript i kort text."
+            summary="Ett flöde som sammanfattar mötestranskript i kort text.",
+            key_decisions=[
+                KeyDecisionPayload(topic="Indata", decision="Ljudfiler"),
+                KeyDecisionPayload(topic="Utdata", decision="Kort text"),
+            ],
+            input_description="En ljudfil per körning.",
+            output_description="En kort textsammanfattning.",
+            assumptions=["Ljudfilen är under 30 minuter."],
+            manual_setup_notes=[],
         ),
     )
     output = _planner_output(action)
@@ -325,11 +337,16 @@ async def test_send_message_dispatched_confirm_requirements_emits_summary_text()
     ):
         events = await _collect_events(planner, **_send_kwargs())
 
-    assert [event["event"] for event in events] == ["text", "done"]
+    assert [event["event"] for event in events] == ["requirements_summary", "done"]
+    payload = json.loads(events[0]["data"])
     assert (
-        json.loads(events[0]["data"])["text"]
-        == "Ett flöde som sammanfattar mötestranskript i kort text."
+        payload["summary"] == "Ett flöde som sammanfattar mötestranskript i kort text."
     )
+    assert payload["input_description"] == "En ljudfil per körning."
+    assert payload["output_description"] == "En kort textsammanfattning."
+    assert len(payload["key_decisions"]) == 2
+    assert isinstance(payload["requirements_version"], str)
+    assert len(payload["requirements_version"]) == 64
 
 
 @pytest.mark.asyncio

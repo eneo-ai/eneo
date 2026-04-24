@@ -34,8 +34,34 @@ skäl — tolka dem som motsvarande planner_action-kind):
 | Historiskt namn | planner_action.kind | Payload-fält |
 |---|---|---|
 | `ask_structured_question` | `ask_question` | `question_id`, `slot_name`, `prompt` |
-| `confirm_requirements` | `confirm_requirements` | `summary` |
+| `confirm_requirements` | `confirm_requirements` | `summary`, `key_decisions` (lista av `{{topic, decision}}`), `input_description`, `output_description`, `assumptions` (lista av strängar), `manual_setup_notes` (lista av strängar, valfri) |
 | {submission_tool_cell} | `propose_plan` | `plan_reference` (default `"latest"`) |
+
+**`confirm_requirements`-kontrakt (OBLIGATORISKT fält-för-fält):** När du \
+emitterar `confirm_requirements` MÅSTE payload innehålla hela krav-\
+sammanfattningen så att nästa tur kan återuppbygga bekräftade krav från \
+konversationen. Minimiform:
+
+```json
+"planner_action": {{
+  "kind": "confirm_requirements",
+  "payload": {{
+    "summary": "Kort sammanfattning av vad användaren vill bygga.",
+    "key_decisions": [
+      {{"topic": "Indata", "decision": "En PDF i taget"}},
+      {{"topic": "Utdata", "decision": "Strukturerad JSON"}}
+    ],
+    "input_description": "Den indata flödet tar emot.",
+    "output_description": "Det flödet producerar.",
+    "assumptions": [],
+    "manual_setup_notes": []
+  }}
+}}
+```
+
+Emittera ALDRIG bara `summary` — utan de övriga fälten kan systemet \
+inte markera kraven som bekräftade och du kommer att fråga om samma \
+sak i nästa tur.
 
 Där senare text säger "anropa `X`" betyder det "emittera `planner_action` \
 med motsvarande `kind`". Emittera ALDRIG function calls, skriv ALDRIG \

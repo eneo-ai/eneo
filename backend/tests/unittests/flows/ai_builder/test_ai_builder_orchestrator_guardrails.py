@@ -24,6 +24,7 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
+    ResolvedSlot,
     StepTriple,
 )
 
@@ -124,8 +125,32 @@ def _empty_session_state() -> PlanningState:
     return PlanningState.empty()
 
 
+def _resolved_core_slots() -> dict[str, ResolvedSlot]:
+    return {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="text",
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
+
+
+def _session_state_with_core_slots_resolved() -> PlanningState:
+    state = PlanningState.empty()
+    state.resolved_slots = _resolved_core_slots()
+    return state
+
+
 def _session_state_with_commit(*, step_count: int = 1) -> PlanningState:
     state = PlanningState.empty()
+    state.resolved_slots = _resolved_core_slots()
     state.architecture_commit = ArchitectureCommit(
         tuples_chain=[
             StepTriple(
@@ -307,7 +332,7 @@ class TestCommitArchitecturePrematureGuardrail:
 
     def test_accepts_commit_with_legal_tuple_and_no_unresolved_choices(self) -> None:
         output = parse_planner_output(_commit_architecture())
-        context = _ctx()
+        context = _ctx(session_state=_session_state_with_core_slots_resolved())
 
         assert evaluate_planner_output(output, context) is None
 
@@ -394,13 +419,13 @@ class TestCommitArchitectureUnresolvableCapabilityGuardrail:
                 required_capabilities=["input_text", "output_mode_pass_through"]
             )
         )
-        context = _ctx()
+        context = _ctx(session_state=_session_state_with_core_slots_resolved())
 
         assert evaluate_planner_output(output, context) is None
 
     def test_accepts_commit_with_empty_required_capabilities(self) -> None:
         output = parse_planner_output(_commit_architecture(required_capabilities=[]))
-        context = _ctx()
+        context = _ctx(session_state=_session_state_with_core_slots_resolved())
 
         assert evaluate_planner_output(output, context) is None
 
@@ -430,15 +455,47 @@ class TestCommitArchitectureUnresolvablePatternGuardrail:
         output = parse_planner_output(
             _commit_architecture(chosen_patterns=["summarize_text"])
         )
-        context = _ctx()
+        context = _ctx(session_state=_session_state_with_core_slots_resolved())
 
         assert evaluate_planner_output(output, context) is None
 
-    def test_accepts_commit_with_empty_chosen_patterns(self) -> None:
+    def test_rejects_commit_with_empty_chosen_patterns(self) -> None:
+        """Empty chosen_patterns evades pattern-specific slot enforcement.
+
+        Without this guard, a commit that declares no patterns skips the
+        pattern-required-slot check that otherwise catches a planner
+        committing before required slots resolve. The committed delta also
+        leaves the capability-projection module with nothing to narrow to
+        post-commit.
+        """
         output = parse_planner_output(_commit_architecture(chosen_patterns=[]))
+        context = _ctx(session_state=_session_state_with_core_slots_resolved())
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "architecture_commit_unresolvable_pattern"
+
+    def test_rejects_commit_when_pattern_required_slot_is_unresolved(self) -> None:
+        """Pattern-specific slot enforcement.
+
+        `summarize_text` requires `primary_runtime_input` and
+        `terminal_output` — a commit against an otherwise-empty session
+        should be rejected with the premature-choices code so the planner
+        retry loop knows which slot to resolve next, not dropped by the
+        downstream bridge after an expensive LLM turn.
+        """
+        output = parse_planner_output(
+            _commit_architecture(chosen_patterns=["summarize_text"])
+        )
         context = _ctx()
 
-        assert evaluate_planner_output(output, context) is None
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "architecture_commit_premature_unresolved_choices"
+        assert "primary_runtime_input" in rejection.detail
+        assert "terminal_output" in rejection.detail
 
 
 # ---------------------------------------------------------------------------

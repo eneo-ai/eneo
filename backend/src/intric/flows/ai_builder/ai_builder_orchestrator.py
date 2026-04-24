@@ -12,8 +12,9 @@ Every planner turn emits one JSON product with two halves:
 
 `evaluate_planner_output` runs the monotonicity guardrails and returns a
 `RejectionReason` the planner retry loop can consume, or ``None`` when
-the turn is accepted. Action dispatch + atomic persistence land in later
-slices and import from here.
+the turn is accepted. Action dispatch and atomic persistence are
+caller responsibilities — see `ai_builder_dispatcher` and
+`ai_builder_planner_turn`.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from typing import Annotated, Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
 
+from intric.flows.ai_builder.ai_builder_event_models import KeyDecisionPayload
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
@@ -83,6 +85,13 @@ class CommitArchitecturePayload(_OrchestratorModel):
 
 class ConfirmRequirementsPayload(_OrchestratorModel):
     summary: str
+    key_decisions: list[KeyDecisionPayload] = Field(
+        default_factory=list[KeyDecisionPayload]
+    )
+    input_description: str = ""
+    output_description: str = ""
+    assumptions: list[str] = Field(default_factory=list[str])
+    manual_setup_notes: list[str] = Field(default_factory=list[str])
 
 
 class ProposePlanPayload(_OrchestratorModel):
@@ -314,12 +323,39 @@ def _check_commit_architecture(
                 ),
             )
 
+    if not commit.chosen_patterns:
+        return RejectionReason(
+            code="architecture_commit_unresolvable_pattern",
+            detail=(
+                "commit_architecture must declare at least one chosen_pattern; "
+                "otherwise pattern-specific architectural slots cannot be "
+                "checked and a later pattern-narrowing turn becomes ambiguous"
+            ),
+        )
+
     for pattern_id in commit.chosen_patterns:
         if pattern_id not in PATTERN_REGISTRY:
             return RejectionReason(
                 code="architecture_commit_unresolvable_pattern",
                 detail=(f"chosen pattern {pattern_id!r} is not in PATTERN_REGISTRY"),
             )
+
+    resolved_slot_names = frozenset(context.session_state.resolved_slots.keys())
+    pattern_required_slots = frozenset(
+        slot_name
+        for pattern_id in commit.chosen_patterns
+        for slot_name in PATTERN_REGISTRY[pattern_id].required_architectural_slots
+    )
+    unresolved_pattern_slots = pattern_required_slots - resolved_slot_names
+    if unresolved_pattern_slots:
+        return RejectionReason(
+            code="architecture_commit_premature_unresolved_choices",
+            detail=(
+                "cannot commit architecture while chosen_patterns require "
+                f"slots {sorted(unresolved_pattern_slots)} that are not yet "
+                "resolved in PlanningState.resolved_slots"
+            ),
+        )
     return None
 
 

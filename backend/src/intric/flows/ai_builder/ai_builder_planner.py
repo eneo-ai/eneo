@@ -21,9 +21,13 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_block_message_runtime,
 )
+from intric.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
+)
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE,
     build_error_event,
+    build_requirements_summary_event,
     build_status_event,
     build_text_event,
 )
@@ -60,6 +64,7 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_requirements_state import (
+    build_requirements_version,
     latest_confirmed_requirements,
     resolve_requirements_state,
 )
@@ -761,12 +766,24 @@ class AIBuilderPlanner:
                 telemetry: TurnTelemetry,
             ) -> list[ConversationMessage]:
                 action = accepted.planner_action
+                requirements_metadata: dict[str, Any] | None = None
                 if isinstance(action, AskQuestionAction):
                     assistant_content = action.payload.prompt
                 elif isinstance(action, CommitArchitectureAction):
                     assistant_content = action.payload.note or "Architecture committed."
                 elif isinstance(action, ConfirmRequirementsAction):
                     assistant_content = action.payload.summary
+                    requirements_payload = RequirementsSummaryPayload.model_validate(
+                        action.payload.model_dump()
+                    )
+                    requirements_metadata = {
+                        "requirements_summary": requirements_payload.model_dump(
+                            mode="json"
+                        ),
+                        "requirements_version": build_requirements_version(
+                            requirements_payload
+                        ),
+                    }
                 else:
                     # `ProposePlanAction` is surfaced by `run_planner_turn`
                     # as `propose_plan_pending_adapter` before this builder
@@ -787,6 +804,7 @@ class AIBuilderPlanner:
                         metadata=build_assistant_message_metadata(
                             conversation,
                             planner_telemetry=planner_telemetry,
+                            base_metadata=requirements_metadata,
                         ),
                     ),
                 ]
@@ -937,7 +955,14 @@ class AIBuilderPlanner:
                 elif isinstance(action, CommitArchitectureAction):
                     yield build_status_event("architecture_committed")
                 elif isinstance(action, ConfirmRequirementsAction):
-                    yield build_text_event(action.payload.summary)
+                    confirmed_payload = RequirementsSummaryPayload.model_validate(
+                        action.payload.model_dump()
+                    )
+                    confirmed_data = confirmed_payload.model_dump(mode="json")
+                    confirmed_data["requirements_version"] = build_requirements_version(
+                        confirmed_payload
+                    )
+                    yield build_requirements_summary_event(confirmed_data)
 
             yield {"event": SSE_EVENT_DONE, "data": ""}
         finally:
