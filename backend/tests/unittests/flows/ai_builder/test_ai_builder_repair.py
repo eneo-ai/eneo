@@ -183,6 +183,7 @@ class TestRepairEligibleCodes:
             "propose_plan_without_architecture_commit",
             "propose_plan_missing_draft_plan",
             "propose_plan_draft_plan_structural_mismatch",
+            "architecture_commit_premature_unresolved_choices",
         ],
     )
     async def test_eligible_code_triggers_one_llm_call(self, code: str) -> None:
@@ -246,6 +247,64 @@ class TestRepairPromptShape:
         assert unique_detail in last_message["content"]
         assert rejection.code not in last_message["content"], (
             "rejection code is internal vocabulary; the planner sees detail only"
+        )
+
+    @pytest.mark.asyncio
+    async def test_prompt_for_premature_commit_names_pivot_action(self) -> None:
+        """When commit is rejected as premature because required slots are
+        unresolved, the repair prompt must explicitly tell the LLM the
+        valid next action is `ask_question` — not a re-emission of
+        `commit_architecture` honoring some different constraint.
+
+        Codex review flagged (structural consultation 2026-04-24) that
+        semantic rejections like `architecture_commit_premature_unresolved_choices`
+        need pivot directives: "ask about `X`", not "honor the
+        constraint". Without this, the LLM's only cue is
+        `rejection.detail`, which describes the violation but not the
+        remediation.
+        """
+        from intric.flows.ai_builder.ai_builder_repair import (
+            repair_planner_turn,
+        )
+
+        commit = _make_commit(architecture_hash="a" * 64)
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            _make_planner_output_json(architecture_commit=commit)
+        )
+        rejection = RejectionReason(
+            code="architecture_commit_premature_unresolved_choices",
+            detail=(
+                "cannot commit architecture while unresolved_architectural_choices "
+                "is non-empty: ['primary_runtime_input', 'terminal_output']"
+            ),
+        )
+        await repair_planner_turn(
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            base_messages=[{"role": "system", "content": "system prompt"}],
+            failed_output_json=_make_planner_output_json(architecture_commit=commit),
+            rejection=rejection,
+            prior_architecture_commit=None,
+        )
+        sent_messages = llm.acompletion.await_args.kwargs["messages"]
+        last_message = sent_messages[-1]
+        content = last_message["content"]
+        assert rejection.detail in content, (
+            "repair prompt must still include the full rejection detail so "
+            "the LLM can see which slots are blocking"
+        )
+        assert "ask_question" in content, (
+            "repair prompt must name the valid next action explicitly — "
+            "the LLM should pivot to asking, not re-emit commit_architecture"
+        )
+        lowered = content.lower()
+        assert "commit_architecture" in content and (
+            "inte" in lowered or "do not" in lowered or "not emit" in lowered
+        ), (
+            "repair prompt must forbid a re-emission of commit_architecture "
+            "until the blocking slots are resolved"
         )
 
     @pytest.mark.asyncio

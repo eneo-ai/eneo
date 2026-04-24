@@ -98,13 +98,57 @@ class CompletionMetadata:
 # prompt on top of the same turn context would re-inherit the same
 # misunderstanding. The outer loop handles those by advancing the
 # session to a fresh turn instead.
+#
+# `architecture_commit_premature_unresolved_choices` is eligible
+# because the remediation is an action pivot (commit → ask_question),
+# not a re-emission of the same action honoring a different
+# constraint. The corrective prompt names the pivot target
+# explicitly via `_REPAIR_DIRECTIVES` below.
 _REPAIR_ELIGIBLE_CODES: frozenset[RejectionCode] = frozenset(
     {
         "propose_plan_without_architecture_commit",
         "propose_plan_missing_draft_plan",
         "propose_plan_draft_plan_structural_mismatch",
+        "architecture_commit_premature_unresolved_choices",
     }
 )
+
+
+# Per-code remediation directive. The default directive (used for the
+# `propose_plan_*` codes) reminds the LLM the committed architecture is
+# pinned; the premature-commit directive tells the LLM to pivot to
+# `ask_question` about one of the blocking slots instead of re-emitting
+# `commit_architecture`.
+_PREMATURE_COMMIT_DIRECTIVE: Final[str] = (
+    "The valid next action is `ask_question` about one of the "
+    "unresolved slots named above. Emit `planner_action` with "
+    '`kind="ask_question"` and a `question_id` that targets one of '
+    "those slots. Do NOT emit `commit_architecture` again this turn."
+)
+_PRESERVE_COMMIT_DIRECTIVE: Final[str] = (
+    "Re-emit a planner JSON product that honors the constraint. Do "
+    "NOT change the committed architecture."
+)
+
+
+def _repair_directive_for(code: RejectionCode) -> str:
+    if code == "architecture_commit_premature_unresolved_choices":
+        return _PREMATURE_COMMIT_DIRECTIVE
+    return _PRESERVE_COMMIT_DIRECTIVE
+
+
+def build_repair_user_message(*, rejection: RejectionReason) -> str:
+    """Compose the corrective user-turn for a semantic-rejection repair.
+
+    The repair prompt always echoes `rejection.detail` (never the
+    `code`, which is internal vocabulary) and appends a per-code
+    remediation directive. Extracted as a named function so new
+    eligible codes land in one place with testable prompt text.
+    """
+    return (
+        "The previous response was rejected because: "
+        f"{rejection.detail}. {_repair_directive_for(rejection.code)}"
+    )
 
 
 RepairOutcomeKind = Literal[
@@ -175,12 +219,7 @@ async def repair_planner_turn(
         {"role": "assistant", "content": failed_output_json},
         {
             "role": "user",
-            "content": (
-                "The previous response was rejected because: "
-                f"{rejection.detail}. Re-emit a planner JSON product "
-                "that honors the constraint. Do NOT change the "
-                "committed architecture."
-            ),
+            "content": build_repair_user_message(rejection=rejection),
         },
     ]
 
@@ -386,6 +425,7 @@ __all__ = [
     "ParseRepairOutcome",
     "RepairOutcome",
     "build_parse_repair_user_message",
+    "build_repair_user_message",
     "repair_parse_failure",
     "repair_planner_turn",
 ]
