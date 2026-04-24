@@ -1044,6 +1044,7 @@ class _SessionRowData(TypedDict):
     conversation: list[object]
     active_request_id: UUID | None
     latest_plan_id: UUID | None
+    planning_state_version: int
     created_at: datetime | None
     updated_at: datetime | None
 
@@ -1076,6 +1077,9 @@ def _session_row_data(row: Any) -> _SessionRowData:
             "conversation": conversation,
             "active_request_id": cast(UUID | None, mapping.get("active_request_id")),
             "latest_plan_id": cast(UUID | None, mapping.get("latest_plan_id")),
+            "planning_state_version": int(
+                cast(int, mapping.get("planning_state_version") or 0)
+            ),
             "created_at": cast(datetime | None, mapping.get("created_at")),
             "updated_at": cast(datetime | None, mapping.get("updated_at")),
         }
@@ -1091,6 +1095,9 @@ def _session_row_data(row: Any) -> _SessionRowData:
         "conversation": cast(list[object], row.conversation or []),
         "active_request_id": cast(UUID | None, row.active_request_id),
         "latest_plan_id": cast(UUID | None, row.latest_plan_id),
+        "planning_state_version": int(
+            cast(int, getattr(row, "planning_state_version", 0) or 0)
+        ),
         "created_at": cast(datetime | None, row.created_at),
         "updated_at": cast(datetime | None, row.updated_at),
     }
@@ -1153,6 +1160,7 @@ def _session_from_row(row: Any) -> BuilderSession:
         actor_user_id=data["actor_user_id"],
         conversation=conversation,
         latest_plan_id=data["latest_plan_id"],
+        planning_state_version=data["planning_state_version"],
         created_at=data["created_at"],
         updated_at=data["updated_at"],
     )

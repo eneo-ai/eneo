@@ -5,8 +5,64 @@ def build_role_and_protocol(*, is_edit_mode: bool) -> str:
     submission_tool = "edit_flow" if is_edit_mode else "create_flow"
     draft_noun = "ändringsplan" if is_edit_mode else "typed draft"
     plan_phrase = "ändringarna" if is_edit_mode else "planen"
+    submission_tool_cell = "`edit_flow`" if is_edit_mode else "`create_flow`"
 
     return f"""\
+# Utdataformat — OBLIGATORISKT
+
+Ditt svar MÅSTE vara **ett enda JSON-objekt och ingenting annat** — ingen \
+prosa runt, ingen markdown-kodblock, inga function calls. Exakt schema:
+
+```json
+{{
+  "planning_state_delta": {{
+    "base_planning_state_version": <kopiera aktuellt `base_planning_state_version` från systemkontexten>,
+    "architecture_commit": <populera endast vid kind="commit_architecture">,
+    "draft_plan": <populera endast vid kind="propose_plan">
+  }},
+  "planner_action": {{
+    "kind": "ask_question" | "confirm_requirements" | "commit_architecture" | "propose_plan",
+    "payload": {{ "..." }}
+  }}
+}}
+```
+
+**Mappning från tidigare tool-anropsnamn till `planner_action.kind`** \
+(tidigare delar av denna prompt refererar till tool-namn av historiska \
+skäl — tolka dem som motsvarande planner_action-kind):
+
+| Historiskt namn | planner_action.kind | Payload-fält |
+|---|---|---|
+| `ask_structured_question` | `ask_question` | `question_id`, `slot_name`, `prompt` |
+| `confirm_requirements` | `confirm_requirements` | `summary` |
+| {submission_tool_cell} | `propose_plan` | `plan_reference` (default `"latest"`) |
+
+Där senare text säger "anropa `X`" betyder det "emittera `planner_action` \
+med motsvarande `kind`". Emittera ALDRIG function calls, skriv ALDRIG \
+prosa utanför JSON-objektet, omsluts ALDRIG av ```` ```json ```` \
+kodblock.
+
+**Sekvens för att bygga planen** (gäller EFTER att `confirm_requirements` \
+är godkänd och systemet visar att `architecture_commit` saknas i planer\
+kontexten):
+1. Emittera FÖRST `commit_architecture` med komplett `architecture_commit`\
+-kropp i `planning_state_delta.architecture_commit`. Fält och format:
+   - `tuples_chain`: lista av JSON-OBJEKT (INTE arrayer/tupler), ett per planerat steg i ordning. Varje objekt har EXAKT nycklarna `input_type`, `output_type`, `output_mode`. Exempel:
+     ```json
+     "tuples_chain": [
+       {{"input_type": "text", "output_type": "text", "output_mode": "pass_through"}}
+     ]
+     ```
+     Arrayer som `["text", "text", "pass_through"]` förkastas av parsern ("Input should be a valid dictionary or instance of StepTriple").
+   - `chosen_patterns`: lista av mönster-id från de tillgängliga positiva mönstren.
+   - `required_capabilities`: lista av FCM-kapabilitets-id som planen behöver.
+   - `architecture_hash`: EXAKT 64 tecken, små bokstäver, hex (`[0-9a-f]{{64}}`). Beräkna deterministiskt från `tuples_chain` + `chosen_patterns` + `required_capabilities` (t.ex. SHA-256 över en kanonisk JSON-serialisering) så att samma arkitektur alltid får samma hash.
+   - `committed_at`: ISO-8601-tidsstämpel (t.ex. `2026-04-24T18:35:00Z`).
+2. Emittera DÄREFTER `propose_plan` (vanligen i nästa tur) för att \
+leverera ändrings- eller nystaplingsplanen mot den nyss committade \
+arkitekturen. `propose_plan` utan tidigare commit förkastas av \
+orkestratorn som `propose_plan_without_architecture_commit`.
+
 # Roll
 
 Du är en expert på att bygga AI-flöden i Eneo. Du hjälper användare att skapa \

@@ -149,7 +149,9 @@ async def run_planner_turn(
     flow: "Flow | None",
     base_messages: list[dict[str, Any]],
     orchestration_context: OrchestrationContext,
-    build_new_messages: Callable[[PlannerOutput], "list[ConversationMessage]"],
+    build_new_messages: Callable[
+        [PlannerOutput, TurnTelemetry], "list[ConversationMessage]"
+    ],
     request_id: UUID | None = None,
     lock_token: UUID | None = None,
     telemetry_now_ms: Callable[[], int] | None = None,
@@ -247,7 +249,14 @@ async def run_planner_turn(
             ),
         )
 
-    new_messages = build_new_messages(accepted)
+    dispatched_telemetry = _telemetry(
+        "dispatched",
+        architecture_commit_populated=isinstance(
+            accepted.planner_action, CommitArchitectureAction
+        ),
+    )
+
+    new_messages = build_new_messages(accepted, dispatched_telemetry)
     dispatch_result = await dispatch_planner_action(
         repo=repo,
         session_id=session_id,
@@ -266,12 +275,7 @@ async def run_planner_turn(
         final_completion=pipeline_outcome.final_completion,
         llm_calls_made=pipeline_outcome.llm_calls_made,
         repair_attempts=pipeline_outcome.repair_attempts,
-        turn_telemetry=_telemetry(
-            "dispatched",
-            architecture_commit_populated=isinstance(
-                accepted.planner_action, CommitArchitectureAction
-            ),
-        ),
+        turn_telemetry=dispatched_telemetry,
     )
 
 

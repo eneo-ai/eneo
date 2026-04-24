@@ -271,7 +271,7 @@ async def test_run_planner_turn_persists_commit_architecture_through_real_repo(
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_orchestration_context(),
-            build_new_messages=lambda _a: [
+            build_new_messages=lambda _a, _t: [
                 ConversationMessage(role="user", content="Bind arkitekturen."),
                 ConversationMessage(role="assistant", content="Arkitektur committad."),
             ],
@@ -352,7 +352,7 @@ async def test_run_planner_turn_persists_ask_question_without_commit(
             orchestration_context=_orchestration_context(
                 required_slot_names=frozenset({"primary_runtime_input"})
             ),
-            build_new_messages=lambda _a: [
+            build_new_messages=lambda _a, _t: [
                 ConversationMessage(role="user", content="Vad behöver jag svara på?"),
                 ConversationMessage(
                     role="assistant",
@@ -423,7 +423,7 @@ async def test_run_planner_turn_rejected_outcome_does_not_persist(
             )
         )
 
-        def _fail_if_builder_invoked(_a: Any) -> list[ConversationMessage]:
+        def _fail_if_builder_invoked(_a: Any, _t: Any) -> list[ConversationMessage]:
             raise AssertionError(
                 "rejected outcome must not call the post-accept builder; "
                 "no conversation should be appended"

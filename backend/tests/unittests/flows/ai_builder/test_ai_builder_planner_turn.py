@@ -173,7 +173,7 @@ class TestDispatchedHappyPaths:
             role="assistant", content="assistant turn rendered after accept"
         )
 
-        def _builder(_accepted: Any) -> list[ConversationMessage]:
+        def _builder(_accepted: Any, _telemetry: Any) -> list[ConversationMessage]:
             return [user_message, assistant_message]
 
         result = await run_planner_turn(
@@ -225,7 +225,7 @@ class TestDispatchedHappyPaths:
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(),
-            build_new_messages=lambda _a: [
+            build_new_messages=lambda _a, _t: [
                 ConversationMessage(role="user", content="Gör så")
             ],
         )
@@ -261,7 +261,7 @@ class TestDispatchedHappyPaths:
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(state=state),
-            build_new_messages=lambda _a: [
+            build_new_messages=lambda _a, _t: [
                 ConversationMessage(role="user", content="Ja")
             ],
         )
@@ -293,7 +293,9 @@ class TestDispatchedHappyPaths:
         lock_token = uuid4()
         captured_outputs: list[PlannerOutput] = []
 
-        def _builder(accepted: PlannerOutput) -> list[ConversationMessage]:
+        def _builder(
+            accepted: PlannerOutput, _telemetry: Any
+        ) -> list[ConversationMessage]:
             captured_outputs.append(accepted)
             return [
                 ConversationMessage(role="user", content="trigger"),
@@ -344,7 +346,7 @@ class TestProposePlanPendingAdapter:
             )
         )
 
-        def _should_not_build(_a: Any) -> list[ConversationMessage]:
+        def _should_not_build(_a: Any, _t: Any) -> list[ConversationMessage]:
             raise AssertionError(
                 "propose_plan_pending_adapter must not invoke the builder; "
                 "nothing is persisted on that outcome"
@@ -380,7 +382,7 @@ class TestPipelineRejections:
             _planner_output_json(kind="confirm_requirements", base_version=99)
         )
 
-        def _should_not_build(_a: Any) -> list[ConversationMessage]:
+        def _should_not_build(_a: Any, _t: Any) -> list[ConversationMessage]:
             raise AssertionError(
                 "rejected outcome must not invoke the builder; no persistence"
             )
@@ -418,7 +420,7 @@ class TestPipelineParseFailed:
             completion_tokens=1024,
         )
 
-        def _should_not_build(_a: Any) -> list[ConversationMessage]:
+        def _should_not_build(_a: Any, _t: Any) -> list[ConversationMessage]:
             raise AssertionError(
                 "parse_failed outcome must not invoke the builder; no persistence"
             )
@@ -481,7 +483,7 @@ class TestTurnTelemetry:
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(),
-            build_new_messages=lambda _a: [
+            build_new_messages=lambda _a, _t: [
                 ConversationMessage(role="user", content="Commit")
             ],
             request_id=request_id,
@@ -522,7 +524,7 @@ class TestTurnTelemetry:
             orchestration_context=_ctx(
                 required_slot_names=frozenset({"primary_runtime_input"})
             ),
-            build_new_messages=lambda _a: [
+            build_new_messages=lambda _a, _t: [
                 ConversationMessage(role="user", content="Q")
             ],
         )
@@ -543,7 +545,7 @@ class TestTurnTelemetry:
             total_tokens=240,
         )
 
-        def _should_not_build(_a: Any) -> list[ConversationMessage]:
+        def _should_not_build(_a: Any, _t: Any) -> list[ConversationMessage]:
             raise AssertionError("rejected outcome must not invoke the builder")
 
         result = await run_planner_turn(
@@ -576,7 +578,7 @@ class TestTurnTelemetry:
             completion_tokens=1024,
         )
 
-        def _should_not_build(_a: Any) -> list[ConversationMessage]:
+        def _should_not_build(_a: Any, _t: Any) -> list[ConversationMessage]:
             raise AssertionError("parse_failed outcome must not invoke the builder")
 
         result = await run_planner_turn(
@@ -611,7 +613,7 @@ class TestTurnTelemetry:
             )
         )
 
-        def _should_not_build(_a: Any) -> list[ConversationMessage]:
+        def _should_not_build(_a: Any, _t: Any) -> list[ConversationMessage]:
             raise AssertionError("propose_plan_pending_adapter must not build")
 
         result = await run_planner_turn(
@@ -663,7 +665,7 @@ class TestTurnTelemetry:
             orchestration_context=_ctx(
                 required_slot_names=frozenset({"primary_runtime_input"})
             ),
-            build_new_messages=lambda _a: [
+            build_new_messages=lambda _a, _t: [
                 ConversationMessage(role="user", content="Q")
             ],
             telemetry_now_ms=lambda: next(ticks),
@@ -695,7 +697,7 @@ class TestTurnTelemetry:
             orchestration_context=_ctx(
                 required_slot_names=frozenset({"primary_runtime_input"})
             ),
-            build_new_messages=lambda _a: [
+            build_new_messages=lambda _a, _t: [
                 ConversationMessage(role="user", content="Q")
             ],
             telemetry_now_ms=lambda: next(ticks),

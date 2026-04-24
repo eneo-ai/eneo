@@ -21,16 +21,11 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_block_message_runtime,
 )
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
-    build_edit_mode_tool_schemas,
-)
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE,
-    SSE_EVENT_ERROR,
     build_error_event,
     build_status_event,
     build_text_event,
-    error_payload,
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     infer_question_answer_from_freeform,
@@ -40,6 +35,17 @@ from intric.flows.ai_builder.ai_builder_interaction_utils import (
     looks_like_information_request,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage, SessionStatus
+from intric.flows.ai_builder.ai_builder_orchestrator import (
+    AskQuestionAction,
+    CommitArchitectureAction,
+    ConfirmRequirementsAction,
+    OrchestrationContext,
+    PlannerOutput,
+)
+from intric.flows.ai_builder.ai_builder_planner_turn import (
+    TurnTelemetry,
+    run_planner_turn,
+)
 from intric.flows.ai_builder.ai_builder_prompts import (
     build_available_kbs_context,
     build_available_models_context,
@@ -57,10 +63,6 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
     latest_confirmed_requirements,
     resolve_requirements_state,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
-    AIBuilderResourceCatalog,
-    build_ai_builder_resource_catalog,
-)
 from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
     adjudicate_pending_question_answer,
 )
@@ -70,13 +72,7 @@ from intric.flows.ai_builder.ai_builder_settings import (
 )
 from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
-    build_planner_telemetry,
-)
-from intric.flows.ai_builder.ai_builder_tools import (
-    CONFIRM_REQUIREMENTS_TOOL_NAME,
-    build_all_tool_schemas,
-    build_discovery_complete_tool_schemas,
-    build_free_discovery_tool_schemas,
+    build_planner_telemetry_from_turn,
 )
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import PlanningState
@@ -105,23 +101,26 @@ class PlannerMetadataResolution:
 
 
 @dataclass(frozen=True)
-class PlannerToolSelection:
-    tool_schemas: list[dict[str, Any]]
-    should_force_requirements_summary: bool
-    is_free_discovery: bool
-    should_emit_forced_followup: bool
-
-
-@dataclass(frozen=True)
 class PlannerPreparedRequest:
     requirements_state: Any
     ui_language: str | None
     discovery_block_message: str | None
     llm_messages: list[dict[str, Any]]
-    tool_selection: PlannerToolSelection
-    available_model_refs: set[str] | None
-    available_kb_refs: set[str] | None
-    resource_catalog: AIBuilderResourceCatalog | None
+    # Free-discovery escape valve: when the planner has been in
+    # open-ended discovery for two turns without a structured answer
+    # AND the MVS forced-followup catalog has a priority question
+    # waiting, `send_message` yields the backend-owned followup before
+    # invoking the planner LLM. Computed once per turn alongside the
+    # other prompt-context signals.
+    should_emit_forced_followup: bool
+    # Rebuilt-from-current-conversation planning state — the same one
+    # the capability projection rendered into the system prompt.
+    # `send_message` derives the `OrchestrationContext` slot sets from
+    # this so the model and the orchestrator evaluate against identical
+    # resolved_slots; using the persisted (pre-turn) state here would
+    # reject `commit_architecture` one turn after the user resolved the
+    # last core slot even though the prompt already shows it resolved.
+    rebuilt_planning_state: PlanningState | None = None
 
 
 class AIBuilderPlanner:
@@ -325,62 +324,37 @@ class AIBuilderPlanner:
             used_auxiliary_llm=used_auxiliary_llm,
         )
 
-    def _select_tool_schemas(
+    def _should_emit_forced_followup(
         self,
         *,
         conversation: list[ConversationMessage],
         requirements_confirmed: bool,
         is_requirements_confirmation: bool,
-        user_message: str,
         discovery_block_message: str | None,
         discovery_analysis: Any,
         flow: "Flow | None",
-        is_edit_mode: bool,
-        available_models: list[dict[str, Any]] | None,
-        available_kbs: list[dict[str, Any]] | None,
-    ) -> PlannerToolSelection:
-        mvs_met = discovery_analysis.mvs_met
-        should_force_requirements_summary = (
-            not requirements_confirmed
-            and not is_requirements_confirmation
-            and not looks_like_information_request(user_message)
-            and discovery_block_message is None
-            and mvs_met
-        )
+    ) -> bool:
+        """Arm the backend-owned followup when discovery has stalled.
+
+        Returns ``True`` when the planner has been in open-ended
+        discovery for at least two consecutive turns without a
+        structured answer AND the MVS forced-followup catalog has a
+        priority question waiting. Caller emits the backend-owned
+        followup prior to invoking the planner LLM, short-circuiting
+        another free-discovery turn that the LLM is unlikely to
+        recover from on its own.
+        """
         is_free_discovery = (
             not requirements_confirmed
             and not is_requirements_confirmation
-            and not mvs_met
+            and not discovery_analysis.mvs_met
             and discovery_block_message is None
         )
-        should_emit_forced_followup = (
-            is_free_discovery
-            and _count_free_discovery_turns(conversation) >= 2
-            and _get_mvs_forced_followup(conversation, flow=flow) is not None
-        )
-
-        if should_force_requirements_summary:
-            tool_schemas = build_discovery_complete_tool_schemas()
-        elif is_free_discovery:
-            tool_schemas = build_free_discovery_tool_schemas()
-        elif is_edit_mode and requirements_confirmed:
-            tool_schemas = build_edit_mode_tool_schemas(
-                current_steps=list(flow.steps) if flow is not None else [],
-                available_models=available_models,
-                available_kbs=available_kbs,
-            )
-        else:
-            tool_schemas = build_all_tool_schemas(
-                available_models=available_models,
-                available_kbs=available_kbs,
-            )
-
-        return PlannerToolSelection(
-            tool_schemas=tool_schemas,
-            should_force_requirements_summary=should_force_requirements_summary,
-            is_free_discovery=is_free_discovery,
-            should_emit_forced_followup=should_emit_forced_followup,
-        )
+        if not is_free_discovery:
+            return False
+        if _count_free_discovery_turns(conversation) < 2:
+            return False
+        return _get_mvs_forced_followup(conversation, flow=flow) is not None
 
     async def _prepare_planner_request(
         self,
@@ -400,6 +374,7 @@ class AIBuilderPlanner:
         is_requirements_confirmation: bool,
         allow_discovery_semantic_adjudication: bool = True,
         persisted_planning_state: PlanningState | None = None,
+        base_planning_state_version: int | None = None,
     ) -> PlannerPreparedRequest:
         requirements_state = resolve_requirements_state(conversation)
         has_requirements_summary = requirements_state.latest_summary is not None
@@ -435,10 +410,6 @@ class AIBuilderPlanner:
             else None
         )
         kbs_ctx = build_available_kbs_context(available_kbs) if available_kbs else None
-        resource_catalog = build_ai_builder_resource_catalog(
-            available_models=available_models,
-            available_kbs=available_kbs,
-        )
         clarification_hints = build_clarification_hints(
             conversation=conversation,
             latest_user_message=message,
@@ -473,6 +444,7 @@ class AIBuilderPlanner:
             ),
             planner_hints=clarification_hints,
             planning_state_block=planning_state_block,
+            base_planning_state_version=base_planning_state_version,
             ui_language=ui_language,
             confirmed_requirements=(
                 confirmed_requirements.model_dump(mode="json")
@@ -495,22 +467,14 @@ class AIBuilderPlanner:
             [self.conversation_msg_to_llm_dict(message) for message in conversation],
             max_tokens=conversation_budget,
         )
-        tool_selection = self._select_tool_schemas(
+        should_emit_forced_followup = self._should_emit_forced_followup(
             conversation=conversation,
             requirements_confirmed=requirements_state.confirmed,
             is_requirements_confirmation=is_requirements_confirmation,
-            user_message=message,
             discovery_block_message=discovery_block_message,
             discovery_analysis=discovery_analysis,
             flow=flow,
-            is_edit_mode=is_edit_mode,
-            available_models=available_models,
-            available_kbs=available_kbs,
         )
-        available_model_refs = (
-            {model["ref"] for model in models_ctx} if models_ctx else None
-        )
-        available_kb_refs = {kb["ref"] for kb in kbs_ctx} if kbs_ctx else None
 
         logger.info(
             "AI Builder planner prompt metrics",
@@ -545,10 +509,8 @@ class AIBuilderPlanner:
                 ui_language=ui_language,
                 discovery_block_message=discovery_block_message,
                 llm_messages=[],
-                tool_selection=tool_selection,
-                available_model_refs=available_model_refs,
-                available_kb_refs=available_kb_refs,
-                resource_catalog=resource_catalog,
+                should_emit_forced_followup=should_emit_forced_followup,
+                rebuilt_planning_state=rebuilt_planning_state,
             )
 
         return PlannerPreparedRequest(
@@ -556,10 +518,8 @@ class AIBuilderPlanner:
             ui_language=ui_language,
             discovery_block_message=discovery_block_message,
             llm_messages=[{"role": "system", "content": system_prompt}] + trimmed,
-            tool_selection=tool_selection,
-            available_model_refs=available_model_refs,
-            available_kb_refs=available_kb_refs,
-            resource_catalog=resource_catalog,
+            should_emit_forced_followup=should_emit_forced_followup,
+            rebuilt_planning_state=rebuilt_planning_state,
         )
 
     async def send_message(
@@ -699,6 +659,7 @@ class AIBuilderPlanner:
                 is_requirements_confirmation=is_requirements_confirmation,
                 allow_discovery_semantic_adjudication=not metadata_resolution.used_auxiliary_llm,
                 persisted_planning_state=persisted_planning_state,
+                base_planning_state_version=session.planning_state_version,
             )
             requirements_state = prepared_request.requirements_state
             ui_language = prepared_request.ui_language
@@ -728,9 +689,7 @@ class AIBuilderPlanner:
                 yield {"event": SSE_EVENT_DONE, "data": ""}
                 return
 
-            llm_messages = prepared_request.llm_messages
-            tool_selection = prepared_request.tool_selection
-            if tool_selection.should_emit_forced_followup:
+            if prepared_request.should_emit_forced_followup:
                 for (
                     event
                 ) in await self.proposal_processor.emit_discovery_followup_if_needed(
@@ -748,46 +707,138 @@ class AIBuilderPlanner:
                     yield event
                 yield {"event": SSE_EVENT_DONE, "data": ""}
                 return
-            tool_schemas = tool_selection.tool_schemas
-            should_force_requirements_summary = (
-                tool_selection.should_force_requirements_summary
+
+            # Use the SAME planning state the projection rendered into the
+            # prompt. `persisted_planning_state` is pre-turn; the projection
+            # rebuilds from the current conversation (including the user
+            # message that just landed) and only then carries persisted
+            # planner-owned fields forward. Feeding pre-turn state here
+            # would reject `commit_architecture` one turn after the user
+            # resolved the last core slot — the prompt shows it resolved,
+            # the orchestrator still blocks.
+            session_state = (
+                prepared_request.rebuilt_planning_state
+                or persisted_planning_state
+                or PlanningState.empty()
+            )
+            # `PlanningState.open_questions` is the planner's own "I still
+            # need these answered" list, but no production code path writes
+            # to it today — `build_planning_state_from_conversation` seeds
+            # only the deterministic slot surface and
+            # `carry_forward_persisted_planner_state` preserves
+            # architecture/draft/phase. Until a writer lands, derive the
+            # required-slot surface directly from what IS known: the
+            # positive patterns' declared architectural slots minus what
+            # the deterministic rebuild already resolved.
+            resolved_slot_names = frozenset(session_state.resolved_slots.keys())
+            all_pattern_slots = frozenset(
+                slot_name
+                for pattern in PATTERN_REGISTRY.values()
+                if pattern.polarity == "positive"
+                for slot_name in pattern.required_architectural_slots
+            )
+            # `required_slot_names` is permissive: any slot that any positive
+            # pattern might require is a legitimate target for an
+            # `ask_question`. Once the pattern-scope narrows at commit time,
+            # the post-commit projection takes over.
+            required_slot_names = all_pattern_slots - resolved_slot_names
+            # `unresolved_architectural_choices` is the conservative commit
+            # gate: these minimum pattern-agnostic slots MUST resolve before
+            # any architecture_commit can land. A stricter pattern-specific
+            # gate is follow-up debt — needs a pattern-choice signal we
+            # don't carry pre-commit.
+            core_slots = frozenset({"primary_runtime_input", "terminal_output"})
+            unresolved_core_slots = core_slots - resolved_slot_names
+            orchestration_context = OrchestrationContext(
+                current_version=session.planning_state_version,
+                session_state=session_state,
+                unresolved_architectural_choices=unresolved_core_slots,
+                required_slot_names=required_slot_names,
             )
 
-            try:
-                response = await self.litellm_client.acompletion(
-                    model=litellm_model,
-                    messages=llm_messages,
-                    tools=tool_schemas,
-                    tool_choice=(
-                        {
-                            "type": "function",
-                            "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME},
-                        }
-                        if should_force_requirements_summary
-                        else None
-                    ),
-                    stream=False,
-                    drop_params=True,
-                    max_tokens=max_output_tokens,
-                    temperature=(
-                        self.discovery_temperature
-                        if not requirements_state.confirmed
-                        else self.planner_temperature
-                    ),
-                    **litellm_kwargs,
+            def _build_new_messages(
+                accepted: PlannerOutput,
+                telemetry: TurnTelemetry,
+            ) -> list[ConversationMessage]:
+                action = accepted.planner_action
+                if isinstance(action, AskQuestionAction):
+                    assistant_content = action.payload.prompt
+                elif isinstance(action, CommitArchitectureAction):
+                    assistant_content = action.payload.note or "Architecture committed."
+                elif isinstance(action, ConfirmRequirementsAction):
+                    assistant_content = action.payload.summary
+                else:
+                    # `ProposePlanAction` is surfaced by `run_planner_turn`
+                    # as `propose_plan_pending_adapter` before this builder
+                    # is invoked. Reaching here would be a contract break.
+                    raise AssertionError(
+                        "build_new_messages invoked for unexpected action: "
+                        f"{type(action).__name__}"
+                    )
+                planner_telemetry = build_planner_telemetry_from_turn(
+                    telemetry,
+                    used_auxiliary_llm=metadata_resolution.used_auxiliary_llm,
                 )
-                if lease_lost_event.is_set():
+                return [
+                    *conversation[new_messages_start:],
+                    ConversationMessage(
+                        role="assistant",
+                        content=assistant_content,
+                        metadata=build_assistant_message_metadata(
+                            conversation,
+                            planner_telemetry=planner_telemetry,
+                        ),
+                    ),
+                ]
+
+            try:
+                turn_result = await run_planner_turn(
+                    repo=self.repo,
+                    litellm_client=self.litellm_client,
+                    litellm_model=litellm_model,
+                    litellm_kwargs={
+                        **litellm_kwargs,
+                        "max_tokens": max_output_tokens,
+                        "temperature": (
+                            self.discovery_temperature
+                            if not requirements_state.confirmed
+                            else self.planner_temperature
+                        ),
+                        "response_format": {"type": "json_object"},
+                        # `drop_params=True` lets litellm silently strip
+                        # `response_format` for providers that don't support
+                        # JSON mode, turning an unsupported-param provider
+                        # error into a plain completion the pipeline still
+                        # parses. Without this the v1 fallback path was
+                        # lost.
+                        "drop_params": True,
+                    },
+                    session_id=session_id,
+                    tenant_id=self.user.tenant_id,
+                    flow=flow,
+                    base_messages=prepared_request.llm_messages,
+                    orchestration_context=orchestration_context,
+                    build_new_messages=_build_new_messages,
+                    request_id=request_uuid,
+                    lock_token=lock_token,
+                )
+            except BadRequestException as error:
+                if error.code == "session_send_lease_lost":
                     yield build_error_event(
-                        message="The AI Builder session lock was lost while the planner was running. Please try again.",
+                        message=(
+                            "The AI Builder session lock was lost while the "
+                            "planner was running. Please try again."
+                        ),
                         code="session_send_lease_lost",
                         phase="planner",
                         request_id=request_id,
                     )
                     yield {"event": SSE_EVENT_DONE, "data": ""}
                     return
+                raise
             except Exception as error:
                 logger.error(
-                    "LLM call failed",
+                    "AI Builder planner turn failed",
                     exc_info=error,
                     extra={"request_id": request_id},
                 )
@@ -800,154 +851,93 @@ class AIBuilderPlanner:
                 yield {"event": SSE_EVENT_DONE, "data": ""}
                 return
 
-            choice = response.choices[0]
-            assistant_message = choice.message
-            usage = getattr(response, "usage", None)
-            logger.info(
-                "AI Builder planner completion metrics",
-                extra={
-                    "prompt_tokens": getattr(usage, "prompt_tokens", None),
-                    "completion_tokens": getattr(usage, "completion_tokens", None),
-                    "total_tokens": getattr(usage, "total_tokens", None),
-                    "finish_reason": getattr(choice, "finish_reason", None),
-                    "tool_call_count": (
-                        len(assistant_message.tool_calls)
-                        if hasattr(assistant_message, "tool_calls")
-                        and assistant_message.tool_calls
-                        else 0
+            if lease_lost_event.is_set():
+                yield build_error_event(
+                    message=(
+                        "The AI Builder session lock was lost while the planner "
+                        "was running. Please try again."
                     ),
+                    code="session_send_lease_lost",
+                    phase="planner",
+                    request_id=request_id,
+                )
+                yield {"event": SSE_EVENT_DONE, "data": ""}
+                return
+
+            logger.info(
+                "AI Builder planner turn metrics",
+                extra={
+                    "outcome_kind": turn_result.kind,
+                    "llm_calls_made": turn_result.llm_calls_made,
+                    "repair_attempts": turn_result.repair_attempts,
+                    "architecture_commit_populated": (
+                        turn_result.turn_telemetry.architecture_commit_populated
+                    ),
+                    "wall_clock_ms": turn_result.turn_telemetry.wall_clock_ms,
+                    "prompt_tokens": turn_result.turn_telemetry.prompt_tokens,
+                    "completion_tokens": (turn_result.turn_telemetry.completion_tokens),
+                    "total_tokens": turn_result.turn_telemetry.total_tokens,
+                    "finish_reason": turn_result.turn_telemetry.finish_reason,
+                    "request_id": request_id,
                 },
             )
-            planner_telemetry = build_planner_telemetry(
-                request_id=request_id,
-                model=litellm_model,
-                finish_reason=getattr(choice, "finish_reason", None),
-                prompt_tokens=getattr(usage, "prompt_tokens", None),
-                completion_tokens=getattr(usage, "completion_tokens", None),
-                total_tokens=getattr(usage, "total_tokens", None),
-                tool_call_count=(
-                    len(assistant_message.tool_calls)
-                    if hasattr(assistant_message, "tool_calls")
-                    and assistant_message.tool_calls
-                    else 0
-                ),
-                used_auxiliary_llm=metadata_resolution.used_auxiliary_llm,
-            )
 
-            if getattr(choice, "finish_reason", None) == "length":
-                logger.warning(
-                    "LLM response truncated (finish_reason=length) — "
-                    f"max_tokens={max_output_tokens} may be too low for this model"
-                )
-                yield {
-                    "event": SSE_EVENT_ERROR,
-                    "data": error_payload(
+            if turn_result.kind == "parse_failed":
+                completion = turn_result.final_completion
+                if completion is not None and completion.finish_reason == "length":
+                    logger.warning(
+                        "LLM response truncated (finish_reason=length) — "
+                        f"max_tokens={max_output_tokens} may be too low for this model"
+                    )
+                    yield build_error_event(
                         message=(
-                            "The flow was too complex for the current model's output limit. "
-                            "Try simplifying the flow or using a more capable model."
+                            "The flow was too complex for the current model's "
+                            "output limit. Try simplifying the flow or using a "
+                            "more capable model."
                         ),
                         code="planner_output_too_long",
                         phase="planner",
                         request_id=request_id,
-                    ),
-                }
-                yield {"event": SSE_EVENT_DONE, "data": ""}
-                return
-
-            if (
-                hasattr(assistant_message, "tool_calls")
-                and assistant_message.tool_calls
-            ):
-                async for event in self.proposal_processor.handle_tool_call(
-                    session_id=session_id,
-                    conversation=conversation,
-                    new_messages_start=new_messages_start,
-                    tool_calls=assistant_message.tool_calls,
-                    text_content=assistant_message.content,
-                    assistant_metadata=build_assistant_message_metadata(
-                        conversation,
-                        planner_telemetry=planner_telemetry,
-                        tool_calls=assistant_message.tool_calls,
-                    ),
-                    llm_messages=llm_messages,
-                    tool_schemas=tool_schemas,
-                    litellm_model=litellm_model,
-                    litellm_kwargs=litellm_kwargs,
-                    available_model_refs=prepared_request.available_model_refs,
-                    available_kb_refs=prepared_request.available_kb_refs,
-                    resource_catalog=prepared_request.resource_catalog,
-                    max_output_tokens=max_output_tokens,
-                    request_id=request_id,
-                    lease_request_id=request_uuid,
-                    lease_lock_token=lock_token,
-                    flow=flow,
-                    assistant_snapshots=assistant_snapshots,
-                ):
-                    yield event
-                if lease_lost_event.is_set():
+                    )
+                else:
                     yield build_error_event(
-                        message="The AI Builder session lock was lost while tool processing was running. Please try again.",
-                        code="session_send_lease_lost",
+                        message=(
+                            "The AI planner response could not be parsed. "
+                            "Please try again."
+                        ),
+                        code="planner_parse_error",
                         phase="planner",
                         request_id=request_id,
                     )
-                    yield {"event": SSE_EVENT_DONE, "data": ""}
-                    return
-            elif assistant_message.content:
-                # During discovery (before requirements confirmed), don't force proposals —
-                # let the LLM ask questions freely in text form.
-                requirements_confirmed = requirements_state.confirmed
-                should_force_proposal = (
-                    requirements_confirmed
-                    and not looks_like_information_request(assistant_message.content)
+            elif turn_result.kind == "rejected":
+                yield build_error_event(
+                    message=(
+                        "The AI planner's output violated an orchestrator "
+                        "invariant and was rejected. Please try again."
+                    ),
+                    code="planner_rejected",
+                    phase="planner",
+                    request_id=request_id,
                 )
-                if should_force_proposal:
-                    yield build_status_event("finalizing_plan")
-                    forced_plan = (
-                        await self.proposal_processor.retry_forced_proposal_after_text(
-                            correction_messages=llm_messages,
-                            assistant_text=assistant_message.content,
-                            tool_schemas=tool_schemas,
-                            litellm_model=litellm_model,
-                            litellm_kwargs=litellm_kwargs,
-                            session_id=session_id,
-                            conversation=conversation,
-                            new_messages_start=new_messages_start,
-                            available_model_refs=prepared_request.available_model_refs,
-                            available_kb_refs=prepared_request.available_kb_refs,
-                            resource_catalog=prepared_request.resource_catalog,
-                            max_output_tokens=max_output_tokens,
-                            flow=flow,
-                            assistant_snapshots=assistant_snapshots,
-                            lease_request_id=request_uuid,
-                            lease_lock_token=lock_token,
-                        )
-                    )
-                    if forced_plan is not None:
-                        yield build_text_event(assistant_message.content)
-                        yield forced_plan
-                        yield {"event": SSE_EVENT_DONE, "data": ""}
-                        return
-
-                conversation.append(
-                    ConversationMessage(
-                        role="assistant",
-                        content=assistant_message.content,
-                        metadata=build_assistant_message_metadata(
-                            conversation,
-                            planner_telemetry=planner_telemetry,
-                        ),
-                    )
+            elif turn_result.kind == "propose_plan_pending_adapter":
+                yield build_error_event(
+                    message=(
+                        "Plan proposal requires the materialization adapter, "
+                        "which is not yet available. Please try again shortly."
+                    ),
+                    code="propose_plan_adapter_unavailable",
+                    phase="planner",
+                    request_id=request_id,
                 )
-                await self.repo.commit_turn(
-                    session_id=session_id,
-                    tenant_id=self.user.tenant_id,
-                    new_messages=conversation[new_messages_start:],
-                    flow=flow,
-                    request_id=request_uuid,
-                    lock_token=lock_token,
-                )
-                yield build_text_event(assistant_message.content)
+            elif turn_result.kind == "dispatched":
+                assert turn_result.accepted_output is not None
+                action = turn_result.accepted_output.planner_action
+                if isinstance(action, AskQuestionAction):
+                    yield build_text_event(action.payload.prompt)
+                elif isinstance(action, CommitArchitectureAction):
+                    yield build_status_event("architecture_committed")
+                elif isinstance(action, ConfirmRequirementsAction):
+                    yield build_text_event(action.payload.summary)
 
             yield {"event": SSE_EVENT_DONE, "data": ""}
         finally:

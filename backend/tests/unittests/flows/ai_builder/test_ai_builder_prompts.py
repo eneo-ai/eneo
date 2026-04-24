@@ -197,6 +197,24 @@ class TestBuildSystemPrompt:
         assert "edit_flow" in prompt
         assert CREATE_FLOW_TOOL_NAME not in prompt
 
+    def test_prompt_teaches_tuples_chain_as_object_not_array(self) -> None:
+        """`tuples_chain` entries must be JSON objects, not arrays.
+
+        `planning_state.StepTriple` is a Pydantic model — a positional
+        array like `["text", "text", "pass_through"]` fails parse. The
+        protocol block must name the three object keys explicitly and
+        warn against the array shape, otherwise the model emits an
+        array and every commit_architecture turn terminally rejects
+        on parse.
+        """
+        prompt = build_system_prompt()
+
+        assert '"input_type"' in prompt
+        assert '"output_type"' in prompt
+        assert '"output_mode"' in prompt
+        assert "INTE arrayer/tupler" in prompt
+        assert "StepTriple" in prompt
+
     def test_prompt_with_flow_context(self) -> None:
         flow = _make_flow(
             name="Tjänsteskrivelse",

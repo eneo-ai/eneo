@@ -87,6 +87,7 @@ def build_system_prompt(
     attachment_context: str | None = None,
     planner_hints: str | None = None,
     planning_state_block: str | None = None,
+    base_planning_state_version: int | None = None,
     ui_language: str | None = None,
     confirmed_requirements: dict[str, Any] | None = None,
     is_edit_mode: bool = False,
@@ -105,6 +106,17 @@ def build_system_prompt(
     sections.insert(2, build_framework_guardrails_block())
     if planning_state_block:
         sections.append(planning_state_block)
+    if base_planning_state_version is not None:
+        # The Utdataformat section in build_role_and_protocol tells the
+        # model to copy `base_planning_state_version` from system context;
+        # without this block the model has no source for the integer and
+        # guesses, which terminally rejects as `version_mismatch`.
+        sections.append(
+            "## Session-version kontrakt\n\n"
+            f"`base_planning_state_version` för denna tur = `{base_planning_state_version}`. "
+            "Kopiera EXAKT detta värde in i "
+            "`planning_state_delta.base_planning_state_version`."
+        )
 
     if confirmed_requirements and not is_edit_mode:
         full_create_recipes = render_knowledge_pack_create_recipes()

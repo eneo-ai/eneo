@@ -9,10 +9,7 @@ import pytest
 
 from intric.files.file_models import File, FileType
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_planner import (
-    AIBuilderPlanner,
-    PlannerToolSelection,
-)
+from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
@@ -198,9 +195,18 @@ async def test_resolve_message_metadata_infers_final_output_answer_from_structur
     }
 
 
-def test_select_tool_schemas_marks_forced_followup_after_free_discovery_turn_limit() -> (
+def test_should_emit_forced_followup_arms_after_two_free_discovery_turns_with_catalog_hit() -> (
     None
 ):
+    """Backend-owned followup arms only when three conditions line up.
+
+    Free discovery (requirements not confirmed, MVS not met, no
+    discovery block) PLUS the last two assistant messages were free
+    discovery without a structured answer PLUS the MVS forced-followup
+    catalog has a priority question waiting. Any one of those missing
+    and `send_message` must defer to the planner LLM instead of
+    short-circuiting with a backend question.
+    """
     planner = _make_planner()
     conversation = [
         ConversationMessage(
@@ -211,46 +217,30 @@ def test_select_tool_schemas_marks_forced_followup_after_free_discovery_turn_lim
         ),
     ]
 
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner._get_mvs_forced_followup",
-            return_value="forced followup",
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_free_discovery_tool_schemas",
-            return_value=[{"function": {"name": "ask_structured_question"}}],
-        ),
+    with patch(
+        "intric.flows.ai_builder.ai_builder_planner._get_mvs_forced_followup",
+        return_value="forced followup",
     ):
-        result = planner._select_tool_schemas(
+        armed = planner._should_emit_forced_followup(
             conversation=conversation,
             requirements_confirmed=False,
             is_requirements_confirmation=False,
-            user_message="I need a flow",
             discovery_block_message=None,
             discovery_analysis=SimpleNamespace(mvs_met=False),
             flow=None,
-            is_edit_mode=False,
-            available_models=None,
-            available_kbs=None,
         )
 
-    assert result.is_free_discovery is True
-    assert result.should_force_requirements_summary is False
-    assert result.should_emit_forced_followup is True
+    assert armed is True
 
 
 @pytest.mark.asyncio
-async def test_prepare_planner_request_collects_refs_and_tool_selection() -> None:
+async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_header() -> (
+    None
+):
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
     discovery_analysis = SimpleNamespace(mvs_met=True)
-    tool_selection = PlannerToolSelection(
-        tool_schemas=[{"function": {"name": "confirm_requirements"}}],
-        should_force_requirements_summary=True,
-        is_free_discovery=False,
-        should_emit_forced_followup=False,
-    )
 
     with (
         patch(
@@ -278,7 +268,6 @@ async def test_prepare_planner_request_collects_refs_and_tool_selection() -> Non
             "intric.flows.ai_builder.ai_builder_planner.trim_conversation_for_context",
             return_value=[{"role": "user", "content": "Build a flow"}],
         ),
-        patch.object(planner, "_select_tool_schemas", return_value=tool_selection),
     ):
         prepared = await planner._prepare_planner_request(
             conversation=conversation,
@@ -300,9 +289,7 @@ async def test_prepare_planner_request_collects_refs_and_tool_selection() -> Non
         )
 
     assert prepared.requirements_state is requirements_state
-    assert prepared.tool_selection is tool_selection
-    assert prepared.available_model_refs == {"model-a"}
-    assert prepared.available_kb_refs == {"kb-a"}
+    assert prepared.should_emit_forced_followup is False
     assert prepared.llm_messages[0] == {"role": "system", "content": "system prompt"}
 
 
@@ -314,12 +301,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
     conversation = [ConversationMessage(role="user", content="Build from this file")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
     discovery_analysis = SimpleNamespace(mvs_met=True)
-    tool_selection = PlannerToolSelection(
-        tool_schemas=[{"function": {"name": "confirm_requirements"}}],
-        should_force_requirements_summary=False,
-        is_free_discovery=False,
-        should_emit_forced_followup=False,
-    )
 
     with (
         patch(
@@ -356,7 +337,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
             "intric.flows.ai_builder.ai_builder_planner.trim_conversation_for_context",
             return_value=[{"role": "user", "content": "Build from this file"}],
         ),
-        patch.object(planner, "_select_tool_schemas", return_value=tool_selection),
     ):
         await planner._prepare_planner_request(
             conversation=conversation,
@@ -393,12 +373,6 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
     discovery_analysis = SimpleNamespace(mvs_met=True)
-    tool_selection = PlannerToolSelection(
-        tool_schemas=[{"function": {"name": "confirm_requirements"}}],
-        should_force_requirements_summary=False,
-        is_free_discovery=False,
-        should_emit_forced_followup=False,
-    )
 
     with (
         patch(
@@ -426,7 +400,6 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
             "intric.flows.ai_builder.ai_builder_planner.trim_conversation_for_context",
             return_value=[{"role": "user", "content": "Build a flow"}],
         ),
-        patch.object(planner, "_select_tool_schemas", return_value=tool_selection),
     ):
         await planner._prepare_planner_request(
             conversation=conversation,
@@ -458,12 +431,6 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
     discovery_analysis = SimpleNamespace(mvs_met=True)
-    tool_selection = PlannerToolSelection(
-        tool_schemas=[{"function": {"name": "confirm_requirements"}}],
-        should_force_requirements_summary=False,
-        is_free_discovery=False,
-        should_emit_forced_followup=False,
-    )
 
     with (
         patch(
@@ -491,7 +458,6 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
             "intric.flows.ai_builder.ai_builder_planner.trim_conversation_for_context",
             return_value=[{"role": "user", "content": "Build a flow"}],
         ),
-        patch.object(planner, "_select_tool_schemas", return_value=tool_selection),
         patch("intric.flows.ai_builder.ai_builder_planner.logger.info") as logger_info,
     ):
         await planner._prepare_planner_request(
@@ -527,12 +493,6 @@ async def test_prepare_planner_request_projects_pre_commit_into_system_prompt() 
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
     discovery_analysis = SimpleNamespace(mvs_met=True)
-    tool_selection = PlannerToolSelection(
-        tool_schemas=[{"function": {"name": "confirm_requirements"}}],
-        should_force_requirements_summary=False,
-        is_free_discovery=False,
-        should_emit_forced_followup=False,
-    )
 
     with (
         patch(
@@ -560,7 +520,6 @@ async def test_prepare_planner_request_projects_pre_commit_into_system_prompt() 
             "intric.flows.ai_builder.ai_builder_planner.trim_conversation_for_context",
             return_value=[{"role": "user", "content": "Build a flow"}],
         ),
-        patch.object(planner, "_select_tool_schemas", return_value=tool_selection),
     ):
         await planner._prepare_planner_request(
             conversation=conversation,
@@ -610,12 +569,6 @@ async def test_prepare_planner_request_carries_forward_persisted_commit_into_pro
     conversation = [ConversationMessage(role="user", content="Refine step 1")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
     discovery_analysis = SimpleNamespace(mvs_met=True)
-    tool_selection = PlannerToolSelection(
-        tool_schemas=[{"function": {"name": "ask_structured_question"}}],
-        should_force_requirements_summary=False,
-        is_free_discovery=False,
-        should_emit_forced_followup=False,
-    )
     committed_hash = "b" * 64
     persisted = PlanningState.empty()
     persisted.architecture_commit = ArchitectureCommit(
@@ -658,7 +611,6 @@ async def test_prepare_planner_request_carries_forward_persisted_commit_into_pro
             "intric.flows.ai_builder.ai_builder_planner.trim_conversation_for_context",
             return_value=[{"role": "user", "content": "Refine step 1"}],
         ),
-        patch.object(planner, "_select_tool_schemas", return_value=tool_selection),
     ):
         await planner._prepare_planner_request(
             conversation=conversation,
