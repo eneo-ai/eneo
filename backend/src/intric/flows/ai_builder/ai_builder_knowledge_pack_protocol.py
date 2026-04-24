@@ -63,6 +63,32 @@ Emittera ALDRIG bara `summary` — utan de övriga fälten kan systemet \
 inte markera kraven som bekräftade och du kommer att fråga om samma \
 sak i nästa tur.
 
+**`propose_plan`-kontrakt (exakt layout):** När du emitterar \
+`propose_plan` gäller den här fullständiga shapen — `plan_reference` \
+hör hemma i `planner_action.payload`, ALDRIG i \
+`planning_state_delta.draft_plan`. `draft_plan` har exakt tre \
+deklarerade nycklar: `plan_id`, `steps`, `form_fields`. Ingen annan \
+nyckel accepteras av parsern.
+
+```json
+{{
+  "planning_state_delta": {{
+    "base_planning_state_version": <kopiera aktuellt värde>,
+    "draft_plan": {{
+      "plan_id": null,
+      "steps": [],
+      "form_fields": []
+    }}
+  }},
+  "planner_action": {{
+    "kind": "propose_plan",
+    "payload": {{
+      "plan_reference": "latest"
+    }}
+  }}
+}}
+```
+
 Där senare text säger "anropa `X`" betyder det "emittera `planner_action` \
 med motsvarande `kind`". Emittera ALDRIG function calls, skriv ALDRIG \
 prosa utanför JSON-objektet, omsluts ALDRIG av ```` ```json ```` \

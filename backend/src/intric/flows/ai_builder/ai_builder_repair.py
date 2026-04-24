@@ -246,6 +246,32 @@ class ParseRepairOutcome:
     parse_failure_diagnostics: dict[str, Any] | None = None
 
 
+def build_parse_repair_user_message(*, parse_error_message: str) -> str:
+    """Compose the corrective user-turn for a parse-repair retry.
+
+    Extracted to keep the prompt text testable and to land one place
+    where layout reminders for observed confusion patterns
+    accumulate. Today the reminder targets the `plan_reference` vs
+    `draft_plan` confusion — an LLM repeatedly emitted
+    `planning_state_delta.draft_plan.plan_reference` despite the
+    system prompt declaring the correct home, so parse-repair
+    explicitly names the right location. Future repeated confusions
+    land here with the same pattern (named field, named correct
+    location, "NEVER" + named wrong location).
+    """
+    return (
+        "The previous response could not be parsed as a PlannerOutput "
+        f"JSON object. Parser error: {parse_error_message}. Re-emit the "
+        "response as a single raw JSON object matching the "
+        "PlannerOutput schema. Do NOT wrap the JSON in markdown code "
+        "fences. Do NOT add prose before or after the JSON. Do NOT "
+        "invent keys not declared in the schema. Reminder: "
+        "`plan_reference` belongs in `planner_action.payload` when "
+        "`kind` is `propose_plan`; it is NEVER a field of "
+        "`planning_state_delta.draft_plan`."
+    )
+
+
 async def repair_parse_failure(
     *,
     litellm_client: Any,
@@ -276,14 +302,8 @@ async def repair_parse_failure(
         {"role": "assistant", "content": failed_output_raw},
         {
             "role": "user",
-            "content": (
-                "The previous response could not be parsed as a "
-                "PlannerOutput JSON object. Parser error: "
-                f"{parse_error_message}. Re-emit the response as a "
-                "single raw JSON object matching the PlannerOutput "
-                "schema. Do NOT wrap the JSON in markdown code fences. "
-                "Do NOT add prose before or after the JSON. Do NOT "
-                "invent keys not declared in the schema."
+            "content": build_parse_repair_user_message(
+                parse_error_message=parse_error_message,
             ),
         },
     ]
@@ -362,6 +382,7 @@ __all__ = [
     "CompletionMetadata",
     "ParseRepairOutcome",
     "RepairOutcome",
+    "build_parse_repair_user_message",
     "repair_parse_failure",
     "repair_planner_turn",
 ]
