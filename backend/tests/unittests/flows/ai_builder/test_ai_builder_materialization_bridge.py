@@ -13,27 +13,55 @@ contract the bridge exposes to its callers:
 - on success the bridge emits a pair: the canonical
   ``FlowDraftSpecCore`` and the already-compiled ``FlowChangeSet`` so
   consumers skip re-compilation
+- materialize spans every positive archetype in the Pattern Registry,
+  not just ``summarize_text`` — per-pattern parameterized coverage
+  guards against any future archetype drift that would silently break
+  the general-purpose builder contract
+- the bridge hands off to ``compile_changeset`` for its final output,
+  so the modify/delete routing an edit-path caller expects is pinned
+  at the bridge's seam even while the edit-mode entry point is still
+  under construction
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 from unittest.mock import create_autospec
 from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_domain_models import PlannerPlanEnvelope
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    AssistantSpec,
+    InputSource,
+    InputType,
+    MCPPolicy,
+    OutputMode,
+    OutputType,
+    PlannerPlanEnvelope,
+    StepSpec,
+)
 from intric.flows.ai_builder.ai_builder_materialization_bridge import (
     MaterializationError,
     MaterializedDraft,
     apply_to_draft,
     materialize,
 )
+from intric.flows.ai_builder.ai_builder_materializer import compile_changeset
 from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore
 from intric.flows.ai_builder.ai_builder_orchestrator import DraftPlanEnvelope
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import ArchitectureCommit, StepTriple
+from intric.flows.domain.flow import Flow, FlowStep
+from intric.flows.enums import (
+    FlowInputSource,
+    FlowInputType,
+    FlowMcpPolicy,
+    FlowOutputMode,
+    FlowOutputType,
+)
 
 _FIXED_COMMIT_TIMESTAMP = datetime(2026, 4, 23, 12, 0, tzinfo=timezone.utc)
 
@@ -651,3 +679,644 @@ class TestPublicSurface:
         assert hasattr(bridge, "MaterializationError")
         assert hasattr(bridge, "MaterializedDraft")
         assert issubclass(bridge.MaterializationError, ValueError)
+
+
+# ---------------------------------------------------------------------------
+# Per-archetype coverage
+# ---------------------------------------------------------------------------
+
+
+def _archetype_case(
+    *,
+    pattern_id: str,
+    tuples_chain: list[StepTriple],
+    envelope_steps: list[dict[str, Any]],
+    envelope_form_fields: list[dict[str, Any]] | None = None,
+    expected_assistants_to_create: int,
+    expected_output_modes: list[str],
+) -> dict[str, Any]:
+    """Bundle the per-pattern fixture so the parametrize table is readable.
+
+    The bridge asserts each returned field against the compiled spec /
+    changeset, so the fixture is the ground truth for what ``materialize``
+    is expected to produce for this archetype shape.
+    """
+    return {
+        "pattern_id": pattern_id,
+        "tuples_chain": tuples_chain,
+        "envelope_steps": envelope_steps,
+        "envelope_form_fields": envelope_form_fields or [],
+        "expected_assistants_to_create": expected_assistants_to_create,
+        "expected_output_modes": expected_output_modes,
+    }
+
+
+_ARCHETYPE_CASES: tuple[dict[str, Any], ...] = (
+    # summarize_text — the single-archetype baseline the other
+    # bridge contract tests already exercise, restated here so the
+    # registry coverage set is complete.
+    _archetype_case(
+        pattern_id="summarize_text",
+        tuples_chain=[
+            StepTriple(
+                input_type="text", output_type="text", output_mode="pass_through"
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Sammanfatta texten",
+                "instructions": "Skriv en kort sammanfattning av texten.",
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_type": "text",
+            },
+        ],
+        expected_assistants_to_create=1,
+        expected_output_modes=["pass_through"],
+    ),
+    # extract_structured_fields — text → json → pass_through with
+    # structured output_fields. output_fields are what turn a text/json
+    # step into a working structured-extraction flow.
+    _archetype_case(
+        pattern_id="extract_structured_fields",
+        tuples_chain=[
+            StepTriple(
+                input_type="text", output_type="json", output_mode="pass_through"
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Extrahera fält",
+                "instructions": "Extrahera namn och datum från texten.",
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_type": "json",
+                "output_fields": [
+                    {
+                        "name": "customer_name",
+                        "field_type": "string",
+                        "description": "Kundens namn.",
+                    },
+                    {
+                        "name": "issued_at",
+                        "field_type": "string",
+                        "description": "Utfärdandedatum.",
+                    },
+                ],
+            },
+        ],
+        expected_assistants_to_create=1,
+        expected_output_modes=["pass_through"],
+    ),
+    # document_to_structured_report — document → text with runtime_upload
+    # declared on the first step (the create validator rejects document
+    # flow_input without runtime_upload).
+    _archetype_case(
+        pattern_id="document_to_structured_report",
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="text",
+                output_mode="pass_through",
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Rapport från dokument",
+                "instructions": "Sammanfatta dokumentet som en strukturerad rapport.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "text",
+                "runtime_upload": True,
+            },
+        ],
+        expected_assistants_to_create=1,
+        expected_output_modes=["pass_through"],
+    ),
+    # document_to_docx_template — canonical 3-step chain ending in
+    # template_fill. The final step flips document_delivery_mode to
+    # "template_fill" so the compiler derives OutputMode.TEMPLATE_FILL.
+    _archetype_case(
+        pattern_id="document_to_docx_template",
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="json",
+                output_mode="pass_through",
+            ),
+            StepTriple(
+                input_type="json", output_type="text", output_mode="pass_through"
+            ),
+            StepTriple(
+                input_type="text", output_type="docx", output_mode="template_fill"
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Läs in dokument",
+                "instructions": "Läs in dokumentet och extrahera nyckelvärden.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "json",
+                "runtime_upload": True,
+                "output_fields": [
+                    {
+                        "name": "reference_id",
+                        "field_type": "string",
+                        "description": "Referensnummer.",
+                    },
+                ],
+            },
+            {
+                "name": "Skriv brödtext",
+                "instructions": "Förbered den text som ska fyllas i mallen.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+            },
+            {
+                "name": "Fyll DOCX-mall",
+                "instructions": "Fyll i DOCX-mallen med brödtexten.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "docx",
+                "document_delivery_mode": "template_fill",
+            },
+        ],
+        expected_assistants_to_create=3,
+        expected_output_modes=["pass_through", "pass_through", "template_fill"],
+    ),
+    # document_to_pdf_report — document → pdf → pass_through, single
+    # step, runtime_upload required.
+    _archetype_case(
+        pattern_id="document_to_pdf_report",
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="pdf",
+                output_mode="pass_through",
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "PDF-rapport",
+                "instructions": "Producera en strukturerad PDF-rapport.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "pdf",
+                "runtime_upload": True,
+            },
+        ],
+        expected_assistants_to_create=1,
+        expected_output_modes=["pass_through"],
+    ),
+    # audio_transcription — audio → text derives transcribe_only
+    # unconditionally; runtime_upload required for audio flow_input.
+    _archetype_case(
+        pattern_id="audio_transcription",
+        tuples_chain=[
+            StepTriple(
+                input_type="audio",
+                output_type="text",
+                output_mode="transcribe_only",
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Transkribera ljud",
+                "instructions": "Transkribera inspelningen till text.",
+                "input_source": "flow_input",
+                "input_type": "audio",
+                "output_type": "text",
+                "runtime_upload": True,
+            },
+        ],
+        expected_assistants_to_create=1,
+        expected_output_modes=["transcribe_only"],
+    ),
+    # multi_step_quality_chain — 4-step chain: document intake, JSON
+    # extraction, text review, text terminal. Each step explicitly
+    # declares its tuple so the bridge's tuple-authoritative contract
+    # is exercised end-to-end.
+    _archetype_case(
+        pattern_id="multi_step_quality_chain",
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="json",
+                output_mode="pass_through",
+            ),
+            StepTriple(
+                input_type="json", output_type="text", output_mode="pass_through"
+            ),
+            StepTriple(
+                input_type="text", output_type="text", output_mode="pass_through"
+            ),
+            StepTriple(
+                input_type="text", output_type="text", output_mode="pass_through"
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Extrahera struktur",
+                "instructions": "Extrahera strukturerade fält från dokumentet.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "json",
+                "runtime_upload": True,
+                "output_fields": [
+                    {
+                        "name": "topic",
+                        "field_type": "string",
+                        "description": "Huvudämnet i dokumentet.",
+                    },
+                ],
+            },
+            {
+                "name": "Skriv utkast",
+                "instructions": "Skapa ett första utkast baserat på extraktionen.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+            },
+            {
+                "name": "Granska kvalitet",
+                "instructions": "Granska utkastet och föreslå förbättringar.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "text",
+            },
+            {
+                "name": "Slutresultat",
+                "instructions": "Producera den slutgiltiga texten.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "text",
+            },
+        ],
+        expected_assistants_to_create=4,
+        expected_output_modes=[
+            "pass_through",
+            "pass_through",
+            "pass_through",
+            "pass_through",
+        ],
+    ),
+    # comparison — single-step realization over a document input. The
+    # pattern's multi-document variant routes additional inputs through
+    # form_fields; the bridge just needs to not reject the shape here —
+    # the richer multi-input composition is exercised by the goldens
+    # coverage matrix.
+    _archetype_case(
+        pattern_id="comparison",
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="text",
+                output_mode="pass_through",
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Jämför dokument",
+                "instructions": "Jämför dokumentet mot de angivna referenserna.",
+                "input_source": "flow_input",
+                "input_type": "document",
+                "output_type": "text",
+                "runtime_upload": True,
+            },
+        ],
+        expected_assistants_to_create=1,
+        expected_output_modes=["pass_through"],
+    ),
+    # sectioned_form_intake — 2-step chain. Step 1 captures rubric text
+    # via uses_form_fields, step 2 composes the sections into the final
+    # output. Requires flow-level form_fields to resolve the references.
+    _archetype_case(
+        pattern_id="sectioned_form_intake",
+        tuples_chain=[
+            StepTriple(
+                input_type="text", output_type="text", output_mode="pass_through"
+            ),
+            StepTriple(
+                input_type="text", output_type="text", output_mode="pass_through"
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Fånga sektioner",
+                "instructions": "Ta in rubriktext för varje angiven sektion.",
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_type": "text",
+                "uses_form_fields": ["bakgrund", "analys"],
+            },
+            {
+                "name": "Komponera resultat",
+                "instructions": "Sammanställ sektionerna till ett slutresultat.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "text",
+            },
+        ],
+        envelope_form_fields=[
+            {
+                "variable_name": "bakgrund",
+                "label": "Bakgrund",
+                "field_type": "text",
+                "required": True,
+            },
+            {
+                "variable_name": "analys",
+                "label": "Analys",
+                "field_type": "text",
+                "required": True,
+            },
+        ],
+        expected_assistants_to_create=2,
+        expected_output_modes=["pass_through", "pass_through"],
+    ),
+    # form_field_runtime_inputs — text/text/pass_through single step
+    # where the runtime variables live entirely on flow-level form_fields
+    # and step 1 references them via uses_form_fields.
+    _archetype_case(
+        pattern_id="form_field_runtime_inputs",
+        tuples_chain=[
+            StepTriple(
+                input_type="text", output_type="text", output_mode="pass_through"
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Generera svar",
+                "instructions": "Svara med utgångspunkt från formulärfälten.",
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_type": "text",
+                "uses_form_fields": ["reference_id", "owning_unit"],
+            },
+        ],
+        envelope_form_fields=[
+            {
+                "variable_name": "reference_id",
+                "label": "Referens-ID",
+                "field_type": "text",
+                "required": True,
+            },
+            {
+                "variable_name": "owning_unit",
+                "label": "Ansvarig enhet",
+                "field_type": "text",
+                "required": False,
+            },
+        ],
+        expected_assistants_to_create=1,
+        expected_output_modes=["pass_through"],
+    ),
+)
+
+
+class TestArchetypeCoverage:
+    """Per-archetype coverage that the bridge materialises every positive
+    pattern in the Pattern Registry.
+
+    The rest of this file's contract tests exercise
+    ``summarize_text`` only. A future archetype drift (e.g. the
+    compiler stops deriving ``transcribe_only`` for audio, or a new
+    pattern lands without a matching envelope shape) would not fail
+    the single-archetype suite. This parameterized case set keeps the
+    general-purpose builder contract in view: every registered
+    positive pattern has a known-good fixture that round-trips
+    through the bridge.
+    """
+
+    def test_every_positive_pattern_has_a_fixture(self) -> None:
+        """Structural guard: if a positive pattern lands in the registry
+        without a corresponding case here, the archetype set goes stale
+        silently and new shapes ride into production untested.
+        """
+        positive_registry_ids = {
+            pattern.id
+            for pattern in PATTERN_REGISTRY.values()
+            if pattern.polarity == "positive"
+        }
+        covered_ids = {case["pattern_id"] for case in _ARCHETYPE_CASES}
+        missing = positive_registry_ids - covered_ids
+        assert not missing, (
+            "Every positive pattern in PATTERN_REGISTRY must have a coverage "
+            f"case in _ARCHETYPE_CASES; missing: {sorted(missing)}"
+        )
+        unknown = covered_ids - positive_registry_ids
+        assert not unknown, (
+            "_ARCHETYPE_CASES references patterns absent from the registry: "
+            f"{sorted(unknown)}"
+        )
+
+    @pytest.mark.parametrize(
+        "case",
+        _ARCHETYPE_CASES,
+        ids=[case["pattern_id"] for case in _ARCHETYPE_CASES],
+    )
+    def test_archetype_materializes_through_bridge(self, case: dict[str, Any]) -> None:
+        commit = _architecture_commit(
+            tuples_chain=case["tuples_chain"],
+            chosen_patterns=[case["pattern_id"]],
+            required_capabilities=[case["pattern_id"]],
+        )
+        envelope = DraftPlanEnvelope(
+            plan_id=f"plan_{case['pattern_id']}",
+            steps=case["envelope_steps"],
+            form_fields=case["envelope_form_fields"],
+        )
+
+        result = materialize(
+            architecture_commit=commit,
+            draft_plan=envelope,
+            flow_name=f"{case['pattern_id']} flow",
+            flow_description=f"Archetype coverage fixture for {case['pattern_id']}.",
+            plan_rationale=f"Canonical {case['pattern_id']} realisation.",
+        )
+
+        assert isinstance(result, MaterializedDraft)
+        assert isinstance(result.spec, FlowDraftSpecCore)
+        assert len(result.spec.steps) == len(case["envelope_steps"])
+        for step_index, expected_mode in enumerate(case["expected_output_modes"]):
+            assert result.spec.steps[step_index].output_mode.value == expected_mode, (
+                f"{case['pattern_id']} step[{step_index}] output_mode "
+                f"{result.spec.steps[step_index].output_mode.value!r} did not "
+                f"match expected {expected_mode!r}"
+            )
+        assert (
+            len(result.changeset.assistants_to_create)
+            == case["expected_assistants_to_create"]
+        )
+        assert not result.changeset.assistants_to_update
+        assert not result.changeset.assistants_to_delete
+
+
+# ---------------------------------------------------------------------------
+# Edit-mode delegation contract
+# ---------------------------------------------------------------------------
+
+
+def _edit_step_spec(
+    *,
+    plan_step_ref: str,
+    name: str,
+    existing_step_ref: str | None = None,
+    input_source: InputSource = InputSource.FLOW_INPUT,
+) -> StepSpec:
+    return StepSpec(
+        plan_step_ref=plan_step_ref,
+        existing_step_ref=existing_step_ref,
+        name=name,
+        assistant_spec=AssistantSpec(instructions=f"{name} instructions."),
+        mcp_policy=MCPPolicy.INHERIT,
+        input_source=input_source,
+        input_type=InputType.TEXT,
+        output_mode=OutputMode.PASS_THROUGH,
+        output_type=OutputType.TEXT,
+    )
+
+
+def _edit_flow_step(*, step_order: int) -> FlowStep:
+    return FlowStep(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        assistant_id=uuid4(),
+        step_order=step_order,
+        user_description=f"Existing step {step_order}",
+        input_source=FlowInputSource.FLOW_INPUT
+        if step_order == 1
+        else FlowInputSource.PREVIOUS_STEP,
+        input_type=FlowInputType.TEXT,
+        output_mode=FlowOutputMode.PASS_THROUGH,
+        output_type=FlowOutputType.TEXT,
+        mcp_policy=FlowMcpPolicy.INHERIT,
+    )
+
+
+def _edit_flow(*, step_orders: list[int]) -> Flow:
+    return Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Existing flow",
+        steps=[_edit_flow_step(step_order=order) for order in step_orders],
+    )
+
+
+class TestBridgeEditModeDelegation:
+    """Edit-mode tests with a real ``current_flow`` fixture exercise the
+    modify / delete paths the bridge ultimately hands off to through
+    ``compile_changeset``.
+
+    ``materialize`` is create-only today: it always invokes
+    ``compile_changeset(spec, current_flow=None)``. The edit-mode entry
+    point is a follow-up slice and will dispatch on ``target_kind``.
+    These tests pin the compile-changeset delegation contract at the
+    bridge's seam so that when edit-mode materialisation lands, the
+    downstream routing (modified → ``assistants_to_update``, unreferenced
+    existing step → ``assistants_to_delete``, mixed → both) already has
+    regression coverage the bridge can rely on.
+    """
+
+    def test_modify_routes_into_assistants_to_update(self) -> None:
+        """A spec step whose ``existing_step_ref`` matches an existing
+        ``step_order`` must route to the update lane — not create a
+        second step with the same semantics and not silently fall back
+        to create-mode.
+        """
+        spec = FlowDraftSpecCore(
+            flow_name="Edit modify",
+            flow_description="",
+            steps=[
+                _edit_step_spec(
+                    plan_step_ref="step_a",
+                    name="Updated step",
+                    existing_step_ref="existing_step_1",
+                ),
+            ],
+        )
+        current_flow = _edit_flow(step_orders=[1])
+
+        changeset = compile_changeset(spec, current_flow)
+
+        assert len(changeset.assistants_to_update) == 1
+        assert not changeset.assistants_to_create
+        assert not changeset.assistants_to_delete
+        assert len(changeset.compiled_steps) == 1
+        assert changeset.compiled_steps[0].change_kind.value == "modified"
+
+    def test_unreferenced_existing_step_routes_into_assistants_to_delete(
+        self,
+    ) -> None:
+        """Existing steps the new spec does not reference must land in
+        the delete lane. Without this, a user who removes a step via the
+        builder would see it persist as an orphan assistant.
+        """
+        spec = FlowDraftSpecCore(
+            flow_name="Edit delete",
+            flow_description="",
+            steps=[
+                _edit_step_spec(
+                    plan_step_ref="step_a",
+                    name="Only remaining step",
+                    existing_step_ref="existing_step_1",
+                ),
+            ],
+        )
+        current_flow = _edit_flow(step_orders=[1, 2])
+
+        changeset = compile_changeset(spec, current_flow)
+
+        assert len(changeset.assistants_to_update) == 1
+        assert not changeset.assistants_to_create
+        assert len(changeset.assistants_to_delete) == 1
+        # The delete targets the unreferenced existing_step_2.
+        deleted_ids = {
+            entry.step_id for entry in changeset.assistants_to_delete if entry.step_id
+        }
+        existing_ids = {step.id for step in current_flow.steps if step.step_order == 2}
+        assert deleted_ids == existing_ids
+
+    def test_mixed_add_modify_delete_produces_all_three_lanes(self) -> None:
+        """The canonical edit shape: insert a new step, modify one
+        existing, delete one existing. All three lanes populate in a
+        single compile pass — the contract the bridge will delegate to
+        once edit-mode materialisation lands.
+        """
+        spec = FlowDraftSpecCore(
+            flow_name="Edit mixed",
+            flow_description="",
+            steps=[
+                _edit_step_spec(
+                    plan_step_ref="step_a",
+                    name="Brand-new first step",
+                ),
+                _edit_step_spec(
+                    plan_step_ref="step_b",
+                    name="Modified middle step",
+                    existing_step_ref="existing_step_2",
+                    input_source=InputSource.PREVIOUS_STEP,
+                ),
+            ],
+        )
+        current_flow = _edit_flow(step_orders=[1, 2, 3])
+
+        changeset = compile_changeset(spec, current_flow)
+
+        assert len(changeset.assistants_to_create) == 1
+        assert len(changeset.assistants_to_update) == 1
+        # Existing steps 1 and 3 are unreferenced → deleted.
+        assert len(changeset.assistants_to_delete) == 2
+        deleted_orders = {
+            step.step_order
+            for step in current_flow.steps
+            if step.id in {entry.step_id for entry in changeset.assistants_to_delete}
+        }
+        assert deleted_orders == {1, 3}
+        # Compiled steps keep the spec order: ADD then MODIFY.
+        kinds = [step.change_kind.value for step in changeset.compiled_steps]
+        assert kinds == ["added", "modified"]
