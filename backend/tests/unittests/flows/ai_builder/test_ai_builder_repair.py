@@ -344,10 +344,16 @@ class TestCommitDriftBlocked:
         assert "architecture_hash" in outcome.drift_rejection.detail
 
     @pytest.mark.asyncio
-    async def test_dropping_commit_after_prior_commit_blocks_repair(self) -> None:
-        """If the prior turn had a commit and the repaired output no
-        longer carries one, the planner attempted to abandon the
-        committed architecture — same drift class."""
+    async def test_dropping_commit_after_prior_commit_is_preservation_by_absence(
+        self,
+    ) -> None:
+        """The knowledge-pack protocol tells the planner to populate
+        ``architecture_commit`` only on ``commit_architecture`` turns.
+        A repaired ``propose_plan`` may leave the delta commit ``None``
+        and rely on the pinned commit carried in ``session_state``;
+        that matches the evaluator's preservation-by-absence semantics
+        and the repair helper must not flag it as drift.
+        """
         from intric.flows.ai_builder.ai_builder_repair import (
             repair_planner_turn,
         )
@@ -370,9 +376,10 @@ class TestCommitDriftBlocked:
             rejection=rejection,
             prior_architecture_commit=prior,
         )
-        assert outcome.kind == "commit_drift_blocked"
-        assert outcome.drift_rejection is not None
-        assert outcome.drift_rejection.code == "repair_attempted_commit_drift"
+        assert outcome.kind == "repaired"
+        assert outcome.repaired_output is not None
+        assert outcome.repaired_output.planning_state_delta.architecture_commit is None
+        assert outcome.drift_rejection is None
 
     @pytest.mark.asyncio
     async def test_matching_hash_with_mutated_body_is_blocked_as_drift(self) -> None:

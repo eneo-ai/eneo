@@ -221,13 +221,22 @@ def _detect_commit_drift(
     prior: ArchitectureCommit | None,
     after: ArchitectureCommit | None,
 ) -> RejectionReason | None:
-    """Return a drift rejection if the repaired commit is not the prior.
+    """Return a drift rejection if the repaired commit mutates the prior.
 
-    Delegates the invariant check to
-    `assert_architecture_commit_unchanged`; the exception message
-    already names the offending field(s), so we forward it as the
-    `RejectionReason.detail` the outer loop surfaces to telemetry.
+    Matches the evaluator's preservation-by-absence semantics: when a
+    prior commit is pinned and the repaired delta omits
+    `architecture_commit`, that is not drift — the knowledge-pack
+    protocol teaches the planner to populate `architecture_commit` only
+    on `commit_architecture` turns, so a repaired `propose_plan` is
+    allowed (and expected) to leave the field ``None``. Only when the
+    repaired output carries a delta commit do we invoke
+    `assert_architecture_commit_unchanged` and classify hash or body
+    divergence as drift. The exception message already names the
+    offending field(s), so we forward it as the `RejectionReason.detail`
+    the outer loop surfaces to telemetry.
     """
+    if after is None:
+        return None
     try:
         assert_architecture_commit_unchanged(before=prior, after=after)
     except CommitDriftError as exc:

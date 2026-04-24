@@ -241,7 +241,6 @@ class TestRepairLoop:
         second_response = _llm_response(
             _planner_output_json(
                 kind="propose_plan",
-                architecture_commit=commit,
                 draft_plan=_single_step_draft_plan(),
             )
         )
@@ -258,6 +257,7 @@ class TestRepairLoop:
         assert outcome.kind == "accepted"
         assert outcome.accepted_output is not None
         assert outcome.accepted_output.planner_action.kind == "propose_plan"
+        assert outcome.accepted_output.planning_state_delta.architecture_commit is None
         assert outcome.llm_calls_made == 2
         assert outcome.repair_attempts == 1
 
@@ -492,7 +492,6 @@ class TestCompletionMetadataThreading:
         second = _llm_response(
             _planner_output_json(
                 kind="propose_plan",
-                architecture_commit=commit,
                 draft_plan=_single_step_draft_plan(),
             ),
             finish_reason="length",
