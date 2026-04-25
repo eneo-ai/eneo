@@ -63,6 +63,7 @@ _TRAILING_CONTEXT_RE = re.compile(
     r"\s*(?:vid körning|vid korning|at runtime|runtime)$",
     re.IGNORECASE,
 )
+_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 _GENERIC_FIELD_LABELS = {
     "field",
     "fields",
@@ -74,9 +75,78 @@ _GENERIC_FIELD_LABELS = {
     "input fields",
     "metadata",
 }
+_NEGATION_TOKENS = frozenset(
+    {
+        "inga",
+        "ingen",
+        "inget",
+        "inte",
+        "no",
+        "not",
+        "none",
+        "utan",
+        "without",
+    }
+)
+_OPTIONAL_SCOPE_TOKENS = frozenset(
+    {
+        "additional",
+        "extra",
+        "sekundara",
+        "sekundära",
+        "secondary",
+    }
+)
+_ABSENCE_PREDICATE_TOKENS = frozenset(
+    {
+        "behovs",
+        "behövs",
+        "kravs",
+        "krävs",
+        "needed",
+        "required",
+    }
+)
+
+
+def runtime_input_fields_declared_absent(text: str) -> bool:
+    """Return true when the user explicitly says no secondary fields are needed.
+
+    This is intentionally about polarity near the generic runtime-field concept,
+    not about domain-specific words. It prevents phrases such as "no extra input
+    fields needed" from being parsed as a request for a field named "needed".
+    """
+
+    tokens = normalize_discovery_text(text).split()
+    if not tokens:
+        return False
+
+    trigger_polarities: list[tuple[int, bool]] = []
+    for trigger in _RUNTIME_FIELD_TRIGGERS:
+        trigger_tokens = normalize_discovery_text(trigger).split()
+        if not trigger_tokens:
+            continue
+        for start_index in _find_token_sequence_indexes(tokens, trigger_tokens):
+            before = tokens[max(0, start_index - 4) : start_index]
+            after_start = start_index + len(trigger_tokens)
+            after = tokens[after_start : after_start + 4]
+            trigger_polarities.append(
+                (
+                    start_index,
+                    _field_trigger_has_absence_polarity(
+                        before=before,
+                        after=after,
+                    ),
+                )
+            )
+    if not trigger_polarities:
+        return False
+    return max(trigger_polarities, key=lambda item: item[0])[1]
 
 
 def runtime_input_fields_requested(text: str) -> bool:
+    if runtime_input_fields_declared_absent(text):
+        return False
     return contains_any_phrase(normalize_discovery_text(text), _RUNTIME_FIELD_TRIGGERS)
 
 
@@ -100,7 +170,21 @@ def extract_runtime_input_field_hints(text: str) -> tuple[RuntimeInputFieldHint,
     return tuple(hints)
 
 
+def extract_runtime_input_field_hints_for_metadata_state(
+    text: str,
+    *,
+    runtime_metadata_state: str | None,
+) -> tuple[RuntimeInputFieldHint, ...]:
+    """Extract field hints only when the server policy allows secondary fields."""
+
+    if runtime_metadata_state == "no_extra_metadata":
+        return ()
+    return extract_runtime_input_field_hints(text)
+
+
 def infer_runtime_metadata_slot(text: str) -> str | None:
+    if runtime_input_fields_declared_absent(text):
+        return "no_extra_metadata"
     if extract_runtime_input_field_hints(text):
         return "detailed_case_metadata"
     if runtime_input_fields_requested(text):
@@ -108,19 +192,75 @@ def infer_runtime_metadata_slot(text: str) -> str | None:
     return None
 
 
+def _find_token_sequence_indexes(
+    tokens: list[str],
+    sequence: list[str],
+) -> tuple[int, ...]:
+    last_start = len(tokens) - len(sequence)
+    if last_start < 0:
+        return ()
+    indexes: list[int] = []
+    for index in range(last_start + 1):
+        if tokens[index : index + len(sequence)] == sequence:
+            indexes.append(index)
+    return tuple(indexes)
+
+
+def _field_trigger_has_absence_polarity(
+    *,
+    before: list[str],
+    after: list[str],
+) -> bool:
+    negated = any(token in _NEGATION_TOKENS for token in before)
+    if not negated:
+        return False
+    if not after:
+        return True
+    if any(token in {"utan", "without"} for token in before):
+        return True
+    if any(token in _OPTIONAL_SCOPE_TOKENS for token in before):
+        return True
+    if any(token in {"utan", "without"} for token in after):
+        return True
+    return any(token in _ABSENCE_PREDICATE_TOKENS for token in after)
+
+
+def _clause_starts_with_absence_predicate(clause: str) -> bool:
+    tokens = normalize_discovery_text(clause).split()
+    return bool(tokens) and tokens[0] in _ABSENCE_PREDICATE_TOKENS
+
+
 def _candidate_field_clauses(text: str) -> tuple[str, ...]:
-    lower_text = text.casefold()
     clauses: list[str] = []
-    for trigger in _RUNTIME_FIELD_TRIGGERS:
-        trigger_index = lower_text.find(trigger.casefold())
-        if trigger_index < 0:
-            continue
-        start = trigger_index + len(trigger)
+    for start in _trigger_end_char_indexes(text):
         window = text[start : start + 180]
         clause = _truncate_at_boundary(_LEADING_CONNECTOR_RE.sub("", window))
-        if clause:
+        if clause and not _clause_starts_with_absence_predicate(clause):
             clauses.append(clause)
     return tuple(clauses)
+
+
+def _trigger_end_char_indexes(text: str) -> tuple[int, ...]:
+    token_spans = _normalized_token_spans(text)
+    tokens = [token for token, _, _ in token_spans]
+    indexes: set[int] = set()
+    for trigger in _RUNTIME_FIELD_TRIGGERS:
+        trigger_tokens = normalize_discovery_text(trigger).split()
+        if not trigger_tokens:
+            continue
+        for start_index in _find_token_sequence_indexes(tokens, trigger_tokens):
+            end_index = start_index + len(trigger_tokens) - 1
+            indexes.add(token_spans[end_index][2])
+    return tuple(sorted(indexes))
+
+
+def _normalized_token_spans(text: str) -> tuple[tuple[str, int, int], ...]:
+    spans: list[tuple[str, int, int]] = []
+    for match in _TOKEN_RE.finditer(text):
+        normalized = normalize_discovery_text(match.group(0))
+        if normalized:
+            spans.append((normalized, match.start(), match.end()))
+    return tuple(spans)
 
 
 def _truncate_at_boundary(value: str) -> str:
@@ -157,6 +297,8 @@ def _is_useful_label(label: str) -> bool:
         return False
     normalized = normalize_discovery_text(label)
     if normalized in _GENERIC_FIELD_LABELS:
+        return False
+    if normalized in _ABSENCE_PREDICATE_TOKENS:
         return False
     return len(normalized.split()) <= 4 and len(label) <= 48
 

@@ -211,6 +211,41 @@ class TestAddBeforeExistingStep:
         assert step.assistant_spec.instructions == "Transkribera ljudfilen ordagrant."
 
 
+def test_edit_compiler_ignores_form_field_that_shadows_primary_text_input():
+    existing = [
+        _make_flow_step(
+            step_order=1,
+            user_description="Analyze text",
+            input_source="flow_input",
+            input_type="text",
+        )
+    ]
+    draft = FlowEditDraft(
+        operations=[],
+        form_operations=[
+            FormFieldOperation(
+                op="add",
+                field_name="text",
+                field_payload=EditFormFieldSpec(
+                    label="Text",
+                    field_type="text",
+                    required=True,
+                ),
+            )
+        ],
+    )
+
+    result = compile_edit_draft(draft, existing, base_flow_revision=1)
+
+    assert result.compiled_spec.form_fields is None
+    assert result.diff.form_changes == []
+    assert any(
+        advisory.code == "form_field_shadows_primary_input"
+        and advisory.field == "form_fields"
+        for advisory in result.advisories
+    )
+
+
 class TestUntouchedStepsPreserved:
     def test_modify_one_step_preserves_others(self):
         existing = [

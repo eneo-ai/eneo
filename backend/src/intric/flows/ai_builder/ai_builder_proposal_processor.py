@@ -111,7 +111,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     format_resource_resolution_feedback,
 )
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
-    extract_runtime_input_field_hints,
+    extract_runtime_input_field_hints_for_metadata_state,
 )
 from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
@@ -273,8 +273,11 @@ class AIBuilderProposalProcessor:
     ) -> ToolProcessingResult:
         try:
             outline = parse_outline_flow_arguments(arguments)
-            runtime_input_field_hints = extract_runtime_input_field_hints(
-                aggregate_freeform_user_text(conversation)
+            runtime_input_field_hints = (
+                extract_runtime_input_field_hints_for_metadata_state(
+                    aggregate_freeform_user_text(conversation),
+                    runtime_metadata_state=_runtime_metadata_state(planning_state),
+                )
             )
             compile_context = outline_compile_context_from_planning_state(
                 planning_state,
@@ -1962,6 +1965,13 @@ def _extract_description_provenance(
 
 def _active_submission_tool_name(flow: "Flow | None") -> str:
     return EDIT_FLOW_TOOL_NAME if flow is not None else OUTLINE_FLOW_TOOL_NAME
+
+
+def _runtime_metadata_state(planning_state: PlanningState | None) -> str | None:
+    if planning_state is None:
+        return None
+    slot = planning_state.resolved_slots.get("runtime_metadata_fields")
+    return slot.value if slot is not None else None
 
 
 def _active_submission_tool_schemas(

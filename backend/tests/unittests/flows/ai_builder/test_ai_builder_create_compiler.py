@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from intric.flows.ai_builder.ai_builder_architecture_commit import (
@@ -1037,6 +1039,151 @@ def test_compile_outline_flow_adds_server_derived_runtime_field_hints() -> None:
     assert compiled.steps[-1].input_bindings == {
         "question": "{{ indata_text }}\n\naudience: {{ audience }}\n"
         "detail_level: {{ detail_level }}"
+    }
+    assert validation.valid
+
+
+def test_compile_outline_flow_drops_field_that_shadows_primary_text_input(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Customer reply",
+            "plan_rationale": "Classify the request before drafting an answer.",
+            "input_fields": [
+                {
+                    "variable_name": "text",
+                    "label": "Text",
+                    "field_type": "text",
+                    "required": True,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Classify request",
+                    "task": "Classify the incoming customer request.",
+                    "output_fields": [
+                        {
+                            "name": "category",
+                            "field_type": "string",
+                            "description": "Request category.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft reply",
+                    "task": "Draft a concise reply based on the classification.",
+                    "output_type": "text",
+                    "uses_input_fields": ["text"],
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="intric.flows.ai_builder.ai_builder_create_outline",
+    ):
+        draft = compile_outline_to_create_draft(
+            outline,
+            context=outline_compile_context_from_planning_state(state),
+        )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    shadow_records = [
+        record
+        for record in caplog.records
+        if record.message == "ai_builder_primary_input_shadow_fields_dropped"
+    ]
+    assert shadow_records
+    assert getattr(shadow_records[0], "field_names") == ["text"]
+    assert getattr(shadow_records[0], "runtime_input_type") == "text"
+    assert draft.form_fields == []
+    assert draft.steps[1].uses_form_fields == []
+    assert draft.steps[1].input_type.value == "json"
+    assert compiled.form_fields is None
+    assert compiled.steps[1].input_bindings is None
+    assert validation.valid
+
+
+def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audience aware reply",
+            "plan_rationale": "Classify the request and adapt the response.",
+            "input_fields": [
+                {
+                    "variable_name": "audience",
+                    "label": "Audience",
+                    "field_type": "text",
+                    "required": False,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Classify request",
+                    "task": "Classify the incoming customer request.",
+                    "output_fields": [
+                        {
+                            "name": "category",
+                            "field_type": "string",
+                            "description": "Request category.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft reply",
+                    "task": "Draft a concise reply for the selected audience.",
+                    "output_type": "text",
+                    "uses_input_fields": ["audience"],
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [field.variable_name for field in draft.form_fields] == ["audience"]
+    assert draft.steps[1].uses_form_fields == ["audience"]
+    assert compiled.form_fields is not None
+    assert compiled.steps[1].input_bindings == {
+        "question": "{{ step_a.output.structured }}\n\naudience: {{ audience }}"
     }
     assert validation.valid
 

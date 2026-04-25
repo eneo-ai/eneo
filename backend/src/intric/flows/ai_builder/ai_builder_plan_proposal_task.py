@@ -26,7 +26,8 @@ def build_plan_proposal_system_prompt(
     create_mode_rules = (
         [
             "- In create mode, describe semantic flow intent in outline_flow; do not choose Flow mechanics.",
-            "- Use input_fields for inmatningsfält/input variables the user fills in at runtime.",
+            "- Use input_fields only for secondary inmatningsfält/input variables the user fills in at runtime.",
+            "- Do not add an input_field for the primary text, document, file, or audio material being processed; the backend supplies that from the committed architecture.",
             "- The backend compiles step topology, underlag/input_bindings, runtime uploads, step refs, output modes, and document delivery.",
         ]
         if not is_edit_mode

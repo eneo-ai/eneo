@@ -47,6 +47,11 @@ from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     default_previous_field_label,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from intric.flows.ai_builder.ai_builder_primary_input_fields import (
+    is_primary_runtime_input_shadow_field,
+    remove_primary_runtime_input_shadow_names,
+    split_primary_runtime_input_shadow_names,
+)
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     StepNormalizationChange,
     normalize_ai_builder_spec,
@@ -88,6 +93,8 @@ def compile_edit_draft(
     removed_refs: set[str] = set()
     modified_refs: dict[str, StepPatch] = {}
     warnings: list[str] = []
+    primary_runtime_input_type = _primary_runtime_input_type_from_steps(current_steps)
+    shadowed_primary_input_fields: list[str] = []
 
     # Process operations in order
     for op in edit_draft.operations:
@@ -104,9 +111,14 @@ def compile_edit_draft(
         plan_ref = f"step_{chr(ord('a') + i)}" if i < 26 else f"step_{i + 1}"
 
         if isinstance(item, NewStepDraft):
+            step_draft, dropped_field_names = _without_primary_runtime_shadow_fields(
+                item,
+                primary_runtime_input_type=primary_runtime_input_type,
+            )
+            shadowed_primary_input_fields.extend(dropped_field_names)
             compiled_steps.append(
                 compile_new_step_draft(
-                    step_draft=item,
+                    step_draft=step_draft,
                     step_index=i,
                     prior_steps=compiled_steps,
                 )
@@ -120,6 +132,7 @@ def compile_edit_draft(
                     patch,
                     assistant_snapshots=assistant_snapshots,
                     current_steps=current_steps,
+                    primary_runtime_input_type=primary_runtime_input_type,
                 )
             )
 
@@ -139,10 +152,12 @@ def compile_edit_draft(
     )
     compiled_steps = normalized_spec.steps
 
-    compiled_form_fields, form_changes = _compile_form_fields(
+    compiled_form_fields, form_changes, dropped_form_field_names = _compile_form_fields(
         edit_draft,
         current_metadata_json=current_metadata_json,
+        primary_runtime_input_type=primary_runtime_input_type,
     )
+    shadowed_primary_input_fields.extend(dropped_form_field_names)
 
     # Resolve flow name/description — no regex mutation, just pass-through
     final_name = normalized_spec.flow_name
@@ -165,6 +180,12 @@ def compile_edit_draft(
             current_steps=current_steps,
             compiled_steps=compiled_steps,
             current_description=flow_description,
+        )
+    )
+    advisories.extend(
+        _build_primary_input_shadow_advisories(
+            field_names=shadowed_primary_input_fields,
+            primary_runtime_input_type=primary_runtime_input_type,
         )
     )
 
@@ -278,6 +299,7 @@ def _flow_step_to_spec(
     *,
     assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     current_steps: list[FlowStep] | None = None,
+    primary_runtime_input_type: InputType | None = None,
 ) -> StepSpec:
     """Convert an existing FlowStep to a StepSpec, applying patch if present."""
     name = step.user_description or f"Step {step.step_order}"
@@ -327,6 +349,10 @@ def _flow_step_to_spec(
             "uses_previous_fields" in patch.model_fields_set
             or "uses_form_fields" in patch.model_fields_set
         ):
+            uses_form_fields = remove_primary_runtime_input_shadow_names(
+                field_names=patch.uses_form_fields or [],
+                runtime_input_type=primary_runtime_input_type,
+            )
             target_step = spec.model_copy(
                 update={
                     "input_source": updates.get("input_source", spec.input_source),
@@ -336,7 +362,7 @@ def _flow_step_to_spec(
             compiled_bindings = _compile_patch_input_bindings(
                 target_step=target_step,
                 uses_previous_fields=patch.uses_previous_fields or [],
-                uses_form_fields=patch.uses_form_fields or [],
+                uses_form_fields=uses_form_fields,
                 current_steps=current_steps or [],
             )
             updates["input_bindings"] = compiled_bindings
@@ -347,7 +373,7 @@ def _flow_step_to_spec(
                 )
                 hint = _compile_patch_input_instruction_hint(
                     uses_previous_fields=patch.uses_previous_fields or [],
-                    uses_form_fields=patch.uses_form_fields or [],
+                    uses_form_fields=uses_form_fields,
                 )
                 if hint:
                     updates["assistant_spec"] = assistant_spec.model_copy(
@@ -620,6 +646,29 @@ def _build_description_advisories(
     ]
 
 
+def _build_primary_input_shadow_advisories(
+    *,
+    field_names: list[str],
+    primary_runtime_input_type: InputType | None,
+) -> list[EditAdvisory]:
+    unique_names = sorted(set(field_names))
+    if not unique_names or primary_runtime_input_type is None:
+        return []
+    joined_names = ", ".join(f"'{name}'" for name in unique_names)
+    return [
+        EditAdvisory(
+            code="form_field_shadows_primary_input",
+            message=(
+                f"Ignored form field reference(s) {joined_names} because "
+                f"the flow's primary {primary_runtime_input_type.value} input is "
+                "already provided through Flow input, not an inmatningsfält."
+            ),
+            severity="info",
+            field="form_fields",
+        )
+    ]
+
+
 def _flow_steps_to_step_specs(steps: list[FlowStep]) -> list[StepSpec]:
     """Convert FlowSteps to minimal StepSpecs for signature extraction."""
     return [
@@ -640,14 +689,20 @@ def _compile_form_fields(
     edit_draft: FlowEditDraft,
     *,
     current_metadata_json: dict[str, Any] | None,
-) -> tuple[list[FormFieldSpec] | None, list[FormFieldChange]]:
+    primary_runtime_input_type: InputType | None,
+) -> tuple[list[FormFieldSpec] | None, list[FormFieldChange], list[str]]:
     current_fields = extract_form_fields_from_metadata(current_metadata_json)
     if not edit_draft.form_operations:
-        return (deepcopy(current_fields) if current_fields is not None else None, [])
+        return (
+            deepcopy(current_fields) if current_fields is not None else None,
+            [],
+            [],
+        )
 
     working_fields = deepcopy(current_fields) if current_fields is not None else []
     field_index = {field.name: index for index, field in enumerate(working_fields)}
     form_changes: list[FormFieldChange] = []
+    dropped_primary_input_field_names: list[str] = []
 
     for op in edit_draft.form_operations:
         existing_index = field_index.get(op.field_name)
@@ -668,15 +723,24 @@ def _compile_form_fields(
             continue
 
         payload = op.field_payload
+        payload_field_type = (
+            payload.field_type
+            if payload is not None and payload.field_type is not None
+            else existing_field.type
+            if existing_field is not None
+            else "text"
+        )
+        if is_primary_runtime_input_shadow_field(
+            variable_name=op.field_name,
+            field_type=payload_field_type,
+            runtime_input_type=primary_runtime_input_type,
+        ):
+            dropped_primary_input_field_names.append(op.field_name)
+            continue
+
         merged_field = FormFieldSpec(
             name=op.field_name,
-            type=(
-                payload.field_type
-                if payload is not None and payload.field_type is not None
-                else existing_field.type
-                if existing_field is not None
-                else "text"
-            ),
+            type=payload_field_type,
             label=(
                 payload.label
                 if payload is not None and payload.label is not None
@@ -709,7 +773,34 @@ def _compile_form_fields(
         working_fields[existing_index] = merged_field
         form_changes.append(FormFieldChange(kind="modified", field_name=op.field_name))
 
-    return (working_fields or None, form_changes)
+    return (working_fields or None, form_changes, dropped_primary_input_field_names)
+
+
+def _primary_runtime_input_type_from_steps(
+    steps: list[FlowStep],
+) -> InputType | None:
+    for step in sorted(steps, key=lambda item: item.step_order):
+        if step.input_source != InputSource.FLOW_INPUT.value:
+            continue
+        try:
+            return InputType(step.input_type)
+        except ValueError:
+            return None
+    return None
+
+
+def _without_primary_runtime_shadow_fields(
+    step: NewStepDraft,
+    *,
+    primary_runtime_input_type: InputType | None,
+) -> tuple[NewStepDraft, list[str]]:
+    filtered, dropped = split_primary_runtime_input_shadow_names(
+        field_names=step.uses_form_fields,
+        runtime_input_type=primary_runtime_input_type,
+    )
+    if filtered == step.uses_form_fields:
+        return step, dropped
+    return step.model_copy(update={"uses_form_fields": filtered}), dropped
 
 
 def _canonicalize_existing_runtime_aliases(

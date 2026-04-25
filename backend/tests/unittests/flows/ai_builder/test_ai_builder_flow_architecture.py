@@ -141,8 +141,8 @@ class TestRenderFlowArchitecture:
                     "(`text`, `json`, `document`, `file` eller `audio`)"
                 ),
                 (
-                    "- `input_fields` modellerar inmatningsfält/input variables "
-                    "som användaren fyller i"
+                    "- `input_fields` modellerar sekundära inmatningsfält/input variables "
+                    "som användaren fyller i vid sidan av huvudunderlaget"
                 ),
                 "- `steps[].name` och `steps[].task` beskriver semantiska arbetssteg",
                 (
@@ -171,6 +171,10 @@ class TestRenderFlowArchitecture:
                 (
                     "- Lägg körningsmetadata som ska återanvändas i `input_fields`, "
                     "inte gömt i prompttext"
+                ),
+                (
+                    "- Lägg inte huvudtexten, dokumentet, filen eller ljudet som ett "
+                    "`input_field`; backend kopplar huvudingången från arkitekturen"
                 ),
                 (
                     "- Använd `output_fields` när senare steg behöver stabila fält; "

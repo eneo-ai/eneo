@@ -61,6 +61,7 @@ def build_structured_reference_payload(*, is_edit_mode: bool) -> dict[str, Any]:
         "do not emit plan_step_ref values",
         "do not emit input_bindings or template variables like {{ ... }}",
         "do not emit input_source in create mode; backend derives step topology",
+        "input_fields are secondary runtime parameters only, not the primary material being processed",
         "output_fields are only for json output",
         "output_fields max nesting depth is 3",
         "template_fill requires docx output",

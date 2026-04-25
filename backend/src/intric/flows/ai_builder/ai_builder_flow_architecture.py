@@ -40,7 +40,10 @@ FLOW_ARCHITECTURE_SECTIONS: tuple[FlowArchitectureSection, ...] = (
                 "`runtime_input` beskriver bara huvudingången vid körning "
                 "(`text`, `json`, `document`, `file` eller `audio`)"
             ),
-            "`input_fields` modellerar inmatningsfält/input variables som användaren fyller i",
+            (
+                "`input_fields` modellerar sekundära inmatningsfält/input variables "
+                "som användaren fyller i vid sidan av huvudunderlaget"
+            ),
             "`steps[].name` och `steps[].task` beskriver semantiska arbetssteg",
             (
                 "`steps[].output_fields` används när ett steg ska producera "
@@ -71,6 +74,10 @@ FLOW_ARCHITECTURE_SECTIONS: tuple[FlowArchitectureSection, ...] = (
             (
                 "Lägg körningsmetadata som ska återanvändas i `input_fields`, "
                 "inte gömt i prompttext"
+            ),
+            (
+                "Lägg inte huvudtexten, dokumentet, filen eller ljudet som ett "
+                "`input_field`; backend kopplar huvudingången från arkitekturen"
             ),
             (
                 "Använd `output_fields` när senare steg behöver stabila fält; "

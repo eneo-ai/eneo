@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -35,6 +36,9 @@ from intric.flows.ai_builder.ai_builder_new_step_schema import (
 from intric.flows.ai_builder.ai_builder_outline_pattern_chains import (
     chain_requests_docx_template_fill,
     realize_outline_pattern_chain,
+)
+from intric.flows.ai_builder.ai_builder_primary_input_fields import (
+    is_primary_runtime_input_shadow_field,
 )
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
@@ -76,6 +80,7 @@ _OUTLINE_STEP_BACKEND_OWNED_KEYS = frozenset(
         "uses_previous_fields",
     }
 )
+logger = logging.getLogger(__name__)
 _OUTLINE_ROOT_IGNORED_KEYS = frozenset(
     {
         "citations_requested",
@@ -471,11 +476,6 @@ def compile_outline_to_create_draft(
     *,
     context: OutlineCompileContext | None = None,
 ) -> FlowCreateDraft:
-    form_fields = _compile_form_fields(
-        outline_fields=outline.input_fields,
-        context=context,
-    )
-    known_field_names = {field.variable_name for field in form_fields}
     runtime_input_type = (
         context.runtime_input_type
         if context is not None and context.runtime_input_type is not None
@@ -486,6 +486,12 @@ def compile_outline_to_create_draft(
         if context is not None and context.final_output_type is not None
         else OutputType(outline.final_output_type)
     )
+    form_fields, dropped_primary_input_field_names = _compile_form_fields(
+        outline_fields=outline.input_fields,
+        context=context,
+        runtime_input_type=runtime_input_type,
+    )
+    known_field_names = {field.variable_name for field in form_fields}
 
     outline_steps = _apply_server_pattern_chain(
         steps=list(outline.steps),
@@ -496,6 +502,23 @@ def compile_outline_to_create_draft(
 
     steps: list[NewStepDraft] = []
     for index, outline_step in enumerate(outline_steps):
+        uses_form_fields = [
+            field_name
+            for field_name in outline_step.uses_input_fields
+            if field_name in known_field_names
+        ]
+        dropped_primary_input_field_names.extend(
+            [
+                field_name
+                for field_name in outline_step.uses_input_fields
+                if field_name not in known_field_names
+                and is_primary_runtime_input_shadow_field(
+                    variable_name=field_name,
+                    field_type="text",
+                    runtime_input_type=runtime_input_type,
+                )
+            ]
+        )
         fan_in_required = _requires_server_owned_fan_in(
             step_index=index,
             step_count=len(outline_steps),
@@ -515,11 +538,11 @@ def compile_outline_to_create_draft(
                     fan_in_required=fan_in_required,
                 ),
                 input_type=_derive_step_input_type(
-                    step=outline_step,
                     step_index=index,
                     runtime_input_type=runtime_input_type,
                     prior_step=steps[-1] if steps else None,
                     fan_in_required=fan_in_required,
+                    uses_form_fields=uses_form_fields,
                 ),
                 output_type=output_type,
                 runtime_upload=(index == 0 and runtime_input_type in _FILE_INPUT_TYPES),
@@ -533,11 +556,7 @@ def compile_outline_to_create_draft(
                     if index == 0 and runtime_input_type in _FILE_INPUT_TYPES
                     else None
                 ),
-                uses_form_fields=[
-                    field_name
-                    for field_name in outline_step.uses_input_fields
-                    if field_name in known_field_names
-                ],
+                uses_form_fields=uses_form_fields,
                 document_delivery_mode=_document_delivery_mode_for_step(
                     output_type=output_type,
                     is_last=index == len(outline_steps) - 1,
@@ -563,6 +582,10 @@ def compile_outline_to_create_draft(
     steps = _attach_unreferenced_form_fields_to_final_step(
         steps=steps,
         known_field_names=known_field_names,
+    )
+    _log_dropped_primary_input_shadow_fields(
+        field_names=dropped_primary_input_field_names,
+        runtime_input_type=runtime_input_type,
     )
 
     return FlowCreateDraft(
@@ -743,8 +766,9 @@ def build_outline_flow_tool_schema() -> dict[str, Any]:
                     "input_fields": {
                         "type": "array",
                         "description": (
-                            "Optional inmatningsfält/input variables the user fills "
-                            "in when running the flow."
+                            "Optional secondary inmatningsfält/input variables the "
+                            "user fills in when running the flow. Do not include the "
+                            "primary text/document/file/audio material being processed."
                         ),
                         "items": _input_field_schema(),
                     },
@@ -824,10 +848,29 @@ def _compile_form_fields(
     *,
     outline_fields: list[OutlineInputField],
     context: OutlineCompileContext | None,
-) -> list[CreateFormFieldDraft]:
-    fields = [_compile_input_field(field) for field in outline_fields]
+    runtime_input_type: InputType | None,
+) -> tuple[list[CreateFormFieldDraft], list[str]]:
+    fields: list[CreateFormFieldDraft] = []
+    dropped_primary_input_field_names: list[str] = []
+    for field in outline_fields:
+        if is_primary_runtime_input_shadow_field(
+            variable_name=field.variable_name,
+            field_type=field.field_type,
+            runtime_input_type=runtime_input_type,
+        ):
+            dropped_primary_input_field_names.append(field.variable_name)
+            continue
+        fields.append(_compile_input_field(field))
+
     seen = {field.variable_name for field in fields}
     for hint in context.runtime_input_field_hints if context is not None else ():
+        if is_primary_runtime_input_shadow_field(
+            variable_name=hint.variable_name,
+            field_type=hint.field_type,
+            runtime_input_type=runtime_input_type,
+        ):
+            dropped_primary_input_field_names.append(hint.variable_name)
+            continue
         if hint.variable_name in seen:
             continue
         fields.append(
@@ -840,7 +883,24 @@ def _compile_form_fields(
             )
         )
         seen.add(hint.variable_name)
-    return fields
+    return fields, dropped_primary_input_field_names
+
+
+def _log_dropped_primary_input_shadow_fields(
+    *,
+    field_names: list[str],
+    runtime_input_type: InputType,
+) -> None:
+    unique_names = sorted(set(field_names))
+    if not unique_names:
+        return
+    logger.info(
+        "ai_builder_primary_input_shadow_fields_dropped",
+        extra={
+            "field_names": unique_names,
+            "runtime_input_type": runtime_input_type.value,
+        },
+    )
 
 
 def _compile_input_field(field: OutlineInputField) -> CreateFormFieldDraft:
@@ -1198,17 +1258,17 @@ def _derive_step_input_source(
 
 def _derive_step_input_type(
     *,
-    step: OutlineStep,
     step_index: int,
     runtime_input_type: InputType,
     prior_step: NewStepDraft | None,
     fan_in_required: bool,
+    uses_form_fields: list[str],
 ) -> InputType:
     if step_index == 0:
         return runtime_input_type
     if fan_in_required:
         return InputType.TEXT
-    if step.uses_input_fields:
+    if uses_form_fields:
         return InputType.TEXT
     if prior_step is not None and prior_step.output_type == OutputType.JSON:
         return InputType.JSON

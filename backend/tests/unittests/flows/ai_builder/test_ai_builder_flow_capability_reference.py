@@ -16,6 +16,7 @@ def test_create_reference_keeps_flow_topology_backend_owned() -> None:
     assert any(
         "backend derives step topology" in rule for rule in payload["hard_rules"]
     )
+    assert any("secondary runtime parameters" in rule for rule in payload["hard_rules"])
 
 
 def test_edit_reference_exposes_flow_input_sources() -> None:

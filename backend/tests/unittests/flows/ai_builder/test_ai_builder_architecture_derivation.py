@@ -38,6 +38,7 @@ def test_derives_text_to_text_architecture_from_resolved_slots() -> None:
         }
     ]
     assert draft.chosen_patterns == ["summarize_text"]
+    assert "form_field_runtime_inputs" not in draft.chosen_patterns
     assert draft.required_capabilities == ["input_text", "output_mode_pass_through"]
 
 
