@@ -524,6 +524,26 @@ async def send_message(
                     data=event["data"],
                     event=event["event"],
                 )
+        except BadRequestException as error:
+            code = error.code or "bad_request"
+            message = str(error) or "The AI Builder request could not be processed."
+            logger.info(
+                "AI Builder event stream rejected.",
+                extra={
+                    "session_id": str(session_id),
+                    "space_id": str(session.space_id),
+                    "code": code,
+                },
+            )
+            error_event = build_error_event(
+                message=message,
+                code=code,
+                phase="router",
+                intric_error_code=ErrorCodes.BAD_REQUEST,
+                request_id=_request_correlation_id(request),
+            )
+            yield ServerSentEvent(data=error_event["data"], event=error_event["event"])
+            yield ServerSentEvent(data="", event=SSE_EVENT_DONE)
         except Exception as error:
             logger.error(
                 "AI Builder event stream failed.",

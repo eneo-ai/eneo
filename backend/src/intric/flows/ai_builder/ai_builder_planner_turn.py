@@ -17,13 +17,9 @@ Keeping the bridge pure means tests exercise it with `AsyncMock(repo)`
 + a litellm-shaped stub, and future call sites reuse the same contract
 without re-implementing the accept-and-dispatch dance.
 
-`propose_plan` is a first-class outcome (`propose_plan_pending_adapter`):
-the helper bypasses the dispatcher for `ProposePlanAction` and surfaces
-the accepted output directly, so the caller can route to the proposal-
-processor adapter when it lands. The pipeline still spent an LLM call
-on the turn, so telemetry counts populate on this path, and control
-flow stays on the normal return rather than running through a
-`NotImplementedError` the dispatcher would otherwise raise.
+Plan proposal no longer flows through this planner union. The caller
+enters a separate proposal task after the server-owned action policy
+selects that phase.
 """
 
 from __future__ import annotations
@@ -45,8 +41,8 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     CommitArchitectureAction,
     OrchestrationContext,
     PlannerOutput,
-    ProposePlanAction,
     RejectionReason,
+    evaluate_planner_output,
 )
 from intric.flows.ai_builder.ai_builder_repair import CompletionMetadata
 
@@ -60,7 +56,6 @@ PlannerTurnOutcomeKind = Literal[
     "dispatched",
     "rejected",
     "parse_failed",
-    "propose_plan_pending_adapter",
 ]
 
 
@@ -115,13 +110,6 @@ class PlannerTurnResult:
       can distinguish truncation (`finish_reason == "length"`) from
       other parse failures. `parse_error_raw` and `parse_error_message`
       carry the unparseable body and the validator complaint string.
-    - `propose_plan_pending_adapter` — the pipeline accepted a
-      `propose_plan` action but the dispatcher does not yet route it.
-      `accepted_output` is populated (including the draft-plan
-      envelope) so the caller can hand off to the proposal-processor
-      adapter when it lands. Nothing was persisted. The LLM ran, so
-      telemetry counters still populate.
-
     `llm_calls_made` / `repair_attempts` mirror the pipeline counters
     so the caller's telemetry does not have to reach back into the
     outcome's `PipelineOutcome`.
@@ -155,6 +143,7 @@ async def run_planner_turn(
     build_new_messages: Callable[
         [PlannerOutput, TurnTelemetry], "list[ConversationMessage]"
     ],
+    precomputed_output: PlannerOutput | None = None,
     request_id: UUID | None = None,
     lock_token: UUID | None = None,
     telemetry_now_ms: Callable[[], int] | None = None,
@@ -184,13 +173,27 @@ async def run_planner_turn(
     now_ms = telemetry_now_ms if telemetry_now_ms is not None else _default_now_ms
     turn_started_ms = now_ms()
 
-    pipeline_outcome: PipelineOutcome = await run_planner_pipeline(
-        litellm_client=litellm_client,
-        litellm_model=litellm_model,
-        litellm_kwargs=litellm_kwargs,
-        base_messages=base_messages,
-        orchestration_context=orchestration_context,
-    )
+    if precomputed_output is None:
+        pipeline_outcome: PipelineOutcome = await run_planner_pipeline(
+            litellm_client=litellm_client,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            base_messages=base_messages,
+            orchestration_context=orchestration_context,
+        )
+    else:
+        rejection = evaluate_planner_output(precomputed_output, orchestration_context)
+        pipeline_outcome = (
+            PipelineOutcome(
+                kind="rejected",
+                rejection=rejection,
+            )
+            if rejection is not None
+            else PipelineOutcome(
+                kind="accepted",
+                accepted_output=precomputed_output,
+            )
+        )
 
     def _telemetry(
         outcome_kind: PlannerTurnOutcomeKind,
@@ -242,20 +245,6 @@ async def run_planner_turn(
 
     assert pipeline_outcome.accepted_output is not None
     accepted = pipeline_outcome.accepted_output
-
-    if isinstance(accepted.planner_action, ProposePlanAction):
-        return PlannerTurnResult(
-            kind="propose_plan_pending_adapter",
-            accepted_output=accepted,
-            final_completion=pipeline_outcome.final_completion,
-            llm_calls_made=pipeline_outcome.llm_calls_made,
-            repair_attempts=pipeline_outcome.repair_attempts,
-            parse_repair_attempts=pipeline_outcome.parse_repair_attempts,
-            turn_telemetry=_telemetry(
-                "propose_plan_pending_adapter",
-                architecture_commit_populated=False,
-            ),
-        )
 
     dispatched_telemetry = _telemetry(
         "dispatched",

@@ -6,9 +6,14 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from intric.flows.ai_builder.ai_builder_create_recipes import (
-    render_knowledge_pack_create_recipes,
+from intric.flows.ai_builder.ai_builder_action_policy import (
+    PlannerActionPolicy,
+    render_action_policy_prompt_block,
 )
+from intric.flows.ai_builder.ai_builder_ask_question_contract import (
+    render_ask_question_vocabulary_block,
+)
+from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_discovery import (
     build_discovery_guidance,
 )
@@ -26,7 +31,6 @@ from intric.flows.ai_builder.ai_builder_flow_context import (
     build_step_ref_mapping,
 )
 from intric.flows.ai_builder.ai_builder_form_intake_signals import (
-    extract_form_intake_recipe_signals,
     mentions_form_field_needs,
     mentions_sectioned_form_intake,
 )
@@ -49,14 +53,6 @@ from intric.flows.ai_builder.ai_builder_knowledge_pack import (
 from intric.flows.ai_builder.ai_builder_models import (
     ConversationMessage,
     RequirementsSummaryPayload,
-)
-from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
-    build_requirements_signal_text,
-    detect_planner_pattern_signals,
-    extract_planner_pattern_recipe_signals,
-)
-from intric.flows.ai_builder.ai_builder_recipe_selector import (
-    select_relevant_recipes,
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_confirmed_requirements_prompt_block,
@@ -92,6 +88,7 @@ def build_system_prompt(
     confirmed_requirements: dict[str, Any] | None = None,
     is_edit_mode: bool = False,
     unresolved_architectural_choices: frozenset[str] | None = None,
+    action_policy: PlannerActionPolicy | None = None,
 ) -> str:
     """Build the complete system prompt for the AI builder LLM.
 
@@ -105,6 +102,7 @@ def build_system_prompt(
         has_confirmed_requirements=confirmed_requirements is not None,
     )
     sections.insert(2, build_framework_guardrails_block())
+    sections.insert(3, render_ask_question_vocabulary_block())
     if planning_state_block:
         sections.append(planning_state_block)
     if base_planning_state_version is not None:
@@ -119,7 +117,9 @@ def build_system_prompt(
             "`planning_state_delta.base_planning_state_version`."
         )
 
-    if unresolved_architectural_choices:
+    if action_policy is not None:
+        sections.append(render_action_policy_prompt_block(action_policy))
+    elif unresolved_architectural_choices:
         # Server-side phase lock: when core architectural slots are still
         # unresolved, `commit_architecture` is rejected by the orchestrator.
         # Surfacing that contract in the prompt prevents the wasted LLM call
@@ -134,24 +134,9 @@ def build_system_prompt(
             "först:\n\n"
             f"{slot_bullets}\n\n"
             "Tillåtna handlingar denna tur: `ask_question`, "
-            "`confirm_requirements`, `propose_plan`. Ställ en fråga som "
+            "`confirm_requirements`. Ställ en fråga som "
             "resolver en av ovanstående slots innan arkitekturen kan pinnas."
         )
-
-    if confirmed_requirements and not is_edit_mode:
-        full_create_recipes = render_knowledge_pack_create_recipes()
-        selected_recipes = select_relevant_recipes(
-            _extract_signals_from_requirements(confirmed_requirements),
-            freeform_text=" ".join(
-                str(confirmed_requirements.get(key, ""))
-                for key in ("summary", "input_description", "output_description")
-            ),
-            recipe_source=full_create_recipes,
-        )
-        sections = [
-            selected_recipes if section == full_create_recipes else section
-            for section in sections
-        ]
 
     if confirmed_requirements:
         requirements_payload = RequirementsSummaryPayload.model_validate(
@@ -268,14 +253,16 @@ def build_clarification_hints(
     resolved_output = output_intent.terminal_output
     resolved_docx_mode = output_intent.docx_output_mode
     resolved_pdf_mode = output_intent.pdf_generation_mode
-    submission_tool = "edit_flow" if flow is not None else "create_flow"
+    submission_tool = "edit_flow" if flow is not None else OUTLINE_FLOW_TOOL_NAME
     json_contract_term = "output_contract" if flow is not None else "output_fields"
 
     if _needs_pdf_scope_question(text, answered_ids):
         hints.append(
-            f"- Frågegate: använd `ask_structured_question` innan `{submission_tool}` för att avgöra "
+            f'- Frågegate: emittera `planner_action.kind="ask_question"` innan `{submission_tool}` för att avgöra '
             "om flödet ska stödja en PDF i taget eller flera dokument i samma körning. "
-            'Använd `question_id="document_material_scope"` med tydliga alternativ för enkel respektive fler-dokument-körning.'
+            'Använd `question_id="document_material_scope"` och formulera en enda textfråga i `payload.prompt` '
+            "som beskriver valet mellan enkel- och fler-dokument-körning — inga extra payload-fält bortom "
+            "`question_id`, `slot_name`, `prompt`."
         )
 
     if _needs_docx_mode_question(
@@ -284,9 +271,10 @@ def build_clarification_hints(
         resolved_docx_mode=resolved_docx_mode,
     ):
         hints.append(
-            f"- Frågegate: använd `ask_structured_question` innan `{submission_tool}` för att avgöra "
-            'hur DOCX-rapporten ska skapas. Använd `question_id="docx_output_mode"` med alternativ '
-            "för mallbaserad DOCX respektive genererad DOCX utan mall."
+            f'- Frågegate: emittera `planner_action.kind="ask_question"` innan `{submission_tool}` för att avgöra '
+            'hur DOCX-rapporten ska skapas. Använd `question_id="docx_output_mode"` och formulera en enda '
+            "textfråga i `payload.prompt` som beskriver valet mellan mallbaserad DOCX och genererad DOCX "
+            "utan mall — inga extra payload-fält bortom `question_id`, `slot_name`, `prompt`."
         )
 
     if (
@@ -307,10 +295,11 @@ def build_clarification_hints(
         resolved_pdf_mode=resolved_pdf_mode,
     ):
         hints.append(
-            f"- Frågegate: använd `ask_structured_question` innan `{submission_tool}` för att avgöra "
+            f'- Frågegate: emittera `planner_action.kind="ask_question"` innan `{submission_tool}` för att avgöra '
             "om PDF-resultatet ska vara en vanlig genererad PDF eller om användaren egentligen "
-            'efterfrågar en fast PDF-mall. Använd `question_id="pdf_generation_mode"` och var '
-            "tydlig med att inbyggd mallfyllning bara stöds för DOCX/Word."
+            'efterfrågar en fast PDF-mall. Använd `question_id="pdf_generation_mode"` och formulera '
+            "en enda textfråga i `payload.prompt` som är tydlig med att inbyggd mallfyllning bara "
+            "stöds för DOCX/Word — inga extra payload-fält bortom `question_id`, `slot_name`, `prompt`."
         )
 
     if input_intent.primary_runtime_input in {
@@ -321,8 +310,9 @@ def build_clarification_hints(
         if flow is None:
             hints.append(
                 "- Implementationshint: eftersom användaren laddar upp PDF/dokument/filer vid körning ska "
-                "relevanta `flow_input`-steg använda `runtime_upload=true` och vid behov "
-                "`runtime_required=true`, så att backend kan aktivera 'Ta emot filer vid körning'."
+                "outline-planen beskriva den semantiska bearbetningen från uppladdat material; backend "
+                "härleder uppladdnings- och obligatoriskhetsmekanik för 'Ta emot filer vid körning' från "
+                "den låsta arkitekturen."
             )
         else:
             hints.append(
@@ -628,54 +618,6 @@ def _mentions_structured_extraction(text: str) -> bool:
 
 def _mentions_template_need(text: str) -> bool:
     return any(token in text for token in ("mall", "template", "fylla i"))
-
-
-def _extract_signals_from_requirements(
-    confirmed_requirements: dict[str, Any] | None,
-) -> dict[str, set[str]]:
-    """Extract answer signals from confirmed requirements for recipe selection."""
-    if not confirmed_requirements:
-        return {}
-    signals: dict[str, set[str]] = {}
-    requirements_text = build_requirements_signal_text(
-        confirmed_requirements
-    ).casefold()
-    input_desc = str(confirmed_requirements.get("input_description", "")).casefold()
-    output_desc = str(confirmed_requirements.get("output_description", "")).casefold()
-    combined = " ".join(
-        part for part in (requirements_text, input_desc, output_desc) if part
-    )
-
-    input_intent = resolve_input_intent(input_desc, {})
-    if input_intent.primary_runtime_input == "audio":
-        signals.setdefault("input_material_mode", set()).add("audio")
-    if input_intent.primary_runtime_input == "documents":
-        signals.setdefault("input_material_mode", set()).add("documents")
-    if input_intent.primary_runtime_input == "text":
-        signals.setdefault("input_material_mode", set()).add("text")
-    if input_intent.primary_runtime_input == "text_and_documents":
-        signals.setdefault("input_material_mode", set()).add("text_and_documents")
-    if "docx" in combined:
-        signals.setdefault("final_output_mode", set()).add("docx_document")
-    if "pdf" in output_desc:
-        signals.setdefault("final_output_mode", set()).add("pdf_document")
-    if "json" in combined:
-        signals.setdefault("final_output_mode", set()).add("structured_json")
-        signals.setdefault("structured_analysis_need", set()).add(
-            "use_structured_analysis"
-        )
-    if "jämför" in combined or "compar" in combined:
-        signals.setdefault("comparison_scope", set()).add("comparison")
-    pattern = detect_planner_pattern_signals(combined)
-    if pattern.prefers_structured_intermediate:
-        signals.setdefault("structured_analysis_need", set()).add(
-            "use_structured_analysis"
-        )
-    for signal in extract_form_intake_recipe_signals(combined):
-        signals.setdefault("planner_pattern", set()).add(signal)
-    for signal in extract_planner_pattern_recipe_signals(combined):
-        signals.setdefault("planner_pattern", set()).add(signal)
-    return signals
 
 
 def has_confirmed_requirements(conversation: list[ConversationMessage]) -> bool:

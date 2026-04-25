@@ -13,8 +13,8 @@ from intric.flows.ai_builder.ai_builder_models import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
-    PlanStatus,
     PlannerPlanEnvelope,
+    PlanStatus,
     SessionStatus,
     StepSpec,
     TargetKind,
@@ -45,7 +45,9 @@ def _make_spec(*, input_type: InputType = InputType.TEXT) -> FlowDraftSpecCore:
     )
 
 
-def _make_grounded_spec(*, model_ref: str | None, knowledge_refs: list[str]) -> FlowDraftSpecCore:
+def _make_grounded_spec(
+    *, model_ref: str | None, knowledge_refs: list[str]
+) -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Flow",
         steps=[
@@ -85,7 +87,9 @@ def _make_plan(
     )
 
 
-def _make_session(*, tenant_id, actor_user_id, flow_id, target_kind: TargetKind, space_id=None):
+def _make_session(
+    *, tenant_id, actor_user_id, flow_id, target_kind: TargetKind, space_id=None
+):
     return BuilderSession(
         id=uuid4(),
         tenant_id=tenant_id,
@@ -228,7 +232,9 @@ class TestAIBuilderPlanLifecycle:
             space_service=space_service,
         )
 
-        with pytest.raises(BadRequestException, match="transcription model must be selected"):
+        with pytest.raises(
+            BadRequestException, match="transcription model must be selected"
+        ):
             await lifecycle.apply_plan(plan_id=plan.id)
 
         mock_compile.assert_not_called()
@@ -373,7 +379,9 @@ class TestAIBuilderPlanLifecycle:
             space_service=space_service,
         )
 
-        with pytest.raises(BadRequestException, match="Ambiguous knowledge base reference 'socio'"):
+        with pytest.raises(
+            BadRequestException, match="Ambiguous knowledge base reference 'socio'"
+        ):
             await lifecycle.apply_plan(plan_id=plan.id)
 
         flow_service.create_flow.assert_not_awaited()

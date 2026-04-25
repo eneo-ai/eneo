@@ -4,13 +4,13 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from intric.flows.ai_builder.ai_builder_materializer import (
-    compile_changeset,
-    execute_changeset,
-)
 from intric.flows.ai_builder.ai_builder_context import (
     serialize_space_kbs,
     serialize_space_models,
+)
+from intric.flows.ai_builder.ai_builder_materializer import (
+    compile_changeset,
+    execute_changeset,
 )
 from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
@@ -23,12 +23,12 @@ from intric.flows.ai_builder.ai_builder_models import (
     SessionStatus,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
     canonicalize_flow_spec_resources,
     format_resource_resolution_feedback,
 )
-from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_spec_validator import (
     normalize_compiled_spec_for_session,
     validate_compiled_spec_for_session,
@@ -95,8 +95,8 @@ class AIBuilderPlanLifecycle:
             session=session,
             expected_revision=expected_revision,
         )
-        default_transcription_model_id = await self._resolve_default_transcription_model_id(
-            session.space_id
+        default_transcription_model_id = (
+            await self._resolve_default_transcription_model_id(session.space_id)
         )
         self._require_create_audio_transcription_model(
             session=session,
@@ -349,7 +349,8 @@ class AIBuilderPlanLifecycle:
         if default_transcription_model_id is not None:
             return
         if not any(
-            step.input_source == InputSource.FLOW_INPUT and step.input_type == InputType.AUDIO
+            step.input_source == InputSource.FLOW_INPUT
+            and step.input_type == InputType.AUDIO
             for step in plan.spec.steps
         ):
             return

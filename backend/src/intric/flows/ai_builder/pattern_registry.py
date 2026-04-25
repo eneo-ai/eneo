@@ -26,12 +26,16 @@ Each `Pattern` captures:
 `PATTERN_REGISTRY_VERSION` is the monotonic integer persisted alongside
 plans and digests. Any pattern-surface change bumps it by one alongside
 a fingerprint update, mirroring the FCM bump-discipline policy.
+
+The module also owns the tiny chain-step vocabulary used by patterns. Pattern
+objects store backend tokens; `render_chain_shape` translates those tokens into
+prompt-safe labels. Concrete compiler step text lives with the compiler.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
@@ -39,12 +43,86 @@ from typing import Literal
 from intric.flows.ai_builder.question_catalog import QUESTION_CATALOG, QuestionTemplate
 from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY, FlowCapability
 
-PATTERN_REGISTRY_VERSION: int = 4
+PATTERN_REGISTRY_VERSION: int = 5
 
 PatternId = str
+FLOW_INPUT_AUDIO_TRANSCRIPTION = "flow_input_audio_transcription"
+FLOW_INPUT_DOCUMENT_UPLOAD = "flow_input_document_upload"
+FLOW_INPUT_SECTIONED_FORM_FIELDS = "flow_input_sectioned_form_fields"
+EXTRACT_TEMPLATE_VARIABLES_STEP = "extract_template_variables_step"
+STRUCTURED_EXTRACTION_STEP = "structured_extraction_step"
+ANALYSIS_OR_QUALITY_REVIEW_STEP = "analysis_or_quality_review_step"
+COMPOSE_SECTIONS_STEP = "compose_sections_step"
+TEMPLATE_FILL_DOCX_STEP = "template_fill_docx_step"
+TERMINAL_ARTIFACT_STEP = "terminal_artifact_step"
 
 PatternPolarity = Literal["positive", "negative"]
+PatternChainKind = Literal["none", "compiled", "planner_only"]
 _VALID_POLARITIES: frozenset[str] = frozenset({"positive", "negative"})
+_VALID_CHAIN_KINDS: frozenset[str] = frozenset({"none", "compiled", "planner_only"})
+
+
+@dataclass(frozen=True, slots=True)
+class ChainStepDescriptor:
+    """Developer-owned metadata for backend pattern-chain tokens.
+
+    Pattern chains are server/compiler vocabulary. The LLM should see a
+    readable shape, not these token names, so every token used by the Pattern
+    Registry must have human-readable metadata here.
+    """
+
+    token: str
+    label: str
+
+
+CHAIN_STEP_DESCRIPTORS: Mapping[str, ChainStepDescriptor] = MappingProxyType(
+    {
+        FLOW_INPUT_AUDIO_TRANSCRIPTION: ChainStepDescriptor(
+            token=FLOW_INPUT_AUDIO_TRANSCRIPTION,
+            label="transcribe uploaded audio",
+        ),
+        FLOW_INPUT_DOCUMENT_UPLOAD: ChainStepDescriptor(
+            token=FLOW_INPUT_DOCUMENT_UPLOAD,
+            label="receive uploaded document material",
+        ),
+        FLOW_INPUT_SECTIONED_FORM_FIELDS: ChainStepDescriptor(
+            token=FLOW_INPUT_SECTIONED_FORM_FIELDS,
+            label="collect runtime input fields",
+        ),
+        EXTRACT_TEMPLATE_VARIABLES_STEP: ChainStepDescriptor(
+            token=EXTRACT_TEMPLATE_VARIABLES_STEP,
+            label="extract template variables",
+        ),
+        STRUCTURED_EXTRACTION_STEP: ChainStepDescriptor(
+            token=STRUCTURED_EXTRACTION_STEP,
+            label="extract structured foundation",
+        ),
+        ANALYSIS_OR_QUALITY_REVIEW_STEP: ChainStepDescriptor(
+            token=ANALYSIS_OR_QUALITY_REVIEW_STEP,
+            label="analyze and review quality",
+        ),
+        COMPOSE_SECTIONS_STEP: ChainStepDescriptor(
+            token=COMPOSE_SECTIONS_STEP,
+            label="compose sections",
+        ),
+        TEMPLATE_FILL_DOCX_STEP: ChainStepDescriptor(
+            token=TEMPLATE_FILL_DOCX_STEP,
+            label="fill DOCX template",
+        ),
+        TERMINAL_ARTIFACT_STEP: ChainStepDescriptor(
+            token=TERMINAL_ARTIFACT_STEP,
+            label="create final output",
+        ),
+    }
+)
+
+
+def render_chain_shape(chain_steps: tuple[str, ...]) -> str:
+    """Render backend chain tokens as prompt-safe semantic guidance."""
+
+    return " -> ".join(
+        CHAIN_STEP_DESCRIPTORS[chain_step].label for chain_step in chain_steps
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,19 +136,14 @@ class Pattern:
     localized copy — those belong to the Question Catalog and product
     surfaces that render patterns to users.
 
-    `chain_steps` is the ordered token sequence for patterns whose
-    canonical realisation is multi-step. Each entry is a terse
-    non-localized structural token (same vocabulary discipline as
-    `examples` / `retrieval_hints`) naming one step in the chain;
-    single-step shapes leave it empty.
+    `chain_steps` is the backend/compiler token sequence for patterns whose
+    canonical realisation is multi-step. Knowledge-pack rendering translates
+    these tokens into human-readable `chain_shape` guidance; raw tokens are
+    not part of the LLM contract. Single-step shapes leave it empty.
 
-    `recipe_sections` names the knowledge-pack recipe-section keys
-    (`"transcription"`, `"docx_template"`, etc.) a pattern should
-    activate when it wins a `find_pattern_candidates` scoring pass. The
-    recipe selector reads this field instead of maintaining a separate
-    pattern-id → section mapping. Patterns whose retrieval hints are too
-    generic for reliable score-only triggering (and every negative
-    pattern) leave it empty to opt out.
+    The registry deliberately avoids prompt recipe coupling. Patterns
+    describe structural intent; the backend compiler and Flow capability
+    manifest decide mechanics.
     """
 
     id: PatternId
@@ -81,7 +154,7 @@ class Pattern:
     question_template_ids: tuple[str, ...]
     polarity: PatternPolarity
     chain_steps: tuple[str, ...] = ()
-    recipe_sections: tuple[str, ...] = ()
+    chain_kind: PatternChainKind = "none"
 
     def __post_init__(self) -> None:
         if not self.id or not self.id.strip():
@@ -91,6 +164,15 @@ class Pattern:
                 f"Pattern polarity must be one of "
                 f"{sorted(_VALID_POLARITIES)}; got {self.polarity!r}"
             )
+        if self.chain_kind not in _VALID_CHAIN_KINDS:
+            raise ValueError(
+                f"Pattern chain_kind must be one of "
+                f"{sorted(_VALID_CHAIN_KINDS)}; got {self.chain_kind!r}"
+            )
+        if self.chain_steps and self.chain_kind == "none":
+            raise ValueError("Patterns with chain_steps must set chain_kind.")
+        if not self.chain_steps and self.chain_kind != "none":
+            raise ValueError("Patterns without chain_steps must use chain_kind='none'.")
 
 
 def _pattern(
@@ -103,7 +185,7 @@ def _pattern(
     negative_examples: tuple[str, ...] = (),
     polarity: PatternPolarity = "positive",
     chain_steps: tuple[str, ...] = (),
-    recipe_sections: tuple[str, ...] = (),
+    chain_kind: PatternChainKind = "none",
 ) -> Pattern:
     return Pattern(
         id=id,
@@ -114,7 +196,7 @@ def _pattern(
         question_template_ids=question_template_ids,
         polarity=polarity,
         chain_steps=chain_steps,
-        recipe_sections=recipe_sections,
+        chain_kind=chain_kind,
     )
 
 
@@ -156,7 +238,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "primary_runtime_input",
             "terminal_output",
         ),
-        recipe_sections=("json_pipeline",),
     ),
     _pattern(
         id="document_to_structured_report",
@@ -179,7 +260,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "terminal_output",
             "document_material_scope",
         ),
-        recipe_sections=("document_analysis",),
     ),
     _pattern(
         id="document_to_docx_template",
@@ -204,11 +284,11 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "document_material_scope",
         ),
         chain_steps=(
-            "flow_input_document_upload",
-            "extract_template_variables_step",
-            "template_fill_docx_step",
+            FLOW_INPUT_DOCUMENT_UPLOAD,
+            EXTRACT_TEMPLATE_VARIABLES_STEP,
+            TEMPLATE_FILL_DOCX_STEP,
         ),
-        recipe_sections=("document_analysis",),
+        chain_kind="compiled",
     ),
     _pattern(
         id="document_to_pdf_report",
@@ -232,7 +312,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "pdf_generation_mode",
             "document_material_scope",
         ),
-        recipe_sections=("document_analysis",),
     ),
     _pattern(
         id="audio_transcription",
@@ -252,17 +331,34 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "primary_runtime_input",
             "terminal_output",
         ),
-        recipe_sections=("transcription",),
     ),
-    # `recipe_sections=()` on this pattern and on `sectioned_form_intake`
-    # below is an intentional score-trigger opt-out, not a missed migration.
-    # Their retrieval hints (`review`, `document`, `chain`, `form`,
-    # `sections`, `headings`) overlap too heavily with generic planner
-    # vocabulary; score-only activation would narrow "review my document"
-    # onto the rich-workflow recipe. These recipes still reach the planner
-    # through the phrase-aware signal paths in `ai_builder_recipe_selector`
-    # (`extract_planner_pattern_recipe_signals`,
-    # `extract_form_intake_recipe_signals`).
+    _pattern(
+        id="audio_to_artifact_report",
+        examples=(
+            "audio in, generated report artifact out",
+            "transcribe audio and produce PDF, DOCX, JSON, or structured text",
+        ),
+        retrieval_hints=(
+            "audio transcribe summarize report artifact",
+            "input_type=audio output_type=pdf docx json text",
+        ),
+        required_architectural_slots=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+        chain_steps=(
+            FLOW_INPUT_AUDIO_TRANSCRIPTION,
+            TERMINAL_ARTIFACT_STEP,
+        ),
+        chain_kind="compiled",
+    ),
+    # These structural hints are intentionally not coupled to prompt recipes.
+    # The server-owned outline compiler and Flow capability manifest own
+    # low-level realization.
     _pattern(
         id="multi_step_quality_chain",
         examples=(
@@ -286,11 +382,12 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "structured_analysis_need",
         ),
         chain_steps=(
-            "flow_input_document_upload",
-            "structured_extraction_step",
-            "analysis_or_quality_review_step",
-            "terminal_artifact_step",
+            FLOW_INPUT_DOCUMENT_UPLOAD,
+            STRUCTURED_EXTRACTION_STEP,
+            ANALYSIS_OR_QUALITY_REVIEW_STEP,
+            TERMINAL_ARTIFACT_STEP,
         ),
+        chain_kind="compiled",
     ),
     _pattern(
         id="comparison",
@@ -313,7 +410,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "terminal_output",
             "document_material_scope",
         ),
-        recipe_sections=("comparison",),
     ),
     _pattern(
         id="sectioned_form_intake",
@@ -335,21 +431,18 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "terminal_output",
         ),
         chain_steps=(
-            "flow_input_sectioned_form_fields",
-            "compose_sections_step",
+            FLOW_INPUT_SECTIONED_FORM_FIELDS,
+            COMPOSE_SECTIONS_STEP,
         ),
+        chain_kind="planner_only",
     ),
     # General-purpose counterpart to `sectioned_form_intake`. Matches any
     # flow shape where the user supplies one or more named runtime
     # variables alongside the primary input — e.g. "name + role +
     # description", "language + focus", "reference id + owning unit". The
     # sectioned variant stays for the narrower rubric-per-field shape.
-    # `recipe_sections=()` because `form` / `fields` / `user` / `provides`
-    # overlap heavily with generic planner vocabulary; score-only
-    # activation would narrow unrelated prompts. The phrase-aware signal
-    # paths in `ai_builder_recipe_selector` keep form-field recipes
-    # routable through `extract_form_intake_recipe_signals` and
-    # `extract_planner_pattern_recipe_signals`.
+    # Form-field realization is backend-compiled from semantic runtime
+    # input-field intent, not from prompt recipe selection.
     _pattern(
         id="form_field_runtime_inputs",
         examples=(
@@ -412,6 +505,33 @@ def _build_registry() -> Mapping[str, Pattern]:
 
 
 PATTERN_REGISTRY: Mapping[str, Pattern] = _build_registry()
+
+COMPILED_CHAIN_PATTERN_IDS: frozenset[str] = frozenset(
+    pattern.id
+    for pattern in PATTERN_REGISTRY.values()
+    if pattern.chain_kind == "compiled"
+)
+PLANNER_ONLY_CHAIN_PATTERN_IDS: frozenset[str] = frozenset(
+    pattern.id
+    for pattern in PATTERN_REGISTRY.values()
+    if pattern.chain_kind == "planner_only"
+)
+
+
+def compiled_chain_pattern_ids(pattern_ids: Iterable[str]) -> frozenset[str]:
+    """Return selected pattern ids whose chains are backend-compiled.
+
+    Multiple planner patterns can be committed together, but compiler-backed
+    chain patterns are currently wrappers, not freely composable transforms.
+    Architecture validation uses this helper to reject ambiguous commits
+    before a plan can silently drop one chain.
+    """
+
+    return frozenset(
+        pattern_id
+        for pattern_id in pattern_ids
+        if pattern_id in COMPILED_CHAIN_PATTERN_IDS
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -542,7 +662,7 @@ def _render_pattern(pattern: Pattern) -> str:
     if pattern.polarity == "negative" and pattern.negative_examples:
         lines.append("  avoid: " + "; ".join(pattern.negative_examples))
     if pattern.chain_steps:
-        lines.append("  chain_steps: " + " -> ".join(pattern.chain_steps))
+        lines.append("  chain_shape: " + render_chain_shape(pattern.chain_steps))
     if pattern.retrieval_hints:
         lines.append("  hints: " + "; ".join(pattern.retrieval_hints))
     if pattern.required_architectural_slots:

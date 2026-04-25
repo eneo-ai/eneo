@@ -19,10 +19,11 @@
   interface Props {
     question: StructuredQuestion;
     answered?: boolean;
+    answerText?: string | null;
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
   }
 
-  let { question, answered = false, onanswer }: Props = $props();
+  let { question, answered = false, answerText = null, onanswer }: Props = $props();
 
   // Generated once per instance so radiogroup + its label can link without colliding.
   const questionLabelId = `ai-builder-q-${Math.random().toString(36).slice(2, 10)}`;
@@ -104,107 +105,116 @@
     {question.question}
   </p>
 
-  <div
-    class="options-stack"
-    role={isSingle ? "radiogroup" : "group"}
-    aria-labelledby={questionLabelId}
-  >
-    {#each question.options as option, i (getStructuredQuestionOptionKey(option))}
-      {@const optionKey = getStructuredQuestionOptionKey(option)}
-      {@const isSelected = selectedOptionKeys.has(optionKey)}
-      <button
-        type="button"
-        class="option-row"
-        class:is-selected={isSelected}
-        style="--i: {i}"
-        disabled={answered}
-        onclick={() => selectOption(option)}
-        role={isSingle ? "radio" : "checkbox"}
-        aria-checked={isSelected}
-      >
-        <span
-          class="option-indicator"
-          class:is-selected={isSelected}
-          class:is-radio={isSingle}
-          aria-hidden="true"
-        >
-          {#if isSelected}
-            {#if isSingle}
-              <span class="option-indicator-dot"></span>
-            {:else}
-              <CheckIcon class="size-3" />
-            {/if}
-          {/if}
-        </span>
-        <span class="option-body">
-          <span class="option-label">{option.label}</span>
-          {#if option.description}
-            <span class="option-description">{option.description}</span>
-          {/if}
-        </span>
-      </button>
-    {/each}
-
-    {#if question.allow_custom}
-      <button
-        type="button"
-        class="option-row option-row-custom"
-        class:is-selected={customSelected}
-        style="--i: {question.options.length}"
-        disabled={answered}
-        onclick={selectCustom}
-        role={isSingle ? "radio" : "checkbox"}
-        aria-checked={customSelected}
-        aria-controls="{questionLabelId}-custom"
-      >
-        <span
-          class="option-indicator"
-          class:is-selected={customSelected}
-          class:is-radio={isSingle}
-          aria-hidden="true"
-        >
-          {#if customSelected}
-            {#if isSingle}
-              <span class="option-indicator-dot"></span>
-            {:else}
-              <CheckIcon class="size-3" />
-            {/if}
-          {:else}
-            <PencilIcon class="text-secondary size-3" />
-          {/if}
-        </span>
-        <span class="option-body">
-          <span class="option-label">{m.ai_builder_question_custom()}</span>
-          <span class="option-description">{m.ai_builder_question_custom_helper()}</span>
-        </span>
-      </button>
-
-      {#if customSelected && !answered}
-        <div
-          class="custom-input-wrap"
-          id="{questionLabelId}-custom"
-          transition:slide={{ duration: 180, easing: cubicOut }}
-        >
-          <Textarea
-            bind:ref={textareaRef}
-            bind:value={customText}
-            rows={2}
-            placeholder={m.ai_builder_question_custom_placeholder()}
-            onkeydown={handleTextareaKeydown}
-            class="resize-none"
-            aria-label={m.ai_builder_question_custom()}
-          />
-        </div>
+  {#if answered}
+    <div class="answered-summary" aria-live="polite">
+      <span class="answered-check" aria-hidden="true">
+        <CheckIcon class="size-3.5" />
+      </span>
+      {#if answerText}
+        <span class="answered-text">{answerText}</span>
       {/if}
-    {/if}
-  </div>
-
-  {#if !answered && (!isSingle || customSelected)}
-    <div class="actions-row">
-      <Button variant="default" size="sm" onclick={handleConfirm} disabled={!canConfirm}>
-        {m.ai_builder_question_confirm()}
-      </Button>
     </div>
+  {:else}
+    <div
+      class="options-stack"
+      role={isSingle ? "radiogroup" : "group"}
+      aria-labelledby={questionLabelId}
+    >
+      {#each question.options as option, i (getStructuredQuestionOptionKey(option))}
+        {@const optionKey = getStructuredQuestionOptionKey(option)}
+        {@const isSelected = selectedOptionKeys.has(optionKey)}
+        <button
+          type="button"
+          class="option-row"
+          class:is-selected={isSelected}
+          style="--i: {i}"
+          onclick={() => selectOption(option)}
+          role={isSingle ? "radio" : "checkbox"}
+          aria-checked={isSelected}
+        >
+          <span
+            class="option-indicator"
+            class:is-selected={isSelected}
+            class:is-radio={isSingle}
+            aria-hidden="true"
+          >
+            {#if isSelected}
+              {#if isSingle}
+                <span class="option-indicator-dot"></span>
+              {:else}
+                <CheckIcon class="size-3" />
+              {/if}
+            {/if}
+          </span>
+          <span class="option-body">
+            <span class="option-label">{option.label}</span>
+            {#if option.description}
+              <span class="option-description">{option.description}</span>
+            {/if}
+          </span>
+        </button>
+      {/each}
+
+      {#if question.allow_custom}
+        <button
+          type="button"
+          class="option-row option-row-custom"
+          class:is-selected={customSelected}
+          style="--i: {question.options.length}"
+          onclick={selectCustom}
+          role={isSingle ? "radio" : "checkbox"}
+          aria-checked={customSelected}
+          aria-controls="{questionLabelId}-custom"
+        >
+          <span
+            class="option-indicator"
+            class:is-selected={customSelected}
+            class:is-radio={isSingle}
+            aria-hidden="true"
+          >
+            {#if customSelected}
+              {#if isSingle}
+                <span class="option-indicator-dot"></span>
+              {:else}
+                <CheckIcon class="size-3" />
+              {/if}
+            {:else}
+              <PencilIcon class="text-secondary size-3" />
+            {/if}
+          </span>
+          <span class="option-body">
+            <span class="option-label">{m.ai_builder_question_custom()}</span>
+            <span class="option-description">{m.ai_builder_question_custom_helper()}</span>
+          </span>
+        </button>
+
+        {#if customSelected}
+          <div
+            class="custom-input-wrap"
+            id="{questionLabelId}-custom"
+            transition:slide={{ duration: 180, easing: cubicOut }}
+          >
+            <Textarea
+              bind:ref={textareaRef}
+              bind:value={customText}
+              rows={2}
+              placeholder={m.ai_builder_question_custom_placeholder()}
+              onkeydown={handleTextareaKeydown}
+              class="resize-none"
+              aria-label={m.ai_builder_question_custom()}
+            />
+          </div>
+        {/if}
+      {/if}
+    </div>
+
+    {#if !isSingle || customSelected}
+      <div class="actions-row">
+        <Button variant="default" size="sm" onclick={handleConfirm} disabled={!canConfirm}>
+          {m.ai_builder_question_confirm()}
+        </Button>
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -224,9 +234,7 @@
   }
 
   .question-panel.answered {
-    opacity: 0.6;
-    pointer-events: none;
-    filter: saturate(0.85);
+    background: oklch(from var(--accent-default) l c h / 0.045);
   }
 
   /* --- Question prompt --- */
@@ -246,6 +254,23 @@
 
   .options-stack {
     @apply flex flex-col gap-1.5;
+  }
+
+  .answered-summary {
+    @apply flex items-center gap-2 rounded-lg border px-3 py-2;
+    border-color: oklch(from var(--accent-default) l c h / 0.22);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  .answered-check {
+    @apply flex size-6 shrink-0 items-center justify-center rounded-full;
+    background: oklch(from var(--accent-default) l c h / 0.11);
+    color: var(--accent-stronger);
+  }
+
+  .answered-text {
+    @apply min-w-0 truncate text-[0.8125rem] leading-snug font-medium;
   }
 
   .option-row {

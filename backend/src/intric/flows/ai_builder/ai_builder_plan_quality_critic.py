@@ -27,6 +27,7 @@ from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
+from intric.flows.ai_builder.planning_state import AggregationIntent
 from intric.flows.domain.flow import Flow
 
 
@@ -35,6 +36,7 @@ def build_conversation_aware_quality_feedback(
     spec: FlowDraftSpecCore,
     *,
     flow: Flow | None = None,
+    aggregation_intent: AggregationIntent = "linear",
 ) -> str | None:
     answer_signals = extract_answer_signals(conversation)
     text = aggregate_freeform_user_text(conversation)
@@ -65,6 +67,7 @@ def build_conversation_aware_quality_feedback(
         planner_patterns=planner_patterns,
         output_intent=output_intent,
         mixed_audio_doc_input=mixed_audio_document_input_requested(text, flow=flow),
+        aggregation_intent=aggregation_intent,
     )
     issues = render_critic_issues(context)
 

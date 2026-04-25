@@ -21,8 +21,8 @@ Call surface:
   ``ArchitectureCommit`` + the strict-envelope ``DraftPlanEnvelope``)
   and produces a ``MaterializedDraft`` carrying the canonical
   ``FlowDraftSpecCore`` plus the already-compiled ``FlowChangeSet``.
-  Drift between envelope and commit (step count, per-step tuple,
-  unsupported output_mode) and semantic errors surfaced by the
+  Drift between envelope and commit (primary runtime input, terminal
+  output, unsupported output_mode) and semantic errors surfaced by the
   create-draft validator (``first_step_invalid_source``,
   ``file_flow_input_requires_runtime_upload``, form-field reference
   errors, etc.) are hard ``MaterializationError``s — the commit plus
@@ -58,19 +58,22 @@ from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
 from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
+from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    normalize_create_draft_mechanics,
+)
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     PlannerPlanEnvelope,
 )
+from intric.flows.ai_builder.ai_builder_draft_plan import DraftPlanEnvelope
 from intric.flows.ai_builder.ai_builder_materializer import compile_changeset
 from intric.flows.ai_builder.ai_builder_models import (
     FlowChangeSet,
     FlowDraftSpecCore,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_orchestrator import DraftPlanEnvelope
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.planning_state import ArchitectureCommit
 
@@ -127,12 +130,12 @@ def materialize(
 ) -> MaterializedDraft:
     """Translate an orchestrator v2 planner output into flows-domain types.
 
-    The architecture commit is authoritative: the envelope must carry
-    exactly as many steps as ``tuples_chain`` and each step's declared
-    ``input_type`` / ``output_type`` must match the commit's tuple at
-    that index. ``output_mode`` is derived by the create compiler from
-    per-step fields; the post-compile check enforces that derivation
-    lands on the commit's expected mode.
+    The architecture commit is a capability envelope: it pins the
+    primary runtime input and terminal output contract, not the exact
+    implementation step count. ``output_mode`` is derived by the create
+    compiler from per-step fields; the post-compile envelope check
+    enforces that terminal delivery still honors the committed
+    architecture while allowing intermediate extraction/review steps.
 
     The create-draft validator (``validate_create_draft``) is the same
     gate the existing proposal-processor path runs before compile —
@@ -142,7 +145,6 @@ def materialize(
     consistently regardless of which caller reaches the compile path.
     """
     _validate_commit_supports_create_materialization(architecture_commit)
-    _validate_step_count(architecture_commit, draft_plan)
     _require_explicit_tuple_axes_per_envelope_step(draft_plan)
 
     try:
@@ -161,12 +163,13 @@ def materialize(
             f"Draft envelope failed strict structural validation: {exc}"
         ) from exc
 
-    _validate_pre_compile_tuples(architecture_commit, draft)
+    draft = normalize_create_draft_mechanics(draft)
     _run_create_draft_semantic_validator(draft)
+    _validate_pre_compile_tuples(architecture_commit, draft)
 
     spec = compile_create_draft(draft)
 
-    _validate_post_compile_output_modes(architecture_commit, spec)
+    _validate_compiled_spec_matches_architecture_envelope(architecture_commit, spec)
     prepared_spec = _run_compiled_spec_validator(spec)
 
     changeset = compile_changeset(prepared_spec, None)
@@ -190,19 +193,6 @@ def _validate_commit_supports_create_materialization(
             )
 
 
-def _validate_step_count(
-    commit: ArchitectureCommit,
-    envelope: DraftPlanEnvelope,
-) -> None:
-    expected = len(commit.tuples_chain)
-    actual = len(envelope.steps)
-    if expected != actual:
-        raise MaterializationError(
-            f"draft_plan step count {actual} does not match "
-            f"architecture_commit.tuples_chain length {expected}"
-        )
-
-
 _REQUIRED_ENVELOPE_STEP_TUPLE_KEYS: frozenset[str] = frozenset(
     {"input_type", "output_type"}
 )
@@ -214,11 +204,10 @@ def _require_explicit_tuple_axes_per_envelope_step(
     """Force the envelope to declare every tuple axis explicitly.
 
     ``NewStepDraft`` defaults ``input_type`` / ``output_type`` to
-    ``text``. Without this check, a text/text commit would silently
-    accept an envelope step that omits both axes — the envelope would
-    pretend to declare the tuple but actually just rely on defaults.
-    Requiring explicit keys keeps the commit-authoritative contract
-    honest.
+    ``text``. Without this check, a plan could silently rely on those
+    defaults and hide what capabilities it actually asks the Flow
+    compiler to build. Requiring explicit keys keeps the capability
+    envelope check meaningful without forcing an exact step-count match.
     """
     for index, step_dict in enumerate(envelope.steps):
         missing = _REQUIRED_ENVELOPE_STEP_TUPLE_KEYS - step_dict.keys()
@@ -234,25 +223,34 @@ def _validate_pre_compile_tuples(
     commit: ArchitectureCommit,
     draft: FlowCreateDraft,
 ) -> None:
-    for index, (triple, step) in enumerate(zip(commit.tuples_chain, draft.steps)):
-        if step.input_type.value != triple.input_type:
-            raise MaterializationError(
-                _tuple_mismatch_message(
-                    index=index,
-                    axis="input_type",
-                    expected=triple.input_type,
-                    actual=step.input_type.value,
-                )
-            )
-        if step.output_type.value != triple.output_type:
-            raise MaterializationError(
-                _tuple_mismatch_message(
-                    index=index,
-                    axis="output_type",
-                    expected=triple.output_type,
-                    actual=step.output_type.value,
-                )
-            )
+    if not commit.tuples_chain:
+        raise MaterializationError(
+            "architecture_commit.tuples_chain must contain at least one "
+            "architecture envelope tuple"
+        )
+
+    primary_input_type = commit.tuples_chain[0].input_type
+    if primary_input_type == "any":
+        return
+
+    has_primary_input = any(
+        step.input_source.value == "flow_input"
+        and step.input_type.value == primary_input_type
+        for step in draft.steps
+    )
+    if has_primary_input:
+        return
+
+    actual_flow_inputs = [
+        step.input_type.value
+        for step in draft.steps
+        if step.input_source.value == "flow_input"
+    ]
+    raise MaterializationError(
+        "draft_plan does not contain a flow_input step matching "
+        f"architecture primary input_type {primary_input_type!r}; "
+        f"actual flow_input input_type values: {actual_flow_inputs}"
+    )
 
 
 def _run_create_draft_semantic_validator(draft: FlowCreateDraft) -> None:
@@ -268,20 +266,51 @@ def _run_create_draft_semantic_validator(draft: FlowCreateDraft) -> None:
     )
 
 
-def _validate_post_compile_output_modes(
+def _validate_compiled_spec_matches_architecture_envelope(
     commit: ArchitectureCommit,
     spec: FlowDraftSpecCore,
 ) -> None:
-    for index, (triple, step) in enumerate(zip(commit.tuples_chain, spec.steps)):
-        if step.output_mode.value != triple.output_mode:
-            raise MaterializationError(
-                _tuple_mismatch_message(
-                    index=index,
-                    axis="output_mode",
-                    expected=triple.output_mode,
-                    actual=step.output_mode.value,
-                )
-            )
+    if not commit.tuples_chain:
+        raise MaterializationError(
+            "architecture_commit.tuples_chain must contain at least one "
+            "architecture envelope tuple"
+        )
+    if not spec.steps:
+        raise MaterializationError("compiled spec has no steps")
+
+    terminal = commit.tuples_chain[-1]
+    terminal_step = spec.steps[-1]
+    if terminal_step.output_type.value != terminal.output_type:
+        raise MaterializationError(
+            "terminal output_type "
+            f"{terminal_step.output_type.value!r} does not match architecture "
+            f"terminal output_type {terminal.output_type!r}"
+        )
+
+    if terminal.output_mode == "transcribe_only":
+        if _has_audio_transcription_step(spec):
+            return
+        raise MaterializationError(
+            "architecture terminal output_mode 'transcribe_only' requires at "
+            "least one compiled audio transcription step"
+        )
+
+    if terminal_step.output_mode.value != terminal.output_mode:
+        raise MaterializationError(
+            "terminal output_mode "
+            f"{terminal_step.output_mode.value!r} does not match architecture "
+            f"terminal output_mode {terminal.output_mode!r}"
+        )
+
+
+def _has_audio_transcription_step(spec: FlowDraftSpecCore) -> bool:
+    return any(
+        step.input_source.value == "flow_input"
+        and step.input_type.value == "audio"
+        and step.output_type.value == "text"
+        and step.output_mode.value == "transcribe_only"
+        for step in spec.steps
+    )
 
 
 def _run_compiled_spec_validator(spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
@@ -346,19 +375,6 @@ def _run_compiled_spec_validator(spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
             f"Compiled spec failed create-path validation: {rendered}"
         )
     return prepared.spec
-
-
-def _tuple_mismatch_message(
-    *,
-    index: int,
-    axis: str,
-    expected: str,
-    actual: str,
-) -> str:
-    return (
-        f"step[{index}] {axis} {actual!r} does not match "
-        f"architecture_commit.tuples_chain[{index}].{axis} {expected!r}"
-    )
 
 
 async def apply_to_draft(

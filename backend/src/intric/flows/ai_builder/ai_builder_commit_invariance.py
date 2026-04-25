@@ -7,12 +7,11 @@ post-commit invariance check in the dispatcher, the materialization
 bridge before it writes a draft flow — must verify the transform did
 not silently drift the commit.
 
-`architecture_hash` equality alone is NOT sufficient. The planner
-supplies the hash as part of its JSON product; the server never
-recomputes it against the commit body. A matching hash on a divergent
-body (`tuples_chain` / `chosen_patterns` / `required_capabilities` /
-`committed_at`) is hash forgery, not preservation. The enforceable
-invariant is full canonical-form equality via `model_dump(mode="json")`.
+Persisted-commit preservation uses full canonical-form equality via
+`model_dump(mode="json")`. LLM-facing draft preservation is structural:
+the model may re-emit the semantic body, but server-owned fields
+(`architecture_hash`, `committed_at`) are never model-authored and are
+therefore ignored for draft-vs-pinned comparison.
 
 Callers that need a structured rejection rather than an exception
 (e.g. the repair helper, which surfaces drift as a `RejectionReason`
@@ -23,7 +22,13 @@ loud by default on every unchecked call site.
 
 from __future__ import annotations
 
-from intric.flows.ai_builder.planning_state import ArchitectureCommit
+from intric.flows.ai_builder.ai_builder_architecture_commit import (
+    canonical_architecture_commit_payload,
+)
+from intric.flows.ai_builder.planning_state import (
+    ArchitectureCommit,
+    ArchitectureCommitDraft,
+)
 
 
 class CommitDriftError(ValueError):
@@ -43,9 +48,8 @@ def assert_architecture_commit_unchanged(
       - `before=set, after` with different `architecture_hash`: raise.
       - `before=set, after` with matching hash but divergent body
         (`tuples_chain` / `chosen_patterns` / `required_capabilities` /
-        `committed_at`): raise — the server does not rebind the
-        planner-supplied hash to the body, so a matching hash on a
-        different body is forgery, not preservation.
+        `committed_at`): raise — a persisted commit with matching hash
+        but divergent body is corrupt state, not preservation.
       - `before=set, after` byte-identical: no raise.
 
     Caller composition: the evaluator's `_check_commit_preservation`
@@ -77,13 +81,37 @@ def assert_architecture_commit_unchanged(
         raise CommitDriftError(
             f"architecture_hash={before.architecture_hash} was preserved but "
             "the commit body was mutated (tuples_chain / chosen_patterns / "
-            "required_capabilities / committed_at). The server does not "
-            "rebind the planner-supplied hash; a matching hash on a "
-            "different body is drift, not preservation"
+            "required_capabilities / committed_at). A matching hash on a "
+            "different persisted body is corrupt state, not preservation"
+        )
+
+
+def assert_architecture_commit_draft_matches_pinned(
+    *,
+    before: ArchitectureCommit | None,
+    after: ArchitectureCommitDraft | None,
+) -> None:
+    """Raise when an LLM-facing commit draft drifts from a pinned commit.
+
+    Unlike `assert_architecture_commit_unchanged`, this helper compares
+    only semantic structure because the LLM-facing draft has no
+    server-owned `architecture_hash` or `committed_at` fields.
+    """
+    if before is None or after is None:
+        return
+    if canonical_architecture_commit_payload(before) != (
+        canonical_architecture_commit_payload(after)
+    ):
+        raise CommitDriftError(
+            "architecture_commit draft mutated the pinned committed "
+            "architecture (tuples_chain / chosen_patterns / "
+            "required_capabilities). The LLM may omit architecture_commit "
+            "after commit, but must not re-author a different semantic body"
         )
 
 
 __all__ = [
     "CommitDriftError",
+    "assert_architecture_commit_draft_matches_pinned",
     "assert_architecture_commit_unchanged",
 ]

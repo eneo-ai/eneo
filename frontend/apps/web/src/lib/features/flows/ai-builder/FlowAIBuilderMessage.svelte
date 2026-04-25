@@ -15,6 +15,7 @@
     isStreaming?: boolean;
     question?: StructuredQuestion;
     questionAnswered?: boolean;
+    questionAnswerText?: string | null;
     requirementsSummary?: RequirementsSummary;
     requirementsConfirmed?: boolean;
     requirementsActive?: boolean;
@@ -30,6 +31,7 @@
     isStreaming = false,
     question = undefined,
     questionAnswered = false,
+    questionAnswerText = null,
     requirementsSummary = undefined,
     requirementsConfirmed = false,
     requirementsActive = true,
@@ -72,6 +74,7 @@
         <FlowAIBuilderQuestion
           {question}
           answered={questionAnswered}
+          answerText={questionAnswerText}
           onanswer={(payload) => onQuestionAnswer?.(payload)}
         />
       {/if}

@@ -9,6 +9,12 @@ from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
     build_edit_mode_tool_schemas,
 )
+from intric.flows.ai_builder.ai_builder_flow_schema_values import (
+    builder_input_source_values,
+    builder_input_type_values,
+    builder_output_mode_values,
+    builder_output_type_values,
+)
 from intric.flows.flow import FlowStep
 
 
@@ -96,16 +102,29 @@ class TestBuildEditFlowToolSchema:
         assert "instructions" in add_payload["properties"]
         assert "document_delivery_mode" in add_payload["properties"]
         assert "output_fields" in add_payload["properties"]
+        assert "uses_previous_fields" not in add_payload["properties"]
 
-    def test_patch_schema_exposes_typed_previous_field_reuse(self):
+    def test_patch_schema_hides_backend_owned_previous_field_paths(self):
         schema = build_edit_flow_tool_schema([_make_step(1), _make_step(2)])
         patch = schema["function"]["parameters"]["properties"]["operations"]["items"][
             "properties"
         ]["patch"]
 
-        assert "uses_previous_fields" in patch["properties"]
-        uses_previous_fields = patch["properties"]["uses_previous_fields"]
-        assert uses_previous_fields["items"]["required"] == ["from_step", "field_path"]
+        assert "uses_previous_fields" not in patch["properties"]
+        assert "uses_form_fields" in patch["properties"]
+        assert "field-level previous-step paths" in patch["description"]
+
+    def test_patch_schema_uses_generated_flow_schema_values(self):
+        schema = build_edit_flow_tool_schema([_make_step(1), _make_step(2)])
+        patch = schema["function"]["parameters"]["properties"]["operations"]["items"][
+            "properties"
+        ]["patch"]
+        props = patch["properties"]
+
+        assert props["input_source"]["enum"] == builder_input_source_values()
+        assert props["input_type"]["enum"] == builder_input_type_values()
+        assert props["output_mode"]["enum"] == builder_output_mode_values()
+        assert props["output_type"]["enum"] == builder_output_type_values()
 
 
 class TestBuildEditModeToolSchemas:

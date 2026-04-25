@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from intric.flows.ai_builder.ai_builder_models import InputSource, InputType, OutputType
+from intric.flows.ai_builder.ai_builder_flow_schema_values import (
+    builder_input_source_values,
+    builder_input_type_values,
+    builder_output_type_values,
+    document_delivery_mode_values,
+)
+from intric.flows.ai_builder.ai_builder_models import InputType, OutputType
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     MAX_STRUCTURED_FIELD_DEPTH,
 )
@@ -21,6 +27,7 @@ def build_new_step_draft_schema(
     kb_refs: list[str] | None,
     description: str,
     input_source_description: str,
+    expose_previous_field_refs: bool = True,
 ) -> dict[str, Any]:
     properties: dict[str, Any] = {
         "name": {
@@ -38,17 +45,17 @@ def build_new_step_draft_schema(
         },
         "input_source": {
             "type": "string",
-            "enum": [value.value for value in InputSource],
+            "enum": builder_input_source_values(),
             "description": input_source_description,
         },
         "input_type": {
             "type": "string",
-            "enum": [value.value for value in InputType],
+            "enum": builder_input_type_values(),
             "default": InputType.TEXT.value,
         },
         "output_type": {
             "type": "string",
-            "enum": [value.value for value in OutputType],
+            "enum": builder_output_type_values(),
             "default": OutputType.TEXT.value,
         },
         "runtime_upload": {
@@ -71,7 +78,53 @@ def build_new_step_draft_schema(
             "items": {"type": "string"},
             "description": "Form field variable names this step needs in its compiled underlag.",
         },
-        "uses_previous_fields": {
+        "document_delivery_mode": {
+            "type": "string",
+            "enum": document_delivery_mode_values(),
+            "default": "not_applicable",
+            "description": (
+                "For docx/pdf outputs: generated document or template_fill. "
+                "Only DOCX supports template_fill."
+            ),
+        },
+        "citations_requested": {
+            "type": "boolean",
+            "default": False,
+            "description": "Whether the backend should enable inline citations for this text step.",
+        },
+        "output_fields": {
+            "type": ["array", "null"],
+            "description": (
+                "Typed structured output fields for JSON output. Use these instead of raw JSON Schema. "
+                "These field objects belong inside output_fields, never directly in steps[]. "
+                f"Keep max nesting depth {MAX_STRUCTURED_FIELD_DEPTH}: top-level fields, child fields, "
+                "and one grandchild level only."
+            ),
+            "items": build_structured_field_schema(),
+        },
+    }
+
+    properties["model_ref"] = {
+        "type": ["string", "null"],
+        "description": "Optional canonical model ref to use for this step.",
+    }
+    if model_refs is not None:
+        model_ref_property = cast(dict[str, Any], properties["model_ref"])
+        model_ref_property["enum"] = [*model_refs, None]
+
+    properties["knowledge_refs"] = {
+        "type": "array",
+        "items": {"type": "string"},
+        "uniqueItems": True,
+        "description": "Optional canonical knowledge base refs for this step.",
+    }
+    if kb_refs is not None:
+        knowledge_ref_property = cast(dict[str, Any], properties["knowledge_refs"])
+        knowledge_ref_items = cast(dict[str, Any], knowledge_ref_property["items"])
+        knowledge_ref_items["enum"] = kb_refs
+
+    if expose_previous_field_refs:
+        properties["uses_previous_fields"] = {
             "type": "array",
             "description": (
                 "Optional field-level reuse intent for earlier JSON-producing steps. "
@@ -100,58 +153,18 @@ def build_new_step_draft_schema(
                 },
                 "additionalProperties": False,
             },
-        },
-        "document_delivery_mode": {
-            "type": "string",
-            "enum": ["not_applicable", "generated", "template_fill"],
-            "default": "not_applicable",
-            "description": (
-                "For docx/pdf outputs: generated document or template_fill. "
-                "Only DOCX supports template_fill."
-            ),
-        },
-        "citations_requested": {
-            "type": "boolean",
-            "default": False,
-            "description": "Whether the backend should enable inline citations for this text step.",
-        },
-        "output_fields": {
-            "type": ["array", "null"],
-            "description": (
-                "Typed structured output fields for JSON output. Use these instead of raw JSON Schema. "
-                "These field objects belong inside output_fields, never directly in steps[]. "
-                f"Keep max nesting depth {MAX_STRUCTURED_FIELD_DEPTH}: top-level fields, child fields, "
-                "and one grandchild level only."
-            ),
-            "items": _structured_field_schema(depth=1),
-        },
-    }
+        }
 
-    properties["model_ref"] = {
-        "type": ["string", "null"],
-        "description": "Optional canonical model ref to use for this step.",
-    }
-    if model_refs is not None:
-        model_ref_property = cast(dict[str, Any], properties["model_ref"])
-        model_ref_property["enum"] = [*model_refs, None]
-
-    properties["knowledge_refs"] = {
-        "type": "array",
-        "items": {"type": "string"},
-        "uniqueItems": True,
-        "description": "Optional canonical knowledge base refs for this step.",
-    }
-    if kb_refs is not None:
-        knowledge_ref_property = cast(dict[str, Any], properties["knowledge_refs"])
-        knowledge_ref_items = cast(dict[str, Any], knowledge_ref_property["items"])
-        knowledge_ref_items["enum"] = kb_refs
+    step_description = description
+    if expose_previous_field_refs:
+        step_description = (
+            f"{description} Use `uses_previous_fields` instead of raw `input_bindings` "
+            "when a downstream step should reuse specific structured fields."
+        )
 
     return {
         "type": "object",
-        "description": (
-            f"{description} Use `uses_previous_fields` instead of raw `input_bindings` "
-            "when a downstream step should reuse specific structured fields."
-        ),
+        "description": step_description,
         "required": ["name", "instructions", "input_source"],
         "properties": properties,
         "additionalProperties": False,
@@ -193,3 +206,7 @@ def _structured_field_schema(*, depth: int) -> dict[str, Any]:
         "additionalProperties": False,
     }
     return schema
+
+
+def build_structured_field_schema() -> dict[str, Any]:
+    return _structured_field_schema(depth=1)

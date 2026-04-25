@@ -78,6 +78,45 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
 
 type FlowAIBuilderListener = (state: Readonly<FlowAIBuilderState>) => void;
 
+function extractQuestionAnswer(
+  metadata: ChatMessage["metadata"] | undefined
+): StructuredQuestionAnswerMetadata | null {
+  if (!metadata || typeof metadata !== "object" || !("question_answer" in metadata)) {
+    return null;
+  }
+  const questionAnswer = metadata.question_answer;
+  if (!questionAnswer || typeof questionAnswer !== "object") {
+    return null;
+  }
+  return questionAnswer as StructuredQuestionAnswerMetadata;
+}
+
+function renderQuestionAnswer(
+  question: StructuredQuestion,
+  answer: StructuredQuestionAnswerMetadata
+): string | null {
+  if (typeof answer.custom_value === "string" && answer.custom_value.trim()) {
+    return answer.custom_value.trim();
+  }
+
+  const selectedOptionIds = new Set(answer.selected_option_ids ?? []);
+  const selectedValues = answer.selected_values ?? [];
+  const labels = question.options
+    .filter((option) => {
+      if (option.id && selectedOptionIds.has(option.id)) {
+        return true;
+      }
+      if (option.value === undefined) {
+        return false;
+      }
+      return selectedValues.some((value) => value === option.value);
+    })
+    .map((option) => option.label.trim())
+    .filter(Boolean);
+
+  return labels.length > 0 ? labels.join(", ") : null;
+}
+
 export class FlowAIBuilderDriver {
   readonly #transport: AIBuilderClientTransport;
   readonly #spaceId: string;
@@ -667,21 +706,31 @@ export class FlowAIBuilderDriver {
 
   isQuestionAnswered(questionId: string): boolean {
     for (let index = this.#state.messages.length - 1; index >= 0; index -= 1) {
-      const metadata = this.#state.messages[index]?.metadata;
-      const questionAnswer =
-        metadata && typeof metadata === "object" && "question_answer" in metadata
-          ? metadata.question_answer
-          : null;
-      if (
-        questionAnswer &&
-        typeof questionAnswer === "object" &&
-        "question_id" in questionAnswer &&
-        questionAnswer.question_id === questionId
-      ) {
+      const questionAnswer = extractQuestionAnswer(this.#state.messages[index]?.metadata);
+      if (questionAnswer?.question_id === questionId) {
         return true;
       }
     }
     return false;
+  }
+
+  getQuestionAnswerText(question: StructuredQuestion): string | null {
+    for (let index = this.#state.messages.length - 1; index >= 0; index -= 1) {
+      const message = this.#state.messages[index];
+      const questionAnswer = extractQuestionAnswer(message?.metadata);
+      if (questionAnswer?.question_id !== question.question_id) {
+        continue;
+      }
+
+      const answerText = renderQuestionAnswer(question, questionAnswer);
+      if (answerText) {
+        return answerText;
+      }
+
+      const fallbackText = message?.role === "user" ? message.content.trim() : "";
+      return fallbackText || null;
+    }
+    return null;
   }
 
   async continueEditing(): Promise<void> {
@@ -797,6 +846,13 @@ export class FlowAIBuilderDriver {
         content: message.content ?? "",
         timestamp: this.#parseTimestamp(message.timestamp)
       };
+
+      const metadataRequirementsSummary = this.#parseRequirementsSummary(
+        message.metadata?.requirements_summary
+      );
+      if (metadataRequirementsSummary) {
+        assistantMessage.requirementsSummary = metadataRequirementsSummary;
+      }
 
       const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
       const structuredQuestionToolCall = toolCalls.find(

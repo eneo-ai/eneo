@@ -4,8 +4,8 @@
 `AsyncMock(AIBuilderRepository)` — see
 `tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py`. The
 unit tests pin the contract of every outcome kind (`dispatched`,
-`rejected`, `parse_failed`, `propose_plan_pending_adapter`) but they
-never exercise the real persistence layer.
+`rejected`, `parse_failed`) but they never exercise the real persistence
+layer.
 
 This suite closes that gap. Each test drives a full turn end-to-end
 against a live PostgreSQL container so the real `commit_turn`
@@ -19,7 +19,7 @@ Scope:
 - `commit_architecture` happy path — the accepted delta's
   `ArchitectureCommit` is stamped onto `PlanningState` in the same
   savepoint as the conversation append, and `load_planning_state`
-  returns it byte-identical.
+  returns the same semantic architecture with server-owned hash/time.
 - `ask_question` happy path — conversation appended, no commit on the
   persisted state (carry-forward starts from empty).
 - `rejected` outcome — the pipeline's terminal-rejection path does
@@ -37,6 +37,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_architecture_commit import (
+    architecture_commit_hash,
+    canonical_architecture_commit_payload,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_models import TargetKind
 from intric.flows.ai_builder.ai_builder_orchestrator import OrchestrationContext
@@ -45,6 +49,7 @@ from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
+    ResolvedSlot,
     StepTriple,
 )
 
@@ -71,6 +76,23 @@ def _architecture_commit_fixture() -> ArchitectureCommit:
         committed_at=datetime(2026, 4, 23, tzinfo=timezone.utc),
         architecture_hash="a" * 64,
     )
+
+
+def _resolved_core_slots() -> dict[str, ResolvedSlot]:
+    return {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="text",
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
 
 
 def _planner_output_json(
@@ -100,11 +122,10 @@ def _planner_output_json(
                 "signals_added": [],
                 "slots_resolved": [],
                 "architecture_commit": (
-                    architecture_commit.model_dump(mode="json")
+                    canonical_architecture_commit_payload(architecture_commit)
                     if architecture_commit is not None
                     else None
                 ),
-                "draft_plan": None,
             },
             "planner_action": {"kind": kind, "payload": payload},
         }
@@ -182,10 +203,13 @@ def _orchestration_context(
     current_version: int = 0,
     architecture_commit: ArchitectureCommit | None = None,
     required_slot_names: frozenset[str] = frozenset(),
+    resolve_core_slots: bool = True,
 ) -> OrchestrationContext:
     state = PlanningState.empty()
     if architecture_commit is not None:
         state.architecture_commit = architecture_commit
+    if resolve_core_slots:
+        state.resolved_slots = _resolved_core_slots()
     return OrchestrationContext(
         current_version=current_version,
         session_state=state,
@@ -234,8 +258,8 @@ async def test_run_planner_turn_persists_commit_architecture_through_real_repo(
 
     A single turn drives the real dispatcher through a real
     `commit_turn` savepoint. After the turn, `load_planning_state`
-    must return the commit byte-identical to what the planner
-    produced — no field drift, no hash rebinding, no partial writes.
+    must return the same semantic commit that the planner produced,
+    plus server-owned hash/time — no field drift or partial writes.
     """
     commit = _architecture_commit_fixture()
     space_id = await _create_space(
@@ -303,8 +327,12 @@ async def test_run_planner_turn_persists_commit_architecture_through_real_repo(
 
     assert loaded is not None
     assert loaded.architecture_commit is not None
-    assert loaded.architecture_commit.model_dump(mode="json") == commit.model_dump(
-        mode="json"
+    assert loaded.architecture_commit.architecture_hash == architecture_commit_hash(
+        commit
+    )
+    assert loaded.architecture_commit.committed_at.tzinfo is not None
+    assert canonical_architecture_commit_payload(loaded.architecture_commit) == (
+        canonical_architecture_commit_payload(commit)
     )
     assert len(fetched_session.conversation) == 2
     assert fetched_session.conversation[0].role == "user"
@@ -350,7 +378,8 @@ async def test_run_planner_turn_persists_ask_question_without_commit(
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_orchestration_context(
-                required_slot_names=frozenset({"primary_runtime_input"})
+                required_slot_names=frozenset({"primary_runtime_input"}),
+                resolve_core_slots=False,
             ),
             build_new_messages=lambda _a, _t: [
                 ConversationMessage(role="user", content="Vad behöver jag svara på?"),

@@ -26,7 +26,7 @@ from intric.database.tables.spaces_table import (
     SpacesTranscriptionModels,
 )
 from intric.database.tables.tenant_table import Tenants
-from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_domain_models import SessionStatus
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
@@ -1683,7 +1683,7 @@ async def test_store_plan_and_update_conversation_rolls_back_when_append_fails(
                     new_messages_start=0,
                     assistant_content="simulated",
                     tool_call_id="call-1",
-                    tool_name=CREATE_FLOW_TOOL_NAME,
+                    tool_name=OUTLINE_FLOW_TOOL_NAME,
                     arguments={},
                     spec=spec,
                     assumptions=[],
@@ -1756,7 +1756,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state(
             new_messages_start=0,
             assistant_content="plan ready",
             tool_call_id="call-ps-1",
-            tool_name=CREATE_FLOW_TOOL_NAME,
+            tool_name=OUTLINE_FLOW_TOOL_NAME,
             arguments={},
             spec=spec,
             assumptions=[],
@@ -1842,7 +1842,7 @@ async def test_store_plan_and_update_conversation_stamps_plan_identity_on_state(
             new_messages_start=0,
             assistant_content="plan ready",
             tool_call_id="call-identity-1",
-            tool_name=CREATE_FLOW_TOOL_NAME,
+            tool_name=OUTLINE_FLOW_TOOL_NAME,
             arguments={},
             spec=spec,
             assumptions=[],
@@ -1919,7 +1919,7 @@ async def test_store_plan_and_update_conversation_state_matches_compacted_conver
             new_messages_start=0,
             assistant_content="plan ready",
             tool_call_id="call-cmp-1",
-            tool_name=CREATE_FLOW_TOOL_NAME,
+            tool_name=OUTLINE_FLOW_TOOL_NAME,
             arguments={},
             spec=spec,
             assumptions=[],
@@ -2289,7 +2289,7 @@ async def test_ai_builder_api_repeated_output_question_after_freeform_label_reco
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_ai_builder_api_question_recovery_exhaustion_returns_typed_error_event(
+async def test_ai_builder_api_resolved_architecture_skips_legacy_question_recovery_loop(
     client,
     bearer_token,
     completion_model_factory,
@@ -2303,48 +2303,7 @@ async def test_ai_builder_api_question_recovery_exhaustion_returns_typed_error_e
         space_name="AI Builder API recovery exhaustion",
     )
 
-    initial_question = _make_tool_call(
-        tool_call_id="call_q1",
-        name="ask_structured_question",
-        arguments={
-            "question_id": "final_output_mode",
-            "question": "Vad ska flödet producera som slutresultat?",
-            "options": [
-                {
-                    "id": "structured_text",
-                    "label": "Strukturerat textresultat",
-                },
-                {"id": "pdf_document", "label": "PDF-dokument"},
-                {"id": "docx_document", "label": "DOCX-dokument"},
-                {"id": "structured_json", "label": "Strukturerad JSON"},
-            ],
-            "selection_mode": "single",
-            "allow_custom": True,
-        },
-    )
-    repeated_question = _make_tool_call(
-        tool_call_id="call_q_repeat",
-        name="ask_structured_question",
-        arguments={
-            "question_id": "final_output_mode",
-            "question": "Vad ska flödet producera som slutresultat?",
-            "options": [
-                {"id": "structured_text", "label": "Text"},
-                {"id": "pdf_document", "label": "PDF"},
-            ],
-            "selection_mode": "single",
-            "allow_custom": True,
-        },
-    )
-
-    mock_completion = AsyncMock(
-        side_effect=[
-            _make_llm_response(tool_calls=[initial_question]),
-            _make_llm_response(tool_calls=[repeated_question]),
-            _make_llm_response(tool_calls=[repeated_question]),
-            _make_llm_response(tool_calls=[repeated_question]),
-        ]
-    )
+    mock_completion = AsyncMock(side_effect=AssertionError("LLM should not be called"))
 
     with patch(
         "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
@@ -2455,9 +2414,9 @@ async def test_ai_builder_api_question_recovery_exhaustion_returns_typed_error_e
                 message="Bygg vidare",
             )
 
-    error_events = [event for event in second_events if event["event"] == "error"]
-    assert len(error_events) == 1
-    assert error_events[0]["data"]["code"] == "question_recovery_exhausted"
+    assert not any(event["event"] == "error" for event in second_events)
+    assert any(event["event"] == "requirements_summary" for event in second_events)
+    mock_completion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2483,66 +2442,37 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
         tenant_id=tenant_id,
     )
 
-    initial_question = _make_tool_call(
-        tool_call_id="call_q1",
-        name="ask_structured_question",
-        arguments={
-            "question_id": "final_output_mode",
-            "question": "Vad ska flödet producera som slutresultat?",
-            "options": [
-                {
-                    "id": "structured_text",
-                    "label": "Strukturerat textresultat",
-                },
-                {"id": "pdf_document", "label": "PDF-dokument"},
-                {"id": "docx_document", "label": "DOCX-dokument"},
-                {"id": "structured_json", "label": "Strukturerad JSON"},
-            ],
-            "selection_mode": "single",
-            "allow_custom": True,
-        },
-    )
-    requirements_summary = _make_tool_call(
-        tool_call_id="call_requirements",
-        name="confirm_requirements",
-        arguments={
-            "summary": (
-                "Flödet ska ta en uppladdad ljudfil, transkribera den och skapa "
-                "en läsbar PDF-sammanfattning."
-            ),
-            "key_decisions": [
-                {"topic": "Input", "decision": "En ljudfil per körning"},
-                {"topic": "Output", "decision": "PDF-dokument"},
-            ],
-            "input_description": "Användaren laddar upp en ljudfil vid körning.",
-            "output_description": "Flödet producerar en PDF med en kort sammanfattning.",
-        },
-    )
-    create_flow = _make_tool_call(
+    outline_flow = _make_tool_call(
         tool_call_id="call_plan",
-        name=CREATE_FLOW_TOOL_NAME,
+        name=OUTLINE_FLOW_TOOL_NAME,
         arguments={
             "flow_name": "Ljudtranskribering till PDF",
             "flow_description": "Transkriberar uppladdat ljud och skapar en PDF-sammanfattning.",
             "plan_rationale": "Transkribera först och generera sedan PDF-sammanfattningen.",
+            "runtime_input": {
+                "input_type": "text",
+                "required": True,
+            },
+            "final_output_type": "json",
             "steps": [
                 {
                     "name": "Transkribera ljud",
-                    "instructions": "Transkribera den uppladdade ljudfilen ordagrant till svensk text.",
-                    "input_source": "flow_input",
-                    "input_type": "audio",
+                    "task": "Transkribera den uppladdade ljudfilen ordagrant till svensk text.",
                     "output_type": "text",
-                    "runtime_upload": True,
-                    "runtime_required": True,
                 },
                 {
                     "name": "Skapa PDF-sammanfattning",
-                    "instructions": (
-                        "Sammanfatta transkriberingen på tydlig svenska och generera "
-                        "en läsbar PDF för mänskliga mottagare."
+                    "task": (
+                        "Sammanfatta transkriberingen på tydlig svenska med de "
+                        "viktigaste punkterna för en mänsklig läsare."
                     ),
-                    "input_source": "previous_step",
-                    "input_type": "text",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Generera PDF-dokument",
+                    "task": (
+                        "Skapa ett läsbart PDF-dokument utifrån sammanfattningen."
+                    ),
                     "output_type": "pdf",
                 },
             ],
@@ -2550,11 +2480,7 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
     )
 
     mock_completion = AsyncMock(
-        side_effect=[
-            _make_llm_response(tool_calls=[initial_question]),
-            _make_llm_response(tool_calls=[requirements_summary]),
-            _make_llm_response(tool_calls=[create_flow]),
-        ]
+        return_value=_make_llm_response(tool_calls=[outline_flow])
     )
 
     with patch(
@@ -2612,7 +2538,7 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
 
     assert any(event["event"] == "question" for event in first_events)
     assert any(event["event"] == "requirements_summary" for event in second_events)
-    assert any(event["event"] == "plan" for event in third_events)
+    assert any(event["event"] == "plan" for event in third_events), third_events
 
     plan_id = await _get_latest_plan_id(
         client=client,
@@ -2641,7 +2567,7 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
     )
     assert apply_response.status_code == 200, apply_response.text
     apply_payload = apply_response.json()
-    assert apply_payload["steps_created"] == 2
+    assert apply_payload["steps_created"] == 3
     assert apply_payload["steps_updated"] == 0
     assert apply_payload["steps_removed"] == 0
 
@@ -2653,10 +2579,11 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
     assert flow_response.status_code == 200, flow_response.text
     flow_payload = flow_response.json()
     assert flow_payload["name"] == "Ljudtranskribering till PDF"
-    assert len(flow_payload["steps"]) == 2
+    assert len(flow_payload["steps"]) == 3
     assert flow_payload["steps"][0]["input_type"] == "audio"
     assert flow_payload["steps"][0]["output_mode"] == "transcribe_only"
-    assert flow_payload["steps"][1]["output_type"] == "pdf"
+    assert flow_payload["steps"][1]["output_type"] == "text"
+    assert flow_payload["steps"][2]["output_type"] == "pdf"
 
 
 @pytest.mark.asyncio
@@ -3088,67 +3015,37 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
         space_name="AI Builder API audio missing transcription model",
     )
 
-    initial_question = _make_tool_call(
-        tool_call_id="call_q1",
-        name="ask_structured_question",
-        arguments={
-            "question_id": "final_output_mode",
-            "question": "Vad ska flödet producera som slutresultat?",
-            "options": [
-                {
-                    "id": "structured_text",
-                    "label": "Strukturerat textresultat",
-                },
-                {"id": "pdf_document", "label": "PDF-dokument"},
-                {"id": "docx_document", "label": "DOCX-dokument"},
-                {"id": "structured_json", "label": "Strukturerad JSON"},
-            ],
-            "selection_mode": "single",
-            "allow_custom": True,
-        },
-    )
-    requirements_summary = _make_tool_call(
-        tool_call_id="call_requirements",
-        name="confirm_requirements",
-        arguments={
-            "summary": (
-                "Flödet ska ta en uppladdad ljudfil, transkribera den och skapa "
-                "en läsbar PDF-sammanfattning."
-            ),
-            "key_decisions": [
-                {"topic": "Input", "decision": "En ljudfil per körning"},
-                {"topic": "Output", "decision": "PDF-dokument"},
-            ],
-            "input_description": "Användaren laddar upp en ljudfil vid körning.",
-            "output_description": "Flödet producerar en PDF med en kort sammanfattning.",
-        },
-    )
-
-    create_flow = _make_tool_call(
+    outline_flow = _make_tool_call(
         tool_call_id="call_plan",
-        name=CREATE_FLOW_TOOL_NAME,
+        name=OUTLINE_FLOW_TOOL_NAME,
         arguments={
             "flow_name": "Ljudtranskribering till PDF",
             "flow_description": "Transkriberar uppladdat ljud och skapar en PDF-sammanfattning.",
             "plan_rationale": "Transkribera först och generera sedan PDF-sammanfattningen.",
+            "runtime_input": {
+                "input_type": "text",
+                "required": True,
+            },
+            "final_output_type": "json",
             "steps": [
                 {
                     "name": "Transkribera ljud",
-                    "instructions": "Transkribera den uppladdade ljudfilen ordagrant till svensk text.",
-                    "input_source": "flow_input",
-                    "input_type": "audio",
+                    "task": "Transkribera den uppladdade ljudfilen ordagrant till svensk text.",
                     "output_type": "text",
-                    "runtime_upload": True,
-                    "runtime_required": True,
                 },
                 {
                     "name": "Skapa PDF-sammanfattning",
-                    "instructions": (
-                        "Sammanfatta transkriberingen på tydlig svenska och generera "
-                        "en läsbar PDF för mänskliga mottagare."
+                    "task": (
+                        "Sammanfatta transkriberingen på tydlig svenska med de "
+                        "viktigaste punkterna för en mänsklig läsare."
                     ),
-                    "input_source": "previous_step",
-                    "input_type": "text",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Generera PDF-dokument",
+                    "task": (
+                        "Skapa ett läsbart PDF-dokument utifrån sammanfattningen."
+                    ),
                     "output_type": "pdf",
                 },
             ],
@@ -3156,11 +3053,7 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
     )
 
     mock_completion = AsyncMock(
-        side_effect=[
-            _make_llm_response(tool_calls=[initial_question]),
-            _make_llm_response(tool_calls=[requirements_summary]),
-            _make_llm_response(tool_calls=[create_flow]),
-        ]
+        return_value=_make_llm_response(tool_calls=[outline_flow])
     )
 
     with patch(
@@ -3219,7 +3112,8 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
     assert any(event["event"] == "question" for event in first_events)
     assert any(event["event"] == "requirements_summary" for event in second_events)
 
-    plan_event = next(event for event in events if event["event"] == "plan")
+    plan_event = next((event for event in events if event["event"] == "plan"), None)
+    assert plan_event is not None, events
     plan_id = plan_event["data"]["plan_id"]
 
     approve_response = await client.post(

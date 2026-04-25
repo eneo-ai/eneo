@@ -13,13 +13,10 @@ Enforced invariants (five-state transition matrix):
 - `prior=set, after` with different `architecture_hash` → raises.
 - `prior=set, after` byte-identical → no raise.
 
-The critical subtlety: `architecture_hash` equality alone is
-insufficient. The planner supplies the hash; the server does not
-recompute it. A matching hash on a divergent body
-(`tuples_chain` / `chosen_patterns` / `required_capabilities` /
-`committed_at`) is hash forgery, not preservation. The helper
-compares full canonical `model_dump(mode="json")` output after the
-hash check.
+The critical subtlety: persisted commits compare full canonical
+`model_dump(mode="json")`, while LLM-facing draft comparisons compare
+only the semantic body. The model never authors `architecture_hash` or
+`committed_at`.
 
 Raises `CommitDriftError` (a `ValueError` subclass) so callers can
 catch drift specifically. The exception message names the drifted
@@ -34,9 +31,14 @@ import pytest
 
 from intric.flows.ai_builder.ai_builder_commit_invariance import (
     CommitDriftError,
+    assert_architecture_commit_draft_matches_pinned,
     assert_architecture_commit_unchanged,
 )
-from intric.flows.ai_builder.planning_state import ArchitectureCommit, StepTriple
+from intric.flows.ai_builder.planning_state import (
+    ArchitectureCommit,
+    ArchitectureCommitDraft,
+    StepTriple,
+)
 
 
 def _make_commit(
@@ -157,11 +159,53 @@ class TestExceptionType:
             assert_architecture_commit_unchanged(before=prior, after=None)
 
 
+class TestDraftPreservation:
+    def test_matching_semantic_draft_preserves_pinned_commit(self) -> None:
+        prior = _make_commit(
+            required_capabilities=["output_mode_pass_through", "input_text"],
+            chosen_patterns=["summarize_text"],
+        )
+        draft = ArchitectureCommitDraft(
+            tuples_chain=prior.tuples_chain,
+            chosen_patterns=["summarize_text"],
+            required_capabilities=["input_text", "output_mode_pass_through"],
+        )
+
+        assert_architecture_commit_draft_matches_pinned(before=prior, after=draft)
+
+    def test_draft_omission_is_allowed_for_preservation_by_absence(self) -> None:
+        prior = _make_commit()
+        assert_architecture_commit_draft_matches_pinned(before=prior, after=None)
+
+    def test_different_semantic_draft_raises(self) -> None:
+        prior = _make_commit()
+        draft = ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="text",
+                    output_type="json",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=prior.chosen_patterns,
+            required_capabilities=prior.required_capabilities,
+        )
+
+        with pytest.raises(CommitDriftError) as excinfo:
+            assert_architecture_commit_draft_matches_pinned(before=prior, after=draft)
+
+        assert "semantic body" in str(excinfo.value)
+
+
 class TestPublicSurface:
     def test_expected_symbols_exported(self) -> None:
         from intric.flows.ai_builder import ai_builder_commit_invariance as module
 
-        for symbol in ("assert_architecture_commit_unchanged", "CommitDriftError"):
+        for symbol in (
+            "assert_architecture_commit_draft_matches_pinned",
+            "assert_architecture_commit_unchanged",
+            "CommitDriftError",
+        ):
             assert hasattr(module, symbol), (
                 f"{symbol} must be exported from ai_builder_commit_invariance"
             )

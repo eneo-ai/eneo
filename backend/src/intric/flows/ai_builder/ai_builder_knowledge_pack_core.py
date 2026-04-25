@@ -195,8 +195,11 @@ BEGRÄNSNINGAR:
 
 ## Underlag / input_bindings.question
 **VILKEN TEXT** AI:n ska bearbeta — det faktiska materialet.
-- I `create_flow` skriver du inte `input_bindings.question` själv. Du beskriver bara `instructions`, \
-  `input_source`, `uses_form_fields` och eventuell runtime-uppladdning; backend kompilerar underlaget.
+- AI Builder-modellen skriver inte `input_bindings.question` själv i create-läge. Den beskriver
+  semantisk input, fält och steg; backend kompilerar underlaget från Flow-kapabiliteterna.
+- Ett explicit `input_bindings.question` ersätter stegets implicita `input_source` vid körning. \
+  Därför måste backend bara skapa explicit underlag när det faktiskt behövs, och då inkludera \
+  hela materialet steget ska se.
 - Byggs med variabler från formulär, tidigare steg och systemvariabler
 - Om tomt → används resultatet från föregående steg automatiskt
 - Används för att komponera indata från FLERA källor till ett steg

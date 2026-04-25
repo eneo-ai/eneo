@@ -15,6 +15,9 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
 from intric.flows.ai_builder.ai_builder_keywords import (
     PDF_OUTPUT_CONTEXT_MARKERS,
 )
+from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+    infer_runtime_metadata_slot,
+)
 
 
 def normalize_signal_text(value: str) -> str:
@@ -145,6 +148,16 @@ def _infer_document_material_scope(text: str) -> str | None:
             "either one or several documents",
             "både enskild fil och dokumentpaket",
             "both a single file and a case package",
+            "både enskilt och flera samtidigt",
+            "både ett och flera dokument",
+            "både enskilt dokument och flera dokument",
+            "båda lägen",
+            "båda lägena",
+            "both modes",
+            "both single and multiple documents",
+            "single and multiple documents",
+            "flexibelt ett eller flera dokument",
+            "flexible single or multiple documents",
         ),
     ):
         return "flexible_document_case"
@@ -290,6 +303,8 @@ def _infer_structured_analysis_need(text: str) -> str | None:
             "structured data where it improves quality",
             "use structured analysis",
             "structured analysis",
+            "analysmodul",
+            "analysis module",
             "output contract",
             "output_contract",
             "json innan slutrapporten",
@@ -361,21 +376,45 @@ def _infer_pdf_generation_mode(text: str) -> str | None:
 
 
 def _infer_runtime_metadata_fields(text: str) -> str | None:
-    richer_markers = (
-        "case number",
-        "intern referens",
-        "internal reference",
-        "prioritet",
-        "priority",
-        "ansvarig avdelning",
-        "responsible department",
-        "språk",
-        "language",
-        "fokus",
-        "focus",
-        "committee",
+    runtime_field_intent = infer_runtime_metadata_slot(text)
+    if runtime_field_intent is not None:
+        return runtime_field_intent
+
+    field_marker_groups = (
+        (
+            "case number",
+            "case id",
+            "reference number",
+            "referensnummer",
+            "intern referens",
+            "internal reference",
+            "ärendenummer",
+            "diarienummer",
+            "diarie nummer",
+        ),
+        (
+            "department",
+            "avdelning",
+            "ansvarig avdelning",
+            "responsible department",
+            "committee",
+            "nämnd",
+        ),
+        (
+            "case officer",
+            "handläggare",
+            "owner",
+            "ansvarig",
+            "role",
+            "roll",
+        ),
+        ("priority", "prioritet"),
+        ("language", "språk"),
+        ("focus", "fokus"),
+        ("date", "datum"),
+        ("case type", "ärendetyp", "typ av ärende"),
     )
-    if sum(1 for marker in richer_markers if marker in text) >= 2:
+    if sum(1 for markers in field_marker_groups if _contains_any(text, markers)) >= 2:
         return "detailed_case_metadata"
     if _contains_any(
         text,

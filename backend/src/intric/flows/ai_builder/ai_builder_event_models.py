@@ -5,7 +5,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from intric.flows.ai_builder.ai_builder_domain_models import JsonObject, PlannerPlanEnvelope
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    JsonObject,
+    PlannerPlanEnvelope,
+)
 
 
 class StructuredQuestionOptionPayload(BaseModel):

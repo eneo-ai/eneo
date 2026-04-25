@@ -99,8 +99,24 @@ def compile_input_bindings(
     step_draft: NewStepDraft,
     prior_steps: list[StepSpec],
 ) -> dict[str, Any] | None:
+    """Compile explicit "Underlag till text" only when implicit input is insufficient.
+
+    Runtime treats `input_bindings.question` as the complete effective input for
+    the step. It replaces, rather than augments, `input_source`. For that reason
+    the compiler should leave bindings empty for normal chains and broad fan-in
+    steps unless it must compose material from multiple sources.
+    """
+    if step_draft.input_source.value == "all_previous_steps":
+        return None
+
     source_reference = _resolve_source_reference(step_draft, prior_steps)
     explicit_previous_fields = _compile_previous_field_sections(step_draft, prior_steps)
+    needs_explicit_underlag = bool(
+        explicit_previous_fields or step_draft.uses_form_fields
+    )
+
+    if step_draft.input_source.value == "previous_step" and not needs_explicit_underlag:
+        return None
 
     if source_reference is None and not explicit_previous_fields:
         return None
@@ -128,13 +144,24 @@ def compile_assistant_instructions(
     input_bindings: dict[str, Any] | None,
 ) -> str:
     instructions = step_draft.instructions
+    if input_bindings is None and step_draft.uses_previous_fields:
+        field_lines = "\n".join(
+            f"- {field_ref.label or default_previous_field_label(field_ref.field_path)} "
+            f"(steg {field_ref.from_step}: {field_ref.field_path})"
+            for field_ref in step_draft.uses_previous_fields
+        )
+        instructions = (
+            f"{instructions}\n\n"
+            "Beakta särskilt följande strukturerade fält i underlaget:\n"
+            f"{field_lines}"
+        )
     if input_bindings is None and step_draft.uses_form_fields:
         form_lines = "\n".join(
             f"- {field_name}: {{{{ {field_name} }}}}"
             for field_name in step_draft.uses_form_fields
         )
         instructions = (
-            f"{step_draft.instructions}\n\n"
+            f"{instructions}\n\n"
             "Beakta också följande formulärfält vid analysen:\n"
             f"{form_lines}"
         )
@@ -181,9 +208,12 @@ def _resolve_source_reference(
     if input_source == "previous_step":
         if not prior_steps:
             return None
+        previous_step = prior_steps[-1]
         if input_type == "json":
-            return f"{{{{ {prior_steps[-1].plan_step_ref}.output.structured }}}}"
-        return "{{ föregående_steg }}"
+            return f"{{{{ {previous_step.plan_step_ref}.output.structured }}}}"
+        if previous_step.output_type == OutputType.JSON:
+            return f"{{{{ {previous_step.plan_step_ref}.output.structured }}}}"
+        return f"{{{{ {previous_step.plan_step_ref}.output.text }}}}"
 
     if input_source == "all_previous_steps":
         references = [

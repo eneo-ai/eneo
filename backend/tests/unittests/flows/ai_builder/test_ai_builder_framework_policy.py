@@ -74,6 +74,28 @@ def test_resolve_explicit_output_choice_detects_generic_english_text_summary() -
     assert output == "structured_text"
 
 
+def test_resolve_explicit_output_choice_ignores_json_payload_examples() -> None:
+    output = resolve_explicit_output_choice(
+        (
+            "Output ska vara: 1. en översiktlig flödesdesign, "
+            "2. exempel på payload eller JSON-struktur mellan noder, "
+            "3. felhantering och kvalitetskontroller."
+        ),
+        {},
+    )
+
+    assert output is None
+
+
+def test_resolve_explicit_output_choice_accepts_json_as_final_artifact() -> None:
+    output = resolve_explicit_output_choice(
+        "Slutresultatet ska vara JSON som kan läsas maskinellt.",
+        {},
+    )
+
+    assert output == "structured_json"
+
+
 def test_resolve_explicit_output_choice_does_not_detect_specialty_phrasings() -> None:
     """Lockdown for the framework_policy domain-vocabulary purge.
 
@@ -617,6 +639,24 @@ def test_extract_answer_signals_infers_freeform_document_signals_without_metadat
     assert "documents" in signals["input_material_mode"]
 
 
+def test_extract_answer_signals_infers_swedish_flexible_pdf_answers() -> None:
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": "båda lägen",
+            },
+            {
+                "role": "user",
+                "content": "pdf filer som inkommande underlag",
+            },
+        ]
+    )
+
+    assert "flexible_document_case" in signals["document_material_scope"]
+    assert "documents" in signals["input_material_mode"]
+
+
 def test_extract_answer_signals_infers_structured_analysis_and_metadata_needs() -> None:
     signals = extract_answer_signals(
         [
@@ -631,6 +671,22 @@ def test_extract_answer_signals_infers_structured_analysis_and_metadata_needs() 
     )
 
     assert "use_structured_analysis" in signals["structured_analysis_need"]
+    assert "detailed_case_metadata" in signals["runtime_metadata_fields"]
+
+
+def test_extract_answer_signals_infers_common_runtime_metadata_field_names() -> None:
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Användaren ska fylla i diarienummer, avdelning och "
+                    "handläggare innan rapporten skapas."
+                ),
+            }
+        ]
+    )
+
     assert "detailed_case_metadata" in signals["runtime_metadata_fields"]
 
 

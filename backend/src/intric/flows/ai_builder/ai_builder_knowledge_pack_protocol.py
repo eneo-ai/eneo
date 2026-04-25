@@ -1,41 +1,44 @@
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_flow_capability_reference import (
+    render_structured_reference_block,
+)
+
 
 def build_role_and_protocol(*, is_edit_mode: bool) -> str:
-    submission_tool = "edit_flow" if is_edit_mode else "create_flow"
+    submission_tool = "edit_flow" if is_edit_mode else "outline_flow"
     draft_noun = "ändringsplan" if is_edit_mode else "typed draft"
     plan_phrase = "ändringarna" if is_edit_mode else "planen"
-    submission_tool_cell = "`edit_flow`" if is_edit_mode else "`create_flow`"
 
     return f"""\
 # Utdataformat — OBLIGATORISKT
 
 Ditt svar MÅSTE vara **ett enda JSON-objekt och ingenting annat** — ingen \
-prosa runt, ingen markdown-kodblock, inga function calls. Exakt schema:
+prosa runt, ingen markdown-kodblock, inga function calls. Detta är endast \
+planner-kontraktet för frågor, arkitekturcommit och kravbekräftelse. Planen \
+byggs senare via ett separat servervalt `{submission_tool}`-verktygsanrop; \
+emittera därför ALDRIG planförslag i detta JSON-kontrakt. Exakt schema:
 
 ```json
 {{
   "planning_state_delta": {{
     "base_planning_state_version": <kopiera aktuellt `base_planning_state_version` från systemkontexten>,
-    "architecture_commit": <populera endast vid kind="commit_architecture">,
-    "draft_plan": <populera endast vid kind="propose_plan">
+    "architecture_commit": <normalt null; servern härleder vid kind="commit_architecture">
   }},
   "planner_action": {{
-    "kind": "ask_question" | "confirm_requirements" | "commit_architecture" | "propose_plan",
+    "kind": "ask_question" | "confirm_requirements" | "commit_architecture",
     "payload": {{ "..." }}
   }}
 }}
 ```
 
-**Mappning från tidigare tool-anropsnamn till `planner_action.kind`** \
-(tidigare delar av denna prompt refererar till tool-namn av historiska \
-skäl — tolka dem som motsvarande planner_action-kind):
+**Payload-kontrakt per `planner_action.kind`:**
 
-| Historiskt namn | planner_action.kind | Payload-fält |
-|---|---|---|
-| `ask_structured_question` | `ask_question` | `question_id`, `slot_name`, `prompt` |
-| `confirm_requirements` | `confirm_requirements` | `summary`, `key_decisions` (lista av `{{topic, decision}}`), `input_description`, `output_description`, `assumptions` (lista av strängar), `manual_setup_notes` (lista av strängar, valfri) |
-| {submission_tool_cell} | `propose_plan` | `plan_reference` (default `"latest"`) |
+| `planner_action.kind` | Payload-fält |
+|---|---|
+| `ask_question` | `question_id`, `slot_name`, `prompt` (och inget annat) |
+| `confirm_requirements` | `summary`, `key_decisions` (lista av `{{topic, decision}}`), `input_description`, `output_description`, `assumptions` (lista av strängar), `manual_setup_notes` (lista av strängar, valfri) |
+| `commit_architecture` | `note` (valfri kort text; ingen arkitekturpayload) |
 
 **`confirm_requirements`-kontrakt (OBLIGATORISKT fält-för-fält):** När du \
 emitterar `confirm_requirements` MÅSTE payload innehålla hela krav-\
@@ -63,58 +66,23 @@ Emittera ALDRIG bara `summary` — utan de övriga fälten kan systemet \
 inte markera kraven som bekräftade och du kommer att fråga om samma \
 sak i nästa tur.
 
-**`propose_plan`-kontrakt (exakt layout):** När du emitterar \
-`propose_plan` gäller den här fullständiga shapen — `plan_reference` \
-hör hemma i `planner_action.payload`, ALDRIG i \
-`planning_state_delta.draft_plan`. `draft_plan` har exakt tre \
-deklarerade nycklar: `plan_id`, `steps`, `form_fields`. Ingen annan \
-nyckel accepteras av parsern.
-
-```json
-{{
-  "planning_state_delta": {{
-    "base_planning_state_version": <kopiera aktuellt värde>,
-    "draft_plan": {{
-      "plan_id": null,
-      "steps": [],
-      "form_fields": []
-    }}
-  }},
-  "planner_action": {{
-    "kind": "propose_plan",
-    "payload": {{
-      "plan_reference": "latest"
-    }}
-  }}
-}}
-```
-
-Där senare text säger "anropa `X`" betyder det "emittera `planner_action` \
-med motsvarande `kind`". Emittera ALDRIG function calls, skriv ALDRIG \
-prosa utanför JSON-objektet, omsluts ALDRIG av ```` ```json ```` \
-kodblock.
+Emittera ALDRIG function calls, skriv ALDRIG prosa utanför JSON-objektet, \
+omsluts ALDRIG av ```` ```json ```` kodblock.
 
 **Sekvens för att bygga planen** (gäller EFTER att `confirm_requirements` \
 är godkänd och systemet visar att `architecture_commit` saknas i planer\
 kontexten):
-1. Emittera FÖRST `commit_architecture` med komplett `architecture_commit`\
--kropp i `planning_state_delta.architecture_commit`. ALLA fem fält är \
-OBLIGATORISKA — utelämnade fält ger `extra_forbidden` eller `missing` i \
-parsern. Fullständig layout:
+1. Emittera FÖRST `commit_architecture`. Servern härleder \
+`architecture_commit` från bekräftade/resolverade slots och Flow Capability \
+Manifest. `architecture_commit` ska normalt vara `null` i ditt JSON-svar; \
+försök inte själv räkna ut tuple-kedjor, mönster-id:n, kapabiliteter, hash, \
+timestamp eller andra mekaniska fält. Fullständig layout:
 
 ```json
 {{
   "planning_state_delta": {{
     "base_planning_state_version": <kopiera aktuellt värde>,
-    "architecture_commit": {{
-      "tuples_chain": [
-        {{"input_type": "text", "output_type": "text", "output_mode": "pass_through"}}
-      ],
-      "chosen_patterns": ["<mönster-id från tillgängliga positiva mönster>"],
-      "required_capabilities": ["<FCM-kapabilitets-id>"],
-      "architecture_hash": "<64 tecken, små bokstäver, hex>",
-      "committed_at": "2026-04-24T18:35:00Z"
-    }}
+    "architecture_commit": null
   }},
   "planner_action": {{
     "kind": "commit_architecture",
@@ -123,16 +91,14 @@ parsern. Fullständig layout:
 }}
 ```
 
-Fält-för-fält:
-   - `tuples_chain`: lista av JSON-OBJEKT (INTE arrayer/tupler), ett per planerat steg i ordning. Varje objekt har EXAKT nycklarna `input_type`, `output_type`, `output_mode`. Arrayer som `["text", "text", "pass_through"]` förkastas av parsern ("Input should be a valid dictionary or instance of StepTriple").
-   - `chosen_patterns`: lista av mönster-id från de tillgängliga positiva mönstren. OBLIGATORISK.
-   - `required_capabilities`: lista av FCM-kapabilitets-id som planen behöver. Valfri (tom lista OK).
-   - `architecture_hash`: EXAKT 64 tecken, små bokstäver, hex (`[0-9a-f]{{64}}`). Beräkna deterministiskt från `tuples_chain` + `chosen_patterns` + `required_capabilities` (t.ex. SHA-256 över en kanonisk JSON-serialisering) så att samma arkitektur alltid får samma hash. OBLIGATORISK.
-   - `committed_at`: ISO-8601-tidsstämpel (t.ex. `2026-04-24T18:35:00Z`). OBLIGATORISK.
-2. Emittera DÄREFTER `propose_plan` (vanligen i nästa tur) för att \
-leverera ändrings- eller nystaplingsplanen mot den nyss committade \
-arkitekturen. `propose_plan` utan tidigare commit förkastas av \
-orkestratorn som `propose_plan_without_architecture_commit`.
+Regel: Emitera ALDRIG `architecture_hash`, `committed_at`, UUID:er eller andra \
+mekaniska fält i `architecture_commit`. Om du råkar emitera en \
+`architecture_commit`-kropp behandlar backend den bara som rådgivande och kan \
+ersätta den med serverhärledd arkitektur.
+2. När arkitekturen är committad och kraven är bekräftade väljer backend \
+nästa fas och anropar `{submission_tool}` med ett separat, smalare schema. \
+Planner-JSON ska inte innehålla `draft_plan`, `plan_reference`, tool-namn \
+eller plansteg.
 
 # Roll
 
@@ -143,8 +109,10 @@ samverkar för att skapa kraftfulla flöden.
 
 # Interaktionsprotokoll
 
-1. **Förstå behovet först.** Ställ så många strukturerade frågor med `ask_structured_question` \
-som behövs för att förstå vad användaren vill uppnå. Fokusera på:
+1. **Förstå behovet först.** Ställ så många frågor som behövs — emittera en \
+`planner_action.kind="ask_question"` per fråga med payload-fälten \
+`question_id`, `slot_name`, `prompt` och inget mer — för att förstå vad \
+användaren vill uppnå. Fokusera på:
    - Vad användaren vill mata in (text, dokument, ljud, filer)
    - Vad flödet ska producera (rapport, analys, sammanfattning, DOCX, JSON)
    - Viktiga designval (en fil i taget vs flera, mallbaserad DOCX vs genererad)
@@ -166,7 +134,8 @@ sitt första meddelande (indatatyp, utdataformat, syfte), kan du gå direkt till
 `confirm_requirements` innan `{submission_tool}`.
 5. **Kunskap och bilagor.** Om flödet behöver kunskapsbaser eller DOCX-mallar, nämn \
 detta i `manual_setup_notes` — användaren kopplar dessa manuellt efter att flödet skapats.
-6. Använd `ask_structured_question` för valbara alternativ — inte fritext.
+6. Emittera `planner_action.kind="ask_question"` för specifika slot-frågor \
+— formulera frågan i `payload.prompt` och använd inga extra payload-fält.
 7. Fråga inte efter fler detaljer än nödvändigt, men sluta heller inte discovery-fasen \
 förrän blockerande oklarheter och motsägelser är lösta.
 8. Följ aktivt Eneo-gränssnittsspråk för alla användarvända frågor, kravsammanfattningar och planförklaringar.
@@ -207,55 +176,7 @@ När du reviderar en plan baserat på användarfeedback:
 
 
 def build_structured_reference_block(*, is_edit_mode: bool) -> str:
-    if is_edit_mode:
-        return """\
-# Strukturerad referens
-
-```json
-{
-  "tool_protocol": {
-    "submission_tool": "edit_flow",
-    "question_tool": "ask_structured_question"
-  },
-  "input_source": ["flow_input", "previous_step", "all_previous_steps"],
-  "input_type": ["text", "json", "audio", "document", "file", "any"],
-  "output_mode": ["pass_through", "transcribe_only", "template_fill"],
-  "output_type": ["text", "json", "pdf", "docx"],
-  "hard_rules": [
-    "only describe changes to existing flow state",
-    "use add/modify/remove operations",
-    "use existing_step refs only when targeting an existing step",
-    "use typed add_payload drafts for new steps instead of raw StepSpec fields",
-    "template_fill requires docx output"
-  ]
-}
-```"""
-
-    return """\
-# Strukturerad referens
-
-```json
-{
-  "tool_protocol": {
-    "submission_tool": "create_flow",
-    "question_tool": "ask_structured_question"
-  },
-  "input_source": ["flow_input", "previous_step", "all_previous_steps"],
-  "input_type": ["text", "json", "audio", "document", "file", "any"],
-  "output_type": ["text", "json", "pdf", "docx"],
-  "document_delivery_mode": ["not_applicable", "generated", "template_fill"],
-  "structured_output_fields": ["name", "field_type", "description", "required", "fields", "item_fields"],
-  "hard_rules": [
-    "do not emit raw JSON Schema",
-    "do not emit raw input_config or output_config dicts",
-    "do not emit plan_step_ref values",
-    "do not emit input_bindings or template variables like {{ ... }}",
-    "output_fields are only for json output",
-    "output_fields max nesting depth is 3",
-    "template_fill requires docx output"
-  ]
-}
-```"""
+    return render_structured_reference_block(is_edit_mode=is_edit_mode)
 
 
 __all__ = [

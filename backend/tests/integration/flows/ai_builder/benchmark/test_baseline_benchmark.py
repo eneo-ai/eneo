@@ -167,7 +167,7 @@ class TestComputeCaseMetrics:
         assert metrics["case_id"] == case.case_id
         assert metrics["archetype"] == case.archetype
         assert metrics["ui_language"] == case.ui_language
-        assert metrics["question_budget"] in (1, 3)
+        assert metrics["question_budget"] in (0, 1, 3)
         assert metrics["question_count"] >= 0
         assert metrics["questioning_flag"] in QUESTIONING_FLAGS
         assert isinstance(metrics["has_explicit_step_plan"], bool)

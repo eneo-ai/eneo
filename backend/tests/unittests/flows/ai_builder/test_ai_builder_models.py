@@ -23,7 +23,6 @@ from intric.flows.ai_builder.ai_builder_models import (
     TargetKind,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -84,9 +83,17 @@ class TestFlowDraftSpecCore:
 
     def test_multi_step_spec(self) -> None:
         steps = [
-            _make_step(ref="step_a", name="Extract", input_source=InputSource.FLOW_INPUT),
-            _make_step(ref="step_b", name="Analyze", input_source=InputSource.PREVIOUS_STEP),
-            _make_step(ref="step_c", name="Summarize", input_source=InputSource.ALL_PREVIOUS_STEPS),
+            _make_step(
+                ref="step_a", name="Extract", input_source=InputSource.FLOW_INPUT
+            ),
+            _make_step(
+                ref="step_b", name="Analyze", input_source=InputSource.PREVIOUS_STEP
+            ),
+            _make_step(
+                ref="step_c",
+                name="Summarize",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+            ),
         ]
         spec = _make_spec(steps=steps)
         assert len(spec.steps) == 3
@@ -134,7 +141,9 @@ class TestFlowDraftSpecCore:
             flow_name="With form",
             steps=[_make_step()],
             form_fields=[
-                FormFieldSpec(name="company", type="text", label="Företag", required=True),
+                FormFieldSpec(
+                    name="company", type="text", label="Företag", required=True
+                ),
                 FormFieldSpec(
                     name="priority",
                     type="select",
@@ -192,7 +201,11 @@ class TestFlowChangeSet:
         assert cs.compiled_steps == []
 
     def test_changeset_with_creates(self) -> None:
-        from intric.flows.ai_builder.ai_builder_models import AssistantToCreate, CompiledStep, StepChangeKind
+        from intric.flows.ai_builder.ai_builder_models import (
+            AssistantToCreate,
+            CompiledStep,
+            StepChangeKind,
+        )
 
         cs = FlowChangeSet(
             flow_name="New flow",

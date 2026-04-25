@@ -6,6 +6,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -35,7 +36,7 @@ def _make_repo_mock() -> AsyncMock:
 import pytest
 
 from intric.files.file_models import File, FileType
-from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     BuilderPlan,
@@ -60,9 +61,16 @@ from intric.flows.ai_builder.ai_builder_service import (
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
     SSE_EVENT_QUESTION,
+    SSE_EVENT_STATUS,
     SSE_EVENT_TEXT,
     AIBuilderService,
     PreparedMessageContext,
+)
+from intric.flows.ai_builder.planning_state import (
+    ArchitectureCommit,
+    PlanningState,
+    ResolvedSlot,
+    StepTriple,
 )
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 
@@ -218,6 +226,50 @@ def _make_requirements_confirmation() -> dict[str, Any]:
     }
 
 
+def _make_committed_planning_state() -> PlanningState:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="documents",
+            source="requirements_summary",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="requirements_summary",
+            confidence="high",
+        ),
+        "document_material_scope": ResolvedSlot(
+            name="document_material_scope",
+            value="flexible_document_case",
+            source="policy_default",
+            confidence="medium",
+        ),
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value="no_extra_metadata",
+            source="policy_default",
+            confidence="medium",
+        ),
+    }
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=["document_to_structured_report"],
+        required_capabilities=[],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="c" * 64,
+    )
+    return state
+
+
 def _make_confirmed_requirements_conversation() -> list[ConversationMessage]:
     summary = _make_requirements_summary_payload()
     version = build_requirements_version(summary)
@@ -254,7 +306,7 @@ def _make_llm_response(
 def _make_tool_call(
     *,
     tool_call_id: str = "call_123",
-    name: str = CREATE_FLOW_TOOL_NAME,
+    name: str = OUTLINE_FLOW_TOOL_NAME,
     arguments: dict[str, Any] | None = None,
 ) -> MagicMock:
     """Create a mock tool call."""
@@ -271,18 +323,18 @@ def _normalize_tool_arguments(
     name: str,
     arguments: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    if name != CREATE_FLOW_TOOL_NAME:
+    if name != OUTLINE_FLOW_TOOL_NAME:
         return arguments or {}
     if arguments is None:
         return {
             "flow_name": "Test Flow",
             "plan_rationale": "Extrahera först och strukturera sedan resultatet.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "final_output_type": "text",
             "steps": [
                 {
                     "name": "Extrahera fakta",
-                    "instructions": "Extrahera fakta.",
-                    "input_source": "flow_input",
-                    "input_type": "text",
+                    "task": "Extrahera fakta.",
                     "output_type": "text",
                 }
             ],
@@ -296,41 +348,28 @@ def _normalize_tool_arguments(
     steps = normalized.get("steps")
     if isinstance(steps, list):
         normalized["steps"] = [_normalize_create_step(step) for step in steps]
+    normalized.setdefault("runtime_input", {"input_type": "text", "required": True})
+    normalized.setdefault("final_output_type", "text")
     return normalized
 
 
 def _normalize_create_step(step: Any) -> Any:
     if not isinstance(step, dict):
         return step
-    if "instructions" in step and "assistant_spec" not in step:
-        return step
 
     assistant_spec = step.get("assistant_spec") or {}
-    input_source = step.get("input_source", "flow_input")
-    input_type = step.get("input_type", "text")
     output_type = step.get("output_type", "text")
     output_mode = step.get("output_mode")
 
     normalized: dict[str, Any] = {
         "name": step.get("name", "Step"),
-        "instructions": assistant_spec.get("instructions", "Do things."),
-        "input_source": input_source,
-        "input_type": "audio" if output_mode == "transcribe_only" else input_type,
+        "task": step.get("instructions")
+        or assistant_spec.get("instructions")
+        or "Do things.",
         "output_type": "text" if output_mode == "transcribe_only" else output_type,
     }
-    if assistant_spec.get("model_ref"):
-        normalized["model_ref"] = assistant_spec["model_ref"]
-    if assistant_spec.get("knowledge_refs"):
-        normalized["knowledge_refs"] = assistant_spec["knowledge_refs"]
-    if input_source == "flow_input" and normalized["input_type"] in {
-        "audio",
-        "document",
-        "file",
-    }:
-        normalized["runtime_upload"] = True
-        normalized["runtime_required"] = True
     if normalized["output_type"] == "docx":
-        normalized["document_delivery_mode"] = "generated"
+        normalized["output_type"] = "docx"
     output_config = step.get("output_config") or {}
     if output_config.get("citations", {}).get("enabled"):
         normalized["citations_requested"] = True
@@ -1100,7 +1139,7 @@ class TestSendMessage:
     @pytest.mark.anyio
     async def test_llm_error_yields_error_event(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         session = _make_session(
             status=SessionStatus.CHATTING,
             tenant_id=user.tenant_id,
@@ -1117,6 +1156,7 @@ class TestSendMessage:
             repo=repo,
             completion_service=completion_service,
         )
+        repo.load_planning_state.return_value = _make_committed_planning_state()
 
         with patch(
             "intric.flows.ai_builder.ai_builder_service.litellm"
@@ -1126,6 +1166,7 @@ class TestSendMessage:
                 service.send_message(
                     session_id=session.id,
                     message="Hello",
+                    question_answer=_make_requirements_confirmation(),
                     litellm_model="openai/gpt-4",
                     litellm_kwargs={"api_key": "sk-test"},
                 )
@@ -1144,7 +1185,7 @@ class TestSendMessage:
 
 class TestSendMessageToolCall:
     @pytest.mark.anyio
-    async def test_backend_discovery_short_circuits_ambiguous_pdf_docx_flow_before_llm_call(
+    async def test_backend_discovery_commits_explicit_flexible_pdf_docx_flow_before_llm_call(
         self,
     ):
         user = _make_user()
@@ -1172,12 +1213,11 @@ class TestSendMessageToolCall:
 
         assert mock_litellm.acompletion.await_count == 0
         question_events = [e for e in events if e["event"] == SSE_EVENT_QUESTION]
-        assert len(question_events) == 1
-        question = json.loads(question_events[0]["data"])
-        assert question["question_id"] in {
-            "processing_scope",
-            "document_kind",
-            "comparison_scope",
+        assert question_events == []
+        status_events = [e for e in events if e["event"] == SSE_EVENT_STATUS]
+        assert status_events
+        assert json.loads(status_events[0]["data"]) == {
+            "status": "architecture_committed"
         }
 
     @pytest.mark.anyio
@@ -1191,7 +1231,7 @@ class TestSendMessageToolCall:
                 tool_calls=[
                     {
                         "id": "call_prior",
-                        "name": CREATE_FLOW_TOOL_NAME,
+                        "name": OUTLINE_FLOW_TOOL_NAME,
                         "arguments": {"flow_name": "Old"},
                     }
                 ],
@@ -1242,6 +1282,7 @@ class TestSendMessageToolCall:
             repo=repo,
             completion_service=completion_service,
         )
+        repo.load_planning_state.return_value = _make_committed_planning_state()
 
         with patch(
             "intric.flows.ai_builder.ai_builder_service.litellm"
@@ -1291,6 +1332,7 @@ class TestSendMessageToolCall:
             session_id=session.id, tenant_id=user.tenant_id
         )
         service = _make_service(user=user, repo=repo)
+        repo.load_planning_state.return_value = _make_committed_planning_state()
 
         with patch(
             "intric.flows.ai_builder.ai_builder_service.litellm"
@@ -1331,12 +1373,13 @@ class TestSendMessageToolCall:
 
         bad_args = {
             "flow_name": "Bad",
+            "plan_rationale": "Invalid semantic outline.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "final_output_type": "text",
             "steps": [
                 {
-                    "plan_step_ref": "step_a",
-                    "name": "Bad Step",
-                    "assistant_spec": {"instructions": "X"},
-                    "input_source": "previous_step",
+                    "name": "Bad {{ Step }}",
+                    "task": "X",
                 }
             ],
         }
@@ -1347,6 +1390,7 @@ class TestSendMessageToolCall:
             repo=repo,
             completion_service=completion_service,
         )
+        repo.load_planning_state.return_value = _make_committed_planning_state()
 
         bail_text = (
             "Jag försökte skapa flödet men backend-valideringen stoppade mig: "
@@ -2484,7 +2528,7 @@ class TestReasoningLeakRegression:
             conversation=conversation,
             assistant_content="Here is a flow.",
             tool_call_id="call_123",
-            tool_name=CREATE_FLOW_TOOL_NAME,
+            tool_name=OUTLINE_FLOW_TOOL_NAME,
             arguments=arguments,
             spec=spec,
             assumptions=["Test"],
@@ -2510,7 +2554,7 @@ class TestReasoningLeakRegression:
                 tool_calls=[
                     {
                         "id": "call_123",
-                        "name": CREATE_FLOW_TOOL_NAME,
+                        "name": OUTLINE_FLOW_TOOL_NAME,
                         "arguments": {
                             "flow_name": "Test",
                             "step_count": 1,

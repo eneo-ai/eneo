@@ -2,9 +2,8 @@
 
 After monotonicity guardrails accept a `PlannerOutput`, the dispatcher
 routes the action to atomic persistence. Persisted branches produce a
-`PlannerDispatchResult` envelope the caller emits as an SSE event;
-`propose_plan` raises `NotImplementedError` (adapter not wired yet),
-and an invalid `commit_architecture` shape raises `ValueError`.
+`PlannerDispatchResult` envelope the caller emits as an SSE event; an
+invalid `commit_architecture` shape raises `ValueError`.
 
 Contracts exercised here:
 
@@ -14,10 +13,6 @@ Contracts exercised here:
 - `ask_question` and `confirm_requirements` commit the conversation +
   planner-owned state but pass ``architecture_commit=None`` so the
   repo's carry-forward helper preserves any prior commit.
-- `propose_plan` intentionally raises `NotImplementedError` — its
-  handoff to the legacy proposal processor requires a translating
-  adapter that is not wired here; the dispatcher must not silently
-  forward a `propose_plan` action through `commit_turn`.
 - `PlannerDispatchResult` is a frozen dataclass — callers treat it as
   an immutable value, and mutation would silently corrupt downstream
   event emission.
@@ -25,13 +20,15 @@ Contracts exercised here:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import MagicMock, create_autospec
 from uuid import UUID, uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_architecture_commit import (
+    architecture_commit_hash,
+)
 from intric.flows.ai_builder.ai_builder_dispatcher import (
     PlannerDispatchResult,
     dispatch_planner_action,
@@ -53,7 +50,6 @@ def _empty_delta_dict(base_version: int = 0) -> dict:
         "signals_added": [],
         "slots_resolved": [],
         "architecture_commit": None,
-        "draft_plan": None,
     }
 
 
@@ -72,7 +68,7 @@ def _ask_question_output_dict() -> dict:
 
 
 def _commit_architecture_output_dict(
-    *, hash_hex: str = "a" * 64, chosen_patterns: list[str] | None = None
+    *, chosen_patterns: list[str] | None = None
 ) -> dict:
     return {
         "planning_state_delta": {
@@ -91,8 +87,6 @@ def _commit_architecture_output_dict(
                     else ["summarize_text"]
                 ),
                 "required_capabilities": [],
-                "committed_at": datetime(2026, 4, 23, tzinfo=timezone.utc).isoformat(),
-                "architecture_hash": hash_hex,
             },
         },
         "planner_action": {
@@ -108,19 +102,6 @@ def _confirm_requirements_output_dict() -> dict:
         "planner_action": {
             "kind": "confirm_requirements",
             "payload": {"summary": "Ready to propose draft plan."},
-        },
-    }
-
-
-def _propose_plan_output_dict() -> dict:
-    return {
-        "planning_state_delta": {
-            **_empty_delta_dict(),
-            "draft_plan": {"steps": [{"id": "s0"}]},
-        },
-        "planner_action": {
-            "kind": "propose_plan",
-            "payload": {"plan_reference": "latest"},
         },
     }
 
@@ -194,7 +175,8 @@ class TestCommitArchitectureDispatch:
         kwargs = repo.commit_turn.call_args.kwargs
         commit = kwargs["architecture_commit"]
         assert isinstance(commit, ArchitectureCommit)
-        assert commit.architecture_hash == "a" * 64
+        assert commit.architecture_hash == architecture_commit_hash(commit)
+        assert commit.committed_at.tzinfo is not None
         assert commit.chosen_patterns == ["summarize_text"]
         assert kwargs["session_id"] == session_id
         assert kwargs["tenant_id"] == tenant_id
@@ -376,29 +358,6 @@ class TestConfirmRequirementsDispatch:
 
         assert result.action_kind == "confirm_requirements"
         assert result.new_planning_state_version == 3
-
-
-# ---------------------------------------------------------------------------
-# propose_plan — deferred until a proposal processor adapter is wired
-# ---------------------------------------------------------------------------
-
-
-class TestProposePlanDispatch:
-    @pytest.mark.asyncio
-    async def test_raises_not_implemented_and_does_not_write(self) -> None:
-        repo = _mock_repo()
-        output = parse_planner_output(_propose_plan_output_dict())
-
-        with pytest.raises(NotImplementedError, match="propose_plan"):
-            await dispatch_planner_action(
-                repo=repo,
-                session_id=uuid4(),
-                tenant_id=uuid4(),
-                output=output,
-                new_messages=[_assistant_msg()],
-            )
-
-        repo.commit_turn.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

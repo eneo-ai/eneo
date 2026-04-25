@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
     CompiledEditResult,
@@ -110,7 +109,9 @@ class TestFlowEditDraft:
             operations=[
                 StepEditOperation(
                     op="add",
-                    placement=StepPlacement(position="before", anchor_ref="existing_step_1"),
+                    placement=StepPlacement(
+                        position="before", anchor_ref="existing_step_1"
+                    ),
                     add_payload=_make_add_payload(
                         name="Transcription",
                         instructions="Transcribe.",
@@ -129,7 +130,9 @@ class TestFlowEditDraft:
                 FormFieldOperation(
                     op="add",
                     field_name="case_id",
-                    field_payload=FormFieldSpec(label="Case ID", field_type="text", required=True),
+                    field_payload=FormFieldSpec(
+                        label="Case ID", field_type="text", required=True
+                    ),
                 ),
             ],
             metadata_patch=FlowMetadataPatch(
@@ -158,7 +161,9 @@ class TestFlowEditDiff:
                     step_ref="existing_step_1",
                     details="input_source: flow_input → previous_step",
                 ),
-                StepChange(kind="unchanged", step_name="Output", step_ref="existing_step_2"),
+                StepChange(
+                    kind="unchanged", step_name="Output", step_ref="existing_step_2"
+                ),
             ],
             net_steps_added=1,
             net_steps_removed=0,

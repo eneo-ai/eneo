@@ -5,9 +5,10 @@ The bridge is the single seam from orchestrator v2 planner output
 types (``FlowDraftSpecCore`` + ``FlowChangeSet``). These tests pin the
 contract the bridge exposes to its callers:
 
-- the envelope step count must match the committed tuples_chain length
-- each envelope step's per-step tuple must match the commit's tuple at
-  the same index — the commit is authoritative
+- the committed architecture constrains primary runtime input and
+  terminal output, not exact implementation step count
+- each envelope step must still declare explicit tuple axes so the
+  Flow compiler and validator see intentional capability choices
 - extra top-level fields on an envelope step are rejected (the bridge
   validates via ``NewStepDraft`` with ``extra="forbid"``)
 - on success the bridge emits a pair: the canonical
@@ -42,6 +43,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     PlannerPlanEnvelope,
     StepSpec,
 )
+from intric.flows.ai_builder.ai_builder_draft_plan import DraftPlanEnvelope
 from intric.flows.ai_builder.ai_builder_materialization_bridge import (
     MaterializationError,
     MaterializedDraft,
@@ -50,7 +52,6 @@ from intric.flows.ai_builder.ai_builder_materialization_bridge import (
 )
 from intric.flows.ai_builder.ai_builder_materializer import compile_changeset
 from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore
-from intric.flows.ai_builder.ai_builder_orchestrator import DraftPlanEnvelope
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import ArchitectureCommit, StepTriple
@@ -143,25 +144,85 @@ class TestHappyPath:
         assert not result.changeset.assistants_to_delete
 
 
-class TestStepCountMismatch:
-    def test_envelope_shorter_than_tuples_chain_raises(self) -> None:
+class TestArchitectureEnvelope:
+    def test_multistep_plan_can_materialize_against_single_commit_envelope(
+        self,
+    ) -> None:
+        """Architecture commit constrains user intent, not implementation size.
+
+        A single document->text architecture envelope must allow the
+        materializer to create an intermediate JSON extraction step when
+        that is the better flow design.
+        """
         commit = _architecture_commit(
             tuples_chain=[
                 StepTriple(
-                    input_type="text",
+                    input_type="document",
                     output_type="text",
                     output_mode="pass_through",
-                ),
-                StepTriple(
-                    input_type="text",
-                    output_type="text",
-                    output_mode="pass_through",
-                ),
-            ]
+                )
+            ],
+            chosen_patterns=["multi_step_quality_chain"],
+            required_capabilities=["input_document", "output_mode_pass_through"],
         )
         envelope = DraftPlanEnvelope(
             plan_id="plan_1",
-            steps=[_summarize_text_step_dict()],
+            steps=[
+                {
+                    "name": "Extrahera fakta",
+                    "instructions": "Extrahera relevanta fakta från dokumentet.",
+                    "input_source": "flow_input",
+                    "input_type": "document",
+                    "output_type": "json",
+                    "runtime_upload": True,
+                    "output_fields": [
+                        {
+                            "name": "facts",
+                            "field_type": "array",
+                            "description": "Relevanta fakta från dokumentet.",
+                        },
+                    ],
+                },
+                {
+                    "name": "Skriv rapport",
+                    "instructions": "Skriv en tydlig rapport från extraktionen.",
+                    "input_source": "previous_step",
+                    "input_type": "json",
+                    "output_type": "text",
+                },
+            ],
+            form_fields=[],
+        )
+
+        result = materialize(
+            architecture_commit=commit,
+            draft_plan=envelope,
+            flow_name="Two-step flow",
+            plan_rationale="Use structured extraction before final writing.",
+        )
+
+        assert len(result.spec.steps) == 2
+        assert result.spec.steps[0].input_type.value == "document"
+        assert result.spec.steps[0].output_type.value == "json"
+        assert result.spec.steps[-1].output_type.value == "text"
+
+    def test_terminal_output_divergence_raises(self) -> None:
+        commit = _architecture_commit()
+        envelope = DraftPlanEnvelope(
+            plan_id="plan_1",
+            steps=[
+                {
+                    **_summarize_text_step_dict(),
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Sammanfattningen.",
+                        },
+                    ],
+                },
+            ],
             form_fields=[],
         )
 
@@ -169,31 +230,11 @@ class TestStepCountMismatch:
             materialize(
                 architecture_commit=commit,
                 draft_plan=envelope,
-                flow_name="Two-step flow",
-                plan_rationale="Mismatch test.",
+                flow_name="JSON flow",
+                plan_rationale="Terminal mismatch test.",
             )
 
-        assert "2" in str(exc_info.value)
-        assert "1" in str(exc_info.value)
-
-    def test_envelope_longer_than_tuples_chain_raises(self) -> None:
-        commit = _architecture_commit()
-        envelope = DraftPlanEnvelope(
-            plan_id="plan_1",
-            steps=[
-                _summarize_text_step_dict(),
-                _summarize_text_step_dict(),
-            ],
-            form_fields=[],
-        )
-
-        with pytest.raises(MaterializationError):
-            materialize(
-                architecture_commit=commit,
-                draft_plan=envelope,
-                flow_name="Two-step flow",
-                plan_rationale="Mismatch test.",
-            )
+        assert "terminal" in str(exc_info.value).lower()
 
 
 class TestPerStepTupleConsistency:
@@ -201,6 +242,7 @@ class TestPerStepTupleConsistency:
         commit = _architecture_commit()
         envelope_step = _summarize_text_step_dict()
         envelope_step["input_type"] = "document"
+        envelope_step["runtime_upload"] = True
         envelope = DraftPlanEnvelope(
             plan_id="plan_1",
             steps=[envelope_step],
@@ -311,18 +353,17 @@ class TestEnvelopeExtraFieldRejection:
 
 class TestCreateDraftSemanticValidator:
     """The bridge must run ``validate_create_draft`` before compile so
-    semantic rejections (``first_step_invalid_source``, ``empty_steps``,
-    ``file_flow_input_requires_runtime_upload``, and friends) surface
-    consistently with the proposal-processor path instead of silently
-    materialising into a structurally-valid-but-semantically-broken
-    draft.
+    semantic rejections (``empty_steps``, unsupported output fields,
+    and friends) surface consistently with the proposal-processor path.
+    Safe backend-owned mechanics are normalized before validation so
+    legacy envelopes do not fail only because the model authored a
+    deterministic wiring default.
     """
 
-    def test_first_step_with_previous_step_source_is_rejected(self) -> None:
+    def test_first_step_with_previous_step_source_is_normalized(self) -> None:
         """First envelope step declaring ``previous_step`` input_source
-        structurally coerces through ``FlowCreateDraft`` but is a
-        semantic error — there is no previous step at index 0.
-        ``validate_create_draft`` raises ``first_step_invalid_source``.
+        is a model-authored wiring mistake. The bridge normalizes it to
+        ``flow_input`` before strict semantic validation.
         """
         commit = _architecture_commit()
         envelope_step = _summarize_text_step_dict()
@@ -333,15 +374,14 @@ class TestCreateDraftSemanticValidator:
             form_fields=[],
         )
 
-        with pytest.raises(MaterializationError) as exc_info:
-            materialize(
-                architecture_commit=commit,
-                draft_plan=envelope,
-                flow_name="Flow",
-                plan_rationale="First-step invalid-source test.",
-            )
+        result = materialize(
+            architecture_commit=commit,
+            draft_plan=envelope,
+            flow_name="Flow",
+            plan_rationale="First-step invalid-source test.",
+        )
 
-        assert "first_step_invalid_source" in str(exc_info.value)
+        assert result.spec.steps[0].input_source == "flow_input"
 
     def test_empty_envelope_and_empty_commit_are_rejected(self) -> None:
         """A commit with no tuples_chain entries and an envelope with no
@@ -893,6 +933,42 @@ _ARCHETYPE_CASES: tuple[dict[str, Any], ...] = (
         ],
         expected_assistants_to_create=1,
         expected_output_modes=["transcribe_only"],
+    ),
+    # audio_to_artifact_report — audio intake must still start with a
+    # transcribe_only step before an artifact-generating terminal step.
+    _archetype_case(
+        pattern_id="audio_to_artifact_report",
+        tuples_chain=[
+            StepTriple(
+                input_type="audio",
+                output_type="text",
+                output_mode="transcribe_only",
+            ),
+            StepTriple(
+                input_type="text",
+                output_type="pdf",
+                output_mode="pass_through",
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Transkribera ljud",
+                "instructions": "Transkribera inspelningen till text.",
+                "input_source": "flow_input",
+                "input_type": "audio",
+                "output_type": "text",
+                "runtime_upload": True,
+            },
+            {
+                "name": "Skapa PDF-rapport",
+                "instructions": "Skapa en PDF-rapport från transkriptionen.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "pdf",
+            },
+        ],
+        expected_assistants_to_create=2,
+        expected_output_modes=["transcribe_only", "pass_through"],
     ),
     # multi_step_quality_chain — 4-step chain: document intake, JSON
     # extraction, text review, text terminal. Each step explicitly

@@ -327,11 +327,34 @@ def _flow_step_to_spec(
             "uses_previous_fields" in patch.model_fields_set
             or "uses_form_fields" in patch.model_fields_set
         ):
-            updates["input_bindings"] = _compile_patch_input_bindings(
+            target_step = spec.model_copy(
+                update={
+                    "input_source": updates.get("input_source", spec.input_source),
+                    "input_type": updates.get("input_type", spec.input_type),
+                }
+            )
+            compiled_bindings = _compile_patch_input_bindings(
+                target_step=target_step,
                 uses_previous_fields=patch.uses_previous_fields or [],
                 uses_form_fields=patch.uses_form_fields or [],
                 current_steps=current_steps or [],
             )
+            updates["input_bindings"] = compiled_bindings
+            if compiled_bindings is None:
+                assistant_spec = cast(
+                    AssistantSpec,
+                    updates.get("assistant_spec", spec.assistant_spec),
+                )
+                hint = _compile_patch_input_instruction_hint(
+                    uses_previous_fields=patch.uses_previous_fields or [],
+                    uses_form_fields=patch.uses_form_fields or [],
+                )
+                if hint:
+                    updates["assistant_spec"] = assistant_spec.model_copy(
+                        update={
+                            "instructions": (f"{assistant_spec.instructions}\n\n{hint}")
+                        }
+                    )
         if "input_bindings" in patch.model_fields_set:
             updates["input_bindings"] = patch.input_bindings
         if "input_contract" in patch.model_fields_set:
@@ -715,11 +738,19 @@ def _existing_step_order(existing_step_ref: str | None) -> int | None:
 
 def _compile_patch_input_bindings(
     *,
+    target_step: StepSpec,
     uses_previous_fields: list[Any],
     uses_form_fields: list[str],
     current_steps: list[FlowStep],
 ) -> dict[str, Any] | None:
+    if target_step.input_source == InputSource.ALL_PREVIOUS_STEPS:
+        return None
+
     sections: list[str] = []
+    source_reference = _patch_source_reference(
+        target_step=target_step,
+        current_steps=current_steps,
+    )
     for field_ref in uses_previous_fields:
         from_step = getattr(field_ref, "from_step", None)
         field_path = getattr(field_ref, "field_path", None)
@@ -737,6 +768,11 @@ def _compile_patch_input_bindings(
             f"{label}: {{{{ step_{from_step}.output.structured.{field_path} }}}}"
         )
 
+    if source_reference is not None and not (
+        sections and source_reference.endswith(".output.structured }}")
+    ):
+        sections.insert(0, source_reference)
+
     if uses_form_fields:
         sections.append(
             "\n".join(
@@ -748,6 +784,71 @@ def _compile_patch_input_bindings(
     if not sections:
         return None
     return {"question": "\n\n".join(sections)}
+
+
+def _patch_source_reference(
+    *,
+    target_step: StepSpec,
+    current_steps: list[FlowStep],
+) -> str | None:
+    if target_step.input_source == InputSource.FLOW_INPUT:
+        if target_step.input_type == InputType.JSON:
+            return "{{ indata_json }}"
+        if target_step.input_type in {
+            InputType.AUDIO,
+            InputType.DOCUMENT,
+            InputType.FILE,
+        }:
+            return "{{ step_input.text }}"
+        return "{{ indata_text }}"
+
+    if target_step.input_source == InputSource.PREVIOUS_STEP:
+        order = _existing_step_order(target_step.existing_step_ref)
+        if order is None or order <= 1:
+            return None
+        previous = next(
+            (step for step in current_steps if step.step_order == order - 1),
+            None,
+        )
+        if target_step.input_type == InputType.JSON:
+            return f"{{{{ step_{order - 1}.output.structured }}}}"
+        if previous is not None and previous.output_type == OutputType.JSON.value:
+            return f"{{{{ step_{order - 1}.output.structured }}}}"
+        return f"{{{{ step_{order - 1}.output.text }}}}"
+
+    return None
+
+
+def _compile_patch_input_instruction_hint(
+    *,
+    uses_previous_fields: list[Any],
+    uses_form_fields: list[str],
+) -> str:
+    sections: list[str] = []
+    if uses_previous_fields:
+        field_lines: list[str] = []
+        for field_ref in uses_previous_fields:
+            field_path = getattr(field_ref, "field_path", None)
+            from_step = getattr(field_ref, "from_step", None)
+            if not isinstance(field_path, str) or not isinstance(from_step, int):
+                continue
+            label = getattr(field_ref, "label", None) or default_previous_field_label(
+                field_path
+            )
+            field_lines.append(f"- {label} (steg {from_step}: {field_path})")
+        if field_lines:
+            sections.append(
+                "Beakta särskilt följande strukturerade fält i underlaget:\n"
+                + "\n".join(field_lines)
+            )
+    if uses_form_fields:
+        form_lines = [
+            f"- {field_name}: {{{{ {field_name} }}}}" for field_name in uses_form_fields
+        ]
+        sections.append(
+            "Beakta också följande formulärfält vid analysen:\n" + "\n".join(form_lines)
+        )
+    return "\n\n".join(sections)
 
 
 def _rewrite_runtime_aliases_for_existing_step(

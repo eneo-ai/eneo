@@ -381,11 +381,19 @@ def suppressed_candidate(
 
 
 def compute_question_budget(text: str) -> int:
-    """Return 1 if user provided an explicit step plan, otherwise 3.
+    """Return the non-architecture question budget for this discovery pass.
 
-    Rich prompts should not receive fewer questions than short prompts.
+    Architecture questions are allowed outside this budget. Quality and
+    polish refinements should not keep advanced users in a loop once
+    they have provided a detailed spec or explicitly told the builder to
+    proceed with the plan.
     """
-    return 1 if has_explicit_step_plan(text) else 3
+    normalized = text.casefold()
+    if has_build_plan_intent(normalized) or is_detailed_flow_spec(normalized):
+        return 0
+    if has_explicit_step_plan(normalized):
+        return 1
+    return 3
 
 
 def has_explicit_step_plan(text: str) -> bool:
@@ -408,6 +416,33 @@ def has_explicit_step_plan(text: str) -> bool:
             "4-step",
         ),
     )
+
+
+def has_build_plan_intent(text: str) -> bool:
+    return mentions_any(
+        text.casefold(),
+        (
+            "bygg planen",
+            "build the plan",
+            "skapa planen",
+            "create the plan",
+            "det stämmer",
+            "that is correct",
+            "that looks right",
+            "gå vidare",
+            "go ahead",
+            "fortsätt",
+            "continue",
+            "kör",
+        ),
+    )
+
+
+def is_detailed_flow_spec(text: str) -> bool:
+    word_count = len(text.split())
+    if word_count >= 80:
+        return True
+    return word_count >= 35 and has_explicit_step_plan(text)
 
 
 def implies_single_case(text: str) -> bool:

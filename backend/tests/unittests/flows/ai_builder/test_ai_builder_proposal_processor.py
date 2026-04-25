@@ -7,8 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
-from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_models import (
@@ -20,7 +19,6 @@ from intric.flows.ai_builder.ai_builder_models import (
     MCPPolicy,
     OutputMode,
     OutputType,
-    PlannerPlanEnvelope,
     StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
@@ -29,9 +27,6 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
     SubmissionToolHandlerConfig,
     ToolProcessingResult,
     ToolRetryConfig,
-)
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
-    build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
@@ -122,328 +117,6 @@ def _make_flow_spec(
             )
         ],
     )
-
-
-def _make_create_draft(
-    *,
-    model_ref: str | None = None,
-    knowledge_refs: list[str] | None = None,
-) -> FlowCreateDraft:
-    return FlowCreateDraft.model_validate(
-        {
-            "flow_name": "Nytt flöde",
-            "plan_rationale": "Extraktion först.",
-            "steps": [
-                {
-                    "name": "Extrahera",
-                    "instructions": "Extrahera risker.",
-                    "input_source": "flow_input",
-                    "input_type": "document",
-                    "output_type": "json",
-                    "model_ref": model_ref,
-                    "knowledge_refs": knowledge_refs or [],
-                    "runtime_upload": True,
-                    "output_fields": [
-                        {
-                            "name": "risknivå",
-                            "field_type": "string",
-                            "description": "Risknivå.",
-                            "required": True,
-                        }
-                    ],
-                }
-            ],
-        }
-    )
-
-
-@pytest.mark.asyncio
-async def test_process_create_arguments_returns_parse_feedback() -> None:
-    processor = _make_processor()
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.parse_create_flow_arguments",
-        side_effect=ValueError("missing steps"),
-    ):
-        result = await processor._process_create_arguments(
-            session_id=uuid4(),
-            conversation=[],
-            new_messages_start=0,
-            arguments={"flow_name": "Broken"},
-            assistant_content="draft",
-            tool_call_id="call_parse",
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-        )
-
-    assert result.event is None
-    assert result.failure_kind == "parse"
-    assert result.feedback == "Invalid create_flow arguments: missing steps"
-
-
-@pytest.mark.asyncio
-async def test_process_create_arguments_rejects_retry_that_shrinks_step_count() -> None:
-    """Depth-repair retries must not collapse a 9-step plan to 2 steps. When the
-    first-attempt arguments had N steps and a retry arrives with < N steps,
-    _process_create_arguments returns a validation failure without calling the
-    downstream parse/compile/validate pipeline."""
-    processor = _make_processor()
-    shrunk_arguments = {
-        "flow_name": "Utredningsflöde",
-        "plan_rationale": "Skulle ha haft nio steg, har bara två.",
-        "steps": [
-            {"name": "Steg A", "instructions": "…"},
-            {"name": "Steg B", "instructions": "…"},
-        ],
-    }
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.parse_create_flow_arguments"
-    ) as parse_mock:
-        result = await processor._process_create_arguments(
-            session_id=uuid4(),
-            conversation=[],
-            new_messages_start=0,
-            arguments=shrunk_arguments,
-            assistant_content="retry",
-            tool_call_id="call_retry",
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-            min_step_count=9,
-        )
-
-    parse_mock.assert_not_called()
-    assert result.event is None
-    assert result.failure_kind == "validation"
-    assert result.feedback is not None
-    assert "shrank from 9 to 2" in result.feedback
-    assert "preserve every step" in result.feedback.lower()
-
-
-@pytest.mark.asyncio
-async def test_process_create_arguments_passes_guard_when_step_count_preserved() -> (
-    None
-):
-    """When the retry keeps the same step count as the first attempt, the
-    step-count guard does not short-circuit — the call falls through to the
-    normal parse path."""
-    processor = _make_processor()
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.parse_create_flow_arguments",
-        side_effect=ValueError("unrelated parse issue"),
-    ) as parse_mock:
-        result = await processor._process_create_arguments(
-            session_id=uuid4(),
-            conversation=[],
-            new_messages_start=0,
-            arguments={
-                "flow_name": "Ok",
-                "plan_rationale": "Samma antal steg.",
-                "steps": [
-                    {"name": "A", "instructions": "…"},
-                    {"name": "B", "instructions": "…"},
-                ],
-            },
-            assistant_content="retry",
-            tool_call_id="call_ok",
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-            min_step_count=2,
-        )
-
-    parse_mock.assert_called_once()
-    assert result.failure_kind == "parse"
-    assert result.feedback is not None
-    assert "shrank from" not in result.feedback
-
-
-def test_extract_create_retry_kwargs_returns_min_step_count_from_steps_list() -> None:
-    from intric.flows.ai_builder.ai_builder_proposal_processor import (
-        _extract_create_retry_kwargs,
-    )
-
-    arguments = {
-        "flow_name": "Nio steg",
-        "steps": [{"name": f"Steg {i}"} for i in range(9)],
-    }
-    assert _extract_create_retry_kwargs(arguments) == {"min_step_count": 9}
-
-
-def test_extract_create_retry_kwargs_returns_empty_when_steps_missing() -> None:
-    from intric.flows.ai_builder.ai_builder_proposal_processor import (
-        _extract_create_retry_kwargs,
-    )
-
-    assert _extract_create_retry_kwargs({"flow_name": "Tom"}) == {}
-    assert _extract_create_retry_kwargs({"flow_name": "Tom", "steps": []}) == {}
-    assert _extract_create_retry_kwargs({"flow_name": "Tom", "steps": "no"}) == {}
-
-
-@pytest.mark.asyncio
-async def test_process_create_arguments_returns_quality_feedback_without_storing() -> (
-    None
-):
-    processor = _make_processor()
-    draft = _make_create_draft()
-    spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    validation = SimpleNamespace(valid=True, errors=[])
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.parse_create_flow_arguments",
-            return_value=draft,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_create_draft",
-            return_value=SpecValidationResult(),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_create_draft",
-            return_value=spec,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
-            return_value=SimpleNamespace(
-                spec=spec,
-                validation=validation,
-                failure_feedback=None,
-            ),
-        ),
-        patch.object(
-            processor, "_format_quality_feedback", return_value="Quality issue"
-        ),
-        patch.object(
-            processor, "_format_contextual_quality_feedback", return_value=None
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-            return_value=(MagicMock(), MagicMock()),
-        ) as store_plan,
-    ):
-        result = await processor._process_create_arguments(
-            session_id=uuid4(),
-            conversation=[ConversationMessage(role="user", content="Build a flow")],
-            new_messages_start=1,
-            arguments=draft.model_dump(mode="json"),
-            assistant_content="draft",
-            tool_call_id="call_quality",
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-        )
-
-    assert result.event is None
-    assert result.failure_kind == "quality"
-    assert result.feedback == "Quality issue"
-    store_plan.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_process_create_arguments_canonicalizes_unique_resource_aliases_before_store() -> (
-    None
-):
-    processor = _make_processor()
-    draft = _make_create_draft(
-        model_ref="gpt-5.4-nano",
-        knowledge_refs=["socio"],
-    )
-    validation = MagicMock(valid=True, errors=[])
-    validation.add_error = MagicMock()
-    plan = SimpleNamespace(id=uuid4())
-    resource_catalog = build_ai_builder_resource_catalog(
-        available_models=[{"id": "model-uuid-1", "name": "gpt-5.4-nano"}],
-        available_kbs=[{"id": "kb-uuid-1", "name": "socio"}],
-    )
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.parse_create_flow_arguments",
-            return_value=draft,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_create_draft",
-            return_value=SpecValidationResult(),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_create_draft",
-            side_effect=lambda create_draft: _make_flow_spec(
-                model_ref=create_draft.steps[0].model_ref,
-                knowledge_refs=create_draft.steps[0].knowledge_refs,
-            ),
-        ),
-        patch.object(processor, "_format_quality_feedback", return_value=None),
-        patch.object(
-            processor, "_format_contextual_quality_feedback", return_value=None
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.build_plan_event",
-            return_value={"event": "plan", "data": "{}"},
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-            return_value=(plan, {"foo": "bar"}),
-        ) as store_plan,
-    ):
-        result = await processor._process_create_arguments(
-            session_id=uuid4(),
-            conversation=[],
-            new_messages_start=0,
-            arguments=draft.model_dump(mode="json"),
-            assistant_content="draft",
-            tool_call_id="call_canonical",
-            available_model_refs={"model-uuid-1"},
-            available_kb_refs={"kb-uuid-1"},
-            resource_catalog=resource_catalog,
-        )
-
-    assert result.event is not None
-    stored_spec = store_plan.await_args.kwargs["spec"]
-    assistant_spec = stored_spec.steps[0].assistant_spec
-    assert assistant_spec.model_ref == "model-uuid-1"
-    assert assistant_spec.knowledge_refs == ["kb-uuid-1"]
-
-
-@pytest.mark.asyncio
-async def test_process_create_arguments_returns_validation_feedback_for_ambiguous_kb_alias() -> (
-    None
-):
-    processor = _make_processor()
-    draft = _make_create_draft(knowledge_refs=["socio"])
-    resource_catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[
-            {"id": "kb-uuid-1", "name": "Socio"},
-            {"id": "kb-uuid-2", "name": "socio"},
-        ],
-    )
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.parse_create_flow_arguments",
-        return_value=draft,
-    ):
-        result = await processor._process_create_arguments(
-            session_id=uuid4(),
-            conversation=[],
-            new_messages_start=0,
-            arguments=draft.model_dump(mode="json"),
-            assistant_content="draft",
-            tool_call_id="call_ambiguous",
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=resource_catalog,
-        )
-
-    assert result.event is None
-    assert result.failure_kind == "validation"
-    assert result.feedback is not None
-    assert "Ambiguous knowledge base reference 'socio'" in result.feedback
-    assert "kb-uuid-1" in result.feedback
 
 
 @pytest.mark.asyncio
@@ -722,10 +395,10 @@ async def test_dispatch_known_tool_call_routes_structured_question_handler() -> 
 
 
 @pytest.mark.asyncio
-async def test_dispatch_known_tool_call_routes_create_flow_handler() -> None:
+async def test_dispatch_known_tool_call_routes_outline_flow_handler() -> None:
     processor = _make_processor()
     tool_call = MagicMock()
-    tool_call.function.name = CREATE_FLOW_TOOL_NAME
+    tool_call.function.name = OUTLINE_FLOW_TOOL_NAME
     ctx = _make_context()
 
     async def _events():
@@ -733,94 +406,81 @@ async def test_dispatch_known_tool_call_routes_create_flow_handler() -> None:
 
     with patch.object(
         processor,
-        "_handle_create_flow_tool_call",
+        "_handle_outline_flow_tool_call",
         return_value=_events(),
-    ) as handle_create_flow:
+    ) as handle_outline_flow:
         dispatched = processor._dispatch_known_tool_call(ctx=ctx, tool_call=tool_call)
         assert dispatched is not None
         events = [event async for event in dispatched]
 
     assert events == [{"event": "plan", "data": "{}"}]
-    handle_create_flow.assert_called_once_with(ctx=ctx, tool_call=tool_call)
+    handle_outline_flow.assert_called_once_with(ctx=ctx, tool_call=tool_call)
 
 
 @pytest.mark.asyncio
-async def test_handle_create_flow_tool_call_returns_requirements_not_confirmed_error() -> (
-    None
-):
+async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
     processor = _make_processor()
-    tool_call = MagicMock()
-    tool_call.function.arguments = "{}"
-    ctx = _make_context(
-        conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
-        request_id="req-create",
+    outline_call = _make_tool_call(
+        OUTLINE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Document analysis",
+            "plan_rationale": "Analyze the document and produce a summary.",
+            "runtime_input": {"input_type": "document", "required": True},
+            "final_output_type": "text",
+            "steps": [{"name": "Analyze", "task": "Analyze the document."}],
+        },
     )
+
+    async def _handled_events(**_kwargs):
+        yield {"event": "plan", "data": "{}"}
 
     with (
         patch.object(
             processor,
-            "emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=[]),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.analyze_discovery_ready",
-            return_value=True,
-        ),
-    ):
-        events = [
-            event
-            async for event in processor._handle_create_flow_tool_call(
-                ctx=ctx,
-                tool_call=tool_call,
-            )
-        ]
-
-    assert [event["event"] for event in events] == ["error"]
-    payload = json.loads(events[0]["data"])
-    assert payload["code"] == "requirements_not_confirmed"
-    assert "creating a flow" in payload["message"]
-
-
-@pytest.mark.asyncio
-async def test_handle_create_flow_tool_call_invalid_json_requests_self_correction() -> (
-    None
-):
-    processor = _make_processor()
-    tool_call = MagicMock()
-    tool_call.function.arguments = "{broken"
-    ctx = _make_context(
-        conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
-        text_content="Här är planen.",
-        request_id="req-create",
-    )
-
-    async def _events():
-        yield {"event": "status", "data": '{"status":"repairing"}'}
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
+            "_call_repair_completion",
+            new=AsyncMock(return_value=_make_response_with_tool_calls(outline_call)),
+        ) as call_completion,
         patch.object(
             processor,
-            "_request_tool_self_correction",
-            return_value=_events(),
-        ) as request_retry,
+            "handle_tool_call",
+            side_effect=_handled_events,
+        ) as handle_tool_call,
     ):
         events = [
             event
-            async for event in processor._handle_create_flow_tool_call(
-                ctx=ctx,
-                tool_call=tool_call,
+            async for event in processor.propose_plan(
+                session_id=uuid4(),
+                conversation=[ConversationMessage(role="user", content="Build a flow")],
+                new_messages_start=1,
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={},
+                available_models=None,
+                available_kbs=None,
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=None,
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-propose",
+                flow=None,
             )
         ]
 
-    assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
-    kwargs = request_retry.call_args.kwargs
-    assert kwargs["error_message"].startswith("Invalid create_flow arguments:")
-    assert kwargs["retry_config"].target_tool_name == CREATE_FLOW_TOOL_NAME
-    assert "Now call create_flow" in kwargs["retry_config"].forced_tool_prompt
+    assert events == [{"event": "plan", "data": "{}"}]
+    assert call_completion.await_args.kwargs["tool_choice"] == {
+        "type": "function",
+        "function": {"name": OUTLINE_FLOW_TOOL_NAME},
+    }
+    assert [
+        schema["function"]["name"]
+        for schema in call_completion.await_args.kwargs["tool_schemas"]
+    ] == [OUTLINE_FLOW_TOOL_NAME]
+    assert handle_tool_call.call_args.kwargs["tool_calls"] == [outline_call]
+    assert [
+        schema["function"]["name"]
+        for schema in handle_tool_call.call_args.kwargs["tool_schemas"]
+    ] == [OUTLINE_FLOW_TOOL_NAME]
 
 
 @pytest.mark.asyncio
@@ -893,11 +553,11 @@ async def test_handle_submission_tool_call_omits_flow_context_by_default() -> No
                 ctx=ctx,
                 tool_call=tool_call,
                 config=SubmissionToolHandlerConfig(
-                    target_tool_name=CREATE_FLOW_TOOL_NAME,
+                    target_tool_name=OUTLINE_FLOW_TOOL_NAME,
                     requirements_not_confirmed_message="Requirements must be confirmed before creating a flow.",
-                    parse_error_prefix="Invalid create_flow arguments",
-                    invalid_result_message="Invalid create_flow draft.",
-                    forced_tool_prompt="Now call create_flow.",
+                    parse_error_prefix="Invalid outline_flow arguments",
+                    invalid_result_message="Invalid outline_flow draft.",
+                    forced_tool_prompt="Now call outline_flow.",
                     process_tool_arguments=process_tool_arguments,
                 ),
             )
@@ -909,350 +569,66 @@ async def test_handle_submission_tool_call_omits_flow_context_by_default() -> No
 
 
 @pytest.mark.asyncio
-async def test_process_create_arguments_compiles_and_stores_plan() -> None:
+async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> None:
     processor = _make_processor()
-    draft = _make_create_draft()
-    compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    create_validation = SpecValidationResult()
-    compiled_validation = MagicMock(valid=True, errors=[])
-    compiled_validation.add_error = MagicMock()
-    plan = SimpleNamespace(id=uuid4())
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.parse_create_flow_arguments",
-            return_value=draft,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_create_draft",
-            return_value=create_validation,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_create_draft",
-            return_value=compiled_spec,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
-            return_value=SimpleNamespace(
-                spec=compiled_spec,
-                validation=compiled_validation,
-                failure_feedback=None,
-            ),
-        ),
-        patch.object(processor, "_format_quality_feedback", return_value=None),
-        patch.object(
-            processor, "_format_contextual_quality_feedback", return_value=None
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.build_plan_event",
-            return_value={"event": "plan", "data": "{}"},
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-            return_value=(plan, {"foo": "bar"}),
-        ) as store_plan,
-    ):
-        result = await processor._process_create_arguments(
-            session_id=uuid4(),
-            conversation=[],
-            new_messages_start=0,
-            arguments=draft.model_dump(mode="json"),
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_create",
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-        )
-
-    assert result.failure_kind is None
-    assert result.event == {"event": "plan", "data": "{}"}
-    store_plan.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_process_create_arguments_formats_structured_field_depth_errors_actionably() -> (
-    None
-):
-    processor = _make_processor()
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.parse_create_flow_arguments",
-        side_effect=ValueError(
-            "1 validation error for FlowCreateDraft\n"
-            "steps.1\n"
-            "  Structured field nesting depth cannot exceed 3."
-        ),
-    ):
-        result = await processor._process_create_arguments(
-            session_id=uuid4(),
-            conversation=[],
-            new_messages_start=0,
-            arguments={"flow_name": "Broken"},
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_create",
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-        )
-
-    assert result.event is None
-    assert result.failure_kind == "parse"
-    assert result.feedback is not None
-    assert "output_fields" in result.feedback
-    assert "max 3 levels" in result.feedback
-    assert "flatten" in result.feedback.casefold()
-
-
-@pytest.mark.asyncio
-async def test_process_create_arguments_normalizes_structured_field_entries_into_previous_json_step() -> (
-    None
-):
-    processor = _make_processor()
-    spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    validation = MagicMock(valid=True, errors=[])
-    plan = SimpleNamespace(id=uuid4())
-    envelope = PlannerPlanEnvelope(
-        spec=spec,
-        assumptions=[],
-        lint_warnings=[],
-        risk_acknowledgments=[],
-        plan_rationale="Struktur först.",
-    )
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_create_draft",
-            return_value=SpecValidationResult(),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_create_draft",
-            return_value=spec,
-        ) as compile_draft,
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
-            return_value=SimpleNamespace(
-                spec=spec,
-                validation=validation,
-                failure_feedback=None,
-            ),
-        ),
-        patch.object(processor, "_format_quality_feedback", return_value=None),
-        patch.object(
-            processor,
-            "_format_contextual_quality_feedback",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-            return_value=(plan, envelope),
-        ),
-    ):
-        result = await processor._process_create_arguments(
-            session_id=uuid4(),
-            conversation=[],
-            new_messages_start=0,
-            arguments={
-                "flow_name": "Kommunärende",
-                "plan_rationale": "Struktur först.",
-                "steps": [
-                    {
-                        "name": "Extrahera risker",
-                        "instructions": "Extrahera risker som strukturerad JSON.",
-                        "input_source": "flow_input",
-                        "input_type": "document",
-                        "output_type": "json",
-                        "runtime_upload": True,
-                        "runtime_required": True,
-                        "output_fields": [
-                            {
-                                "name": "risker",
-                                "field_type": "string",
-                                "description": "Identifierade risker.",
-                                "required": True,
-                            }
-                        ],
-                    },
-                    {
-                        "name": "osakerheter_och_risker",
-                        "field_type": "string",
-                        "description": "Osäkerheter och risker.",
-                        "required": True,
-                    },
-                ],
-            },
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_create",
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-        )
-
-    assert result.failure_kind is None
-    assert result.event is not None
-
-    parsed_draft = compile_draft.call_args.args[0]
-    assert parsed_draft.steps[0].output_fields is not None
-    assert [field.name for field in parsed_draft.steps[0].output_fields] == [
-        "risker",
-        "osakerheter_och_risker",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_process_create_arguments_formats_structured_field_entries_in_steps_actionably_without_json_parent() -> (
-    None
-):
-    processor = _make_processor()
-
-    result = await processor._process_create_arguments(
-        session_id=uuid4(),
-        conversation=[],
-        new_messages_start=0,
-        arguments={
-            "flow_name": "Kommunärende",
-            "plan_rationale": "Struktur först.",
+    tool_call = _make_tool_call(
+        OUTLINE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Document analysis",
+            "plan_rationale": "Analyze documents.",
             "steps": [
-                {
-                    "name": "Extrahera risker",
-                    "instructions": "Extrahera risker som text.",
-                    "input_source": "flow_input",
-                    "input_type": "document",
-                    "output_type": "text",
-                },
-                {
-                    "name": "osakerheter_och_risker",
-                    "field_type": "string",
-                    "description": "Osäkerheter och risker.",
-                    "required": True,
-                },
+                {"name": "Read", "task": "Read the material."},
+                {"name": "Extract", "task": "Extract key facts."},
+                {"name": "Compare", "task": "Compare findings."},
+                {"name": "Report", "task": "Create the report."},
             ],
         },
-        assistant_content="Här är mitt förslag:",
-        tool_call_id="call_create",
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
+        tool_call_id="call-outline",
     )
-
-    assert result.event is None
-    assert result.failure_kind == "recoverable_parse"
-    assert result.feedback is not None
-    assert "structured output field, not a step" in result.feedback
-    assert "output_fields" in result.feedback
-    assert "Every steps[] item must be a full create step object" in result.feedback
-
-
-@pytest.mark.asyncio
-async def test_process_create_arguments_formats_first_step_source_errors_actionably() -> (
-    None
-):
-    processor = _make_processor()
-    invalid_draft = FlowCreateDraft.model_validate(
-        {
-            "flow_name": "Ogiltigt flöde",
-            "plan_rationale": "Testar första steget.",
-            "steps": [
-                {
-                    "name": "Analys",
-                    "instructions": "Analysera underlaget.",
-                    "input_source": "previous_step",
-                    "input_type": "text",
-                    "output_type": "text",
-                }
-            ],
-        }
+    ctx = _make_context(
+        conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+        request_id="req-outline-retry",
     )
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.parse_create_flow_arguments",
-        return_value=invalid_draft,
-    ):
-        result = await processor._process_create_arguments(
-            session_id=uuid4(),
-            conversation=[],
-            new_messages_start=0,
-            arguments=invalid_draft.model_dump(mode="json"),
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_create",
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
+    process_tool_arguments = AsyncMock(
+        return_value=ToolProcessingResult(
+            feedback="Invalid outline_flow arguments: bad shape",
+            failure_kind="parse",
         )
-
-    assert result.event is None
-    assert result.failure_kind == "validation"
-    assert result.feedback is not None
-    assert "steps[0].input_source" in result.feedback
-    assert "flow_input" in result.feedback
-    assert (
-        "Only later steps may use previous_step or all_previous_steps"
-        in result.feedback
     )
 
-
-@pytest.mark.asyncio
-async def test_process_create_arguments_appends_actionable_quality_repair_rules() -> (
-    None
-):
-    processor = _make_processor()
-    draft = _make_create_draft()
-    compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    compiled_validation = MagicMock(valid=True, errors=[])
+    async def _events():
+        yield {"event": "status", "data": '{"status":"repairing"}'}
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.parse_create_flow_arguments",
-            return_value=draft,
+            "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_create_draft",
-            return_value=SpecValidationResult(),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_create_draft",
-            return_value=compiled_spec,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
-            return_value=SimpleNamespace(
-                spec=compiled_spec,
-                validation=compiled_validation,
-                failure_feedback=None,
-            ),
-        ),
-        patch.object(processor, "_format_quality_feedback", return_value=None),
         patch.object(
             processor,
-            "_format_contextual_quality_feedback",
-            return_value=(
-                "Quality issues:\n"
-                "1. Användaren har valt DOCX som slutartefakt men sista steget producerar inte DOCX. "
-                "Justera slutstegets output_type så att det matchar användarens val.\n"
-                "2. Konversationen beskriver jämförelse eller samlad analys av flera dokument, men inget steg använder "
-                '`input_source="all_previous_steps"`. Använd en aggregerande eller jämförande koppling när flera dokument ska behandlas tillsammans.'
-            ),
-        ),
+            "_request_tool_self_correction",
+            return_value=_events(),
+        ) as repair,
     ):
-        result = await processor._process_create_arguments(
-            session_id=uuid4(),
-            conversation=[],
-            new_messages_start=0,
-            arguments=draft.model_dump(mode="json"),
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_create",
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-        )
+        events = [
+            event
+            async for event in processor._handle_submission_tool_call(
+                ctx=ctx,
+                tool_call=tool_call,
+                config=SubmissionToolHandlerConfig(
+                    target_tool_name=OUTLINE_FLOW_TOOL_NAME,
+                    requirements_not_confirmed_message="Requirements must be confirmed before creating a flow.",
+                    parse_error_prefix="Invalid outline_flow arguments",
+                    invalid_result_message="Invalid outline_flow draft.",
+                    forced_tool_prompt="Now call outline_flow.",
+                    process_tool_arguments=process_tool_arguments,
+                ),
+            )
+        ]
 
-    assert result.event is None
-    assert result.failure_kind == "quality"
-    assert result.feedback is not None
-    assert "Create-flow quality repair rules:" in result.feedback
-    assert "output_type to 'docx'" in result.feedback
-    assert "input_source='all_previous_steps'" in result.feedback
+    assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
+    retry_config = repair.call_args.kwargs["retry_config"]
+    assert retry_config.process_tool_kwargs == {"planning_state": None}
 
 
 @pytest.mark.asyncio
@@ -1426,6 +802,111 @@ async def test_process_edit_arguments_passes_metadata_to_edit_validator() -> Non
 
 
 @pytest.mark.asyncio
+async def test_process_edit_arguments_normalizes_mechanical_refs_before_validation() -> (
+    None
+):
+    processor = _make_processor()
+    flow = MagicMock()
+    flow.steps = [
+        MagicMock(
+            step_order=1,
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
+        ),
+        MagicMock(step_order=2, output_type="text", output_contract=None),
+    ]
+    flow.draft_revision = 7
+    flow.name = "Rapportflöde"
+    flow.description = "Skapar rapport."
+    flow.metadata_json = {
+        "form_schema": {"fields": [{"name": "case_id", "type": "text"}]}
+    }
+    arguments = {
+        "plan_rationale": "Uppdatera kopplingar.",
+        "operations": [
+            {
+                "op": "modify",
+                "target_ref": "existing_step_2",
+                "patch": {
+                    "uses_previous_fields": [
+                        {"from_step": 1, "field_path": "summary"},
+                        {"from_step": 1, "field_path": "invented"},
+                    ],
+                    "uses_form_fields": ["case_id", "invented_field"],
+                },
+            }
+        ],
+    }
+    edit_result = MagicMock(
+        compiled_spec=_make_flow_spec(model_ref=None, knowledge_refs=[])
+    )
+    compiled_validation = MagicMock(valid=True, errors=[])
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
+            return_value=SimpleNamespace(
+                spec=edit_result.compiled_spec,
+                validation=compiled_validation,
+                failure_feedback=None,
+            ),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_edit_draft",
+            return_value=edit_result,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_edit_draft",
+            return_value=SpecValidationResult(),
+        ) as validate_edit,
+        patch.object(
+            processor,
+            "_format_contextual_quality_feedback",
+            return_value=None,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.build_plan_event",
+            return_value={"event": "plan", "data": "{}"},
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(), MagicMock()),
+        ),
+    ):
+        await processor._process_edit_arguments(
+            session_id=uuid4(),
+            conversation=[],
+            new_messages_start=0,
+            arguments=arguments,
+            assistant_content="Här är mitt förslag:",
+            tool_call_id="call_edit",
+            available_model_refs=None,
+            available_kb_refs=None,
+            flow=flow,
+            assistant_snapshots=None,
+            litellm_model="openai/gpt-4",
+            litellm_kwargs={"api_key": "sk-test"},
+            max_output_tokens=1024,
+            resource_catalog=None,
+        )
+
+    assert validate_edit.call_args is not None
+    normalized_draft = validate_edit.call_args.args[0]
+    patch_payload = normalized_draft.operations[0].patch
+    assert patch_payload is not None
+    assert [
+        (ref.from_step, ref.field_path) for ref in patch_payload.uses_previous_fields
+    ] == [
+        (1, "summary"),
+    ]
+    assert patch_payload.uses_form_fields == ["case_id"]
+
+
+@pytest.mark.asyncio
 async def test_handle_tool_call_builds_proposal_context_for_edit_handler() -> None:
     processor = _make_processor()
     flow = MagicMock()
@@ -1549,7 +1030,7 @@ async def test_request_self_correction_returns_typed_error_when_repair_completio
 ):
     processor = _make_processor()
     tool_call = _make_tool_call(
-        CREATE_FLOW_TOOL_NAME,
+        OUTLINE_FLOW_TOOL_NAME,
         {
             "flow_name": "Utredningsflöde",
             "plan_rationale": "Kort plan.",
@@ -1574,7 +1055,7 @@ async def test_request_self_correction_returns_typed_error_when_repair_completio
                 error_message="Invalid flow specification: missing steps",
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 tool_call=tool_call,
-                tool_schemas=[{"function": {"name": CREATE_FLOW_TOOL_NAME}}],
+                tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
                 available_model_refs=None,
@@ -1603,10 +1084,10 @@ async def test_submission_retry_config_returns_typed_create_retry_config() -> No
     )
 
     assert isinstance(config, ToolRetryConfig)
-    assert config.target_tool_name == CREATE_FLOW_TOOL_NAME
-    assert config.process_tool_arguments == processor._process_create_arguments
+    assert config.target_tool_name == OUTLINE_FLOW_TOOL_NAME
+    assert config.process_tool_arguments == processor._process_outline_arguments
     assert config.process_tool_kwargs == {}
-    assert "Now call create_flow" in config.forced_tool_prompt
+    assert "Now call outline_flow" in config.forced_tool_prompt
 
 
 @pytest.mark.asyncio
@@ -1638,7 +1119,7 @@ async def test_submission_retry_config_returns_typed_edit_retry_config() -> None
 
 
 @pytest.mark.asyncio
-async def test_retry_forced_proposal_after_text_uses_create_flow_for_create_mode() -> (
+async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mode() -> (
     None
 ):
     processor = _make_processor()
@@ -1650,7 +1131,7 @@ async def test_retry_forced_proposal_after_text_uses_create_flow_for_create_mode
         result = await processor.retry_forced_proposal_after_text(
             correction_messages=[{"role": "system", "content": "Prompt"}],
             assistant_text="Här är planen.",
-            tool_schemas=[{"function": {"name": CREATE_FLOW_TOOL_NAME}}],
+            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             session_id=uuid4(),
@@ -1665,9 +1146,9 @@ async def test_retry_forced_proposal_after_text_uses_create_flow_for_create_mode
 
     assert result == {"event": "plan", "data": "{}"}
     kwargs = retry_forced_tool.await_args.kwargs
-    assert kwargs["target_tool_name"] == CREATE_FLOW_TOOL_NAME
-    assert kwargs["process_tool_arguments"] == processor._process_create_arguments
-    assert "Now call create_flow" in kwargs["forced_tool_prompt"]
+    assert kwargs["target_tool_name"] == OUTLINE_FLOW_TOOL_NAME
+    assert kwargs["process_tool_arguments"] == processor._process_outline_arguments
+    assert "Now call outline_flow" in kwargs["forced_tool_prompt"]
 
 
 @pytest.mark.asyncio

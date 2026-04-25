@@ -1,24 +1,3 @@
-"""Contract tests for the single-pass planner repair helper.
-
-The helper `repair_planner_turn` is a pure async function that takes a
-rejected `PlannerOutput` + `RejectionReason` and asks the LLM to emit a
-corrective JSON product. It does NOT hold the retry budget itself — the
-outer `send_message` loop (shipping with the transport migration) owns
-the multi-attempt bookkeeping. Per-call it returns exactly one
-`RepairOutcome`:
-
-- `not_repairable` when the rejection code is outside the
-  `_REPAIR_ELIGIBLE_CODES` set (LLM not called).
-- `repaired` when the LLM returned a `PlannerOutput` whose architecture
-  commit, if any, still matches the session's prior commit hash, OR
-  whose delta omits `architecture_commit` entirely (preservation-by-
-  absence — the evaluator only inspects the delta when populated).
-- `commit_drift_blocked` when the LLM's repaired output mutates the
-  prior `architecture_hash` — either by hash divergence or by body-
-  forgery with a matching hash. Budget is NOT decremented in this
-  branch — drift is a hard failure, not a retry candidate.
-"""
-
 from __future__ import annotations
 
 import json
@@ -28,9 +7,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_architecture_commit import (
+    canonical_architecture_commit_payload,
+)
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     PlannerOutput,
     RejectionReason,
+)
+from intric.flows.ai_builder.ai_builder_repair import (
+    MAX_ORCHESTRATOR_REPAIR_RETRIES,
+    RepairOutcome,
+    repair_planner_turn,
 )
 from intric.flows.ai_builder.planning_state import ArchitectureCommit, StepTriple
 
@@ -51,508 +38,263 @@ def _make_commit(*, architecture_hash: str) -> ArchitectureCommit:
     )
 
 
-def _make_planner_output_json(
+def _planner_output_json(
     *,
-    architecture_commit: ArchitectureCommit | None,
-    kind: str = "propose_plan",
-    base_version: int = 0,
+    kind: str = "confirm_requirements",
+    architecture_commit: ArchitectureCommit | None = None,
 ) -> str:
-    """Build a minimally-valid PlannerOutput JSON string.
-
-    The helper's parse path accepts this string verbatim; if the
-    schema drifts under us, parse will raise and the tests will fail
-    loud rather than silently routing the wrong shape.
-    """
     payload: dict[str, Any] = {
         "planning_state_delta": {
-            "base_planning_state_version": base_version,
+            "base_planning_state_version": 0,
             "signals_added": [],
             "slots_resolved": [],
             "architecture_commit": (
-                architecture_commit.model_dump(mode="json")
+                canonical_architecture_commit_payload(architecture_commit)
                 if architecture_commit is not None
                 else None
             ),
-            "draft_plan": {
-                "plan_id": "plan-42",
-                "steps": [{"step_ix": 0}],
-                "form_fields": [],
-            },
         },
         "planner_action": {
             "kind": kind,
-            "payload": (
-                {"plan_reference": "latest"} if kind == "propose_plan" else {"note": ""}
-            ),
+            "payload": _payload_for(kind),
         },
     }
     return json.dumps(payload)
 
 
+def _payload_for(kind: str) -> dict[str, Any]:
+    if kind == "ask_question":
+        return {
+            "question_id": "primary_runtime_input",
+            "slot_name": "primary_runtime_input",
+            "prompt": "What should the flow receive?",
+        }
+    if kind == "commit_architecture":
+        return {"note": ""}
+    if kind == "confirm_requirements":
+        return {
+            "summary": "Resolved requirements.",
+            "key_decisions": [],
+            "input_description": "",
+            "output_description": "",
+            "assumptions": [],
+            "manual_setup_notes": [],
+        }
+    raise AssertionError(f"unsupported kind {kind}")
+
+
 def _llm_response(raw_json: str) -> MagicMock:
-    """Shape a litellm-style chat.completions response."""
     message = MagicMock(content=raw_json, tool_calls=None)
     return MagicMock(choices=[MagicMock(message=message, finish_reason="stop")])
 
 
-class TestNotRepairable:
-    @pytest.mark.asyncio
-    async def test_version_mismatch_short_circuits_without_llm_call(self) -> None:
-        from intric.flows.ai_builder.ai_builder_repair import (
-            RepairOutcome,
-            repair_planner_turn,
-        )
-
-        llm = AsyncMock()
-        rejection = RejectionReason(
-            code="version_mismatch",
-            detail="planner sent base_planning_state_version=3, session is at 5",
-            current_version=5,
-        )
-        outcome = await repair_planner_turn(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system prompt"}],
-            failed_output_json="{}",
-            rejection=rejection,
-            prior_architecture_commit=None,
-        )
-        assert isinstance(outcome, RepairOutcome)
-        assert outcome.kind == "not_repairable"
-        assert outcome.repaired_output is None
-        assert outcome.drift_rejection is None
-        llm.acompletion.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_duplicate_question_is_not_repair_eligible(self) -> None:
-        from intric.flows.ai_builder.ai_builder_repair import (
-            repair_planner_turn,
-        )
-
-        llm = AsyncMock()
-        rejection = RejectionReason(
-            code="duplicate_question",
-            detail="planner re-asked input_material_mode without new evidence",
-        )
-        outcome = await repair_planner_turn(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system prompt"}],
-            failed_output_json="{}",
-            rejection=rejection,
-            prior_architecture_commit=None,
-        )
-        assert outcome.kind == "not_repairable"
-        llm.acompletion.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_architecture_commit_rejection_is_not_repair_eligible(self) -> None:
-        """Only ``propose_plan_*`` rejections are repair-eligible.
-        Architecture commit rejections indicate the planner misunderstood
-        the constraint surface, not that the plan shape drifted; they
-        need a fresh turn, not a corrective loop."""
-        from intric.flows.ai_builder.ai_builder_repair import (
-            repair_planner_turn,
-        )
-
-        llm = AsyncMock()
-        rejection = RejectionReason(
-            code="architecture_commit_illegal_tuple",
-            detail="tuple #0 (text → pdf, pass_through) not supported by FCM",
-        )
-        outcome = await repair_planner_turn(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system prompt"}],
-            failed_output_json="{}",
-            rejection=rejection,
-            prior_architecture_commit=None,
-        )
-        assert outcome.kind == "not_repairable"
-        llm.acompletion.assert_not_awaited()
-
-
-class TestRepairEligibleCodes:
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "code",
-        [
-            "propose_plan_without_architecture_commit",
-            "propose_plan_missing_draft_plan",
-            "propose_plan_draft_plan_structural_mismatch",
-            "architecture_commit_premature_unresolved_choices",
-        ],
+@pytest.mark.asyncio
+async def test_version_mismatch_short_circuits_without_llm_call() -> None:
+    llm = AsyncMock()
+    rejection = RejectionReason(
+        code="version_mismatch",
+        detail="planner sent base_planning_state_version=3, session is at 5",
+        current_version=5,
     )
-    async def test_eligible_code_triggers_one_llm_call(self, code: str) -> None:
-        from intric.flows.ai_builder.ai_builder_repair import (
-            repair_planner_turn,
-        )
 
-        commit = _make_commit(architecture_hash="a" * 64)
-        llm = AsyncMock()
-        llm.acompletion.return_value = _llm_response(
-            _make_planner_output_json(architecture_commit=commit)
-        )
-        rejection = RejectionReason(code=code, detail=f"detail for {code}")
-        outcome = await repair_planner_turn(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system prompt"}],
-            failed_output_json=_make_planner_output_json(architecture_commit=commit),
-            rejection=rejection,
-            prior_architecture_commit=commit,
-        )
-        assert outcome.kind == "repaired"
-        assert outcome.repaired_output is not None
-        assert isinstance(outcome.repaired_output, PlannerOutput)
-        llm.acompletion.assert_awaited_once()
+    outcome = await repair_planner_turn(
+        litellm_client=llm,
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        base_messages=[{"role": "system", "content": "system prompt"}],
+        failed_output_json="{}",
+        rejection=rejection,
+        prior_architecture_commit=None,
+    )
+
+    assert isinstance(outcome, RepairOutcome)
+    assert outcome.kind == "not_repairable"
+    llm.acompletion.assert_not_awaited()
 
 
-class TestRepairPromptShape:
-    @pytest.mark.asyncio
-    async def test_prompt_includes_rejection_detail_not_code(self) -> None:
-        """The rejection `code` is internal vocabulary and must not
-        reach the planner LLM; `detail` is the human-grade explanation
-        and is what the LLM consumes."""
-        from intric.flows.ai_builder.ai_builder_repair import (
-            repair_planner_turn,
-        )
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code",
+    [
+        "architecture_commit_premature_unresolved_choices",
+        "architecture_commit_missing_delta",
+        "off_topic_question",
+        "duplicate_question",
+    ],
+)
+async def test_eligible_code_triggers_one_llm_call(code: str) -> None:
+    llm = AsyncMock()
+    llm.acompletion.return_value = _llm_response(_planner_output_json())
 
-        commit = _make_commit(architecture_hash="a" * 64)
-        llm = AsyncMock()
-        llm.acompletion.return_value = _llm_response(
-            _make_planner_output_json(architecture_commit=commit)
-        )
-        unique_detail = "step count on draft_plan (2) differs from tuples_chain (3)"
-        rejection = RejectionReason(
-            code="propose_plan_draft_plan_structural_mismatch",
-            detail=unique_detail,
-        )
-        await repair_planner_turn(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system prompt"}],
-            failed_output_json=_make_planner_output_json(architecture_commit=commit),
-            rejection=rejection,
-            prior_architecture_commit=commit,
-        )
-        sent_messages = llm.acompletion.await_args.kwargs["messages"]
-        last_message = sent_messages[-1]
-        assert last_message["role"] == "user"
-        assert unique_detail in last_message["content"]
-        assert rejection.code not in last_message["content"], (
-            "rejection code is internal vocabulary; the planner sees detail only"
-        )
+    outcome = await repair_planner_turn(
+        litellm_client=llm,
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        base_messages=[{"role": "system", "content": "system prompt"}],
+        failed_output_json=_planner_output_json(kind="ask_question"),
+        rejection=RejectionReason(code=code, detail=f"detail for {code}"),
+        prior_architecture_commit=None,
+    )
 
-    @pytest.mark.asyncio
-    async def test_prompt_for_premature_commit_names_pivot_action(self) -> None:
-        """When commit is rejected as premature because required slots are
-        unresolved, the repair prompt must explicitly tell the LLM the
-        valid next action is `ask_question` — not a re-emission of
-        `commit_architecture` honoring some different constraint.
-
-        Codex review flagged (structural consultation 2026-04-24) that
-        semantic rejections like `architecture_commit_premature_unresolved_choices`
-        need pivot directives: "ask about `X`", not "honor the
-        constraint". Without this, the LLM's only cue is
-        `rejection.detail`, which describes the violation but not the
-        remediation.
-        """
-        from intric.flows.ai_builder.ai_builder_repair import (
-            repair_planner_turn,
-        )
-
-        commit = _make_commit(architecture_hash="a" * 64)
-        llm = AsyncMock()
-        llm.acompletion.return_value = _llm_response(
-            _make_planner_output_json(architecture_commit=commit)
-        )
-        rejection = RejectionReason(
-            code="architecture_commit_premature_unresolved_choices",
-            detail=(
-                "cannot commit architecture while unresolved_architectural_choices "
-                "is non-empty: ['primary_runtime_input', 'terminal_output']"
-            ),
-        )
-        await repair_planner_turn(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system prompt"}],
-            failed_output_json=_make_planner_output_json(architecture_commit=commit),
-            rejection=rejection,
-            prior_architecture_commit=None,
-        )
-        sent_messages = llm.acompletion.await_args.kwargs["messages"]
-        last_message = sent_messages[-1]
-        content = last_message["content"]
-        assert rejection.detail in content, (
-            "repair prompt must still include the full rejection detail so "
-            "the LLM can see which slots are blocking"
-        )
-        assert "ask_question" in content, (
-            "repair prompt must name the valid next action explicitly — "
-            "the LLM should pivot to asking, not re-emit commit_architecture"
-        )
-        lowered = content.lower()
-        assert "commit_architecture" in content and (
-            "inte" in lowered or "do not" in lowered or "not emit" in lowered
-        ), (
-            "repair prompt must forbid a re-emission of commit_architecture "
-            "until the blocking slots are resolved"
-        )
-
-    @pytest.mark.asyncio
-    async def test_prompt_instructs_preserve_committed_architecture(self) -> None:
-        from intric.flows.ai_builder.ai_builder_repair import (
-            repair_planner_turn,
-        )
-
-        commit = _make_commit(architecture_hash="a" * 64)
-        llm = AsyncMock()
-        llm.acompletion.return_value = _llm_response(
-            _make_planner_output_json(architecture_commit=commit)
-        )
-        rejection = RejectionReason(
-            code="propose_plan_missing_draft_plan",
-            detail="propose_plan delta lacked draft_plan after commit",
-        )
-        await repair_planner_turn(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system prompt"}],
-            failed_output_json=_make_planner_output_json(architecture_commit=commit),
-            rejection=rejection,
-            prior_architecture_commit=commit,
-        )
-        sent_messages = llm.acompletion.await_args.kwargs["messages"]
-        last_message = sent_messages[-1]
-        assert "committed architecture" in last_message["content"].lower(), (
-            "repair prompt must remind the LLM the committed architecture "
-            "is pinned and must not drift"
-        )
-
-    @pytest.mark.asyncio
-    async def test_prompt_echoes_failed_output_for_the_planner_to_see(self) -> None:
-        from intric.flows.ai_builder.ai_builder_repair import (
-            repair_planner_turn,
-        )
-
-        commit = _make_commit(architecture_hash="a" * 64)
-        llm = AsyncMock()
-        llm.acompletion.return_value = _llm_response(
-            _make_planner_output_json(architecture_commit=commit)
-        )
-        rejection = RejectionReason(
-            code="propose_plan_missing_draft_plan",
-            detail="propose_plan delta lacked draft_plan after commit",
-        )
-        failed_json = _make_planner_output_json(architecture_commit=commit)
-        await repair_planner_turn(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system prompt"}],
-            failed_output_json=failed_json,
-            rejection=rejection,
-            prior_architecture_commit=commit,
-        )
-        sent_messages = llm.acompletion.await_args.kwargs["messages"]
-        assistant_echoes = [msg for msg in sent_messages if msg["role"] == "assistant"]
-        assert assistant_echoes, (
-            "repair loop must echo the failed output back as an assistant "
-            "turn so the LLM sees what was rejected"
-        )
-        assert failed_json in assistant_echoes[-1]["content"]
+    assert outcome.kind == "repaired"
+    assert isinstance(outcome.repaired_output, PlannerOutput)
+    llm.acompletion.assert_awaited_once()
 
 
-class TestCommitDriftBlocked:
-    @pytest.mark.asyncio
-    async def test_drift_in_architecture_hash_blocks_repair(self) -> None:
-        from intric.flows.ai_builder.ai_builder_repair import (
-            repair_planner_turn,
-        )
+@pytest.mark.asyncio
+async def test_prompt_includes_rejection_detail_not_code() -> None:
+    llm = AsyncMock()
+    llm.acompletion.return_value = _llm_response(_planner_output_json())
+    unique_detail = "question_id='x' already asked this session"
+    rejection = RejectionReason(code="duplicate_question", detail=unique_detail)
 
-        prior = _make_commit(architecture_hash="a" * 64)
-        drifted = _make_commit(architecture_hash="b" * 64)
-        llm = AsyncMock()
-        llm.acompletion.return_value = _llm_response(
-            _make_planner_output_json(architecture_commit=drifted)
-        )
-        rejection = RejectionReason(
-            code="propose_plan_missing_draft_plan",
-            detail="propose_plan delta lacked draft_plan after commit",
-        )
-        outcome = await repair_planner_turn(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system prompt"}],
-            failed_output_json=_make_planner_output_json(architecture_commit=prior),
-            rejection=rejection,
-            prior_architecture_commit=prior,
-        )
-        assert outcome.kind == "commit_drift_blocked"
-        assert outcome.repaired_output is None
-        assert outcome.drift_rejection is not None
-        assert outcome.drift_rejection.code == "repair_attempted_commit_drift"
-        assert "architecture_hash" in outcome.drift_rejection.detail
+    await repair_planner_turn(
+        litellm_client=llm,
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        base_messages=[{"role": "system", "content": "system prompt"}],
+        failed_output_json=_planner_output_json(kind="ask_question"),
+        rejection=rejection,
+        prior_architecture_commit=None,
+    )
 
-    @pytest.mark.asyncio
-    async def test_dropping_commit_after_prior_commit_is_preservation_by_absence(
-        self,
-    ) -> None:
-        """The knowledge-pack protocol tells the planner to populate
-        ``architecture_commit`` only on ``commit_architecture`` turns.
-        A repaired ``propose_plan`` may leave the delta commit ``None``
-        and rely on the pinned commit carried in ``session_state``;
-        that matches the evaluator's preservation-by-absence semantics
-        and the repair helper must not flag it as drift.
-        """
-        from intric.flows.ai_builder.ai_builder_repair import (
-            repair_planner_turn,
-        )
-
-        prior = _make_commit(architecture_hash="a" * 64)
-        llm = AsyncMock()
-        llm.acompletion.return_value = _llm_response(
-            _make_planner_output_json(architecture_commit=None)
-        )
-        rejection = RejectionReason(
-            code="propose_plan_missing_draft_plan",
-            detail="propose_plan delta lacked draft_plan after commit",
-        )
-        outcome = await repair_planner_turn(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system prompt"}],
-            failed_output_json=_make_planner_output_json(architecture_commit=prior),
-            rejection=rejection,
-            prior_architecture_commit=prior,
-        )
-        assert outcome.kind == "repaired"
-        assert outcome.repaired_output is not None
-        assert outcome.repaired_output.planning_state_delta.architecture_commit is None
-        assert outcome.drift_rejection is None
-
-    @pytest.mark.asyncio
-    async def test_matching_hash_with_mutated_body_is_blocked_as_drift(self) -> None:
-        """The architecture_hash is planner-supplied and the server
-        does NOT rebind it to the commit body at repair time. A
-        matching hash whose `tuples_chain` / `chosen_patterns` /
-        `required_capabilities` / `committed_at` differ from the prior
-        is a forgery, not a preserved commit, and the helper must
-        treat it as drift."""
-        from intric.flows.ai_builder.ai_builder_repair import (
-            repair_planner_turn,
-        )
-
-        shared_hash = "a" * 64
-        prior = _make_commit(architecture_hash=shared_hash)
-        # Same hash, but mutated tuples_chain (swapped output_type).
-        mutated = ArchitectureCommit(
-            tuples_chain=[
-                StepTriple(
-                    input_type="text",
-                    output_type="json",
-                    output_mode="pass_through",
-                )
-            ],
-            chosen_patterns=prior.chosen_patterns,
-            required_capabilities=prior.required_capabilities,
-            committed_at=prior.committed_at,
-            architecture_hash=shared_hash,
-        )
-        llm = AsyncMock()
-        llm.acompletion.return_value = _llm_response(
-            _make_planner_output_json(architecture_commit=mutated)
-        )
-        rejection = RejectionReason(
-            code="propose_plan_missing_draft_plan",
-            detail="propose_plan delta lacked draft_plan after commit",
-        )
-        outcome = await repair_planner_turn(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system prompt"}],
-            failed_output_json=_make_planner_output_json(architecture_commit=prior),
-            rejection=rejection,
-            prior_architecture_commit=prior,
-        )
-        assert outcome.kind == "commit_drift_blocked"
-        assert outcome.drift_rejection is not None
-        assert outcome.drift_rejection.code == "repair_attempted_commit_drift"
-        detail = outcome.drift_rejection.detail
-        assert "mutated" in detail
-        assert "commit body" in detail
-
-    @pytest.mark.asyncio
-    async def test_adding_commit_when_prior_was_none_is_not_drift(self) -> None:
-        """If the session had no prior commit, the repaired output may
-        introduce one — that is the commit_architecture path, not
-        drift. Drift is specifically about mutating or dropping an
-        existing commit."""
-        from intric.flows.ai_builder.ai_builder_repair import (
-            repair_planner_turn,
-        )
-
-        new_commit = _make_commit(architecture_hash="c" * 64)
-        llm = AsyncMock()
-        llm.acompletion.return_value = _llm_response(
-            _make_planner_output_json(architecture_commit=new_commit)
-        )
-        rejection = RejectionReason(
-            code="propose_plan_without_architecture_commit",
-            detail="propose_plan requires an architecture_commit on the delta",
-        )
-        outcome = await repair_planner_turn(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system prompt"}],
-            failed_output_json=_make_planner_output_json(architecture_commit=None),
-            rejection=rejection,
-            prior_architecture_commit=None,
-        )
-        assert outcome.kind == "repaired"
-        assert outcome.repaired_output is not None
+    content = llm.acompletion.await_args.kwargs["messages"][-1]["content"]
+    assert unique_detail in content
+    assert rejection.code not in content
 
 
-class TestRepairBudgetConstant:
-    def test_max_orchestrator_repair_retries_is_three(self) -> None:
-        """The budget is a module-level Final the outer retry loop
-        imports. Locked to 3 per the intent doc — deliberately
-        distinct from the proposal processor's own retry budget so one
-        loop's retries never eat the other's."""
-        from intric.flows.ai_builder.ai_builder_repair import (
-            MAX_ORCHESTRATOR_REPAIR_RETRIES,
-        )
+@pytest.mark.asyncio
+async def test_duplicate_question_prompt_forbids_repeating_question() -> None:
+    llm = AsyncMock()
+    llm.acompletion.return_value = _llm_response(
+        _planner_output_json(kind="commit_architecture")
+    )
+    rejection = RejectionReason(
+        code="duplicate_question",
+        detail=(
+            "question_id='runtime_metadata_fields' already asked this session "
+            "and no new evidence arrived since"
+        ),
+    )
 
-        assert MAX_ORCHESTRATOR_REPAIR_RETRIES == 3
+    await repair_planner_turn(
+        litellm_client=llm,
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        base_messages=[{"role": "system", "content": "system prompt"}],
+        failed_output_json=_planner_output_json(kind="ask_question"),
+        rejection=rejection,
+        prior_architecture_commit=None,
+    )
+
+    content = llm.acompletion.await_args.kwargs["messages"][-1]["content"]
+    assert "Do NOT repeat the same `ask_question`" in content
+    assert "latest user message" in content
+    assert "different unresolved slot" in content
 
 
-class TestPublicSurface:
-    def test_module_exports(self) -> None:
-        from intric.flows.ai_builder import ai_builder_repair
+@pytest.mark.asyncio
+async def test_missing_commit_delta_prompt_keeps_commit_server_derived() -> None:
+    llm = AsyncMock()
+    llm.acompletion.return_value = _llm_response(
+        _planner_output_json(kind="commit_architecture")
+    )
+    rejection = RejectionReason(
+        code="architecture_commit_missing_delta",
+        detail="commit_architecture action requires a populated architecture_commit delta",
+    )
 
-        for symbol in (
-            "MAX_ORCHESTRATOR_REPAIR_RETRIES",
-            "RepairOutcome",
-            "repair_planner_turn",
-        ):
-            assert hasattr(ai_builder_repair, symbol), (
-                f"public surface must expose {symbol} — consumed by "
-                "the outer send_message loop's transport helper"
+    await repair_planner_turn(
+        litellm_client=llm,
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        base_messages=[{"role": "system", "content": "system prompt"}],
+        failed_output_json=_planner_output_json(kind="commit_architecture"),
+        rejection=rejection,
+        prior_architecture_commit=None,
+    )
+
+    content = llm.acompletion.await_args.kwargs["messages"][-1]["content"]
+    assert "planning_state_delta.architecture_commit" in content
+    assert "server derives" in content
+    assert "Flow Capability Manifest" in content
+    assert "architecture_hash" in content
+    assert "committed_at" in content
+
+
+@pytest.mark.asyncio
+async def test_drift_in_architecture_body_blocks_repair() -> None:
+    prior = _make_commit(architecture_hash="a" * 64)
+    drifted = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="text",
+                output_type="json",
+                output_mode="pass_through",
             )
+        ],
+        chosen_patterns=prior.chosen_patterns,
+        required_capabilities=prior.required_capabilities,
+        committed_at=prior.committed_at,
+        architecture_hash=prior.architecture_hash,
+    )
+    llm = AsyncMock()
+    llm.acompletion.return_value = _llm_response(
+        _planner_output_json(kind="commit_architecture", architecture_commit=drifted)
+    )
+
+    outcome = await repair_planner_turn(
+        litellm_client=llm,
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        base_messages=[{"role": "system", "content": "system prompt"}],
+        failed_output_json=_planner_output_json(kind="ask_question"),
+        rejection=RejectionReason(
+            code="duplicate_question",
+            detail="question_id='x' already asked",
+        ),
+        prior_architecture_commit=prior,
+    )
+
+    assert outcome.kind == "commit_drift_blocked"
+    assert outcome.drift_rejection is not None
+    assert outcome.drift_rejection.code == "repair_attempted_commit_drift"
 
 
-if __name__ == "__main__":  # pragma: no cover
-    pytest.main([__file__, "-x", "-v"])
+@pytest.mark.asyncio
+async def test_omitted_commit_after_prior_commit_is_preservation_by_absence() -> None:
+    prior = _make_commit(architecture_hash="a" * 64)
+    llm = AsyncMock()
+    llm.acompletion.return_value = _llm_response(_planner_output_json())
+
+    outcome = await repair_planner_turn(
+        litellm_client=llm,
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        base_messages=[{"role": "system", "content": "system prompt"}],
+        failed_output_json=_planner_output_json(kind="ask_question"),
+        rejection=RejectionReason(
+            code="duplicate_question",
+            detail="question_id='x' already asked",
+        ),
+        prior_architecture_commit=prior,
+    )
+
+    assert outcome.kind == "repaired"
+    assert outcome.repaired_output is not None
+    assert outcome.repaired_output.planning_state_delta.architecture_commit is None
+
+
+def test_max_orchestrator_repair_retries_is_three() -> None:
+    assert MAX_ORCHESTRATOR_REPAIR_RETRIES == 3
+
+
+def test_module_exports() -> None:
+    from intric.flows.ai_builder import ai_builder_repair
+
+    for symbol in (
+        "MAX_ORCHESTRATOR_REPAIR_RETRIES",
+        "RepairOutcome",
+        "repair_planner_turn",
+    ):
+        assert hasattr(ai_builder_repair, symbol)

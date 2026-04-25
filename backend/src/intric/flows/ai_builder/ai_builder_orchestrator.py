@@ -3,12 +3,17 @@
 Every planner turn emits one JSON product with two halves:
 
 - `planning_state_delta` — what the planner understood (signals added,
-  slots resolved, optional architecture commit, optional draft plan).
+  slots resolved, optional architecture commit).
   The delta carries `base_planning_state_version` so the repo's
   optimistic-concurrency guard can reject stale writes.
 - `planner_action` — what the planner wants to do next. A discriminated
   union on `kind`: `ask_question`, `commit_architecture`,
-  `confirm_requirements`, `propose_plan`.
+  `confirm_requirements`.
+
+Plan proposal is intentionally not part of this LLM-facing union. The
+server selects the proposal phase from `PlanningState` and invokes the
+task-specific proposal processor, where the model only fills the
+create/edit flow tool payload.
 
 `evaluate_planner_output` runs the monotonicity guardrails and returns a
 `RejectionReason` the planner retry loop can consume, or ``None`` when
@@ -26,14 +31,19 @@ from typing import Annotated, Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, ValidationError
 
+from intric.flows.ai_builder.ai_builder_action_policy import PlannerActionPolicy
+from intric.flows.ai_builder.ai_builder_ask_question_contract import (
+    allowed_ask_question_targets,
+    format_ask_question_targets,
+)
 from intric.flows.ai_builder.ai_builder_commit_invariance import (
     CommitDriftError,
-    assert_architecture_commit_unchanged,
+    assert_architecture_commit_draft_matches_pinned,
 )
 from intric.flows.ai_builder.ai_builder_event_models import KeyDecisionPayload
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import (
-    ArchitectureCommit,
+    ArchitectureCommitDraft,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -55,27 +65,11 @@ class _OrchestratorModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class DraftPlanEnvelope(_OrchestratorModel):
-    """Top-level envelope for a planner-proposed draft plan.
-
-    The fine-grained shape of `steps` and `form_fields` lands with the
-    materialization bridge and its consumers. The envelope here is
-    strict so the orchestrator rejects invented top-level keys, which
-    are the drift the planner hits first when the LLM hallucinates a
-    "plan_rationale" or "summary" sibling.
-    """
-
-    plan_id: Optional[str] = None
-    steps: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
-    form_fields: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
-
-
 class PlanningStateDelta(_OrchestratorModel):
     base_planning_state_version: NonNegativeInt
     signals_added: list[PlanningSignal] = Field(default_factory=list[PlanningSignal])
     slots_resolved: list[ResolvedSlot] = Field(default_factory=list[ResolvedSlot])
-    architecture_commit: Optional[ArchitectureCommit] = None
-    draft_plan: Optional[DraftPlanEnvelope] = None
+    architecture_commit: Optional[ArchitectureCommitDraft] = None
 
 
 class AskQuestionPayload(_OrchestratorModel):
@@ -99,10 +93,6 @@ class ConfirmRequirementsPayload(_OrchestratorModel):
     manual_setup_notes: list[str] = Field(default_factory=list[str])
 
 
-class ProposePlanPayload(_OrchestratorModel):
-    plan_reference: str = "latest"
-
-
 class AskQuestionAction(_OrchestratorModel):
     kind: Literal["ask_question"]
     payload: AskQuestionPayload
@@ -118,17 +108,11 @@ class ConfirmRequirementsAction(_OrchestratorModel):
     payload: ConfirmRequirementsPayload
 
 
-class ProposePlanAction(_OrchestratorModel):
-    kind: Literal["propose_plan"]
-    payload: ProposePlanPayload
-
-
 PlannerAction = Annotated[
     Union[
         AskQuestionAction,
         CommitArchitectureAction,
         ConfirmRequirementsAction,
-        ProposePlanAction,
     ],
     Field(discriminator="kind"),
 ]
@@ -253,16 +237,15 @@ def summarize_parse_failure(raw: str, exc: Exception) -> dict[str, Any]:
 
 RejectionCode = Literal[
     "version_mismatch",
+    "action_not_allowed",
     "duplicate_question",
     "off_topic_question",
     "architecture_commit_premature_unresolved_choices",
+    "architecture_commit_missing_delta",
     "architecture_commit_illegal_tuple",
     "architecture_commit_unresolvable_capability",
     "architecture_commit_unresolvable_pattern",
     "architecture_commit_drift_from_pinned",
-    "propose_plan_without_architecture_commit",
-    "propose_plan_missing_draft_plan",
-    "propose_plan_draft_plan_structural_mismatch",
     "repair_attempted_commit_drift",
 ]
 
@@ -290,25 +273,35 @@ class OrchestrationContext:
 
     - `current_version` is the session's live `planning_state_version`.
     - `session_state` is the currently-persisted PlanningState. The
-      `architecture_commit` field gates `propose_plan` acceptance.
+      pinned `architecture_commit` is preserved across later turns.
     - `asked_question_ids` is the set of canonical question IDs the
-      planner has already asked this session; combined with
-      `has_new_evidence` to reject infinite-loop interrogation.
+      planner has already asked this session.
+    - `question_ids_with_new_evidence` names asked question IDs that
+      have a user evidence turn after their latest ask. It is the
+      question-specific duplicate guard input; `has_new_evidence`
+      remains a legacy fail-open signal for tests and older callers.
     - `unresolved_architectural_choices` names the architecture choices
       still open (e.g. `terminal_output`, `primary_runtime_input`).
     - `required_slot_names` is the union of slot names required by the
       current pattern candidates. A question resolving neither an
       unresolved choice nor a required slot is off-topic.
+    - `action_policy` is the preferred server-owned legal action menu
+      for this turn. `required_slot_names` remains as a compatibility
+      input for tests and older callers.
     """
 
     current_version: int
     session_state: PlanningState
     asked_question_ids: frozenset[str] = field(default_factory=frozenset[str])
     has_new_evidence: bool = False
+    question_ids_with_new_evidence: frozenset[str] = field(
+        default_factory=frozenset[str]
+    )
     unresolved_architectural_choices: frozenset[str] = field(
         default_factory=frozenset[str]
     )
     required_slot_names: frozenset[str] = field(default_factory=frozenset[str])
+    action_policy: PlannerActionPolicy | None = None
 
 
 def evaluate_planner_output(
@@ -331,15 +324,36 @@ def evaluate_planner_output(
     if preservation_violation is not None:
         return preservation_violation
 
+    action_policy_violation = _check_action_policy(output, context)
+    if action_policy_violation is not None:
+        return action_policy_violation
+
     action = output.planner_action
 
     if isinstance(action, AskQuestionAction):
         return _check_ask_question(action, context)
     if isinstance(action, CommitArchitectureAction):
         return _check_commit_architecture(output, context)
-    if isinstance(action, ProposePlanAction):
-        return _check_propose_plan(output, context)
     return None
+
+
+def _check_action_policy(
+    output: PlannerOutput, context: OrchestrationContext
+) -> RejectionReason | None:
+    policy = context.action_policy
+    if policy is None:
+        return None
+    action_kind = output.planner_action.kind
+    if action_kind in policy.allowed_action_kinds:
+        return None
+    blocked_reason = policy.blocked_action_reasons.get(action_kind)
+    detail = (
+        f"planner_action.kind={action_kind!r} is not allowed this turn. "
+        "Allowed actions: " + ", ".join(policy.allowed_action_kinds or ("none",))
+    )
+    if blocked_reason:
+        detail = f"{detail}. Reason: {blocked_reason}"
+    return RejectionReason(code="action_not_allowed", detail=detail)
 
 
 def _check_commit_preservation(
@@ -363,7 +377,9 @@ def _check_commit_preservation(
     if delta_commit is None:
         return None
     try:
-        assert_architecture_commit_unchanged(before=pinned, after=delta_commit)
+        assert_architecture_commit_draft_matches_pinned(
+            before=pinned, after=delta_commit
+        )
     except CommitDriftError as exc:
         return RejectionReason(
             code="architecture_commit_drift_from_pinned",
@@ -393,22 +409,48 @@ def _check_ask_question(
 ) -> RejectionReason | None:
     question_id = action.payload.question_id
     slot_name = action.payload.slot_name
+    resolved_slot_names = context.session_state.resolved_slots.keys()
+    if question_id in resolved_slot_names or slot_name in resolved_slot_names:
+        return RejectionReason(
+            code="duplicate_question",
+            detail=(
+                f"question_id={question_id!r} / slot_name={slot_name!r} is "
+                "already resolved in PlanningState.resolved_slots; use that "
+                "resolved value instead of asking the user again"
+            ),
+        )
 
-    resolves_something = (
-        question_id in context.unresolved_architectural_choices
-        or slot_name in context.unresolved_architectural_choices
-        or slot_name in context.required_slot_names
+    allowed_targets = (
+        context.action_policy.allowed_ask_question_targets
+        if context.action_policy is not None
+        else allowed_ask_question_targets(
+            unresolved_architectural_choices=context.unresolved_architectural_choices,
+            required_slot_names=context.required_slot_names,
+        )
     )
-    if not resolves_something:
+
+    resolves_allowed_target = (
+        question_id in allowed_targets
+        and slot_name in allowed_targets
+        and question_id == slot_name
+    )
+    if not resolves_allowed_target:
         return RejectionReason(
             code="off_topic_question",
             detail=(
                 f"question_id={question_id!r} / slot_name={slot_name!r} "
-                "resolves no unresolved_architectural_choice and no required slot"
+                "must both match the same allowed ask_question target. "
+                "Allowed ask_question targets this turn: "
+                f"{format_ask_question_targets(allowed_targets)}"
             ),
         )
 
-    if question_id in context.asked_question_ids and not context.has_new_evidence:
+    has_question_specific_evidence = (
+        question_id in context.question_ids_with_new_evidence
+        if context.question_ids_with_new_evidence
+        else context.has_new_evidence
+    )
+    if question_id in context.asked_question_ids and not has_question_specific_evidence:
         return RejectionReason(
             code="duplicate_question",
             detail=(
@@ -428,8 +470,8 @@ def _check_commit_architecture(
             detail=(
                 "architecture was already pinned on this session; a second "
                 "commit_architecture would overwrite the canonical contract. "
-                "Emit confirm_requirements or propose_plan to advance the "
-                "turn, or start a new session if the commitment is stale"
+                "Emit confirm_requirements or let the server enter proposal "
+                "mode, or start a new session if the commitment is stale"
             ),
         )
 
@@ -445,7 +487,7 @@ def _check_commit_architecture(
     commit = output.planning_state_delta.architecture_commit
     if commit is None:
         return RejectionReason(
-            code="architecture_commit_illegal_tuple",
+            code="architecture_commit_missing_delta",
             detail="commit_architecture action requires a populated architecture_commit delta",
         )
 
@@ -520,46 +562,6 @@ def _check_commit_architecture(
     return None
 
 
-def _check_propose_plan(
-    output: PlannerOutput, context: OrchestrationContext
-) -> RejectionReason | None:
-    commit = context.session_state.architecture_commit
-    if commit is None:
-        return RejectionReason(
-            code="propose_plan_without_architecture_commit",
-            detail=(
-                "propose_plan is only allowed once PlanningState.architecture_commit "
-                "is populated via a prior commit_architecture turn"
-            ),
-        )
-
-    draft_plan = output.planning_state_delta.draft_plan
-    if draft_plan is None:
-        return RejectionReason(
-            code="propose_plan_missing_draft_plan",
-            detail=(
-                "propose_plan must re-emit the draft_plan in "
-                "planning_state_delta so structural parity against the "
-                "committed architecture can run every turn; a bare "
-                "plan_reference cannot be trusted because persisted plans "
-                "carry no architecture binding"
-            ),
-        )
-
-    draft_step_count = len(draft_plan.steps)
-    commit_step_count = len(commit.tuples_chain)
-    if draft_step_count != commit_step_count:
-        return RejectionReason(
-            code="propose_plan_draft_plan_structural_mismatch",
-            detail=(
-                f"draft_plan has {draft_step_count} step(s) but "
-                f"architecture_commit.tuples_chain has {commit_step_count}; "
-                "proposed plan must honor the committed tuple-chain length"
-            ),
-        )
-    return None
-
-
 def _tuple_is_legal(input_type: str, output_type: str, output_mode: str) -> bool:
     """Coerce the orchestrator's string literals to FCM enums and defer
     to `flow_capability_manifest.supports_step_io_tuple` as the single
@@ -598,13 +600,10 @@ __all__ = [
     "CommitArchitecturePayload",
     "ConfirmRequirementsAction",
     "ConfirmRequirementsPayload",
-    "DraftPlanEnvelope",
     "OrchestrationContext",
     "PlannerAction",
     "PlannerOutput",
     "PlanningStateDelta",
-    "ProposePlanAction",
-    "ProposePlanPayload",
     "RejectionCode",
     "RejectionReason",
     "evaluate_planner_output",

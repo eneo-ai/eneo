@@ -10,6 +10,12 @@ from __future__ import annotations
 from typing import Any
 
 from intric.flows.ai_builder.ai_builder_flow_name import MAX_FLOW_NAME_LENGTH
+from intric.flows.ai_builder.ai_builder_flow_schema_values import (
+    builder_input_source_values,
+    builder_input_type_values,
+    builder_output_mode_values,
+    builder_output_type_values,
+)
 from intric.flows.ai_builder.ai_builder_new_step_schema import (
     build_new_step_draft_schema,
     small_ref_enums,
@@ -177,6 +183,7 @@ def _build_step_payload_schema(
             "the added step becomes the new entry step; otherwise use 'previous_step' "
             "or 'all_previous_steps'."
         ),
+        expose_previous_field_refs=False,
     )
 
 
@@ -192,55 +199,32 @@ def _build_patch_schema(
         "description": (
             "Partial update for existing steps (modify operations). "
             "Only include fields you want to change. "
-            "Use `uses_previous_fields` instead of raw `input_bindings` when the edited step should reuse specific structured JSON fields from earlier steps."
+            "Do not author raw `input_bindings` or field-level previous-step paths; "
+            "the backend preserves and derives mechanical dataflow wiring."
         ),
         "properties": {
             "name": {"type": "string"},
             "assistant_spec": assistant_spec,
             "input_source": {
                 "type": "string",
-                "enum": ["flow_input", "previous_step", "all_previous_steps"],
+                "enum": builder_input_source_values(),
             },
             "input_type": {
                 "type": "string",
-                "enum": ["text", "json", "audio", "document", "file", "any"],
+                "enum": builder_input_type_values(),
             },
             "uses_form_fields": {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Optional form field variable names this existing step should reuse in its compiled underlag.",
             },
-            "uses_previous_fields": {
-                "type": "array",
-                "description": "Optional typed field reuse intent for earlier JSON-producing steps in the current flow.",
-                "items": {
-                    "type": "object",
-                    "required": ["from_step", "field_path"],
-                    "properties": {
-                        "from_step": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "1-based earlier step number in the current flow.",
-                        },
-                        "field_path": {
-                            "type": "string",
-                            "description": "Dot path inside the earlier step's structured JSON output.",
-                        },
-                        "label": {
-                            "type": ["string", "null"],
-                            "description": "Optional human-readable label to use in the compiled underlag.",
-                        },
-                    },
-                    "additionalProperties": False,
-                },
-            },
             "output_mode": {
                 "type": "string",
-                "enum": ["pass_through", "transcribe_only", "template_fill"],
+                "enum": builder_output_mode_values(),
             },
             "output_type": {
                 "type": "string",
-                "enum": ["text", "json", "pdf", "docx"],
+                "enum": builder_output_type_values(),
             },
             "output_config": {
                 "type": ["object", "null"],

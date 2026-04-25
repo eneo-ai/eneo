@@ -22,6 +22,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     has_explicit_docx_mode_text,
     has_explicit_pdf_mode_text,
     has_explicit_structured_answer,
+    mentions_runtime_metadata,
     resolve_output_intent,
 )
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
@@ -51,7 +52,19 @@ class _PolicyDefaultRule:
     has_explicit_text: Callable[[str], bool]
 
 
+def _never_explicit_text(_: str) -> bool:
+    return False
+
+
 _POLICY_DEFAULT_RULES: dict[str, _PolicyDefaultRule] = {
+    "document_material_scope": _PolicyDefaultRule(
+        default_value="flexible_document_case",
+        has_explicit_text=_never_explicit_text,
+    ),
+    "runtime_metadata_fields": _PolicyDefaultRule(
+        default_value="no_extra_metadata",
+        has_explicit_text=mentions_runtime_metadata,
+    ),
     "docx_output_mode": _PolicyDefaultRule(
         default_value="generated_docx",
         has_explicit_text=has_explicit_docx_mode_text,
@@ -142,9 +155,12 @@ def _resolve_slots(
     flow: Flow | None,
 ) -> dict[str, ResolvedSlot]:
     answer_signals = extract_answer_signals(conversation)
-    freeform_text = aggregate_freeform_user_text(conversation)
-    flow_defaults = build_flow_discovery_defaults(flow)
     requirements_state = resolve_requirements_state(conversation)
+    freeform_text = _semantic_planning_text(
+        aggregate_freeform_user_text(conversation),
+        requirements_state,
+    )
+    flow_defaults = build_flow_discovery_defaults(flow)
     input_intent = resolve_input_intent(freeform_text, answer_signals, flow=flow)
     output_intent = resolve_output_intent(
         freeform_text,
@@ -212,6 +228,11 @@ def _resolve_slots(
         flow_defaults=flow_defaults,
         question_id="document_material_scope",
     )
+    if document_material_scope is None and primary_runtime_input in {
+        "documents",
+        "text_and_documents",
+    }:
+        document_material_scope = "flexible_document_case"
     if document_material_scope is not None:
         slots["document_material_scope"] = _build_slot(
             name="document_material_scope",
@@ -248,6 +269,12 @@ def _resolve_slots(
         flow_defaults=flow_defaults,
         question_id="runtime_metadata_fields",
     )
+    if (
+        runtime_metadata_fields is None
+        and primary_runtime_input in {"documents", "text_and_documents"}
+        and not mentions_runtime_metadata(freeform_text)
+    ):
+        runtime_metadata_fields = "no_extra_metadata"
     if runtime_metadata_fields is not None:
         slots["runtime_metadata_fields"] = _build_slot(
             name="runtime_metadata_fields",
@@ -262,6 +289,22 @@ def _resolve_slots(
         )
 
     return slots
+
+
+def _semantic_planning_text(
+    freeform_text: str,
+    requirements_state: RequirementsState,
+) -> str:
+    latest_summary = requirements_state.latest_summary
+    if latest_summary is None:
+        return freeform_text
+    summary_parts = (
+        latest_summary.input_description,
+        latest_summary.output_description,
+        latest_summary.summary,
+    )
+    summary_text = " ".join(part for part in summary_parts if part)
+    return " ".join(part for part in (freeform_text, summary_text) if part)
 
 
 def _build_slot(

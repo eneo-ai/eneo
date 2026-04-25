@@ -9,11 +9,6 @@ caller-facing outcome contract that `send_message` will consume:
 - `rejected` — pipeline returned a terminal rejection.
 - `parse_failed` — pipeline surfaced a parse failure (the caller
   distinguishes truncation via `final_completion.finish_reason`).
-- `propose_plan_pending_adapter` — pipeline accepted a `propose_plan`
-  action; the helper bypasses the dispatcher (the dispatcher would
-  raise `NotImplementedError` on this action kind) and surfaces the
-  accepted output directly until the proposal-processor adapter is
-  wired. The LLM already ran, so telemetry counts still populate.
 
 The tests drive the module with `AsyncMock(AIBuilderRepository)` and a
 litellm-shaped AsyncMock so no real transport or DB is touched.
@@ -29,8 +24,15 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_architecture_commit import (
+    architecture_commit_hash,
+    canonical_architecture_commit_payload,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_orchestrator import OrchestrationContext
+from intric.flows.ai_builder.ai_builder_orchestrator import (
+    OrchestrationContext,
+    parse_planner_output,
+)
 from intric.flows.ai_builder.ai_builder_planner_turn import (
     PlannerTurnResult,
     TurnTelemetry,
@@ -117,8 +119,6 @@ def _minimal_payload(kind: str) -> dict[str, Any]:
         return {"note": ""}
     if kind == "confirm_requirements":
         return {"summary": "Resolved"}
-    if kind == "propose_plan":
-        return {"plan_reference": "latest"}
     raise AssertionError(f"unknown kind {kind}")
 
 
@@ -127,7 +127,6 @@ def _planner_output_json(
     kind: str,
     architecture_commit: ArchitectureCommit | None = None,
     base_version: int = 0,
-    draft_plan: dict[str, Any] | None = None,
 ) -> str:
     payload: dict[str, Any] = {
         "planning_state_delta": {
@@ -135,23 +134,14 @@ def _planner_output_json(
             "signals_added": [],
             "slots_resolved": [],
             "architecture_commit": (
-                architecture_commit.model_dump(mode="json")
+                canonical_architecture_commit_payload(architecture_commit)
                 if architecture_commit is not None
                 else None
             ),
-            "draft_plan": draft_plan,
         },
         "planner_action": {"kind": kind, "payload": _minimal_payload(kind)},
     }
     return json.dumps(payload)
-
-
-def _single_step_draft_plan() -> dict[str, Any]:
-    return {
-        "plan_id": "plan-1",
-        "steps": [{"step_ix": 0}],
-        "form_fields": [],
-    }
 
 
 def _llm_response(
@@ -181,6 +171,37 @@ def _autospec_repo() -> AIBuilderRepository:
 
 @pytest.mark.asyncio
 class TestDispatchedHappyPaths:
+    async def test_precomputed_output_dispatches_without_llm_call(self) -> None:
+        repo = _autospec_repo()
+        repo.commit_turn.return_value = 11
+        llm = AsyncMock()
+        precomputed = parse_planner_output(_planner_output_json(kind="ask_question"))
+
+        result = await run_planner_turn(
+            repo=repo,
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            flow=None,
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=_ctx(
+                state=_make_state(resolve_core_slots=False),
+                required_slot_names=frozenset({"primary_runtime_input"}),
+            ),
+            build_new_messages=lambda _a, _t: [
+                ConversationMessage(role="user", content="Hi")
+            ],
+            precomputed_output=precomputed,
+        )
+
+        assert result.kind == "dispatched"
+        assert result.llm_calls_made == 0
+        assert result.repair_attempts == 0
+        llm.acompletion.assert_not_called()
+        repo.commit_turn.assert_awaited_once()
+
     async def test_ask_question_dispatches_without_commit(self) -> None:
         repo = _autospec_repo()
         repo.commit_turn.return_value = 7
@@ -208,7 +229,8 @@ class TestDispatchedHappyPaths:
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(
-                required_slot_names=frozenset({"primary_runtime_input"})
+                state=_make_state(resolve_core_slots=False),
+                required_slot_names=frozenset({"primary_runtime_input"}),
             ),
             build_new_messages=_builder,
         )
@@ -259,7 +281,7 @@ class TestDispatchedHappyPaths:
         repo.commit_turn.assert_awaited_once()
         committed = repo.commit_turn.await_args.kwargs["architecture_commit"]
         assert committed is not None
-        assert committed.architecture_hash == commit.architecture_hash
+        assert committed.architecture_hash == architecture_commit_hash(commit)
 
     async def test_confirm_requirements_dispatches_without_commit(self) -> None:
         repo = _autospec_repo()
@@ -391,48 +413,6 @@ class TestDispatchedHappyPaths:
         assert result.kind == "dispatched"
         commit_kwargs = repo.commit_turn.await_args.kwargs
         assert commit_kwargs["base_version"] == 4
-
-
-@pytest.mark.asyncio
-class TestProposePlanPendingAdapter:
-    async def test_propose_plan_surfaces_pending_adapter_outcome(self) -> None:
-        repo = _autospec_repo()
-        commit = _make_commit()
-        state = _make_state(architecture_commit=commit)
-        llm = AsyncMock()
-        llm.acompletion.return_value = _llm_response(
-            _planner_output_json(
-                kind="propose_plan",
-                architecture_commit=commit,
-                draft_plan=_single_step_draft_plan(),
-            )
-        )
-
-        def _should_not_build(_a: Any, _t: Any) -> list[ConversationMessage]:
-            raise AssertionError(
-                "propose_plan_pending_adapter must not invoke the builder; "
-                "nothing is persisted on that outcome"
-            )
-
-        result = await run_planner_turn(
-            repo=repo,
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
-            flow=None,
-            base_messages=[{"role": "system", "content": "system"}],
-            orchestration_context=_ctx(state=state),
-            build_new_messages=_should_not_build,
-        )
-
-        assert result.kind == "propose_plan_pending_adapter"
-        assert result.accepted_output is not None
-        assert result.accepted_output.planner_action.kind == "propose_plan"
-        assert result.dispatch_result is None
-        assert result.llm_calls_made == 1
-        repo.commit_turn.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -584,7 +564,8 @@ class TestTurnTelemetry:
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(
-                required_slot_names=frozenset({"primary_runtime_input"})
+                state=_make_state(resolve_core_slots=False),
+                required_slot_names=frozenset({"primary_runtime_input"}),
             ),
             build_new_messages=lambda _a, _t: [
                 ConversationMessage(role="user", content="Q")
@@ -661,43 +642,6 @@ class TestTurnTelemetry:
         assert result.turn_telemetry.outcome_kind == "parse_failed"
         assert result.turn_telemetry.finish_reason == "length"
         assert result.turn_telemetry.completion_tokens == 1024
-
-    async def test_propose_plan_pending_adapter_populates_telemetry(self) -> None:
-        repo = _autospec_repo()
-        commit = _make_commit()
-        state = _make_state(architecture_commit=commit)
-        llm = AsyncMock()
-        llm.acompletion.return_value = _llm_response(
-            _planner_output_json(
-                kind="propose_plan",
-                architecture_commit=commit,
-                draft_plan=_single_step_draft_plan(),
-            )
-        )
-
-        def _should_not_build(_a: Any, _t: Any) -> list[ConversationMessage]:
-            raise AssertionError("propose_plan_pending_adapter must not build")
-
-        result = await run_planner_turn(
-            repo=repo,
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.5",
-            litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
-            flow=None,
-            base_messages=[{"role": "system", "content": "system"}],
-            orchestration_context=_ctx(state=state),
-            build_new_messages=_should_not_build,
-        )
-
-        assert result.kind == "propose_plan_pending_adapter"
-        assert result.turn_telemetry is not None
-        assert result.turn_telemetry.outcome_kind == "propose_plan_pending_adapter"
-        assert result.turn_telemetry.llm_calls_made == 1
-        # The committed architecture is already on the session state;
-        # the planner's propose_plan delta does not _populate_ a new commit.
-        assert result.turn_telemetry.architecture_commit_populated is False
 
     async def test_injectable_clock_produces_deterministic_wall_clock(self) -> None:
         """`telemetry_now_ms` overrides the default `time.perf_counter` source.

@@ -5,14 +5,25 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, cast
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
 from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
+from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    normalize_create_draft_mechanics,
+)
 from intric.flows.ai_builder.ai_builder_create_feedback import (
-    format_create_argument_error,
     format_create_quality_feedback,
     format_create_validation_feedback,
+)
+from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
+from intric.flows.ai_builder.ai_builder_create_outline import (
+    OutlineFlowArgumentError,
+    compile_outline_to_create_draft,
+    outline_compile_context_from_planning_state,
+    safe_validation_issues,
 )
 from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
 from intric.flows.ai_builder.ai_builder_description_semantics import (
@@ -30,11 +41,18 @@ from intric.flows.ai_builder.ai_builder_discovery_runtime import (
 )
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
+from intric.flows.ai_builder.ai_builder_edit_normalizer import (
+    normalize_edit_draft_mechanics,
+    strip_malformed_edit_mechanics,
+)
 from intric.flows.ai_builder.ai_builder_edit_repair import (
     should_attempt_description_repair,
     validate_repair_invariance,
 )
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
+    EDIT_FLOW_TOOL_NAME,
+    build_edit_flow_tool_schema,
+)
 from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_ERROR,
@@ -46,6 +64,7 @@ from intric.flows.ai_builder.ai_builder_events import (
     error_payload,
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
+    aggregate_freeform_user_text,
     is_supported_structured_question_id,
     normalize_structured_question_payload,
 )
@@ -91,20 +110,24 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     canonicalize_edit_draft_resources,
     format_resource_resolution_feedback,
 )
+from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+    extract_runtime_input_field_hints,
+)
 from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
 )
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
-    CREATE_FLOW_TOOL_NAME,
-    RecoverableToolPayloadError,
+    OUTLINE_FLOW_TOOL_NAME,
     build_discovery_complete_tool_schemas,
+    build_outline_flow_tool_schema,
     parse_confirm_requirements,
-    parse_create_flow_arguments,
+    parse_outline_flow_arguments,
     parse_structured_question,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from intric.flows.ai_builder.planning_state import AggregationIntent, PlanningState
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -113,7 +136,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 MAX_SELF_CORRECTION_RETRIES = 3
-SUBMISSION_TOOL_NAMES = frozenset({CREATE_FLOW_TOOL_NAME, EDIT_FLOW_TOOL_NAME})
+SUBMISSION_TOOL_NAMES = frozenset({OUTLINE_FLOW_TOOL_NAME, EDIT_FLOW_TOOL_NAME})
 
 
 def _tool_calls_contain_submission(tool_calls: list[Any]) -> bool:
@@ -123,14 +146,15 @@ def _tool_calls_contain_submission(tool_calls: list[Any]) -> bool:
     )
 
 
-def _extract_create_retry_kwargs(arguments: dict[str, Any]) -> dict[str, Any]:
-    raw_steps = arguments.get("steps")
-    if not isinstance(raw_steps, list):
-        return {}
-    steps_list = cast(list[Any], raw_steps)
-    if not steps_list:
-        return {}
-    return {"min_step_count": len(steps_list)}
+def _resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:
+    for message in reversed(conversation):
+        if message.role != "user":
+            continue
+        metadata = message.metadata if isinstance(message.metadata, dict) else None
+        ui_language = metadata.get("ui_language") if metadata else None
+        if ui_language in {"sv", "en"}:
+            return ui_language
+    return None
 
 
 @dataclass(frozen=True)
@@ -160,6 +184,7 @@ class ProposalContext:
     assistant_snapshots: dict[UUID, dict[str, Any]] | None = None
     text_content: str | None = None
     assistant_metadata: dict[str, Any] | None = None
+    planning_state: PlanningState | None = None
 
 
 @dataclass(frozen=True)
@@ -171,7 +196,6 @@ class SubmissionToolHandlerConfig:
     forced_tool_prompt: str
     process_tool_arguments: Callable[..., Awaitable[ToolProcessingResult]]
     include_flow_context: bool = False
-    extract_retry_kwargs: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -220,14 +244,16 @@ class AIBuilderProposalProcessor:
         conversation: list[ConversationMessage],
         spec: FlowDraftSpecCore,
         flow: "Flow | None" = None,
+        aggregation_intent: AggregationIntent = "linear",
     ) -> str | None:
         return build_conversation_aware_quality_feedback(
             conversation,
             spec,
             flow=flow,
+            aggregation_intent=aggregation_intent,
         )
 
-    async def _process_create_arguments(
+    async def _process_outline_arguments(
         self,
         *,
         session_id: UUID,
@@ -243,38 +269,95 @@ class AIBuilderProposalProcessor:
         flow: "Flow | None" = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
-        min_step_count: int | None = None,
+        planning_state: PlanningState | None = None,
     ) -> ToolProcessingResult:
-        if min_step_count is not None:
-            step_count = (
-                len(arguments["steps"])
-                if isinstance(arguments.get("steps"), list)
-                else 0
-            )
-            if step_count < min_step_count:
-                return ToolProcessingResult(
-                    feedback=(
-                        f"Create-flow step scope shrank from {min_step_count} to "
-                        f"{step_count}. The repaired plan must preserve every step "
-                        "from the previous attempt (same count, same names, same "
-                        "order). Only the field that triggered validation is allowed "
-                        "to change — do not merge, drop, or rename any step."
-                    ),
-                    failure_kind="validation",
-                )
         try:
-            draft = parse_create_flow_arguments(arguments)
-        except RecoverableToolPayloadError as error:
+            outline = parse_outline_flow_arguments(arguments)
+            runtime_input_field_hints = extract_runtime_input_field_hints(
+                aggregate_freeform_user_text(conversation)
+            )
+            compile_context = outline_compile_context_from_planning_state(
+                planning_state,
+                ui_language=_resolve_ui_language(conversation),
+                runtime_input_field_hints=runtime_input_field_hints,
+            )
+            draft = compile_outline_to_create_draft(
+                outline,
+                context=compile_context,
+            )
+        except OutlineFlowArgumentError as error:
+            logger.info(
+                "ai_builder_outline_parse_failed session_id=%s tool_call_id=%s issues=%s",
+                session_id,
+                tool_call_id,
+                list(error.issues),
+            )
             return ToolProcessingResult(
-                feedback=format_create_argument_error(error),
-                failure_kind="recoverable_parse",
+                feedback=f"Invalid outline_flow arguments: {error}",
+                failure_kind="parse",
             )
         except Exception as error:
+            issues = (
+                list(safe_validation_issues(error))
+                if isinstance(error, ValidationError)
+                else None
+            )
+            logger.info(
+                "ai_builder_outline_compile_failed session_id=%s tool_call_id=%s error_type=%s issues=%s",
+                session_id,
+                tool_call_id,
+                type(error).__name__,
+                issues,
+            )
+            detail = "; ".join(issues) if issues else str(error)
             return ToolProcessingResult(
-                feedback=format_create_argument_error(error),
+                feedback=f"Invalid outline_flow arguments: {detail}",
                 failure_kind="parse",
             )
 
+        return await self._process_create_draft(
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            draft=draft,
+            arguments=arguments,
+            assistant_content=assistant_content,
+            assistant_metadata=assistant_metadata,
+            tool_call_id=tool_call_id,
+            tool_name=OUTLINE_FLOW_TOOL_NAME,
+            available_model_refs=available_model_refs,
+            available_kb_refs=available_kb_refs,
+            resource_catalog=resource_catalog,
+            flow=flow,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
+            aggregation_intent=(
+                compile_context.aggregation_intent
+                if compile_context is not None
+                else "linear"
+            ),
+        )
+
+    async def _process_create_draft(
+        self,
+        *,
+        session_id: UUID,
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        draft: FlowCreateDraft,
+        arguments: dict[str, Any],
+        assistant_content: str,
+        assistant_metadata: dict[str, Any] | None,
+        tool_call_id: str,
+        tool_name: str,
+        available_model_refs: set[str] | None,
+        available_kb_refs: set[str] | None,
+        resource_catalog: AIBuilderResourceCatalog | None,
+        flow: "Flow | None",
+        lease_request_id: UUID | None,
+        lease_lock_token: UUID | None,
+        aggregation_intent: AggregationIntent = "linear",
+    ) -> ToolProcessingResult:
         if resource_catalog is not None:
             draft, resolution_issues = canonicalize_create_draft_resources(
                 draft,
@@ -286,6 +369,7 @@ class AIBuilderProposalProcessor:
                     failure_kind="validation",
                 )
 
+        draft = normalize_create_draft_mechanics(draft)
         create_validation = validate_create_draft(draft)
         if create_validation.errors:
             return ToolProcessingResult(
@@ -298,7 +382,7 @@ class AIBuilderProposalProcessor:
         except Exception as error:
             logger.error("Create draft compilation failed: %s", error, exc_info=error)
             return ToolProcessingResult(
-                feedback=f"Failed to compile create_flow draft: {error}",
+                feedback=f"Failed to compile {tool_name} draft: {error}",
                 failure_kind="validation",
             )
 
@@ -325,6 +409,7 @@ class AIBuilderProposalProcessor:
                 conversation=conversation,
                 spec=spec,
                 flow=None,
+                aggregation_intent=aggregation_intent,
             )
             hard_feedback = format_validation_feedback(
                 spec=spec,
@@ -346,6 +431,7 @@ class AIBuilderProposalProcessor:
             conversation=conversation,
             spec=spec,
             flow=None,
+            aggregation_intent=aggregation_intent,
         )
         combined_quality_feedback = (
             "\n\n".join(
@@ -373,7 +459,7 @@ class AIBuilderProposalProcessor:
             assistant_content=assistant_content,
             assistant_metadata=assistant_metadata,
             tool_call_id=tool_call_id,
-            tool_name=CREATE_FLOW_TOOL_NAME,
+            tool_name=tool_name,
             arguments=arguments,
             spec=spec,
             assumptions=list(draft.assumptions),
@@ -436,6 +522,7 @@ class AIBuilderProposalProcessor:
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        planning_state: PlanningState | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         ctx = ProposalContext(
             session_id=session_id,
@@ -456,6 +543,7 @@ class AIBuilderProposalProcessor:
             assistant_snapshots=assistant_snapshots,
             text_content=text_content,
             assistant_metadata=assistant_metadata,
+            planning_state=planning_state,
         )
         if ctx.text_content and not _tool_calls_contain_submission(tool_calls):
             yield build_text_event(ctx.text_content)
@@ -466,6 +554,130 @@ class AIBuilderProposalProcessor:
                 continue
             async for event in dispatched:
                 yield event
+
+    async def propose_plan(
+        self,
+        *,
+        session_id: UUID,
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        llm_messages: list[dict[str, Any]],
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        available_models: list[dict[str, Any]] | None,
+        available_kbs: list[dict[str, Any]] | None,
+        available_model_refs: set[str] | None,
+        available_kb_refs: set[str] | None,
+        resource_catalog: AIBuilderResourceCatalog | None,
+        max_output_tokens: int,
+        proposal_temperature: float,
+        request_id: str,
+        flow: "Flow | None" = None,
+        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        assistant_metadata: dict[str, Any] | None = None,
+        planning_state: PlanningState | None = None,
+        lease_request_id: UUID | None = None,
+        lease_lock_token: UUID | None = None,
+    ) -> AsyncGenerator[dict[str, str], None]:
+        """Run the server-selected plan proposal task.
+
+        This is deliberately narrower than the planner contract: the
+        server already selected `propose_plan`, so the model only fills
+        the create/edit tool payload.
+        """
+
+        submission_tool_name = _active_submission_tool_name(flow)
+        tool_schemas = _active_submission_tool_schemas(
+            flow=flow,
+            available_models=available_models,
+            available_kbs=available_kbs,
+        )
+        try:
+            response = await self._call_repair_completion(
+                messages=llm_messages,
+                tool_schemas=tool_schemas,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                max_output_tokens=max_output_tokens,
+                temperature=proposal_temperature,
+                tool_choice={
+                    "type": "function",
+                    "function": {"name": submission_tool_name},
+                },
+            )
+        except Exception as error:
+            logger.error("AI Builder proposal task failed", exc_info=error)
+            yield build_error_event(
+                message="The AI planner failed. Please try again.",
+                code="planner_upstream_error",
+                phase="planner",
+                request_id=request_id,
+            )
+            return
+
+        message = response.choices[0].message
+        tool_calls = message.tool_calls if hasattr(message, "tool_calls") else None
+        if tool_calls:
+            yielded = False
+            async for event in self.handle_tool_call(
+                session_id=session_id,
+                conversation=conversation,
+                new_messages_start=new_messages_start,
+                tool_calls=tool_calls,
+                text_content=message.content,
+                llm_messages=llm_messages,
+                tool_schemas=tool_schemas,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                available_model_refs=available_model_refs,
+                available_kb_refs=available_kb_refs,
+                resource_catalog=resource_catalog,
+                max_output_tokens=max_output_tokens,
+                request_id=request_id,
+                assistant_metadata=assistant_metadata,
+                lease_request_id=lease_request_id,
+                lease_lock_token=lease_lock_token,
+                flow=flow,
+                assistant_snapshots=assistant_snapshots,
+                planning_state=planning_state,
+            ):
+                yielded = True
+                yield event
+            if yielded:
+                return
+
+        forced_event = await self.retry_forced_proposal_after_text(
+            correction_messages=llm_messages,
+            assistant_text=message.content or "",
+            tool_schemas=tool_schemas,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            available_model_refs=available_model_refs,
+            available_kb_refs=available_kb_refs,
+            resource_catalog=resource_catalog,
+            max_output_tokens=max_output_tokens,
+            flow=flow,
+            assistant_snapshots=assistant_snapshots,
+            planning_state=planning_state,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
+        )
+        if forced_event is not None:
+            yield forced_event
+            return
+
+        yield build_error_event(
+            message=(
+                "The AI planner did not return a valid flow proposal. "
+                "Please try again or use a more capable model."
+            ),
+            code="proposal_tool_missing",
+            phase="proposal",
+            request_id=request_id,
+        )
 
     def _dispatch_known_tool_call(
         self,
@@ -479,8 +691,8 @@ class AIBuilderProposalProcessor:
                 ctx=ctx,
                 tool_call=tool_call,
             )
-        if tool_name == CREATE_FLOW_TOOL_NAME:
-            return self._handle_create_flow_tool_call(
+        if tool_name == OUTLINE_FLOW_TOOL_NAME:
+            return self._handle_outline_flow_tool_call(
                 ctx=ctx,
                 tool_call=tool_call,
             )
@@ -569,15 +781,19 @@ class AIBuilderProposalProcessor:
                     target_tool_name=config.target_tool_name,
                     forced_tool_prompt=config.forced_tool_prompt,
                     process_tool_arguments=config.process_tool_arguments,
-                    process_tool_kwargs={},
+                    process_tool_kwargs=(
+                        {"planning_state": ctx.planning_state}
+                        if config.target_tool_name == OUTLINE_FLOW_TOOL_NAME
+                        else {}
+                    ),
                 ),
             ):
                 yield event
             return
 
         retry_process_kwargs: dict[str, Any] = {}
-        if config.extract_retry_kwargs is not None:
-            retry_process_kwargs = config.extract_retry_kwargs(arguments)
+        if config.target_tool_name == OUTLINE_FLOW_TOOL_NAME:
+            retry_process_kwargs["planning_state"] = ctx.planning_state
 
         submission_kwargs = self._build_submission_processing_kwargs(
             session_id=ctx.session_id,
@@ -595,6 +811,8 @@ class AIBuilderProposalProcessor:
             lease_request_id=ctx.lease_request_id,
             lease_lock_token=ctx.lease_lock_token,
         )
+        if config.target_tool_name == OUTLINE_FLOW_TOOL_NAME:
+            submission_kwargs["planning_state"] = ctx.planning_state
         submission_result = await config.process_tool_arguments(**submission_kwargs)
         logger.info(
             "ai_builder_submission_first_attempt tool=%s request_id=%s success=%s failure_kind=%s",
@@ -657,7 +875,7 @@ class AIBuilderProposalProcessor:
             processing_kwargs["flow"] = flow
         return processing_kwargs
 
-    async def _handle_create_flow_tool_call(
+    async def _handle_outline_flow_tool_call(
         self,
         *,
         ctx: ProposalContext,
@@ -667,17 +885,16 @@ class AIBuilderProposalProcessor:
             ctx=ctx,
             tool_call=tool_call,
             config=SubmissionToolHandlerConfig(
-                target_tool_name=CREATE_FLOW_TOOL_NAME,
+                target_tool_name=OUTLINE_FLOW_TOOL_NAME,
                 requirements_not_confirmed_message="Requirements must be confirmed before creating a flow.",
-                parse_error_prefix="Invalid create_flow arguments",
-                invalid_result_message="Invalid create_flow draft.",
+                parse_error_prefix="Invalid outline_flow arguments",
+                invalid_result_message="Invalid outline_flow draft.",
                 forced_tool_prompt=(
                     "Your previous reply was prose only. "
-                    "Now call create_flow with one complete typed draft. "
+                    "Now call outline_flow with one complete semantic outline. "
                     "Do not answer with prose."
                 ),
-                process_tool_arguments=self._process_create_arguments,
-                extract_retry_kwargs=_extract_create_retry_kwargs,
+                process_tool_arguments=self._process_outline_arguments,
             ),
         ):
             yield event
@@ -854,6 +1071,7 @@ class AIBuilderProposalProcessor:
         max_output_tokens: int,
         flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        planning_state: PlanningState | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
     ) -> dict[str, str] | None:
@@ -864,6 +1082,7 @@ class AIBuilderProposalProcessor:
             max_output_tokens=max_output_tokens,
             assistant_snapshots=assistant_snapshots,
             resource_catalog=resource_catalog,
+            planning_state=planning_state,
         )
         return await self.retry_forced_tool_after_text(
             correction_messages=correction_messages,
@@ -1289,7 +1508,9 @@ class AIBuilderProposalProcessor:
             )
 
         try:
-            draft = FlowEditDraft.model_validate(arguments)
+            draft = FlowEditDraft.model_validate(
+                strip_malformed_edit_mechanics(arguments)
+            )
         except Exception as exc:
             logger.warning("Failed to parse edit_flow arguments: %s", exc)
             return ToolProcessingResult(
@@ -1308,6 +1529,11 @@ class AIBuilderProposalProcessor:
                     failure_kind="validation",
                 )
 
+        draft = normalize_edit_draft_mechanics(
+            draft,
+            current_steps=list(flow.steps),
+            current_metadata_json=flow.metadata_json,
+        )
         valid_step_refs = [f"existing_step_{step.step_order}" for step in flow.steps]
         edit_validation = validate_edit_draft(
             draft,
@@ -1647,17 +1873,22 @@ class AIBuilderProposalProcessor:
         max_output_tokens: int,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
+        planning_state: PlanningState | None = None,
     ) -> ToolRetryConfig:
         if flow is None:
             return ToolRetryConfig(
-                target_tool_name=CREATE_FLOW_TOOL_NAME,
+                target_tool_name=OUTLINE_FLOW_TOOL_NAME,
                 forced_tool_prompt=(
                     "Your previous reply was prose only. "
-                    "Now call create_flow with one complete typed draft. "
+                    "Now call outline_flow with one complete semantic outline. "
                     "Do not answer with prose."
                 ),
-                process_tool_arguments=self._process_create_arguments,
-                process_tool_kwargs={},
+                process_tool_arguments=self._process_outline_arguments,
+                process_tool_kwargs=(
+                    {"planning_state": planning_state}
+                    if planning_state is not None
+                    else {}
+                ),
             )
 
         return ToolRetryConfig(
@@ -1730,4 +1961,21 @@ def _extract_description_provenance(
 
 
 def _active_submission_tool_name(flow: "Flow | None") -> str:
-    return EDIT_FLOW_TOOL_NAME if flow is not None else CREATE_FLOW_TOOL_NAME
+    return EDIT_FLOW_TOOL_NAME if flow is not None else OUTLINE_FLOW_TOOL_NAME
+
+
+def _active_submission_tool_schemas(
+    *,
+    flow: "Flow | None",
+    available_models: list[dict[str, Any]] | None,
+    available_kbs: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    if flow is None:
+        return [build_outline_flow_tool_schema()]
+    return [
+        build_edit_flow_tool_schema(
+            list(flow.steps),
+            available_models=available_models,
+            available_kbs=available_kbs,
+        )
+    ]

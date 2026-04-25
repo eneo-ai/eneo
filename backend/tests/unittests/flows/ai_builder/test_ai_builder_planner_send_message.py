@@ -2,10 +2,10 @@
 
 `send_message` bridges the builder's public SSE surface and the
 orchestrator's structured-JSON planner pipeline. This suite pins the
-five `PlannerTurnResult` outcomes the planner can surface — dispatched
+`PlannerTurnResult` outcomes the planner can surface — dispatched
 (ask_question / commit_architecture / confirm_requirements),
-parse_failed with finish_reason=="length", rejected, and
-propose_plan_pending_adapter — to specific SSE event sequences.
+parse_failed with finish_reason=="length", and rejected — to specific
+SSE event sequences.
 
 Every test stubs `_prepare_planner_request` so the test owns the
 downstream `PlannerPreparedRequest` shape without re-driving the
@@ -26,6 +26,10 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_action_policy import (
+    PlannerActionPolicy,
+    build_planner_action_policy,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import BuilderSession
 from intric.flows.ai_builder.ai_builder_event_models import KeyDecisionPayload
 from intric.flows.ai_builder.ai_builder_models import SessionStatus, TargetKind
@@ -49,7 +53,11 @@ from intric.flows.ai_builder.ai_builder_planner_turn import (
     TurnTelemetry,
 )
 from intric.flows.ai_builder.ai_builder_repair import CompletionMetadata
+from intric.flows.ai_builder.ai_builder_server_actions import (
+    build_server_planner_output,
+)
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from intric.flows.ai_builder.planning_state import PlanningState
 
 
 def _make_planner() -> AIBuilderPlanner:
@@ -281,6 +289,61 @@ async def test_send_message_dispatched_commit_architecture_emits_status_plus_don
 
 
 @pytest.mark.asyncio
+async def test_send_message_does_not_persist_internal_commit_note_as_assistant_text() -> (
+    None
+):
+    planner = _make_planner()
+    prepared = _make_prepared_request()
+    action = CommitArchitectureAction(
+        kind="commit_architecture",
+        payload=CommitArchitecturePayload(
+            note="Architecture committed from resolved planning state."
+        ),
+    )
+    output = _planner_output(action)
+    turn_result = _dispatched_result(
+        action_kind="commit_architecture",
+        planner_output=output,
+        populated=True,
+    )
+    captured: dict[str, list[Any]] = {}
+
+    async def run_and_capture(**kwargs: Any) -> PlannerTurnResult:
+        captured["new_messages"] = kwargs["build_new_messages"](
+            output,
+            _turn_telemetry("dispatched", populated=True),
+        )
+        return turn_result
+
+    with (
+        patch.object(
+            planner,
+            "_resolve_message_metadata",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    metadata=None,
+                    is_requirements_confirmation=False,
+                    used_auxiliary_llm=False,
+                )
+            ),
+        ),
+        patch.object(
+            planner,
+            "_prepare_planner_request",
+            new=AsyncMock(return_value=prepared),
+        ),
+        _patched_send(run_and_capture),
+    ):
+        await _collect_events(planner, **_send_kwargs())
+
+    assert [message.role for message in captured["new_messages"]] == ["user"]
+    assert all(
+        "Architecture committed" not in message.content
+        for message in captured["new_messages"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_send_message_dispatched_confirm_requirements_emits_versioned_summary_event() -> (
     None
 ):
@@ -465,61 +528,6 @@ async def test_send_message_rejected_emits_planner_rejected_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_message_propose_plan_pending_adapter_emits_transient_error() -> (
-    None
-):
-    """`propose_plan_pending_adapter` → `propose_plan_adapter_unavailable`.
-
-    The materialization bridge is the adapter that translates the
-    orchestrator's `DraftPlanEnvelope` into the persistence format
-    the proposal processor expects. Until that adapter is wired in
-    `send_message`, the planner's `propose_plan` turns are surfaced as
-    a transient error so the user can retry; nothing should be written
-    to `builder_plans`.
-    """
-    planner = _make_planner()
-    prepared = _make_prepared_request()
-    pending_turn = PlannerTurnResult(
-        kind="propose_plan_pending_adapter",
-        accepted_output=None,
-        turn_telemetry=_turn_telemetry("propose_plan_pending_adapter"),
-        llm_calls_made=1,
-    )
-
-    with (
-        patch.object(
-            planner,
-            "_resolve_message_metadata",
-            new=AsyncMock(
-                return_value=SimpleNamespace(
-                    metadata=None,
-                    is_requirements_confirmation=False,
-                    used_auxiliary_llm=False,
-                )
-            ),
-        ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
-            new=AsyncMock(return_value=prepared),
-        ),
-        _patched_send(pending_turn),
-    ):
-        events = await _collect_events(planner, **_send_kwargs())
-
-    assert [event["event"] for event in events] == ["error", "done"]
-    payload = json.loads(events[0]["data"])
-    assert payload["code"] == "propose_plan_adapter_unavailable"
-    assert payload["phase"] == "planner"
-    planner.repo.commit_turn.assert_not_called()
-    message = payload["message"].lower()
-    for leaked in ("materialization", "adapter", "bridge", "processor"):
-        assert leaked not in message, (
-            f"user-facing pending-adapter message must not leak {leaked!r}"
-        )
-
-
-@pytest.mark.asyncio
 async def test_send_message_orchestration_context_uses_rebuilt_state() -> None:
     """The slot sets on the passed-through OrchestrationContext must be
     derived from the SAME planning state the projection renders into the
@@ -615,7 +623,7 @@ async def test_send_message_orchestration_context_uses_rebuilt_state() -> None:
     ctx = captured["orchestration_context"]
     # Both core slots resolved → commit is no longer blocked.
     assert ctx.unresolved_architectural_choices == frozenset()
-    # Those same slots do not appear on the broad required-slot surface.
+    # Those same slots do not appear on the non-core required-slot surface.
     assert "primary_runtime_input" not in ctx.required_slot_names
     assert "terminal_output" not in ctx.required_slot_names
 
@@ -628,9 +636,9 @@ async def test_send_message_orchestration_context_blocks_commit_until_core_slots
     resolved, the commit gate still blocks.
 
     Asserts the pattern-agnostic `unresolved_architectural_choices`
-    reflects exactly the un-resolved core slot, and the broad
-    `required_slot_names` surface covers the discovery surface minus
-    what's been resolved.
+    reflects exactly the un-resolved core slot. Core slots are allowed
+    through that dedicated field; `required_slot_names` is now reserved
+    for non-core discovery-selected questions.
     """
     from intric.flows.ai_builder.planning_state import (
         BUILDER_SCHEMA_VERSION,
@@ -711,8 +719,324 @@ async def test_send_message_orchestration_context_blocks_commit_until_core_slots
 
     ctx = captured["orchestration_context"]
     assert ctx.unresolved_architectural_choices == frozenset({"terminal_output"})
-    assert "terminal_output" in ctx.required_slot_names
+    assert "terminal_output" not in ctx.required_slot_names
     assert "primary_runtime_input" not in ctx.required_slot_names
+
+
+@pytest.mark.asyncio
+async def test_send_message_uses_discovery_selected_questions_as_non_core_ask_surface() -> (
+    None
+):
+    planner = _make_planner()
+    prepared = PlannerPreparedRequest(
+        requirements_state=SimpleNamespace(latest_summary=None, confirmed=False),
+        ui_language="en",
+        discovery_block_message=None,
+        llm_messages=[{"role": "system", "content": "system"}],
+        should_emit_forced_followup=False,
+        rebuilt_planning_state=PlanningState.empty(),
+        action_policy=build_planner_action_policy(
+            session_state=PlanningState.empty(),
+            unresolved_architectural_choices=frozenset(
+                {"primary_runtime_input", "terminal_output"}
+            ),
+            selected_discovery_question_ids=frozenset(
+                {"document_material_scope", "runtime_metadata_fields"}
+            ),
+        ),
+    )
+
+    action = AskQuestionAction(
+        kind="ask_question",
+        payload=AskQuestionPayload(
+            question_id="document_material_scope",
+            slot_name="document_material_scope",
+            prompt="?",
+        ),
+    )
+    output = _planner_output(action)
+    turn_result = _dispatched_result(action_kind="ask_question", planner_output=output)
+
+    captured: dict[str, Any] = {}
+
+    async def _capture_turn(**kwargs: Any) -> PlannerTurnResult:
+        captured["orchestration_context"] = kwargs["orchestration_context"]
+        return turn_result
+
+    with (
+        patch.object(
+            planner,
+            "_resolve_message_metadata",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    metadata=None,
+                    is_requirements_confirmation=False,
+                    used_auxiliary_llm=False,
+                )
+            ),
+        ),
+        patch.object(
+            planner,
+            "_prepare_planner_request",
+            new=AsyncMock(return_value=prepared),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
+            new=AsyncMock(side_effect=_capture_turn),
+        ),
+    ):
+        await _collect_events(planner, **_send_kwargs())
+
+    ctx = captured["orchestration_context"]
+    assert ctx.required_slot_names == frozenset(
+        {"document_material_scope", "runtime_metadata_fields"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_message_passes_server_precomputed_commit_to_turn_runner() -> None:
+    from intric.flows.ai_builder.planning_state import ResolvedSlot
+
+    def _slot(name: str, value: str) -> ResolvedSlot:
+        return ResolvedSlot(
+            name=name,
+            value=value,
+            source="structured_answer",
+            evidence=[],
+            confidence="high",
+        )
+
+    planner = _make_planner()
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "text"),
+        "document_material_scope": _slot(
+            "document_material_scope", "flexible_document_case"
+        ),
+    }
+    action_policy = build_planner_action_policy(
+        session_state=state,
+        unresolved_architectural_choices=frozenset(),
+        selected_discovery_question_ids=frozenset(),
+    )
+    prepared = PlannerPreparedRequest(
+        requirements_state=SimpleNamespace(latest_summary=None, confirmed=False),
+        ui_language="en",
+        discovery_block_message=None,
+        llm_messages=[],
+        should_emit_forced_followup=False,
+        rebuilt_planning_state=state,
+        action_policy=action_policy,
+        server_output=build_server_planner_output(
+            action_policy=action_policy,
+            session_state=state,
+            base_planning_state_version=0,
+            ui_language="en",
+        ),
+    )
+    action = CommitArchitectureAction(
+        kind="commit_architecture",
+        payload=CommitArchitecturePayload(note="server"),
+    )
+    output = _planner_output(action)
+    turn_result = _dispatched_result(
+        action_kind="commit_architecture", planner_output=output
+    )
+
+    captured: dict[str, Any] = {}
+
+    async def _capture_turn(**kwargs: Any) -> PlannerTurnResult:
+        captured["precomputed_output"] = kwargs["precomputed_output"]
+        return turn_result
+
+    with (
+        patch.object(
+            planner,
+            "_resolve_message_metadata",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    metadata=None,
+                    is_requirements_confirmation=False,
+                    used_auxiliary_llm=False,
+                )
+            ),
+        ),
+        patch.object(
+            planner,
+            "_prepare_planner_request",
+            new=AsyncMock(return_value=prepared),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
+            new=AsyncMock(side_effect=_capture_turn),
+        ),
+    ):
+        await _collect_events(planner, **_send_kwargs())
+
+    precomputed = captured["precomputed_output"]
+    assert precomputed is not None
+    assert precomputed.planner_action.kind == "commit_architecture"
+    assert precomputed.planning_state_delta.architecture_commit is not None
+
+
+@pytest.mark.asyncio
+async def test_send_message_auto_advances_server_commit_to_requirements_summary() -> (
+    None
+):
+    from datetime import datetime, timezone
+
+    from intric.flows.ai_builder.planning_state import (
+        ArchitectureCommit,
+        ResolvedSlot,
+        StepTriple,
+    )
+
+    def _slot(name: str, value: str) -> ResolvedSlot:
+        return ResolvedSlot(
+            name=name,
+            value=value,
+            source="structured_answer",
+            evidence=[],
+            confidence="high",
+        )
+
+    planner = _make_planner()
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "docx"),
+        "document_material_scope": _slot(
+            "document_material_scope", "flexible_document_case"
+        ),
+        "runtime_metadata_fields": _slot(
+            "runtime_metadata_fields", "no_extra_metadata"
+        ),
+    }
+    action_policy = build_planner_action_policy(
+        session_state=state,
+        unresolved_architectural_choices=frozenset(),
+        selected_discovery_question_ids=frozenset(),
+    )
+    server_output = build_server_planner_output(
+        action_policy=action_policy,
+        session_state=state,
+        base_planning_state_version=0,
+        ui_language="en",
+    )
+    assert server_output is not None
+    assert server_output.planner_action.kind == "commit_architecture"
+    prepared = PlannerPreparedRequest(
+        requirements_state=SimpleNamespace(latest_summary=None, confirmed=False),
+        ui_language="en",
+        discovery_block_message=None,
+        llm_messages=[],
+        should_emit_forced_followup=False,
+        rebuilt_planning_state=state,
+        action_policy=action_policy,
+        server_output=server_output,
+    )
+
+    committed_state = PlanningState.empty()
+    committed_state.resolved_slots = dict(state.resolved_slots)
+    committed_state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=["summarize_text"],
+        required_capabilities=[],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="a" * 64,
+    )
+    planner.repo.load_planning_state.side_effect = [None, committed_state]
+    planner.repo.commit_turn.side_effect = [1, 2]
+
+    with (
+        patch.object(
+            planner,
+            "_resolve_message_metadata",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    metadata=None,
+                    is_requirements_confirmation=False,
+                    used_auxiliary_llm=False,
+                )
+            ),
+        ),
+        patch.object(
+            planner,
+            "_prepare_planner_request",
+            new=AsyncMock(return_value=prepared),
+        ),
+    ):
+        events = await _collect_events(planner, **_send_kwargs())
+
+    assert [event["event"] for event in events] == [
+        "status",
+        "requirements_summary",
+        "done",
+    ]
+    assert json.loads(events[0]["data"])["status"] == "architecture_committed"
+    summary_payload = json.loads(events[1]["data"])
+    assert "requirements_version" in summary_payload
+    assert summary_payload["input_description"] == "Primary runtime input: Documents."
+    assert summary_payload["output_description"] == "Primary final output: docx."
+    assert planner.repo.commit_turn.await_count == 2
+    planner.litellm_client.acompletion.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_message_routes_proposal_mode_to_task_specific_proposer() -> None:
+    planner = _make_planner()
+    prepared = PlannerPreparedRequest(
+        requirements_state=SimpleNamespace(latest_summary=None, confirmed=True),
+        ui_language="en",
+        discovery_block_message=None,
+        llm_messages=[{"role": "system", "content": "proposal task"}],
+        should_emit_forced_followup=False,
+        rebuilt_planning_state=PlanningState.empty(),
+        action_policy=PlannerActionPolicy(allowed_action_kinds=("propose_plan",)),
+        proposal_mode=True,
+    )
+    captured: dict[str, Any] = {}
+
+    async def _proposal(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        yield {"event": "plan", "data": "{}"}
+
+    with (
+        patch.object(
+            planner,
+            "_resolve_message_metadata",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    metadata=None,
+                    is_requirements_confirmation=False,
+                    used_auxiliary_llm=False,
+                )
+            ),
+        ),
+        patch.object(
+            planner,
+            "_prepare_planner_request",
+            new=AsyncMock(return_value=prepared),
+        ),
+        patch.object(planner.proposal_processor, "propose_plan", new=_proposal),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
+            new=AsyncMock(side_effect=AssertionError("planner union should not run")),
+        ),
+    ):
+        events = await _collect_events(planner, **_send_kwargs())
+
+    assert [event["event"] for event in events] == ["plan", "done"]
+    assert captured["llm_messages"] == [{"role": "system", "content": "proposal task"}]
+    assert captured["available_model_refs"] == set()
+    assert captured["available_kb_refs"] == set()
 
 
 @pytest.mark.asyncio
@@ -729,7 +1053,9 @@ async def test_send_message_derives_asked_question_ids_and_new_evidence() -> Non
       assistant messages (persisted by `_build_new_messages` whenever
       an `ask_question` action lands).
     - `has_new_evidence` = True if the latest user message (the one
-      being processed this turn) carries `question_answer` metadata.
+      being processed this turn) carries answer evidence.
+    - `question_ids_with_new_evidence` = question IDs that have a user
+      evidence turn after their latest ask.
     """
     from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 
@@ -806,17 +1132,21 @@ async def test_send_message_derives_asked_question_ids_and_new_evidence() -> Non
     ctx = captured["orchestration_context"]
     assert ctx.asked_question_ids == frozenset({"primary_runtime_input"})
     assert ctx.has_new_evidence is True
+    assert ctx.question_ids_with_new_evidence == frozenset({"primary_runtime_input"})
 
 
 @pytest.mark.asyncio
-async def test_send_message_has_new_evidence_false_when_last_user_message_plain() -> (
+async def test_send_message_counts_plain_reply_after_v2_question_as_new_evidence() -> (
     None
 ):
-    """Free-form user chat does not count as new evidence.
+    """A prose reply to v2 ask_question is still question-specific evidence.
 
-    Only a structured `question_answer` payload proves a slot moved.
-    A plain chat message since the last ask leaves the guard blocking
-    a repeat — the LLM must surface new signal before asking again.
+    The v2 planner action persists assistant questions as
+    `metadata.question_id`, not as legacy `ask_structured_question`
+    tool calls. The duplicate-question guard must therefore use
+    conversation order, not only structured answer metadata, or a
+    perfectly normal free-form answer gets rejected as "no new
+    evidence arrived since".
     """
     from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 
@@ -887,4 +1217,5 @@ async def test_send_message_has_new_evidence_false_when_last_user_message_plain(
 
     ctx = captured["orchestration_context"]
     assert ctx.asked_question_ids == frozenset({"primary_runtime_input"})
-    assert ctx.has_new_evidence is False
+    assert ctx.has_new_evidence is True
+    assert ctx.question_ids_with_new_evidence == frozenset({"primary_runtime_input"})

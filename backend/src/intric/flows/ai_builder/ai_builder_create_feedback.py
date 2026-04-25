@@ -1,36 +1,7 @@
 from __future__ import annotations
 
-import re
-
 from intric.flows.ai_builder.ai_builder_plan_store import format_revision_feedback
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
-
-_STRUCTURED_FIELD_DEPTH_ERROR_RE = re.compile(
-    r"Structured field nesting depth cannot exceed (\d+)"
-)
-
-
-def format_create_argument_error(error: Exception) -> str:
-    raw_message = str(error)
-    depth_match = _STRUCTURED_FIELD_DEPTH_ERROR_RE.search(raw_message)
-    if depth_match is not None:
-        max_depth = depth_match.group(1)
-        return (
-            f"Invalid create_flow arguments: {raw_message}\n"
-            "Fix ONLY the output_fields nesting depth. "
-            "Preserve every step you already emitted (same count, same names, same order, "
-            "same instructions, same input/output_source and input/output_type) and every form_field. "
-            f"output_fields may nest at max {max_depth} levels: top-level fields, child fields, "
-            "and one grandchild level only.\n"
-            "Flattening recipe when a subtree exceeds the limit: in the step with the deepest "
-            "subtree, collapse the deepest level into a single field_type='string' field whose "
-            "description captures what that deeper structure would have held (e.g., instead of a "
-            "fourth-level 'address.country.region.city' object, keep 'address.country' as an object "
-            "with a child field named 'region_city_description' typed as string). "
-            "Never reintroduce nested objects or arrays below the third level. "
-            "Do not rename, reorder, merge, or delete steps. Do not touch any other step's output_fields."
-        )
-    return f"Invalid create_flow arguments: {raw_message}"
 
 
 def format_create_validation_feedback(validation: SpecValidationResult) -> str:
@@ -42,28 +13,25 @@ def format_create_validation_feedback(validation: SpecValidationResult) -> str:
     repair_rules: list[str] = []
     if "first_step_invalid_source" in codes:
         repair_rules.append(
-            "Set steps[0].input_source to 'flow_input'. The first create step is always the runtime entry step. Only later steps may use previous_step or all_previous_steps."
+            "Keep the first outline step as the semantic runtime entry step. Do not try to set low-level input_source or runtime upload fields; the backend derives them from the committed architecture."
         )
     if "multiple_flow_input" in codes:
         repair_rules.append(
-            "Only later steps may use previous_step or all_previous_steps. Keep flow_input only on steps[0]."
+            "Describe a single first outline step for the runtime material. Later outline steps should describe semantic work only; the backend derives step-to-step wiring."
         )
     if "media_source_mismatch" in codes:
         repair_rules.append(
-            "audio/document/file inputs require input_source='flow_input' on the entry step."
+            "Keep the outline focused on the user's semantic task; the backend already knows the uploaded media type from the committed architecture."
         )
     if "json_incompatible_with_all_previous_steps" in codes:
         repair_rules.append(
-            "input_type='json' cannot be combined with input_source='all_previous_steps' "
-            "because concatenated text from multiple steps is not valid JSON. "
-            "Pick one: (a) set input_source='previous_step' and reference specific fields "
-            "via uses_previous_fields when the step consumes structured JSON from the "
-            "immediately preceding step; or (b) set input_type='text' when the step "
-            "should summarize or synthesize concatenated text from all earlier steps."
+            "Describe the semantic extraction and synthesis steps only. The backend will choose previous-step JSON chaining or server-owned fan-in where the committed architecture requires it."
         )
     if not repair_rules:
         return base_feedback
-    return f"{base_feedback}\nCreate-flow repair rules:\n- " + "\n- ".join(repair_rules)
+    return f"{base_feedback}\nOutline-flow repair rules:\n- " + "\n- ".join(
+        repair_rules
+    )
 
 
 def format_create_quality_feedback(feedback: str | None) -> str | None:
@@ -91,10 +59,10 @@ def format_create_quality_feedback(feedback: str | None) -> str | None:
         or '`input_source=\\"all_previous_steps\\"`' in feedback
     ):
         repair_rules.append(
-            "When several uploaded documents must be combined into one shared analysis or report, add an aggregation step with input_source='all_previous_steps' before the final synthesis step."
+            "Do not author input_source or explicit all-previous wiring in outline_flow. Add semantic analysis/synthesis steps and let the backend compile the dataflow."
         )
     if not repair_rules:
         return feedback
-    return f"{feedback}\n\nCreate-flow quality repair rules:\n- " + "\n- ".join(
+    return f"{feedback}\n\nOutline-flow quality repair rules:\n- " + "\n- ".join(
         repair_rules
     )

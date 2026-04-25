@@ -1412,6 +1412,42 @@ class TestSendMessageEndpoint:
         )
         assert error_payload["request_id"] == "req-stream-1"
 
+    @pytest.mark.anyio
+    async def test_streams_bad_request_code_when_session_message_in_progress(self):
+        container = _make_container()
+        _configure_space_with_planner_model(container)
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        async def rejected_events(*args, **kwargs):
+            raise BadRequestException(
+                "Another AI Builder message is already being processed for this session.",
+                code="session_message_in_progress",
+            )
+            yield  # pragma: no cover
+
+        service.send_message.return_value = rejected_events()
+
+        request = _make_request()
+        request.headers = {"x-request-id": "req-stream-busy"}
+
+        result = await send_message(
+            request=request,
+            session_id=session.id,
+            body=SendMessageRequest(message="Bygg ett flöde"),
+            container=container,
+        )
+
+        events = await _read_sse_events(result)
+        assert [event["event"] for event in events] == ["error", "done"]
+        error_payload = events[0]["data"]
+        assert error_payload["code"] == "session_message_in_progress"
+        assert error_payload["phase"] == "router"
+        assert error_payload["intric_error_code"] == int(ErrorCodes.BAD_REQUEST)
+        assert "already being processed" in error_payload["message"]
+        assert error_payload["request_id"] == "req-stream-busy"
+
 
 class TestApprovePlanEndpoint:
     @pytest.mark.anyio

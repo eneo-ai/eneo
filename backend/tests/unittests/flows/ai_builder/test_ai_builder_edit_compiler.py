@@ -315,6 +315,126 @@ class TestUntouchedStepsPreserved:
             == "Sammanfattning: {{ step_a.output.structured.sammanfattning }}"
         )
 
+    def test_modify_step_form_fields_preserve_previous_source_in_underlag(self):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Extrahera JSON",
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "sammanfattning": {"type": "string"},
+                    },
+                },
+            ),
+            _make_flow_step(
+                step_order=2,
+                user_description="Skriv rapport",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+            ),
+        ]
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(uses_form_fields=["case_id"]),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(
+            draft,
+            existing,
+            base_flow_revision=2,
+            current_metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {
+                            "name": "case_id",
+                            "type": "text",
+                            "label": "Case ID",
+                        }
+                    ]
+                }
+            },
+        )
+
+        assert result.compiled_spec.steps[1].input_bindings == {
+            "question": "{{ step_a.output.structured }}\n\ncase_id: {{ case_id }}"
+        }
+        validation = validate_spec(result.compiled_spec)
+        assert validation.valid
+
+    def test_modify_all_previous_step_keeps_fan_in_implicit_and_adds_hints(self):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Extrahera JSON",
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "sammanfattning": {"type": "string"},
+                    },
+                },
+            ),
+            _make_flow_step(
+                step_order=2,
+                user_description="Skriv rapport",
+                input_source="all_previous_steps",
+                input_type="text",
+                output_type="text",
+            ),
+        ]
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(
+                        uses_previous_fields=[
+                            {
+                                "from_step": 1,
+                                "field_path": "sammanfattning",
+                                "label": "Sammanfattning",
+                            }
+                        ],
+                        uses_form_fields=["case_id"],
+                    ),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(
+            draft,
+            existing,
+            base_flow_revision=2,
+            current_metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {
+                            "name": "case_id",
+                            "type": "text",
+                            "label": "Case ID",
+                        }
+                    ]
+                }
+            },
+        )
+
+        step = result.compiled_spec.steps[1]
+        assert step.input_bindings is None
+        assert "Beakta särskilt följande strukturerade fält" in (
+            step.assistant_spec.instructions
+        )
+        assert "case_id: {{ case_id }}" in step.assistant_spec.instructions
+        validation = validate_spec(result.compiled_spec)
+        assert validation.valid
+
 
 class TestTransitionNormalization:
     def test_text_to_pdf_edit_clears_incompatible_citation_mode_and_emits_advisory(

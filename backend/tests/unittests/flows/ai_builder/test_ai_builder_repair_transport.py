@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_repair_transport import (
     build_persisted_tool_call_stub,
@@ -19,7 +19,7 @@ def test_build_tool_retry_messages_appends_tool_call_and_feedback() -> None:
     tool_call = SimpleNamespace(
         id="call_1",
         function=SimpleNamespace(
-            name=CREATE_FLOW_TOOL_NAME,
+            name=OUTLINE_FLOW_TOOL_NAME,
             arguments='{"flow_name":"Draft"}',
         ),
     )
@@ -32,7 +32,7 @@ def test_build_tool_retry_messages_appends_tool_call_and_feedback() -> None:
 
     assert messages[0] == {"role": "system", "content": "Prompt"}
     assert messages[1]["role"] == "assistant"
-    assert messages[1]["tool_calls"][0]["function"]["name"] == CREATE_FLOW_TOOL_NAME
+    assert messages[1]["tool_calls"][0]["function"]["name"] == OUTLINE_FLOW_TOOL_NAME
     assert messages[2] == {
         "role": "tool",
         "tool_call_id": "call_1",

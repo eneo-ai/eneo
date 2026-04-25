@@ -105,6 +105,7 @@ def _resolve_intric_error_code(*, code: str, phase: str) -> int | None:
         "edit_validation_error",
         "edit_compile_error",
         "edit_spec_validation_error",
+        "session_message_in_progress",
     }
     internal_error_codes = {
         "planner_upstream_error",

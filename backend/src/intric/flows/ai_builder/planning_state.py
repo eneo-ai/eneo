@@ -31,7 +31,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 FCM_VERSION: int = 1
 PLANNER_CONTRACT_VERSION: int = 1
@@ -78,6 +78,7 @@ StepOutputMode = Literal[
     "transcribe_only",
     "template_fill",
 ]
+AggregationIntent = Literal["linear", "aggregate", "compare"]
 
 
 class _PlanningModel(BaseModel):
@@ -121,10 +122,42 @@ class StepTriple(_PlanningModel):
     output_mode: StepOutputMode
 
 
-class ArchitectureCommit(_PlanningModel):
+class ArchitectureCommitDraft(_PlanningModel):
+    """Semantic architecture commitment.
+
+    The model may choose the high-level `commit_architecture` action,
+    but the server should derive this draft whenever possible. The
+    tuple chain is a capability envelope from primary input to terminal
+    output; it is not an exact implementation-step count. Deterministic
+    mechanics (`architecture_hash`, `committed_at`) are server-owned
+    and added only when the draft is finalized into a persisted
+    `ArchitectureCommit`.
+    """
+
     tuples_chain: list[StepTriple]
     chosen_patterns: list[str]
     required_capabilities: list[str] = Field(default_factory=list[str])
+    aggregation_intent: AggregationIntent = "linear"
+
+    @model_validator(mode="after")
+    def _at_most_one_compiled_chain_pattern(self) -> "ArchitectureCommitDraft":
+        from intric.flows.ai_builder.pattern_registry import (
+            compiled_chain_pattern_ids,
+        )
+
+        compiled_pattern_ids = compiled_chain_pattern_ids(self.chosen_patterns)
+        if len(compiled_pattern_ids) > 1:
+            raise ValueError(
+                "architecture_commit.chosen_patterns may include at most one "
+                "compiler-backed chain pattern; got "
+                f"{sorted(compiled_pattern_ids)}"
+            )
+        return self
+
+
+class ArchitectureCommit(ArchitectureCommitDraft):
+    """Persisted architecture commitment with server-owned metadata."""
+
     committed_at: datetime
     architecture_hash: str
 

@@ -21,8 +21,8 @@ from intric.flows.ai_builder.ai_builder_validation_flow_parity import (
     validate_flow_service_parity,
 )
 from intric.flows.ai_builder.ai_builder_validation_quality import (
-    lint_all_previous_with_specific_refs,
     lint_all_previous_steps_overuse,
+    lint_all_previous_with_specific_refs,
     lint_contract_fields_without_descriptions,
     lint_contract_instruction_alignment,
     lint_json_output_without_contract,
@@ -37,7 +37,6 @@ from intric.flows.ai_builder.ai_builder_validation_references import (
 )
 from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.step_chain_rules import find_first_step_chain_violation
-
 
 # ---------------------------------------------------------------------------
 # Valid enum values (from DB constraints, excluding http_ which AI can't set)
@@ -73,7 +72,11 @@ def validate_spec(
     result = SpecValidationResult()
 
     if not spec.steps:
-        result.add_error(step_ref=None, code="empty_steps", message="Flow must have at least one step.")
+        result.add_error(
+            step_ref=None,
+            code="empty_steps",
+            message="Flow must have at least one step.",
+        )
         return result
 
     _validate_step_refs_unique(spec, result)
@@ -111,7 +114,9 @@ def validate_spec(
 # ---------------------------------------------------------------------------
 
 
-def _validate_step_refs_unique(spec: FlowDraftSpecCore, result: SpecValidationResult) -> None:
+def _validate_step_refs_unique(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
     seen: set[str] = set()
     for step in spec.steps:
         if step.plan_step_ref in seen:
@@ -123,7 +128,9 @@ def _validate_step_refs_unique(spec: FlowDraftSpecCore, result: SpecValidationRe
         seen.add(step.plan_step_ref)
 
 
-def _validate_step_names_unique(spec: FlowDraftSpecCore, result: SpecValidationResult) -> None:
+def _validate_step_names_unique(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
     seen: set[str] = set()
     for step in spec.steps:
         normalized = step.name.strip().casefold()
@@ -143,12 +150,18 @@ def _validate_step_names_unique(spec: FlowDraftSpecCore, result: SpecValidationR
         seen.add(normalized)
 
 
-def _validate_chaining_rules(spec: FlowDraftSpecCore, result: SpecValidationResult) -> None:
+def _validate_chaining_rules(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
     violation = find_first_step_chain_violation(_chain_shapes(spec))
     if violation is None:
         return
 
-    step_ref = spec.steps[violation.step_order - 1].plan_step_ref if violation.step_order <= len(spec.steps) else None
+    step_ref = (
+        spec.steps[violation.step_order - 1].plan_step_ref
+        if violation.step_order <= len(spec.steps)
+        else None
+    )
     result.add_error(
         step_ref=step_ref,
         code=_map_chain_violation_code(violation.code),
@@ -156,13 +169,18 @@ def _validate_chaining_rules(spec: FlowDraftSpecCore, result: SpecValidationResu
     )
 
 
-def _validate_type_compatibility(spec: FlowDraftSpecCore, result: SpecValidationResult) -> None:
+def _validate_type_compatibility(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
     steps = spec.steps
     for index, step in enumerate(steps):
         if step.input_source != InputSource.PREVIOUS_STEP or index == 0:
             continue
         previous = steps[index - 1]
-        if previous.output_type == OutputType.PDF and step.input_type == InputType.AUDIO:
+        if (
+            previous.output_type == OutputType.PDF
+            and step.input_type == InputType.AUDIO
+        ):
             result.add_error(
                 step_ref=step.plan_step_ref,
                 code="incompatible_type_chain",
@@ -171,7 +189,10 @@ def _validate_type_compatibility(spec: FlowDraftSpecCore, result: SpecValidation
                     f"cannot feed input '{step.input_type.value}'."
                 ),
             )
-        if previous.output_type == OutputType.DOCX and step.input_type == InputType.JSON:
+        if (
+            previous.output_type == OutputType.DOCX
+            and step.input_type == InputType.JSON
+        ):
             result.add_error(
                 step_ref=step.plan_step_ref,
                 code="incompatible_type_chain",
@@ -182,7 +203,9 @@ def _validate_type_compatibility(spec: FlowDraftSpecCore, result: SpecValidation
             )
 
 
-def _validate_enum_values(spec: FlowDraftSpecCore, result: SpecValidationResult) -> None:
+def _validate_enum_values(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
     for step in spec.steps:
         if step.input_source.value not in _VALID_INPUT_SOURCES:
             result.add_error(
@@ -210,7 +233,9 @@ def _validate_enum_values(spec: FlowDraftSpecCore, result: SpecValidationResult)
             )
 
 
-def _validate_transcribe_only(spec: FlowDraftSpecCore, result: SpecValidationResult) -> None:
+def _validate_transcribe_only(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
     for i, step in enumerate(spec.steps):
         error = transcribe_only_violation(
             step_order=i + 1,
@@ -219,10 +244,16 @@ def _validate_transcribe_only(spec: FlowDraftSpecCore, result: SpecValidationRes
             output_mode=step.output_mode.value,
         )
         if error is not None:
-            result.add_error(step_ref=step.plan_step_ref, code="transcribe_only_violation", message=error)
+            result.add_error(
+                step_ref=step.plan_step_ref,
+                code="transcribe_only_violation",
+                message=error,
+            )
 
 
-def _validate_template_fill(spec: FlowDraftSpecCore, result: SpecValidationResult) -> None:
+def _validate_template_fill(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
     for step in spec.steps:
         if step.output_mode != OutputMode.TEMPLATE_FILL:
             continue
@@ -273,7 +304,9 @@ def _validate_kb_refs(
 # ---------------------------------------------------------------------------
 
 
-def _validate_contract_syntax(spec: FlowDraftSpecCore, result: SpecValidationResult) -> None:
+def _validate_contract_syntax(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
     """Validate JSON Schema syntax of contracts at plan time."""
     for step in spec.steps:
         for field_name, contract in [
@@ -292,10 +325,15 @@ def _validate_contract_syntax(spec: FlowDraftSpecCore, result: SpecValidationRes
                 )
 
 
-def _validate_contract_type_compat(spec: FlowDraftSpecCore, result: SpecValidationResult) -> None:
+def _validate_contract_type_compat(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
     """Validate that contracts are compatible with step input/output types."""
     for step in spec.steps:
-        if step.input_contract is not None and step.input_type not in (InputType.TEXT, InputType.JSON):
+        if step.input_contract is not None and step.input_type not in (
+            InputType.TEXT,
+            InputType.JSON,
+        ):
             result.add_error(
                 step_ref=step.plan_step_ref,
                 code="input_contract_type_mismatch",
@@ -310,7 +348,10 @@ def _validate_contract_type_compat(spec: FlowDraftSpecCore, result: SpecValidati
                 code="output_contract_type_mismatch",
                 message="output_contract is not valid for output_type 'text'. Use 'json' for structured output.",
             )
-        if step.output_contract is not None and step.output_mode == OutputMode.TEMPLATE_FILL:
+        if (
+            step.output_contract is not None
+            and step.output_mode == OutputMode.TEMPLATE_FILL
+        ):
             result.add_error(
                 step_ref=step.plan_step_ref,
                 code="output_contract_template_fill_incompatible",
@@ -344,7 +385,9 @@ def _map_chain_violation_code(code: str) -> str:
 
 
 class _StepChainShape:
-    def __init__(self, *, step_order: int, input_source: str, input_type: str, output_type: str) -> None:
+    def __init__(
+        self, *, step_order: int, input_source: str, input_type: str, output_type: str
+    ) -> None:
         self.step_order = step_order
         self.input_source = input_source
         self.input_type = input_type

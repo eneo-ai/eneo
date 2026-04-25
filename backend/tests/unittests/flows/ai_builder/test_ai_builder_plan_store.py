@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_domain_models import LintSeverity, LintWarning
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
@@ -80,14 +80,14 @@ def test_append_plan_messages_uses_active_submission_tool_name() -> None:
         conversation=conversation,
         assistant_content="Här är planen.",
         tool_call_id="call_create",
-        tool_name="create_flow",
+        tool_name=OUTLINE_FLOW_TOOL_NAME,
         arguments={"plan_rationale": "Struktur först."},
         spec=spec,
         assumptions=["Antagande"],
     )
 
     assert conversation[0].tool_calls is not None
-    assert conversation[0].tool_calls[0]["name"] == "create_flow"
+    assert conversation[0].tool_calls[0]["name"] == OUTLINE_FLOW_TOOL_NAME
 
 
 @asynccontextmanager
@@ -139,7 +139,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
         new_messages_start=0,
         assistant_content="plan ready",
         tool_call_id="call-unit-1",
-        tool_name=CREATE_FLOW_TOOL_NAME,
+        tool_name=OUTLINE_FLOW_TOOL_NAME,
         arguments={},
         spec=spec,
         assumptions=[],

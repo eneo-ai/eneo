@@ -122,15 +122,20 @@ class TenantModelCredentialResolver:
                 "Please update the provider configuration."
             )
 
-        # Return fallback for optional fields
-        logger.debug(
-            f"Field '{field}' not found for provider {self.provider_id}, using fallback",
-            extra={
-                "provider_id": str(self.provider_id),
-                "field": field,
-                "has_fallback": fallback is not None,
-            },
-        )
+        # Optional provider-specific fields are frequently absent for
+        # providers that do not need them (for example OpenAI vs Azure).
+        # Only log fallback use when there is an actual fallback value;
+        # otherwise every request emits low-signal "missing field" noise.
+        if fallback is not None:
+            logger.debug(
+                f"Field '{field}' not found for provider {self.provider_id}, "
+                "using fallback",
+                extra={
+                    "provider_id": str(self.provider_id),
+                    "field": field,
+                    "has_fallback": True,
+                },
+            )
         return fallback
 
     def uses_global_credentials(self) -> bool:

@@ -4,8 +4,7 @@ Covers: `Pattern` dataclass shape (structural planner-strategy fields
 only), registry immutability, version constant, exact seed ids,
 slot-vocabulary anchored on the live `ai_builder_slot_vocabulary`
 leaf export, and negative-pattern bite asserted against live FCM callables.
-Matches the `test_ai_builder_recipe_selector.py` idiom — plain test
-class, no fixtures beyond scoped helpers, direct imports.
+Plain test class, no fixtures beyond scoped helpers, direct imports.
 
 User-facing copy (labels, localized text, help prose) is explicitly NOT
 pinned here; that surface lives on the Question Catalog and is never
@@ -19,12 +18,18 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_outline_pattern_chains import (
+    compiled_chain_realizer_ids,
+)
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
 from intric.flows.ai_builder.pattern_registry import (
+    CHAIN_STEP_DESCRIPTORS,
+    COMPILED_CHAIN_PATTERN_IDS,
     PATTERN_REGISTRY,
     PATTERN_REGISTRY_VERSION,
+    PLANNER_ONLY_CHAIN_PATTERN_IDS,
     Pattern,
     find_pattern_candidates,
     question_template_ids_for_slot,
@@ -52,6 +57,7 @@ _EXPECTED_POSITIVE_IDS: frozenset[str] = frozenset(
         "document_to_docx_template",
         "document_to_pdf_report",
         "audio_transcription",
+        "audio_to_artifact_report",
         "multi_step_quality_chain",
         "comparison",
         "sectioned_form_intake",
@@ -132,8 +138,8 @@ _NEGATIVE_FCM_ASSERTIONS: dict[str, Callable[[], None]] = {
 
 
 class TestPatternDataclass:
-    def test_pattern_version_is_four(self) -> None:
-        assert PATTERN_REGISTRY_VERSION == 4
+    def test_pattern_version_is_five(self) -> None:
+        assert PATTERN_REGISTRY_VERSION == 5
 
     def test_pattern_is_frozen_with_structural_fields(self) -> None:
         pattern = Pattern(
@@ -195,25 +201,31 @@ class TestPatternDataclass:
         )
         assert pattern.chain_steps == ()
 
-    def test_pattern_recipe_sections_defaults_to_empty_tuple(self) -> None:
-        """`recipe_sections` names the knowledge-pack recipe-section keys
-        (`"transcription"`, `"docx_template"`, etc.) that a pattern
-        activates when it wins a `find_pattern_candidates` scoring pass.
-        Patterns without a stable recipe-section mapping — including
-        every negative pattern and patterns whose retrieval hints are
-        too generic for score-based triggering — leave it empty; the
-        default is `()` so adding the field does not require touching
-        the existing negative-pattern seeds."""
-        pattern = Pattern(
-            id="fixture",
-            examples=(),
-            retrieval_hints=(),
-            negative_examples=(),
-            required_architectural_slots=(),
-            question_template_ids=(),
-            polarity="positive",
-        )
-        assert pattern.recipe_sections == ()
+    def test_pattern_rejects_chain_steps_without_chain_kind(self) -> None:
+        with pytest.raises(ValueError, match="chain_kind"):
+            Pattern(
+                id="fixture",
+                examples=(),
+                retrieval_hints=(),
+                negative_examples=(),
+                required_architectural_slots=(),
+                question_template_ids=(),
+                polarity="positive",
+                chain_steps=("compiled_step",),
+            )
+
+    def test_pattern_rejects_chain_kind_without_chain_steps(self) -> None:
+        with pytest.raises(ValueError, match="without chain_steps"):
+            Pattern(
+                id="fixture",
+                examples=(),
+                retrieval_hints=(),
+                negative_examples=(),
+                required_architectural_slots=(),
+                question_template_ids=(),
+                polarity="positive",
+                chain_kind="compiled",
+            )
 
 
 class TestRegistryInvariants:
@@ -301,6 +313,7 @@ class TestPositivePatternContract:
         and this test."""
         multi_step_seed: frozenset[str] = frozenset(
             {
+                "audio_to_artifact_report",
                 "multi_step_quality_chain",
                 "sectioned_form_intake",
                 "document_to_docx_template",
@@ -313,78 +326,47 @@ class TestPositivePatternContract:
                 f"non-empty chain_steps; got {pattern.chain_steps!r}"
             )
 
-    def test_positive_patterns_recipe_sections_match_canonical_seed(self) -> None:
-        """Exact-seed pin for `Pattern.recipe_sections`. Each positive
-        pattern either names the recipe-section keys it should activate
-        when it wins a `find_pattern_candidates` scoring pass, or leaves
-        the tuple empty to opt out of score-based recipe triggering.
+    def test_chain_bearing_patterns_are_explicitly_classified(self) -> None:
+        """Every chain-bearing pattern needs an owner.
 
-        `multi_step_quality_chain` and `sectioned_form_intake` stay
-        empty on purpose — their retrieval hints (`review`, `document`,
-        `chain`, `form`, `sections`, `headings`) overlap too heavily
-        with generic planner vocabulary, so score-only triggering is
-        unreliable; those recipes still reach the planner through the
-        phrase-aware signal paths.
-
-        `summarize_text` stays empty because it has no dedicated recipe
-        section — the golden example plus base architecture cover it.
-
-        Changing this seed is a deliberate one-line diff against both
-        the registry and this test; a drift here almost certainly means
-        the recipe selector's intended narrowing got silently widened.
+        Compiler-backed chains are turned into backend-owned skeleton steps;
+        planner-only chains are prompt metadata only. A new chain pattern
+        must choose one category explicitly so compiler behavior cannot drift
+        behind the planner-visible registry.
         """
-        canonical_seed: dict[str, tuple[str, ...]] = {
-            "audio_transcription": ("transcription",),
-            "comparison": ("comparison",),
-            "document_to_docx_template": ("document_analysis",),
-            "document_to_pdf_report": ("document_analysis",),
-            "document_to_structured_report": ("document_analysis",),
-            "extract_structured_fields": ("json_pipeline",),
-            "form_field_runtime_inputs": (),
-            "multi_step_quality_chain": (),
-            "sectioned_form_intake": (),
-            "summarize_text": (),
-        }
 
-        # Exhaustiveness: every positive pattern in the registry must
-        # appear in `canonical_seed`. A future positive pattern added
-        # without a seed entry would otherwise silently inherit the
-        # dataclass default `()` and bypass this drift check.
-        positive_ids = frozenset(
-            p.id for p in PATTERN_REGISTRY.values() if p.polarity == "positive"
+        chain_bearing_ids = frozenset(
+            pattern.id for pattern in PATTERN_REGISTRY.values() if pattern.chain_steps
         )
-        assert frozenset(canonical_seed) == positive_ids, (
-            f"canonical_seed missing positive patterns: "
-            f"{sorted(positive_ids - frozenset(canonical_seed))}; "
-            f"or stale entries: "
-            f"{sorted(frozenset(canonical_seed) - positive_ids)}"
-        )
+        classified_ids = COMPILED_CHAIN_PATTERN_IDS | PLANNER_ONLY_CHAIN_PATTERN_IDS
 
-        # Cross-module contract: every declared recipe-section key must
-        # resolve to a real `RecipeSection.section_id` in the registry.
-        # A typo (`"json_pipline"`) on a Pattern would otherwise silently
-        # fall through `_filter_recipe_sections` without activating
-        # anything.
-        from intric.flows.ai_builder.ai_builder_create_recipes import (
-            KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS,
-        )
+        assert COMPILED_CHAIN_PATTERN_IDS.isdisjoint(PLANNER_ONLY_CHAIN_PATTERN_IDS)
+        assert chain_bearing_ids == classified_ids
 
-        known_section_keys = frozenset(
-            section.section_id for section in KNOWLEDGE_PACK_CREATE_RECIPES_SECTIONS
-        )
+    def test_compiled_chain_patterns_have_realizers(self) -> None:
+        assert compiled_chain_realizer_ids() == COMPILED_CHAIN_PATTERN_IDS
 
-        for pattern_id, expected in canonical_seed.items():
-            pattern = PATTERN_REGISTRY[pattern_id]
-            assert pattern.recipe_sections == expected, (
-                f"{pattern_id}: recipe_sections drift. "
-                f"Expected {expected!r}, got {pattern.recipe_sections!r}"
-            )
-            unknown = frozenset(pattern.recipe_sections) - known_section_keys
-            assert not unknown, (
-                f"{pattern_id}: recipe_sections references unknown "
-                f"section_id(s) {sorted(unknown)}; must be a subset of "
-                f"{sorted(known_section_keys)}"
-            )
+    def test_every_chain_step_token_is_declared_in_manifest(self) -> None:
+        """Chain tokens are backend/compiler vocabulary.
+
+        The Pattern Registry chooses which token sequence belongs to a
+        pattern and owns the human-readable label for each token. Concrete
+        compiler step text lives in the outline compiler. This guard makes
+        token renames fail in tests instead of silently drifting between the
+        planner prompt and backend compiler.
+        """
+
+        registry_tokens = frozenset(
+            chain_step
+            for pattern in PATTERN_REGISTRY.values()
+            for chain_step in pattern.chain_steps
+        )
+        manifest_tokens = frozenset(CHAIN_STEP_DESCRIPTORS)
+
+        assert registry_tokens == manifest_tokens
+        for token, descriptor in CHAIN_STEP_DESCRIPTORS.items():
+            assert descriptor.token == token
+            assert descriptor.label.strip(), f"{token}: empty chain-step label"
 
 
 class TestNegativePatternContract:
@@ -417,20 +399,6 @@ class TestNegativePatternContract:
         surfaces the stale negative."""
         for pattern in negative_patterns:
             _NEGATIVE_FCM_ASSERTIONS[pattern.id]()
-
-    def test_negative_patterns_declare_no_recipe_sections(
-        self, negative_patterns: list[Pattern]
-    ) -> None:
-        """Negative patterns describe shapes the planner must avoid; they
-        must never activate a recipe section. An accidental populated
-        `recipe_sections` on a negative would let a score-based trigger
-        widen the recipe pack with the anti-pattern's guidance — the
-        opposite of what the negative is for."""
-        for pattern in negative_patterns:
-            assert pattern.recipe_sections == (), (
-                f"{pattern.id}: negative pattern must leave recipe_sections "
-                f"empty; got {pattern.recipe_sections!r}"
-            )
 
 
 class TestQuestionTemplateIdReferences:
@@ -702,14 +670,14 @@ class TestPatternRegistryPublicApi:
         make planning-state snapshots unreproducible."""
         assert render_knowledge_pack() == render_knowledge_pack()
 
-    def test_render_knowledge_pack_emits_chain_steps_when_present(self) -> None:
-        """Patterns with a non-empty `chain_steps` must surface the chain
-        tokens in the rendered pack — that is the whole point of the
-        field. The existing `multi_step_quality_chain` pattern is the
-        canonical carrier; the rendered block must contain an exact
-        `chain_steps: a -> b -> c -> d` line (sequence preserved, arrow
-        separator pinned) so the LLM reads the sequential shape rather
-        than a flat list."""
+    def test_render_knowledge_pack_emits_chain_shape_when_present(self) -> None:
+        """Patterns with compiler chain metadata should show a readable shape.
+
+        Raw `chain_steps` tokens are backend/compiler vocabulary, not prompt
+        instructions. The knowledge pack exposes the sequence as semantic
+        guidance so the planner understands the shape without learning
+        backend token names.
+        """
         rendered = render_knowledge_pack()
         chain_pattern = PATTERN_REGISTRY["multi_step_quality_chain"]
         assert chain_pattern.chain_steps, (
@@ -717,15 +685,20 @@ class TestPatternRegistryPublicApi:
             "test to be meaningful"
         )
         block = _extract_pattern_block(rendered, chain_pattern.id)
-        expected_line = "  chain_steps: " + " -> ".join(chain_pattern.chain_steps)
+        expected_line = (
+            "  chain_shape: receive uploaded document material -> "
+            "extract structured foundation -> analyze and review quality -> "
+            "create final output"
+        )
         assert expected_line in block, (
             f"rendered block for {chain_pattern.id} must contain the exact "
-            f"chain_steps line {expected_line!r}; block was:\n{block}"
+            f"chain_shape line {expected_line!r}; block was:\n{block}"
         )
+        assert "chain_steps:" not in block
 
-    def test_render_knowledge_pack_omits_chain_steps_when_absent(self) -> None:
+    def test_render_knowledge_pack_omits_chain_shape_when_absent(self) -> None:
         """Single-step patterns with empty `chain_steps` must not emit
-        a bare `chain_steps:` header — that would make the pack's
+        a bare `chain_shape:` header — that would make the pack's
         per-pattern block inconsistent and leak scaffolding prose to
         the planner. `summarize_text` is the canonical single-step
         pattern; its rendered block must not contain the label."""
@@ -735,8 +708,8 @@ class TestPatternRegistryPublicApi:
             "summarize_text must carry empty chain_steps for this test to be meaningful"
         )
         summarize_block = _extract_pattern_block(rendered, summarize.id)
-        assert "chain_steps:" not in summarize_block, (
-            f"single-step pattern {summarize.id} leaked `chain_steps:` "
+        assert "chain_shape:" not in summarize_block, (
+            f"single-step pattern {summarize.id} leaked `chain_shape:` "
             f"label; block was:\n{summarize_block}"
         )
 

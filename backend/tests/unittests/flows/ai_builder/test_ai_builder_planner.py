@@ -8,6 +8,10 @@ from uuid import uuid4
 import pytest
 
 from intric.files.file_models import File, FileType
+from intric.flows.ai_builder.ai_builder_event_models import (
+    KeyDecisionPayload,
+    RequirementsSummaryPayload,
+)
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
@@ -294,6 +298,120 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
 
 
 @pytest.mark.asyncio
+async def test_prepare_planner_request_skips_prompt_for_server_owned_action() -> None:
+    planner = _make_planner()
+    conversation = [ConversationMessage(role="user", content="Build a flow")]
+    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.resolve_requirements_state",
+            return_value=requirements_state,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            new_callable=AsyncMock,
+            return_value=(None, discovery_analysis),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_system_prompt",
+            return_value="system prompt",
+        ) as build_system_prompt,
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.compute_conversation_token_budget",
+            return_value=256,
+        ) as compute_budget,
+    ):
+        prepared = await planner._prepare_planner_request(
+            conversation=conversation,
+            message="Build a flow",
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+                unknown_model_context_window_tokens=8192,
+            ),
+            is_requirements_confirmation=False,
+            base_planning_state_version=4,
+        )
+
+    assert prepared.server_output is not None
+    assert prepared.server_output.planner_action.kind == "ask_question"
+    assert prepared.llm_messages == []
+    build_system_prompt.assert_not_called()
+    compute_budget.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_server_action_policy_overrides_stale_discovery_question() -> None:
+    planner = _make_planner()
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=(
+                "Skapa ett flöde som tar emot en kort text från användaren och "
+                "sammanfattar den i tre tydliga punkter."
+            ),
+        )
+    ]
+    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    discovery_analysis = SimpleNamespace(
+        mvs_met=False,
+        selected_question_ids=("input_material_mode",),
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.resolve_requirements_state",
+            return_value=requirements_state,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            new_callable=AsyncMock,
+            return_value=("legacy discovery question", discovery_analysis),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_system_prompt",
+            return_value="system prompt",
+        ) as build_system_prompt,
+    ):
+        prepared = await planner._prepare_planner_request(
+            conversation=conversation,
+            message=conversation[0].content,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+                unknown_model_context_window_tokens=8192,
+            ),
+            is_requirements_confirmation=False,
+            base_planning_state_version=4,
+        )
+
+    assert prepared.server_output is not None
+    assert prepared.server_output.planner_action.kind == "commit_architecture"
+    assert prepared.discovery_block_message is None
+    assert prepared.should_emit_forced_followup is False
+    assert prepared.llm_messages == []
+    build_system_prompt.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_prepare_planner_request_passes_attachment_context_into_system_prompt() -> (
     None
 ):
@@ -363,6 +481,96 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
         build_system_prompt.call_args.kwargs["attachment_context"]
         == "attachment context"
     )
+
+
+@pytest.mark.asyncio
+async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -> None:
+    planner = _make_planner()
+    conversation = [ConversationMessage(role="user", content="Build a report flow")]
+    requirements_state = SimpleNamespace(latest_summary=None, confirmed=True)
+    discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
+    state = PlanningState.empty()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=["summarize_text"],
+        required_capabilities=["input_document"],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="a" * 64,
+    )
+    requirements = RequirementsSummaryPayload(
+        summary="Build a report flow.",
+        key_decisions=[
+            KeyDecisionPayload(topic="Input", decision="Uploaded documents")
+        ],
+        input_description="Documents",
+        output_description="Report",
+        assumptions=[],
+        manual_setup_notes=[],
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.resolve_requirements_state",
+            return_value=requirements_state,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            new_callable=AsyncMock,
+            return_value=(None, discovery_analysis),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_planning_state_from_conversation",
+            return_value=state,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
+            return_value=requirements,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_system_prompt",
+            return_value="planner union prompt",
+        ) as build_system_prompt,
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.compute_conversation_token_budget",
+            return_value=256,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.trim_conversation_for_context",
+            return_value=[{"role": "user", "content": "Build a report flow"}],
+        ),
+    ):
+        prepared = await planner._prepare_planner_request(
+            conversation=conversation,
+            message="Build a report flow",
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            attachment_files=[],
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+                unknown_model_context_window_tokens=8192,
+            ),
+            is_requirements_confirmation=False,
+            base_planning_state_version=4,
+        )
+
+    assert prepared.proposal_mode is True
+    assert prepared.server_output is None
+    assert prepared.llm_messages[0]["role"] == "system"
+    assert "Call exactly one `outline_flow` tool" in prepared.llm_messages[0]["content"]
+    build_system_prompt.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_create_recipes import (
-    render_knowledge_pack_create_recipes,
-)
 from intric.flows.ai_builder.ai_builder_flow_architecture import (
     render_flow_architecture,
 )
@@ -21,10 +18,6 @@ from intric.flows.ai_builder.ai_builder_knowledge_pack_edit import (
 from intric.flows.ai_builder.ai_builder_knowledge_pack_protocol import (
     build_role_and_protocol,
     build_structured_reference_block,
-)
-from intric.flows.ai_builder.ai_builder_step_design import render_step_design
-from intric.flows.ai_builder.ai_builder_validation_repair import (
-    render_validation_repair_examples,
 )
 from intric.flows.ai_builder.pattern_registry import render_knowledge_pack
 
@@ -54,14 +47,7 @@ def build_prompt_knowledge_sections(
 
     sections.append(render_flow_architecture())
     if has_confirmed_requirements:
-        sections.extend(
-            [
-                render_step_design(),
-                render_knowledge_pack_create_recipes(),
-                render_validation_repair_examples(),
-                render_knowledge_pack(),
-            ]
-        )
+        sections.append(render_knowledge_pack())
     return sections
 
 

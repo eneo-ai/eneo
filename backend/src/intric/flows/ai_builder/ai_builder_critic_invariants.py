@@ -49,6 +49,7 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     PlannerPatternSignals,
 )
+from intric.flows.ai_builder.planning_state import AggregationIntent
 
 if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
@@ -73,6 +74,7 @@ class CriticContext:
     planner_patterns: PlannerPatternSignals
     output_intent: OutputIntentResolution
     mixed_audio_doc_input: bool
+    aggregation_intent: AggregationIntent = "linear"
 
 
 CriticCheck = Callable[[CriticContext], bool]
@@ -153,16 +155,6 @@ _FIELD_REUSE_MARKERS: tuple[str, ...] = (
     "nyckelfakta",
 )
 
-_MULTI_DOC_COMPARE_MARKERS: tuple[str, ...] = (
-    "compare",
-    "jämför",
-    "jämföra",
-    "multiple documents",
-    "flera dokument",
-    "document package",
-    "dokumentpaket",
-)
-
 
 def has_json_contract_step(spec: FlowDraftSpecCore) -> bool:
     """True when the spec has a non-terminal JSON step with an output contract.
@@ -220,10 +212,6 @@ def _spec_handles_audio(spec: FlowDraftSpecCore) -> bool:
 
 def _conversation_requests_field_reuse(text: str) -> bool:
     return any(marker in text for marker in _FIELD_REUSE_MARKERS)
-
-
-def _conversation_requests_multi_document_compare(text: str) -> bool:
-    return any(marker in text for marker in _MULTI_DOC_COMPARE_MARKERS)
 
 
 def _spec_uses_input_bindings(spec: FlowDraftSpecCore) -> bool:
@@ -606,9 +594,21 @@ _FIELD_REUSE_REQUIRES_INPUT_BINDINGS = CriticInvariant(
 def _multi_document_compare_requires_all_previous_steps_evidence(
     context: CriticContext,
 ) -> bool:
-    return _conversation_requests_multi_document_compare(
-        context.text
-    ) and not _spec_uses_all_previous_steps(context.spec)
+    return (
+        context.aggregation_intent in {"aggregate", "compare"}
+        and _spec_has_multiple_content_steps(context.spec)
+        and not _spec_uses_all_previous_steps(context.spec)
+    )
+
+
+def _spec_has_multiple_content_steps(spec: FlowDraftSpecCore) -> bool:
+    content_steps = [
+        step
+        for step in spec.steps
+        if step.output_mode != OutputMode.TEMPLATE_FILL
+        and step.output_type not in {OutputType.DOCX, OutputType.PDF}
+    ]
+    return len(content_steps) >= 2
 
 
 _MULTI_DOCUMENT_COMPARE_REQUIRES_ALL_PREVIOUS_STEPS = CriticInvariant(

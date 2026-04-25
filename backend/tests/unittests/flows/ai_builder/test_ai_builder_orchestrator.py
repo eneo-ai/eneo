@@ -9,12 +9,11 @@ per planner turn:
     "base_planning_state_version": int,
     "signals_added": [...],
     "slots_resolved": [...],
-    "architecture_commit": null | { "tuples_chain": [...], ... },
-    "draft_plan": null | { ... }
+    "architecture_commit": null | { "tuples_chain": [...], ... }
   },
   "planner_action": {
     "kind": "ask_question" | "commit_architecture"
-          | "confirm_requirements" | "propose_plan",
+          | "confirm_requirements",
     "payload": {...}
   }
 }
@@ -26,8 +25,6 @@ architecture-commit-semantics tests live alongside in
 """
 
 from __future__ import annotations
-
-from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -41,12 +38,10 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     ConfirmRequirementsPayload,
     PlannerOutput,
     PlanningStateDelta,
-    ProposePlanAction,
-    ProposePlanPayload,
     parse_planner_output,
 )
 from intric.flows.ai_builder.planning_state import (
-    ArchitectureCommit,
+    ArchitectureCommitDraft,
     PlanningSignal,
     ResolvedSlot,
     StepTriple,
@@ -63,7 +58,6 @@ def _empty_delta_dict(base_version: int = 0) -> dict:
         "signals_added": [],
         "slots_resolved": [],
         "architecture_commit": None,
-        "draft_plan": None,
     }
 
 
@@ -82,7 +76,6 @@ def _ask_question_output() -> dict:
 
 
 def _commit_architecture_output() -> dict:
-    architecture_hash = "a" * 64
     return {
         "planning_state_delta": {
             **_empty_delta_dict(base_version=2),
@@ -95,8 +88,7 @@ def _commit_architecture_output() -> dict:
                     }
                 ],
                 "chosen_patterns": ["text_summary_basic"],
-                "committed_at": datetime(2026, 4, 23, tzinfo=timezone.utc).isoformat(),
-                "architecture_hash": architecture_hash,
+                "required_capabilities": [],
             },
         },
         "planner_action": {
@@ -115,21 +107,6 @@ def _confirm_requirements_output() -> dict:
             "kind": "confirm_requirements",
             "payload": {
                 "summary": "Du vill sammanfatta inlämnad text till en kort rapport.",
-            },
-        },
-    }
-
-
-def _propose_plan_output() -> dict:
-    return {
-        "planning_state_delta": {
-            **_empty_delta_dict(base_version=4),
-            "draft_plan": {"steps": [], "form_fields": []},
-        },
-        "planner_action": {
-            "kind": "propose_plan",
-            "payload": {
-                "plan_reference": "latest",
             },
         },
     }
@@ -160,7 +137,7 @@ class TestPlannerOutputParsesEveryActionKind:
         assert output.planner_action.kind == "commit_architecture"
         assert isinstance(output.planner_action.payload, CommitArchitecturePayload)
         assert isinstance(
-            output.planning_state_delta.architecture_commit, ArchitectureCommit
+            output.planning_state_delta.architecture_commit, ArchitectureCommitDraft
         )
         assert output.planning_state_delta.architecture_commit.chosen_patterns == [
             "text_summary_basic"
@@ -173,16 +150,6 @@ class TestPlannerOutputParsesEveryActionKind:
         assert output.planner_action.kind == "confirm_requirements"
         assert isinstance(output.planner_action.payload, ConfirmRequirementsPayload)
         assert output.planner_action.payload.summary.startswith("Du vill")
-
-    def test_propose_plan_output_carries_draft_plan_in_delta(self) -> None:
-        output = parse_planner_output(_propose_plan_output())
-
-        assert isinstance(output.planner_action, ProposePlanAction)
-        assert output.planner_action.kind == "propose_plan"
-        assert isinstance(output.planner_action.payload, ProposePlanPayload)
-        assert output.planning_state_delta.draft_plan is not None
-        assert output.planning_state_delta.draft_plan.steps == []
-        assert output.planning_state_delta.draft_plan.form_fields == []
 
 
 class TestPlannerOutputIngestsSignalsAndSlotsIntoDelta:
@@ -209,7 +176,6 @@ class TestPlannerOutputIngestsSignalsAndSlotsIntoDelta:
                     }
                 ],
                 "architecture_commit": None,
-                "draft_plan": None,
             },
             "planner_action": {
                 "kind": "ask_question",
@@ -267,7 +233,7 @@ class TestPlannerOutputRejectsMalformedShapes:
             parse_planner_output(raw)
 
     def test_wrong_payload_shape_for_kind_rejected(self) -> None:
-        # ask_question requires question_id + slot_name; pass a propose_plan
+        # ask_question requires question_id + slot_name; pass an unrelated
         # payload instead.
         raw = _ask_question_output()
         raw["planner_action"]["payload"] = {"plan_reference": "latest"}
@@ -295,21 +261,22 @@ class TestPlannerOutputRejectsMalformedShapes:
         output = parse_planner_output(json.dumps(_ask_question_output()))
         assert output.planner_action.kind == "ask_question"
 
-    def test_draft_plan_envelope_rejects_invented_top_level_keys(self) -> None:
-        raw = _propose_plan_output()
-        raw["planning_state_delta"]["draft_plan"]["plan_rationale"] = "hallucinated"
+    def test_architecture_commit_rejects_server_owned_fields(self) -> None:
+        raw = _commit_architecture_output()
+        raw["planning_state_delta"]["architecture_commit"]["architecture_hash"] = (
+            "a" * 64
+        )
+        raw["planning_state_delta"]["architecture_commit"]["committed_at"] = (
+            "2026-04-24T18:35:00Z"
+        )
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError) as exc_info:
             parse_planner_output(raw)
 
-    def test_draft_plan_envelope_accepts_declared_keys_only(self) -> None:
-        raw = _propose_plan_output()
-        raw["planning_state_delta"]["draft_plan"] = {
-            "plan_id": "draft-1",
-            "steps": [{"id": "s1"}],
-            "form_fields": [{"name": "subject"}],
+        locs = {
+            ".".join(str(part) for part in error.get("loc", ()))
+            for error in exc_info.value.errors()
+            if error.get("type") == "extra_forbidden"
         }
-
-        output = parse_planner_output(raw)
-        assert output.planning_state_delta.draft_plan is not None
-        assert output.planning_state_delta.draft_plan.plan_id == "draft-1"
+        assert any(loc.endswith("architecture_hash") for loc in locs)
+        assert any(loc.endswith("committed_at") for loc in locs)

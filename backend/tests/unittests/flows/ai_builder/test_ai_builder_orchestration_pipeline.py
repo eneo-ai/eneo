@@ -10,8 +10,6 @@ Coverage:
 
 - A single happy-path turn returns `accepted` with
   `llm_calls_made=1`, `repair_attempts=0`.
-- A propose_plan action returns `accepted` with the parsed output
-  (the caller will route it to the proposal-processor adapter).
 - One rejection + one repair that parses clean returns `accepted`
   with `repair_attempts=1`, `llm_calls_made=2`.
 - Three consecutive rejections exhaust the budget and return
@@ -34,6 +32,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_action_policy import (
+    build_planner_action_policy,
+)
+from intric.flows.ai_builder.ai_builder_architecture_commit import (
+    canonical_architecture_commit_payload,
+)
 from intric.flows.ai_builder.ai_builder_orchestration_pipeline import (
     PipelineOutcome,
     run_planner_pipeline,
@@ -97,10 +101,14 @@ def _make_context(
     *,
     current_version: int = 0,
     state: PlanningState | None = None,
+    asked_question_ids: frozenset[str] = frozenset(),
+    required_slot_names: frozenset[str] = frozenset(),
 ) -> OrchestrationContext:
     return OrchestrationContext(
         current_version=current_version,
         session_state=state if state is not None else _make_planning_state(),
+        asked_question_ids=asked_question_ids,
+        required_slot_names=required_slot_names,
     )
 
 
@@ -115,8 +123,6 @@ def _minimal_payload(kind: str) -> dict[str, Any]:
         return {"note": ""}
     if kind == "confirm_requirements":
         return {"summary": "Resolved"}
-    if kind == "propose_plan":
-        return {"plan_reference": "latest"}
     raise AssertionError(f"unknown kind {kind}")
 
 
@@ -125,7 +131,6 @@ def _planner_output_json(
     kind: str,
     architecture_commit: ArchitectureCommit | None = None,
     base_version: int = 0,
-    draft_plan: dict[str, Any] | None = None,
 ) -> str:
     payload: dict[str, Any] = {
         "planning_state_delta": {
@@ -133,23 +138,31 @@ def _planner_output_json(
             "signals_added": [],
             "slots_resolved": [],
             "architecture_commit": (
-                architecture_commit.model_dump(mode="json")
+                canonical_architecture_commit_payload(architecture_commit)
                 if architecture_commit is not None
                 else None
             ),
-            "draft_plan": draft_plan,
         },
         "planner_action": {"kind": kind, "payload": _minimal_payload(kind)},
     }
     return json.dumps(payload)
 
 
-def _single_step_draft_plan() -> dict[str, Any]:
-    return {
-        "plan_id": "plan-1",
-        "steps": [{"step_ix": 0}],
-        "form_fields": [],
+def _ask_question_json(
+    *,
+    question_id: str,
+    slot_name: str,
+    base_version: int = 0,
+) -> str:
+    payload = json.loads(
+        _planner_output_json(kind="ask_question", base_version=base_version)
+    )
+    payload["planner_action"]["payload"] = {
+        "question_id": question_id,
+        "slot_name": slot_name,
+        "prompt": "Which runtime fields should the user provide?",
     }
+    return json.dumps(payload)
 
 
 def _llm_response(
@@ -198,51 +211,19 @@ class TestHappyPath:
         assert outcome.rejection is None
         llm.acompletion.assert_awaited_once()
 
-    async def test_propose_plan_returns_accepted_for_external_handoff(self) -> None:
-        """The pipeline never dispatches — the caller routes propose_plan
-        to the proposal-processor adapter from the accepted output."""
-        commit = _make_commit()
-        state = _make_planning_state(architecture_commit=commit)
-        llm = AsyncMock()
-        llm.acompletion.return_value = _llm_response(
-            _planner_output_json(
-                kind="propose_plan",
-                architecture_commit=commit,
-                base_version=0,
-                draft_plan=_single_step_draft_plan(),
-            )
-        )
-
-        outcome = await run_planner_pipeline(
-            litellm_client=llm,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            base_messages=[{"role": "system", "content": "system"}],
-            orchestration_context=_make_context(state=state),
-        )
-
-        assert outcome.kind == "accepted"
-        assert outcome.accepted_output is not None
-        assert outcome.accepted_output.planner_action.kind == "propose_plan"
-
 
 @pytest.mark.asyncio
 class TestRepairLoop:
     async def test_single_repair_recovers_from_eligible_rejection(self) -> None:
-        commit = _make_commit()
-        state = _make_planning_state(architecture_commit=commit)
         llm = AsyncMock()
         first_response = _llm_response(
-            _planner_output_json(
-                kind="propose_plan",
-                architecture_commit=commit,
+            _ask_question_json(
+                question_id="primary_runtime_input",
+                slot_name="primary_runtime_input",
             )
         )
         second_response = _llm_response(
-            _planner_output_json(
-                kind="propose_plan",
-                draft_plan=_single_step_draft_plan(),
-            )
+            _planner_output_json(kind="confirm_requirements")
         )
         llm.acompletion.side_effect = [first_response, second_response]
 
@@ -251,24 +232,25 @@ class TestRepairLoop:
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             base_messages=[{"role": "system", "content": "system"}],
-            orchestration_context=_make_context(state=state),
+            orchestration_context=_make_context(
+                asked_question_ids=frozenset({"primary_runtime_input"}),
+                required_slot_names=frozenset({"primary_runtime_input"}),
+            ),
         )
 
         assert outcome.kind == "accepted"
         assert outcome.accepted_output is not None
-        assert outcome.accepted_output.planner_action.kind == "propose_plan"
+        assert outcome.accepted_output.planner_action.kind == "confirm_requirements"
         assert outcome.accepted_output.planning_state_delta.architecture_commit is None
         assert outcome.llm_calls_made == 2
         assert outcome.repair_attempts == 1
 
     async def test_repair_budget_exhaustion_returns_terminal_rejection(self) -> None:
-        commit = _make_commit()
-        state = _make_planning_state(architecture_commit=commit)
         llm = AsyncMock()
         bad_response = _llm_response(
-            _planner_output_json(
-                kind="propose_plan",
-                architecture_commit=commit,
+            _ask_question_json(
+                question_id="primary_runtime_input",
+                slot_name="primary_runtime_input",
             )
         )
         llm.acompletion.side_effect = [bad_response] * 4
@@ -278,16 +260,15 @@ class TestRepairLoop:
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             base_messages=[{"role": "system", "content": "system"}],
-            orchestration_context=_make_context(state=state),
+            orchestration_context=_make_context(
+                asked_question_ids=frozenset({"primary_runtime_input"}),
+                required_slot_names=frozenset({"primary_runtime_input"}),
+            ),
         )
 
         assert outcome.kind == "rejected"
         assert outcome.rejection is not None
-        assert outcome.rejection.code in {
-            "propose_plan_without_architecture_commit",
-            "propose_plan_missing_draft_plan",
-            "propose_plan_draft_plan_structural_mismatch",
-        }
+        assert outcome.rejection.code == "duplicate_question"
         assert outcome.llm_calls_made == 4
         assert outcome.repair_attempts == 3
 
@@ -319,6 +300,281 @@ class TestShortCircuits:
         assert outcome.llm_calls_made == 1
         assert outcome.repair_attempts == 0
 
+    async def test_off_topic_question_repairs_to_canonical_slot(self) -> None:
+        """An invented question id is LLM vocabulary drift, not a user-visible
+        terminal failure. The guardrail should still reject it, but the
+        pipeline gets one bounded repair chance to re-emit a canonical
+        ask_question target from the same server-owned slot surface.
+        """
+        context = OrchestrationContext(
+            current_version=0,
+            session_state=_make_planning_state(),
+            required_slot_names=frozenset({"runtime_metadata_fields"}),
+        )
+        llm = AsyncMock()
+        llm.acompletion.side_effect = [
+            _llm_response(
+                _ask_question_json(
+                    question_id="case_type_scope",
+                    slot_name="case_type_scope",
+                )
+            ),
+            _llm_response(
+                _ask_question_json(
+                    question_id="runtime_metadata_fields",
+                    slot_name="runtime_metadata_fields",
+                )
+            ),
+        ]
+
+        outcome = await run_planner_pipeline(
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=context,
+        )
+
+        assert outcome.kind == "accepted"
+        assert outcome.accepted_output is not None
+        accepted_payload = outcome.accepted_output.planner_action.payload
+        assert accepted_payload.question_id == "runtime_metadata_fields"
+        assert accepted_payload.slot_name == "runtime_metadata_fields"
+        assert outcome.llm_calls_made == 2
+        assert outcome.repair_attempts == 1
+
+    async def test_disallowed_question_pivots_to_commit_without_repair(self) -> None:
+        """When the server policy has closed the question phase, do not ask
+        the LLM to repair an impossible question. Commit deterministically
+        if the same policy allows the architecture to be pinned.
+        """
+        state = _make_planning_state(resolve_core_slots=True)
+        context = OrchestrationContext(
+            current_version=0,
+            session_state=state,
+            action_policy=build_planner_action_policy(
+                session_state=state,
+                unresolved_architectural_choices=frozenset(),
+                selected_discovery_question_ids=frozenset(),
+            ),
+        )
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            _ask_question_json(
+                question_id="document_material_scope",
+                slot_name="document_material_scope",
+            )
+        )
+
+        outcome = await run_planner_pipeline(
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=context,
+        )
+
+        assert outcome.kind == "accepted"
+        assert outcome.accepted_output is not None
+        assert outcome.accepted_output.planner_action.kind == "commit_architecture"
+        assert (
+            outcome.accepted_output.planning_state_delta.architecture_commit is not None
+        )
+        assert outcome.llm_calls_made == 1
+        assert outcome.repair_attempts == 0
+
+    async def test_duplicate_question_repairs_to_action_pivot(self) -> None:
+        """Repeating an already-asked question without a user reply is model
+        loop drift, not a reason to fail the user's turn immediately.
+
+        The guardrail remains strict, but the repair loop gets a bounded
+        chance to pivot to a different unresolved slot or another valid
+        action before surfacing a terminal error.
+        """
+        context = OrchestrationContext(
+            current_version=0,
+            session_state=_make_planning_state(),
+            required_slot_names=frozenset(
+                {"runtime_metadata_fields", "structured_analysis_need"}
+            ),
+            asked_question_ids=frozenset({"runtime_metadata_fields"}),
+            has_new_evidence=False,
+        )
+        llm = AsyncMock()
+        llm.acompletion.side_effect = [
+            _llm_response(
+                _ask_question_json(
+                    question_id="runtime_metadata_fields",
+                    slot_name="runtime_metadata_fields",
+                )
+            ),
+            _llm_response(
+                _ask_question_json(
+                    question_id="structured_analysis_need",
+                    slot_name="structured_analysis_need",
+                )
+            ),
+        ]
+
+        outcome = await run_planner_pipeline(
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=context,
+        )
+
+        assert outcome.kind == "accepted"
+        assert outcome.accepted_output is not None
+        accepted_payload = outcome.accepted_output.planner_action.payload
+        assert accepted_payload.question_id == "structured_analysis_need"
+        assert accepted_payload.slot_name == "structured_analysis_need"
+        assert outcome.llm_calls_made == 2
+        assert outcome.repair_attempts == 1
+
+    async def test_parse_repairs_malformed_semantic_repair_output(self) -> None:
+        """Parse repair must cover every LLM output, not only the initial call.
+
+        Production failure 2026-04-24: initial output parsed, evaluator
+        repair ran, and the repair response was JSON-looking but
+        malformed (`json_decode_error="Extra data"`). The pipeline
+        surfaced `parse_failed` with `llm_calls_made=2` and
+        `parse_repair_attempts=0`, proving parse repair was not wired
+        for repair-call outputs.
+        """
+        context = OrchestrationContext(
+            current_version=0,
+            session_state=_make_planning_state(),
+            required_slot_names=frozenset({"runtime_metadata_fields"}),
+        )
+        valid_repair = _ask_question_json(
+            question_id="runtime_metadata_fields",
+            slot_name="runtime_metadata_fields",
+        )
+        malformed_repair = f"{valid_repair}\n{{}}"
+        llm = AsyncMock()
+        llm.acompletion.side_effect = [
+            _llm_response(
+                _ask_question_json(
+                    question_id="case_type_scope",
+                    slot_name="case_type_scope",
+                )
+            ),
+            _llm_response(malformed_repair),
+            _llm_response(valid_repair),
+        ]
+
+        outcome = await run_planner_pipeline(
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=context,
+        )
+
+        assert outcome.kind == "accepted"
+        assert outcome.accepted_output is not None
+        assert outcome.accepted_output.planner_action.kind == "ask_question"
+        assert outcome.llm_calls_made == 3
+        assert outcome.repair_attempts == 1
+        assert outcome.parse_repair_attempts == 1
+
+    async def test_missing_commit_delta_is_server_normalized_without_repair(
+        self,
+    ) -> None:
+        """`commit_architecture` is a semantic action; the server owns the
+        deterministic architecture draft when resolved slots are sufficient.
+
+        Missing commit body should therefore not spend a repair call or
+        rely on the model to re-author tuples/patterns/capabilities.
+        """
+        context = OrchestrationContext(
+            current_version=0,
+            session_state=_make_planning_state(),
+        )
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            _planner_output_json(
+                kind="commit_architecture",
+                architecture_commit=None,
+            )
+        )
+
+        outcome = await run_planner_pipeline(
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=context,
+        )
+
+        assert outcome.kind == "accepted"
+        assert outcome.accepted_output is not None
+        commit = outcome.accepted_output.planning_state_delta.architecture_commit
+        assert commit is not None
+        assert [triple.model_dump() for triple in commit.tuples_chain] == [
+            {
+                "input_type": "text",
+                "output_type": "text",
+                "output_mode": "pass_through",
+            }
+        ]
+        assert outcome.accepted_output.planner_action.kind == "commit_architecture"
+        assert outcome.llm_calls_made == 1
+        assert outcome.repair_attempts == 0
+
+    async def test_llm_freehand_commit_tuple_is_replaced_by_server_architecture(
+        self,
+    ) -> None:
+        """The LLM can choose the commit action, but not the canonical tuple.
+
+        A model-specific bad tuple should not create an invalid terminal
+        turn when the backend can derive the legal tuple from resolved
+        planning state.
+        """
+        bad_commit = _make_commit()
+        bad_commit.tuples_chain = [
+            StepTriple(
+                input_type="text",
+                output_type="text",
+                output_mode="template_fill",
+            )
+        ]
+        context = OrchestrationContext(
+            current_version=0,
+            session_state=_make_planning_state(),
+        )
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            _planner_output_json(
+                kind="commit_architecture",
+                architecture_commit=bad_commit,
+            )
+        )
+
+        outcome = await run_planner_pipeline(
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=context,
+        )
+
+        assert outcome.kind == "accepted"
+        assert outcome.accepted_output is not None
+        commit = outcome.accepted_output.planning_state_delta.architecture_commit
+        assert commit is not None
+        assert [triple.model_dump() for triple in commit.tuples_chain] == [
+            {
+                "input_type": "text",
+                "output_type": "text",
+                "output_mode": "pass_through",
+            }
+        ]
+        assert commit.chosen_patterns == ["summarize_text"]
+        assert outcome.llm_calls_made == 1
+        assert outcome.repair_attempts == 0
+
 
 @pytest.mark.asyncio
 class TestCommitDriftDuringRepair:
@@ -330,13 +586,22 @@ class TestCommitDriftDuringRepair:
         (llm_calls_made=2) but drift is NOT a consumed retry slot
         (repair_attempts=0)."""
         original_commit = _make_commit(architecture_hash="a" * 64)
-        drifted_commit = _make_commit(architecture_hash="b" * 64)
+        drifted_commit = _make_commit(
+            architecture_hash="b" * 64,
+        )
+        drifted_commit.tuples_chain = [
+            StepTriple(
+                input_type="text",
+                output_type="json",
+                output_mode="pass_through",
+            )
+        ]
         state = _make_planning_state(architecture_commit=original_commit)
         llm = AsyncMock()
         first = _llm_response(
-            _planner_output_json(
-                kind="propose_plan",
-                architecture_commit=original_commit,
+            _ask_question_json(
+                question_id="primary_runtime_input",
+                slot_name="primary_runtime_input",
             )
         )
         second = _llm_response(
@@ -352,7 +617,11 @@ class TestCommitDriftDuringRepair:
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             base_messages=[{"role": "system", "content": "system"}],
-            orchestration_context=_make_context(state=state),
+            orchestration_context=_make_context(
+                state=state,
+                asked_question_ids=frozenset({"primary_runtime_input"}),
+                required_slot_names=frozenset({"primary_runtime_input"}),
+            ),
         )
 
         assert outcome.kind == "rejected"
@@ -404,11 +673,12 @@ class TestParseFailures:
         """If a repair turn returns malformed JSON, the pipeline must
         surface parse_failed with the REPAIR call's metadata — not the
         initial call's."""
-        commit = _make_commit()
-        state = _make_planning_state(architecture_commit=commit)
         llm = AsyncMock()
         first = _llm_response(
-            _planner_output_json(kind="propose_plan", architecture_commit=commit),
+            _ask_question_json(
+                question_id="primary_runtime_input",
+                slot_name="primary_runtime_input",
+            ),
             finish_reason="stop",
             prompt_tokens=200,
             completion_tokens=60,
@@ -428,7 +698,10 @@ class TestParseFailures:
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             base_messages=[{"role": "system", "content": "system"}],
-            orchestration_context=_make_context(state=state),
+            orchestration_context=_make_context(
+                asked_question_ids=frozenset({"primary_runtime_input"}),
+                required_slot_names=frozenset({"primary_runtime_input"}),
+            ),
         )
 
         assert outcome.kind == "parse_failed"
@@ -479,21 +752,19 @@ class TestCompletionMetadataThreading:
         """When a repair produces the accepted output, final_completion
         carries the REPAIR call's metadata — so truncation detection
         and token telemetry reflect the final call."""
-        commit = _make_commit()
-        state = _make_planning_state(architecture_commit=commit)
         llm = AsyncMock()
         first = _llm_response(
-            _planner_output_json(kind="propose_plan", architecture_commit=commit),
+            _ask_question_json(
+                question_id="primary_runtime_input",
+                slot_name="primary_runtime_input",
+            ),
             finish_reason="stop",
             prompt_tokens=500,
             completion_tokens=40,
             total_tokens=540,
         )
         second = _llm_response(
-            _planner_output_json(
-                kind="propose_plan",
-                draft_plan=_single_step_draft_plan(),
-            ),
+            _planner_output_json(kind="confirm_requirements"),
             finish_reason="length",
             prompt_tokens=600,
             completion_tokens=1024,
@@ -506,7 +777,10 @@ class TestCompletionMetadataThreading:
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             base_messages=[{"role": "system", "content": "system"}],
-            orchestration_context=_make_context(state=state),
+            orchestration_context=_make_context(
+                asked_question_ids=frozenset({"primary_runtime_input"}),
+                required_slot_names=frozenset({"primary_runtime_input"}),
+            ),
         )
 
         assert outcome.kind == "accepted"

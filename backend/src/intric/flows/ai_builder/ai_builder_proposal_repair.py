@@ -3,8 +3,8 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from typing import Any
-from uuid import UUID
+from typing import Any, cast
+from uuid import UUID, uuid4
 
 from intric.flows.ai_builder.ai_builder_events import (
     build_error_event,
@@ -127,11 +127,12 @@ def _build_retry_feedback(
             "Do not include comments, placeholders, status notes, or quoted fragments inside arrays. "
             f"Rebuild any broken array entries as normal JSON objects and return one complete {target_tool_name} call."
         )
-    if target_tool_name == "create_flow":
+    if target_tool_name == "outline_flow":
         suffix = (
-            "Every steps[] item must be one complete create step object with at least name, instructions, input_source, and output_type. "
-            "Structured field definitions belong only in output_fields on a JSON step, and runtime form fields belong only in form_fields[]. "
-            "Keep valid parts and fix only the listed issues. Return one complete create_flow call."
+            "Every steps[] item must be one complete semantic outline step with at least name and task. "
+            "Runtime form inputs belong in top-level input_fields[], and steps should reference them by name in uses_input_fields. "
+            "Do not emit input_source, input_type, input_bindings, output_mode, refs, ids, hashes, or timestamps; backend compiles those mechanics. "
+            "Keep valid semantic parts and fix only the listed issues. Return one complete outline_flow call."
         )
     if retry_count >= 2:
         preamble = (
@@ -367,6 +368,21 @@ async def retry_forced_tool_after_text(
     if looks_like_information_request(assistant_text):
         return None
 
+    direct_event = await _try_process_json_text_as_tool_arguments(
+        assistant_text=assistant_text,
+        session_id=session_id,
+        conversation=conversation,
+        new_messages_start=new_messages_start,
+        available_model_refs=available_model_refs,
+        available_kb_refs=available_kb_refs,
+        target_tool_name=target_tool_name,
+        process_tool_arguments=process_tool_arguments,
+        process_tool_kwargs=process_tool_kwargs,
+        flow=flow,
+    )
+    if direct_event is not None:
+        return direct_event
+
     forced_messages = list(correction_messages) + [
         {"role": "assistant", "content": assistant_text},
         {
@@ -433,6 +449,79 @@ async def retry_forced_tool_after_text(
         return tool_result.event
 
     return None
+
+
+async def _try_process_json_text_as_tool_arguments(
+    *,
+    assistant_text: str,
+    session_id: UUID,
+    conversation: list[Any],
+    new_messages_start: int,
+    available_model_refs: set[str] | None,
+    available_kb_refs: set[str] | None,
+    target_tool_name: str,
+    process_tool_arguments: Callable[..., Awaitable[Any]],
+    process_tool_kwargs: dict[str, Any] | None,
+    flow: Any,
+) -> dict[str, str] | None:
+    arguments = _parse_json_object_text(assistant_text)
+    if arguments is None:
+        return None
+
+    invocation_kwargs = _build_process_tool_kwargs(
+        process_tool_arguments=process_tool_arguments,
+        process_tool_kwargs=process_tool_kwargs,
+        flow=flow,
+    )
+    tool_result = await process_tool_arguments(
+        session_id=session_id,
+        conversation=conversation,
+        new_messages_start=new_messages_start,
+        arguments=arguments,
+        assistant_content="Här är mitt korrigerade förslag:",
+        tool_call_id=f"call_text_{uuid4().hex}",
+        available_model_refs=available_model_refs,
+        available_kb_refs=available_kb_refs,
+        **invocation_kwargs,
+    )
+    if tool_result.event is not None:
+        logger.info(
+            "Accepted %s arguments returned as JSON text during forced retry.",
+            target_tool_name,
+        )
+        return tool_result.event
+
+    logger.warning(
+        "JSON text fallback for %s returned %s issue: %s",
+        target_tool_name,
+        tool_result.failure_kind or "unknown",
+        tool_result.feedback or "missing feedback",
+    )
+    return None
+
+
+def _parse_json_object_text(text: str) -> dict[str, Any] | None:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = _strip_json_fence(stripped)
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else None
+
+
+def _strip_json_fence(text: str) -> str:
+    lines = text.splitlines()
+    if not lines or not lines[0].startswith("```"):
+        return text
+    if lines[-1].strip() == "```":
+        lines = lines[1:-1]
+    else:
+        lines = lines[1:]
+    return "\n".join(lines).strip()
 
 
 def _safe_assistant_text(value: Any) -> str | None:

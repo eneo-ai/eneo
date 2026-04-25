@@ -35,7 +35,7 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
 )
 from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
-    CREATE_FLOW_TOOL_NAME,
+    OUTLINE_FLOW_TOOL_NAME,
 )
 from intric.flows.flow import Flow, FlowStep
 
@@ -239,7 +239,7 @@ class TestHandleConfirmRequirements:
 
 class TestProposalGating:
     @pytest.mark.asyncio
-    async def test_create_flow_is_rejected_until_latest_requirements_are_confirmed(
+    async def test_outline_flow_is_rejected_until_latest_requirements_are_confirmed(
         self,
     ) -> None:
         processor = _make_processor()
@@ -272,16 +272,16 @@ class TestProposalGating:
             ),
         ]
         tool_call = _make_tool_call(
-            CREATE_FLOW_TOOL_NAME,
+            OUTLINE_FLOW_TOOL_NAME,
             {
                 "flow_name": "Test Flow",
                 "plan_rationale": "Extraktion först.",
+                "runtime_input": {"input_type": "text", "required": True},
+                "final_output_type": "text",
                 "steps": [
                     {
                         "name": "Extract",
-                        "instructions": "Extract the text.",
-                        "input_source": "flow_input",
-                        "input_type": "text",
+                        "task": "Extract the text.",
                         "output_type": "text",
                     }
                 ],
@@ -936,21 +936,18 @@ class TestExtendedClarificationHints:
         followup = build_discovery_followup(conversation)
         assert followup is not None
         _issue, question, _text = followup
-        assert (
-            question["question"]
-            == "Vilken typ av dokument ska flödet främst arbeta med?"
-        )
+        assert question["question"] == "Vad ska flödet producera som slutresultat?"
         first_option = question["options"][0]
-        assert first_option["label"] == "Rapporter och formella dokument"
+        assert first_option["label"] == "Strukturerat textresultat"
         assert all(
             option["label"] != english
             for option, english in zip(
                 question["options"],
                 [
-                    "Reports and formal documents",
-                    "News or article-like material",
-                    "Contracts or agreements",
-                    "A mixed document package",
+                    "Structured text result",
+                    "PDF document",
+                    "DOCX document",
+                    "Structured JSON",
                 ],
                 strict=True,
             )
@@ -1284,6 +1281,31 @@ class TestExtendedClarificationHints:
         assert "document_kind" not in question_ids
         assert "final_pdf_type" not in question_ids
 
+    def test_swedish_uploaded_pdf_prompt_resolves_runtime_document_input(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Skapa ett flöde som tar emot uppladdade PDF-filer, analyserar "
+                    "innehållet och sammanfattar risker, beslutspunkter och nästa steg."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "input_material_mode" not in question_ids
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "final_output_mode"
+
     def test_generic_uploaded_pdf_docx_prompt_defaults_generated_docx_without_reasking(
         self,
     ) -> None:
@@ -1439,7 +1461,7 @@ class TestExtendedClarificationHints:
         assert "structured_analysis_need" not in question_ids
         assert "runtime_metadata_fields" not in question_ids
 
-    def test_case_like_flow_with_resolved_core_requirements_asks_runtime_metadata_fields(
+    def test_case_like_flow_with_resolved_core_requirements_defaults_runtime_metadata_fields(
         self,
     ) -> None:
         conversation = [
@@ -1505,7 +1527,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "runtime_metadata_fields" in question_ids
+        assert "runtime_metadata_fields" not in question_ids
 
     def test_case_like_flow_with_explicit_runtime_metadata_does_not_reask_runtime_metadata_fields(
         self,

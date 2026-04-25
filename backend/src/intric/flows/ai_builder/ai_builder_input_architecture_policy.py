@@ -82,6 +82,37 @@ _DOCUMENT_UPLOAD_MARKERS: tuple[str, ...] = (
     "keep documents",
 )
 
+_DOCUMENT_REFERENCE_PREFIXES: tuple[str, ...] = (
+    "pdf",
+    "docx",
+    "word",
+    "dokument",
+    "document",
+    "fil",
+    "file",
+    "bilag",
+    "attachment",
+)
+
+_RUNTIME_FILE_ACTION_PREFIXES: tuple[str, ...] = (
+    "uppladd",
+    "upload",
+    "bifog",
+    "attach",
+    "receiv",
+)
+
+_RUNTIME_FILE_ACTION_PHRASES: tuple[str, ...] = (
+    "ladda upp",
+    "skicka in",
+    "send in",
+    "runtime input",
+    "primary input",
+    "vid körning",
+    "lämna underlag",
+    "provide source material",
+)
+
 _TEXT_INPUT_MARKERS: tuple[str, ...] = (
     "klistra in",
     "paste as text",
@@ -103,6 +134,37 @@ _TEXT_INPUT_MARKERS: tuple[str, ...] = (
     "redan utskrivet",
     "transcript",
     "transkript",
+)
+
+_TEXT_REFERENCE_PREFIXES: tuple[str, ...] = (
+    "text",
+    "fritext",
+    "plaintext",
+    "transkript",
+    "transcript",
+    "anteckning",
+    "note",
+    "notes",
+)
+
+_RUNTIME_TEXT_ACTION_PREFIXES: tuple[str, ...] = (
+    "skriv",
+    "paste",
+    "klistra",
+    "ange",
+    "mata",
+    "provide",
+    "receiv",
+)
+
+_RUNTIME_TEXT_ACTION_PHRASES: tuple[str, ...] = (
+    "ta emot",
+    "tar emot",
+    "text input",
+    "runtime input",
+    "vid körning",
+    "vid korning",
+    "input field",
 )
 
 _OUTPUT_ONLY_EDIT_INPUT_CHANGE_MARKERS: tuple[str, ...] = (
@@ -444,17 +506,7 @@ def _document_runtime_input_requested(text: str) -> bool:
         ),
     ):
         return True
-    if _contains_any(text, ("pdf", "pdf er", "pdf:er")) and _contains_any(
-        text,
-        (
-            "ladda upp",
-            "upload",
-            "skicka in",
-            "send in",
-            "ta emot",
-            "receive",
-        ),
-    ):
+    if _mentions_runtime_document_input(text):
         return True
     if _mentions_source_material_underlag(text):
         return True
@@ -487,8 +539,41 @@ def _document_runtime_input_requested(text: str) -> bool:
     )
 
 
+def _mentions_runtime_document_input(text: str) -> bool:
+    """Detect file/document runtime input without enumerating every phrasing.
+
+    The discovery layer only needs to know whether the user's text implies
+    uploaded/provided source files. Exact business-domain document kinds belong
+    elsewhere; this helper intentionally combines generic file-action prefixes
+    with generic document/file references.
+    """
+
+    if not _mentions_document_reference(text):
+        return False
+    if contains_any_token_prefix(text, _RUNTIME_FILE_ACTION_PREFIXES):
+        return True
+    if _contains_any(text, _RUNTIME_FILE_ACTION_PHRASES):
+        return True
+    tokens = text.split()
+    return "emot" in tokens and any(token in {"ta", "tar"} for token in tokens)
+
+
+def _mentions_document_reference(text: str) -> bool:
+    return contains_any_token_prefix(text, _DOCUMENT_REFERENCE_PREFIXES)
+
+
 def _text_runtime_input_requested(text: str) -> bool:
-    return _contains_any(text, _TEXT_INPUT_MARKERS)
+    if _contains_any(text, _TEXT_INPUT_MARKERS):
+        return True
+    return _mentions_runtime_text_input(text)
+
+
+def _mentions_runtime_text_input(text: str) -> bool:
+    if not contains_any_token_prefix(text, _TEXT_REFERENCE_PREFIXES):
+        return False
+    if contains_any_token_prefix(text, _RUNTIME_TEXT_ACTION_PREFIXES):
+        return True
+    return _contains_any(text, _RUNTIME_TEXT_ACTION_PHRASES)
 
 
 def _has_explicit_input_resolution(explicit_question_ids: set[str] | None) -> bool:

@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import json
+
+from intric.flows.ai_builder.ai_builder_flow_schema_values import (
+    builder_input_source_values,
+    builder_input_type_values,
+    builder_output_mode_values,
+    builder_output_type_values,
+)
 from intric.flows.ai_builder.ai_builder_knowledge_pack import (
     build_prompt_knowledge_sections,
     build_role_and_protocol,
     build_structured_reference_block,
 )
+from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY
 
 
 def test_build_prompt_knowledge_sections_for_create_discovery_is_compact() -> None:
@@ -13,12 +22,12 @@ def test_build_prompt_knowledge_sections_for_create_discovery_is_compact() -> No
         has_confirmed_requirements=False,
     )
 
-    assert any("Create-flow-kompilering" in section for section in sections)
+    assert any("Outline-flow-kompilering" in section for section in sections)
     assert not any("Create-läge: vanliga mönster" in section for section in sections)
     assert not any("Validation Repair Examples" in section for section in sections)
 
 
-def test_build_prompt_knowledge_sections_for_create_proposal_includes_full_create_guidance() -> (
+def test_build_prompt_knowledge_sections_for_create_after_confirmation_stays_compact() -> (
     None
 ):
     sections = build_prompt_knowledge_sections(
@@ -26,10 +35,12 @@ def test_build_prompt_knowledge_sections_for_create_proposal_includes_full_creat
         has_confirmed_requirements=True,
     )
 
-    assert any("Create-flow-kompilering" in section for section in sections)
-    assert any("Create-läge: kompilerad datamodell" in section for section in sections)
-    assert any("Create-läge: vanliga mönster" in section for section in sections)
-    assert any("Validation Repair Examples" in section for section in sections)
+    assert any("Outline-flow-kompilering" in section for section in sections)
+    assert not any(
+        "Create-läge: kompilerad datamodell" in section for section in sections
+    )
+    assert not any("Create-läge: vanliga mönster" in section for section in sections)
+    assert not any("Validation Repair Examples" in section for section in sections)
 
 
 def test_build_prompt_knowledge_sections_for_edit_mode_uses_edit_guidance() -> None:
@@ -97,7 +108,38 @@ def test_role_and_reference_blocks_switch_submission_tool_by_mode() -> None:
     create_reference = build_structured_reference_block(is_edit_mode=False)
     edit_reference = build_structured_reference_block(is_edit_mode=True)
 
-    assert "create_flow" in create_role
+    assert "outline_flow" in create_role
     assert "edit_flow" in edit_role
-    assert '"submission_tool": "create_flow"' in create_reference
+    assert '"submission_tool": "outline_flow"' in create_reference
     assert '"submission_tool": "edit_flow"' in edit_reference
+
+
+def test_structured_reference_is_generated_from_flow_capability_sources() -> None:
+    reference = build_structured_reference_block(is_edit_mode=False)
+    payload = _extract_json_block(reference)
+
+    assert payload["flow_capability_source"] == (
+        "AI Builder schema values + Flow Capability Manifest"
+    )
+    assert "input_source" not in payload
+    assert "output_mode" not in payload
+    assert "semantic_input_strategy" not in payload
+    assert payload["input_type"] == builder_input_type_values()
+    assert payload["output_type"] == builder_output_type_values()
+    assert payload["builder_capabilities"] == sorted(
+        cap.id for cap in CAPABILITY_REGISTRY.values() if cap.exposure == "builder"
+    )
+
+
+def test_edit_structured_reference_keeps_raw_flow_wiring_surface() -> None:
+    reference = build_structured_reference_block(is_edit_mode=True)
+    payload = _extract_json_block(reference)
+
+    assert payload["input_source"] == builder_input_source_values()
+    assert payload["output_mode"] == builder_output_mode_values()
+
+
+def _extract_json_block(markdown: str) -> dict[str, object]:
+    start = markdown.index("```json") + len("```json")
+    end = markdown.index("```", start)
+    return json.loads(markdown[start:end])

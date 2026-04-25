@@ -1,9 +1,9 @@
-"""Flow-architecture rules registry tests.
+"""Outline-flow architecture rules registry tests.
 
 Pins the structured-data contract that replaces the hand-prose
-`_KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE` constant in
-`ai_builder_knowledge_pack_create`. The renderer must preserve the
-top-level header the existing prompt-level tests assert against
+low-level Flow mechanics in legacy create-mode prompts.
+The renderer must preserve the top-level header the existing
+prompt-level tests assert against
 (`test_ai_builder_prompts.py::test_prompt_contains_knowledge_pack_sections`
 and `test_ai_builder_knowledge_pack.py` substring guards).
 """
@@ -24,10 +24,10 @@ from intric.flows.ai_builder.ai_builder_flow_architecture import (
 class TestFlowArchitectureSectionDataclass:
     def test_section_dataclass_is_frozen_with_heading_and_rules(self) -> None:
         section = FlowArchitectureSection(
-            heading="Vad du SKA ange",
+            heading="Vad modellen anger",
             rules=("rule one", "rule two"),
         )
-        assert section.heading == "Vad du SKA ange"
+        assert section.heading == "Vad modellen anger"
         assert section.rules == ("rule one", "rule two")
         with pytest.raises(FrozenInstanceError):
             section.heading = "mutated"  # type: ignore[misc]
@@ -35,9 +35,6 @@ class TestFlowArchitectureSectionDataclass:
 
 class TestFlowArchitectureRegistryContract:
     def test_registry_contains_three_canonical_sections(self) -> None:
-        """Pin the three hand-prose section headings from the replaced
-        constant — `Vad du SKA ange` / `Vad backend äger` / `Praktiska
-        regler` — so a silent drop or merge trips CI."""
         assert len(FLOW_ARCHITECTURE_SECTIONS) == 3
 
     def test_registry_covers_three_canonical_headings(self) -> None:
@@ -45,7 +42,7 @@ class TestFlowArchitectureRegistryContract:
         future reorder for pedagogical reasons does not break the
         contract."""
         headings = {section.heading for section in FLOW_ARCHITECTURE_SECTIONS}
-        assert "Vad du SKA ange" in headings
+        assert "Vad modellen anger" in headings
         assert "Vad backend äger" in headings
         assert "Praktiska regler" in headings
 
@@ -63,12 +60,12 @@ class TestFlowArchitectureRegistryContract:
 
 class TestRenderFlowArchitecture:
     def test_render_emits_top_level_header(self) -> None:
-        """`# Create-flow-kompilering` is the top-level header asserted
+        """`# Outline-flow-kompilering` is the top-level header asserted
         as a substring by
         `test_build_prompt_knowledge_sections_for_create_proposal_includes_full_create_guidance`
         and `test_prompt_contains_knowledge_pack_sections`."""
         rendered = render_flow_architecture()
-        assert "# Create-flow-kompilering" in rendered
+        assert "# Outline-flow-kompilering" in rendered
 
     def test_render_emits_lead_paragraph(self) -> None:
         """The lead paragraph explains the create-mode contract (planner
@@ -77,13 +74,13 @@ class TestRenderFlowArchitecture:
         bullets."""
         rendered = render_flow_architecture()
         assert (
-            "I create-läge beskriver du bara avsikten i `create_flow`. "
-            "Backend kompilerar utkastet till den kanoniska flödesspecifikationen."
+            "I create-läge beskriver modellen bara avsikten i `outline_flow`. "
+            "Backend kompilerar outline till kanonisk flödesspecifikation."
         ) in rendered
 
     def test_render_emits_every_section_heading(self) -> None:
         rendered = render_flow_architecture()
-        assert "## Vad du SKA ange" in rendered
+        assert "## Vad modellen anger" in rendered
         assert "## Vad backend äger" in rendered
         assert "## Praktiska regler" in rendered
 
@@ -127,72 +124,69 @@ class TestRenderFlowArchitecture:
         planner; documented in the slice commit body."""
         expected = "\n".join(
             [
-                "# Create-flow-kompilering",
+                "# Outline-flow-kompilering",
                 "",
                 (
-                    "I create-läge beskriver du bara avsikten i `create_flow`. "
-                    "Backend kompilerar utkastet till den kanoniska flödesspecifikationen."
+                    "I create-läge beskriver modellen bara avsikten i `outline_flow`. "
+                    "Backend kompilerar outline till kanonisk flödesspecifikation."
                 ),
                 "",
-                "## Vad du SKA ange",
-                "- `instructions` — vanlig text utan variabelsyntax",
-                "- `input_source`, `input_type`, `output_type`",
+                "## Vad modellen anger",
                 (
-                    "- `runtime_upload`, `runtime_required`, `runtime_max_files` "
-                    "för första uppladdningssteget"
+                    "- `flow_name`, `flow_description` och `plan_rationale` "
+                    "som vanlig text"
                 ),
-                "- `uses_form_fields` när senare steg behöver formulärvärden",
                 (
-                    "- `uses_previous_fields` när senare steg behöver specifika "
-                    "strukturerade fält från tidigare JSON-steg"
+                    "- `runtime_input` beskriver bara huvudingången vid körning "
+                    "(`text`, `json`, `document`, `file` eller `audio`)"
                 ),
-                "- `document_delivery_mode` för PDF/DOCX-leverans",
-                "- `citations_requested` för textsteg som ska ha källhänvisningar",
-                "- `output_fields` för JSON-steg",
+                (
+                    "- `input_fields` modellerar inmatningsfält/input variables "
+                    "som användaren fyller i"
+                ),
+                "- `steps[].name` och `steps[].task` beskriver semantiska arbetssteg",
+                (
+                    "- `steps[].output_fields` används när ett steg ska producera "
+                    "strukturerade datapunkter för senare arbete"
+                ),
+                "- `steps[].uses_input_fields` refererar till namn i `input_fields`",
+                (
+                    "- `final_output_type` anger slutartefakten (`text`, `json`, "
+                    "`pdf` eller `docx`)"
+                ),
                 "",
                 "## Vad backend äger",
+                "- input source/type och upload/runtime config",
+                "- `underlag` / input bindings och variabelinjektion mellan steg",
                 "- stegrefar (`plan_step_ref`)",
-                "- underlag / variabelinjektion mellan steg",
-                "- kontrakt / JSON Schema",
                 "- `output_mode`",
-                "- runtime-input-config",
+                "- `document_delivery_mode` för PDF/DOCX-leverans",
+                "- `uses_previous_fields` och fältnivåreferenser mellan JSON-steg",
+                "- kontrakt / JSON Schema från `output_fields`",
                 "",
                 "## Praktiska regler",
-                '- Steg 1 MÅSTE använda `input_source="flow_input"`',
+                "- Skriv inga template-variabler som `{{ ... }}` i outline-fält",
+                "- Skriv inga ID:n, hashvärden, tidsstämplar, råa bindings eller rå JSON Schema",
+                "- Använd flera tydliga steg för komplexa flöden i stället för ett överlastat steg",
                 (
-                    '- Senare steg får inte använda `input_source="flow_input"`; '
-                    "använd `previous_step` eller `all_previous_steps`"
+                    "- Lägg körningsmetadata som ska återanvändas i `input_fields`, "
+                    "inte gömt i prompttext"
                 ),
                 (
-                    "- Sista steget MÅSTE ha `output_type` som matchar den explicit "
-                    "efterfrågade slutartefakten (`text`, `json`, `pdf` eller `docx`)"
+                    "- Använd `output_fields` när senare steg behöver stabila fält; "
+                    "backend gör steget strukturerat"
                 ),
                 (
-                    "- När flera uppladdade dokument ska vägas samman i en gemensam "
-                    "analys eller grounded sammanfattning ska ett samlande steg använda "
-                    '`input_source="all_previous_steps"`'
+                    "- Beskriv syntes/jämförelse semantiskt; backend avgör när flera "
+                    "tidigare steg ska kopplas in som källa"
                 ),
                 (
-                    "- Varje objekt i `steps` måste vara ett komplett steg. "
-                    "Fältdefinitioner med `name`, `field_type`, `description` och "
-                    "`required` hör hemma i `output_fields`, inte som egna poster i "
-                    "`steps`"
+                    "- För DOCX/PDF räcker `final_output_type`; backend skapar "
+                    "leveranssteget eller dokumentläget"
                 ),
                 (
-                    "- Filuppladdning används via `runtime_upload=true` på ett "
-                    "`flow_input`-steg med `input_type=document`, `file` eller `audio`"
-                ),
-                (
-                    '- Använd `output_type="json"` + `output_fields` när nästa steg '
-                    "behöver namngivna datapunkter"
-                ),
-                (
-                    '- Använd `output_type="text"` för grounded sammanfattningar, '
-                    "resonemang och läsbar rapporttext"
-                ),
-                (
-                    '- Använd `output_type="docx"` eller `"pdf"` bara när steget '
-                    "faktiskt levererar dokumentet"
+                    "- Citations kan begäras bara som semantisk önskan på textsteg; "
+                    "backend validerar om det stöds"
                 ),
             ]
         )

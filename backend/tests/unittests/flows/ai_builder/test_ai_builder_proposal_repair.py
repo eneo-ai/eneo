@@ -35,7 +35,7 @@ def _bad_tool_response(call_index: int) -> SimpleNamespace:
     tool_call = SimpleNamespace(
         id=f"retry_{call_index}",
         function=SimpleNamespace(
-            name="create_flow",
+            name="outline_flow",
             arguments=json.dumps(
                 {"flow_name": "T", "plan_rationale": "R", "steps": []}
             ),
@@ -48,7 +48,7 @@ def _bad_tool_response(call_index: int) -> SimpleNamespace:
 def _original_tool_call() -> SimpleNamespace:
     return SimpleNamespace(
         id="orig",
-        function=SimpleNamespace(name="create_flow", arguments="{}"),
+        function=SimpleNamespace(name="outline_flow", arguments="{}"),
     )
 
 
@@ -77,7 +77,7 @@ async def test_retry_forced_tool_after_text_does_not_inject_flow_into_processors
     result = await retry_forced_tool_after_text(
         correction_messages=[{"role": "system", "content": "Prompt"}],
         assistant_text="Här är mitt förslag.",
-        tool_schemas=[{"function": {"name": "create_flow"}}],
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         session_id=uuid4(),
@@ -86,12 +86,12 @@ async def test_retry_forced_tool_after_text_does_not_inject_flow_into_processors
         available_model_refs=None,
         available_kb_refs=None,
         max_output_tokens=1024,
-        target_tool_name="create_flow",
-        forced_tool_prompt="Call create_flow.",
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
         forced_proposal_temperature=0.1,
         call_repair_completion=AsyncMock(
             return_value=_tool_response(
-                tool_name="create_flow",
+                tool_name="outline_flow",
                 arguments={"flow_name": "Test", "plan_rationale": "R", "steps": []},
             )
         ),
@@ -104,13 +104,68 @@ async def test_retry_forced_tool_after_text_does_not_inject_flow_into_processors
     assert processed_arguments["flow_name"] == "Test"
 
 
+@pytest.mark.asyncio
+async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_text() -> (
+    None
+):
+    processed_arguments: dict[str, object] = {}
+    call_repair_completion = AsyncMock()
+
+    async def process_create_arguments(
+        *,
+        session_id,
+        conversation,
+        new_messages_start,
+        arguments,
+        assistant_content,
+        tool_call_id,
+        available_model_refs,
+        available_kb_refs,
+    ):
+        processed_arguments.update(arguments)
+        return SimpleNamespace(
+            event={"event": "plan", "data": "{}"}, feedback=None, failure_kind=None
+        )
+
+    result = await retry_forced_tool_after_text(
+        correction_messages=[{"role": "system", "content": "Prompt"}],
+        assistant_text=json.dumps(
+            {
+                "flow_name": "Text JSON outline",
+                "plan_rationale": "The model returned JSON as prose.",
+                "steps": [{"name": "Analyze", "task": "Analyze the input."}],
+            }
+        ),
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        session_id=uuid4(),
+        conversation=[],
+        new_messages_start=0,
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
+        forced_proposal_temperature=0.1,
+        call_repair_completion=call_repair_completion,
+        process_tool_arguments=process_create_arguments,
+        process_tool_kwargs=None,
+        flow=None,
+    )
+
+    assert result == {"event": "plan", "data": "{}"}
+    assert processed_arguments["flow_name"] == "Text JSON outline"
+    call_repair_completion.assert_not_awaited()
+
+
 def test_max_self_correction_retries_budgets_three_retries() -> None:
     assert MAX_SELF_CORRECTION_RETRIES == 3
 
 
 def test_build_retry_feedback_uses_standard_preamble_on_first_retry() -> None:
     feedback = _build_retry_feedback(
-        target_tool_name="create_flow",
+        target_tool_name="outline_flow",
         feedback="missing field X",
         failure_kind="validation",
         retry_count=1,
@@ -121,7 +176,7 @@ def test_build_retry_feedback_uses_standard_preamble_on_first_retry() -> None:
 
 def test_build_retry_feedback_escalates_to_stronger_preamble_on_second_retry() -> None:
     feedback = _build_retry_feedback(
-        target_tool_name="create_flow",
+        target_tool_name="outline_flow",
         feedback="missing field X",
         failure_kind="validation",
         retry_count=2,
@@ -132,7 +187,7 @@ def test_build_retry_feedback_escalates_to_stronger_preamble_on_second_retry() -
 
 def test_build_retry_feedback_keeps_stronger_preamble_on_third_retry() -> None:
     feedback = _build_retry_feedback(
-        target_tool_name="create_flow",
+        target_tool_name="outline_flow",
         feedback="missing field X",
         failure_kind="validation",
         retry_count=3,
@@ -189,7 +244,7 @@ async def _run_repair_capturing(
         error_message="original invalid",
         llm_messages=[{"role": "user", "content": "go"}],
         tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": "create_flow"}}],
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         available_model_refs=None,
@@ -200,8 +255,8 @@ async def _run_repair_capturing(
         max_self_correction_retries=max_retries,
         call_repair_completion=call_repair_completion,
         process_tool_arguments=process_tool_arguments,
-        target_tool_name="create_flow",
-        forced_tool_prompt="Call create_flow.",
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
         build_self_correction_error_event=lambda *, feedback, failure_kind: {
             "event": "error",
             "data": feedback or "",
@@ -273,7 +328,7 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
         error_message="Structured field nesting depth cannot exceed 3.",
         llm_messages=[{"role": "user", "content": "build flow"}],
         tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": "create_flow"}}],
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         available_model_refs=None,
@@ -284,8 +339,8 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
         max_self_correction_retries=3,
         call_repair_completion=call_repair_completion,
         process_tool_arguments=process_tool_arguments,
-        target_tool_name="create_flow",
-        forced_tool_prompt="Call create_flow.",
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
         build_self_correction_error_event=lambda *, feedback, failure_kind: {
             "event": "error",
             "data": feedback or "",
@@ -349,7 +404,7 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
         error_message="original invalid",
         llm_messages=[{"role": "user", "content": "go"}],
         tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": "create_flow"}}],
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         available_model_refs=None,
@@ -360,8 +415,8 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
         max_self_correction_retries=3,
         call_repair_completion=call_repair_completion,
         process_tool_arguments=process_tool_arguments,
-        target_tool_name="create_flow",
-        forced_tool_prompt="Call create_flow.",
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
         build_self_correction_error_event=lambda *, feedback, failure_kind: {
             "event": "error",
             "data": feedback or "",

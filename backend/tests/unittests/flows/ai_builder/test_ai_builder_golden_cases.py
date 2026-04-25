@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_models import AssistantSpec, FlowDraftSpecCore, FormFieldSpec, StepSpec
+from intric.flows.ai_builder.ai_builder_models import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    FormFieldSpec,
+    StepSpec,
+)
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
 
 
@@ -26,7 +31,10 @@ class TestAIBuilderGoldenCases:
                         "type": "object",
                         "properties": {
                             "titel": {"type": "string", "description": "Kort rubrik"},
-                            "sammanfattning": {"type": "string", "description": "Kort sammanfattning"},
+                            "sammanfattning": {
+                                "type": "string",
+                                "description": "Kort sammanfattning",
+                            },
                             "risk": {"type": "string", "description": "Risknivå"},
                         },
                     },
@@ -81,7 +89,9 @@ class TestAIBuilderGoldenCases:
                 )
             ],
             form_fields=[
-                FormFieldSpec(name="Bakgrund", type="text", label="Bakgrund", required=True),
+                FormFieldSpec(
+                    name="Bakgrund", type="text", label="Bakgrund", required=True
+                ),
                 FormFieldSpec(name="Mål", type="text", label="Mål", required=True),
                 FormFieldSpec(
                     name="Prioritet",
@@ -113,9 +123,18 @@ class TestAIBuilderGoldenCases:
                     output_contract={
                         "type": "object",
                         "properties": {
-                            "projektnamn": {"type": "string", "description": "Projektets namn"},
-                            "agare": {"type": "string", "description": "Ansvarig ägare"},
-                            "slutsats": {"type": "string", "description": "Kort slutsats"},
+                            "projektnamn": {
+                                "type": "string",
+                                "description": "Projektets namn",
+                            },
+                            "agare": {
+                                "type": "string",
+                                "description": "Ansvarig ägare",
+                            },
+                            "slutsats": {
+                                "type": "string",
+                                "description": "Kort slutsats",
+                            },
                         },
                     },
                 ),

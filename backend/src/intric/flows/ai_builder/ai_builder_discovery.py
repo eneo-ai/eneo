@@ -640,7 +640,7 @@ def build_discovery_guidance(
     suggestion = next_issue.suggestion
     lines = [
         "- Discovery protocol: there is still blocking ambiguity or a contradiction.",
-        "- Ask exactly ONE structured question now. Do not call `confirm_requirements`, `create_flow`, or `edit_flow` yet.",
+        "- Ask exactly ONE structured question now. Do not call `confirm_requirements`, `outline_flow`, or `edit_flow` yet.",
         f"- Highest-priority blocker: {next_issue.message}",
         f'- Use `question_id="{suggestion.question_id}"`.',
         f"- Ask this question: {suggestion.question}",

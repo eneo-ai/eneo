@@ -14,6 +14,7 @@ from __future__ import annotations
 import typing
 from datetime import datetime, timezone
 
+from intric.flows.ai_builder.ai_builder_action_policy import PlannerActionPolicy
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     OrchestrationContext,
     RejectionCode,
@@ -39,7 +40,6 @@ def _empty_delta_dict(base_version: int = 0) -> dict:
         "signals_added": [],
         "slots_resolved": [],
         "architecture_commit": None,
-        "draft_plan": None,
     }
 
 
@@ -69,7 +69,6 @@ def _commit_architecture(
     required_capabilities: list[str] | None = None,
     chosen_patterns: list[str] | None = None,
 ) -> dict:
-    hash_hex = "a" * 64
     chain = (
         tuples_chain
         if tuples_chain is not None
@@ -92,8 +91,6 @@ def _commit_architecture(
                     else ["summarize_text"]
                 ),
                 "required_capabilities": required_capabilities or [],
-                "committed_at": datetime(2026, 4, 23, tzinfo=timezone.utc).isoformat(),
-                "architecture_hash": hash_hex,
             },
         },
         "planner_action": {
@@ -103,20 +100,19 @@ def _commit_architecture(
     }
 
 
-def _propose_plan(
-    *,
-    base_version: int = 0,
-    step_count: int = 1,
-    include_draft_plan: bool = True,
-) -> dict:
-    delta: dict = {**_empty_delta_dict(base_version=base_version)}
-    if include_draft_plan:
-        delta["draft_plan"] = {"steps": [{"id": f"s{i}"} for i in range(step_count)]}
+def _confirm_requirements(*, base_version: int = 0) -> dict:
     return {
-        "planning_state_delta": delta,
+        "planning_state_delta": _empty_delta_dict(base_version=base_version),
         "planner_action": {
-            "kind": "propose_plan",
-            "payload": {"plan_reference": "latest"},
+            "kind": "confirm_requirements",
+            "payload": {
+                "summary": "Resolved requirements.",
+                "key_decisions": [],
+                "input_description": "",
+                "output_description": "",
+                "assumptions": [],
+                "manual_setup_notes": [],
+            },
         },
     }
 
@@ -173,16 +169,20 @@ def _ctx(
     current_version: int = 0,
     asked_question_ids: frozenset[str] = frozenset(),
     has_new_evidence: bool = False,
+    question_ids_with_new_evidence: frozenset[str] = frozenset(),
     unresolved_architectural_choices: frozenset[str] = frozenset(),
     required_slot_names: frozenset[str] = frozenset(),
+    action_policy: PlannerActionPolicy | None = None,
 ) -> OrchestrationContext:
     return OrchestrationContext(
         current_version=current_version,
         session_state=session_state or _empty_session_state(),
         asked_question_ids=asked_question_ids,
         has_new_evidence=has_new_evidence,
+        question_ids_with_new_evidence=question_ids_with_new_evidence,
         unresolved_architectural_choices=unresolved_architectural_choices,
         required_slot_names=required_slot_names,
+        action_policy=action_policy,
     )
 
 
@@ -208,6 +208,40 @@ class TestVersionMismatchGuardrail:
         output = parse_planner_output(_ask_question(base_version=3))
         context = _ctx(
             current_version=3, required_slot_names=frozenset({"final_output_mode"})
+        )
+
+        assert evaluate_planner_output(output, context) is None
+
+
+# ---------------------------------------------------------------------------
+# Guardrail 7 — server-owned action policy
+# ---------------------------------------------------------------------------
+
+
+class TestActionPolicyGuardrail:
+    def test_rejects_action_not_allowed_by_server_policy(self) -> None:
+        output = parse_planner_output(_commit_architecture())
+        context = _ctx(
+            session_state=_session_state_with_core_slots_resolved(),
+            action_policy=PlannerActionPolicy(
+                allowed_action_kinds=("confirm_requirements",),
+                blocked_action_reasons={"commit_architecture": "already committed"},
+            ),
+        )
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "action_not_allowed"
+        assert "already committed" in rejection.detail
+
+    def test_accepts_action_allowed_by_server_policy(self) -> None:
+        output = parse_planner_output(_confirm_requirements())
+        context = _ctx(
+            session_state=_session_state_with_commit(),
+            action_policy=PlannerActionPolicy(
+                allowed_action_kinds=("confirm_requirements",),
+            ),
         )
 
         assert evaluate_planner_output(output, context) is None
@@ -242,6 +276,52 @@ class TestDuplicateQuestionGuardrail:
 
         assert evaluate_planner_output(output, context) is None
 
+    def test_rejects_repeat_question_after_slot_is_already_resolved(self) -> None:
+        state = PlanningState.empty()
+        state.resolved_slots["document_material_scope"] = ResolvedSlot(
+            name="document_material_scope",
+            value="flexible_document_case",
+            source="heuristic",
+            confidence="medium",
+        )
+        output = parse_planner_output(
+            _ask_question(
+                question_id="document_material_scope",
+                slot_name="document_material_scope",
+            )
+        )
+        context = _ctx(
+            session_state=state,
+            asked_question_ids=frozenset({"document_material_scope"}),
+            has_new_evidence=True,
+            question_ids_with_new_evidence=frozenset({"document_material_scope"}),
+            required_slot_names=frozenset({"document_material_scope"}),
+        )
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "duplicate_question"
+        assert "already resolved" in rejection.detail
+
+    def test_rejects_repeat_question_when_evidence_belongs_to_different_question(
+        self,
+    ) -> None:
+        output = parse_planner_output(_ask_question(question_id="final_output_mode"))
+        context = _ctx(
+            asked_question_ids=frozenset(
+                {"final_output_mode", "runtime_metadata_fields"}
+            ),
+            has_new_evidence=True,
+            question_ids_with_new_evidence=frozenset({"runtime_metadata_fields"}),
+            required_slot_names=frozenset({"final_output_mode"}),
+        )
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "duplicate_question"
+
     def test_accepts_new_question_id(self) -> None:
         output = parse_planner_output(
             _ask_question(question_id="document_kind", slot_name="document_kind")
@@ -273,17 +353,32 @@ class TestOffTopicQuestionGuardrail:
         assert isinstance(rejection, RejectionReason)
         assert rejection.code == "off_topic_question"
 
+    def test_off_topic_rejection_names_allowed_targets_for_repair(self) -> None:
+        output = parse_planner_output(
+            _ask_question(question_id="case_type_scope", slot_name="case_type_scope")
+        )
+        context = _ctx(required_slot_names=frozenset({"runtime_metadata_fields"}))
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "off_topic_question"
+        assert "runtime_metadata_fields" in rejection.detail
+        assert "Allowed ask_question targets" in rejection.detail
+
     def test_accepts_question_resolving_required_slot(self) -> None:
-        output = parse_planner_output(_ask_question(slot_name="document_kind"))
+        output = parse_planner_output(
+            _ask_question(question_id="document_kind", slot_name="document_kind")
+        )
         context = _ctx(required_slot_names=frozenset({"document_kind"}))
 
         assert evaluate_planner_output(output, context) is None
 
-    def test_accepts_question_resolving_architectural_choice_by_question_id(
+    def test_accepts_question_resolving_architectural_choice(
         self,
     ) -> None:
         output = parse_planner_output(
-            _ask_question(question_id="terminal_output", slot_name="__irrelevant__")
+            _ask_question(question_id="terminal_output", slot_name="terminal_output")
         )
         context = _ctx(
             unresolved_architectural_choices=frozenset({"terminal_output"}),
@@ -291,6 +386,20 @@ class TestOffTopicQuestionGuardrail:
         )
 
         assert evaluate_planner_output(output, context) is None
+
+    def test_rejects_mismatched_question_id_and_slot_name(self) -> None:
+        output = parse_planner_output(
+            _ask_question(question_id="terminal_output", slot_name="document_kind")
+        )
+        context = _ctx(
+            unresolved_architectural_choices=frozenset({"terminal_output"}),
+            required_slot_names=frozenset({"document_kind"}),
+        )
+
+        rejection = evaluate_planner_output(output, context)
+
+        assert isinstance(rejection, RejectionReason)
+        assert rejection.code == "off_topic_question"
 
 
 # ---------------------------------------------------------------------------
@@ -330,33 +439,21 @@ class TestCommitArchitecturePrematureGuardrail:
         assert isinstance(rejection, RejectionReason)
         assert rejection.code == "architecture_commit_illegal_tuple"
 
-    def test_accepts_commit_with_legal_tuple_and_no_unresolved_choices(self) -> None:
-        output = parse_planner_output(_commit_architecture())
-        context = _ctx(session_state=_session_state_with_core_slots_resolved())
-
-        assert evaluate_planner_output(output, context) is None
-
-
-# ---------------------------------------------------------------------------
-# Guardrail 4 — propose_plan without ArchitectureCommit
-# ---------------------------------------------------------------------------
-
-
-class TestProposePlanRequiresArchitectureCommitGuardrail:
-    def test_rejects_propose_plan_when_session_has_no_architecture_commit(
-        self,
-    ) -> None:
-        output = parse_planner_output(_propose_plan())
-        context = _ctx(session_state=_empty_session_state())
+    def test_rejects_commit_action_missing_architecture_commit_delta(self) -> None:
+        payload = _commit_architecture()
+        payload["planning_state_delta"]["architecture_commit"] = None
+        output = parse_planner_output(payload)
+        context = _ctx()
 
         rejection = evaluate_planner_output(output, context)
 
         assert isinstance(rejection, RejectionReason)
-        assert rejection.code == "propose_plan_without_architecture_commit"
+        assert rejection.code == "architecture_commit_missing_delta"
+        assert "architecture_commit delta" in rejection.detail
 
-    def test_accepts_propose_plan_when_session_has_architecture_commit(self) -> None:
-        output = parse_planner_output(_propose_plan())
-        context = _ctx(session_state=_session_state_with_commit())
+    def test_accepts_commit_with_legal_tuple_and_no_unresolved_choices(self) -> None:
+        output = parse_planner_output(_commit_architecture())
+        context = _ctx(session_state=_session_state_with_core_slots_resolved())
 
         assert evaluate_planner_output(output, context) is None
 
@@ -499,57 +596,6 @@ class TestCommitArchitectureUnresolvablePatternGuardrail:
 
 
 # ---------------------------------------------------------------------------
-# Guardrail 5 — structural parity between draft_plan and ArchitectureCommit
-# ---------------------------------------------------------------------------
-
-
-class TestProposePlanDraftPlanStructuralParityGuardrail:
-    def test_rejects_propose_plan_when_draft_plan_step_count_differs_from_commit(
-        self,
-    ) -> None:
-        output = parse_planner_output(_propose_plan(step_count=2))
-        context = _ctx(session_state=_session_state_with_commit(step_count=1))
-
-        rejection = evaluate_planner_output(output, context)
-
-        assert isinstance(rejection, RejectionReason)
-        assert rejection.code == "propose_plan_draft_plan_structural_mismatch"
-        assert "2" in rejection.detail and "1" in rejection.detail
-
-    def test_accepts_propose_plan_with_matching_multi_step_draft_plan(self) -> None:
-        output = parse_planner_output(_propose_plan(step_count=3))
-        context = _ctx(session_state=_session_state_with_commit(step_count=3))
-
-        assert evaluate_planner_output(output, context) is None
-
-    def test_rejects_propose_plan_when_draft_plan_absent_from_delta(self) -> None:
-        # Previously the check skipped on draft_plan=None, trusting
-        # `plan_reference="latest"` to bind to the current commit. But
-        # persisted plans carry no architecture binding, so a stale
-        # "latest" plan could bypass parity. The tightened rule is:
-        # propose_plan must re-emit the draft_plan in the delta so
-        # parity can run every time.
-        output = parse_planner_output(_propose_plan(include_draft_plan=False))
-        context = _ctx(session_state=_session_state_with_commit(step_count=1))
-
-        rejection = evaluate_planner_output(output, context)
-
-        assert isinstance(rejection, RejectionReason)
-        assert rejection.code == "propose_plan_missing_draft_plan"
-
-    def test_earlier_commit_presence_guardrail_fires_first_when_session_has_no_commit(
-        self,
-    ) -> None:
-        output = parse_planner_output(_propose_plan(step_count=5))
-        context = _ctx(session_state=_empty_session_state())
-
-        rejection = evaluate_planner_output(output, context)
-
-        assert isinstance(rejection, RejectionReason)
-        assert rejection.code == "propose_plan_without_architecture_commit"
-
-
-# ---------------------------------------------------------------------------
 # Commit-preservation: a pinned commit is the canonical contract and
 # cannot be re-emitted, replaced, or drifted by any later turn.
 # ---------------------------------------------------------------------------
@@ -569,31 +615,6 @@ class TestCommitPreservationGuardrail:
         output = parse_planner_output(
             _commit_architecture(chosen_patterns=["summarize_text"])
         )
-        context = _ctx(session_state=_session_state_with_commit(step_count=1))
-
-        rejection = evaluate_planner_output(output, context)
-
-        assert isinstance(rejection, RejectionReason)
-        assert rejection.code == "architecture_commit_drift_from_pinned"
-
-    def test_rejects_propose_plan_with_delta_commit_that_drifts_from_pinned(
-        self,
-    ) -> None:
-        drifted_raw = _propose_plan(step_count=1)
-        drifted_raw["planning_state_delta"]["architecture_commit"] = {
-            "tuples_chain": [
-                {
-                    "input_type": "text",
-                    "output_type": "text",
-                    "output_mode": "pass_through",
-                }
-            ],
-            "chosen_patterns": ["summarize_text"],
-            "required_capabilities": [],
-            "committed_at": datetime(2026, 4, 23, tzinfo=timezone.utc).isoformat(),
-            "architecture_hash": "c" * 64,
-        }
-        output = parse_planner_output(drifted_raw)
         context = _ctx(session_state=_session_state_with_commit(step_count=1))
 
         rejection = evaluate_planner_output(output, context)
@@ -622,8 +643,6 @@ class TestCommitPreservationGuardrail:
             ],
             "chosen_patterns": ["summarize_text"],
             "required_capabilities": [],
-            "committed_at": datetime(2026, 4, 23, tzinfo=timezone.utc).isoformat(),
-            "architecture_hash": "b" * 64,
         }
         output = parse_planner_output(drifted_raw)
         context = _ctx(
@@ -635,26 +654,6 @@ class TestCommitPreservationGuardrail:
 
         assert isinstance(rejection, RejectionReason)
         assert rejection.code == "architecture_commit_drift_from_pinned"
-
-    def test_accepts_propose_plan_with_byte_identical_delta_commit(self) -> None:
-        preserved_raw = _propose_plan(step_count=1)
-        preserved_raw["planning_state_delta"]["architecture_commit"] = {
-            "tuples_chain": [
-                {
-                    "input_type": "text",
-                    "output_type": "text",
-                    "output_mode": "pass_through",
-                }
-            ],
-            "chosen_patterns": ["summarize_text"],
-            "required_capabilities": [],
-            "committed_at": datetime(2026, 4, 23, tzinfo=timezone.utc).isoformat(),
-            "architecture_hash": "b" * 64,
-        }
-        output = parse_planner_output(preserved_raw)
-        context = _ctx(session_state=_session_state_with_commit(step_count=1))
-
-        assert evaluate_planner_output(output, context) is None
 
     def test_accepts_ask_question_without_delta_commit_when_session_is_pinned(
         self,
@@ -712,16 +711,15 @@ class TestRejectionCodeExhaustiveness:
     _expected_codes = frozenset(
         {
             "version_mismatch",
+            "action_not_allowed",
             "duplicate_question",
             "off_topic_question",
             "architecture_commit_premature_unresolved_choices",
+            "architecture_commit_missing_delta",
             "architecture_commit_illegal_tuple",
             "architecture_commit_unresolvable_capability",
             "architecture_commit_unresolvable_pattern",
             "architecture_commit_drift_from_pinned",
-            "propose_plan_without_architecture_commit",
-            "propose_plan_draft_plan_structural_mismatch",
-            "propose_plan_missing_draft_plan",
             "repair_attempted_commit_drift",
         }
     )

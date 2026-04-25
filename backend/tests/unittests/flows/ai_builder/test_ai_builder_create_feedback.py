@@ -1,32 +1,10 @@
 from __future__ import annotations
 
 from intric.flows.ai_builder.ai_builder_create_feedback import (
-    format_create_argument_error,
     format_create_quality_feedback,
     format_create_validation_feedback,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
-
-
-def test_format_create_argument_error_guides_output_fields_depth_repairs() -> None:
-    feedback = format_create_argument_error(
-        ValueError(
-            "1 validation error for FlowCreateDraft\n"
-            "steps.1\n"
-            "  Structured field nesting depth cannot exceed 3."
-        )
-    )
-
-    assert "Invalid create_flow arguments" in feedback
-    assert "output_fields" in feedback
-    assert "max 3 levels" in feedback
-    assert "top-level fields, child fields" in feedback
-    assert "grandchild" in feedback
-    assert "field_type='string'" in feedback
-    assert "description" in feedback
-    # The flatten message must lock scope: no step removal/merging/reordering.
-    assert "Do not rename, reorder, merge, or delete steps" in feedback
-    assert "Preserve every step" in feedback
 
 
 def test_format_create_validation_feedback_adds_first_step_source_rule() -> None:
@@ -40,8 +18,8 @@ def test_format_create_validation_feedback_adds_first_step_source_rule() -> None
     feedback = format_create_validation_feedback(validation)
 
     assert "Create draft validation failed" in feedback
-    assert "steps[0].input_source" in feedback
-    assert "flow_input" in feedback
+    assert "runtime entry step" in feedback
+    assert "committed architecture" in feedback
 
 
 def test_format_create_validation_feedback_adds_json_all_previous_steps_rule() -> None:
@@ -57,10 +35,9 @@ def test_format_create_validation_feedback_adds_json_all_previous_steps_rule() -
     feedback = format_create_validation_feedback(validation)
 
     assert "Create draft validation failed" in feedback
-    assert "Create-flow repair rules" in feedback
-    assert "input_source='previous_step'" in feedback
-    assert "uses_previous_fields" in feedback
-    assert "input_type='text'" in feedback
+    assert "Outline-flow repair rules" in feedback
+    assert "semantic extraction and synthesis steps" in feedback
+    assert "server-owned fan-in" in feedback
 
 
 def test_format_create_quality_feedback_adds_terminal_artifact_and_aggregation_rules() -> (
@@ -72,6 +49,6 @@ def test_format_create_quality_feedback_adds_terminal_artifact_and_aggregation_r
     )
 
     assert feedback is not None
-    assert "Create-flow quality repair rules" in feedback
+    assert "Outline-flow quality repair rules" in feedback
     assert "final step output_type to 'docx'" in feedback
-    assert "input_source='all_previous_steps'" in feedback
+    assert "let the backend compile the dataflow" in feedback

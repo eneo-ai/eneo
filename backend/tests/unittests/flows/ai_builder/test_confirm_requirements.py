@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_REQUIREMENTS_SUMMARY,
     build_requirements_summary_event,
@@ -11,14 +13,11 @@ from intric.flows.ai_builder.ai_builder_events import (
 from intric.flows.ai_builder.ai_builder_models import RequirementsSummaryPayload
 from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
-    CREATE_FLOW_TOOL_NAME,
+    OUTLINE_FLOW_TOOL_NAME,
     build_all_tool_schemas,
     build_confirm_requirements_tool_schema,
     parse_confirm_requirements,
 )
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Tool schema
@@ -56,7 +55,8 @@ class TestBuildAllToolSchemasIncludesConfirmRequirements:
         schemas = build_all_tool_schemas()
         names = {s["function"]["name"] for s in schemas}
         assert CONFIRM_REQUIREMENTS_TOOL_NAME in names
-        assert CREATE_FLOW_TOOL_NAME in names
+        assert OUTLINE_FLOW_TOOL_NAME in names
+        assert "create_flow" not in names
 
     def test_returns_three_tools(self) -> None:
         schemas = build_all_tool_schemas()
@@ -83,7 +83,9 @@ class TestParseConfirmRequirements:
         assert len(result["key_decisions"]) == 1
         assert result["key_decisions"][0]["topic"] == "Input"
         assert result["input_description"] == "PDF documents uploaded by the user."
-        assert result["output_description"] == "A DOCX report with comparative analysis."
+        assert (
+            result["output_description"] == "A DOCX report with comparative analysis."
+        )
         assert result["manual_setup_notes"] == []
 
     def test_with_manual_setup_notes(self) -> None:
@@ -103,63 +105,77 @@ class TestParseConfirmRequirements:
 
     def test_empty_summary_raises(self) -> None:
         with pytest.raises(ValueError, match="summary"):
-            parse_confirm_requirements({
-                "summary": "",
-                "key_decisions": [{"topic": "A", "decision": "B"}],
-                "input_description": "X",
-                "output_description": "Y",
-            })
+            parse_confirm_requirements(
+                {
+                    "summary": "",
+                    "key_decisions": [{"topic": "A", "decision": "B"}],
+                    "input_description": "X",
+                    "output_description": "Y",
+                }
+            )
 
     def test_missing_summary_raises(self) -> None:
         with pytest.raises(ValueError, match="summary"):
-            parse_confirm_requirements({
-                "key_decisions": [{"topic": "A", "decision": "B"}],
-                "input_description": "X",
-                "output_description": "Y",
-            })
+            parse_confirm_requirements(
+                {
+                    "key_decisions": [{"topic": "A", "decision": "B"}],
+                    "input_description": "X",
+                    "output_description": "Y",
+                }
+            )
 
     def test_empty_key_decisions_raises(self) -> None:
         with pytest.raises(ValueError, match="key_decisions"):
-            parse_confirm_requirements({
-                "summary": "A flow.",
-                "key_decisions": [],
-                "input_description": "X",
-                "output_description": "Y",
-            })
+            parse_confirm_requirements(
+                {
+                    "summary": "A flow.",
+                    "key_decisions": [],
+                    "input_description": "X",
+                    "output_description": "Y",
+                }
+            )
 
     def test_key_decision_missing_topic_raises(self) -> None:
         with pytest.raises(ValueError, match="topic"):
-            parse_confirm_requirements({
-                "summary": "A flow.",
-                "key_decisions": [{"decision": "B"}],
-                "input_description": "X",
-                "output_description": "Y",
-            })
+            parse_confirm_requirements(
+                {
+                    "summary": "A flow.",
+                    "key_decisions": [{"decision": "B"}],
+                    "input_description": "X",
+                    "output_description": "Y",
+                }
+            )
 
     def test_key_decision_missing_decision_raises(self) -> None:
         with pytest.raises(ValueError, match="decision"):
-            parse_confirm_requirements({
-                "summary": "A flow.",
-                "key_decisions": [{"topic": "A"}],
-                "input_description": "X",
-                "output_description": "Y",
-            })
+            parse_confirm_requirements(
+                {
+                    "summary": "A flow.",
+                    "key_decisions": [{"topic": "A"}],
+                    "input_description": "X",
+                    "output_description": "Y",
+                }
+            )
 
     def test_missing_input_description_raises(self) -> None:
         with pytest.raises(ValueError, match="input_description"):
-            parse_confirm_requirements({
-                "summary": "A flow.",
-                "key_decisions": [{"topic": "A", "decision": "B"}],
-                "output_description": "Y",
-            })
+            parse_confirm_requirements(
+                {
+                    "summary": "A flow.",
+                    "key_decisions": [{"topic": "A", "decision": "B"}],
+                    "output_description": "Y",
+                }
+            )
 
     def test_missing_output_description_raises(self) -> None:
         with pytest.raises(ValueError, match="output_description"):
-            parse_confirm_requirements({
-                "summary": "A flow.",
-                "key_decisions": [{"topic": "A", "decision": "B"}],
-                "input_description": "X",
-            })
+            parse_confirm_requirements(
+                {
+                    "summary": "A flow.",
+                    "key_decisions": [{"topic": "A", "decision": "B"}],
+                    "input_description": "X",
+                }
+            )
 
     def test_strips_whitespace(self) -> None:
         args = {
@@ -237,7 +253,10 @@ class TestRequirementsSummaryEvent:
         }
         event = build_requirements_summary_event(data)
         payload = json.loads(event["data"])
-        assert payload.get("manual_setup_notes") is None or payload["manual_setup_notes"] == []
+        assert (
+            payload.get("manual_setup_notes") is None
+            or payload["manual_setup_notes"] == []
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -30,7 +30,6 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.flow import Flow, FlowStep
 from intric.main.exceptions import BadRequestException
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -179,7 +178,10 @@ class TestCompileCreateFlow:
         changeset = compile_changeset(spec, current_flow=None)
         assert len(changeset.assistants_to_create) == 1
         assert changeset.assistants_to_create[0].plan_step_ref == "step_a"
-        assert changeset.assistants_to_create[0].assistant_spec.instructions == "Do the thing."
+        assert (
+            changeset.assistants_to_create[0].assistant_spec.instructions
+            == "Do the thing."
+        )
         assert len(changeset.compiled_steps) == 1
         assert changeset.compiled_steps[0].step_order == 1
         assert changeset.compiled_steps[0].user_description == "Extrahera fakta"
@@ -211,7 +213,9 @@ class TestCompileCreateFlow:
         assert changeset.compiled_steps[0].step_order == 1
         assert changeset.compiled_steps[1].step_order == 2
         assert changeset.compiled_steps[2].step_order == 3
-        assert all(s.change_kind == StepChangeKind.ADDED for s in changeset.compiled_steps)
+        assert all(
+            s.change_kind == StepChangeKind.ADDED for s in changeset.compiled_steps
+        )
 
     def test_assistant_id_is_none_for_new_steps(self) -> None:
         spec = _make_spec(
@@ -314,8 +318,18 @@ class TestCompileCreateFlow:
                 _make_step_spec(plan_step_ref="step_a"),
             ],
             form_fields=[
-                FormFieldSpec(name="Ärendenummer", type="text", label="Ärendenummer", required=True),
-                FormFieldSpec(name="Prioritet", type="select", label="Prioritet", options=["hög", "medel", "låg"]),
+                FormFieldSpec(
+                    name="Ärendenummer",
+                    type="text",
+                    label="Ärendenummer",
+                    required=True,
+                ),
+                FormFieldSpec(
+                    name="Prioritet",
+                    type="select",
+                    label="Prioritet",
+                    options=["hög", "medel", "låg"],
+                ),
             ],
         )
         changeset = compile_changeset(spec, current_flow=None)
@@ -358,7 +372,10 @@ class TestCompileCreateFlow:
             "transcription_language": "auto",
         }
         # Provenance is also stamped
-        assert changeset.metadata_json["ai_builder"]["description"]["mode"] == "builder_managed"
+        assert (
+            changeset.metadata_json["ai_builder"]["description"]["mode"]
+            == "builder_managed"
+        )
 
     def test_audio_flow_input_preserves_existing_transcription_metadata(self) -> None:
         existing_model_id = uuid4()
@@ -432,8 +449,14 @@ class TestCompileEditFlow:
         )
         changeset = compile_changeset(spec, current_flow=flow)
         assert len(changeset.assistants_to_update) == 1
-        assert changeset.assistants_to_update[0].existing_assistant_id == existing_step.assistant_id
-        assert changeset.assistants_to_update[0].assistant_spec.instructions == "Updated instructions"
+        assert (
+            changeset.assistants_to_update[0].existing_assistant_id
+            == existing_step.assistant_id
+        )
+        assert (
+            changeset.assistants_to_update[0].assistant_spec.instructions
+            == "Updated instructions"
+        )
         assert len(changeset.compiled_steps) == 1
         assert changeset.compiled_steps[0].change_kind == StepChangeKind.MODIFIED
         assert changeset.compiled_steps[0].assistant_id == existing_step.assistant_id
@@ -462,7 +485,9 @@ class TestCompileEditFlow:
         assert len(changeset.assistants_to_create) == 1
         assert changeset.assistants_to_create[0].plan_step_ref == "step_b"
         assert len(changeset.assistants_to_update) == 1
-        new_step = [s for s in changeset.compiled_steps if s.change_kind == StepChangeKind.ADDED]
+        new_step = [
+            s for s in changeset.compiled_steps if s.change_kind == StepChangeKind.ADDED
+        ]
         assert len(new_step) == 1
         assert new_step[0].plan_step_ref == "step_b"
         assert new_step[0].assistant_id is None
@@ -542,7 +567,9 @@ class TestCompileEditFlow:
         assert step.input_config == existing_config
         assert step.output_config == existing_output_config
 
-    def test_runtime_input_is_removed_when_step_no_longer_uses_flow_input_uploads(self) -> None:
+    def test_runtime_input_is_removed_when_step_no_longer_uses_flow_input_uploads(
+        self,
+    ) -> None:
         """Editing a file-upload step into a previous-step text step must drop stale runtime_input."""
         existing_step = _make_flow_step(
             step_order=1,
@@ -828,10 +855,12 @@ class TestDescriptionProvenance:
         )
         spec = _make_spec(
             flow_description="Updated description.",
-            steps=[_make_step_spec(
-                plan_step_ref="step_a",
-                existing_step_ref="existing_step_1",
-            )],
+            steps=[
+                _make_step_spec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                )
+            ],
         )
         flow.steps = [_make_flow_step(step_order=1)]
         changeset = compile_changeset(spec, current_flow=flow)
@@ -965,8 +994,7 @@ class TestCompileVariableBindings:
         changeset = compile_changeset(spec, current_flow=None)
         # extract → step_order 1
         create_for_summarize = [
-            a for a in changeset.assistants_to_create
-            if a.plan_step_ref == "summarize"
+            a for a in changeset.assistants_to_create if a.plan_step_ref == "summarize"
         ]
         assert len(create_for_summarize) == 1
         rewritten = create_for_summarize[0].assistant_spec.instructions
@@ -979,7 +1007,9 @@ class TestCompileVariableBindings:
             steps=[
                 _make_step_spec(
                     plan_step_ref="step_a",
-                    input_bindings={"question": "{{ föregående_steg }} and {{ datum }}"},
+                    input_bindings={
+                        "question": "{{ föregående_steg }} and {{ datum }}"
+                    },
                 ),
             ],
         )
@@ -1464,7 +1494,9 @@ class TestExecuteEditFlow:
         assert "completion_model_id" not in update_kwargs
 
     @pytest.mark.asyncio
-    async def test_invalid_knowledge_ref_raises_instead_of_silently_skipping(self) -> None:
+    async def test_invalid_knowledge_ref_raises_instead_of_silently_skipping(
+        self,
+    ) -> None:
         flow_id = uuid4()
         space_id = uuid4()
         assistant_id = uuid4()
@@ -1496,7 +1528,9 @@ class TestExecuteEditFlow:
             ],
         )
 
-        with pytest.raises(BadRequestException, match="Invalid knowledge base reference"):
+        with pytest.raises(
+            BadRequestException, match="Invalid knowledge base reference"
+        ):
             await execute_changeset(
                 changeset=changeset,
                 flow_service=mock_flow_service,
@@ -1526,12 +1560,20 @@ class TestExecuteResultCounting:
             flow_name="Test",
             flow_description="",
             assistants_to_create=[
-                AssistantToCreate(plan_step_ref="s1", assistant_spec=AssistantSpec(instructions="x")),
-                AssistantToCreate(plan_step_ref="s2", assistant_spec=AssistantSpec(instructions="y")),
+                AssistantToCreate(
+                    plan_step_ref="s1", assistant_spec=AssistantSpec(instructions="x")
+                ),
+                AssistantToCreate(
+                    plan_step_ref="s2", assistant_spec=AssistantSpec(instructions="y")
+                ),
             ],
             compiled_steps=[
-                _compiled_step(plan_step_ref="s1", step_order=1, change_kind=StepChangeKind.ADDED),
-                _compiled_step(plan_step_ref="s2", step_order=2, change_kind=StepChangeKind.ADDED),
+                _compiled_step(
+                    plan_step_ref="s1", step_order=1, change_kind=StepChangeKind.ADDED
+                ),
+                _compiled_step(
+                    plan_step_ref="s2", step_order=2, change_kind=StepChangeKind.ADDED
+                ),
             ],
         )
 
@@ -1558,7 +1600,9 @@ class TestExecuteResultCounting:
             flow_name="Test",
             flow_description="",
             assistants_to_create=[
-                AssistantToCreate(plan_step_ref="new", assistant_spec=AssistantSpec(instructions="x")),
+                AssistantToCreate(
+                    plan_step_ref="new", assistant_spec=AssistantSpec(instructions="x")
+                ),
             ],
             assistants_to_update=[
                 AssistantToUpdate(
@@ -1572,8 +1616,15 @@ class TestExecuteResultCounting:
                 AssistantToDelete(step_id=uuid4(), assistant_id=uuid4()),
             ],
             compiled_steps=[
-                _compiled_step(plan_step_ref="mod", step_order=1, change_kind=StepChangeKind.MODIFIED, assistant_id=uuid4()),
-                _compiled_step(plan_step_ref="new", step_order=2, change_kind=StepChangeKind.ADDED),
+                _compiled_step(
+                    plan_step_ref="mod",
+                    step_order=1,
+                    change_kind=StepChangeKind.MODIFIED,
+                    assistant_id=uuid4(),
+                ),
+                _compiled_step(
+                    plan_step_ref="new", step_order=2, change_kind=StepChangeKind.ADDED
+                ),
             ],
         )
 

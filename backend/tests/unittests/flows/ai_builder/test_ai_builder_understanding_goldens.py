@@ -79,6 +79,12 @@ def test_docx_output_characterization_cases(
                 ("primary_runtime_input", "documents", "heuristic"),
                 ("terminal_output", "docx_document", "heuristic"),
                 ("docx_output_mode", "generated_docx", "policy_default"),
+                (
+                    "document_material_scope",
+                    "flexible_document_case",
+                    "policy_default",
+                ),
+                ("runtime_metadata_fields", "no_extra_metadata", "policy_default"),
             ],
         ),
         (
@@ -87,6 +93,12 @@ def test_docx_output_characterization_cases(
                 ("primary_runtime_input", "documents", "heuristic"),
                 ("terminal_output", "docx_document", "heuristic"),
                 ("docx_output_mode", "generated_docx", "heuristic"),
+                (
+                    "document_material_scope",
+                    "flexible_document_case",
+                    "policy_default",
+                ),
+                ("runtime_metadata_fields", "no_extra_metadata", "policy_default"),
             ],
         ),
         (
@@ -95,6 +107,12 @@ def test_docx_output_characterization_cases(
                 ("primary_runtime_input", "documents", "heuristic"),
                 ("terminal_output", "docx_document", "heuristic"),
                 ("docx_output_mode", "template_fill_docx", "heuristic"),
+                (
+                    "document_material_scope",
+                    "flexible_document_case",
+                    "policy_default",
+                ),
+                ("runtime_metadata_fields", "no_extra_metadata", "policy_default"),
             ],
         ),
     ],

@@ -23,12 +23,12 @@ from uuid import UUID
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_draft_plan import DraftPlanEnvelope
 from intric.flows.ai_builder.ai_builder_materialization_bridge import (
     apply_to_draft,
     materialize,
 )
 from intric.flows.ai_builder.ai_builder_models import TargetKind
-from intric.flows.ai_builder.ai_builder_orchestrator import DraftPlanEnvelope
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.planning_state import ArchitectureCommit, StepTriple
 

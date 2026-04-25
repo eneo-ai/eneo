@@ -4,21 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from intric.flows.ai_builder.ai_builder_create_tool_schema import (
-    CREATE_FLOW_TOOL_DESCRIPTION,
-    CREATE_FLOW_TOOL_NAME,
-    build_create_flow_tool_schema,
+from intric.flows.ai_builder.ai_builder_create_outline import (
+    OUTLINE_FLOW_TOOL_NAME,
+    build_outline_flow_tool_schema,
+    parse_outline_flow_arguments,
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     supported_structured_question_ids,
 )
 from intric.flows.ai_builder.ai_builder_tool_parsing import (
-    RecoverableToolPayloadError,
     extract_assumptions,
     extract_plan_rationale,
     extract_reasoning,
     parse_confirm_requirements,
-    parse_create_flow_arguments,
     parse_structured_question,
 )
 
@@ -35,7 +33,7 @@ CONFIRM_REQUIREMENTS_TOOL_NAME = "confirm_requirements"
 CONFIRM_REQUIREMENTS_DESCRIPTION = (
     "Present your understanding of the user's needs for confirmation before building a plan. "
     "Call this after discovery to summarize what you understood. "
-    "The user must confirm before you call create_flow or edit_flow."
+    "The user must confirm before you call outline_flow or edit_flow."
 )
 
 
@@ -175,10 +173,7 @@ def build_all_tool_schemas(
     available_kbs: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     return [
-        build_create_flow_tool_schema(
-            available_models=available_models,
-            available_kbs=available_kbs,
-        ),
+        build_outline_flow_tool_schema(),
         build_ask_structured_question_tool_schema(),
         build_confirm_requirements_tool_schema(),
     ]
@@ -197,19 +192,17 @@ __all__ = [
     "ASK_STRUCTURED_QUESTION_TOOL_NAME",
     "CONFIRM_REQUIREMENTS_DESCRIPTION",
     "CONFIRM_REQUIREMENTS_TOOL_NAME",
-    "CREATE_FLOW_TOOL_DESCRIPTION",
-    "CREATE_FLOW_TOOL_NAME",
-    "RecoverableToolPayloadError",
+    "OUTLINE_FLOW_TOOL_NAME",
     "build_all_tool_schemas",
     "build_ask_structured_question_tool_schema",
     "build_confirm_requirements_tool_schema",
-    "build_create_flow_tool_schema",
+    "build_outline_flow_tool_schema",
     "build_discovery_complete_tool_schemas",
     "build_free_discovery_tool_schemas",
     "extract_assumptions",
     "extract_plan_rationale",
     "extract_reasoning",
     "parse_confirm_requirements",
-    "parse_create_flow_arguments",
+    "parse_outline_flow_arguments",
     "parse_structured_question",
 ]

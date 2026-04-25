@@ -203,6 +203,78 @@ class TestMVSGate:
 
 
 class TestQuestionBudget:
+    def test_detailed_session_stops_asking_quality_questions_after_build_plan_signal(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett komplett AI-stött arbetsflöde för en reglerad "
+                    "ärendeprocess. Flödet ska aldrig fatta beslut, och omfatta "
+                    "steg 1 ta emot inkommet underlag, steg 2 inhämta uppgifter, "
+                    "steg 3 klassificera ärendetyp, steg 4 analysera nuläge, "
+                    "steg 5 föreslå nästa handläggningssteg, steg 6 skapa "
+                    "uppdragsunderlag, steg 7 dokumentera genomförande, steg 8 "
+                    "följa upp resultat, steg 9 föreslå fortsatt åtgärd. Output "
+                    "ska vara flödesdesign, nodspecifikation, JSON-payload, "
+                    "prompts, felhantering och kvalitetskontroller."
+                ),
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="Flera dokument i samma körning",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="Jag vill ha docx rapport som slutresultat",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="ärendehandläggning kopplat till hela processen",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="båda lägen",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="extraherar, jämför och kvalitetssäkrar nyckelfält mellan inkomna PDF-dokument",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="inkomna dokument",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="Ja, det stämmer. Bygg planen.",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="pdf filer som inkommande underlag",
+                metadata={"ui_language": "sv"},
+            ),
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.ready_for_confirmation
+        assert analysis.blocking_issues == ()
+        assert {
+            "document_kind",
+            "document_material_scope",
+            "structured_analysis_need",
+            "runtime_metadata_fields",
+        }.isdisjoint(set(analysis.selected_question_ids))
+
     def test_detailed_swedish_prompt_gets_few_questions(self) -> None:
         """A detailed intermediate prompt should get max 2-3 blocking questions,
         not 4+ including high_value ones like processing_scope and document_kind."""

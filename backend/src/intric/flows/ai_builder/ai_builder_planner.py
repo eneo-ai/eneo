@@ -8,12 +8,22 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, cast
 from uuid import UUID, uuid4
 
 from intric.files.file_models import File
+from intric.flows.ai_builder.ai_builder_action_policy import (
+    PlannerActionPolicy,
+    build_planner_action_policy,
+)
 from intric.flows.ai_builder.ai_builder_attachment_context import (
     build_ai_builder_attachment_context,
 )
 from intric.flows.ai_builder.ai_builder_capability_projection import (
     build_llm_prompt_context,
     render_llm_prompt_context,
+)
+from intric.flows.ai_builder.ai_builder_discovery import (
+    build_registry_question_followup,
+)
+from intric.flows.ai_builder.ai_builder_discovery_followup import (
+    persist_backend_question,
 )
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
@@ -46,7 +56,11 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     OrchestrationContext,
     PlannerOutput,
 )
+from intric.flows.ai_builder.ai_builder_plan_proposal_task import (
+    build_plan_proposal_system_prompt,
+)
 from intric.flows.ai_builder.ai_builder_planner_turn import (
+    PlannerTurnResult,
     TurnTelemetry,
     run_planner_turn,
 )
@@ -62,14 +76,23 @@ from intric.flows.ai_builder.ai_builder_prompts import (
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
+from intric.flows.ai_builder.ai_builder_question_state import (
+    derive_asked_question_state,
+)
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
     latest_confirmed_requirements,
     resolve_requirements_state,
 )
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
 from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
     adjudicate_pending_question_answer,
+)
+from intric.flows.ai_builder.ai_builder_server_actions import (
+    build_server_planner_output,
 )
 from intric.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
@@ -127,6 +150,11 @@ _CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(
     {"primary_runtime_input", "terminal_output"}
 )
 
+_SERVER_SLOT_TO_DISCOVERY_QUESTION_ID: dict[str, str] = {
+    "primary_runtime_input": "input_material_mode",
+    "terminal_output": "final_output_mode",
+}
+
 
 def _compute_unresolved_core_slots(
     planning_state: PlanningState,
@@ -141,6 +169,10 @@ def _compute_unresolved_core_slots(
     """
     resolved = frozenset(planning_state.resolved_slots.keys())
     return _CORE_ARCHITECTURAL_SLOTS - resolved
+
+
+def _discovery_question_id_for_server_slot(slot_name: str) -> str:
+    return _SERVER_SLOT_TO_DISCOVERY_QUESTION_ID.get(slot_name, slot_name)
 
 
 @dataclass(frozen=True)
@@ -171,12 +203,22 @@ class PlannerPreparedRequest:
     # reject `commit_architecture` one turn after the user resolved the
     # last core slot even though the prompt already shows it resolved.
     rebuilt_planning_state: PlanningState | None = None
+    # Server-owned legal action surface for this exact prompt/context.
+    action_policy: PlannerActionPolicy | None = None
+    # Deterministic server-owned planner output for ask/commit turns.
+    # When populated, `send_message` dispatches this output directly and
+    # skips the planner LLM contract entirely.
+    server_output: PlannerOutput | None = None
     # Stable hash of the assembled system prompt, computed where the
     # prompt is built so the hash is tied to the literal bytes. Logging
     # it out of the prepared request instead of re-walking
     # `llm_messages` at log time keeps the hash honest if future
     # assembly inserts non-system messages ahead of the system turn.
     system_prompt_hash: str = ""
+    # Plan proposal is a separate task-specific LLM boundary. The
+    # server has already selected `propose_plan`; the model only fills
+    # create/edit tool content, never the planner union.
+    proposal_mode: bool = False
 
 
 class AIBuilderPlanner:
@@ -478,19 +520,123 @@ class AIBuilderPlanner:
         carry_forward_persisted_planner_state(
             rebuilt_planning_state, persisted_planning_state
         )
+        unresolved_architectural_choices = _compute_unresolved_core_slots(
+            rebuilt_planning_state
+        )
+        selected_discovery_question_ids = frozenset(
+            getattr(discovery_analysis, "selected_question_ids", ())
+        )
+        action_policy = build_planner_action_policy(
+            session_state=rebuilt_planning_state,
+            unresolved_architectural_choices=unresolved_architectural_choices,
+            selected_discovery_question_ids=selected_discovery_question_ids,
+            requirements_confirmed=requirements_state.confirmed,
+        )
+        should_emit_forced_followup = self._should_emit_forced_followup(
+            conversation=conversation,
+            requirements_confirmed=requirements_state.confirmed,
+            is_requirements_confirmation=is_requirements_confirmation,
+            discovery_block_message=discovery_block_message,
+            discovery_analysis=discovery_analysis,
+            flow=flow,
+        )
+        server_output = (
+            build_server_planner_output(
+                action_policy=action_policy,
+                session_state=rebuilt_planning_state,
+                base_planning_state_version=base_planning_state_version,
+                ui_language=ui_language,
+            )
+            if base_planning_state_version is not None
+            else None
+        )
+        confirmed_requirements = latest_confirmed_requirements(conversation)
+        attachment_context_result = build_ai_builder_attachment_context(
+            attachment_files or []
+        )
+        if server_output is not None:
+            return PlannerPreparedRequest(
+                requirements_state=requirements_state,
+                ui_language=ui_language,
+                discovery_block_message=None,
+                llm_messages=[],
+                should_emit_forced_followup=False,
+                rebuilt_planning_state=rebuilt_planning_state,
+                action_policy=action_policy,
+                server_output=server_output,
+            )
+
+        if action_policy.allowed_action_kinds == ("propose_plan",):
+            proposal_system_prompt = build_plan_proposal_system_prompt(
+                planning_state=rebuilt_planning_state,
+                confirmed_requirements=(
+                    confirmed_requirements.model_dump(mode="json")
+                    if confirmed_requirements is not None
+                    else None
+                ),
+                attachment_context=(
+                    attachment_context_result.context
+                    if attachment_context_result is not None
+                    else None
+                ),
+                flow_context=flow_context,
+                is_edit_mode=is_edit_mode,
+            )
+            proposal_prompt_tokens = max(1, len(proposal_system_prompt) // 3)
+            proposal_budget = compute_conversation_token_budget(
+                litellm_model=litellm_model,
+                model_max_input_tokens=max_input_tokens,
+                system_prompt_tokens=proposal_prompt_tokens,
+                max_output_tokens=max_output_tokens,
+                safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
+                minimum_budget_tokens=budget_policy.minimum_conversation_budget_tokens,
+                unknown_model_context_window_tokens=budget_policy.unknown_model_context_window_tokens,
+            )
+            trimmed = trim_conversation_for_context(
+                [
+                    self.conversation_msg_to_llm_dict(message)
+                    for message in conversation
+                ],
+                max_tokens=proposal_budget,
+            )
+            logger.info(
+                "AI Builder plan proposal prompt metrics",
+                extra={
+                    "system_prompt_chars": len(proposal_system_prompt),
+                    "attachment_context_chars": len(
+                        attachment_context_result.context
+                        if attachment_context_result is not None
+                        else ""
+                    ),
+                    "conversation_budget_tokens": proposal_budget,
+                    "conversation_message_count": len(conversation),
+                    "trimmed_message_count": len(trimmed),
+                    "attachment_file_count": len(attachment_files or []),
+                    "confirmed_requirements_present": confirmed_requirements
+                    is not None,
+                },
+            )
+            return PlannerPreparedRequest(
+                requirements_state=requirements_state,
+                ui_language=ui_language,
+                discovery_block_message=discovery_block_message,
+                llm_messages=[
+                    {"role": "system", "content": proposal_system_prompt},
+                    *trimmed,
+                ],
+                should_emit_forced_followup=should_emit_forced_followup,
+                rebuilt_planning_state=rebuilt_planning_state,
+                action_policy=action_policy,
+                system_prompt_hash=stable_hash(proposal_system_prompt),
+                proposal_mode=True,
+            )
+
         planning_state_block = render_llm_prompt_context(
             build_llm_prompt_context(
                 rebuilt_planning_state,
                 CAPABILITY_REGISTRY,
                 PATTERN_REGISTRY,
             )
-        )
-        unresolved_architectural_choices = _compute_unresolved_core_slots(
-            rebuilt_planning_state
-        )
-        confirmed_requirements = latest_confirmed_requirements(conversation)
-        attachment_context_result = build_ai_builder_attachment_context(
-            attachment_files or []
         )
         system_prompt = build_system_prompt(
             flow_context=flow_context,
@@ -512,6 +658,7 @@ class AIBuilderPlanner:
             ),
             is_edit_mode=is_edit_mode,
             unresolved_architectural_choices=unresolved_architectural_choices,
+            action_policy=action_policy,
         )
         system_prompt_tokens = max(1, len(system_prompt) // 3)
         conversation_budget = compute_conversation_token_budget(
@@ -527,15 +674,6 @@ class AIBuilderPlanner:
             [self.conversation_msg_to_llm_dict(message) for message in conversation],
             max_tokens=conversation_budget,
         )
-        should_emit_forced_followup = self._should_emit_forced_followup(
-            conversation=conversation,
-            requirements_confirmed=requirements_state.confirmed,
-            is_requirements_confirmation=is_requirements_confirmation,
-            discovery_block_message=discovery_block_message,
-            discovery_analysis=discovery_analysis,
-            flow=flow,
-        )
-
         logger.info(
             "AI Builder planner prompt metrics",
             extra={
@@ -571,6 +709,7 @@ class AIBuilderPlanner:
                 llm_messages=[],
                 should_emit_forced_followup=should_emit_forced_followup,
                 rebuilt_planning_state=rebuilt_planning_state,
+                action_policy=action_policy,
             )
 
         return PlannerPreparedRequest(
@@ -580,7 +719,177 @@ class AIBuilderPlanner:
             llm_messages=[{"role": "system", "content": system_prompt}] + trimmed,
             should_emit_forced_followup=should_emit_forced_followup,
             rebuilt_planning_state=rebuilt_planning_state,
+            action_policy=action_policy,
             system_prompt_hash=stable_hash(system_prompt),
+        )
+
+    async def _dispatch_chained_server_action_after_commit(
+        self,
+        *,
+        session_id: UUID,
+        conversation: list[ConversationMessage],
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        flow: "Flow | None",
+        base_planning_state_version: int,
+        requirements_confirmed: bool,
+        ui_language: str | None,
+        request_id: str,
+        request_uuid: UUID,
+        lock_token: UUID,
+    ) -> PlannerTurnResult | None:
+        """Advance one deterministic post-commit server action.
+
+        `commit_architecture` is a backend state transition, not a useful
+        terminal user-facing response. After that transition persists, the
+        next legal deterministic phase is usually `confirm_requirements`;
+        dispatch it in the same request so the UI lands on an actionable
+        review checkpoint instead of a bare commit status.
+        """
+
+        persisted_state = await self.repo.load_planning_state(
+            session_id=session_id,
+            tenant_id=self.user.tenant_id,
+        )
+        session_state = persisted_state or PlanningState.empty()
+        unresolved_core_slots = _compute_unresolved_core_slots(session_state)
+        action_policy = build_planner_action_policy(
+            session_state=session_state,
+            unresolved_architectural_choices=unresolved_core_slots,
+            selected_discovery_question_ids=frozenset(),
+            requirements_confirmed=requirements_confirmed,
+        )
+        server_output = build_server_planner_output(
+            action_policy=action_policy,
+            session_state=session_state,
+            base_planning_state_version=base_planning_state_version,
+            ui_language=ui_language,
+        )
+        if server_output is None or not isinstance(
+            server_output.planner_action, ConfirmRequirementsAction
+        ):
+            return None
+
+        resolved_slot_names = frozenset(session_state.resolved_slots.keys())
+        required_slot_names = (
+            frozenset(action_policy.allowed_ask_question_targets)
+            - unresolved_core_slots
+            - resolved_slot_names
+        )
+        asked_question_state = derive_asked_question_state(conversation)
+        orchestration_context = OrchestrationContext(
+            current_version=base_planning_state_version,
+            session_state=session_state,
+            unresolved_architectural_choices=unresolved_core_slots,
+            required_slot_names=required_slot_names,
+            asked_question_ids=asked_question_state.asked_question_ids,
+            has_new_evidence=asked_question_state.has_new_evidence,
+            question_ids_with_new_evidence=(
+                asked_question_state.question_ids_with_new_evidence
+            ),
+            action_policy=action_policy,
+        )
+
+        def _build_chained_messages(
+            accepted: PlannerOutput,
+            telemetry: TurnTelemetry,
+        ) -> list[ConversationMessage]:
+            action = accepted.planner_action
+            if not isinstance(action, ConfirmRequirementsAction):
+                raise AssertionError(
+                    "post-commit chained server action must be confirm_requirements"
+                )
+            requirements_payload = RequirementsSummaryPayload.model_validate(
+                action.payload.model_dump()
+            )
+            base_metadata = {
+                "requirements_summary": requirements_payload.model_dump(mode="json"),
+                "requirements_version": build_requirements_version(
+                    requirements_payload
+                ),
+            }
+            planner_telemetry = build_planner_telemetry_from_turn(
+                telemetry,
+                used_auxiliary_llm=False,
+            )
+            return [
+                ConversationMessage(
+                    role="assistant",
+                    content=action.payload.summary,
+                    metadata=build_assistant_message_metadata(
+                        conversation,
+                        planner_telemetry=planner_telemetry,
+                        base_metadata=base_metadata,
+                    ),
+                )
+            ]
+
+        return await run_planner_turn(
+            repo=self.repo,
+            litellm_client=self.litellm_client,
+            litellm_model=litellm_model,
+            litellm_kwargs={
+                **litellm_kwargs,
+                "max_tokens": 1,
+                "temperature": self.planner_temperature,
+                "response_format": {"type": "json_object"},
+                "drop_params": True,
+            },
+            session_id=session_id,
+            tenant_id=self.user.tenant_id,
+            flow=flow,
+            base_messages=[],
+            orchestration_context=orchestration_context,
+            build_new_messages=_build_chained_messages,
+            precomputed_output=server_output,
+            request_id=request_uuid,
+            lock_token=lock_token,
+        )
+
+    async def _dispatch_server_question(
+        self,
+        *,
+        action: AskQuestionAction,
+        session_id: UUID,
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        flow: "Flow | None",
+        request_uuid: UUID,
+        lock_token: UUID,
+    ) -> list[dict[str, str]]:
+        """Persist deterministic questions through the structured-question path.
+
+        Server-selected questions must look exactly like discovery follow-ups to
+        the UI and to the conversation replay layer. Emitting only a text event
+        leaves the user without an actionable card and prevents free-form answer
+        inference from seeing the pending question.
+        """
+
+        question_id = _discovery_question_id_for_server_slot(action.payload.slot_name)
+        followup = build_registry_question_followup(
+            question_id,
+            conversation,
+            flow=flow,
+        )
+        if followup is None:
+            return [build_text_event(action.payload.prompt)]
+
+        question_data, assistant_text = followup
+        return await persist_backend_question(
+            repo=self.repo,
+            tenant_id=self.user.tenant_id,
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            question_data=question_data,
+            assistant_text=assistant_text,
+            flow=flow,
+            assistant_metadata=build_assistant_message_metadata(
+                conversation,
+                tool_calls=[{"name": "ask_structured_question"}],
+            ),
+            lease_request_id=request_uuid,
+            lease_lock_token=lock_token,
         )
 
     async def send_message(
@@ -726,7 +1035,8 @@ class AIBuilderPlanner:
             ui_language = prepared_request.ui_language
 
             if (
-                not prepared_request.llm_messages
+                prepared_request.server_output is None
+                and not prepared_request.llm_messages
                 and prepared_request.discovery_block_message is not None
             ):
                 for (
@@ -750,7 +1060,10 @@ class AIBuilderPlanner:
                 yield {"event": SSE_EVENT_DONE, "data": ""}
                 return
 
-            if prepared_request.should_emit_forced_followup:
+            if (
+                prepared_request.server_output is None
+                and prepared_request.should_emit_forced_followup
+            ):
                 for (
                     event
                 ) in await self.proposal_processor.emit_discovery_followup_if_needed(
@@ -782,39 +1095,85 @@ class AIBuilderPlanner:
                 or persisted_planning_state
                 or PlanningState.empty()
             )
-            # `PlanningState.open_questions` is the planner's own "I still
-            # need these answered" list, but no production code path writes
-            # to it today — `build_planning_state_from_conversation` seeds
-            # only the deterministic slot surface and
-            # `carry_forward_persisted_planner_state` preserves
-            # architecture/draft/phase. Until a writer lands, derive the
-            # required-slot surface directly from what IS known: the
-            # positive patterns' declared architectural slots minus what
-            # the deterministic rebuild already resolved.
             resolved_slot_names = frozenset(session_state.resolved_slots.keys())
-            all_pattern_slots = frozenset(
-                slot_name
-                for pattern in PATTERN_REGISTRY.values()
-                if pattern.polarity == "positive"
-                for slot_name in pattern.required_architectural_slots
-            )
-            # `required_slot_names` is permissive: any slot that any positive
-            # pattern might require is a legitimate target for an
-            # `ask_question`. Once the pattern-scope narrows at commit time,
-            # the post-commit projection takes over.
-            required_slot_names = all_pattern_slots - resolved_slot_names
             unresolved_core_slots = _compute_unresolved_core_slots(session_state)
-            asked_question_ids, has_new_evidence = _derive_asked_question_state(
-                conversation
+            action_policy = prepared_request.action_policy
+            if action_policy is None:
+                action_policy = build_planner_action_policy(
+                    session_state=session_state,
+                    unresolved_architectural_choices=unresolved_core_slots,
+                    selected_discovery_question_ids=frozenset(),
+                    requirements_confirmed=requirements_state.confirmed,
+                )
+            # Compatibility surface for older tests/callers; the action
+            # policy is authoritative and already excludes resolved slots.
+            required_slot_names = (
+                frozenset(action_policy.allowed_ask_question_targets)
+                - unresolved_core_slots
+                - resolved_slot_names
             )
+            asked_question_state = derive_asked_question_state(conversation)
             orchestration_context = OrchestrationContext(
                 current_version=session.planning_state_version,
                 session_state=session_state,
                 unresolved_architectural_choices=unresolved_core_slots,
                 required_slot_names=required_slot_names,
-                asked_question_ids=asked_question_ids,
-                has_new_evidence=has_new_evidence,
+                asked_question_ids=asked_question_state.asked_question_ids,
+                has_new_evidence=asked_question_state.has_new_evidence,
+                question_ids_with_new_evidence=(
+                    asked_question_state.question_ids_with_new_evidence
+                ),
+                action_policy=action_policy,
             )
+
+            if prepared_request.server_output is not None and isinstance(
+                prepared_request.server_output.planner_action,
+                AskQuestionAction,
+            ):
+                events = await self._dispatch_server_question(
+                    action=prepared_request.server_output.planner_action,
+                    session_id=session_id,
+                    conversation=conversation,
+                    new_messages_start=new_messages_start,
+                    flow=flow,
+                    request_uuid=request_uuid,
+                    lock_token=lock_token,
+                )
+                for event in events:
+                    yield event
+                yield {"event": SSE_EVENT_DONE, "data": ""}
+                return
+
+            if prepared_request.proposal_mode:
+                resource_catalog = build_ai_builder_resource_catalog(
+                    available_models=available_models,
+                    available_kbs=available_kbs,
+                )
+                async for event in self.proposal_processor.propose_plan(
+                    session_id=session_id,
+                    conversation=conversation,
+                    new_messages_start=new_messages_start,
+                    llm_messages=prepared_request.llm_messages,
+                    litellm_model=litellm_model,
+                    litellm_kwargs=litellm_kwargs,
+                    available_models=available_models,
+                    available_kbs=available_kbs,
+                    available_model_refs=resource_catalog.model_refs,
+                    available_kb_refs=resource_catalog.knowledge_base_refs,
+                    resource_catalog=resource_catalog,
+                    max_output_tokens=max_output_tokens,
+                    proposal_temperature=self.planner_temperature,
+                    request_id=request_id,
+                    flow=flow,
+                    assistant_snapshots=assistant_snapshots,
+                    assistant_metadata=build_assistant_message_metadata(conversation),
+                    planning_state=session_state,
+                    lease_request_id=request_uuid,
+                    lease_lock_token=lock_token,
+                ):
+                    yield event
+                yield {"event": SSE_EVENT_DONE, "data": ""}
+                return
 
             def _build_new_messages(
                 accepted: PlannerOutput,
@@ -830,8 +1189,8 @@ class AIBuilderPlanner:
                     # without new evidence.
                     base_metadata = {"question_id": action.payload.question_id}
                 elif isinstance(action, CommitArchitectureAction):
-                    assistant_content = action.payload.note or "Architecture committed."
-                elif isinstance(action, ConfirmRequirementsAction):
+                    return [*conversation[new_messages_start:]]
+                else:
                     assistant_content = action.payload.summary
                     requirements_payload = RequirementsSummaryPayload.model_validate(
                         action.payload.model_dump()
@@ -844,14 +1203,6 @@ class AIBuilderPlanner:
                             requirements_payload
                         ),
                     }
-                else:
-                    # `ProposePlanAction` is surfaced by `run_planner_turn`
-                    # as `propose_plan_pending_adapter` before this builder
-                    # is invoked. Reaching here would be a contract break.
-                    raise AssertionError(
-                        "build_new_messages invoked for unexpected action: "
-                        f"{type(action).__name__}"
-                    )
                 planner_telemetry = build_planner_telemetry_from_turn(
                     telemetry,
                     used_auxiliary_llm=metadata_resolution.used_auxiliary_llm,
@@ -868,6 +1219,8 @@ class AIBuilderPlanner:
                         ),
                     ),
                 ]
+
+            precomputed_output = prepared_request.server_output
 
             try:
                 turn_result = await run_planner_turn(
@@ -897,6 +1250,7 @@ class AIBuilderPlanner:
                     base_messages=prepared_request.llm_messages,
                     orchestration_context=orchestration_context,
                     build_new_messages=_build_new_messages,
+                    precomputed_output=precomputed_output,
                     request_id=request_uuid,
                     lock_token=lock_token,
                 )
@@ -1036,16 +1390,6 @@ class AIBuilderPlanner:
                     phase="planner",
                     request_id=request_id,
                 )
-            elif turn_result.kind == "propose_plan_pending_adapter":
-                yield build_error_event(
-                    message=(
-                        "The assistant isn't ready to propose a plan yet. "
-                        "Please try again in a moment."
-                    ),
-                    code="propose_plan_adapter_unavailable",
-                    phase="planner",
-                    request_id=request_id,
-                )
             elif turn_result.kind == "dispatched":
                 assert turn_result.accepted_output is not None
                 action = turn_result.accepted_output.planner_action
@@ -1053,7 +1397,45 @@ class AIBuilderPlanner:
                     yield build_text_event(action.payload.prompt)
                 elif isinstance(action, CommitArchitectureAction):
                     yield build_status_event("architecture_committed")
-                elif isinstance(action, ConfirmRequirementsAction):
+                    if turn_result.dispatch_result is not None:
+                        chained_result = await self._dispatch_chained_server_action_after_commit(
+                            session_id=session_id,
+                            conversation=conversation,
+                            litellm_model=litellm_model,
+                            litellm_kwargs=litellm_kwargs,
+                            flow=flow,
+                            base_planning_state_version=(
+                                turn_result.dispatch_result.new_planning_state_version
+                            ),
+                            requirements_confirmed=requirements_state.confirmed,
+                            ui_language=ui_language,
+                            request_id=request_id,
+                            request_uuid=request_uuid,
+                            lock_token=lock_token,
+                        )
+                        if (
+                            chained_result is not None
+                            and chained_result.kind == "dispatched"
+                            and chained_result.accepted_output is not None
+                            and isinstance(
+                                chained_result.accepted_output.planner_action,
+                                ConfirmRequirementsAction,
+                            )
+                        ):
+                            chained_action = (
+                                chained_result.accepted_output.planner_action
+                            )
+                            confirmed_payload = (
+                                RequirementsSummaryPayload.model_validate(
+                                    chained_action.payload.model_dump()
+                                )
+                            )
+                            confirmed_data = confirmed_payload.model_dump(mode="json")
+                            confirmed_data["requirements_version"] = (
+                                build_requirements_version(confirmed_payload)
+                            )
+                            yield build_requirements_summary_event(confirmed_data)
+                else:
                     confirmed_payload = RequirementsSummaryPayload.model_validate(
                         action.payload.model_dump()
                     )
@@ -1183,51 +1565,6 @@ def _resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:
         if ui_language in {"sv", "en"}:
             return ui_language
     return None
-
-
-def _derive_asked_question_state(
-    conversation: list[ConversationMessage],
-) -> tuple[frozenset[str], bool]:
-    """Derive the `asked_question_ids` + `has_new_evidence` guardrail inputs.
-
-    The orchestrator's `duplicate_question` guard rejects a repeated
-    `ask_question` for a previously asked `question_id` unless new
-    evidence arrived since. In production, these fields are sourced
-    from the conversation:
-
-    - `asked_question_ids`: the union of `question_id` values on prior
-      assistant messages whose metadata carries the key. The planner
-      persists the question_id on every `ask_question` turn through
-      `_build_new_messages`, so a pre-migration conversation (no
-      question_id metadata) contributes nothing — it fails open rather
-      than blocking the LLM from asking.
-    - `has_new_evidence`: `True` if the latest user message carries a
-      `question_answer` metadata payload. A structured answer is
-      concrete new signal; a plain user message (free-form chat) is
-      not. This matches how the downstream planning-state deriver
-      treats structured answers.
-    """
-    asked: set[str] = set()
-    for message in conversation:
-        if message.role != "assistant":
-            continue
-        metadata = message.metadata if isinstance(message.metadata, dict) else None
-        if metadata is None:
-            continue
-        question_id = metadata.get("question_id")
-        if isinstance(question_id, str) and question_id:
-            asked.add(question_id)
-
-    has_new_evidence = False
-    for message in reversed(conversation):
-        if message.role != "user":
-            continue
-        metadata = message.metadata if isinstance(message.metadata, dict) else None
-        if metadata and metadata.get("question_answer"):
-            has_new_evidence = True
-        break
-
-    return frozenset(asked), has_new_evidence
 
 
 def _count_free_discovery_turns(conversation: list[ConversationMessage]) -> int:

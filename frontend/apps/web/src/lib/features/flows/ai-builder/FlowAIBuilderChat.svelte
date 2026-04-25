@@ -221,6 +221,9 @@
             questionAnswered={message.question
               ? service.isQuestionAnswered(message.question.question_id)
               : false}
+            questionAnswerText={message.question
+              ? service.getQuestionAnswerText(message.question)
+              : null}
             requirementsSummary={message.requirementsSummary}
             requirementsConfirmed={message.requirementsSummary
               ? service.isRequirementsSummaryConfirmed(message.requirementsSummary)

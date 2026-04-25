@@ -5,8 +5,9 @@ The pipeline runs one planner LLM call plus up to
 accepted `PlannerOutput` or a terminal `RejectionReason`. It does NOT
 persist anything — the caller builds the post-LLM assistant / tool
 conversation messages from the accepted output and then invokes
-`dispatch_planner_action` (for ask/commit/confirm) or the proposal-
-processor adapter (for propose_plan).
+`dispatch_planner_action` (for ask/commit/confirm). Proposal creation
+uses a separate task-specific tool-call boundary after the server
+selects that phase.
 
 Separating run from dispatch keeps the conversation-increment shape
 under the caller's control: the planner's action and its user-facing
@@ -27,6 +28,10 @@ the evaluator is stateless. Budget accounting:
 - `commit_drift_blocked` → terminal with the drift rejection.
   The LLM ran, so `llm_calls_made` IS bumped; drift is not a
   retry-eligible condition, so `repair_attempts` is NOT bumped.
+- `parse_failed` from any LLM boundary gets the parse-repair loop unless
+  the failed completion was truncated. If parse-repair salvages a
+  semantic-repair response, that semantic repair consumes one retry
+  slot and the output is re-evaluated normally.
 """
 
 from __future__ import annotations
@@ -45,12 +50,16 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     parse_planner_output,
     summarize_parse_failure,
 )
+from intric.flows.ai_builder.ai_builder_planner_output_normalizer import (
+    normalize_planner_output,
+)
 from intric.flows.ai_builder.ai_builder_repair import (
     MAX_ORCHESTRATOR_REPAIR_RETRIES,
     MAX_PARSE_REPAIR_RETRIES,
     CompletionMetadata,
     ParseRepairOutcome,
     RepairOutcome,
+    build_repair_messages,
     repair_parse_failure,
     repair_planner_turn,
 )
@@ -64,10 +73,9 @@ class PipelineOutcome:
 
     `kind="accepted"`: the evaluator returned ``None`` on the final
     parsed output. `accepted_output` carries the parsed PlannerOutput.
-    The caller inspects `accepted_output.planner_action.kind` to route:
+    The caller inspects `accepted_output.planner_action.kind` to route
     dispatch via `dispatch_planner_action` for ask_question /
-    commit_architecture / confirm_requirements, or hand off to the
-    proposal-processor adapter for propose_plan.
+    commit_architecture / confirm_requirements.
 
     `kind="rejected"`: `rejection` carries the terminal reason —
     either the initial non-eligible rejection, the last rejection
@@ -168,8 +176,7 @@ async def run_planner_pipeline(
 
     On `accepted`, the caller must build the post-LLM assistant / tool
     conversation messages from `accepted_output` and then call
-    `dispatch_planner_action(...)` (or the proposal-processor adapter
-    for propose_plan) to persist the turn atomically.
+    `dispatch_planner_action(...)` to persist the turn atomically.
     """
     prior_commit = orchestration_context.session_state.architecture_commit
 
@@ -221,11 +228,14 @@ async def run_planner_pipeline(
                 parse_error_message=parse_repair_result.failed_error,
                 parse_failure_diagnostics=parse_repair_result.failed_diagnostics,
             )
-        output: PlannerOutput = parse_repair_result.repaired_output
+        output = normalize_planner_output(
+            parse_repair_result.repaired_output,
+            orchestration_context,
+        )
         raw = output.model_dump_json()
     else:
-        output = initial.parsed
-        raw = initial.raw
+        output = normalize_planner_output(initial.parsed, orchestration_context)
+        raw = output.model_dump_json()
 
     rejection = evaluate_planner_output(output, orchestration_context)
 
@@ -252,15 +262,51 @@ async def run_planner_pipeline(
         assert repair_outcome.completion_metadata is not None
         final_metadata = repair_outcome.completion_metadata
         if repair_outcome.kind == "parse_failed":
+            if final_metadata.finish_reason == "length":
+                return PipelineOutcome(
+                    kind="parse_failed",
+                    llm_calls_made=llm_calls_made,
+                    repair_attempts=repair_attempts,
+                    parse_repair_attempts=parse_repair_attempts,
+                    final_completion=final_metadata,
+                    parse_error_raw=repair_outcome.parse_error_raw,
+                    parse_error_message=repair_outcome.parse_error_message,
+                    parse_failure_diagnostics=repair_outcome.parse_failure_diagnostics,
+                )
+            semantic_repair_messages = build_repair_messages(
+                base_messages=base_messages,
+                failed_output_json=raw,
+                rejection=rejection,
+            )
+            parse_repair_result = await _run_parse_repair_loop(
+                litellm_client=litellm_client,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                base_messages=semantic_repair_messages,
+                failed_raw=repair_outcome.parse_error_raw or "",
+                failed_error=repair_outcome.parse_error_message or "",
+            )
+            llm_calls_made += parse_repair_result.attempts
+            parse_repair_attempts += parse_repair_result.attempts
+            final_metadata = parse_repair_result.final_metadata
+            if parse_repair_result.repaired_output is not None:
+                output = normalize_planner_output(
+                    parse_repair_result.repaired_output,
+                    orchestration_context,
+                )
+                raw = output.model_dump_json()
+                repair_attempts += 1
+                rejection = evaluate_planner_output(output, orchestration_context)
+                continue
             return PipelineOutcome(
                 kind="parse_failed",
                 llm_calls_made=llm_calls_made,
                 repair_attempts=repair_attempts,
                 parse_repair_attempts=parse_repair_attempts,
                 final_completion=final_metadata,
-                parse_error_raw=repair_outcome.parse_error_raw,
-                parse_error_message=repair_outcome.parse_error_message,
-                parse_failure_diagnostics=repair_outcome.parse_failure_diagnostics,
+                parse_error_raw=parse_repair_result.failed_raw,
+                parse_error_message=parse_repair_result.failed_error,
+                parse_failure_diagnostics=parse_repair_result.failed_diagnostics,
             )
         if repair_outcome.kind == "commit_drift_blocked":
             return PipelineOutcome(
@@ -272,7 +318,10 @@ async def run_planner_pipeline(
                 final_completion=final_metadata,
             )
         assert repair_outcome.repaired_output is not None
-        output = repair_outcome.repaired_output
+        output = normalize_planner_output(
+            repair_outcome.repaired_output,
+            orchestration_context,
+        )
         raw = output.model_dump_json()
         repair_attempts += 1
         rejection = evaluate_planner_output(output, orchestration_context)

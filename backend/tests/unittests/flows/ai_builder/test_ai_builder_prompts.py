@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_create_tool_schema import (
-    CREATE_FLOW_TOOL_NAME,
-)
+from intric.flows.ai_builder.ai_builder_action_policy import PlannerActionPolicy
+from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_capability_profile,
 )
@@ -21,7 +20,6 @@ from intric.flows.ai_builder.ai_builder_models import (
     StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_prompts import (
-    _extract_signals_from_requirements,
     build_available_kbs_context,
     build_available_models_context,
     build_clarification_hints,
@@ -30,6 +28,9 @@ from intric.flows.ai_builder.ai_builder_prompts import (
     build_step_ref_mapping,
     build_system_prompt,
     trim_conversation_for_context,
+)
+from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
+    KNOWN_REQUIREMENT_SLOT_NAMES,
 )
 from intric.flows.flow import Flow, FlowStep
 
@@ -94,16 +95,17 @@ class TestBuildSystemPrompt:
     def test_basic_prompt_contains_role(self) -> None:
         prompt = build_system_prompt()
         assert "expert" in prompt.lower()
-        assert CREATE_FLOW_TOOL_NAME in prompt
+        assert OUTLINE_FLOW_TOOL_NAME in prompt
         assert "propose_flow" not in prompt
 
     def test_prompt_contains_knowledge_pack_sections(self) -> None:
         # Discovery phase (no confirmed requirements) — core sections only
         prompt = build_system_prompt()
-        assert "Create-flow-kompilering" in prompt
+        assert "Outline-flow-kompilering" in prompt
         assert "Instruktioner vs Underlag" not in prompt
 
-        # Proposal phase (confirmed requirements) — full content
+        # Confirmed requirements still use the compact server-state prompt;
+        # final proposal has its own task-specific outline_flow prompt.
         prompt_confirmed = build_system_prompt(
             confirmed_requirements={
                 "summary": "Test",
@@ -112,10 +114,12 @@ class TestBuildSystemPrompt:
                 "output_description": "Test",
             },
         )
-        assert "Create-läge: kompilerad datamodell" in prompt_confirmed
-        assert "Create-läge: vanliga mönster" in prompt_confirmed
+        assert "Outline-flow-kompilering" in prompt_confirmed
+        assert "Flow capabilities (engine truth)" in prompt_confirmed
+        assert "Create-läge: kompilerad datamodell" not in prompt_confirmed
+        assert "Create-läge: vanliga mönster" not in prompt_confirmed
 
-    def test_confirmed_prompt_selects_relevant_create_recipes(self) -> None:
+    def test_confirmed_prompt_omits_legacy_create_recipe_examples(self) -> None:
         prompt = build_system_prompt(
             confirmed_requirements={
                 "summary": "Build a PDF summary from uploaded documents",
@@ -125,7 +129,8 @@ class TestBuildSystemPrompt:
             },
         )
 
-        assert "Dokumentpaket -> JSON -> grounded text -> DOCX/PDF" in prompt
+        assert "Outline-flow-kompilering" in prompt
+        assert "Dokumentpaket -> JSON -> grounded text -> DOCX/PDF" not in prompt
         assert "Audio -> text -> analys -> rapport" not in prompt
 
     def test_create_mode_prompt_stays_on_ir_surface(self) -> None:
@@ -144,7 +149,8 @@ class TestBuildSystemPrompt:
         assert "do not emit plan_step_ref values" in prompt
         # Create-mode IR surface (what the planner DOES emit) stays present.
         assert "output_fields" in prompt
-        assert "runtime_upload" in prompt
+        assert "runtime_input" in prompt
+        assert "runtime_upload" not in prompt
 
     def test_edit_mode_prompt_keeps_canonical_variable_documentation(self) -> None:
         prompt = build_system_prompt(
@@ -161,13 +167,22 @@ class TestBuildSystemPrompt:
         assert "Blanda inte `step_a` och `step_1`" in prompt
         assert "Använd inte stegnamn" in prompt
 
-    def test_prompt_contains_chaining_rules(self) -> None:
+    def test_create_mode_prompt_contains_semantic_flow_contract(self) -> None:
         prompt = build_system_prompt()
+        assert "outline_flow" in prompt
+        assert "backend derives step topology" in prompt
+        assert "do not emit input_source in create mode" in prompt
+        assert '"input_source":' not in prompt
+
+    def test_edit_mode_prompt_contains_flow_chaining_rules(self) -> None:
+        prompt = build_system_prompt(
+            flow_context="Namn: Test\nAntal steg: 2",
+            is_edit_mode=True,
+        )
         assert "flow_input" in prompt
         assert "previous_step" in prompt
         assert "all_previous_steps" in prompt
         assert "document" in prompt
-        assert "runtime_upload=true" in prompt
 
     def test_prompt_does_not_contain_validate_flow_draft(self) -> None:
         """validate_flow_draft was removed as an LLM-facing tool to prevent incremental validation."""
@@ -195,25 +210,16 @@ class TestBuildSystemPrompt:
         )
 
         assert "edit_flow" in prompt
-        assert CREATE_FLOW_TOOL_NAME not in prompt
+        assert "create_flow" not in prompt
 
-    def test_prompt_teaches_tuples_chain_as_object_not_array(self) -> None:
-        """`tuples_chain` entries must be JSON objects, not arrays.
-
-        `planning_state.StepTriple` is a Pydantic model — a positional
-        array like `["text", "text", "pass_through"]` fails parse. The
-        protocol block must name the three object keys explicitly and
-        warn against the array shape, otherwise the model emits an
-        array and every commit_architecture turn terminally rejects
-        on parse.
-        """
+    def test_prompt_keeps_architecture_commit_server_derived(self) -> None:
+        """The prompt must not ask weaker models to author tuple internals."""
         prompt = build_system_prompt()
 
-        assert '"input_type"' in prompt
-        assert '"output_type"' in prompt
-        assert '"output_mode"' in prompt
-        assert "INTE arrayer/tupler" in prompt
-        assert "StepTriple" in prompt
+        assert "Servern härleder `architecture_commit`" in prompt
+        assert '"architecture_commit": null' in prompt
+        assert "StepTriple" not in prompt
+        assert "INTE arrayer/tupler" not in prompt
 
     def test_prompt_with_flow_context(self) -> None:
         flow = _make_flow(
@@ -279,8 +285,9 @@ class TestBuildSystemPrompt:
                 "output_description": "Test",
             },
         )
-        assert "backend kompilerar underlaget" in prompt.lower()
-        assert "uses_form_fields" in prompt
+        assert "underlag" in prompt.lower()
+        assert "input_fields" in prompt
+        assert "uses_input_fields" in prompt
         assert "uses_previous_fields" in prompt
         assert "input_bindings.question" not in prompt
 
@@ -322,7 +329,9 @@ class TestBuildSystemPrompt:
         )
         assert "LÅNGA" in prompt or "långa" in prompt
 
-    def test_prompt_contains_validation_repair_examples(self) -> None:
+    def test_prompt_omits_validation_repair_examples_from_server_state_prompt(
+        self,
+    ) -> None:
         prompt = build_system_prompt(
             confirmed_requirements={
                 "summary": "Test",
@@ -331,19 +340,25 @@ class TestBuildSystemPrompt:
                 "output_description": "Test",
             },
         )
-        assert "bad draft" in prompt.lower() or "felaktigt utkast" in prompt.lower()
-        assert (
-            "validation error" in prompt.lower() or "valideringsfel" in prompt.lower()
-        )
-        assert (
-            "corrected draft" in prompt.lower() or "korrigerat utkast" in prompt.lower()
-        )
+        assert "bad draft" not in prompt.lower()
+        assert "felaktigt utkast" not in prompt.lower()
+        assert "corrected draft" not in prompt.lower()
+        assert "korrigerat utkast" not in prompt.lower()
 
     def test_prompt_contains_framework_guardrails(self) -> None:
         prompt = build_system_prompt()
         assert "Eneo Flow-ramverket" in prompt
         assert "Python" in prompt
         assert "endast bygga giltiga Eneo-flöden" in prompt
+
+    def test_prompt_publishes_canonical_ask_question_vocabulary(self) -> None:
+        prompt = build_system_prompt()
+        assert "Ask-question vocabulary" in prompt
+        assert "`payload.question_id`" in prompt
+        assert "`payload.slot_name`" in prompt
+        assert "domain-specific IDs" in prompt
+        for slot_name in KNOWN_REQUIREMENT_SLOT_NAMES:
+            assert f"`{slot_name}`" in prompt
 
 
 class TestAllowedActionsPhaseLock:
@@ -375,7 +390,6 @@ class TestAllowedActionsPhaseLock:
             "the section must say commit_architecture is not allowed this turn"
         )
         assert "ask_question" in prompt
-        assert "propose_plan" in prompt
 
     def test_commit_allowed_when_no_slots_unresolved(self) -> None:
         prompt = build_system_prompt(
@@ -416,13 +430,33 @@ class TestAllowedActionsPhaseLock:
         for token in (
             "commit_architecture",
             "ask_question",
-            "propose_plan",
             "primary_runtime_input",
         ):
             assert token in window, (
                 f"`{token}` must appear inside the phase-lock section so the "
                 "LLM sees the full contract in one place"
             )
+
+    def test_action_policy_block_takes_precedence_over_legacy_phase_lock(
+        self,
+    ) -> None:
+        prompt = build_system_prompt(
+            unresolved_architectural_choices=frozenset({"primary_runtime_input"}),
+            action_policy=PlannerActionPolicy(
+                allowed_action_kinds=("commit_architecture", "confirm_requirements"),
+                allowed_ask_question_targets=(),
+                blocked_action_reasons={
+                    "ask_question": "no unresolved ask_question targets",
+                    "propose_plan": "architecture has not been committed",
+                },
+            ),
+        )
+
+        assert "Allowed Planner Actions This Turn" in prompt
+        assert (
+            "Allowed actions: `commit_architecture`, `confirm_requirements`." in prompt
+        )
+        assert "Tillåtna handlingar denna tur" not in prompt
 
 
 class TestAdditionalClarificationHints:
@@ -709,32 +743,8 @@ class TestBuildClarificationHints:
 
         assert hints is not None
         assert "Ta emot filer vid körning" in hints
-
-    def test_requirements_output_pdf_does_not_force_document_input_signal(self) -> None:
-        signals = _extract_signals_from_requirements(
-            {
-                "input_description": "Användaren laddar upp en ljudfil med ett medarbetarsamtal.",
-                "output_description": "Det räcker med en PDF-sammanfattning av samtalet.",
-            }
-        )
-
-        assert signals["input_material_mode"] == {"audio"}
-        assert signals["final_output_mode"] == {"pdf_document"}
-
-    def test_requirements_summary_triggers_sectioned_form_intake_recipe_signal(
-        self,
-    ) -> None:
-        signals = _extract_signals_from_requirements(
-            {
-                "summary": (
-                    "Guida användaren sektion för sektion och samla in fritext under varje rubrik."
-                ),
-                "input_description": "Användaren matar in fritext per rubrik.",
-                "output_description": "Skapa ett DOCX-dokument med samma rubriker.",
-            }
-        )
-
-        assert signals["planner_pattern"] == {"sectioned_form_intake"}
+        assert "låsta arkitekturen" in hints
+        assert "runtime_upload" not in hints
 
     def test_includes_form_field_and_contract_hints_for_structured_analysis_flows(
         self,
@@ -764,7 +774,7 @@ class TestBuildClarificationHints:
         assert "form_fields" in hints
         assert "ett textfält per rubrik" in hints
 
-    def test_create_mode_hints_reference_create_flow_instead_of_legacy_submission_tool(
+    def test_create_mode_hints_reference_outline_flow_instead_of_legacy_submission_tool(
         self,
     ) -> None:
         hints = build_clarification_hints(
@@ -773,8 +783,21 @@ class TestBuildClarificationHints:
         )
 
         assert hints is not None
-        assert CREATE_FLOW_TOOL_NAME in hints
+        assert OUTLINE_FLOW_TOOL_NAME in hints
         assert "propose_flow" not in hints
+
+    def test_pdf_scope_hint_uses_v2_ask_question_vocabulary(self) -> None:
+        hints = build_clarification_hints(
+            conversation=[],
+            latest_user_message=(
+                "Jag vill ladda upp ett eller flera PDF-dokument och jämföra innehållet mellan dokumenten."
+            ),
+        )
+
+        assert hints is not None
+        assert "document_material_scope" in hints
+        assert "ask_structured_question" not in hints
+        assert "ask_question" in hints
 
     def test_flow_with_form_fields(self) -> None:
         flow = _make_flow(
@@ -1139,7 +1162,7 @@ class TestTrimConversation:
                     {
                         "id": "call_1",
                         "type": "function",
-                        "function": {"name": "create_flow", "arguments": "{}"},
+                        "function": {"name": "outline_flow", "arguments": "{}"},
                     }
                 ],
             },
@@ -1169,7 +1192,7 @@ class TestTrimConversation:
                     {
                         "id": "call_x",
                         "type": "function",
-                        "function": {"name": "create_flow", "arguments": "{}"},
+                        "function": {"name": "outline_flow", "arguments": "{}"},
                     }
                 ],
             },
@@ -1205,7 +1228,7 @@ class TestTrimConversation:
                     {
                         "id": "call_latest",
                         "type": "function",
-                        "function": {"name": "create_flow", "arguments": "{}"},
+                        "function": {"name": "outline_flow", "arguments": "{}"},
                     }
                 ],
             },

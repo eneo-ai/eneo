@@ -15,6 +15,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
@@ -25,6 +26,7 @@ from intric.flows.ai_builder.planning_state import (
     StepTriple,
 )
 from intric.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
 )
 
@@ -172,3 +174,79 @@ class TestReturnValue:
 
         assert result is None
         assert rebuilt.architecture_commit is not None
+
+
+class TestPolicyDefaults:
+    def test_text_runtime_input_is_inferred_from_generic_receive_text_phrase(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Skapa ett enkelt flöde som tar emot en kort text från "
+                        "användaren och sammanfattar den i tre tydliga punkter."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["primary_runtime_input"]
+        assert slot.value == "text"
+        output_slot = state.resolved_slots["terminal_output"]
+        assert output_slot.value == "structured_text"
+
+    def test_document_input_defaults_to_flexible_document_scope(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Build a document analysis flow that accepts uploaded "
+                        "documents and produces a written report."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["document_material_scope"]
+        assert slot.value == "flexible_document_case"
+        assert slot.source == "policy_default"
+
+    def test_document_input_defaults_to_no_extra_runtime_metadata(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Build a document analysis flow that accepts uploaded "
+                        "documents and produces a written report."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "no_extra_metadata"
+        assert slot.source == "policy_default"
+
+    def test_runtime_input_fields_are_not_overwritten_by_no_metadata_default(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Create a document review flow that accepts PDFs, uses "
+                        "input fields for audience and detail level at runtime, "
+                        "and produces a DOCX report."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "detailed_case_metadata"
+        assert slot.source == "heuristic"

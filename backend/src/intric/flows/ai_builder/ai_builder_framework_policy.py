@@ -40,6 +40,9 @@ from intric.flows.ai_builder.ai_builder_keywords import (
     STRUCTURED_EXTRACTION_KEYWORDS,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage, OutputType
+from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+    runtime_input_fields_requested,
+)
 from intric.flows.domain.flow import Flow, JsonObject
 
 __all__ = [
@@ -507,16 +510,49 @@ def _extract_requirements_summary_signals(
     requirements_summary: Mapping[str, Any],
 ) -> dict[str, set[str]]:
     signals: dict[str, set[str]] = {}
-    output_description = str(
-        requirements_summary.get("output_description") or ""
-    ).casefold()
+    input_description = normalize_signal_text(
+        str(requirements_summary.get("input_description") or "")
+    )
+    if contains_any_phrase(
+        input_description,
+        (
+            "upload",
+            "uploads",
+            "uploaded",
+            "file",
+            "files",
+            "document",
+            "documents",
+            "ladda upp",
+            "uppladd",
+            "fil",
+            "filer",
+            "dokument",
+        ),
+    ):
+        signals["input_material_mode"] = {"documents"}
+
+    output_description = normalize_signal_text(
+        str(requirements_summary.get("output_description") or "")
+    )
     if "docx" in output_description or "word" in output_description:
         signals["final_output_mode"] = {"docx_document"}
     elif "pdf" in output_description:
         signals["final_output_mode"] = {"pdf_document"}
-    elif "json" in output_description:
+    elif _looks_like_final_json_output(output_description):
         signals["final_output_mode"] = {"structured_json"}
-    elif "text" in output_description:
+    elif contains_any_phrase(
+        output_description,
+        (
+            "text",
+            "result",
+            "results",
+            "structured result",
+            "structured analysis",
+            "analysresultat",
+            "strukturerat resultat",
+        ),
+    ):
         signals["final_output_mode"] = {"structured_text"}
     return signals
 
@@ -652,14 +688,72 @@ def _resolve_direct_output_choice(
         ),
     ):
         return "structured_text"
-    if contains_any_phrase(
-        fallback_text,
-        ("json", "structured json", "strukturerad json"),
-    ):
+    if _looks_like_final_json_output(role_scoped_text or fallback_text):
         return "structured_json"
     if _looks_like_pdf_template_expectation(role_scoped_text or fallback_text):
         return "pdf_document"
     return None
+
+
+def _looks_like_final_json_output(text: str) -> bool:
+    """Return true only when JSON is requested as the terminal artifact.
+
+    Bare mentions of JSON are common in prompts that ask for examples of
+    payloads, schemas, or data between nodes. Treating those as final-output
+    intent makes the builder skip the output-format question and silently
+    choose structured JSON. The intent must therefore be scoped to final
+    output/response wording, or come from the explicit structured answer path.
+    """
+
+    normalized = normalize_signal_text(text)
+    if not normalized or "json" not in normalized:
+        return False
+    if contains_any_phrase(
+        normalized,
+        (
+            "example json",
+            "json example",
+            "exempel json",
+            "json exempel",
+            "json struktur",
+            "json structure",
+            "json schema",
+            "payload json",
+            "json payload",
+            "between nodes",
+            "mellan noder",
+            "per steg",
+            "per step",
+        ),
+    ):
+        return False
+    return contains_any_phrase(
+        normalized,
+        (
+            "structured json",
+            "strukturerad json",
+            "json output",
+            "output json",
+            "output as json",
+            "output ska vara json",
+            "utdata ska vara json",
+            "slutresultat json",
+            "slutresultatet ska vara json",
+            "final output json",
+            "final output should be json",
+            "return json",
+            "returnera json",
+            "respond with json",
+            "svara med json",
+            "only json",
+            "enbart json",
+            "bara json",
+            "valid json",
+            "giltig json",
+            "machine readable json",
+            "maskinlasbar json",
+        ),
+    )
 
 
 def resolve_docx_output_mode(
@@ -872,8 +966,8 @@ def _infer_output_content_shape(text: str) -> str | None:
         "rapport",
         "report",
         "memo",
-        "sammanfattning",
-        "summary",
+        "punkter",
+        "bullet points",
     )
     structured_field_markers = (
         "keywords",
@@ -902,7 +996,9 @@ def mentions_output_change(text: str) -> bool:
 
 def mentions_runtime_metadata(text: str) -> bool:
     normalized_text = text.casefold()
-    return any(keyword in normalized_text for keyword in RUNTIME_METADATA_KEYWORDS)
+    return runtime_input_fields_requested(text) or any(
+        keyword in normalized_text for keyword in RUNTIME_METADATA_KEYWORDS
+    )
 
 
 def runtime_metadata_requested(answer_signals: dict[str, set[str]]) -> bool:

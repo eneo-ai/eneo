@@ -587,9 +587,41 @@ def test_flags_missing_all_previous_steps_for_multi_document_compare() -> None:
             ),
         ],
     )
-    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+    feedback = build_conversation_aware_quality_feedback(
+        conversation,
+        spec,
+        aggregation_intent="compare",
+    )
     assert feedback is not None
     assert "all_previous_steps" in feedback
+
+
+def test_does_not_infer_fan_in_from_conversation_words_without_architecture() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": "Jämför flera dokument i samma körning och skriv en sammanfattning.",
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Jämförelse",
+        steps=[
+            _step(
+                "step_a",
+                "Analysera",
+                "Analysera dokument.",
+                input_type=InputType.DOCUMENT,
+            ),
+            _step(
+                "step_b",
+                "Sammanfatta",
+                "Skriv sammanfattning.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+
+    assert build_conversation_aware_quality_feedback(conversation, spec) is None
 
 
 def test_flags_missing_audio_step_when_conversation_mentions_transcription() -> None:

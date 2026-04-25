@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 import re
+from collections.abc import Iterable
 
 _NON_WORD_RE = re.compile(r"[^\w]+", re.UNICODE)
 

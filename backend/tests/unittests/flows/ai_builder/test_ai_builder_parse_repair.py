@@ -54,7 +54,7 @@ def _valid_ask_question_raw() -> str:
             "planner_action": {
                 "kind": "ask_question",
                 "payload": {
-                    "question_id": "q-1",
+                    "question_id": "primary_runtime_input",
                     "slot_name": "primary_runtime_input",
                     "prompt": "What is the input?",
                 },

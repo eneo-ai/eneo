@@ -58,6 +58,9 @@ from intric.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationError,
 )
 from intric.main.exceptions import BadRequestException
+from intric.model_providers.infrastructure.litellm_runtime_config import (
+    configure_litellm_runtime,
+)
 
 if TYPE_CHECKING:
     from intric.completion_models.infrastructure.completion_service import (
@@ -90,6 +93,8 @@ SSE_EVENT_STATUS = _SSE_EVENT_STATUS
 SSE_EVENT_DONE = _SSE_EVENT_DONE
 
 logger = logging.getLogger(__name__)
+
+configure_litellm_runtime(litellm)
 
 
 class _CredentialResolverProtocol(Protocol):

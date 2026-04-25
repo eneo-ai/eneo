@@ -19,13 +19,13 @@ The helper is deliberately narrow:
   LLM once, parses the reply via `parse_planner_output`, and:
   * Returns `RepairOutcome(kind="commit_drift_blocked", ...)` with a
     new `RejectionReason(code="repair_attempted_commit_drift", ...)`
-    when the repaired output mutates the prior `architecture_hash`
-    (by hash divergence or body-forgery with matching hash). A
-    repaired delta that omits `architecture_commit` is preservation-
-    by-absence, not drift — the evaluator only inspects the delta
-    when it is populated. This is a hard failure — the outer loop
-    does NOT decrement its retry budget on drift because drift is
-    not a retry-eligible condition.
+    when the repaired output mutates the prior committed architecture's
+    semantic body (`tuples_chain`, `chosen_patterns`,
+    `required_capabilities`). A repaired delta that omits
+    `architecture_commit` is preservation-by-absence, not drift — the
+    evaluator only inspects the delta when it is populated. This is a
+    hard failure — the outer loop does NOT decrement its retry budget
+    on drift because drift is not a retry-eligible condition.
   * Returns `RepairOutcome(kind="repaired", repaired_output=...)`
     otherwise. The outer loop re-runs `evaluate_planner_output` on the
     repaired output; if it still rejects, the outer loop calls this
@@ -45,9 +45,13 @@ from typing import Any, Final, Literal
 
 from pydantic import ValidationError
 
+from intric.flows.ai_builder.ai_builder_ask_question_contract import (
+    canonical_ask_question_targets,
+    format_ask_question_targets,
+)
 from intric.flows.ai_builder.ai_builder_commit_invariance import (
     CommitDriftError,
-    assert_architecture_commit_unchanged,
+    assert_architecture_commit_draft_matches_pinned,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     PlannerOutput,
@@ -56,7 +60,10 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     parse_planner_output,
     summarize_parse_failure,
 )
-from intric.flows.ai_builder.planning_state import ArchitectureCommit
+from intric.flows.ai_builder.planning_state import (
+    ArchitectureCommit,
+    ArchitectureCommitDraft,
+)
 
 MAX_ORCHESTRATOR_REPAIR_RETRIES: Final[int] = 3
 
@@ -93,11 +100,10 @@ class CompletionMetadata:
 
 
 # Repair-eligible rejection codes. A rejection outside this set means
-# the planner misunderstood the constraint surface (e.g. asked a
-# duplicate question, invented an unsupported tuple) — a corrective
-# prompt on top of the same turn context would re-inherit the same
-# misunderstanding. The outer loop handles those by advancing the
-# session to a fresh turn instead.
+# the planner misunderstood a constraint that a corrective prompt cannot
+# safely repair (e.g. invented an unsupported tuple). Vocabulary and
+# action-loop drift are eligible because the safe remediation is an
+# action pivot inside the same server-owned constraint surface.
 #
 # `architecture_commit_premature_unresolved_choices` is eligible
 # because the remediation is an action pivot (commit → ask_question),
@@ -106,19 +112,17 @@ class CompletionMetadata:
 # explicitly via `_REPAIR_DIRECTIVES` below.
 _REPAIR_ELIGIBLE_CODES: frozenset[RejectionCode] = frozenset(
     {
-        "propose_plan_without_architecture_commit",
-        "propose_plan_missing_draft_plan",
-        "propose_plan_draft_plan_structural_mismatch",
         "architecture_commit_premature_unresolved_choices",
+        "architecture_commit_missing_delta",
+        "off_topic_question",
+        "duplicate_question",
     }
 )
 
 
-# Per-code remediation directive. The default directive (used for the
-# `propose_plan_*` codes) reminds the LLM the committed architecture is
-# pinned; the premature-commit directive tells the LLM to pivot to
-# `ask_question` about one of the blocking slots instead of re-emitting
-# `commit_architecture`.
+# Per-code remediation directive. The premature-commit directive tells
+# the LLM to pivot to `ask_question` about one of the blocking slots
+# instead of re-emitting `commit_architecture`.
 _PREMATURE_COMMIT_DIRECTIVE: Final[str] = (
     "The valid next action is `ask_question` about one of the "
     "unresolved slots named above. Emit `planner_action` with "
@@ -131,9 +135,49 @@ _PRESERVE_COMMIT_DIRECTIVE: Final[str] = (
 )
 
 
+def _off_topic_question_directive() -> str:
+    return (
+        "The valid next action is `ask_question`. Replace invented "
+        "domain-specific identifiers with one of the allowed targets "
+        "named in the rejection detail. Emit that target in both "
+        "`payload.question_id` and `payload.slot_name`; keep any narrower "
+        "domain concept in `payload.prompt` only. Canonical ask_question "
+        "targets are: "
+        f"{format_ask_question_targets(canonical_ask_question_targets())}."
+    )
+
+
+_DUPLICATE_QUESTION_DIRECTIVE: Final[str] = (
+    "Do NOT repeat the same `ask_question`. Use the latest user message "
+    "and conversation context as evidence. If the answer resolves the "
+    "slot, emit a valid non-duplicate next action such as "
+    "`confirm_requirements` or `commit_architecture` when all required "
+    "choices are resolved. If more information is still needed, ask a "
+    "different unresolved slot from the allowed target surface; do not "
+    "re-ask the rejected question ID this turn."
+)
+
+
+_MISSING_COMMIT_DELTA_DIRECTIVE: Final[str] = (
+    "If `planner_action.kind` is `commit_architecture`, keep "
+    "`planning_state_delta.architecture_commit` as null; the server derives "
+    "the architecture from resolved planning slots and the Flow Capability "
+    "Manifest. Do NOT emit `architecture_hash` or `committed_at`. If this "
+    "turn still lacks enough resolved state to commit, pivot to "
+    "`ask_question` for the unresolved slot instead of re-emitting "
+    "`commit_architecture`."
+)
+
+
 def _repair_directive_for(code: RejectionCode) -> str:
     if code == "architecture_commit_premature_unresolved_choices":
         return _PREMATURE_COMMIT_DIRECTIVE
+    if code == "architecture_commit_missing_delta":
+        return _MISSING_COMMIT_DELTA_DIRECTIVE
+    if code == "off_topic_question":
+        return _off_topic_question_directive()
+    if code == "duplicate_question":
+        return _DUPLICATE_QUESTION_DIRECTIVE
     return _PRESERVE_COMMIT_DIRECTIVE
 
 
@@ -149,6 +193,28 @@ def build_repair_user_message(*, rejection: RejectionReason) -> str:
         "The previous response was rejected because: "
         f"{rejection.detail}. {_repair_directive_for(rejection.code)}"
     )
+
+
+def build_repair_messages(
+    *,
+    base_messages: list[dict[str, Any]],
+    failed_output_json: str,
+    rejection: RejectionReason,
+) -> list[dict[str, Any]]:
+    """Compose the full semantic-repair conversation.
+
+    Kept separate from `repair_planner_turn` so the orchestration
+    pipeline can use the same conversation as the base for parse-repair
+    if the semantic-repair LLM call itself returns malformed JSON.
+    """
+    return [
+        *base_messages,
+        {"role": "assistant", "content": failed_output_json},
+        {
+            "role": "user",
+            "content": build_repair_user_message(rejection=rejection),
+        },
+    ]
 
 
 RepairOutcomeKind = Literal[
@@ -172,7 +238,7 @@ class RepairOutcome:
       output; `completion_metadata` carries the LLM call's metadata.
       The outer loop must still re-run `evaluate_planner_output` on it.
     - `kind="commit_drift_blocked"`: the repaired output mutated the
-      prior `architecture_hash` or dropped the commit. `drift_rejection`
+      prior committed architecture's semantic body. `drift_rejection`
       carries a `repair_attempted_commit_drift` reason the outer loop
       surfaces to telemetry; `completion_metadata` is populated because
       the LLM ran. The retry budget is NOT decremented.
@@ -214,14 +280,11 @@ async def repair_planner_turn(
     if rejection.code not in _REPAIR_ELIGIBLE_CODES:
         return RepairOutcome(kind="not_repairable")
 
-    messages: list[dict[str, Any]] = [
-        *base_messages,
-        {"role": "assistant", "content": failed_output_json},
-        {
-            "role": "user",
-            "content": build_repair_user_message(rejection=rejection),
-        },
-    ]
+    messages = build_repair_messages(
+        base_messages=base_messages,
+        failed_output_json=failed_output_json,
+        rejection=rejection,
+    )
 
     response = await litellm_client.acompletion(
         model=litellm_model,
@@ -290,13 +353,9 @@ def build_parse_repair_user_message(*, parse_error_message: str) -> str:
 
     Extracted to keep the prompt text testable and to land one place
     where layout reminders for observed confusion patterns
-    accumulate. Today the reminder targets the `plan_reference` vs
-    `draft_plan` confusion — an LLM repeatedly emitted
-    `planning_state_delta.draft_plan.plan_reference` despite the
-    system prompt declaring the correct home, so parse-repair
-    explicitly names the right location. Future repeated confusions
-    land here with the same pattern (named field, named correct
-    location, "NEVER" + named wrong location).
+    accumulate. Keep this prompt tied to the active PlannerOutput
+    schema only; proposal tool-call repair lives in the proposal
+    processor, not in this planner-union repair helper.
     """
     return (
         "The previous response could not be parsed as a PlannerOutput "
@@ -305,12 +364,11 @@ def build_parse_repair_user_message(*, parse_error_message: str) -> str:
         "PlannerOutput schema. Do NOT wrap the JSON in markdown code "
         "fences. Do NOT add prose before or after the JSON. Do NOT "
         "invent keys not declared in the schema. Reminders: "
-        "`plan_reference` belongs in `planner_action.payload` when "
-        "`kind` is `propose_plan`; it is NEVER a field of "
-        "`planning_state_delta.draft_plan`. "
-        "`architecture_commit` has FIVE required fields — `tuples_chain`, "
-        "`chosen_patterns`, `required_capabilities`, `architecture_hash`, "
-        "`committed_at` — all MUST be present when the object is emitted."
+        "For `kind=commit_architecture`, prefer "
+        "`architecture_commit: null`; the server derives the architecture "
+        "from resolved planning slots and the Flow Capability Manifest. "
+        "Do NOT emit `architecture_hash` or `committed_at`; the server "
+        "owns those values."
     )
 
 
@@ -390,17 +448,14 @@ def _extract_completion_metadata(response: Any) -> CompletionMetadata:
 def _detect_commit_drift(
     *,
     prior: ArchitectureCommit | None,
-    after: ArchitectureCommit | None,
+    after: ArchitectureCommitDraft | None,
 ) -> RejectionReason | None:
     """Return a drift rejection if the repaired commit mutates the prior.
 
     Matches the evaluator's preservation-by-absence semantics: when a
     prior commit is pinned and the repaired delta omits
-    `architecture_commit`, that is not drift — the knowledge-pack
-    protocol teaches the planner to populate `architecture_commit` only
-    on `commit_architecture` turns, so a repaired `propose_plan` is
-    allowed (and expected) to leave the field ``None``. Only when the
-    repaired output carries a delta commit do we invoke
+    `architecture_commit`, that is not drift. Only when the repaired
+    output carries a delta commit do we invoke
     `assert_architecture_commit_unchanged` and classify hash or body
     divergence as drift. The exception message already names the
     offending field(s), so we forward it as the `RejectionReason.detail`
@@ -409,7 +464,7 @@ def _detect_commit_drift(
     if after is None:
         return None
     try:
-        assert_architecture_commit_unchanged(before=prior, after=after)
+        assert_architecture_commit_draft_matches_pinned(before=prior, after=after)
     except CommitDriftError as exc:
         return RejectionReason(
             code="repair_attempted_commit_drift",
@@ -424,6 +479,7 @@ __all__ = [
     "CompletionMetadata",
     "ParseRepairOutcome",
     "RepairOutcome",
+    "build_repair_messages",
     "build_parse_repair_user_message",
     "build_repair_user_message",
     "repair_parse_failure",

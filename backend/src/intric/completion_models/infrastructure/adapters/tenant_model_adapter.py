@@ -42,11 +42,16 @@ from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from intric.main.logging import get_logger
+from intric.model_providers.infrastructure.litellm_runtime_config import (
+    configure_litellm_runtime,
+)
 from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
 
 logger = get_logger(__name__)
+
+configure_litellm_runtime(litellm)
 
 
 # Regex to match Qwen3 thinking blocks: <think>...</think>

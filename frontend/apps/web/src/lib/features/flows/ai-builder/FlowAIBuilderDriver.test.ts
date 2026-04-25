@@ -101,18 +101,19 @@ describe("FlowAIBuilderDriver", () => {
 
   it("tracks answered structured questions from question metadata instead of message position", async () => {
     const { driver } = makeDriver();
+    const question = {
+      question_id: "input_mode",
+      question: "What input should the flow accept?",
+      options: [{ label: "Documents", id: "documents" }],
+      selection_mode: "single" as const,
+      allow_custom: true
+    };
     driver.seedState({
       messages: [
         {
           role: "assistant",
           content: "",
-          question: {
-            question_id: "input_mode",
-            question: "What input should the flow accept?",
-            options: [{ label: "Documents", id: "documents" }],
-            selection_mode: "single",
-            allow_custom: true
-          },
+          question,
           timestamp: 1
         },
         {
@@ -131,6 +132,36 @@ describe("FlowAIBuilderDriver", () => {
 
     expect(driver.isQuestionAnswered("input_mode")).toBe(true);
     expect(driver.isQuestionAnswered("output_mode")).toBe(false);
+    expect(driver.getQuestionAnswerText(question)).toBe("Documents");
+  });
+
+  it("renders custom structured question answers for collapsed answered questions", async () => {
+    const { driver } = makeDriver();
+    const question = {
+      question_id: "output_mode",
+      question: "What should the flow produce?",
+      options: [{ label: "DOCX document", id: "docx", value: "docx_document" }],
+      selection_mode: "single" as const,
+      allow_custom: true
+    };
+    driver.seedState({
+      messages: [
+        { role: "assistant", content: "", question, timestamp: 1 },
+        {
+          role: "user",
+          content: "PowerPoint deck",
+          metadata: {
+            question_answer: {
+              question_id: "output_mode",
+              custom_value: "PowerPoint deck"
+            }
+          },
+          timestamp: 2
+        }
+      ]
+    });
+
+    expect(driver.getQuestionAnswerText(question)).toBe("PowerPoint deck");
   });
 
   it("only treats the latest requirements summary as active", async () => {
@@ -654,5 +685,47 @@ describe("FlowAIBuilderDriver", () => {
       "Transkribera ljud och skriv rapport"
     );
     expect(driver.state.currentPlan?.plan_id).toBe("plan-9");
+  });
+
+  it("hydrates requirements summary stored on assistant metadata", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        makeSession({
+          session_id: "session-3",
+          status: "chatting",
+          conversation: [
+            {
+              role: "user",
+              content: "Bygg ett dokumentflöde",
+              timestamp: "2026-03-15T10:00:00Z"
+            },
+            {
+              role: "assistant",
+              content: "Jag har tillräckligt med information.",
+              timestamp: "2026-03-15T10:00:05Z",
+              metadata: {
+                requirements_summary: {
+                  summary: "Analysera dokument och skapa rapport",
+                  key_decisions: [{ topic: "Indata", decision: "PDF-dokument" }],
+                  input_description: "PDF-filer",
+                  output_description: "DOCX-rapport",
+                  requirements_version: "req-2"
+                }
+              }
+            }
+          ]
+        })
+      )
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce({ sessions: [] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    await driver.resumeSession("session-3");
+
+    expect(driver.state.messages[1]?.requirementsSummary?.summary).toBe(
+      "Analysera dokument och skapa rapport"
+    );
+    expect(driver.derivePhase()).toBe("confirming");
   });
 });

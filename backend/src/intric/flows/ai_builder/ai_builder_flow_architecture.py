@@ -1,15 +1,15 @@
-"""Structured flow-architecture rules surfaced to the planner.
+"""Structured create-outline rules surfaced to the planner.
 
 Each `FlowArchitectureSection` groups one heading plus an ordered tuple
 of bullet-rule strings. The renderer turns the registry (plus a short
-lead paragraph describing the create-mode contract) into the markdown
-block that lands in the create-proposal system prompt.
+lead paragraph describing the create-mode outline contract) into the
+markdown block that lands in the create-proposal system prompt.
 
-The registry replaces the hand-prose
-`_KNOWLEDGE_PACK_CREATE_FLOW_ARCHITECTURE` constant: structuring the
-data lets future consumers (e.g. a validator that wants to cite a
-specific planner-responsibility rule, a prompt-mode renderer that wants
-a different section ordering) read the same source instead of the
+The registry replaces older hand-prose full-mechanics guidance.
+Structuring the data lets
+future consumers (e.g. a validator that wants to cite a specific
+planner-responsibility rule, a prompt-mode renderer that wants a
+different section ordering) read the same source instead of the
 renderer copying prose by hand.
 """
 
@@ -33,83 +33,70 @@ class FlowArchitectureSection:
 
 FLOW_ARCHITECTURE_SECTIONS: tuple[FlowArchitectureSection, ...] = (
     FlowArchitectureSection(
-        heading="Vad du SKA ange",
+        heading="Vad modellen anger",
         rules=(
-            "`instructions` — vanlig text utan variabelsyntax",
-            "`input_source`, `input_type`, `output_type`",
+            "`flow_name`, `flow_description` och `plan_rationale` som vanlig text",
             (
-                "`runtime_upload`, `runtime_required`, `runtime_max_files` "
-                "för första uppladdningssteget"
+                "`runtime_input` beskriver bara huvudingången vid körning "
+                "(`text`, `json`, `document`, `file` eller `audio`)"
             ),
-            "`uses_form_fields` när senare steg behöver formulärvärden",
+            "`input_fields` modellerar inmatningsfält/input variables som användaren fyller i",
+            "`steps[].name` och `steps[].task` beskriver semantiska arbetssteg",
             (
-                "`uses_previous_fields` när senare steg behöver specifika "
-                "strukturerade fält från tidigare JSON-steg"
+                "`steps[].output_fields` används när ett steg ska producera "
+                "strukturerade datapunkter för senare arbete"
             ),
-            "`document_delivery_mode` för PDF/DOCX-leverans",
-            "`citations_requested` för textsteg som ska ha källhänvisningar",
-            "`output_fields` för JSON-steg",
+            "`steps[].uses_input_fields` refererar till namn i `input_fields`",
+            "`final_output_type` anger slutartefakten (`text`, `json`, `pdf` eller `docx`)",
         ),
     ),
     FlowArchitectureSection(
         heading="Vad backend äger",
         rules=(
+            "input source/type och upload/runtime config",
+            "`underlag` / input bindings och variabelinjektion mellan steg",
             "stegrefar (`plan_step_ref`)",
-            "underlag / variabelinjektion mellan steg",
-            "kontrakt / JSON Schema",
             "`output_mode`",
-            "runtime-input-config",
+            "`document_delivery_mode` för PDF/DOCX-leverans",
+            "`uses_previous_fields` och fältnivåreferenser mellan JSON-steg",
+            "kontrakt / JSON Schema från `output_fields`",
         ),
     ),
     FlowArchitectureSection(
         heading="Praktiska regler",
         rules=(
-            'Steg 1 MÅSTE använda `input_source="flow_input"`',
+            "Skriv inga template-variabler som `{{ ... }}` i outline-fält",
+            "Skriv inga ID:n, hashvärden, tidsstämplar, råa bindings eller rå JSON Schema",
+            "Använd flera tydliga steg för komplexa flöden i stället för ett överlastat steg",
             (
-                'Senare steg får inte använda `input_source="flow_input"`; '
-                "använd `previous_step` eller `all_previous_steps`"
+                "Lägg körningsmetadata som ska återanvändas i `input_fields`, "
+                "inte gömt i prompttext"
             ),
             (
-                "Sista steget MÅSTE ha `output_type` som matchar den explicit "
-                "efterfrågade slutartefakten (`text`, `json`, `pdf` eller `docx`)"
+                "Använd `output_fields` när senare steg behöver stabila fält; "
+                "backend gör steget strukturerat"
             ),
             (
-                "När flera uppladdade dokument ska vägas samman i en gemensam "
-                "analys eller grounded sammanfattning ska ett samlande steg "
-                'använda `input_source="all_previous_steps"`'
+                "Beskriv syntes/jämförelse semantiskt; backend avgör när flera "
+                "tidigare steg ska kopplas in som källa"
             ),
             (
-                "Varje objekt i `steps` måste vara ett komplett steg. "
-                "Fältdefinitioner med `name`, `field_type`, `description` och "
-                "`required` hör hemma i `output_fields`, inte som egna poster "
-                "i `steps`"
+                "För DOCX/PDF räcker `final_output_type`; backend skapar leveranssteget "
+                "eller dokumentläget"
             ),
             (
-                "Filuppladdning används via `runtime_upload=true` på ett "
-                "`flow_input`-steg med `input_type=document`, `file` eller "
-                "`audio`"
-            ),
-            (
-                'Använd `output_type="json"` + `output_fields` när nästa steg '
-                "behöver namngivna datapunkter"
-            ),
-            (
-                'Använd `output_type="text"` för grounded sammanfattningar, '
-                "resonemang och läsbar rapporttext"
-            ),
-            (
-                'Använd `output_type="docx"` eller `"pdf"` bara när steget '
-                "faktiskt levererar dokumentet"
+                "Citations kan begäras bara som semantisk önskan på textsteg; "
+                "backend validerar om det stöds"
             ),
         ),
     ),
 )
 
 
-_HEADER = "# Create-flow-kompilering"
+_HEADER = "# Outline-flow-kompilering"
 _LEAD = (
-    "I create-läge beskriver du bara avsikten i `create_flow`. "
-    "Backend kompilerar utkastet till den kanoniska flödesspecifikationen."
+    "I create-läge beskriver modellen bara avsikten i `outline_flow`. "
+    "Backend kompilerar outline till kanonisk flödesspecifikation."
 )
 
 
