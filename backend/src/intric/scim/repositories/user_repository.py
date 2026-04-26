@@ -1,0 +1,149 @@
+from uuid import UUID
+
+import sqlalchemy as sa
+from sqlalchemy import Select, asc, desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from intric.database.tables.roles_table import PredefinedRoles
+from intric.database.tables.users_table import Users, users_predefined_roles_table
+from intric.scim.schemas.common import ScimFilter, ScimSort
+
+UserModel = Users
+
+_ATTR_MAP = {
+    "username": Users.username,
+    "externalid": Users.external_id,
+    "email": Users.email,
+}
+
+
+def _apply_filter(query: Select, scim_filter: ScimFilter | None) -> Select:
+    if scim_filter is None:
+        return query
+    col = _ATTR_MAP.get(scim_filter.attribute.lower().replace(".", ""))
+    if col is None:
+        return query
+    op = scim_filter.operator
+    v = scim_filter.value
+    if op == "eq":
+        return query.where(col == v)
+    elif op == "ne":
+        return query.where(col != v)
+    elif op == "co":
+        return query.where(col.ilike(f"%{v}%"))
+    elif op == "sw":
+        return query.where(col.ilike(f"{v}%"))
+    elif op == "ew":
+        return query.where(col.ilike(f"%{v}"))
+    elif op == "pr":
+        return query.where(col.is_not(None))
+    elif op == "gt":
+        return query.where(col > v)
+    elif op == "ge":
+        return query.where(col >= v)
+    elif op == "lt":
+        return query.where(col < v)
+    elif op == "le":
+        return query.where(col <= v)
+    return query
+
+
+class ScimUserRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, model: UserModel) -> UserModel:
+        self._session.add(model)
+        await self._session.flush()
+        await self._assign_user_predefined_role(model.id)
+        return model
+
+    async def _assign_user_predefined_role(self, user_id: UUID) -> None:
+        role_id_row = await self._session.execute(
+            select(PredefinedRoles.id).where(PredefinedRoles.name == "User")
+        )
+        role_id = role_id_row.scalar_one_or_none()
+        if role_id is None:
+            return
+        await self._session.execute(
+            sa.insert(users_predefined_roles_table).values(
+                user_id=user_id,
+                predefined_role_id=role_id,
+            )
+        )
+
+    async def get_by_id(self, user_id: UUID, tenant_id: UUID) -> UserModel | None:
+        result = await self._session.execute(
+            select(UserModel).where(
+                UserModel.id == user_id,
+                UserModel.tenant_id == tenant_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_username(self, user_name: str, tenant_id: UUID) -> UserModel | None:
+        result = await self._session.execute(
+            select(UserModel).where(
+                UserModel.username == user_name,
+                UserModel.tenant_id == tenant_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_email(self, email: str, tenant_id: UUID) -> UserModel | None:
+        result = await self._session.execute(
+            select(UserModel).where(
+                UserModel.email == email,
+                UserModel.tenant_id == tenant_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def email_exists_in_other_tenant(self, email: str, tenant_id: UUID) -> bool:
+        result = await self._session.execute(
+            select(UserModel.id).where(
+                UserModel.email == email,
+                UserModel.tenant_id != tenant_id,
+                UserModel.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    def _base_list_query(self, tenant_id: UUID, scim_filter: ScimFilter | None) -> Select:
+        query = select(UserModel).where(
+            UserModel.state == "active",
+            UserModel.tenant_id == tenant_id,
+        )
+        return _apply_filter(query, scim_filter)
+
+    async def count(self, tenant_id: UUID, scim_filter: ScimFilter | None = None) -> int:
+        base = self._base_list_query(tenant_id, scim_filter)
+        count_query = select(func.count()).select_from(base.subquery())
+        result = await self._session.execute(count_query)
+        return result.scalar_one()
+
+    async def list(
+        self,
+        tenant_id: UUID,
+        scim_filter: ScimFilter | None = None,
+        scim_sort: ScimSort | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> list[UserModel]:
+        query = self._base_list_query(tenant_id, scim_filter)
+        if scim_sort is not None:
+            sort_col = _ATTR_MAP.get(scim_sort.attribute.lower().replace(".", ""))
+            if sort_col is not None:
+                query = query.order_by(
+                    asc(sort_col) if scim_sort.order == "ascending" else desc(sort_col)
+                )
+        query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+        result = await self._session.execute(query)
+        return list(result.scalars().all())
+
+    async def update(self, model: UserModel) -> UserModel:
+        await self._session.flush()
+        await self._session.refresh(model)
+        return model

@@ -1,0 +1,53 @@
+"""Verify that all error responses on SCIM routes use the SCIM error schema."""
+import pytest
+from unittest.mock import AsyncMock
+from httpx import ASGITransport, AsyncClient
+
+from uuid import uuid4
+
+from intric.scim.app import scim_app
+from intric.scim.auth import require_scim_auth
+from intric.scim.deps import get_scim_user_service
+from intric.scim.services.user_service import ScimUserService
+from intric.server.main import app
+from tests.unittests.scim.conftest import _check_test_token
+
+TEST_TOKEN = "test-scim-token"
+AUTH = {"Authorization": f"Bearer {TEST_TOKEN}"}
+SCIM_ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
+
+
+@pytest.fixture
+async def client() -> AsyncClient:
+    scim_app.dependency_overrides[require_scim_auth] = _check_test_token
+    scim_app.dependency_overrides[get_scim_user_service] = lambda: AsyncMock(spec=ScimUserService)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+    scim_app.dependency_overrides.clear()
+
+
+class TestScimErrorSchema:
+    async def test_unauthorized_returns_scim_schema(self, client: AsyncClient):
+        res = await client.get("/scim/v2/Users", headers={"Authorization": "Bearer wrong-token"})
+        assert res.status_code == 401
+        body = res.json()
+        assert SCIM_ERROR_SCHEMA in body["schemas"]
+        assert body["status"] == "401"
+
+    async def test_validation_error_returns_scim_schema(self, client: AsyncClient):
+        res = await client.post(
+            "/scim/v2/Users",
+            json={"invalid": "payload"},
+            headers=AUTH,
+        )
+        assert res.status_code == 422
+        body = res.json()
+        assert SCIM_ERROR_SCHEMA in body["schemas"]
+        assert body["status"] == "422"
+        assert "detail" in body
+
+    async def test_non_scim_error_uses_default_format(self, client: AsyncClient):
+        # Non-SCIM routes should not use the SCIM error schema format
+        res = await client.get("/api/v1/this-route-does-not-exist")
+        assert res.status_code == 404
+        assert "schemas" not in res.json()

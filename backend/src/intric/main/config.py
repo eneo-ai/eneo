@@ -229,6 +229,9 @@ class Settings(BaseSettings):
     eneo_super_api_key: Optional[str] = None
     eneo_super_duper_api_key: Optional[str] = None
 
+    # SCIM 2.0
+    scim_bearer_token: Optional[str] = None
+
     # Infrastructure dependencies
     postgres_user: str
     postgres_host: str

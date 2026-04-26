@@ -8,6 +8,8 @@ from typing import Any, Optional, Protocol, cast
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -17,6 +19,7 @@ from intric.allowed_origins.get_origin_callback import get_origin
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.main.request_context import get_request_context
+from intric.scim.app import scim_app
 from intric.server import api_documentation
 from intric.server.dependencies.lifespan import lifespan as app_lifespan
 from intric.server.exception_handlers import add_exception_handlers
@@ -221,9 +224,19 @@ def get_application():
     )
 
     app.include_router(api_router, prefix=get_settings().api_prefix)
+    app.mount("/scim/v2", scim_app)
 
     # Add handlers of all errors except 500
     add_exception_handlers(app)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": jsonable_encoder(exc.errors())},
+        )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(

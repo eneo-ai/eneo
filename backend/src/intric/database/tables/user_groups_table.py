@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, UniqueConstraint
@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 
 class UserGroups(BasePublic):
     name: Mapped[str] = mapped_column()
+    external_id: Mapped[Optional[str]] = mapped_column(index=True)
+    state: Mapped[Optional[str]] = mapped_column()
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey("tenants.id", ondelete="CASCADE")
     )

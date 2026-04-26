@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 class Users(BasePublic):
     username: Mapped[Optional[str]] = mapped_column()
     email: Mapped[str] = mapped_column(index=True)
+    external_id: Mapped[Optional[str]] = mapped_column(index=True)
     email_verified: Mapped[bool] = mapped_column(server_default="False")
     salt: Mapped[Optional[str]] = mapped_column()
     password: Mapped[Optional[str]] = mapped_column()

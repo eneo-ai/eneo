@@ -91,6 +91,18 @@ class ActionType(str, Enum):
     MCP_SERVER_TOOL_ENABLED = "mcp_server_tool_enabled"
     MCP_SERVER_TOOL_DISABLED = "mcp_server_tool_disabled"
 
+    # SCIM Provisioning Actions
+    SCIM_USER_PROVISIONED = "scim_user_provisioned"
+    SCIM_USER_RECONCILED = "scim_user_reconciled"
+    SCIM_USER_REACTIVATED = "scim_user_reactivated"
+    SCIM_USER_DEPROVISIONED = "scim_user_deprovisioned"
+    SCIM_USER_UPDATED = "scim_user_updated"
+    SCIM_GROUP_CREATED = "scim_group_created"
+    SCIM_GROUP_UPDATED = "scim_group_updated"
+    SCIM_GROUP_DELETED = "scim_group_deleted"
+    SCIM_TOKEN_CREATED = "scim_token_created"
+    SCIM_TOKEN_REVOKED = "scim_token_revoked"
+
     # System Actions
     RETENTION_POLICY_APPLIED = "retention_policy_applied"
     ENCRYPTION_KEY_ROTATED = "encryption_key_rotated"

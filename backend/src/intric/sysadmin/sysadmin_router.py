@@ -1,4 +1,6 @@
-from datetime import datetime, timedelta
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, cast
 from uuid import UUID
 
@@ -47,6 +49,7 @@ from intric.completion_models.presentation.completion_model_models import (
 from intric.database.database import AsyncSession
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.websites_table import Websites
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import override_user
@@ -1397,3 +1400,165 @@ async def delete_embedding_model(
         await repo.delete_model(id)
 
     return {"success": True, "message": f"Model {id} deleted successfully"}
+
+
+# ============================================================================
+# SCIM Token Management
+# ============================================================================
+
+
+class ScimTokenCreatedResponse(BaseModel):
+    tenant_id: UUID
+    token: str = Field(description="Plaintext token — shown once, never stored")
+
+
+class ScimTokenStatusResponse(BaseModel):
+    tenant_id: UUID
+    is_active: bool
+
+
+def _scim_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+@router.post(
+    "/tenants/{tenant_id}/scim-token",
+    response_model=ScimTokenCreatedResponse,
+    status_code=201,
+    summary="Generate SCIM bearer token for tenant",
+    description=(
+        "Generates a new SCIM bearer token for the given tenant. "
+        "The token is returned in plaintext exactly once and is never stored — only its SHA-256 hash is persisted. "
+        "Calling this endpoint again replaces any existing token."
+    ),
+    responses={
+        201: {"description": "Token created. Copy it now — it will not be shown again."},
+        404: {"description": "Tenant not found"},
+    },
+)
+async def create_scim_token(
+    tenant_id: UUID,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> ScimTokenCreatedResponse:
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from intric.main.exceptions import NotFoundException
+
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        result = await session.execute(
+            sa.select(Tenants.id).where(Tenants.id == tenant_id)
+        )
+        if result.scalar_one_or_none() is None:
+            raise NotFoundException(f"Tenant {tenant_id} not found")
+
+        token = secrets.token_urlsafe(32)
+        token_hash = _scim_hash(token)
+
+        await session.execute(
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(scim_token_hash=token_hash, updated_at=datetime.now(timezone.utc))
+        )
+
+        audit = AuditService(repository=AuditLogRepositoryImpl(session=session))
+        await audit.log(
+            tenant_id=tenant_id,
+            actor_id=None,
+            actor_type=ActorType.SYSTEM,
+            action=ActionType.SCIM_TOKEN_CREATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=tenant_id,
+            description="Sysadmin generated SCIM bearer token for tenant",
+            metadata={"actor": {"type": "sysadmin", "via": "eneo_super_api_key"}},
+        )
+
+    logger.info(
+        "scim.token.created",
+        extra={"tenant_id": str(tenant_id)},
+    )
+    return ScimTokenCreatedResponse(tenant_id=tenant_id, token=token)
+
+
+@router.get(
+    "/tenants/{tenant_id}/scim-token",
+    response_model=ScimTokenStatusResponse,
+    summary="Get SCIM token status for tenant",
+    description="Returns whether SCIM provisioning is active (i.e. a token hash is configured) for the given tenant. Never returns the token itself.",
+    responses={
+        200: {"description": "SCIM token status"},
+        404: {"description": "Tenant not found"},
+    },
+)
+async def get_scim_token_status(
+    tenant_id: UUID,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> ScimTokenStatusResponse:
+    from intric.main.exceptions import NotFoundException
+
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        result = await session.execute(
+            sa.select(Tenants.scim_token_hash).where(Tenants.id == tenant_id)
+        )
+        row = result.one_or_none()
+    if row is None:
+        raise NotFoundException(f"Tenant {tenant_id} not found")
+
+    return ScimTokenStatusResponse(tenant_id=tenant_id, is_active=row[0] is not None)
+
+
+@router.delete(
+    "/tenants/{tenant_id}/scim-token",
+    status_code=204,
+    summary="Revoke SCIM token for tenant",
+    description="Removes the SCIM token hash, disabling SCIM provisioning for the tenant. Any subsequent SCIM requests from the IdP will receive 401.",
+    responses={
+        204: {"description": "Token revoked — SCIM disabled for this tenant"},
+        404: {"description": "Tenant not found"},
+    },
+)
+async def delete_scim_token(
+    tenant_id: UUID,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> None:
+    from intric.audit.application.audit_service import AuditService
+    from intric.audit.domain.action_types import ActionType
+    from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.entity_types import EntityType
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from intric.main.exceptions import NotFoundException
+
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        result = await session.execute(
+            sa.select(Tenants.id).where(Tenants.id == tenant_id)
+        )
+        if result.scalar_one_or_none() is None:
+            raise NotFoundException(f"Tenant {tenant_id} not found")
+
+        await session.execute(
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(scim_token_hash=None, updated_at=datetime.now(timezone.utc))
+        )
+
+        audit = AuditService(repository=AuditLogRepositoryImpl(session=session))
+        await audit.log(
+            tenant_id=tenant_id,
+            actor_id=None,
+            actor_type=ActorType.SYSTEM,
+            action=ActionType.SCIM_TOKEN_REVOKED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=tenant_id,
+            description="Sysadmin revoked SCIM bearer token for tenant",
+            metadata={"actor": {"type": "sysadmin", "via": "eneo_super_api_key"}},
+        )
+
+    logger.info(
+        "scim.token.revoked",
+        extra={"tenant_id": str(tenant_id)},
+    )
