@@ -84,7 +84,6 @@ dev = [
     "pytest-dotenv>=0.5.2,<0.6",
     "openpyxl>=3.1.5,<4",
     "pytest-xdist>=3.8.0",
-    "faker>=40.15.0",
 ]
 
 [build-system]
