@@ -22,7 +22,7 @@ from intric.flows.domain.flow import Flow, FlowStep, FlowTemplateAsset, FlowVers
 from intric.flows.flow_input_limits import (
     FlowInputLimits,
     effective_flow_input_limit,
-    effective_max_files_per_run,
+    effective_runtime_max_files,
 )
 from intric.flows.runtime.step_definition_parser import parse_runtime_steps
 from intric.flows.runtime_input import (
@@ -221,8 +221,9 @@ def _build_policy(flow: Flow, limits: FlowInputLimits) -> FlowFileInputPolicy:
             input_type=input_type,
             limits=limits,
         )
-        max_files_per_run = effective_max_files_per_run(
+        max_files_per_run = effective_runtime_max_files(
             input_type=input_type,
+            step_max_files=None,
             limits=limits,
         )
 
@@ -316,7 +317,11 @@ class FlowFileUploadService:
             if not runtime_input.enabled:
                 continue
 
-            max_files = runtime_input.max_files
+            max_files = effective_runtime_max_files(
+                input_type=runtime_input.input_format,
+                step_max_files=runtime_input.max_files,
+                limits=limits,
+            )
             if aggregate_max_files is not None:
                 if max_files is None:
                     aggregate_max_files = None
@@ -331,7 +336,7 @@ class FlowFileUploadService:
                     "description": runtime_input.description,
                     "required": runtime_input.required,
                     "input_format": runtime_input.input_format,
-                    "max_files": runtime_input.max_files,
+                    "max_files": max_files,
                     "max_file_size_bytes": effective_flow_input_limit(
                         input_type=runtime_input.input_format,
                         limits=limits,
@@ -492,9 +497,9 @@ class FlowFileUploadService:
             accepts_file_upload=True,
             accepted_mimetypes=runtime_input_accept_mimetypes(runtime_input),
             max_file_size_bytes=max_size,
-            max_files_per_run=runtime_input.max_files
-            or effective_max_files_per_run(
+            max_files_per_run=effective_runtime_max_files(
                 input_type=runtime_input.input_format,
+                step_max_files=runtime_input.max_files,
                 limits=limits,
             ),
             recommended_run_payload=None,

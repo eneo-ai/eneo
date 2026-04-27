@@ -255,6 +255,8 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         flow_settings currently supports:
         - input_limits.file_max_size_bytes
         - input_limits.audio_max_size_bytes
+        - input_limits.max_files_per_run
+        - input_limits.audio_max_files_per_run
         - ai_builder.conversation_safety_buffer_tokens
         - ai_builder.minimum_conversation_budget_tokens
         - ai_builder.unknown_model_context_window_tokens
@@ -264,37 +266,13 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
 
         input_limits = v.get("input_limits")
         if input_limits is not None:
-            if not isinstance(input_limits, dict):
-                raise ValueError("flow_settings.input_limits must be an object")
-            input_limits_dict = cast(dict[str, Any], input_limits)
+            from intric.flows.flow_input_limits import validate_flow_input_limits_object
+            from intric.main.exceptions import BadRequestException
 
-            for key in ("file_max_size_bytes", "audio_max_size_bytes"):
-                if key not in input_limits_dict:
-                    continue
-                value = input_limits_dict[key]
-                if not isinstance(value, int) or isinstance(value, bool):
-                    raise ValueError(
-                        f"flow_settings.input_limits.{key} must be an integer"
-                    )
-                if value < 1:
-                    raise ValueError(
-                        f"flow_settings.input_limits.{key} must be greater than 0"
-                    )
-
-            for key in ("max_files_per_run", "audio_max_files_per_run"):
-                if key not in input_limits_dict:
-                    continue
-                value = input_limits_dict[key]
-                if value is None:
-                    continue  # None = use default
-                if not isinstance(value, int) or isinstance(value, bool):
-                    raise ValueError(
-                        f"flow_settings.input_limits.{key} must be an integer or null"
-                    )
-                if value < 1:
-                    raise ValueError(
-                        f"flow_settings.input_limits.{key} must be greater than 0"
-                    )
+            try:
+                validate_flow_input_limits_object(input_limits)
+            except BadRequestException as error:
+                raise ValueError(str(error)) from error
 
         ai_builder = v.get("ai_builder")
         if ai_builder is not None:

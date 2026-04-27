@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from io import BytesIO
-import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -11,9 +11,16 @@ import pytest
 from fastapi import UploadFile
 
 from intric.flows.flow import Flow, FlowStep
-from intric.flows.flow_file_upload_service import FlowFileInputPolicy, FlowFileUploadService
+from intric.flows.flow_file_upload_service import (
+    FlowFileInputPolicy,
+    FlowFileUploadService,
+)
 from intric.flows.flow_input_limits import FlowInputLimits
-from intric.main.exceptions import BadRequestException, FileNotSupportedException, FileTooLargeException
+from intric.main.exceptions import (
+    BadRequestException,
+    FileNotSupportedException,
+    FileTooLargeException,
+)
 
 
 def _flow(*, step: FlowStep) -> Flow:
@@ -70,7 +77,9 @@ async def test_policy_uses_first_flow_input_step_by_order() -> None:
     assert policy.accepts_file_upload is False
     assert policy.max_file_size_bytes is None
     assert policy.max_files_per_run is None
-    assert policy.recommended_run_payload == {"input_payload_json": {"text": "<text-input>"}}
+    assert policy.recommended_run_payload == {
+        "input_payload_json": {"text": "<text-input>"}
+    }
 
 
 @pytest.mark.asyncio
@@ -197,7 +206,9 @@ async def test_upload_without_content_type_is_rejected_with_allowed_types_hint(
 
 
 @pytest.mark.asyncio
-async def test_upload_wraps_file_too_large_with_effective_limit_message(monkeypatch) -> None:
+async def test_upload_wraps_file_too_large_with_effective_limit_message(
+    monkeypatch,
+) -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
     settings_service = AsyncMock()
@@ -238,7 +249,9 @@ async def test_upload_wraps_file_too_large_with_effective_limit_message(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_upload_document_input_uses_file_limit_not_audio_limit(monkeypatch) -> None:
+async def test_upload_document_input_uses_file_limit_not_audio_limit(
+    monkeypatch,
+) -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
     settings_service = AsyncMock()
@@ -353,7 +366,9 @@ async def test_upload_offloads_file_inspection_to_thread(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_upload_rejects_when_sniffed_content_type_is_not_allowed(monkeypatch) -> None:
+async def test_upload_rejects_when_sniffed_content_type_is_not_allowed(
+    monkeypatch,
+) -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
     settings_service = AsyncMock()
@@ -431,7 +446,9 @@ async def test_upload_rejects_zero_byte_file_with_clear_error(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_upload_rejects_declared_type_even_if_sniffed_type_is_allowed(monkeypatch) -> None:
+async def test_upload_rejects_declared_type_even_if_sniffed_type_is_allowed(
+    monkeypatch,
+) -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
     settings_service = AsyncMock()
@@ -467,7 +484,9 @@ async def test_upload_rejects_declared_type_even_if_sniffed_type_is_allowed(monk
 
 
 @pytest.mark.asyncio
-async def test_upload_uses_declared_type_when_sniffer_returns_unknown(monkeypatch) -> None:
+async def test_upload_uses_declared_type_when_sniffer_returns_unknown(
+    monkeypatch,
+) -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
     settings_service = AsyncMock()
@@ -558,7 +577,9 @@ async def test_upload_rejects_flows_without_file_upload_input() -> None:
         headers={"content-type": "audio/mpeg"},
     )
 
-    with pytest.raises(BadRequestException, match="does not accept file uploads") as exc_info:
+    with pytest.raises(
+        BadRequestException, match="does not accept file uploads"
+    ) as exc_info:
         await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
     assert exc_info.value.code == "flow_input_upload_not_supported"
 
@@ -770,6 +791,67 @@ async def test_get_run_contract_returns_runtime_steps_and_template_readiness() -
 
 
 @pytest.mark.asyncio
+async def test_get_run_contract_caps_step_file_count_by_tenant_limit() -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    template_asset_repo = AsyncMock()
+
+    runtime_step = _step(step_order=1, input_type="text").model_copy(
+        update={
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "max_files": 10,
+                    "input_format": "document",
+                    "label": "Upload",
+                }
+            }
+        }
+    )
+    flow = _flow(step=runtime_step).model_copy(
+        update={"published_version": 1, "steps": [runtime_step]}
+    )
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=12_000_000,
+        audio_max_size_bytes=25_000_000,
+        max_files_per_run=5,
+    )
+    flow_version_repo.get.return_value = SimpleNamespace(
+        definition_json={
+            "steps": [
+                {
+                    "step_id": str(runtime_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(runtime_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": runtime_step.input_config,
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "mcp_policy": "inherit",
+                }
+            ]
+        }
+    )
+
+    service = FlowFileUploadService(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+        template_asset_repo=template_asset_repo,
+    )
+
+    contract = await service.get_run_contract(flow_id=flow.id)
+
+    assert contract["aggregate_max_files"] == 5
+    assert contract["steps_requiring_input"][0]["max_files"] == 5
+
+
+@pytest.mark.asyncio
 async def test_get_run_contract_logs_template_lookup_failures(caplog) -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
@@ -790,7 +872,9 @@ async def test_get_run_contract_logs_template_lookup_failures(caplog) -> None:
             },
         }
     )
-    flow = _flow(step=template_step).model_copy(update={"published_version": 4, "steps": [template_step]})
+    flow = _flow(step=template_step).model_copy(
+        update={"published_version": 4, "steps": [template_step]}
+    )
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
         file_max_size_bytes=12_000_000,
@@ -828,7 +912,10 @@ async def test_get_run_contract_logs_template_lookup_failures(caplog) -> None:
     contract = await service.get_run_contract(flow_id=flow.id)
 
     assert contract["template_readiness"][0]["status"] == "unavailable"
-    assert contract["template_readiness"][0]["message_code"] == "flow_template_not_accessible"
+    assert (
+        contract["template_readiness"][0]["message_code"]
+        == "flow_template_not_accessible"
+    )
     assert "Failed to resolve template asset readiness" in caplog.text
 
 
@@ -843,7 +930,9 @@ async def test_upload_runtime_file_for_step_rejects_unknown_step_id() -> None:
     runtime_step = _step(step_order=1, input_type="text").model_copy(
         update={"input_config": {"runtime_input": {"enabled": True}}}
     )
-    flow = _flow(step=runtime_step).model_copy(update={"published_version": 1, "steps": [runtime_step]})
+    flow = _flow(step=runtime_step).model_copy(
+        update={"published_version": 1, "steps": [runtime_step]}
+    )
     flow_service.get_flow.return_value = flow
     flow_version_repo.get.return_value = SimpleNamespace(
         definition_json={

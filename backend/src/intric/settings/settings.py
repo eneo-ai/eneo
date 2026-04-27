@@ -4,6 +4,12 @@ from pydantic import BaseModel, Field
 
 from intric.ai_models.completion_models.completion_model import CompletionModelPublic
 from intric.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
+from intric.flows.flow_input_limits import (
+    FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
+    FLOW_INPUT_MAX_FILES_COUNT,
+    FLOW_INPUT_MAX_LIMIT_BYTES,
+    FLOW_INPUT_MIN_LIMIT_BYTES,
+)
 from intric.main.models import InDB
 
 
@@ -43,17 +49,53 @@ class ToggleSettingUpdate(BaseModel):
 
 
 class FlowInputLimitsPublic(BaseModel):
-    file_max_size_bytes: int
-    audio_max_size_bytes: int
-    max_files_per_run: int | None = None
-    audio_max_files_per_run: int | None = None
+    file_max_size_bytes: int = Field(
+        ge=FLOW_INPUT_MIN_LIMIT_BYTES,
+        le=FLOW_INPUT_MAX_LIMIT_BYTES,
+    )
+    audio_max_size_bytes: int = Field(
+        ge=FLOW_INPUT_MIN_LIMIT_BYTES,
+        le=FLOW_INPUT_MAX_LIMIT_BYTES,
+    )
+    max_files_per_run: int | None = Field(
+        ...,
+        ge=1,
+        le=FLOW_INPUT_MAX_FILES_COUNT,
+        description="Null means no tenant-level file count ceiling.",
+    )
+    audio_max_files_per_run: int | None = Field(
+        ...,
+        ge=1,
+        le=FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
+        description="Null means no tenant-level audio file count ceiling.",
+    )
 
 
 class FlowInputLimitsUpdate(BaseModel):
-    file_max_size_bytes: int | None = None
-    audio_max_size_bytes: int | None = None
-    max_files_per_run: int | None = None
-    audio_max_files_per_run: int | None = None
+    file_max_size_bytes: int | None = Field(
+        default=None,
+        ge=FLOW_INPUT_MIN_LIMIT_BYTES,
+        le=FLOW_INPUT_MAX_LIMIT_BYTES,
+        description="Set the tenant override, or send null to use the deployment default.",
+    )
+    audio_max_size_bytes: int | None = Field(
+        default=None,
+        ge=FLOW_INPUT_MIN_LIMIT_BYTES,
+        le=FLOW_INPUT_MAX_LIMIT_BYTES,
+        description="Set the tenant override, or send null to use the deployment default.",
+    )
+    max_files_per_run: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_INPUT_MAX_FILES_COUNT,
+        description="Set the tenant ceiling, or send null for no tenant-level ceiling.",
+    )
+    audio_max_files_per_run: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
+        description="Set the tenant ceiling, or send null to use the default audio ceiling.",
+    )
 
 
 class AIBuilderBudgetSettingsPublic(BaseModel):

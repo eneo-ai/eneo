@@ -61,6 +61,8 @@ export type FlowRunBlocker = {
     | "missing-form-field"
     | "missing-runtime-input"
     | "upload-in-progress"
+    | "recording-in-progress"
+    | "local-recording-pending"
     | "template-readiness";
   pageId: FlowRunWizardPage["id"];
   title: string;
@@ -145,15 +147,19 @@ export function buildFlowRunBlockers({
   missingRequiredFieldNames,
   stepsRequiringInput,
   runtimeFilesByStepId,
+  localRecordingStepIds = [],
   templateReadinessItems,
-  uploadingStepIds
+  uploadingStepIds,
+  recordingStepIds
 }: {
   locale: FlowLocale;
   missingRequiredFieldNames: string[];
   stepsRequiringInput: WizardStepInput[];
   runtimeFilesByStepId: Record<string, { id: string }[]>;
+  localRecordingStepIds?: string[];
   templateReadinessItems: TemplateReadinessItem[];
   uploadingStepIds: string[];
+  recordingStepIds?: string[];
 }): FlowRunBlocker[] {
   const copy = RUN_WIZARD_COPY[locale];
   const blockers: FlowRunBlocker[] = [];
@@ -193,6 +199,32 @@ export function buildFlowRunBlockers({
       title: copy.uploadInProgress(step.step_order, getStepLabel(step)),
       actionLabel: copy.goToStep(step.step_order),
       blocksProgress: false
+    });
+  }
+
+  for (const stepId of recordingStepIds ?? []) {
+    const step = stepsRequiringInput.find((item) => item.step_id === stepId);
+    if (!step) continue;
+    blockers.push({
+      id: `recording:${stepId}`,
+      kind: "recording-in-progress",
+      pageId: runtimeStepPageId(stepId),
+      title: copy.recordingInProgress(step.step_order, getStepLabel(step)),
+      actionLabel: copy.goToStep(step.step_order),
+      blocksProgress: true
+    });
+  }
+
+  for (const stepId of localRecordingStepIds) {
+    const step = stepsRequiringInput.find((item) => item.step_id === stepId);
+    if (!step) continue;
+    blockers.push({
+      id: `local-recording:${stepId}`,
+      kind: "local-recording-pending",
+      pageId: runtimeStepPageId(stepId),
+      title: copy.localRecordingPending(step.step_order, getStepLabel(step)),
+      actionLabel: copy.goToStep(step.step_order),
+      blocksProgress: true
     });
   }
 
@@ -284,6 +316,10 @@ const RUN_WIZARD_COPY = {
       `Ladda upp filer för steg ${stepOrder}: ${stepLabel}.`,
     uploadInProgress: (stepOrder: number, stepLabel: string) =>
       `Filer laddas fortfarande upp för steg ${stepOrder}: ${stepLabel}.`,
+    recordingInProgress: (stepOrder: number, stepLabel: string) =>
+      `Stoppa inspelningen för steg ${stepOrder}: ${stepLabel}.`,
+    localRecordingPending: (stepOrder: number, stepLabel: string) =>
+      `Slutför uppladdningen eller kassera inspelningen för steg ${stepOrder}: ${stepLabel}.`,
     templateNotReady: (templateName: string) =>
       `Mallen "${templateName}" behöver åtgärdas innan flödet kan köras.`,
     reviewTemplateSummary: (count: number) => `${count} mall${count === 1 ? "" : "ar"} klar`,
@@ -311,6 +347,10 @@ const RUN_WIZARD_COPY = {
       `Upload files for step ${stepOrder}: ${stepLabel}.`,
     uploadInProgress: (stepOrder: number, stepLabel: string) =>
       `Files are still uploading for step ${stepOrder}: ${stepLabel}.`,
+    recordingInProgress: (stepOrder: number, stepLabel: string) =>
+      `Stop the recording for step ${stepOrder}: ${stepLabel}.`,
+    localRecordingPending: (stepOrder: number, stepLabel: string) =>
+      `Finish uploading or discard the recording for step ${stepOrder}: ${stepLabel}.`,
     templateNotReady: (templateName: string) =>
       `The template "${templateName}" needs attention before the flow can run.`,
     reviewTemplateSummary: (count: number) => `${count} template${count === 1 ? "" : "s"} ready`,

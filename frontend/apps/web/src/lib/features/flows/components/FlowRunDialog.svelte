@@ -19,6 +19,7 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { buildRecordedAudioFile } from "$lib/features/audio/recordedAudioFile";
+  import { downloadRecordedAudioFile } from "$lib/features/audio/downloadRecordedAudioFile";
   import type { RecordingStopReason } from "$lib/features/audio/recordedAudioFile";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
   import {
@@ -49,6 +50,7 @@
   import FlowRunDialogForm from "./FlowRunDialogForm.svelte";
   import FlowRunDialogRuntimeStep from "./FlowRunDialogRuntimeStep.svelte";
   import FlowRunDialogReview from "./FlowRunDialogReview.svelte";
+  import { onDestroy, onMount } from "svelte";
 
   let {
     open = $bindable(false),
@@ -74,10 +76,13 @@
 
   let formValues = $state<Record<string, unknown>>({});
   let runtimeFilesByStepId = $state<Record<string, UploadedFile[]>>({});
+  let recordedFilesByStepId = $state<Record<string, File | null>>({});
+  let recorderResetTokensByStepId = $state<Record<string, number>>({});
   let uploadErrorsByStepId = $state<Record<string, string | null>>({});
   let recordingNoticesByStepId = $state<Record<string, string | null>>({});
   let skippedMessagesByStepId = $state<Record<string, string | null>>({});
   let uploadingStepIds = $state<string[]>([]);
+  let recordingStepIds = $state<string[]>([]);
   let draggingStepId = $state<string | null>(null);
   let currentPageIndex = $state(0);
   let showCloseConfirmation = $state(false);
@@ -133,14 +138,21 @@
     const idx = currentPageIndex;
     return wizardPages[idx] ?? wizardPages[0] ?? null;
   });
+  const localRecordingStepIds = $derived.by(() =>
+    Object.entries(recordedFilesByStepId)
+      .filter(([, file]) => file !== null)
+      .map(([stepId]) => stepId)
+  );
   const runBlockers = $derived.by(() =>
     buildFlowRunBlockers({
       locale,
       missingRequiredFieldNames,
       stepsRequiringInput,
       runtimeFilesByStepId,
+      localRecordingStepIds,
       templateReadinessItems,
-      uploadingStepIds
+      uploadingStepIds,
+      recordingStepIds
     })
   );
   const currentPageProgressBlockers = $derived(
@@ -204,6 +216,12 @@
   const currentStepUploadedFiles = $derived(
     currentRuntimeStep ? (runtimeFilesByStepId[currentRuntimeStep.step_id] ?? []) : []
   );
+  const currentStepRecordedFile = $derived(
+    currentRuntimeStep ? (recordedFilesByStepId[currentRuntimeStep.step_id] ?? null) : null
+  );
+  const currentStepRecorderResetToken = $derived(
+    currentRuntimeStep ? (recorderResetTokensByStepId[currentRuntimeStep.step_id] ?? 0) : 0
+  );
   const currentStepFileCount = $derived(currentStepUploadedFiles.length);
   const currentStepRemainingSlots = $derived(
     currentRuntimeStep?.max_files != null
@@ -229,14 +247,33 @@
         )
       : []
   );
+  const hasLocalRecordedFiles = $derived(
+    Object.values(recordedFilesByStepId).some((file) => file !== null)
+  );
 
   const isDirty = $derived.by(
     () =>
+      recordingStepIds.length > 0 ||
+      hasLocalRecordedFiles ||
       Object.values(runtimeFilesByStepId).some((files) => files.length > 0) ||
       Object.entries(formValues).some(([_, v]) => v != null && String(v).trim() !== "") ||
       inputText.trim() !== ""
   );
   const closeBehavior = $derived<"close" | "ignore">(isDirty ? "ignore" : "close");
+
+  const beforeUnloadHandler = (event: BeforeUnloadEvent) => {
+    if (recordingStepIds.length === 0 && !hasLocalRecordedFiles) return;
+    event.preventDefault();
+    event.returnValue = m.recording_unsaved_warning();
+  };
+
+  onMount(() => {
+    window.addEventListener("beforeunload", beforeUnloadHandler);
+  });
+
+  onDestroy(() => {
+    window.removeEventListener("beforeunload", beforeUnloadHandler);
+  });
 
   $effect(() => {
     if (wizardPages.length > 0 && currentPageIndex > wizardPages.length - 1) {
@@ -273,10 +310,13 @@
     runContract = null;
     runContractError = null;
     runtimeFilesByStepId = {};
+    recordedFilesByStepId = {};
+    recorderResetTokensByStepId = {};
     uploadErrorsByStepId = {};
     recordingNoticesByStepId = {};
     skippedMessagesByStepId = {};
     uploadingStepIds = [];
+    recordingStepIds = [];
     draggingStepId = null;
     currentPageIndex = 0;
     showCloseConfirmation = false;
@@ -497,13 +537,26 @@
     }
   }
 
-  async function uploadFilesForStep(step: FlowRunContractStepInput, files: File[]) {
-    if (!flow.id) return;
+  type StepUploadResult = {
+    uploadedCount: number;
+    failed: boolean;
+  };
+
+  async function uploadFilesForStep(
+    step: FlowRunContractStepInput,
+    files: File[],
+    options: { clearRecordingNotice?: boolean } = {}
+  ): Promise<StepUploadResult> {
+    if (!flow.id) return { uploadedCount: 0, failed: true };
 
     uploadErrorsByStepId = { ...uploadErrorsByStepId, [step.step_id]: null };
-    recordingNoticesByStepId = { ...recordingNoticesByStepId, [step.step_id]: null };
+    if (options.clearRecordingNotice ?? true) {
+      recordingNoticesByStepId = { ...recordingNoticesByStepId, [step.step_id]: null };
+    }
     skippedMessagesByStepId = { ...skippedMessagesByStepId, [step.step_id]: null };
     uploadingStepIds = [...uploadingStepIds, step.step_id];
+    let uploadedCount = 0;
+    let failed = false;
 
     try {
       const remainingSlots = getRemainingFileSlots(step);
@@ -511,6 +564,7 @@
         remainingSlots !== Infinity ? files.slice(0, Math.max(remainingSlots, 0)) : files;
 
       if (toUpload.length < files.length && step.max_files != null) {
+        failed = true;
         skippedMessagesByStepId = {
           ...skippedMessagesByStepId,
           [step.step_id]: m.flow_run_max_files_exceeded({
@@ -522,11 +576,12 @@
       }
 
       if (toUpload.length === 0) {
-        return;
+        return { uploadedCount, failed: files.length > 0 };
       }
 
       for (const file of toUpload) {
         if (step.max_file_size_bytes != null && file.size > step.max_file_size_bytes) {
+          failed = true;
           uploadErrorsByStepId = {
             ...uploadErrorsByStepId,
             [step.step_id]: `${file.name}: ${m.flow_run_upload_max_size({
@@ -538,17 +593,20 @@
 
         try {
           const uploaded = await uploadRuntimeFileWithTimeout(step, file);
+          uploadedCount += 1;
           runtimeFilesByStepId = {
             ...runtimeFilesByStepId,
             [step.step_id]: [...getUploadedFiles(step.step_id), uploaded]
           };
         } catch (error) {
+          failed = true;
           uploadErrorsByStepId = {
             ...uploadErrorsByStepId,
             [step.step_id]: getFlowRuntimeErrorMessage(error, String(error))
           };
         }
       }
+      return { uploadedCount, failed };
     } finally {
       uploadingStepIds = uploadingStepIds.filter((stepId) => stepId !== step.step_id);
     }
@@ -561,6 +619,15 @@
     };
     recordingNoticesByStepId = { ...recordingNoticesByStepId, [stepId]: null };
     skippedMessagesByStepId = { ...skippedMessagesByStepId, [stepId]: null };
+  }
+
+  function setStepRecordingState(stepId: string, active: boolean) {
+    const exists = recordingStepIds.includes(stepId);
+    if (active && !exists) {
+      recordingStepIds = [...recordingStepIds, stepId];
+    } else if (!active && exists) {
+      recordingStepIds = recordingStepIds.filter((id) => id !== stepId);
+    }
   }
 
   function recordingNoticeForReason(reason: RecordingStopReason): string | null {
@@ -576,6 +643,60 @@
     }
   }
 
+  function clearRecordedFile(stepId: string) {
+    recordedFilesByStepId = {
+      ...recordedFilesByStepId,
+      [stepId]: null
+    };
+  }
+
+  function clearRecordedFileAndResetRecorder(stepId: string) {
+    recordedFilesByStepId = {
+      ...recordedFilesByStepId,
+      [stepId]: null
+    };
+    recorderResetTokensByStepId = {
+      ...recorderResetTokensByStepId,
+      [stepId]: (recorderResetTokensByStepId[stepId] ?? 0) + 1
+    };
+  }
+
+  function discardRecordedFile(stepId: string) {
+    clearRecordedFileAndResetRecorder(stepId);
+    uploadErrorsByStepId = { ...uploadErrorsByStepId, [stepId]: null };
+    recordingNoticesByStepId = { ...recordingNoticesByStepId, [stepId]: null };
+    skippedMessagesByStepId = { ...skippedMessagesByStepId, [stepId]: null };
+  }
+
+  async function downloadRecordedFile(step: FlowRunContractStepInput) {
+    const file = recordedFilesByStepId[step.step_id];
+    if (!file) {
+      toast.error(m.recording_not_found());
+      return;
+    }
+
+    try {
+      await downloadRecordedAudioFile(file);
+    } catch (error) {
+      console.error("Failed to save recording:", error);
+      toast.error(m.recording_save_failed());
+    }
+  }
+
+  async function retryRecordedFileUpload(step: FlowRunContractStepInput) {
+    const file = recordedFilesByStepId[step.step_id];
+    if (!file) {
+      openFilePicker(step);
+      return;
+    }
+
+    const result = await uploadFilesForStep(step, [file], { clearRecordingNotice: false });
+    if (result.uploadedCount > 0 && !result.failed) {
+      clearRecordedFile(step.step_id);
+      recordingNoticesByStepId = { ...recordingNoticesByStepId, [step.step_id]: null };
+    }
+  }
+
   async function handleRecordedAudio(
     step: FlowRunContractStepInput,
     params: { blob: Blob; mimeType: string; reason: RecordingStopReason }
@@ -586,11 +707,37 @@
       mimeType: params.mimeType,
       fileNameBase: m.recording_filename_template({ datetime: timestamp })
     });
+    recordedFilesByStepId = {
+      ...recordedFilesByStepId,
+      [step.step_id]: file
+    };
     recordingNoticesByStepId = {
       ...recordingNoticesByStepId,
       [step.step_id]: recordingNoticeForReason(params.reason)
     };
-    await uploadFilesForStep(step, [file]);
+    const result = await uploadFilesForStep(step, [file], { clearRecordingNotice: false });
+    if (result.uploadedCount > 0 && !result.failed) {
+      clearRecordedFile(step.step_id);
+    }
+  }
+
+  async function downloadUploadedFile(file: UploadedFile) {
+    try {
+      const { url } = await intric.files.generateSignedUrl({
+        fileId: file.id,
+        contentDisposition: "attachment"
+      });
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = file.name;
+      anchor.rel = "noopener";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } catch (error) {
+      console.error("Failed to download uploaded file:", error);
+      toast.error(m.error_downloading_file());
+    }
   }
 
   function focusPageHeading() {
@@ -629,7 +776,11 @@
 
   function retryUpload(step: FlowRunContractStepInput) {
     uploadErrorsByStepId = { ...uploadErrorsByStepId, [step.step_id]: null };
-    openFilePicker(step);
+    if (recordedFilesByStepId[step.step_id]) {
+      void retryRecordedFileUpload(step);
+    } else {
+      openFilePicker(step);
+    }
   }
 
   function getDisabledNextReason(): string | undefined {
@@ -689,6 +840,8 @@
       inputText = "";
       formValues = {};
       runtimeFilesByStepId = {};
+      recordedFilesByStepId = {};
+      recorderResetTokensByStepId = {};
       uploadErrorsByStepId = {};
       recordingNoticesByStepId = {};
       skippedMessagesByStepId = {};
@@ -913,6 +1066,8 @@
           <FlowRunDialogRuntimeStep
             step={currentRuntimeStep}
             files={currentStepUploadedFiles}
+            recordedFile={currentStepRecordedFile}
+            recorderResetToken={currentStepRecorderResetToken}
             fileCount={currentStepFileCount}
             remainingSlots={currentStepRemainingSlots}
             isUploading={currentStepIsUploading}
@@ -925,8 +1080,14 @@
             {locale}
             onOpenFilePicker={() => openFilePicker(currentRuntimeStep)}
             onRemoveFile={(fileId) => removeFile(currentRuntimeStep.step_id, fileId)}
+            onDownloadUploadedFile={(file) => void downloadUploadedFile(file)}
             onRetryUpload={() => retryUpload(currentRuntimeStep)}
+            onDownloadRecordedAudio={() => void downloadRecordedFile(currentRuntimeStep)}
+            onRetryRecordedAudio={() => void retryRecordedFileUpload(currentRuntimeStep)}
+            onDiscardRecordedAudio={() => discardRecordedFile(currentRuntimeStep.step_id)}
             onRecordingDone={(params) => void handleRecordedAudio(currentRuntimeStep, params)}
+            onRecordingStateChange={(active) =>
+              setStepRecordingState(currentRuntimeStep.step_id, active)}
             onDrop={(event) => handleDrop(currentRuntimeStep, event)}
             onDragOver={(event) => handleDragOver(currentRuntimeStep.step_id, event)}
             onDragLeave={(event) => handleDragLeave(currentRuntimeStep.step_id, event)}

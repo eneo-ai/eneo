@@ -140,6 +140,17 @@
             Open `/admin/api-keys`
           </a>
         </Settings.Row>
+        <Settings.Row
+          title={m.flow_input_limits_title()}
+          description={m.flow_input_limits_admin_description()}
+        >
+          <a
+            href={resolve("/(app)/admin/flow-input-limits")}
+            class="text-accent-default hover:text-accent-default/80 text-sm font-medium"
+          >
+            {m.flow_input_limits_open()}
+          </a>
+        </Settings.Row>
       </Settings.Group>
     </Settings.Page>
   </Page.Main>

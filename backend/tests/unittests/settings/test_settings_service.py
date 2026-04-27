@@ -243,6 +243,52 @@ async def test_update_flow_input_limits_persists_and_audits(monkeypatch):
     assert tenant.flow_settings["input_limits"]["audio_max_size_bytes"] == 35_000_000
     assert len(calls) == 1
     assert calls[0]["metadata"]["setting"] == "flow_input_limits"
+    assert calls[0]["metadata"]["changes"] == {
+        "audio_max_size_bytes": {"old": 25_000_000, "new": 35_000_000}
+    }
+
+
+async def test_update_flow_input_limits_null_clears_nullable_overrides(monkeypatch):
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "input_limits": {
+                    "max_files_per_run": 25,
+                    "audio_max_files_per_run": 8,
+                }
+            }
+        }
+    )
+
+    monkeypatch.setattr(
+        "intric.flows.flow_input_limits.get_settings",
+        lambda: SimpleNamespace(
+            upload_max_file_size=10_000_000,
+            transcription_max_file_size=25_000_000,
+        ),
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    updated = await service.update_flow_input_limits(
+        FlowInputLimitsUpdate(max_files_per_run=None, audio_max_files_per_run=None)
+    )
+
+    assert updated.max_files_per_run is None
+    assert updated.audio_max_files_per_run == 10
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "max_files_per_run" not in tenant.flow_settings["input_limits"]
+    assert "audio_max_files_per_run" not in tenant.flow_settings["input_limits"]
 
 
 async def test_update_flow_input_limits_rejects_empty_patch():

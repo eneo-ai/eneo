@@ -7,6 +7,7 @@ from intric.flows.flow_input_limits import (
     apply_flow_input_limits_patch,
     effective_flow_input_limit,
     effective_max_files_per_run,
+    effective_runtime_max_files,
     resolve_flow_input_limits,
 )
 from intric.main.exceptions import BadRequestException
@@ -19,7 +20,9 @@ def _app_settings(upload: int, transcription: int) -> SimpleNamespace:
     )
 
 
-def test_resolve_defaults_when_tenant_settings_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_defaults_when_tenant_settings_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "intric.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
@@ -50,7 +53,9 @@ def test_resolve_uses_tenant_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert limits.audio_max_size_bytes == 32_000_000
 
 
-def test_resolve_falls_back_for_malformed_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_falls_back_for_malformed_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "intric.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
@@ -69,7 +74,9 @@ def test_resolve_falls_back_for_malformed_settings(monkeypatch: pytest.MonkeyPat
     assert limits.audio_max_size_bytes == 25_000_000
 
 
-def test_resolve_falls_back_for_boolean_limit_values(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_falls_back_for_boolean_limit_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "intric.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
@@ -132,7 +139,9 @@ def test_effective_limit_prefers_audio_for_audio_type() -> None:
 # --- File count fields ---
 
 
-def test_resolve_defaults_includes_file_count_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_defaults_includes_file_count_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "intric.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
@@ -144,7 +153,9 @@ def test_resolve_defaults_includes_file_count_fields(monkeypatch: pytest.MonkeyP
     assert limits.audio_max_files_per_run == DEFAULT_MAX_AUDIO_FILES_PER_RUN
 
 
-def test_resolve_uses_tenant_file_count_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_uses_tenant_file_count_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "intric.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
@@ -163,7 +174,9 @@ def test_resolve_uses_tenant_file_count_overrides(monkeypatch: pytest.MonkeyPatc
     assert limits.audio_max_files_per_run == 20
 
 
-def test_resolve_falls_back_for_malformed_file_count(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_falls_back_for_malformed_file_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "intric.flows.flow_input_limits.get_settings",
         lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
@@ -233,3 +246,40 @@ def test_effective_max_files_audio_vs_generic() -> None:
     assert effective_max_files_per_run(input_type="audio", limits=limits) == 20
     assert effective_max_files_per_run(input_type="document", limits=limits) == 100
     assert effective_max_files_per_run(input_type="file", limits=limits) == 100
+
+
+def test_effective_runtime_max_files_uses_stricter_step_or_tenant_limit() -> None:
+    limits = resolve_flow_input_limits(
+        {
+            "input_limits": {
+                "max_files_per_run": 5,
+                "audio_max_files_per_run": 3,
+            }
+        },
+        defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
+    )
+
+    assert (
+        effective_runtime_max_files(
+            input_type="document", step_max_files=None, limits=limits
+        )
+        == 5
+    )
+    assert (
+        effective_runtime_max_files(
+            input_type="document", step_max_files=2, limits=limits
+        )
+        == 2
+    )
+    assert (
+        effective_runtime_max_files(
+            input_type="document", step_max_files=10, limits=limits
+        )
+        == 5
+    )
+    assert (
+        effective_runtime_max_files(
+            input_type="audio", step_max_files=10, limits=limits
+        )
+        == 3
+    )

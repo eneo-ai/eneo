@@ -119,7 +119,12 @@ async def get_flow_input_limits(
     "/flow-input-limits",
     response_model=FlowInputLimitsPublic,
     summary="Update flow input limits",
-    description="Update tenant-level upload limits used by flow runtime input endpoints.",
+    description=(
+        "Update tenant-level upload limits used by flow runtime input endpoints. "
+        "Omit a field to leave it unchanged. Send null to remove that tenant "
+        "override and fall back to the default policy. Send a positive integer "
+        "to set a tenant override."
+    ),
     responses={
         400: {"description": "Invalid flow input limit payload."},
         403: {"description": "Caller lacks permission to update tenant settings."},

@@ -14,7 +14,7 @@
   import { IconHistory } from "@intric/icons/history";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
-  import { ChartPie, LayoutTemplate, Cloud, Plug } from "lucide-svelte";
+  import { ChartPie, LayoutTemplate, Cloud, Plug, SlidersHorizontal } from "lucide-svelte";
   import { IconKey } from "@intric/icons/key";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -67,6 +67,12 @@
     isActive={isSelected("/admin/api-keys", currentRoute)}
     icon={IconKey}
     label={m.api_keys()}
+  />
+  <Navigation.Link
+    href={localizeHref("/admin/flow-input-limits")}
+    isActive={isSelected("/admin/flow-input-limits", currentRoute)}
+    icon={SlidersHorizontal}
+    label={m.flow_input_limits_title()}
   />
   <Navigation.Link
     href={localizeHref("/admin/mcp-servers")}

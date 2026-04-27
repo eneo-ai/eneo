@@ -4,6 +4,11 @@
   import { IconUploadCloud } from "@intric/icons/upload-cloud";
   import { IconXMark } from "@intric/icons/x-mark";
   import { IconCheck } from "@intric/icons/check";
+  import { IconDownload } from "@intric/icons/download";
+  import { IconRefresh } from "@intric/icons/refresh";
+  import { IconTrash } from "@intric/icons/trash";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { m } from "$lib/paraglide/messages";
   import {
     classifyUploadError,
@@ -18,6 +23,8 @@
   let {
     step,
     files,
+    recordedFile,
+    recorderResetToken,
     fileCount,
     remainingSlots,
     isUploading,
@@ -30,14 +37,21 @@
     locale,
     onOpenFilePicker,
     onRemoveFile,
+    onDownloadUploadedFile,
     onRetryUpload,
+    onDownloadRecordedAudio,
+    onRetryRecordedAudio,
+    onDiscardRecordedAudio,
     onRecordingDone,
+    onRecordingStateChange,
     onDrop,
     onDragOver,
     onDragLeave
   }: {
     step: FlowRunContractStepInput;
     files: UploadedFile[];
+    recordedFile: File | null;
+    recorderResetToken: number;
     fileCount: number;
     remainingSlots: number;
     isUploading: boolean;
@@ -50,12 +64,17 @@
     locale: "sv" | "en";
     onOpenFilePicker: () => void;
     onRemoveFile: (fileId: string) => void;
+    onDownloadUploadedFile: (file: UploadedFile) => void;
     onRetryUpload: () => void;
+    onDownloadRecordedAudio: () => void;
+    onRetryRecordedAudio: () => void;
+    onDiscardRecordedAudio: () => void;
     onRecordingDone: (params: {
       blob: Blob;
       mimeType: string;
       reason: RecordingStopReason;
     }) => void;
+    onRecordingStateChange?: (isRecording: boolean) => void;
     onDrop: (event: DragEvent) => void;
     onDragOver: (event: DragEvent) => void;
     onDragLeave: (event: DragEvent) => void;
@@ -266,7 +285,37 @@
           </p>
         </div>
 
-        <AudioRecorder maxBytes={step.max_file_size_bytes ?? null} {onRecordingDone} />
+        <AudioRecorder
+          maxBytes={step.max_file_size_bytes ?? null}
+          resetToken={recorderResetToken}
+          {onRecordingDone}
+          onRecordingStateChange={onRecordingStateChange ?? (() => {})}
+        />
+
+        {#if recordedFile && uploadError}
+          <Alert.Root
+            class="border-warning-default/30 bg-warning-dimmer/60 text-warning-stronger mt-4"
+          >
+            <Alert.Title>{m.recording_last_clip_ready()}</Alert.Title>
+            <Alert.Description class="text-warning-stronger/90">
+              {m.recording_upload_failed_preserved()}
+            </Alert.Description>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onclick={onRetryRecordedAudio}>
+                <IconRefresh data-icon="inline-start" />
+                {labels.retryUpload}
+              </Button>
+              <Button variant="outline" size="sm" onclick={onDownloadRecordedAudio}>
+                <IconDownload data-icon="inline-start" />
+                {m.save_as_file()}
+              </Button>
+              <Button variant="ghost" size="sm" onclick={onDiscardRecordedAudio}>
+                <IconTrash data-icon="inline-start" />
+                {m.discard()}
+              </Button>
+            </div>
+          </Alert.Root>
+        {/if}
 
         {#if recordingNotice}
           <p
@@ -280,7 +329,7 @@
       </div>
     {/if}
 
-    {#if uploadError}
+    {#if uploadError && !recordedFile}
       <div
         class="border-negative-default/30 bg-negative-dimmer text-negative-stronger mt-3 rounded-md border px-3.5 py-2.5 text-sm"
         role="alert"
@@ -298,6 +347,12 @@
       </div>
     {/if}
 
+    {#if supportsAudioRecording && fileCount > 0 && remainingSlots > 0}
+      <p class="text-muted mt-3 text-sm leading-relaxed">
+        {m.recording_record_another_hint()}
+      </p>
+    {/if}
+
     {#if files.length > 0}
       <div class="mt-3 mb-2 flex flex-col gap-1.5">
         {#each files as file (file.id)}
@@ -310,13 +365,22 @@
                 <span class="text-muted text-xs">{formatBytes(file.size)}</span>
               {/if}
             </div>
-            <button
-              class="text-muted/60 hover:text-negative-default group-hover:text-muted flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md transition-colors duration-100"
-              onclick={() => onRemoveFile(file.id)}
-              aria-label="{m.delete()} {file.name ?? file.id}"
-            >
-              <IconXMark class="size-4" />
-            </button>
+            <div class="flex shrink-0 items-center gap-1">
+              <button
+                class="text-muted/70 hover:text-accent-stronger group-hover:text-muted flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md transition-colors duration-100"
+                onclick={() => onDownloadUploadedFile(file)}
+                aria-label="{m.download_file()} {file.name ?? file.id}"
+              >
+                <IconDownload class="size-4" />
+              </button>
+              <button
+                class="text-muted/60 hover:text-negative-default group-hover:text-muted flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md transition-colors duration-100"
+                onclick={() => onRemoveFile(file.id)}
+                aria-label="{m.delete()} {file.name ?? file.id}"
+              >
+                <IconXMark class="size-4" />
+              </button>
+            </div>
           </div>
         {/each}
       </div>

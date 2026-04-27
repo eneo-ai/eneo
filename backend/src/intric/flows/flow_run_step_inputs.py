@@ -6,7 +6,7 @@ from typing import Protocol, cast
 from uuid import UUID
 
 from intric.files.file_models import File
-from intric.flows.flow_input_limits import FlowInputLimits, effective_max_files_per_run
+from intric.flows.flow_input_limits import FlowInputLimits, effective_runtime_max_files
 from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.models import RuntimeStep
 from intric.flows.runtime_input import (
@@ -55,9 +55,9 @@ def build_runtime_step_input_specs(
         specs[step.step_id] = RuntimeStepInputSpec(
             step=step,
             accepted_mimetypes=runtime_input_accept_mimetypes(runtime_input),
-            max_files=runtime_input.max_files
-            or effective_max_files_per_run(
+            max_files=effective_runtime_max_files(
                 input_type=runtime_input.input_format,
+                step_max_files=runtime_input.max_files,
                 limits=limits,
             ),
         )

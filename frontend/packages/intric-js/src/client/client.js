@@ -36,11 +36,13 @@ export function createClient(args) {
 
   return {
     fetch: async (endpoint, { method, params, requestBody, signal }) => {
-      const url = parseUrl(baseUrl, endpoint, params);
       const payload = parsePayload(requestBody);
       const httpMethod = String(method).toUpperCase();
+      let requestEndpoint = `${httpMethod}@${baseUrl}${endpoint}`;
 
       try {
+        const url = parseUrl(baseUrl, endpoint, params);
+        requestEndpoint = `${httpMethod}@${url}`;
         const response = await _fetch(url, {
           method: httpMethod,
           headers: {
@@ -55,13 +57,13 @@ export function createClient(args) {
         const parsed = await parseResponse(response);
         return parsed;
       } catch (error) {
-        IntricError.throw(error, { endpoint: `${httpMethod}@${url}`, payload });
+        IntricError.throw(error, { endpoint: requestEndpoint, payload });
       }
     },
 
     stream: async (endpoint, { params, requestBody }, callbacks, abortController) => {
-      const url = parseUrl(baseUrl, endpoint, params);
       const payload = parsePayload(requestBody);
+      let requestEndpoint = `STREAM@${baseUrl}${endpoint}`;
       const headers = { ...auth, ...payload.header, accept: "text/event-stream" };
       const body = payload.body;
 
@@ -72,6 +74,8 @@ export function createClient(args) {
       };
 
       try {
+        const url = parseUrl(baseUrl, endpoint, params);
+        requestEndpoint = `STREAM@${url}`;
         const response = await _fetch(url, {
           body,
           headers,
@@ -86,16 +90,18 @@ export function createClient(args) {
           onMessage
         });
       } catch (error) {
-        IntricError.throw(error, { endpoint: `STREAM@${url}`, payload });
+        IntricError.throw(error, { endpoint: requestEndpoint, payload });
       }
     },
 
     xhr: async (endpoint, { method, params, requestBody }, callbacks, abortController) => {
-      const url = parseUrl(baseUrl, endpoint, params);
       const payload = parsePayload(requestBody);
       const httpMethod = String(method).toUpperCase();
+      let requestEndpoint = `${httpMethod}@${baseUrl}${endpoint}`;
 
       try {
+        const url = parseUrl(baseUrl, endpoint, params);
+        requestEndpoint = `${httpMethod}@${url}`;
         const response = await xhr(
           url,
           {
@@ -113,7 +119,7 @@ export function createClient(args) {
         const parsed = await parseResponse(response);
         return parsed;
       } catch (error) {
-        IntricError.throw(error, { endpoint: `${httpMethod}@${url}`, payload });
+        IntricError.throw(error, { endpoint: requestEndpoint, payload });
       }
     },
 
@@ -134,7 +140,10 @@ function parseUrl(baseUrl, endpoint, params) {
 
   if (params?.path) {
     Object.entries(params.path).forEach(([param, value]) => {
-      endpoint = endpoint.replace(`{${param}}`, value);
+      if (value === undefined || value === null || value === "" || value === "undefined") {
+        throw new Error(`Cannot build API request: path parameter "${param}" is missing.`);
+      }
+      endpoint = endpoint.replace(`{${param}}`, String(value));
     });
   }
 

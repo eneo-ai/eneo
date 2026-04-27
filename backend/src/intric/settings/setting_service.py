@@ -226,12 +226,19 @@ class SettingService:
             raise BadRequestException(
                 "At least one flow input limit field must be provided."
             )
+        previous = await self.get_flow_input_limits()
+        remove_keys = {key for key, value in patch.items() if value is None}
+        updated_values = {
+            key: value for key, value in patch.items() if value is not None
+        }
         tenant = await self._get_tenant_for_flow_settings()
         next_flow_settings = apply_flow_input_limits_patch(
             cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
-            **patch,
+            remove_keys=remove_keys,
+            **updated_values,
         )
         await self._persist_flow_settings(next_flow_settings)
+        updated = await self.get_flow_input_limits()
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
             actor_id=self.user.id,
@@ -239,9 +246,18 @@ class SettingService:
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,
             description="Updated flow input limits",
-            metadata={"setting": "flow_input_limits", "changes": patch},
+            metadata={
+                "setting": "flow_input_limits",
+                "changes": {
+                    key: {
+                        "old": getattr(previous, key),
+                        "new": getattr(updated, key),
+                    }
+                    for key in patch
+                },
+            },
         )
-        return await self.get_flow_input_limits()
+        return updated
 
     @validate_permissions(Permission.ADMIN)
     async def get_ai_builder_budget_settings(self) -> AIBuilderBudgetSettingsPublic:

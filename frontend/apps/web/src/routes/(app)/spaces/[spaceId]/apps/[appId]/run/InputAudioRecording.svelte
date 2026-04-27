@@ -10,6 +10,7 @@
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import AudioRecorder from "$lib/features/audio/AudioRecorder.svelte";
   import { buildRecordedAudioFile } from "$lib/features/audio/recordedAudioFile";
+  import { downloadRecordedAudioFile } from "$lib/features/audio/downloadRecordedAudioFile";
   import FileSizeValidationPanel from "$lib/features/attachments/components/FileSizeValidationPanel.svelte";
   import dayjs from "dayjs";
   import AttachmentItem from "$lib/features/attachments/components/AttachmentItem.svelte";
@@ -65,28 +66,12 @@
       toast.error(m.recording_not_found());
       return;
     }
-    const suggestedName = audioFile.name;
-    if (window.showSaveFilePicker) {
-      try {
-        const handle = await window.showSaveFilePicker({ suggestedName });
-        const writable = await handle.createWritable();
-        await writable.write(audioFile);
-        await writable.close();
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-        console.error("Failed to save recording:", error);
-        toast.error(m.recording_save_failed());
-      }
-    } else {
-      const a = document.createElement("a");
-      a.download = suggestedName;
-      a.href = URL.createObjectURL(audioFile);
-      a.click();
-      setTimeout(function () {
-        URL.revokeObjectURL(a.href);
-      }, 1500);
+
+    try {
+      await downloadRecordedAudioFile(audioFile);
+    } catch (error) {
+      console.error("Failed to save recording:", error);
+      toast.error(m.recording_save_failed());
     }
   }
 </script>
@@ -196,30 +181,19 @@
 <style lang="postcss">
   @reference "@intric/ui/styles";
 
-  /* Warning alert with icon and left border accent */
   .alert-warning {
     @apply flex items-start gap-3 rounded-lg p-4;
-    @apply border-l-4 border-yellow-500 bg-yellow-50;
-    @apply text-sm text-yellow-800;
+    @apply border-warning-default/30 bg-warning-dimmer text-warning-stronger border;
+    @apply text-sm;
     max-width: 60ch;
   }
 
-  :global(.dark) .alert-warning {
-    @apply border-yellow-500/70 bg-yellow-900/20 text-yellow-200;
-  }
-
-  /* Success flash for queued recording */
   .success-flash {
     @apply flex items-center gap-2 rounded-lg p-3;
-    @apply bg-green-50 text-green-700;
+    @apply bg-positive-dimmer text-positive-stronger;
     max-width: 60ch;
   }
 
-  :global(.dark) .success-flash {
-    @apply bg-green-900/20 text-green-300;
-  }
-
-  /* Action button row with clear hierarchy */
   .action-row {
     @apply flex flex-wrap items-center gap-3;
   }

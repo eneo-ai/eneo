@@ -82,7 +82,11 @@ export function initSettings(client) {
       const res = await client.fetch("/api/v1/settings/flow-input-limits", {
         method: "get"
       });
-      return res;
+      return {
+        ...res,
+        max_files_per_run: res.max_files_per_run ?? null,
+        audio_max_files_per_run: res.audio_max_files_per_run ?? null
+      };
     },
 
     /**
@@ -96,7 +100,11 @@ export function initSettings(client) {
         method: "patch",
         requestBody: { "application/json": patch }
       });
-      return res;
+      return {
+        ...res,
+        max_files_per_run: res.max_files_per_run ?? null,
+        audio_max_files_per_run: res.audio_max_files_per_run ?? null
+      };
     },
 
     /**

@@ -4,37 +4,60 @@
   import { toast } from "$lib/components/toast";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
-  import { localizeHref } from "$lib/paraglide/runtime";
+  import { resolve } from "$app/paths";
 
   let { data } = $props();
   const intric = getIntric();
 
-  let fileMaxSizeBytes = $state(String(data.flowInputLimits.file_max_size_bytes ?? ""));
-  let audioMaxSizeBytes = $state(String(data.flowInputLimits.audio_max_size_bytes ?? ""));
-  let maxFilesPerRun = $state(
-    data.flowInputLimits.max_files_per_run != null
-      ? String(data.flowInputLimits.max_files_per_run)
-      : ""
-  );
-  let audioMaxFilesPerRun = $state(
-    data.flowInputLimits.audio_max_files_per_run != null
-      ? String(data.flowInputLimits.audio_max_files_per_run)
-      : ""
-  );
+  let fileMaxSizeBytes = $state("");
+  let audioMaxSizeBytes = $state("");
+  let maxFilesPerRun = $state("");
+  let audioMaxFilesPerRun = $state("");
   let isSaving = $state(false);
 
-  // Track initial values to detect changes
-  let initialFileMaxSizeBytes = fileMaxSizeBytes;
-  let initialAudioMaxSizeBytes = audioMaxSizeBytes;
-  let initialMaxFilesPerRun = maxFilesPerRun;
-  let initialAudioMaxFilesPerRun = audioMaxFilesPerRun;
+  let initialFileMaxSizeBytes = "";
+  let initialAudioMaxSizeBytes = "";
+  let initialMaxFilesPerRun = "";
+  let initialAudioMaxFilesPerRun = "";
 
-  function toPositiveInteger(value: string, label: string): number {
-    const parsed = Number(value);
+  $effect.pre(() => {
+    const nextFileMaxSizeBytes = String(data.flowInputLimits.file_max_size_bytes ?? "");
+    const nextAudioMaxSizeBytes = String(data.flowInputLimits.audio_max_size_bytes ?? "");
+    const nextMaxFilesPerRun =
+      data.flowInputLimits.max_files_per_run != null
+        ? String(data.flowInputLimits.max_files_per_run)
+        : "";
+    const nextAudioMaxFilesPerRun =
+      data.flowInputLimits.audio_max_files_per_run != null
+        ? String(data.flowInputLimits.audio_max_files_per_run)
+        : "";
+
+    fileMaxSizeBytes = nextFileMaxSizeBytes;
+    audioMaxSizeBytes = nextAudioMaxSizeBytes;
+    maxFilesPerRun = nextMaxFilesPerRun;
+    audioMaxFilesPerRun = nextAudioMaxFilesPerRun;
+
+    initialFileMaxSizeBytes = nextFileMaxSizeBytes;
+    initialAudioMaxSizeBytes = nextAudioMaxSizeBytes;
+    initialMaxFilesPerRun = nextMaxFilesPerRun;
+    initialAudioMaxFilesPerRun = nextAudioMaxFilesPerRun;
+  });
+
+  function normalizeNumericInput(value: unknown): string {
+    return value == null ? "" : String(value).trim();
+  }
+
+  function toPositiveInteger(value: unknown, label: string): number {
+    const normalizedValue = normalizeNumericInput(value);
+    const parsed = Number(normalizedValue);
     if (!Number.isFinite(parsed) || parsed <= 0 || !Number.isInteger(parsed)) {
       throw new Error(`${label} must be a positive integer.`);
     }
     return parsed;
+  }
+
+  function toPositiveIntegerOrNull(value: unknown, label: string): number | null {
+    return normalizeNumericInput(value) === "" ? null : toPositiveInteger(value, label);
   }
 
   function formatBytes(bytes: number): string {
@@ -47,6 +70,13 @@
       unitIndex += 1;
     }
     return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  }
+
+  function formatLimitPreview(value: unknown): string {
+    const normalizedValue = normalizeNumericInput(value);
+    return normalizedValue === ""
+      ? m.flow_input_limits_deployment_default_hint()
+      : formatBytes(Number(normalizedValue));
   }
 
   function getReadableErrorMessage(error: unknown): string {
@@ -68,25 +98,22 @@
 
       // Only include changed fields
       if (fileMaxSizeBytes !== initialFileMaxSizeBytes) {
-        patch.file_max_size_bytes = toPositiveInteger(fileMaxSizeBytes, "File max size");
+        patch.file_max_size_bytes = toPositiveIntegerOrNull(fileMaxSizeBytes, "File max size");
       }
       if (audioMaxSizeBytes !== initialAudioMaxSizeBytes) {
-        patch.audio_max_size_bytes = toPositiveInteger(audioMaxSizeBytes, "Audio max size");
+        patch.audio_max_size_bytes = toPositiveIntegerOrNull(audioMaxSizeBytes, "Audio max size");
       }
       if (maxFilesPerRun !== initialMaxFilesPerRun) {
         patch.max_files_per_run =
-          String(maxFilesPerRun).trim() === ""
+          normalizeNumericInput(maxFilesPerRun) === ""
             ? null
-            : toPositiveInteger(String(maxFilesPerRun), m.flow_input_limits_max_files_title());
+            : toPositiveInteger(maxFilesPerRun, m.flow_input_limits_max_files_title());
       }
       if (audioMaxFilesPerRun !== initialAudioMaxFilesPerRun) {
         patch.audio_max_files_per_run =
-          String(audioMaxFilesPerRun).trim() === ""
+          normalizeNumericInput(audioMaxFilesPerRun) === ""
             ? null
-            : toPositiveInteger(
-                String(audioMaxFilesPerRun),
-                m.flow_input_limits_audio_max_files_title()
-              );
+            : toPositiveInteger(audioMaxFilesPerRun, m.flow_input_limits_audio_max_files_title());
       }
 
       if (Object.keys(patch).length === 0) {
@@ -123,7 +150,7 @@
 <Page.Root>
   <Page.Header>
     <a
-      href={localizeHref("/admin")}
+      href={resolve("/(app)/admin")}
       class="text-accent-default hover:text-accent-default/80 inline-flex items-center gap-1 text-sm font-medium"
     >
       <span aria-hidden="true">&larr;</span>
@@ -143,9 +170,10 @@
               class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
               type="number"
               min="1"
+              placeholder={m.flow_input_limits_deployment_default_hint()}
               bind:value={fileMaxSizeBytes}
             />
-            <p class="text-secondary text-xs">{formatBytes(Number(fileMaxSizeBytes))}</p>
+            <p class="text-secondary text-xs">{formatLimitPreview(fileMaxSizeBytes)}</p>
           </div>
         </Settings.Row>
         <Settings.Row
@@ -174,9 +202,10 @@
               class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
               type="number"
               min="1"
+              placeholder={m.flow_input_limits_deployment_default_hint()}
               bind:value={audioMaxSizeBytes}
             />
-            <p class="text-secondary text-xs">{formatBytes(Number(audioMaxSizeBytes))}</p>
+            <p class="text-secondary text-xs">{formatLimitPreview(audioMaxSizeBytes)}</p>
           </div>
         </Settings.Row>
         <Settings.Row

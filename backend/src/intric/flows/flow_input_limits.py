@@ -9,12 +9,12 @@ from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
 
-_MIN_LIMIT_BYTES = 1
-_MAX_LIMIT_BYTES = 2 * 1024**3  # 2 GB hard guard against accidental runaway values
+FLOW_INPUT_MIN_LIMIT_BYTES = 1
+FLOW_INPUT_MAX_LIMIT_BYTES = 2 * 1024**3
+FLOW_INPUT_MAX_FILES_COUNT = 1000
+FLOW_INPUT_MAX_AUDIO_FILES_COUNT = 100
 
 DEFAULT_MAX_AUDIO_FILES_PER_RUN = 10
-_MAX_FILES_COUNT = 1000  # generic file count guard
-_MAX_AUDIO_FILES_COUNT = 100  # audio: tighter due to cost/timeout
 
 
 @dataclass(frozen=True)
@@ -39,9 +39,10 @@ def _parse_limit(value: Any, field_name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise BadRequestException(f"{field_name} must be an integer.")
 
-    if value < _MIN_LIMIT_BYTES or value > _MAX_LIMIT_BYTES:
+    if value < FLOW_INPUT_MIN_LIMIT_BYTES or value > FLOW_INPUT_MAX_LIMIT_BYTES:
         raise BadRequestException(
-            f"{field_name} must be between {_MIN_LIMIT_BYTES} and {_MAX_LIMIT_BYTES} bytes."
+            f"{field_name} must be between "
+            f"{FLOW_INPUT_MIN_LIMIT_BYTES} and {FLOW_INPUT_MAX_LIMIT_BYTES} bytes."
         )
 
     return value
@@ -67,6 +68,31 @@ def _extract_input_limits(
         return {}
 
     return dict(cast(dict[str, Any], input_limits))
+
+
+def validate_flow_input_limits_object(input_limits: Any) -> dict[str, Any]:
+    if not isinstance(input_limits, dict):
+        raise BadRequestException("flow_settings.input_limits must be an object")
+
+    input_limits_dict = cast(dict[str, Any], input_limits)
+    for key in ("file_max_size_bytes", "audio_max_size_bytes"):
+        if key not in input_limits_dict:
+            continue
+        _parse_limit(input_limits_dict[key], key)
+
+    count_bounds = {
+        "max_files_per_run": FLOW_INPUT_MAX_FILES_COUNT,
+        "audio_max_files_per_run": FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
+    }
+    for key, max_bound in count_bounds.items():
+        if key not in input_limits_dict:
+            continue
+        value = input_limits_dict[key]
+        if value is None:
+            continue
+        _parse_optional_file_count(value, key, max_bound)
+
+    return input_limits_dict
 
 
 def resolve_flow_input_limits(
@@ -113,7 +139,7 @@ def resolve_flow_input_limits(
         else:
             try:
                 max_files = _parse_optional_file_count(
-                    raw, "max_files_per_run", _MAX_FILES_COUNT
+                    raw, "max_files_per_run", FLOW_INPUT_MAX_FILES_COUNT
                 )
             except BadRequestException:
                 logger.warning(
@@ -128,7 +154,7 @@ def resolve_flow_input_limits(
         else:
             try:
                 audio_max_files = _parse_optional_file_count(
-                    raw, "audio_max_files_per_run", _MAX_AUDIO_FILES_COUNT
+                    raw, "audio_max_files_per_run", FLOW_INPUT_MAX_AUDIO_FILES_COUNT
                 )
             except BadRequestException:
                 logger.warning(
@@ -175,11 +201,13 @@ def apply_flow_input_limits_patch(
         )
     if max_files_per_run is not None:
         next_input_limits["max_files_per_run"] = _parse_optional_file_count(
-            max_files_per_run, "max_files_per_run", _MAX_FILES_COUNT
+            max_files_per_run, "max_files_per_run", FLOW_INPUT_MAX_FILES_COUNT
         )
     if audio_max_files_per_run is not None:
         next_input_limits["audio_max_files_per_run"] = _parse_optional_file_count(
-            audio_max_files_per_run, "audio_max_files_per_run", _MAX_AUDIO_FILES_COUNT
+            audio_max_files_per_run,
+            "audio_max_files_per_run",
+            FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
         )
 
     for key in remove_keys or ():
@@ -201,3 +229,19 @@ def effective_max_files_per_run(
     if input_type == "audio":
         return limits.audio_max_files_per_run
     return limits.max_files_per_run
+
+
+def effective_runtime_max_files(
+    *,
+    input_type: str,
+    step_max_files: int | None,
+    limits: FlowInputLimits,
+) -> int | None:
+    """Apply the stricter of a step limit and the tenant flow-input ceiling."""
+
+    tenant_limit = effective_max_files_per_run(input_type=input_type, limits=limits)
+    if step_max_files is None:
+        return tenant_limit
+    if tenant_limit is None:
+        return step_max_files
+    return min(step_max_files, tenant_limit)

@@ -132,6 +132,70 @@ describe("flowRunWizard", () => {
     ]);
   });
 
+  it("blocks run submission while a browser recording is still active", () => {
+    const blockers = buildFlowRunBlockers({
+      locale: "sv",
+      missingRequiredFieldNames: [],
+      stepsRequiringInput: [
+        {
+          step_id: "step-7",
+          step_order: 7,
+          label: "Ljudfil",
+          required: false,
+          input_format: "audio",
+          accepted_mimetypes: []
+        }
+      ],
+      runtimeFilesByStepId: {},
+      templateReadinessItems: [],
+      uploadingStepIds: [],
+      recordingStepIds: ["step-7"]
+    });
+
+    expect(blockers).toEqual([
+      {
+        id: "recording:step-7",
+        kind: "recording-in-progress",
+        pageId: "runtime-step:step-7",
+        title: "Stoppa inspelningen för steg 7: Ljudfil.",
+        actionLabel: "Gå till steg 7",
+        blocksProgress: true
+      }
+    ]);
+  });
+
+  it("blocks progression when a stopped browser recording is still only local", () => {
+    const blockers = buildFlowRunBlockers({
+      locale: "sv",
+      missingRequiredFieldNames: [],
+      stepsRequiringInput: [
+        {
+          step_id: "step-7",
+          step_order: 7,
+          label: "Ljudfil",
+          required: false,
+          input_format: "audio",
+          accepted_mimetypes: []
+        }
+      ],
+      runtimeFilesByStepId: {},
+      localRecordingStepIds: ["step-7"],
+      templateReadinessItems: [],
+      uploadingStepIds: []
+    });
+
+    expect(blockers).toEqual([
+      {
+        id: "local-recording:step-7",
+        kind: "local-recording-pending",
+        pageId: "runtime-step:step-7",
+        title: "Slutför uppladdningen eller kassera inspelningen för steg 7: Ljudfil.",
+        actionLabel: "Gå till steg 7",
+        blocksProgress: true
+      }
+    ]);
+  });
+
   it("builds compact review summary chips for templates, fields, steps, and files", () => {
     const summary = buildFlowRunReviewSummary({
       locale: "sv",

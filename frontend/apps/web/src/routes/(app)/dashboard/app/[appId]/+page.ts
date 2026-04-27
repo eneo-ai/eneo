@@ -1,5 +1,7 @@
+import { requireUuidRouteParam } from "$lib/core/routeParams";
+
 export const load = async (event) => {
-  const selectedAppId = event.params.appId;
+  const selectedAppId = requireUuidRouteParam(event.params.appId, "App");
 
   const { intric } = await event.parent();
 
