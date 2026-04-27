@@ -37,6 +37,11 @@ async def test_process_typed_output_json_with_contract_validation() -> None:
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=lambda data, schema, label: None,
         render_document=lambda text, output_type, step_order: (b"", "", ""),
+        render_structured_document=lambda data, output_type, step_order, schema=None: (
+            b"",
+            "",
+            "",
+        ),
     )
 
     structured, artifacts = await process_typed_output(
@@ -69,6 +74,11 @@ async def test_process_typed_output_json_without_compiled_validator_skips_contra
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=_unexpected_validate,
         render_document=lambda text, output_type, step_order: (b"", "", ""),
+        render_structured_document=lambda data, output_type, step_order, schema=None: (
+            b"",
+            "",
+            "",
+        ),
     )
 
     structured, artifacts = await process_typed_output(
@@ -100,6 +110,11 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
         render_document=lambda text, output_type, step_order: (
+            blob,
+            mimetype,
+            filename,
+        ),
+        render_structured_document=lambda data, output_type, step_order, schema=None: (
             blob,
             mimetype,
             filename,
@@ -150,6 +165,11 @@ async def test_process_typed_output_pdf_preserves_pdf_bytes_from_model() -> None
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
         render_document=_render_not_expected,
+        render_structured_document=lambda data, output_type, step_order, schema=None: (
+            b"",
+            "",
+            "",
+        ),
     )
 
     structured, artifacts = await process_typed_output(
@@ -168,14 +188,22 @@ async def test_process_typed_output_pdf_preserves_pdf_bytes_from_model() -> None
 
 
 @pytest.mark.asyncio
-async def test_process_typed_output_docx_validates_pre_render_contract() -> None:
+async def test_process_typed_output_docx_renders_validated_structured_contract() -> (
+    None
+):
     step = _Step(step_order=4, output_type="docx", output_contract={"type": "object"})
     run = _Run(tenant_id=uuid4())
-    file_repo = SimpleNamespace(add=AsyncMock(return_value=SimpleNamespace(id=uuid4())))
+    file_id = uuid4()
+    file_repo = SimpleNamespace(add=AsyncMock(return_value=SimpleNamespace(id=file_id)))
     validate_calls: list[tuple[object, dict, str]] = []
+    render_calls: list[tuple[object, str, int, dict | None]] = []
 
     def _validate(data, schema, label):
         validate_calls.append((data, schema, label))
+
+    def _render_structured(data, output_type, step_order, schema=None):
+        render_calls.append((data, output_type, step_order, schema))
+        return b"docx", "application/docx", "x.docx"
 
     deps = OutputRuntimeDeps(
         file_repo=file_repo,
@@ -188,22 +216,58 @@ async def test_process_typed_output_docx_validates_pre_render_contract() -> None
             "application/pdf",
             "x.pdf",
         ),
+        render_structured_document=_render_structured,
     )
 
-    await process_typed_output(
+    structured, artifacts = await process_typed_output(
         full_text='{"structured": 1}',
         step=step,
         run=run,
         deps=deps,
     )
 
-    assert validate_calls == [
-        (
-            {"structured": 1},
-            {"type": "object"},
-            "Step 4 output (pre-render)",
-        )
-    ]
+    assert structured == {"structured": 1}
+    assert validate_calls == [({"structured": 1}, {"type": "object"}, "Step 4 output")]
+    assert render_calls == [({"structured": 1}, "docx", 4, {"type": "object"})]
+    assert artifacts is not None
+    assert artifacts[0]["file_id"] == str(file_id)
+
+
+@pytest.mark.asyncio
+async def test_process_typed_output_docx_treats_empty_contract_as_structured() -> None:
+    step = _Step(step_order=4, output_type="docx", output_contract={})
+    run = _Run(tenant_id=uuid4())
+    file_repo = SimpleNamespace(add=AsyncMock(return_value=SimpleNamespace(id=uuid4())))
+    render_calls: list[tuple[object, str, int, dict | None]] = []
+
+    def _render_structured(data, output_type, step_order, schema=None):
+        render_calls.append((data, output_type, step_order, schema))
+        return b"docx", "application/docx", "x.docx"
+
+    deps = OutputRuntimeDeps(
+        file_repo=file_repo,
+        user_id=uuid4(),
+        compile_validators=lambda steps: {},
+        parse_json_output=lambda text: ["legacy", "data"],
+        validate_against_contract=lambda data, schema, label: None,
+        render_document=lambda text, output_type, step_order: (
+            b"raw-json-doc",
+            "application/docx",
+            "raw.docx",
+        ),
+        render_structured_document=_render_structured,
+    )
+
+    structured, artifacts = await process_typed_output(
+        full_text='["legacy", "data"]',
+        step=step,
+        run=run,
+        deps=deps,
+    )
+
+    assert structured == ["legacy", "data"]
+    assert render_calls == [(["legacy", "data"], "docx", 4, {})]
+    assert artifacts is not None
 
 
 @pytest.mark.asyncio
@@ -225,6 +289,11 @@ async def test_process_typed_output_docx_without_contract_does_not_parse_json() 
             b"docx",
             "application/docx",
             "x.docx",
+        ),
+        render_structured_document=lambda data, output_type, step_order, schema=None: (
+            b"",
+            "",
+            "",
         ),
     )
 
@@ -253,6 +322,11 @@ async def test_process_typed_output_unknown_type_returns_empty() -> None:
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=lambda data, schema, label: None,
         render_document=lambda text, output_type, step_order: (b"", "", ""),
+        render_structured_document=lambda data, output_type, step_order, schema=None: (
+            b"",
+            "",
+            "",
+        ),
     )
 
     structured, artifacts = await process_typed_output(
@@ -285,6 +359,11 @@ async def test_process_typed_output_json_contract_violation_propagates() -> None
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=_raise_contract,
         render_document=lambda text, output_type, step_order: (b"", "", ""),
+        render_structured_document=lambda data, output_type, step_order, schema=None: (
+            b"",
+            "",
+            "",
+        ),
     )
 
     with pytest.raises(TypedIOValidationException) as exc:
@@ -314,6 +393,11 @@ async def test_process_typed_output_render_failure_propagates() -> None:
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
         render_document=_fail_render,
+        render_structured_document=lambda data, output_type, step_order, schema=None: (
+            b"",
+            "",
+            "",
+        ),
     )
 
     with pytest.raises(RuntimeError, match="renderer unavailable"):
@@ -343,6 +427,11 @@ async def test_process_typed_output_file_repo_failure_propagates() -> None:
             b"pdf",
             "application/pdf",
             "x.pdf",
+        ),
+        render_structured_document=lambda data, output_type, step_order, schema=None: (
+            b"",
+            "",
+            "",
         ),
     )
 

@@ -521,7 +521,7 @@ def augment_prompt_for_typed_output(
             "Do not include markdown code fences, commentary, or any surrounding text.",
             "The top-level JSON value must be an object or array.",
         ]
-        if output_contract:
+        if output_contract is not None:
             schema_json = json.dumps(
                 output_contract, ensure_ascii=False, sort_keys=True
             )
@@ -531,14 +531,29 @@ def augment_prompt_for_typed_output(
                     schema_json,
                 ]
             )
-    elif output_type in {"pdf", "docx"} and output_contract is None:
-        artifact_name = "PDF" if output_type == "pdf" else "DOCX"
-        instructions = [
-            f"The system will render your answer into a {artifact_name} file after you respond.",
-            "Return only the document body as Markdown/plain text content.",
-            "Do not output binary file contents, base64, XML/ZIP internals, or PDF object syntax.",
-            "For PDF output specifically, do not start the response with %PDF-.",
-        ]
+    elif output_type in {"pdf", "docx"}:
+        if output_contract is not None:
+            artifact_name = "PDF" if output_type == "pdf" else "DOCX"
+            schema_json = json.dumps(
+                output_contract, ensure_ascii=False, sort_keys=True
+            )
+            instructions = [
+                f"The system will validate your JSON and render it into a {artifact_name} file after you respond.",
+                "Return ONLY valid JSON.",
+                "Do not include markdown code fences, commentary, or any surrounding text.",
+                "The top-level JSON value must be an object or array.",
+                "Use plain text for JSON string values; do not include Markdown formatting markers inside strings.",
+                "Follow this JSON Schema exactly:",
+                schema_json,
+            ]
+        else:
+            artifact_name = "PDF" if output_type == "pdf" else "DOCX"
+            instructions = [
+                f"The system will render your answer into a {artifact_name} file after you respond.",
+                "Return only the document body as Markdown/plain text content.",
+                "Do not output binary file contents, base64, XML/ZIP internals, or PDF object syntax.",
+                "For PDF output specifically, do not start the response with %PDF-.",
+            ]
     else:
         return prompt
 
@@ -803,7 +818,8 @@ async def complete_step_execution(
     model_kwargs = prepared.assistant.completion_model_kwargs
     original_kwargs = model_kwargs
     cache_key = deps.json_mode_cache_key(prepared.assistant)
-    if step.output_type == "json":
+    native_json_object_requested = _should_request_native_json_object_mode(step)
+    if native_json_object_requested:
         cached_json_mode_support = state.json_mode_supported.get(cache_key)
         if cached_json_mode_support is None:
             detected_json_mode_support = detect_native_json_output_support(
@@ -856,7 +872,7 @@ async def complete_step_execution(
             version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
         )
     except Exception as model_exc:
-        if step.output_type == "json" and deps.is_json_mode_rejection(model_exc):
+        if native_json_object_requested and deps.is_json_mode_rejection(model_exc):
             state.json_mode_supported[cache_key] = False
             response = await prepared.assistant.get_response(
                 question=prepared.step_input.text,
@@ -995,3 +1011,29 @@ async def complete_step_execution(
             else None
         ),
     )
+
+
+def _should_request_native_json_object_mode(step: RuntimeStep) -> bool:
+    if step.output_type == "json":
+        if step.output_contract is None:
+            return True
+        return _schema_prefers_object_value(step.output_contract)
+    if step.output_type in {"pdf", "docx"} and step.output_contract is not None:
+        return _schema_prefers_object_value(step.output_contract)
+    return False
+
+
+def _schema_prefers_object_value(schema: dict[str, Any]) -> bool:
+    raw_type = schema.get("type")
+    if isinstance(raw_type, str):
+        return raw_type == "object"
+    if isinstance(raw_type, list):
+        declared = {
+            item for item in cast(list[object], raw_type) if isinstance(item, str)
+        }
+        return "object" in declared and "array" not in declared
+    if isinstance(schema.get("properties"), dict):
+        return True
+    if "items" in schema:
+        return False
+    return False

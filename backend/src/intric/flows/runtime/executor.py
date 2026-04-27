@@ -1343,7 +1343,10 @@ class FlowRunExecutor:
             parse_json_output,
             validate_against_contract,
         )
-        from intric.flows.runtime.document_renderer import render_document
+        from intric.flows.runtime.document_renderer import (
+            render_document,
+            render_structured_document,
+        )
 
         deps = OutputRuntimeDeps(
             file_repo=self.file_repo,
@@ -1353,6 +1356,7 @@ class FlowRunExecutor:
             parse_json_output=parse_json_output,
             validate_against_contract=validate_against_contract,
             render_document=render_document,
+            render_structured_document=render_structured_document,
         )
         return await process_typed_output_runtime(
             full_text=full_text,

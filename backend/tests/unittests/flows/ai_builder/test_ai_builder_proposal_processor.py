@@ -17,6 +17,7 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 )
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
+    BuilderPlan,
     ConversationMessage,
     FlowDraftSpecCore,
     InputSource,
@@ -24,7 +25,12 @@ from intric.flows.ai_builder.ai_builder_models import (
     MCPPolicy,
     OutputMode,
     OutputType,
+    PlannerPlanEnvelope,
+    PlanStatus,
     StepSpec,
+)
+from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
 )
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
@@ -34,6 +40,7 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
     ToolProcessingResult,
     ToolRetryConfig,
     _active_submission_tool_schemas,
+    _terminal_output_type_for_conversation,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
@@ -151,8 +158,71 @@ def _make_flow_spec(
     )
 
 
+def _make_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
+    return BuilderPlan(
+        id=uuid4(),
+        session_id=uuid4(),
+        tenant_id=uuid4(),
+        status=PlanStatus.PROPOSED,
+        spec=spec,
+        spec_hash=spec.spec_hash(),
+        envelope=PlannerPlanEnvelope(spec=spec),
+    )
+
+
 async def _single_plan_event(**_kwargs):
     yield {"event": "plan", "data": "{}"}
+
+
+def test_plan_edit_output_intent_preserves_prior_document_terminal_type() -> None:
+    spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
+    spec = spec.model_copy(
+        update={
+            "steps": [spec.steps[0].model_copy(update={"output_type": OutputType.PDF})]
+        }
+    )
+    plan = _make_plan(spec)
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=plan.id,
+        target_plan_step_ref="step_a",
+    )
+
+    output_type = _terminal_output_type_for_conversation(
+        [
+            ConversationMessage(
+                role="user",
+                content="Gör språket mer formellt i den här delen.",
+            )
+        ],
+        plan_edit_context=context,
+        prior_plan=plan,
+    )
+
+    assert output_type == OutputType.PDF
+
+
+def test_plan_edit_output_intent_uses_latest_explicit_document_change() -> None:
+    spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
+    plan = _make_plan(spec)
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=plan.id,
+        target_plan_step_ref="step_a",
+    )
+
+    output_type = _terminal_output_type_for_conversation(
+        [
+            ConversationMessage(
+                role="user",
+                content="Ändra slutresultatet så att jag får en PDF-fil.",
+            )
+        ],
+        plan_edit_context=context,
+        prior_plan=plan,
+    )
+
+    assert output_type == OutputType.PDF
 
 
 def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:

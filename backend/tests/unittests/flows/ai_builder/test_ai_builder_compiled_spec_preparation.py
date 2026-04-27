@@ -181,3 +181,39 @@ def test_prepare_compiled_spec_for_session_expands_mcp_server_refs_to_tools() ->
     assistant_spec = result.spec.steps[0].assistant_spec
     assert assistant_spec.mcp_server_refs == ["server-time"]
     assert assistant_spec.mcp_tool_refs == ["tool-current-time", "tool-convert-time"]
+
+
+def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() -> None:
+    spec = _make_spec()
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_compiled_spec_for_session",
+            side_effect=lambda spec, target_kind: spec,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
+            side_effect=lambda spec, **_kwargs: (spec, []),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            return_value=SpecValidationResult(),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_compiled_spec_for_session",
+            return_value=MagicMock(errors=[]),
+        ),
+    ):
+        result = prepare_compiled_spec_for_session(
+            spec=spec,
+            target_kind=TargetKind.CREATE,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            valid_existing_step_refs=None,
+            terminal_output_type=OutputType.PDF,
+        )
+
+    assert result.validation is not None
+    assert not result.validation.valid
+    assert result.validation.errors[0].code == "terminal_output_type_mismatch"

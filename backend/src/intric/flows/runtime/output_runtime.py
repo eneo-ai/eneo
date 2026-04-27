@@ -52,6 +52,17 @@ class RenderDocumentFn(Protocol):
     ) -> tuple[bytes, str, str]: ...
 
 
+class RenderStructuredDocumentFn(Protocol):
+    def __call__(
+        self,
+        data: dict[str, Any] | list[Any],
+        output_type: str,
+        *,
+        step_order: int,
+        schema: dict[str, Any] | None = None,
+    ) -> tuple[bytes, str, str]: ...
+
+
 @dataclass(frozen=True)
 class OutputRuntimeDeps:
     file_repo: Any
@@ -60,6 +71,7 @@ class OutputRuntimeDeps:
     parse_json_output: Callable[[str], dict[str, Any] | list[Any]]
     validate_against_contract: ValidateAgainstContractFn
     render_document: RenderDocumentFn
+    render_structured_document: RenderStructuredDocumentFn
     principal: FlowPrincipal | None = None
 
 
@@ -85,14 +97,20 @@ async def process_typed_output(
                 label=f"Step {step.step_order} output",
             )
     elif step.output_type in ("pdf", "docx"):
-        if step.output_contract:
-            pre_render_data = deps.parse_json_output(full_text)
+        if step.output_contract is not None:
+            structured_output = deps.parse_json_output(full_text)
             deps.validate_against_contract(
-                pre_render_data,
+                structured_output,
                 step.output_contract,
-                label=f"Step {step.step_order} output (pre-render)",
+                label=f"Step {step.step_order} output",
             )
-        if step.output_type == "pdf" and _is_pdf_bytes_text(full_text):
+            blob, mimetype, filename = deps.render_structured_document(
+                structured_output,
+                step.output_type,
+                step_order=step.step_order,
+                schema=step.output_contract,
+            )
+        elif step.output_type == "pdf" and _is_pdf_bytes_text(full_text):
             blob = _pdf_bytes_from_text(full_text)
             mimetype = "application/pdf"
             filename = f"step_{step.step_order}_output.pdf"

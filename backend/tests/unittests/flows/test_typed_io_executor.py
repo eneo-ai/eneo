@@ -1903,11 +1903,14 @@ def test_document_output_prompt_instructs_model_to_return_markdown_not_binary() 
     assert "%PDF-" in prompt
 
 
-def test_document_output_prompt_preserves_contract_driven_json_behavior() -> None:
+def test_document_output_prompt_with_contract_requests_validated_json() -> None:
     prompt = augment_prompt_for_typed_output(
         output_type="pdf",
         output_contract={"type": "object"},
         prompt="Return report data",
     )
 
-    assert prompt == "Return report data"
+    assert "render it into a PDF file" in prompt
+    assert "Return ONLY valid JSON" in prompt
+    assert "Use plain text for JSON string values" in prompt
+    assert "Follow this JSON Schema exactly" in prompt

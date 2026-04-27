@@ -76,6 +76,7 @@ def _step(
     output_type: str = "text",
     output_mode: str = "pass_through",
     input_contract: dict[str, object] | None = None,
+    output_contract: dict[str, object] | None = None,
     output_config: dict[str, object] | None = None,
     input_bindings: dict[str, object] | None = None,
 ) -> RuntimeStep:
@@ -92,6 +93,7 @@ def _step(
         output_mode=output_mode,
         output_config=output_config,
         output_type=output_type,
+        output_contract=output_contract,
         input_type=input_type,
         input_contract=input_contract,
     )
@@ -542,6 +544,87 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
     assert assistant.get_response.await_args.kwargs["model_kwargs"] is original_kwargs
     assert state.json_mode_supported["anthropic:haiku:1"] is False
     assert output.structured_output == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_does_not_force_json_object_for_array_document_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _unexpected_json_mode_detection(assistant_obj: object) -> bool | None:
+        raise AssertionError("array schemas must not request json_object mode")
+
+    monkeypatch.setattr(
+        "intric.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        _unexpected_json_mode_detection,
+    )
+    run = _run()
+    state = _state()
+    step = _step(
+        output_type="docx",
+        output_contract={
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+            },
+        },
+    )
+    original_kwargs = MagicMock(name="original_kwargs")
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = original_kwargs
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            total_token_count=4,
+            completion='[{"title":"A"}]',
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=([{"title": "A"}], None)),
+        apply_output_cap=AsyncMock(return_value=('[{"title":"A"}]', [])),
+        attach_typed_failure_context=lambda exc, **kwargs: exc,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
+        count_tokens=lambda text: len(text),
+    )
+
+    output = await complete_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        prepared=prepared,
+        deps=deps,
+    )
+
+    assert assistant.completion_model_kwargs.model_copy.call_count == 0
+    assert assistant.get_response.await_count == 1
+    assert assistant.get_response.await_args.kwargs["model_kwargs"] is original_kwargs
+    assert state.json_mode_supported == {}
+    assert output.structured_output == [{"title": "A"}]
 
 
 @pytest.mark.asyncio

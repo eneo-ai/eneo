@@ -1,4 +1,5 @@
 """TDD tests for typed I/O publish-time validation in FlowService — RED phase."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
@@ -76,28 +77,46 @@ def test_rejects_invalid_output_contract(user):
 def test_rejects_output_contract_for_text_output(user):
     service = _service(user)
     steps = [_step(output_type="text", output_contract={"type": "object"})]
-    with pytest.raises(BadRequestException, match="output_contract is not supported for output_type 'text'"):
+    with pytest.raises(
+        BadRequestException,
+        match="output_contract is not supported for output_type 'text'",
+    ):
         service._validate_steps(steps)
+
+
+@pytest.mark.parametrize("output_type", ["pdf", "docx"])
+def test_accepts_document_output_contract_with_structured_schema(
+    user, output_type: str
+):
+    service = _service(user)
+    steps = [
+        _step(
+            output_type=output_type,
+            output_contract={
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+            },
+        )
+    ]
+    service._validate_steps(steps)
 
 
 @pytest.mark.parametrize("output_type", ["pdf", "docx"])
 def test_rejects_document_output_contract_with_scalar_schema(user, output_type: str):
     service = _service(user)
     steps = [_step(output_type=output_type, output_contract={"type": "string"})]
-    with pytest.raises(BadRequestException, match="must declare schema type 'object' or 'array'"):
+    with pytest.raises(BadRequestException, match="must declare schema type"):
         service._validate_steps(steps)
 
 
 @pytest.mark.parametrize("output_type", ["pdf", "docx"])
-def test_accepts_document_output_contract_with_structured_schema(user, output_type: str):
+def test_rejects_document_output_contract_without_declared_shape(
+    user, output_type: str
+):
     service = _service(user)
-    steps = [
-        _step(
-            output_type=output_type,
-            output_contract={"type": "object", "properties": {"title": {"type": "string"}}},
-        )
-    ]
-    service._validate_steps(steps)
+    steps = [_step(output_type=output_type, output_contract={})]
+    with pytest.raises(BadRequestException, match="must declare schema type"):
+        service._validate_steps(steps)
 
 
 def test_accepts_valid_contracts(user):
@@ -105,7 +124,10 @@ def test_accepts_valid_contracts(user):
     service = _service(user)
     steps = [
         _step(
-            input_contract={"type": "object", "properties": {"name": {"type": "string"}}},
+            input_contract={
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+            },
             output_type="json",
             output_contract={"type": "object", "required": ["result"]},
         )
@@ -157,7 +179,9 @@ def test_accepts_previous_step_compatible_coercions_matrix(
     service = _service(user)
     steps = [
         _step(step_order=1, output_type=previous_output_type),
-        _step(step_order=2, input_source="previous_step", input_type=current_input_type),
+        _step(
+            step_order=2, input_source="previous_step", input_type=current_input_type
+        ),
     ]
     service._validate_steps(steps)
 
@@ -178,7 +202,9 @@ def test_rejects_previous_step_incompatible_coercions_matrix(
     service = _service(user)
     steps = [
         _step(step_order=1, output_type=previous_output_type),
-        _step(step_order=2, input_source="previous_step", input_type=current_input_type),
+        _step(
+            step_order=2, input_source="previous_step", input_type=current_input_type
+        ),
     ]
     with pytest.raises(BadRequestException, match="incompatible type chain"):
         service._validate_steps(steps)
@@ -188,11 +214,36 @@ def test_accepts_five_step_mixed_chain(user):
     """Five-step mixed chain should validate when each previous_step coercion is compatible."""
     service = _service(user)
     steps = [
-        _step(step_order=1, input_source="flow_input", input_type="text", output_type="json"),
-        _step(step_order=2, input_source="previous_step", input_type="text", output_type="pdf"),
-        _step(step_order=3, input_source="previous_step", input_type="text", output_type="docx"),
-        _step(step_order=4, input_source="previous_step", input_type="text", output_type="text"),
-        _step(step_order=5, input_source="all_previous_steps", input_type="text", output_type="text"),
+        _step(
+            step_order=1,
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+        ),
+        _step(
+            step_order=2,
+            input_source="previous_step",
+            input_type="text",
+            output_type="pdf",
+        ),
+        _step(
+            step_order=3,
+            input_source="previous_step",
+            input_type="text",
+            output_type="docx",
+        ),
+        _step(
+            step_order=4,
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        _step(
+            step_order=5,
+            input_source="all_previous_steps",
+            input_type="text",
+            output_type="text",
+        ),
     ]
     service._validate_steps(steps)  # should not raise
 
@@ -201,9 +252,24 @@ def test_rejects_five_step_mixed_chain_with_incompatible_hop(user):
     """A later incompatible previous_step hop should still be rejected deterministically."""
     service = _service(user)
     steps = [
-        _step(step_order=1, input_source="flow_input", input_type="text", output_type="json"),
-        _step(step_order=2, input_source="previous_step", input_type="text", output_type="pdf"),
-        _step(step_order=3, input_source="previous_step", input_type="json", output_type="text"),
+        _step(
+            step_order=1,
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+        ),
+        _step(
+            step_order=2,
+            input_source="previous_step",
+            input_type="text",
+            output_type="pdf",
+        ),
+        _step(
+            step_order=3,
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+        ),
     ]
     with pytest.raises(BadRequestException, match="incompatible type chain"):
         service._validate_steps(steps)
@@ -219,7 +285,9 @@ def test_all_previous_steps_json_blocked(user):
         _step(step_order=1),
         _step(step_order=2, input_source="all_previous_steps", input_type="json"),
     ]
-    with pytest.raises(BadRequestException, match="incompatible with input_source 'all_previous_steps'"):
+    with pytest.raises(
+        BadRequestException, match="incompatible with input_source 'all_previous_steps'"
+    ):
         service._validate_steps(steps)
 
 
@@ -227,7 +295,10 @@ def test_rejects_first_step_all_previous_steps_input_source_publish(user):
     """Step 1 must not use all_previous_steps."""
     service = _service(user)
     steps = [_step(step_order=1, input_source="all_previous_steps", input_type="text")]
-    with pytest.raises(BadRequestException, match="Step 1 cannot use previous_step/all_previous_steps input source"):
+    with pytest.raises(
+        BadRequestException,
+        match="Step 1 cannot use previous_step/all_previous_steps input source",
+    ):
         service._validate_steps(steps)
 
 
@@ -241,7 +312,10 @@ def test_previous_step_document_blocked(user):
         _step(step_order=1, output_type="pdf"),
         _step(step_order=2, input_source="previous_step", input_type="document"),
     ]
-    with pytest.raises(BadRequestException, match="input_type 'document' is only supported with input_source 'flow_input'"):
+    with pytest.raises(
+        BadRequestException,
+        match="input_type 'document' is only supported with input_source 'flow_input'",
+    ):
         service._validate_steps(steps)
 
 
@@ -252,7 +326,10 @@ def test_all_previous_steps_document_blocked(user):
         _step(step_order=1),
         _step(step_order=2, input_source="all_previous_steps", input_type="document"),
     ]
-    with pytest.raises(BadRequestException, match="input_type 'document' is only supported with input_source 'flow_input'"):
+    with pytest.raises(
+        BadRequestException,
+        match="input_type 'document' is only supported with input_source 'flow_input'",
+    ):
         service._validate_steps(steps)
 
 
@@ -263,7 +340,10 @@ def test_file_input_source_must_be_flow_input(user):
         _step(step_order=1, output_type="text"),
         _step(step_order=2, input_source="previous_step", input_type="file"),
     ]
-    with pytest.raises(BadRequestException, match="input_type 'file' is only supported with input_source 'flow_input'"):
+    with pytest.raises(
+        BadRequestException,
+        match="input_type 'file' is only supported with input_source 'flow_input'",
+    ):
         service._validate_steps(steps)
 
 
@@ -274,7 +354,9 @@ def test_rejects_multiple_flow_input_steps(user):
         _step(step_order=1, input_source="flow_input", input_type="text"),
         _step(step_order=2, input_source="flow_input", input_type="text"),
     ]
-    with pytest.raises(BadRequestException, match="Only one step may use input_source 'flow_input'"):
+    with pytest.raises(
+        BadRequestException, match="Only one step may use input_source 'flow_input'"
+    ):
         service._validate_steps(steps)
 
 
@@ -290,7 +372,9 @@ def test_rejects_flow_input_when_not_step_one(user):
         ),
         _step(step_order=2, input_source="flow_input", input_type="text"),
     ]
-    with pytest.raises(BadRequestException, match="input_source 'flow_input' must be step 1 if present"):
+    with pytest.raises(
+        BadRequestException, match="input_source 'flow_input' must be step 1 if present"
+    ):
         service._validate_steps(steps)
 
 
@@ -343,7 +427,9 @@ def test_audio_input_requires_transcription_model(user):
             "transcription_language": "sv",
         }
     }
-    with pytest.raises(BadRequestException, match="transcription model must be selected"):
+    with pytest.raises(
+        BadRequestException, match="transcription model must be selected"
+    ):
         service._validate_steps(steps, metadata_json=metadata)
 
 
@@ -375,7 +461,10 @@ def test_audio_input_source_must_be_flow_input(user):
             "transcription_language": "sv",
         }
     }
-    with pytest.raises(BadRequestException, match="input_type 'audio' is only supported with input_source 'flow_input'"):
+    with pytest.raises(
+        BadRequestException,
+        match="input_type 'audio' is only supported with input_source 'flow_input'",
+    ):
         service._validate_steps(steps, metadata_json=metadata)
 
 
@@ -385,7 +474,9 @@ def test_transcribe_only_requires_audio_input(user):
     steps = [
         _step(input_type="text", output_mode="transcribe_only", output_type="text"),
     ]
-    with pytest.raises(BadRequestException, match="transcribe_only.*input_type 'audio'"):
+    with pytest.raises(
+        BadRequestException, match="transcribe_only.*input_type 'audio'"
+    ):
         service._validate_steps(steps)
 
 
@@ -402,7 +493,9 @@ def test_transcribe_only_requires_text_output(user):
             "transcription_language": "sv",
         }
     }
-    with pytest.raises(BadRequestException, match="transcribe_only.*output_type 'text'"):
+    with pytest.raises(
+        BadRequestException, match="transcribe_only.*output_type 'text'"
+    ):
         service._validate_steps(steps, metadata_json=metadata)
 
 

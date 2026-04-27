@@ -24,6 +24,9 @@ from intric.flows.ai_builder.ai_builder_validator import validate_spec
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
+_STRICT_TERMINAL_OUTPUT_TYPES = frozenset(
+    {OutputType.JSON, OutputType.PDF, OutputType.DOCX}
+)
 
 
 @dataclass(frozen=True)
@@ -96,8 +99,42 @@ def prepare_compiled_spec_for_session(
             code=error.code,
             message=error.message,
         )
+    _add_terminal_output_alignment_error(
+        validation=validation,
+        spec=prepared_spec,
+        terminal_output_type=terminal_output_type,
+    )
 
     return PreparedCompiledSpecResult(
         spec=prepared_spec,
         validation=validation,
+    )
+
+
+def _add_terminal_output_alignment_error(
+    *,
+    validation: SpecValidationResult,
+    spec: FlowDraftSpecCore,
+    terminal_output_type: OutputType | None,
+) -> None:
+    if (
+        terminal_output_type is None
+        or terminal_output_type not in _STRICT_TERMINAL_OUTPUT_TYPES
+        or not spec.steps
+    ):
+        return
+
+    terminal_step = spec.steps[-1]
+    if terminal_step.output_type == terminal_output_type:
+        return
+
+    validation.add_error(
+        step_ref=terminal_step.plan_step_ref,
+        code="terminal_output_type_mismatch",
+        message=(
+            "The final step output_type must match the requested terminal output "
+            f"'{terminal_output_type.value}', but the compiled plan ends with "
+            f"'{terminal_step.output_type.value}'. Update the final step instead of "
+            "adding or preserving a trailing text step."
+        ),
     )

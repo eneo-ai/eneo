@@ -172,6 +172,9 @@ logger = get_logger(__name__)
 MAX_SELF_CORRECTION_RETRIES = 3
 SUBMISSION_TOOL_NAMES = frozenset({OUTLINE_FLOW_TOOL_NAME, EDIT_FLOW_TOOL_NAME})
 EventBatch = tuple[dict[str, str], ...]
+_PRESERVED_PLAN_EDIT_TERMINAL_TYPES = frozenset(
+    {OutputType.JSON, OutputType.PDF, OutputType.DOCX}
+)
 
 
 def _tool_calls_contain_submission(tool_calls: list[Any]) -> bool:
@@ -239,6 +242,7 @@ def _terminal_output_type_for_conversation(
     conversation: list[ConversationMessage],
     *,
     plan_edit_context: AIBuilderPlanEditContext | None,
+    prior_plan: BuilderPlan | None = None,
 ) -> OutputType | None:
     if plan_edit_context is not None:
         user_messages = [
@@ -247,22 +251,34 @@ def _terminal_output_type_for_conversation(
             if message.role == "user" and message.content
         ]
         if not user_messages:
-            return None
+            return _terminal_output_type_from_prior_plan(prior_plan)
         latest_user_message = user_messages[-1]
         latest_user_content = latest_user_message.content
         if latest_user_content is None:
-            return None
+            return _terminal_output_type_from_prior_plan(prior_plan)
         output_intent = resolve_output_intent(
             latest_user_content,
             extract_answer_signals([latest_user_message]),
         )
-        return _output_type_from_intent(output_intent.terminal_output)
+        latest_output_type = _output_type_from_intent(output_intent.terminal_output)
+        return latest_output_type or _terminal_output_type_from_prior_plan(prior_plan)
 
     output_intent = resolve_output_intent(
         aggregate_freeform_user_text(conversation),
         extract_answer_signals(conversation),
     )
     return _output_type_from_intent(output_intent.terminal_output)
+
+
+def _terminal_output_type_from_prior_plan(
+    prior_plan: BuilderPlan | None,
+) -> OutputType | None:
+    if prior_plan is None or not prior_plan.spec.steps:
+        return None
+    output_type = prior_plan.spec.steps[-1].output_type
+    if output_type in _PRESERVED_PLAN_EDIT_TERMINAL_TYPES:
+        return output_type
+    return None
 
 
 def _output_type_from_intent(terminal_output: str | None) -> OutputType | None:
@@ -607,6 +623,7 @@ class AIBuilderProposalProcessor:
             terminal_output_type=_terminal_output_type_for_conversation(
                 conversation,
                 plan_edit_context=plan_edit_context,
+                prior_plan=prior_plan_for_revision,
             ),
         )
         if prepared.failure_feedback is not None:
@@ -2133,6 +2150,7 @@ class AIBuilderProposalProcessor:
             terminal_output_type=_terminal_output_type_for_conversation(
                 conversation,
                 plan_edit_context=plan_edit_context,
+                prior_plan=prior_plan_for_revision,
             ),
         )
         if prepared.failure_feedback is not None:

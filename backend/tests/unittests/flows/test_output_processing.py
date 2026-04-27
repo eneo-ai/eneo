@@ -1,4 +1,5 @@
 """Tests for intric.flows.output_processing — pure function module."""
+
 from __future__ import annotations
 
 import pytest
@@ -10,7 +11,6 @@ from intric.flows.output_processing import (
     validate_schema_syntax,
 )
 from intric.main.exceptions import TypedIOValidationException
-
 
 # --- parse_json_output ---
 
@@ -46,12 +46,16 @@ def test_parse_json_output_invalid_json():
 
 
 def test_parse_json_output_scalar_rejected():
-    with pytest.raises(TypedIOValidationException, match="Expected JSON object or array"):
+    with pytest.raises(
+        TypedIOValidationException, match="Expected JSON object or array"
+    ):
         parse_json_output('"just a string"')
 
 
 def test_parse_json_output_number_rejected():
-    with pytest.raises(TypedIOValidationException, match="Expected JSON object or array"):
+    with pytest.raises(
+        TypedIOValidationException, match="Expected JSON object or array"
+    ):
         parse_json_output("42")
 
 
@@ -65,12 +69,20 @@ def test_parse_json_output_error_code():
 
 
 def test_validate_against_contract_passes():
-    schema = {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}
+    schema = {
+        "type": "object",
+        "required": ["name"],
+        "properties": {"name": {"type": "string"}},
+    }
     validate_against_contract({"name": "Alice"}, schema, label="test")
 
 
 def test_validate_against_contract_fails():
-    schema = {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}
+    schema = {
+        "type": "object",
+        "required": ["name"],
+        "properties": {"name": {"type": "string"}},
+    }
     with pytest.raises(TypedIOValidationException, match="test"):
         validate_against_contract({}, schema, label="test")
 
@@ -112,7 +124,9 @@ class _FakeStep:
 
 def test_compile_validators_reusable():
     steps = [
-        _FakeStep(1, input_contract={"type": "object"}, output_contract={"type": "array"}),
+        _FakeStep(
+            1, input_contract={"type": "object"}, output_contract={"type": "array"}
+        ),
         _FakeStep(2, output_contract={"type": "string"}),
     ]
     compiled = compile_validators(steps)
@@ -132,3 +146,14 @@ def test_compile_validators_empty_steps():
 def test_compile_validators_no_contracts():
     steps = [_FakeStep(1)]
     assert compile_validators(steps) == {}
+
+
+def test_compile_validators_keeps_explicit_empty_contracts():
+    steps = [_FakeStep(1, input_contract={}, output_contract={})]
+
+    compiled = compile_validators(steps)
+
+    assert ("input", 1) in compiled
+    assert ("output", 1) in compiled
+    compiled[("input", 1)].validate({"anything": True})
+    compiled[("output", 1)].validate(["anything"])

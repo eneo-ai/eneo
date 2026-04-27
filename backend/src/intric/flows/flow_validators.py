@@ -128,12 +128,16 @@ def validate_steps(
             raise BadRequestException(
                 f"Step {step.step_order}: {_enum_value(step.input_type)} is not yet supported."
             )
-        if step.input_contract and input_policy and not input_policy.contract_allowed:
+        if (
+            step.input_contract is not None
+            and input_policy
+            and not input_policy.contract_allowed
+        ):
             raise BadRequestException(
                 f"Step {step.step_order}: input_contract is not supported for "
                 f"input_type '{_enum_value(step.input_type)}'."
             )
-        if step.input_contract:
+        if step.input_contract is not None:
             try:
                 validate_schema_syntax(
                     step.input_contract,
@@ -141,7 +145,7 @@ def validate_steps(
                 )
             except TypedIOValidationException as exc:
                 raise BadRequestException(str(exc)) from exc
-        if step.output_contract:
+        if step.output_contract is not None:
             try:
                 validate_schema_syntax(
                     step.output_contract,
@@ -225,8 +229,9 @@ def _validate_output_contract_compatibility(*, step: FlowStep) -> None:
         schema_type = _schema_type_hint(step.output_contract)
         if schema_type not in {"object", "array"}:
             raise BadRequestException(
-                f"Step {step.step_order}: output_contract for output_type '{step.output_type}' "
-                "must declare schema type 'object' or 'array'."
+                f"Step {step.step_order}: output_contract for generated document "
+                f"output_type '{step.output_type}' must declare schema type "
+                "'object' or 'array'."
             )
 
 

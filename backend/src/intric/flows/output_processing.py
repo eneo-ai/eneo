@@ -94,11 +94,11 @@ def compile_validators(
     """Pre-compile all step contracts once per run."""
     compiled: dict[tuple[str, int], jsonschema.Draft202012Validator] = {}
     for step in runtime_steps:
-        if step.input_contract:
+        if step.input_contract is not None:
             compiled[("input", step.step_order)] = jsonschema.Draft202012Validator(
                 step.input_contract
             )
-        if step.output_contract:
+        if step.output_contract is not None:
             compiled[("output", step.step_order)] = jsonschema.Draft202012Validator(
                 step.output_contract
             )
