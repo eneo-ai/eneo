@@ -21,7 +21,7 @@ class RuntimeInputFieldHint:
     options: tuple[str, ...] = ()
 
 
-_RUNTIME_FIELD_TRIGGERS: tuple[str, ...] = (
+_RUNTIME_FIELD_DECLARATION_TRIGGERS: tuple[str, ...] = (
     "inmatningsfält",
     "inmatningsfalt",
     "input fields",
@@ -34,6 +34,24 @@ _RUNTIME_FIELD_TRIGGERS: tuple[str, ...] = (
     "metadata fields",
     "fält vid körning",
     "falt vid korning",
+)
+_RUNTIME_METADATA_CONCEPT_TRIGGERS: tuple[str, ...] = (
+    "basic metadata",
+    "basic input fields",
+    "basic form fields",
+    "grundläggande metadata",
+    "grundlaggande metadata",
+    "grundläggande inmatningsfält",
+    "grundlaggande inmatningsfalt",
+)
+_RUNTIME_METADATA_ABSENCE_TRIGGERS = (
+    *_RUNTIME_FIELD_DECLARATION_TRIGGERS,
+    *_RUNTIME_METADATA_CONCEPT_TRIGGERS,
+    "metadata",
+)
+_RUNTIME_METADATA_INTENT_TRIGGERS = (
+    *_RUNTIME_FIELD_DECLARATION_TRIGGERS,
+    *_RUNTIME_METADATA_CONCEPT_TRIGGERS,
 )
 _USER_FIELD_ACTION_PHRASES: tuple[str, ...] = (
     "ange",
@@ -180,7 +198,7 @@ def runtime_input_fields_declared_absent(text: str) -> bool:
         return False
 
     trigger_polarities: list[tuple[int, bool]] = []
-    for trigger in _RUNTIME_FIELD_TRIGGERS:
+    for trigger in _RUNTIME_METADATA_ABSENCE_TRIGGERS:
         trigger_tokens = normalize_discovery_text(trigger).split()
         if not trigger_tokens:
             continue
@@ -207,7 +225,7 @@ def runtime_input_fields_requested(text: str) -> bool:
         return False
     normalized = normalize_discovery_text(text)
     return contains_any_phrase(
-        normalized, _RUNTIME_FIELD_TRIGGERS
+        normalized, _RUNTIME_METADATA_INTENT_TRIGGERS
     ) or _has_user_provided_runtime_field_clause(text)
 
 
@@ -353,7 +371,7 @@ def _trigger_end_char_indexes(text: str) -> tuple[int, ...]:
     token_spans = _normalized_token_spans(text)
     tokens = [token for token, _, _ in token_spans]
     indexes: set[int] = set()
-    for trigger in _RUNTIME_FIELD_TRIGGERS:
+    for trigger in _RUNTIME_FIELD_DECLARATION_TRIGGERS:
         trigger_tokens = normalize_discovery_text(trigger).split()
         if not trigger_tokens:
             continue

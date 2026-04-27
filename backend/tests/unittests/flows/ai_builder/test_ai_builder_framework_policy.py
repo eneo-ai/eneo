@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
+
 from intric.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
@@ -10,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     infer_question_answer_from_freeform,
     is_supported_structured_question_id,
     latest_pending_structured_question,
+    mentions_runtime_metadata,
     needs_structured_extraction,
     normalize_question_answer,
     normalize_structured_question_payload,
@@ -697,6 +700,38 @@ def test_extract_answer_signals_infers_common_runtime_metadata_field_names() -> 
     )
 
     assert "detailed_case_metadata" in signals["runtime_metadata_fields"]
+
+
+def test_extract_answer_signals_does_not_infer_runtime_metadata_from_output_fields() -> (
+    None
+):
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Rapporten ska innehålla diarienummer, avdelning och "
+                    "handläggare om det finns i dokumenten."
+                ),
+            }
+        ]
+    )
+
+    assert "runtime_metadata_fields" not in signals
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Extrahera metadata från dokumentet.",
+        "Sammanfatta på svenskt språk.",
+        "Ändra fokus till riskanalys.",
+    ],
+)
+def test_mentions_runtime_metadata_ignores_content_and_analysis_terms(
+    text: str,
+) -> None:
+    assert not mentions_runtime_metadata(text)
 
 
 def test_extract_answer_signals_does_not_treat_input_pdfs_as_pdf_output_mode() -> None:

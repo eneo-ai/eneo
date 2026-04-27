@@ -206,9 +206,10 @@
       <span class="welcome-glyph" aria-hidden="true">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
           <path
-            d="M12 3.5a1 1 0 0 1 .94.663l1.427 4.002a3 3 0 0 0 1.82 1.82l4.002 1.427a1 1 0 0 1 0 1.884l-4.002 1.427a3 3 0 0 0-1.82 1.82l-1.427 4.002a1 1 0 0 1-1.884 0l-1.427-4.002a3 3 0 0 0-1.82-1.82L3.81 13.296a1 1 0 0 1 0-1.884l4.002-1.427a3 3 0 0 0 1.82-1.82l1.427-4.002A1 1 0 0 1 12 3.5Z"
+            d="M6.75 6.25h3.5v3.5h-3.5v-3.5Zm7 0h3.5v3.5h-3.5v-3.5Zm-7 8h3.5v3.5h-3.5v-3.5Zm3.5-6.25h2.5m-2.5 8h2.5m0-8v8m0-4h4.5"
             stroke="currentColor"
             stroke-width="1.5"
+            stroke-linecap="round"
             stroke-linejoin="round"
           />
         </svg>
@@ -261,10 +262,12 @@
         {#if service.isStreaming && service.messages[service.messages.length - 1]?.role === "user"}
           <div class="mt-4 py-2">
             <div class="generating-badge" role="status" aria-label={generatingText}>
-              <span class="generating-orb" aria-hidden="true"></span>
-              <span class="relative z-[1] text-[0.8125rem] leading-tight font-medium"
-                >{generatingText}</span
-              >
+              <span class="generating-dots" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </span>
+              <span class="text-[0.8125rem] leading-tight font-medium">{generatingText}</span>
             </div>
           </div>
         {/if}
@@ -301,7 +304,7 @@
     justify-content: center;
     width: 3rem;
     height: 3rem;
-    border-radius: 9999px;
+    border-radius: 0.875rem;
     background: var(--background-secondary);
     color: var(--accent-default);
     box-shadow:
@@ -342,94 +345,51 @@
   }
 
   .generating-badge {
-    @apply relative inline-flex items-center gap-2.5 overflow-hidden rounded-full px-4 py-2;
+    @apply inline-flex items-center gap-2.5 rounded-full px-3.5 py-2;
     width: fit-content;
-    isolation: isolate;
     background: oklch(from var(--accent-default) l c h / 0.1);
     color: var(--accent-stronger);
-    box-shadow: 0 4px 12px -2px oklch(from var(--accent-default) l c h / 0.1);
+    border: 1px solid oklch(from var(--accent-default) l c h / 0.16);
   }
 
-  .generating-orb {
-    @apply size-2 shrink-0 rounded-full;
+  .generating-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.1875rem;
+  }
+
+  .generating-dots span {
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 999px;
     background: currentColor;
-    box-shadow: 0 0 8px 2px currentColor;
-    animation: orb-pulse 2s ease-in-out infinite;
+    opacity: 0.35;
+    animation: generating-dot 1.2s ease-in-out infinite;
   }
 
-  @keyframes orb-pulse {
+  .generating-dots span:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  .generating-dots span:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  @keyframes generating-dot {
     0%,
+    80%,
     100% {
-      opacity: 0.4;
-      transform: scale(0.8);
+      opacity: 0.35;
     }
-    50% {
+    40% {
       opacity: 1;
-      transform: scale(1.2);
-    }
-  }
-
-  .generating-badge::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      oklch(from var(--accent-default) l c h / 0.08) 30%,
-      oklch(from var(--accent-default) l c h / 0.15) 50%,
-      oklch(from var(--accent-default) l c h / 0.08) 70%,
-      transparent 100%
-    );
-    background-size: 200% 100%;
-    animation: generating-flow 3s ease-in-out infinite;
-    border-radius: inherit;
-    pointer-events: none;
-  }
-
-  .generating-badge::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    border: 1px solid oklch(from var(--accent-default) l c h / 0.15);
-    animation: generating-border 3s ease-in-out infinite;
-    pointer-events: none;
-  }
-
-  @keyframes generating-flow {
-    0%,
-    100% {
-      background-position: 100% 0;
-    }
-    50% {
-      background-position: 0% 0;
-    }
-  }
-
-  @keyframes generating-border {
-    0%,
-    100% {
-      border-color: oklch(from var(--accent-default) l c h / 0.1);
-    }
-    50% {
-      border-color: oklch(from var(--accent-default) l c h / 0.25);
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .generating-orb,
-    .generating-badge::before,
-    .generating-badge::after {
+    .generating-dots span {
       animation: none;
-    }
-
-    .generating-orb {
       opacity: 0.6;
-    }
-
-    .generating-badge::after {
-      border-color: oklch(from var(--accent-default) l c h / 0.15);
     }
 
     .empty-welcome,

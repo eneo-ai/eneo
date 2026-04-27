@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     extract_runtime_input_field_hints,
     extract_runtime_input_field_hints_for_metadata_state,
@@ -21,6 +23,14 @@ def test_runtime_input_field_extraction_understands_explicit_absence() -> None:
 
 def test_runtime_input_field_extraction_understands_bare_absence() -> None:
     text = "Skapa ett enkelt flöde för kundfrågor. Inga inmatningsfält."
+
+    assert runtime_input_fields_declared_absent(text)
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) == "no_extra_metadata"
+
+
+def test_runtime_input_field_extraction_understands_bare_metadata_absence() -> None:
+    text = "Skapa ett rapportflöde. Ingen metadata behövs vid körning."
 
     assert runtime_input_fields_declared_absent(text)
     assert extract_runtime_input_field_hints(text) == ()
@@ -79,6 +89,22 @@ def test_runtime_input_field_extraction_understands_user_provided_metadata() -> 
     assert infer_runtime_metadata_slot(text) == "detailed_case_metadata"
 
 
+def test_runtime_input_field_extraction_keeps_bare_metadata_as_basic_intent() -> None:
+    text = "Skapa ett rapportflöde med grundläggande metadata vid körning."
+
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) == "basic_case_metadata"
+
+
+def test_runtime_input_field_extraction_does_not_treat_bare_metadata_as_runtime_intent() -> (
+    None
+):
+    text = "Extrahera metadata från dokumentet och sammanfatta innehållet."
+
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) is None
+
+
 def test_runtime_input_field_extraction_cleans_natural_swedish_field_phrases() -> None:
     text = (
         "Vi kommer att ange namn på medarbetaren, personnummer, vilket yrke "
@@ -110,6 +136,21 @@ def test_runtime_input_field_extraction_understands_english_user_metadata() -> N
         ("role", "role"),
         ("salary", "salary"),
     ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Användaren ska ange intern referens, prioritet och ansvarig avdelning.",
+        "We will provide supplier name, contract id and renewal date.",
+        "Användaren kommer att ange namn, personnummer, yrke och roll.",
+        "Use input fields for audience and detail level at runtime.",
+        "Lägg till formulärfält för målgrupp och rapportnivå.",
+    ],
+)
+def test_detailed_runtime_metadata_always_has_field_hints(text: str) -> None:
+    assert infer_runtime_metadata_slot(text) == "detailed_case_metadata"
+    assert extract_runtime_input_field_hints(text)
 
 
 def test_runtime_input_field_extraction_ignores_output_field_lists() -> None:

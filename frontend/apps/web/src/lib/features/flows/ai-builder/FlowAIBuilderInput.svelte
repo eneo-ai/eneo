@@ -330,12 +330,18 @@
           aria-label={m.attach_files()}
           class="sr-only"
           onchange={handleFileInputChange}
-          id="flow-ai-builder-attach-input"
+          disabled={!service.canSendMessage || $isUploading}
         />
-        <label for="flow-ai-builder-attach-input" class="composer-attach">
+        <button
+          type="button"
+          class="composer-attach"
+          aria-label={m.attach_files()}
+          disabled={!service.canSendMessage || $isUploading}
+          onclick={() => fileInputEl?.click()}
+        >
           <IconAttachment class="composer-attach-icon" />
           <span class="composer-attach-label">{m.attach_files()}</span>
-        </label>
+        </button>
 
         {#if service.modelsLoaded}
           {#if hasMultipleModels}
@@ -448,14 +454,6 @@
 </div>
 
 <style lang="postcss">
-  /* ------------------------------------------------------------------ */
-  /* Container                                                           */
-  /* ------------------------------------------------------------------ */
-  /* A single unified surface: textarea + chip row + action row live on */
-  /* the same rounded card, separated only by padding rhythm — never by */
-  /* a horizontal divider. Light borders and a gentle focus-within      */
-  /* treatment keep the feel "calm, trustworthy" rather than glowing.   */
-
   .composer {
     position: relative;
     display: flex;
@@ -570,7 +568,6 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    /* WCAG 2.2 AA SC 2.5.8 minimum is 24×24; 28×28 gives forgiving hit area */
     width: 1.75rem;
     height: 1.75rem;
     border-radius: 0.375rem;
@@ -593,8 +590,6 @@
     height: 0.875rem;
   }
 
-  /* Progress stripe for uploading chips — spans the bottom edge of the */
-  /* chip, never a side stripe (side stripes are explicitly banned).    */
   .chip-progress {
     position: absolute;
     left: 0;
@@ -610,10 +605,6 @@
   .chip-uploading .chip-body {
     opacity: 0.85;
   }
-
-  /* ------------------------------------------------------------------ */
-  /* Scoped edit context                                                 */
-  /* ------------------------------------------------------------------ */
 
   .composer-edit-context {
     display: flex;
@@ -662,10 +653,6 @@
     background: var(--background-hover-default);
   }
 
-  /* ------------------------------------------------------------------ */
-  /* Textarea                                                            */
-  /* ------------------------------------------------------------------ */
-
   .composer-textarea-wrap {
     display: block;
   }
@@ -673,8 +660,6 @@
   .composer-textarea {
     display: block;
     width: 100%;
-    /* Generous default so drop-target area + hero welcome feel substantial. */
-    /* Responsive step-down so mobile keyboards don't obscure everything.   */
     min-height: 5rem;
     max-height: 18.75rem;
     padding: 1rem 1rem 0.5rem;
@@ -704,13 +689,6 @@
     cursor: not-allowed;
   }
 
-  /* ------------------------------------------------------------------ */
-  /* Action row (attach + model + send)                                  */
-  /* ------------------------------------------------------------------ */
-  /* No dividing border above this row. Spacing rhythm separates it     */
-  /* from the textarea instead — Linear uses the same pattern for its   */
-  /* composer. Flex-wrap keeps layout graceful below 640px.             */
-
   .composer-actions {
     display: flex;
     align-items: center;
@@ -729,8 +707,6 @@
     flex-wrap: wrap;
   }
 
-  /* --- Attach button (styled <label> wrapping a hidden file input) --- */
-
   .composer-attach {
     display: inline-flex;
     align-items: center;
@@ -741,6 +717,7 @@
     color: var(--text-secondary);
     background: transparent;
     cursor: pointer;
+    border: 0;
     font-size: 0.8125rem;
     font-weight: 500;
     line-height: 1;
@@ -759,17 +736,33 @@
     outline-offset: 2px;
   }
 
+  .composer-attach:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
   .composer-attach :global(.composer-attach-icon) {
     width: 1rem;
     height: 1rem;
     flex-shrink: 0;
   }
 
-  /* The label collapses to icon-only on very narrow viewports so the   */
-  /* toolbar never wraps onto a second line on tablet widths (≥640px).  */
+  /* Compact mobile controls keep the composer usable above the keyboard. */
   @media (max-width: 639px) {
+    .composer-attach,
+    .model-pill,
+    .composer :global(.composer-send) {
+      min-height: 2.75rem;
+    }
+
     .composer-attach-label {
       display: none;
+    }
+
+    .composer-attach {
+      width: 2.75rem;
+      justify-content: center;
+      padding: 0;
     }
   }
 
@@ -838,11 +831,6 @@
     opacity: 0.6;
   }
 
-  /* --- Send button --- */
-  /* Uses shadcn Button default variant (solid accent). Here we only    */
-  /* normalise the size and the label-on-wide/icon-only-on-narrow       */
-  /* behaviour. No colored shadows or scale hover (both are AI tells).  */
-
   .composer :global(.composer-send) {
     height: 1.75rem;
     border-radius: 999px;
@@ -853,20 +841,13 @@
   @media (max-width: 639px) {
     .composer :global(.composer-send) {
       padding: 0;
-      width: 1.75rem;
+      width: 2.75rem;
     }
 
     .composer-send-label {
       display: none;
     }
   }
-
-  /* ------------------------------------------------------------------ */
-  /* Drop overlay                                                        */
-  /* ------------------------------------------------------------------ */
-  /* Sits inside the composer bounds (parent has position:relative), so */
-  /* it never leaks to full-viewport. Dashed warm border + soft surface */
-  /* wash communicates "a target" without glassmorphism or blur.        */
 
   .composer-drop-overlay {
     position: absolute;
@@ -917,10 +898,6 @@
     color: var(--text-secondary);
     max-width: 36ch;
   }
-
-  /* ------------------------------------------------------------------ */
-  /* Shared utility                                                      */
-  /* ------------------------------------------------------------------ */
 
   .sr-only {
     position: absolute;

@@ -37,12 +37,11 @@ from intric.flows.ai_builder.ai_builder_keywords import (
     PDF_OUTPUT_CONTEXT_MARKERS,
     PDF_TEMPLATE_EXPECTATION_MARKERS,
     PDF_TEMPLATE_GENERIC_MARKERS,
-    RUNTIME_METADATA_KEYWORDS,
     STRUCTURED_EXTRACTION_KEYWORDS,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage, OutputType
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
-    runtime_input_fields_requested,
+    infer_runtime_metadata_slot,
 )
 from intric.flows.domain.flow import Flow, JsonObject
 
@@ -1006,10 +1005,7 @@ def mentions_output_change(text: str) -> bool:
 
 
 def mentions_runtime_metadata(text: str) -> bool:
-    normalized_text = text.casefold()
-    return runtime_input_fields_requested(text) or any(
-        keyword in normalized_text for keyword in RUNTIME_METADATA_KEYWORDS
-    )
+    return infer_runtime_metadata_slot(text) is not None
 
 
 def runtime_metadata_requested(answer_signals: dict[str, set[str]]) -> bool:

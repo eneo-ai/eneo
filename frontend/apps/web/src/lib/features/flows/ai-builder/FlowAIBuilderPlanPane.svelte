@@ -356,7 +356,7 @@
                 {m.ai_builder_plan_rationale()}
               </h3>
               <p
-                class="text-secondary border-accent-default/20 border-l pl-3 text-[0.8125rem] leading-relaxed italic"
+                class="border-default bg-secondary/35 text-secondary rounded-lg border px-3 py-2 text-[0.8125rem] leading-relaxed"
               >
                 {plan.envelope.plan_rationale}
               </p>
@@ -605,6 +605,7 @@
           <Button
             variant="ghost"
             size="sm"
+            class="max-sm:min-h-11 max-sm:w-full"
             onclick={() =>
               onsuggestchange?.({
                 placeholder: m.ai_builder_plan_change_placeholder(),
@@ -623,6 +624,7 @@
           <Button
             variant="ghost"
             size="sm"
+            class="max-sm:min-h-11 max-sm:w-full"
             onclick={handleModify}
             disabled={isApproving || isApplying}
           >
@@ -634,6 +636,7 @@
           <Button
             variant="default"
             size="sm"
+            class="max-sm:min-h-11 max-sm:w-full"
             onclick={handleApprove}
             disabled={isApproving || isApplying}
           >
@@ -645,6 +648,7 @@
           <Button
             variant="default"
             size="sm"
+            class="max-sm:min-h-11 max-sm:w-full"
             onclick={handleApply}
             disabled={isApproving || isApplying}
           >

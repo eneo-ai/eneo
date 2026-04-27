@@ -14,18 +14,6 @@ OUTPUT_CHANGE_KEYWORDS: tuple[str, ...] = (
     "textsammanfattning",
 )
 
-RUNTIME_METADATA_KEYWORDS: tuple[str, ...] = (
-    "case number",
-    "committee",
-    "språk",
-    "language",
-    "fokus",
-    "focus",
-    "metadata",
-    "form fields",
-    "formulärfält",
-)
-
 STRUCTURED_EXTRACTION_KEYWORDS: tuple[str, ...] = (
     "structured data",
     "strukturerad data",

@@ -376,7 +376,7 @@
               {#if planStatus === "proposed"}
                 <button
                   type="button"
-                  class="border-default text-secondary hover:border-accent-default/40 hover:text-accent-default focus-visible:ring-accent-default/30 inline-flex w-fit items-center gap-1.5 rounded-md border bg-transparent px-2.5 py-1.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                  class="border-default text-secondary hover:border-accent-default/40 hover:text-accent-default focus-visible:ring-accent-default/30 inline-flex min-h-10 w-fit items-center gap-1.5 rounded-md border bg-transparent px-3 py-2 text-[0.8125rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none max-sm:w-full max-sm:justify-center sm:min-h-8 sm:px-2.5 sm:py-1.5 sm:text-xs"
                   onclick={(e) => {
                     e.stopPropagation();
                     requestStepChange();
