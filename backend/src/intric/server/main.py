@@ -8,8 +8,6 @@ from typing import Any, Optional, Protocol, cast
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -228,15 +226,6 @@ def get_application():
 
     # Add handlers of all errors except 500
     add_exception_handlers(app)
-
-    @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(
-        request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
-        return JSONResponse(
-            status_code=422,
-            content={"detail": jsonable_encoder(exc.errors())},
-        )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(
