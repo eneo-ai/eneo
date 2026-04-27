@@ -211,14 +211,10 @@ async def update_app(
 
     # Model behavior parameters (temperature, top_p)
     if update_service_req.completion_model_kwargs is not None:
-        old_kwargs = cast(
-            dict[str, object],
-            old_app.completion_model_kwargs or {},
-        )
-        new_kwargs = cast(
-            dict[str, object],
-            update_service_req.completion_model_kwargs or {},
-        )
+        # Materialise both sides as dicts so the `.get(...)` lookups below
+        # work uniformly on the audit-diff path.
+        old_kwargs = old_app.completion_model_kwargs.model_dump()
+        new_kwargs = update_service_req.completion_model_kwargs.model_dump()
 
         # Temperature
         old_temperature = old_kwargs.get("temperature")
