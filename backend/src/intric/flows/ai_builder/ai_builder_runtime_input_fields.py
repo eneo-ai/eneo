@@ -35,6 +35,57 @@ _RUNTIME_FIELD_TRIGGERS: tuple[str, ...] = (
     "fält vid körning",
     "falt vid korning",
 )
+_USER_FIELD_ACTION_PHRASES: tuple[str, ...] = (
+    "ange",
+    "fylla i",
+    "fyller i",
+    "mata in",
+    "lämna",
+    "lamna",
+    "uppge",
+    "välja",
+    "valja",
+    "specificera",
+    "skriva in",
+    "enter",
+    "provide",
+    "fill in",
+    "select",
+    "specify",
+    "supply",
+    "type in",
+)
+_USER_FIELD_ACTOR_TOKENS = frozenset(
+    {
+        "anvandaren",
+        "användaren",
+        "anvandare",
+        "användare",
+        "user",
+        "users",
+        "vi",
+        "we",
+        "jag",
+        "i",
+        "du",
+        "you",
+        "man",
+        "they",
+    }
+)
+_NON_USER_ACTOR_TOKENS = frozenset(
+    {
+        "flode",
+        "flöde",
+        "flow",
+        "rapport",
+        "report",
+        "system",
+        "systemet",
+        "assistant",
+        "assistent",
+    }
+)
 _LEADING_CONNECTOR_RE = re.compile(
     r"^\s*(?:for|för|with|med|som|called|named|including|inklusive)\s+",
     re.IGNORECASE,
@@ -55,6 +106,11 @@ _CLAUSE_BOUNDARIES: tuple[str, ...] = (
     " and then ",
     " sedan ",
     " och sedan ",
+    " innan ",
+    " before ",
+    " när ",
+    " nar ",
+    " when ",
     " som slutresultat ",
     " as final output ",
 )
@@ -63,6 +119,8 @@ _TRAILING_CONTEXT_RE = re.compile(
     r"\s*(?:vid körning|vid korning|at runtime|runtime)$",
     re.IGNORECASE,
 )
+_SWEDISH_NAME_OF_RE = re.compile(r"^namn\s+p[åa]\s+(.+)$", re.IGNORECASE)
+_ENGLISH_NAME_OF_RE = re.compile(r"^name\s+of\s+(.+)$", re.IGNORECASE)
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 _GENERIC_FIELD_LABELS = {
     "field",
@@ -147,7 +205,10 @@ def runtime_input_fields_declared_absent(text: str) -> bool:
 def runtime_input_fields_requested(text: str) -> bool:
     if runtime_input_fields_declared_absent(text):
         return False
-    return contains_any_phrase(normalize_discovery_text(text), _RUNTIME_FIELD_TRIGGERS)
+    normalized = normalize_discovery_text(text)
+    return contains_any_phrase(
+        normalized, _RUNTIME_FIELD_TRIGGERS
+    ) or _has_user_provided_runtime_field_clause(text)
 
 
 def extract_runtime_input_field_hints(text: str) -> tuple[RuntimeInputFieldHint, ...]:
@@ -232,12 +293,60 @@ def _clause_starts_with_absence_predicate(clause: str) -> bool:
 
 def _candidate_field_clauses(text: str) -> tuple[str, ...]:
     clauses: list[str] = []
-    for start in _trigger_end_char_indexes(text):
+    starts = sorted(
+        {*_trigger_end_char_indexes(text), *_user_field_action_end_char_indexes(text)}
+    )
+    for start in starts:
         window = text[start : start + 180]
         clause = _truncate_at_boundary(_LEADING_CONNECTOR_RE.sub("", window))
         if clause and not _clause_starts_with_absence_predicate(clause):
             clauses.append(clause)
     return tuple(clauses)
+
+
+def _has_user_provided_runtime_field_clause(text: str) -> bool:
+    return bool(_user_field_action_end_char_indexes(text))
+
+
+def _user_field_action_end_char_indexes(text: str) -> tuple[int, ...]:
+    """Find user-provided field declarations without treating outputs as inputs.
+
+    The actor gate is deliberate. Phrases such as "the flow should extract name"
+    describe output fields, while "the user will enter name" describes runtime
+    metadata the run form must collect.
+    """
+
+    token_spans = _normalized_token_spans(text)
+    tokens = [token for token, _, _ in token_spans]
+    indexes: set[int] = set()
+    for phrase in _USER_FIELD_ACTION_PHRASES:
+        phrase_tokens = normalize_discovery_text(phrase).split()
+        if not phrase_tokens:
+            continue
+        for start_index in _find_token_sequence_indexes(tokens, phrase_tokens):
+            if not _has_user_actor_before_action(tokens, start_index):
+                continue
+            end_index = start_index + len(phrase_tokens) - 1
+            indexes.add(token_spans[end_index][2])
+    return tuple(sorted(indexes))
+
+
+def _has_user_actor_before_action(tokens: list[str], action_start_index: int) -> bool:
+    before = tokens[max(0, action_start_index - 8) : action_start_index]
+    if not any(token in _USER_FIELD_ACTOR_TOKENS for token in before):
+        return False
+    last_actor_index = max(
+        index for index, token in enumerate(before) if token in _USER_FIELD_ACTOR_TOKENS
+    )
+    last_non_user_index = max(
+        (
+            index
+            for index, token in enumerate(before)
+            if token in _NON_USER_ACTOR_TOKENS
+        ),
+        default=-1,
+    )
+    return last_actor_index > last_non_user_index
 
 
 def _trigger_end_char_indexes(text: str) -> tuple[int, ...]:
@@ -289,7 +398,65 @@ def _candidate_labels(clause: str) -> tuple[str, ...]:
 
 def _normalize_label(value: str) -> str:
     normalized = _TRAILING_CONTEXT_RE.sub("", value).strip(" .,:;-")
-    return " ".join(normalized.split())
+    return _simplify_field_label(" ".join(normalized.split()))
+
+
+def _simplify_field_label(label: str) -> str:
+    normalized = normalize_discovery_text(label)
+    tokens = normalized.split()
+    if not tokens:
+        return label
+
+    name_of = _name_of_label(label)
+    if name_of is not None:
+        return name_of
+
+    token_set = set(tokens)
+    if "nuvarande" in token_set and ("lön" in token_set or "lon" in token_set):
+        return "nuvarande lön"
+    if "salary" in token_set and {"current", "present"} & token_set:
+        return "current salary"
+
+    if tokens[0] in {"vilken", "vilket", "which"}:
+        if "roll" in token_set or "role" in token_set:
+            return "roll" if "roll" in token_set else "role"
+        if (
+            "yrke" in token_set
+            or "profession" in token_set
+            or "occupation" in token_set
+        ):
+            return "yrke" if "yrke" in token_set else "profession"
+
+    if tokens[0] in {"vad", "what"} and ("lön" in token_set or "lon" in token_set):
+        return "lön"
+    if tokens[0] in {"vad", "what"} and "salary" in token_set:
+        return "salary"
+
+    return label
+
+
+def _name_of_label(label: str) -> str | None:
+    match = _SWEDISH_NAME_OF_RE.match(label)
+    if match is not None:
+        subject = _first_subject_token(match.group(1))
+        return f"{subject} namn" if subject else None
+
+    match = _ENGLISH_NAME_OF_RE.match(label)
+    if match is not None:
+        subject = _first_subject_token(match.group(1))
+        return f"{subject} name" if subject else None
+
+    return None
+
+
+def _first_subject_token(value: str) -> str:
+    tokens = normalize_discovery_text(value).split()
+    if not tokens:
+        return ""
+    token = tokens[0].removesuffix("'s")
+    if token.endswith("en") and len(token) > 4:
+        token = token[:-2]
+    return token
 
 
 def _is_useful_label(label: str) -> bool:

@@ -1421,6 +1421,77 @@ def test_compile_outline_flow_adds_server_derived_runtime_field_hints() -> None:
     assert validation.valid
 
 
+def test_compile_outline_flow_wires_extracted_runtime_metadata_fields() -> None:
+    prompt = (
+        "Jag vill ha ett flöde för utvecklingssamtal där användaren kommer "
+        "att ange namn, personnummer, yrke, roll och nuvarande lön och sedan "
+        "ladda upp ljud från samtalet."
+    )
+    field_hints = extract_runtime_input_field_hints(prompt)
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Utvecklingssamtal",
+            "plan_rationale": "Transkribera samtal och skapa en strukturerad bedömning.",
+            "runtime_input": {"input_type": "audio", "required": True},
+            "final_output_type": "json",
+            "steps": [
+                {
+                    "name": "Transkribera samtal",
+                    "task": "Transkribera ljudet från utvecklingssamtalet.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Analysera samtal",
+                    "task": (
+                        "Analysera transkriptionen och använd metadatafält vid "
+                        "bedömningen."
+                    ),
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "salary_increase_percent",
+                            "field_type": "number",
+                            "description": "Bedömd lönehöjning i procent.",
+                            "required": True,
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+    context = outline_compile_context_from_planning_state(
+        None,
+        runtime_input_field_hints=field_hints,
+    )
+
+    draft = compile_outline_to_create_draft(outline, context=context)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    expected_names = [
+        "namn",
+        "personnummer",
+        "yrke",
+        "roll",
+        "nuvarande_lon",
+    ]
+    assert [field.variable_name for field in draft.form_fields] == expected_names
+    assert draft.steps[-1].uses_form_fields == expected_names
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == expected_names
+    assert compiled.steps[-1].input_bindings == {
+        "question": (
+            "{{ step_a.output.text }}\n\n"
+            "namn: {{ namn }}\n"
+            "personnummer: {{ personnummer }}\n"
+            "yrke: {{ yrke }}\n"
+            "roll: {{ roll }}\n"
+            "nuvarande_lon: {{ nuvarande_lon }}"
+        )
+    }
+    assert validation.valid
+
+
 def test_compile_outline_flow_drops_field_that_shadows_primary_text_input(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

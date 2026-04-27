@@ -8,6 +8,7 @@
   import FlowAIBuilderDraftRecovery from "./FlowAIBuilderDraftRecovery.svelte";
   import FlowAIBuilderPlanPane from "./FlowAIBuilderPlanPane.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
+  import type { AIBuilderSuggestChangeIntent } from "./protocol";
   import { onMount } from "svelte";
 
   interface Props {
@@ -177,7 +178,7 @@
         >
           <FlowAIBuilderPlanPane
             onapplied={(detail) => onapplied?.(detail)}
-            onsuggestchange={(prefill) => chatRef?.focusInput(prefill)}
+            onsuggestchange={(intent: AIBuilderSuggestChangeIntent) => chatRef?.focusInput(intent)}
           />
         </div>
       {/if}

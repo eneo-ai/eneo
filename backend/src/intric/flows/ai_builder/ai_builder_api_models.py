@@ -15,6 +15,9 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
+)
 
 AI_BUILDER_SESSION_RESPONSE_EXAMPLE: JsonObject = {
     "session_id": "00000000-0000-0000-0000-000000000701",
@@ -209,6 +212,13 @@ class SendMessageRequest(BaseModel):
                     "selected_option_ids": ["structured_json"],
                     "selected_values": ["structured_json"],
                 },
+                "edit_context": {
+                    "scope": "step",
+                    "plan_id": "00000000-0000-0000-0000-000000000702",
+                    "target_plan_step_ref": "step_b",
+                    "target_step_name": "Create PDF summary",
+                    "target_step_number": 2,
+                },
                 "ui_language": "en",
             }
         }
@@ -218,6 +228,7 @@ class SendMessageRequest(BaseModel):
     model_id: UUID | None = None
     file_ids: list[UUID] | None = None
     question_answer: JsonObject | None = None
+    edit_context: AIBuilderPlanEditContext | None = None
     ui_language: str | None = None
 
 

@@ -543,6 +543,28 @@ describe("FlowAIBuilderDriver", () => {
     expect(stream).toHaveBeenCalledOnce();
   });
 
+  it("forwards structured plan edit context with AI Builder messages", async () => {
+    const editContext = {
+      scope: "step" as const,
+      plan_id: "plan-1",
+      target_plan_step_ref: "step_f",
+      target_step_name: "Create final result",
+      target_step_number: 6
+    };
+    const { driver, stream } = makeDriver({
+      streamImpl: vi.fn(async (_path, init, handlers) => {
+        expect(init.requestBody["application/json"].edit_context).toEqual(editContext);
+        handlers.onClose();
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Change this to PDF", undefined, undefined, editContext);
+
+    expect(stream).toHaveBeenCalledOnce();
+    expect(driver.state.messages[0]?.metadata).toEqual({ edit_context: editContext });
+  });
+
   it("refreshes the session after sending message attachments", async () => {
     const fetch = vi.fn().mockResolvedValue(makeSession({ attachments: [] }));
     const { driver, stream } = makeDriver({

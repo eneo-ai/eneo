@@ -2,16 +2,17 @@
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
-  import type { StepChangeKind, StepSpec } from "./protocol";
+  import type { AIBuilderSuggestChangeIntent, StepChangeKind, StepSpec } from "./protocol";
 
   interface Props {
     step: StepSpec;
     stepNumber: number;
+    planId?: string | null;
     changeKind?: StepChangeKind;
     isFirst?: boolean;
     isLast?: boolean;
     planStatus?: string;
-    onsuggestchange?: (prefill: string) => void;
+    onsuggestchange?: (intent: AIBuilderSuggestChangeIntent) => void;
     resolveModelName?: (ref: string | null) => string | null;
     resolveMcpServerName?: (ref: string) => string | null;
     resolveMcpToolName?: (ref: string) => string | null;
@@ -20,6 +21,7 @@
   let {
     step,
     stepNumber,
+    planId = null,
     changeKind = step.existing_step_ref ? "unchanged" : "added",
     isFirst = false,
     planStatus = "",
@@ -89,6 +91,24 @@
 
   function mcpToolLabel(ref: string): string {
     return resolveMcpToolName?.(ref) ?? ref;
+  }
+
+  function requestStepChange() {
+    if (!planId) return;
+    onsuggestchange?.({
+      placeholder: m.ai_builder_step_change_placeholder({
+        step: stepNumber,
+        name: step.name
+      }),
+      editContext: {
+        scope: "step",
+        plan_id: planId,
+        target_plan_step_ref: step.plan_step_ref,
+        target_existing_step_ref: step.existing_step_ref,
+        target_step_name: step.name,
+        target_step_number: stepNumber
+      }
+    });
   }
 </script>
 
@@ -359,7 +379,7 @@
                   class="border-default text-secondary hover:border-accent-default/40 hover:text-accent-default focus-visible:ring-accent-default/30 inline-flex w-fit items-center gap-1.5 rounded-md border bg-transparent px-2.5 py-1.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
                   onclick={(e) => {
                     e.stopPropagation();
-                    onsuggestchange?.(`${m.ai_builder_suggest_change_prefix()} '${step.name}': `);
+                    requestStepChange();
                   }}
                 >
                   <svg

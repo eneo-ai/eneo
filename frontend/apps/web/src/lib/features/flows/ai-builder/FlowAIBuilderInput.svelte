@@ -16,6 +16,14 @@
   import { IconCheck } from "@intric/icons/check";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { getAIBuilderAttachmentRules } from "./builderAttachmentRules";
+  import type { AIBuilderPlanEditContext } from "./protocol";
+
+  interface Props {
+    editContext?: AIBuilderPlanEditContext | null;
+    oncleareditcontext?: () => void;
+  }
+
+  let { editContext = null, oncleareditcontext }: Props = $props();
 
   const service = getAIBuilderService();
   const { limits } = getAppContext();
@@ -50,6 +58,17 @@
       service.canSendMessage &&
       !$isUploading
   );
+  const editContextLabel = $derived.by(() => {
+    if (!editContext) return null;
+    if (editContext.scope === "whole_plan") {
+      return m.ai_builder_edit_context_plan();
+    }
+    const stepNumber = editContext.target_step_number ?? null;
+    const name = editContext.target_step_name ?? m.ai_builder_edit_context_step_fallback();
+    return stepNumber
+      ? m.ai_builder_edit_context_step({ step: stepNumber, name })
+      : m.ai_builder_edit_context_step_without_number({ name });
+  });
 
   export function focus(options?: string | { placeholder?: string; prefill?: string }) {
     // Support both legacy string signature (treated as placeholder) and options object
@@ -83,7 +102,8 @@
     await service.sendMessage(
       trimmed || m.ai_builder_attachment_only_message(),
       undefined,
-      uploadedFileIds
+      uploadedFileIds,
+      editContext
     );
     clearUploads();
   }
@@ -268,6 +288,21 @@
           </li>
         {/each}
       </ul>
+    {/if}
+
+    {#if editContextLabel}
+      <div class="composer-edit-context" role="status" aria-live="polite">
+        <span class="composer-edit-context-dot" aria-hidden="true"></span>
+        <span class="composer-edit-context-text">{editContextLabel}</span>
+        <button
+          type="button"
+          class="composer-edit-context-clear"
+          aria-label={m.ai_builder_edit_context_clear()}
+          onclick={oncleareditcontext}
+        >
+          {m.ai_builder_edit_context_clear_short()}
+        </button>
+      </div>
     {/if}
 
     <label class="composer-textarea-wrap">
@@ -574,6 +609,57 @@
 
   .chip-uploading .chip-body {
     opacity: 0.85;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Scoped edit context                                                 */
+  /* ------------------------------------------------------------------ */
+
+  .composer-edit-context {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.625rem 0.625rem 0;
+    padding: 0.5rem 0.625rem;
+    background: var(--background-secondary);
+    border: 1px solid var(--border-default);
+    border-radius: 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.8125rem;
+    line-height: 1.25;
+  }
+
+  .composer-edit-context-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: var(--accent-default);
+    flex: 0 0 auto;
+  }
+
+  .composer-edit-context-text {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .composer-edit-context-clear {
+    flex: 0 0 auto;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0.125rem 0.25rem;
+    border-radius: 0.375rem;
+  }
+
+  .composer-edit-context-clear:hover {
+    color: var(--text-primary);
+    background: var(--background-hover-default);
   }
 
   /* ------------------------------------------------------------------ */

@@ -61,7 +61,7 @@ def test_prepare_compiled_spec_for_session_merges_session_validation_errors() ->
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
-            side_effect=lambda spec: (spec, []),
+            side_effect=lambda spec, **_kwargs: (spec, []),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
@@ -95,7 +95,7 @@ def test_prepare_compiled_spec_for_session_returns_resource_failure_feedback() -
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
-            side_effect=lambda spec: (spec, []),
+            side_effect=lambda spec, **_kwargs: (spec, []),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.canonicalize_flow_spec_resources",
@@ -157,7 +157,7 @@ def test_prepare_compiled_spec_for_session_expands_mcp_server_refs_to_tools() ->
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
-            side_effect=lambda spec: (spec, []),
+            side_effect=lambda spec, **_kwargs: (spec, []),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",

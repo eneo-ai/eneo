@@ -52,13 +52,22 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     mcp_resource_selection_values,
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage, SessionStatus
+from intric.flows.ai_builder.ai_builder_models import (
+    BuilderPlan,
+    ConversationMessage,
+    SessionStatus,
+)
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     AskQuestionAction,
     CommitArchitectureAction,
     ConfirmRequirementsAction,
     OrchestrationContext,
     PlannerOutput,
+)
+from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
+    build_plan_revision_prompt_block,
+    resolve_plan_edit_context,
 )
 from intric.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
@@ -139,6 +148,11 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+_MESSAGE_ACCEPTING_SESSION_STATUSES = {
+    SessionStatus.CHATTING.value,
+    SessionStatus.AWAITING_APPROVAL.value,
+}
+
 # Stable hash of the PlannerOutput JSON schema, computed once at import so
 # turn-metrics logs carry the contract shape under which a turn ran. A
 # silent Pydantic-schema drift — say, a field becoming optional, or an
@@ -159,6 +173,13 @@ _SERVER_SLOT_TO_DISCOVERY_QUESTION_ID: dict[str, str] = {
     "primary_runtime_input": "input_material_mode",
     "terminal_output": "final_output_mode",
 }
+
+
+def _session_status_value(status: object) -> str:
+    value = getattr(status, "value", None)
+    if isinstance(value, str):
+        return value
+    return str(status)
 
 
 def _compute_unresolved_core_slots(
@@ -224,6 +245,11 @@ class PlannerPreparedRequest:
     # server has already selected `propose_plan`; the model only fills
     # create/edit tool content, never the planner union.
     proposal_mode: bool = False
+    # Optional user-selected revision scope for an already proposed plan.
+    # Kept beside the prompt so the proposal processor can validate the
+    # model's revision against the same stable target.
+    plan_edit_context: AIBuilderPlanEditContext | None = None
+    prior_plan_for_revision: BuilderPlan | None = None
 
 
 class AIBuilderPlanner:
@@ -475,6 +501,8 @@ class AIBuilderPlanner:
         max_output_tokens: int,
         budget_policy: AIBuilderBudgetPolicy,
         is_requirements_confirmation: bool,
+        plan_edit_context: AIBuilderPlanEditContext | None = None,
+        prior_plan_for_revision: BuilderPlan | None = None,
         allow_discovery_semantic_adjudication: bool = True,
         persisted_planning_state: PlanningState | None = None,
         base_planning_state_version: int | None = None,
@@ -594,6 +622,10 @@ class AIBuilderPlanner:
                 available_kbs=available_kbs,
                 available_mcps=available_mcps,
                 mcp_selection_values=mcp_resource_selection_values(conversation),
+                plan_revision_context=build_plan_revision_prompt_block(
+                    context=plan_edit_context,
+                    prior_plan=prior_plan_for_revision,
+                ),
             )
             proposal_prompt_tokens = max(1, len(proposal_system_prompt) // 3)
             proposal_budget = compute_conversation_token_budget(
@@ -642,6 +674,8 @@ class AIBuilderPlanner:
                 action_policy=action_policy,
                 system_prompt_hash=stable_hash(proposal_system_prompt),
                 proposal_mode=True,
+                plan_edit_context=plan_edit_context,
+                prior_plan_for_revision=prior_plan_for_revision,
             )
 
         planning_state_block = render_llm_prompt_context(
@@ -914,6 +948,7 @@ class AIBuilderPlanner:
         message: str,
         file_ids: list[UUID] | None = None,
         question_answer: dict[str, Any] | None = None,
+        edit_context: AIBuilderPlanEditContext | None = None,
         ui_language: str | None = None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
@@ -950,6 +985,12 @@ class AIBuilderPlanner:
             session_id=session_id,
             tenant_id=self.user.tenant_id,
         )
+        session_status = _session_status_value(session.status)
+        if session_status not in _MESSAGE_ACCEPTING_SESSION_STATUSES:
+            raise BadRequestException(
+                f"Cannot send messages in session status '{session_status}'."
+            )
+
         request_id = str(uuid4())
         request_uuid = UUID(request_id)
         lock_token = uuid4()
@@ -978,15 +1019,7 @@ class AIBuilderPlanner:
         )
 
         try:
-            if session.status not in (
-                SessionStatus.CHATTING,
-                SessionStatus.AWAITING_APPROVAL,
-            ):
-                raise BadRequestException(
-                    f"Cannot send messages in session status '{session.status.value}'."
-                )
-
-            if session.status == SessionStatus.AWAITING_APPROVAL:
+            if session_status == SessionStatus.AWAITING_APPROVAL.value:
                 await self.repo.update_session_status(
                     session_id=session_id,
                     tenant_id=self.user.tenant_id,
@@ -994,6 +1027,15 @@ class AIBuilderPlanner:
                 )
 
             conversation = list(session.conversation)
+            (
+                plan_edit_context,
+                prior_plan_for_revision,
+            ) = await resolve_plan_edit_context(
+                repo=self.repo,
+                tenant_id=self.user.tenant_id,
+                session=session,
+                context=edit_context,
+            )
             persisted_planning_state = await self.repo.load_planning_state(
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,
@@ -1007,6 +1049,11 @@ class AIBuilderPlanner:
                 litellm_kwargs=litellm_kwargs,
             )
             metadata = metadata_resolution.metadata
+            if plan_edit_context is not None:
+                metadata = {
+                    **(metadata or {}),
+                    "edit_context": plan_edit_context.to_metadata(),
+                }
             is_requirements_confirmation = (
                 metadata_resolution.is_requirements_confirmation
             )
@@ -1044,6 +1091,8 @@ class AIBuilderPlanner:
                 max_output_tokens=max_output_tokens,
                 budget_policy=budget_policy,
                 is_requirements_confirmation=is_requirements_confirmation,
+                plan_edit_context=plan_edit_context,
+                prior_plan_for_revision=prior_plan_for_revision,
                 allow_discovery_semantic_adjudication=not metadata_resolution.used_auxiliary_llm,
                 persisted_planning_state=persisted_planning_state,
                 base_planning_state_version=session.planning_state_version,
@@ -1187,6 +1236,8 @@ class AIBuilderPlanner:
                     assistant_snapshots=assistant_snapshots,
                     assistant_metadata=build_assistant_message_metadata(conversation),
                     planning_state=session_state,
+                    plan_edit_context=prepared_request.plan_edit_context,
+                    prior_plan_for_revision=prepared_request.prior_plan_for_revision,
                     lease_request_id=request_uuid,
                     lease_lock_token=lock_token,
                 ):

@@ -22,6 +22,23 @@ export type SessionStatus = "chatting" | "awaiting_approval" | "applying" | "app
 
 export type PlanStatus = "proposed" | "approved" | "applied" | "rejected" | "superseded";
 
+export type AIBuilderPlanEditScope = "whole_plan" | "step";
+
+export interface AIBuilderPlanEditContext {
+  scope: AIBuilderPlanEditScope;
+  plan_id: string;
+  target_plan_step_ref?: string | null;
+  target_existing_step_ref?: string | null;
+  target_step_name?: string | null;
+  target_step_number?: number | null;
+}
+
+export interface AIBuilderSuggestChangeIntent {
+  placeholder?: string;
+  prefill?: string;
+  editContext?: AIBuilderPlanEditContext | null;
+}
+
 export interface AIBuilderConversationToolCall {
   id?: string | null;
   name?: string | null;

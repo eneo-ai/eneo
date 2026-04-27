@@ -156,7 +156,7 @@ def _confirm_requirements_payload(
     input_description = _input_description(resolved, locale)
     output_description = _output_description(resolved, locale)
     return ConfirmRequirementsPayload(
-        summary=_summary_text(locale),
+        summary=_summary_text(resolved, locale),
         key_decisions=key_decisions,
         input_description=input_description,
         output_description=output_description,
@@ -165,7 +165,42 @@ def _confirm_requirements_payload(
     )
 
 
-def _summary_text(locale: Locale) -> str:
+def _summary_text(
+    resolved: Mapping[str, object],
+    locale: Locale,
+) -> str:
+    runtime_input = _slot_value_for_slot(
+        "primary_runtime_input",
+        _resolved_value(resolved, "primary_runtime_input"),
+        locale,
+    )
+    terminal_output = _slot_value_for_slot(
+        "terminal_output",
+        _resolved_value(resolved, "terminal_output"),
+        locale,
+    )
+    analysis_need = _slot_value_for_slot(
+        "structured_analysis_need",
+        _resolved_value(resolved, "structured_analysis_need"),
+        locale,
+    )
+    if runtime_input or terminal_output:
+        if locale == "sv":
+            summary = (
+                f"Flödet ska ta emot {runtime_input or 'indata'} vid körning "
+                f"och leverera {terminal_output or 'ett slutresultat'}."
+            )
+            if analysis_need:
+                summary += f" Analysen ska stödja: {analysis_need}."
+            return summary
+        summary = (
+            f"The flow should accept {runtime_input or 'runtime input'} "
+            f"and deliver {terminal_output or 'a final result'}."
+        )
+        if analysis_need:
+            summary += f" The analysis should support: {analysis_need}."
+        return summary
+
     if locale == "sv":
         return (
             "Jag har tillräckligt med information för att ta fram ett "

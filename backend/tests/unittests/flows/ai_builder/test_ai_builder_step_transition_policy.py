@@ -20,17 +20,23 @@ def _step(
     ref: str,
     name: str,
     input_source: InputSource,
+    instructions: str | None = None,
+    input_type: InputType = InputType.TEXT,
+    output_type: OutputType = OutputType.TEXT,
+    output_mode: OutputMode = OutputMode.PASS_THROUGH,
     input_bindings: dict[str, object] | None = None,
+    output_config: dict[str, object] | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=ref,
         name=name,
-        assistant_spec=AssistantSpec(instructions=f"Run {name}."),
+        assistant_spec=AssistantSpec(instructions=instructions or f"Run {name}."),
         input_source=input_source,
-        input_type=InputType.TEXT,
-        output_mode=OutputMode.PASS_THROUGH,
-        output_type=OutputType.TEXT,
+        input_type=input_type,
+        output_mode=output_mode,
+        output_type=output_type,
         input_bindings=input_bindings,
+        output_config=output_config,
     )
 
 
@@ -151,5 +157,180 @@ def test_normalize_ai_builder_spec_rewires_previous_only_binding() -> None:
     assert normalized.steps[2].input_source == InputSource.PREVIOUS_STEP
     assert any(
         change.code == "input_source_all_previous_rewired"
+        for _step_spec, change in changes
+    )
+
+
+def test_normalize_ai_builder_spec_promotes_trailing_text_after_requested_pdf() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Employee review",
+        form_fields=[
+            FormFieldSpec(
+                name="employee_name",
+                type="text",
+                label="Employee name",
+            )
+        ],
+        steps=[
+            _step(
+                ref="step_a",
+                name="Analyze conversation",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Generate PDF helper",
+                instructions="Render the analysis as a PDF.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.PDF,
+                input_bindings={
+                    "question": "{{ step_a.output.structured }}",
+                },
+            ),
+            _step(
+                ref="step_c",
+                name="Create final result",
+                instructions="Include the employee metadata in the final result.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+                input_bindings={
+                    "question": (
+                        "{{ step_b.output.text }}\n\nemployee_name: {{ employee_name }}"
+                    )
+                },
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.PDF,
+    )
+
+    assert [step.plan_step_ref for step in normalized.steps] == ["step_a", "step_c"]
+    terminal = normalized.steps[-1]
+    assert terminal.input_type == InputType.JSON
+    assert terminal.output_type == OutputType.PDF
+    assert terminal.input_bindings == {
+        "question": "{{ step_a.output.structured }}\n\nemployee_name: {{ employee_name }}"
+    }
+    assert "Include the employee metadata" in terminal.assistant_spec.instructions
+    assert "Render the analysis as a PDF" in terminal.assistant_spec.instructions
+    assert [
+        change.code
+        for _step_spec, change in changes
+        if change.code == "terminal_artifact_helper_folded"
+    ] == ["terminal_artifact_helper_folded"]
+
+
+def test_normalize_ai_builder_spec_preserves_artifact_tail_without_output_intent() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Employee review",
+        steps=[
+            _step(ref="step_a", name="Analyze", input_source=InputSource.FLOW_INPUT),
+            _step(
+                ref="step_b",
+                name="Generate PDF",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.PDF,
+            ),
+            _step(
+                ref="step_c",
+                name="Create final result",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+
+    assert [step.plan_step_ref for step in normalized.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert not any(
+        change.code == "terminal_artifact_helper_folded"
+        for _step_spec, change in changes
+    )
+
+
+def test_normalize_ai_builder_spec_promotes_trailing_text_after_requested_docx_template() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Template report",
+        steps=[
+            _step(ref="step_a", name="Analyze", input_source=InputSource.FLOW_INPUT),
+            _step(
+                ref="step_b",
+                name="Fill DOCX template",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+                output_mode=OutputMode.TEMPLATE_FILL,
+                output_config={"template_asset_id": "template-1"},
+            ),
+            _step(
+                ref="step_c",
+                name="Create final result",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    normalized, _changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.DOCX,
+    )
+
+    terminal = normalized.steps[-1]
+    assert [step.plan_step_ref for step in normalized.steps] == ["step_a", "step_c"]
+    assert terminal.output_type == OutputType.DOCX
+    assert terminal.output_mode == OutputMode.TEMPLATE_FILL
+    assert terminal.output_config == {"template_asset_id": "template-1"}
+
+
+def test_normalize_ai_builder_spec_skips_artifact_fold_when_bindings_cannot_rewire() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Ambiguous artifact report",
+        steps=[
+            _step(ref="step_a", name="Extract", input_source=InputSource.FLOW_INPUT),
+            _step(
+                ref="step_b",
+                name="Generate PDF",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                output_type=OutputType.PDF,
+            ),
+            _step(
+                ref="step_c",
+                name="Create final result",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+                input_bindings={"question": "{{ step_b.output.text }}"},
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.PDF,
+    )
+
+    assert [step.plan_step_ref for step in normalized.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert not any(
+        change.code == "terminal_artifact_helper_folded"
         for _step_spec, change in changes
     )

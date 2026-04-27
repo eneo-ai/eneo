@@ -26,6 +26,7 @@ from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
+    contains_phrase,
 )
 from intric.flows.ai_builder.ai_builder_keywords import (
     DOCX_CONTEXT_MARKERS,
@@ -677,6 +678,16 @@ def _resolve_direct_output_choice(
         pdf_generation_values.intersection({"generated_pdf", "pdf_template_requested"})
         or pdf_index is not None
     ):
+        return "pdf_document"
+    explicit_output_role_text = (
+        scoped_text.replacement_target_text or scoped_text.output_text
+    )
+    if contains_phrase(explicit_output_role_text, "docx") or contains_phrase(
+        explicit_output_role_text,
+        "word",
+    ):
+        return "docx_document"
+    if contains_phrase(explicit_output_role_text, "pdf"):
         return "pdf_document"
     if contains_any_phrase(
         fallback_text,

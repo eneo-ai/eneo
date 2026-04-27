@@ -44,6 +44,15 @@ def test_resolve_explicit_output_choice_prefers_word_target_in_substitution_phra
     assert output == "docx_document"
 
 
+def test_resolve_explicit_output_choice_detects_pdf_file_replacement_target() -> None:
+    output = resolve_explicit_output_choice(
+        "Ändra så att jag får ut en pdf fil istället för text.",
+        {},
+    )
+
+    assert output == "pdf_document"
+
+
 def test_resolve_explicit_output_choice_respects_existing_flow_default_when_output_not_reopened() -> (
     None
 ):

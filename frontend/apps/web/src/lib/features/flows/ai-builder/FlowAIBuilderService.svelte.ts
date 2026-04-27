@@ -10,6 +10,7 @@ import {
 import type {
   AIBuilderDraftSession,
   AIBuilderModel,
+  AIBuilderPlanEditContext,
   AIBuilderPhase,
   AIBuilderSession,
   ApplyError,
@@ -200,9 +201,10 @@ export class FlowAIBuilderService {
   async sendMessage(
     message: string,
     questionAnswer?: StructuredQuestionAnswerMetadata,
-    fileIds?: string[]
+    fileIds?: string[],
+    editContext?: AIBuilderPlanEditContext | null
   ): Promise<void> {
-    await this.#driver.sendMessage(message, questionAnswer, fileIds);
+    await this.#driver.sendMessage(message, questionAnswer, fileIds, editContext);
   }
 
   async approvePlan(): Promise<void> {

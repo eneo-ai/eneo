@@ -234,14 +234,18 @@ def build_system_prompt(
             "\n## Aktivt gränssnittsspråk\n\n"
             "- All användarvänd text, alla strukturerade frågor, kravsammanfattningar och "
             "planförklaringar ska skrivas på svenska.\n"
-            "- Blanda inte svenska och engelska i samma session."
+            "- Blanda inte svenska och engelska i samma session.\n"
+            "- Ge flödet ett kort, mänskligt namn med ord och mellanslag. Använd inte "
+            "snake_case, interna mönster-id:n eller tekniska tokenkedjor som namn."
         )
     elif ui_language == "en":
         sections.append(
             "\n## Active UI language\n\n"
             "- All user-facing text, structured questions, requirements summaries, and plan "
             "explanations must be written in English.\n"
-            "- Do not mix English and Swedish within the same session."
+            "- Do not mix English and Swedish within the same session.\n"
+            "- Give the flow a short human name with words and spaces. Do not use "
+            "snake_case, internal pattern ids, or technical token chains as the name."
         )
 
     return "\n\n".join(sections)

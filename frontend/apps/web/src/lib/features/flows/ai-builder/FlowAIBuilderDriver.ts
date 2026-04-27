@@ -10,6 +10,7 @@ import type {
   AIBuilderErrorEventData,
   AIBuilderModel,
   AIBuilderPhase,
+  AIBuilderPlanEditContext,
   AIBuilderQuestionEventData,
   AIBuilderSession,
   AIBuilderStatusEventData,
@@ -305,7 +306,8 @@ export class FlowAIBuilderDriver {
   async sendMessage(
     message: string,
     questionAnswer?: StructuredQuestionAnswerMetadata,
-    fileIds?: string[]
+    fileIds?: string[],
+    editContext?: AIBuilderPlanEditContext | null
   ): Promise<void> {
     if (!this.#state.session || this.#state.isStreaming) return;
 
@@ -331,6 +333,12 @@ export class FlowAIBuilderDriver {
               question_answer: questionAnswer
             };
     }
+    if (editContext) {
+      userMsg.metadata = {
+        ...(userMsg.metadata ?? {}),
+        edit_context: editContext
+      };
+    }
     this.#state.messages = [...this.#state.messages, userMsg];
 
     if (this.#state.currentPlan) {
@@ -349,6 +357,7 @@ export class FlowAIBuilderDriver {
         model_id?: string;
         file_ids?: string[];
         question_answer?: StructuredQuestionAnswerMetadata;
+        edit_context?: AIBuilderPlanEditContext;
         ui_language?: string;
       } = { message };
 
@@ -360,6 +369,9 @@ export class FlowAIBuilderDriver {
       }
       if (fileIds && fileIds.length > 0) {
         requestBody.file_ids = fileIds;
+      }
+      if (editContext) {
+        requestBody.edit_context = editContext;
       }
       requestBody.ui_language = getLocale();
 

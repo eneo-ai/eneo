@@ -53,6 +53,9 @@ from intric.flows.ai_builder.ai_builder_models import (
     SessionListItemResponse,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
+)
 from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
@@ -460,6 +463,7 @@ class AIBuilderService:
         message: str,
         file_ids: list[UUID] | None = None,
         question_answer: dict[str, Any] | None = None,
+        edit_context: AIBuilderPlanEditContext | None = None,
         ui_language: str | None = None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
@@ -478,6 +482,7 @@ class AIBuilderService:
             session_id=session_id,
             message=message,
             question_answer=question_answer,
+            edit_context=edit_context,
             ui_language=ui_language,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,

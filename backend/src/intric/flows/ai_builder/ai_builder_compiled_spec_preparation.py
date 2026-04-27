@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore, TargetKind
+from intric.flows.ai_builder.ai_builder_models import (
+    FlowDraftSpecCore,
+    OutputType,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     canonicalize_flow_spec_resources,
@@ -17,6 +21,9 @@ from intric.flows.ai_builder.ai_builder_step_transition_policy import (
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
+from intric.main.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -34,12 +41,33 @@ def prepare_compiled_spec_for_session(
     available_kb_refs: set[str] | None,
     resource_catalog: AIBuilderResourceCatalog | None,
     valid_existing_step_refs: list[str] | None,
+    terminal_output_type: OutputType | None = None,
 ) -> PreparedCompiledSpecResult:
     prepared_spec = normalize_compiled_spec_for_session(
         spec,
         target_kind=target_kind,
     )
-    prepared_spec, _ = normalize_ai_builder_spec(prepared_spec)
+    prepared_spec, normalization_changes = normalize_ai_builder_spec(
+        prepared_spec,
+        terminal_output_type=terminal_output_type,
+    )
+    artifact_tail_changes = [
+        {
+            "step_ref": step.plan_step_ref,
+            "code": change.code,
+            "field": change.field_suffix,
+        }
+        for step, change in normalization_changes
+        if change.code == "terminal_artifact_helper_folded"
+    ]
+    if artifact_tail_changes:
+        logger.info(
+            "ai_builder_terminal_artifact_tail_normalized "
+            "target_kind=%s terminal_output_type=%s changes=%s",
+            target_kind,
+            terminal_output_type,
+            artifact_tail_changes,
+        )
     if resource_catalog is not None:
         prepared_spec, resolution_issues = canonicalize_flow_spec_resources(
             prepared_spec,

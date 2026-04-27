@@ -8,7 +8,7 @@
   import FlowAIBuilderStepCard from "./FlowAIBuilderStepCard.svelte";
   import FlowAIBuilderTokenUsage from "./FlowAIBuilderTokenUsage.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-  import type { EditAdvisory } from "./protocol";
+  import type { AIBuilderSuggestChangeIntent, EditAdvisory } from "./protocol";
   import {
     buildAIBuilderMcpResourceLabelMaps,
     type AIBuilderMcpServerLike
@@ -21,7 +21,7 @@
 
   interface Props {
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
-    onsuggestchange?: (prefill: string) => void;
+    onsuggestchange?: (intent: AIBuilderSuggestChangeIntent) => void;
   }
 
   let { onapplied, onsuggestchange }: Props = $props();
@@ -500,6 +500,7 @@
                 <FlowAIBuilderStepCard
                   {step}
                   stepNumber={i + 1}
+                  planId={plan.plan_id}
                   changeKind={getStepChangeKind(step, plan.edit_diff ?? null)}
                   {resolveModelName}
                   {resolveMcpServerName}
@@ -507,7 +508,7 @@
                   isFirst={i === 0}
                   isLast={i === spec.steps.length - 1}
                   planStatus={plan.status}
-                  onsuggestchange={(prefill) => onsuggestchange?.(prefill)}
+                  onsuggestchange={(intent) => onsuggestchange?.(intent)}
                 />
               {/each}
             </div>
@@ -604,7 +605,14 @@
           <Button
             variant="ghost"
             size="sm"
-            onclick={() => onsuggestchange?.(m.ai_builder_plan_suggest_change_prefix())}
+            onclick={() =>
+              onsuggestchange?.({
+                placeholder: m.ai_builder_plan_change_placeholder(),
+                editContext: {
+                  scope: "whole_plan",
+                  plan_id: plan.plan_id
+                }
+              })}
             disabled={isApproving || isApplying}
           >
             {m.ai_builder_plan_suggest_change()}

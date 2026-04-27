@@ -12,7 +12,7 @@ from intric.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
     RequirementsSummaryPayload,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_models import ConversationMessage, SessionStatus
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from intric.flows.ai_builder.planning_state import (
@@ -954,3 +954,35 @@ async def test_send_message_rejects_when_another_send_is_already_in_progress() -
             ),
         ):
             pass
+
+
+@pytest.mark.asyncio
+async def test_send_message_rejects_closed_session_before_claiming_lock() -> None:
+    planner = _make_planner()
+    planner.repo.get_session.return_value = SimpleNamespace(
+        conversation=[],
+        status=SessionStatus.CANCELLED,
+    )
+
+    with pytest.raises(BadRequestException, match="Cannot send messages"):
+        async for _ in planner.send_message(
+            session_id=uuid4(),
+            message="Build a flow",
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            attachment_files=None,
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+                unknown_model_context_window_tokens=8192,
+            ),
+        ):
+            pass
+
+    planner.repo.claim_session_send.assert_not_awaited()

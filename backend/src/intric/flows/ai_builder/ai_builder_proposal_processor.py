@@ -74,8 +74,10 @@ from intric.flows.ai_builder.ai_builder_events import (
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
+    extract_answer_signals,
     is_supported_structured_question_id,
     normalize_structured_question_payload,
+    resolve_output_intent,
 )
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     analyze_discovery_ready,
@@ -93,10 +95,16 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from intric.flows.ai_builder.ai_builder_models import (
+    BuilderPlan,
     ConversationMessage,
     FlowDraftSpecCore,
+    OutputType,
     RequirementsSummaryPayload,
     TargetKind,
+)
+from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
+    validate_scoped_plan_revision,
 )
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
@@ -227,6 +235,47 @@ def _conversation_user_text(conversation: list[ConversationMessage]) -> str:
     )
 
 
+def _terminal_output_type_for_conversation(
+    conversation: list[ConversationMessage],
+    *,
+    plan_edit_context: AIBuilderPlanEditContext | None,
+) -> OutputType | None:
+    if plan_edit_context is not None:
+        user_messages = [
+            message
+            for message in conversation
+            if message.role == "user" and message.content
+        ]
+        if not user_messages:
+            return None
+        latest_user_message = user_messages[-1]
+        latest_user_content = latest_user_message.content
+        if latest_user_content is None:
+            return None
+        output_intent = resolve_output_intent(
+            latest_user_content,
+            extract_answer_signals([latest_user_message]),
+        )
+        return _output_type_from_intent(output_intent.terminal_output)
+
+    output_intent = resolve_output_intent(
+        aggregate_freeform_user_text(conversation),
+        extract_answer_signals(conversation),
+    )
+    return _output_type_from_intent(output_intent.terminal_output)
+
+
+def _output_type_from_intent(terminal_output: str | None) -> OutputType | None:
+    if terminal_output is None:
+        return None
+    return {
+        "pdf_document": OutputType.PDF,
+        "docx_document": OutputType.DOCX,
+        "structured_json": OutputType.JSON,
+        "structured_text": OutputType.TEXT,
+    }.get(terminal_output)
+
+
 @dataclass(frozen=True)
 class ToolProcessingResult:
     event: dict[str, str] | None = None
@@ -326,6 +375,8 @@ class ProposalContext:
     assistant_metadata: dict[str, Any] | None = None
     planning_state: PlanningState | None = None
     usage_tracker: ProposalUsageTracker | None = None
+    plan_edit_context: AIBuilderPlanEditContext | None = None
+    prior_plan_for_revision: BuilderPlan | None = None
 
 
 @dataclass(frozen=True)
@@ -413,6 +464,8 @@ class AIBuilderProposalProcessor:
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
         planning_state: PlanningState | None = None,
+        plan_edit_context: AIBuilderPlanEditContext | None = None,
+        prior_plan_for_revision: BuilderPlan | None = None,
     ) -> ToolProcessingResult:
         try:
             outline = parse_outline_flow_arguments(arguments)
@@ -490,6 +543,8 @@ class AIBuilderProposalProcessor:
                 if compile_context is not None
                 else "linear"
             ),
+            plan_edit_context=plan_edit_context,
+            prior_plan_for_revision=prior_plan_for_revision,
         )
 
     async def _process_create_draft(
@@ -511,6 +566,8 @@ class AIBuilderProposalProcessor:
         lease_request_id: UUID | None,
         lease_lock_token: UUID | None,
         aggregation_intent: AggregationIntent = "linear",
+        plan_edit_context: AIBuilderPlanEditContext | None = None,
+        prior_plan_for_revision: BuilderPlan | None = None,
     ) -> ToolProcessingResult:
         if resource_catalog is not None:
             draft, resolution_issues = canonicalize_create_draft_resources(
@@ -547,6 +604,10 @@ class AIBuilderProposalProcessor:
             available_kb_refs=available_kb_refs,
             resource_catalog=resource_catalog,
             valid_existing_step_refs=None,
+            terminal_output_type=_terminal_output_type_for_conversation(
+                conversation,
+                plan_edit_context=plan_edit_context,
+            ),
         )
         if prepared.failure_feedback is not None:
             return ToolProcessingResult(
@@ -557,6 +618,35 @@ class AIBuilderProposalProcessor:
         assert prepared.validation is not None
         spec = prepared.spec
         validation = prepared.validation
+
+        scoped_revision_feedback = validate_scoped_plan_revision(
+            context=plan_edit_context,
+            prior_spec=(
+                prior_plan_for_revision.spec
+                if prior_plan_for_revision is not None
+                else None
+            ),
+            proposed_spec=spec,
+        )
+        if scoped_revision_feedback is not None:
+            target_step_ref = (
+                (
+                    plan_edit_context.target_plan_step_ref
+                    or plan_edit_context.target_existing_step_ref
+                )
+                if plan_edit_context is not None
+                else None
+            )
+            logger.info(
+                "ai_builder_scoped_plan_revision_rejected "
+                "session_id=%s target_step_ref=%s",
+                session_id,
+                target_step_ref,
+            )
+            return ToolProcessingResult(
+                feedback=format_create_quality_feedback(scoped_revision_feedback),
+                failure_kind="quality",
+            )
 
         mcp_clarification_events = await self._mcp_clarification_events_if_needed(
             session_id=session_id,
@@ -786,6 +876,8 @@ class AIBuilderProposalProcessor:
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
         planning_state: PlanningState | None = None,
         usage_tracker: ProposalUsageTracker | None = None,
+        plan_edit_context: AIBuilderPlanEditContext | None = None,
+        prior_plan_for_revision: BuilderPlan | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         ctx = ProposalContext(
             session_id=session_id,
@@ -808,6 +900,8 @@ class AIBuilderProposalProcessor:
             assistant_metadata=assistant_metadata,
             planning_state=planning_state,
             usage_tracker=usage_tracker,
+            plan_edit_context=plan_edit_context,
+            prior_plan_for_revision=prior_plan_for_revision,
         )
         if ctx.text_content and not _tool_calls_contain_submission(tool_calls):
             yield build_text_event(ctx.text_content)
@@ -840,6 +934,8 @@ class AIBuilderProposalProcessor:
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
         assistant_metadata: dict[str, Any] | None = None,
         planning_state: PlanningState | None = None,
+        plan_edit_context: AIBuilderPlanEditContext | None = None,
+        prior_plan_for_revision: BuilderPlan | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
         available_mcps: AIBuilderMCPResourceInput = None,
@@ -926,6 +1022,8 @@ class AIBuilderProposalProcessor:
                 flow=flow,
                 assistant_snapshots=assistant_snapshots,
                 planning_state=planning_state,
+                plan_edit_context=plan_edit_context,
+                prior_plan_for_revision=prior_plan_for_revision,
                 usage_tracker=usage_tracker,
             ):
                 yielded = True
@@ -949,6 +1047,8 @@ class AIBuilderProposalProcessor:
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             planning_state=planning_state,
+            plan_edit_context=plan_edit_context,
+            prior_plan_for_revision=prior_plan_for_revision,
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
             usage_tracker=usage_tracker,
@@ -1117,6 +1217,13 @@ class AIBuilderProposalProcessor:
                 config.target_tool_name,
                 ctx.request_id,
             )
+            parse_retry_kwargs: dict[str, Any] = {}
+            if config.target_tool_name == OUTLINE_FLOW_TOOL_NAME:
+                parse_retry_kwargs["planning_state"] = ctx.planning_state
+                parse_retry_kwargs["plan_edit_context"] = ctx.plan_edit_context
+                parse_retry_kwargs["prior_plan_for_revision"] = (
+                    ctx.prior_plan_for_revision
+                )
             async for event in self._request_tool_self_correction(
                 ctx=ctx,
                 error_message=f"{config.parse_error_prefix}: {error}",
@@ -1125,11 +1232,7 @@ class AIBuilderProposalProcessor:
                     target_tool_name=config.target_tool_name,
                     forced_tool_prompt=config.forced_tool_prompt,
                     process_tool_arguments=config.process_tool_arguments,
-                    process_tool_kwargs=(
-                        {"planning_state": ctx.planning_state}
-                        if config.target_tool_name == OUTLINE_FLOW_TOOL_NAME
-                        else {}
-                    ),
+                    process_tool_kwargs=parse_retry_kwargs,
                 ),
             ):
                 yield event
@@ -1138,6 +1241,10 @@ class AIBuilderProposalProcessor:
         retry_process_kwargs: dict[str, Any] = {}
         if config.target_tool_name == OUTLINE_FLOW_TOOL_NAME:
             retry_process_kwargs["planning_state"] = ctx.planning_state
+            retry_process_kwargs["plan_edit_context"] = ctx.plan_edit_context
+            retry_process_kwargs["prior_plan_for_revision"] = (
+                ctx.prior_plan_for_revision
+            )
 
         submission_kwargs = self._build_submission_processing_kwargs(
             session_id=ctx.session_id,
@@ -1162,6 +1269,8 @@ class AIBuilderProposalProcessor:
         )
         if config.target_tool_name == OUTLINE_FLOW_TOOL_NAME:
             submission_kwargs["planning_state"] = ctx.planning_state
+            submission_kwargs["plan_edit_context"] = ctx.plan_edit_context
+            submission_kwargs["prior_plan_for_revision"] = ctx.prior_plan_for_revision
         submission_result = await config.process_tool_arguments(**submission_kwargs)
         logger.info(
             "ai_builder_submission_first_attempt tool=%s request_id=%s success=%s failure_kind=%s",
@@ -1485,6 +1594,8 @@ class AIBuilderProposalProcessor:
         flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
         planning_state: PlanningState | None = None,
+        plan_edit_context: AIBuilderPlanEditContext | None = None,
+        prior_plan_for_revision: BuilderPlan | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
         usage_tracker: ProposalUsageTracker | None = None,
@@ -1498,6 +1609,8 @@ class AIBuilderProposalProcessor:
             assistant_snapshots=assistant_snapshots,
             resource_catalog=resource_catalog,
             planning_state=planning_state,
+            plan_edit_context=plan_edit_context,
+            prior_plan_for_revision=prior_plan_for_revision,
         )
         return await self.retry_forced_tool_after_text(
             correction_messages=correction_messages,
@@ -1941,6 +2054,8 @@ class AIBuilderProposalProcessor:
         resource_catalog: AIBuilderResourceCatalog | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
+        plan_edit_context: AIBuilderPlanEditContext | None = None,
+        prior_plan_for_revision: BuilderPlan | None = None,
     ) -> ToolProcessingResult:
         if flow is None:
             return ToolProcessingResult(
@@ -2015,6 +2130,10 @@ class AIBuilderProposalProcessor:
             available_kb_refs=available_kb_refs,
             resource_catalog=resource_catalog,
             valid_existing_step_refs=valid_step_refs,
+            terminal_output_type=_terminal_output_type_for_conversation(
+                conversation,
+                plan_edit_context=plan_edit_context,
+            ),
         )
         if prepared.failure_feedback is not None:
             return ToolProcessingResult(
@@ -2032,6 +2151,34 @@ class AIBuilderProposalProcessor:
                     "Compiled edit spec validation failed: " + "; ".join(error_messages)
                 ),
                 failure_kind="validation",
+            )
+
+        scoped_revision_feedback = validate_scoped_plan_revision(
+            context=plan_edit_context,
+            prior_spec=(
+                prior_plan_for_revision.spec
+                if prior_plan_for_revision is not None
+                else None
+            ),
+            proposed_spec=compiled_spec,
+        )
+        if scoped_revision_feedback is not None:
+            target_step_ref = (
+                (
+                    plan_edit_context.target_plan_step_ref
+                    or plan_edit_context.target_existing_step_ref
+                )
+                if plan_edit_context is not None
+                else None
+            )
+            logger.info(
+                "ai_builder_scoped_plan_edit_rejected session_id=%s target_step_ref=%s",
+                session_id,
+                target_step_ref,
+            )
+            return ToolProcessingResult(
+                feedback=format_create_quality_feedback(scoped_revision_feedback),
+                failure_kind="quality",
             )
 
         mcp_clarification_events = await self._mcp_clarification_events_if_needed(
@@ -2257,6 +2404,8 @@ class AIBuilderProposalProcessor:
                 tool_calls=[tool_call],
             ),
             resource_catalog=ctx.resource_catalog,
+            plan_edit_context=ctx.plan_edit_context,
+            prior_plan_for_revision=ctx.prior_plan_for_revision,
         )
         if edit_result.event is None:
             async for event in self._request_tool_self_correction(
@@ -2365,8 +2514,17 @@ class AIBuilderProposalProcessor:
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         planning_state: PlanningState | None = None,
+        plan_edit_context: AIBuilderPlanEditContext | None = None,
+        prior_plan_for_revision: BuilderPlan | None = None,
     ) -> ToolRetryConfig:
         if flow is None:
+            process_kwargs: dict[str, Any] = {}
+            if planning_state is not None:
+                process_kwargs["planning_state"] = planning_state
+            if plan_edit_context is not None:
+                process_kwargs["plan_edit_context"] = plan_edit_context
+            if prior_plan_for_revision is not None:
+                process_kwargs["prior_plan_for_revision"] = prior_plan_for_revision
             return ToolRetryConfig(
                 target_tool_name=OUTLINE_FLOW_TOOL_NAME,
                 forced_tool_prompt=(
@@ -2375,11 +2533,7 @@ class AIBuilderProposalProcessor:
                     "Do not answer with prose."
                 ),
                 process_tool_arguments=self._process_outline_arguments,
-                process_tool_kwargs=(
-                    {"planning_state": planning_state}
-                    if planning_state is not None
-                    else {}
-                ),
+                process_tool_kwargs=process_kwargs,
             )
 
         return ToolRetryConfig(
@@ -2396,6 +2550,8 @@ class AIBuilderProposalProcessor:
                 "litellm_kwargs": litellm_kwargs,
                 "max_output_tokens": max_output_tokens,
                 "resource_catalog": resource_catalog,
+                "plan_edit_context": plan_edit_context,
+                "prior_plan_for_revision": prior_plan_for_revision,
             },
         )
 
@@ -2429,6 +2585,8 @@ class AIBuilderProposalProcessor:
                 "litellm_kwargs": ctx.litellm_kwargs,
                 "max_output_tokens": ctx.max_output_tokens,
                 "resource_catalog": ctx.resource_catalog,
+                "plan_edit_context": ctx.plan_edit_context,
+                "prior_plan_for_revision": ctx.prior_plan_for_revision,
             },
         )
 

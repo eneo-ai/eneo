@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+    runtime_input_fields_requested,
+)
+
 _FORM_FIELD_NEED_MARKERS: tuple[str, ...] = (
     "ska kunna ange",
     "ska kunna välja",
@@ -78,8 +82,10 @@ def detect_form_intake_pattern(text: str) -> FormIntakePattern:
         return FormIntakePattern()
 
     sectioned_form_intake = _mentions_sectioned_form_intake(normalized)
-    needs_form_fields = sectioned_form_intake or _mentions_generic_form_field_need(
-        normalized
+    needs_form_fields = (
+        sectioned_form_intake
+        or _mentions_generic_form_field_need(normalized)
+        or runtime_input_fields_requested(text)
     )
     return FormIntakePattern(
         needs_form_fields=needs_form_fields,

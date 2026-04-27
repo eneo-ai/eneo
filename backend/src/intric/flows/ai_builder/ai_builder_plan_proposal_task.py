@@ -31,6 +31,7 @@ def build_plan_proposal_system_prompt(
     available_kbs: list[dict[str, Any]] | None = None,
     available_mcps: AIBuilderMCPResourceInput = None,
     mcp_selection_values: set[str] | frozenset[str] | None = None,
+    plan_revision_context: str | None = None,
 ) -> str:
     """Build a compact task prompt for create/edit flow proposal."""
 
@@ -53,6 +54,7 @@ def build_plan_proposal_system_prompt(
         f"Call exactly one `{submission_tool}` tool. Do not ask a question, do not confirm requirements, and do not return prose only.",
         "",
         "Design rules:",
+        "- Use a short human-readable `flow_name` with words and spaces; never copy internal pattern ids, capability ids, or snake_case tokens into the name.",
         "- Use as many steps as the requested workflow needs, up to the tool schema limit.",
         "- Prefer a clear multi-step flow for complex work instead of one overloaded step.",
         "- Use JSON output fields when later steps need specific structured facts.",
@@ -87,6 +89,8 @@ def build_plan_proposal_system_prompt(
     )
     if mcp_decision_context:
         lines.extend(["", "MCP selection decision:", mcp_decision_context])
+    if plan_revision_context:
+        lines.extend(["", plan_revision_context])
     if attachment_context:
         lines.extend(["", "Attachment context:", attachment_context])
     return "\n".join(lines)
@@ -100,13 +104,10 @@ def _architecture_block(planning_state: PlanningState) -> str:
         f"- {triple.input_type} -> {triple.output_type} ({triple.output_mode})"
         for triple in commit.tuples_chain
     ]
-    patterns = ", ".join(commit.chosen_patterns) or "none"
-    capabilities = ", ".join(commit.required_capabilities) or "none"
     return "\n".join(
         [
             *tuples,
-            f"- chosen_patterns: {patterns}",
-            f"- required_capabilities: {capabilities}",
+            "- implementation_strategy: server-selected capability profile (ids hidden from user-facing text)",
         ]
     )
 

@@ -60,6 +60,75 @@ def test_runtime_input_field_extraction_keeps_explicit_secondary_fields() -> Non
     )
 
 
+def test_runtime_input_field_extraction_understands_user_provided_metadata() -> None:
+    text = (
+        "Jag vill skapa ett transkriptionsflöde för utvecklingssamtal. "
+        "Användaren kommer att ange namn, personnummer, yrke, roll och "
+        "nuvarande lön innan ljudet analyseras."
+    )
+
+    hints = extract_runtime_input_field_hints(text)
+
+    assert [(hint.variable_name, hint.label) for hint in hints] == [
+        ("namn", "namn"),
+        ("personnummer", "personnummer"),
+        ("yrke", "yrke"),
+        ("roll", "roll"),
+        ("nuvarande_lon", "nuvarande lön"),
+    ]
+    assert infer_runtime_metadata_slot(text) == "detailed_case_metadata"
+
+
+def test_runtime_input_field_extraction_cleans_natural_swedish_field_phrases() -> None:
+    text = (
+        "Vi kommer att ange namn på medarbetaren, personnummer, vilket yrke "
+        "den har, vilken roll den har och vad den har i lön nuvarande."
+    )
+
+    hints = extract_runtime_input_field_hints(text)
+
+    assert [(hint.variable_name, hint.label) for hint in hints] == [
+        ("medarbetar_namn", "medarbetar namn"),
+        ("personnummer", "personnummer"),
+        ("yrke", "yrke"),
+        ("roll", "roll"),
+        ("nuvarande_lon", "nuvarande lön"),
+    ]
+
+
+def test_runtime_input_field_extraction_understands_english_user_metadata() -> None:
+    text = (
+        "Create an audio review flow. We will provide name, social security "
+        "number, role and salary before the recording is processed."
+    )
+
+    hints = extract_runtime_input_field_hints(text)
+
+    assert [(hint.variable_name, hint.label) for hint in hints] == [
+        ("name", "name"),
+        ("social_security_number", "social security number"),
+        ("role", "role"),
+        ("salary", "salary"),
+    ]
+
+
+def test_runtime_input_field_extraction_ignores_output_field_lists() -> None:
+    text = (
+        "Transkribera samtalet och extrahera namn, personnummer, yrke, roll "
+        "och nuvarande lön från inspelningen."
+    )
+
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) is None
+
+
+def test_runtime_input_field_extraction_ignores_source_content_lists() -> None:
+    text = "Samtalet innehåller namn, personnummer, yrke, roll och nuvarande lön."
+
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) is None
+
+
 def test_runtime_input_field_extraction_lets_newer_positive_instruction_win() -> None:
     text = (
         "Inga extra inmatningsfält behövs. "

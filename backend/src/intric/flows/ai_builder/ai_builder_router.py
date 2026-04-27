@@ -526,6 +526,7 @@ async def send_message(
                     message=body.message,
                     file_ids=body.file_ids,
                     question_answer=body.question_answer,
+                    edit_context=body.edit_context,
                     ui_language=body.ui_language,
                     litellm_model=prepared_context.litellm_model,
                     litellm_kwargs=prepared_context.litellm_kwargs,

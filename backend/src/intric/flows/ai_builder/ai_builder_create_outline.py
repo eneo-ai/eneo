@@ -527,7 +527,8 @@ def compile_outline_to_create_draft(
         context=context,
         runtime_input_type=runtime_input_type,
     )
-    known_field_names = {field.variable_name for field in form_fields}
+    known_field_order = [field.variable_name for field in form_fields]
+    known_field_names = set(known_field_order)
 
     outline_steps = _fold_leading_zero_contract_text_steps(
         steps=list(outline.steps),
@@ -626,7 +627,7 @@ def compile_outline_to_create_draft(
     steps = _ensure_required_server_owned_fan_in(steps=steps, context=context)
     steps = _attach_unreferenced_form_fields_to_final_step(
         steps=steps,
-        known_field_names=known_field_names,
+        known_field_order=known_field_order,
     )
     _log_dropped_primary_input_shadow_fields(
         field_names=dropped_primary_input_field_names,
@@ -904,6 +905,11 @@ def build_outline_flow_tool_schema(
                         "type": "string",
                         "minLength": 1,
                         "maxLength": MAX_FLOW_NAME_LENGTH,
+                        "description": (
+                            "Human-readable user-facing flow name in the user's "
+                            "language. Use words and spaces, not snake_case, "
+                            "internal pattern ids, or output-type token chains."
+                        ),
                     },
                     "flow_description": {"type": ["string", "null"]},
                     "plan_rationale": {
@@ -1768,12 +1774,14 @@ def _default_final_step_instructions(*, ui_language: str | None) -> str:
 def _attach_unreferenced_form_fields_to_final_step(
     *,
     steps: list[NewStepDraft],
-    known_field_names: set[str],
+    known_field_order: list[str],
 ) -> list[NewStepDraft]:
-    if not steps or not known_field_names:
+    if not steps or not known_field_order:
         return steps
     referenced = {field_name for step in steps for field_name in step.uses_form_fields}
-    unreferenced = sorted(known_field_names - referenced)
+    unreferenced = [
+        field_name for field_name in known_field_order if field_name not in referenced
+    ]
     if not unreferenced:
         return steps
     final_step = steps[-1]

@@ -9,6 +9,7 @@
   import FlowAIBuilderPhaseIndicator from "./FlowAIBuilderPhaseIndicator.svelte";
   import { shouldShowEditStartOver } from "./flowAIBuilderReset";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
+  import type { AIBuilderPlanEditContext, AIBuilderSuggestChangeIntent } from "./protocol";
   import type { StructuredQuestionAnswerPayload } from "./structuredQuestionAnswer";
 
   interface Props {
@@ -42,10 +43,11 @@
   );
 
   function handleQuestionAnswer(answer: StructuredQuestionAnswerPayload) {
-    service.sendMessage(answer.text, answer.questionAnswer);
+    service.sendMessage(answer.text, answer.questionAnswer, undefined, pendingEditContext);
   }
 
   let inputRef = $state<FlowAIBuilderInput | undefined>();
+  let pendingEditContext = $state<AIBuilderPlanEditContext | null>(null);
 
   let hadPlanBefore = $state(false);
   $effect(() => {
@@ -56,19 +58,42 @@
     hadPlanBefore ? m.ai_builder_updating_plan() : m.ai_builder_generating()
   );
 
-  export function focusInput(prefill?: string) {
-    inputRef?.focus(prefill ? { placeholder: prefill } : undefined);
+  export function focusInput(intent?: string | AIBuilderSuggestChangeIntent) {
+    if (typeof intent === "string") {
+      pendingEditContext = null;
+      inputRef?.focus(intent ? { placeholder: intent } : undefined);
+      return;
+    }
+    pendingEditContext = intent?.editContext ?? null;
+    inputRef?.focus(
+      intent ? { placeholder: intent.placeholder, prefill: intent.prefill } : undefined
+    );
   }
+
+  function clearPendingEditContext() {
+    pendingEditContext = null;
+    inputRef?.clearActivePlaceholder();
+  }
+
+  $effect(() => {
+    if (!pendingEditContext) return;
+    const currentPlanId = service.currentPlan?.plan_id ?? null;
+    if (!service.hasSession || (currentPlanId && currentPlanId !== pendingEditContext.plan_id)) {
+      clearPendingEditContext();
+    }
+  });
 
   function handleRequirementsConfirm() {
     service.confirmRequirements();
   }
 
   function handleRequirementsChange() {
+    clearPendingEditContext();
     inputRef?.focus({ placeholder: m.ai_builder_requirements_change_hint() });
   }
 
   function handleStartOver() {
+    clearPendingEditContext();
     void service.startFreshSession("edit");
   }
 
@@ -251,7 +276,11 @@
     class="bg-primary border-border-default w-full border-t px-4 pt-3 pb-4 max-sm:px-2 max-sm:pt-2 max-sm:pb-3"
     class:input-area-hero={showEmptyState}
   >
-    <FlowAIBuilderInput bind:this={inputRef} />
+    <FlowAIBuilderInput
+      bind:this={inputRef}
+      editContext={pendingEditContext}
+      oncleareditcontext={clearPendingEditContext}
+    />
   </div>
   {#if showEmptyState}
     <div class="flex-1" aria-hidden="true"></div>

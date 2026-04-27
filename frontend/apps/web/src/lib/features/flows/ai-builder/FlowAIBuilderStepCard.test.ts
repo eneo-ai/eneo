@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import FlowAIBuilderStepCard from "./FlowAIBuilderStepCard.svelte";
 import type { StepSpec } from "./protocol";
@@ -37,6 +37,34 @@ describe("FlowAIBuilderStepCard", () => {
     expect(
       screen.getByText("Only this step gets these external tools when the flow runs.")
     ).toBeTruthy();
+  });
+
+  it("emits structured step edit context instead of relying on button text", async () => {
+    const onsuggestchange = vi.fn();
+    render(FlowAIBuilderStepCard, {
+      step: makeStep({ plan_step_ref: "step_f", name: "Create final result" }),
+      stepNumber: 6,
+      planId: "plan-1",
+      planStatus: "proposed",
+      onsuggestchange
+    });
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Step 6: Create final result (NEW)" })
+    );
+    await fireEvent.click(screen.getByRole("button", { name: "Change this step" }));
+
+    expect(onsuggestchange).toHaveBeenCalledWith({
+      placeholder: "Describe the change for step 6: Create final result",
+      editContext: {
+        scope: "step",
+        plan_id: "plan-1",
+        target_plan_step_ref: "step_f",
+        target_existing_step_ref: null,
+        target_step_name: "Create final result",
+        target_step_number: 6
+      }
+    });
   });
 });
 

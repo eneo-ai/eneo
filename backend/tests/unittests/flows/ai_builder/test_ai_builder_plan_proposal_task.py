@@ -73,6 +73,9 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
         "Exception: when the Available resources section gives canonical resource refs"
         in prompt
     )
+    assert "human-readable `flow_name`" in prompt
+    assert "mcp_lookup" not in prompt
+    assert "mcp_policy" not in prompt
     assert "must not execute MCP tools" in prompt
     assert "input_schema" not in prompt
 
