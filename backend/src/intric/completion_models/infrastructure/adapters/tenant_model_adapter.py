@@ -430,14 +430,16 @@ class TenantModelAdapter(CompletionModelAdapter):
                     ),
                 }
             )
-            # Assistant response. If the turn invoked tools, emit the assistant
-            # message with OpenAI-style `tool_calls` followed by a `role: tool`
-            # entry per call so the model can see its prior tool use on replay.
+            # Assistant response. If the turn invoked tools, emit the canonical
+            # OpenAI shape: a pre-tool assistant message with only `tool_calls`,
+            # one `role: tool` entry per call, then a post-tool assistant
+            # message with the final answer. This matches what the live flow
+            # produces during generation and keeps causal order intact.
             if msg.tool_calls:
                 messages.append(
                     {
                         "role": "assistant",
-                        "content": msg.answer or None,
+                        "content": None,
                         "tool_calls": [
                             {
                                 "id": tc.tool_call_id,
@@ -447,7 +449,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     "arguments": (
                                         json.dumps(tc.arguments)
                                         if tc.arguments is not None
-                                        else ""
+                                        else "{}"
                                     ),
                                 },
                             }
@@ -461,6 +463,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                             "role": "tool",
                             "tool_call_id": tc.tool_call_id,
                             "content": tc.result,
+                        }
+                    )
+                if msg.answer:
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": msg.answer,
                         }
                     )
             else:
