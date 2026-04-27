@@ -332,11 +332,11 @@ def _scim_container(session):
 def _patch_audit(monkeypatch):
     mock_audit = AsyncMock()
     monkeypatch.setattr(
-        "intric.audit.application.audit_service.AuditService",
+        "intric.sysadmin.sysadmin_service.AuditService",
         MagicMock(return_value=mock_audit),
     )
     monkeypatch.setattr(
-        "intric.audit.infrastructure.audit_log_repo_impl.AuditLogRepositoryImpl",
+        "intric.sysadmin.sysadmin_service.AuditLogRepositoryImpl",
         MagicMock(),
     )
     return mock_audit
