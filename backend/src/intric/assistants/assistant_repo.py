@@ -257,6 +257,11 @@ class AssistantRepository:
         )
         await self.session.execute(stmt)
 
+        await self._prune_mcp_tool_overrides_for_servers(
+            assistant_in_db=assistant_in_db,
+            mcp_server_ids=mcp_server_ids,
+        )
+
         if mcp_server_ids:
             values = [
                 {
@@ -270,6 +275,30 @@ class AssistantRepository:
             await self.session.execute(stmt)
 
         await self.session.refresh(assistant_in_db)
+
+    async def _prune_mcp_tool_overrides_for_servers(
+        self,
+        *,
+        assistant_in_db: Assistants,
+        mcp_server_ids: list[UUID],
+    ) -> None:
+        """Keep assistant tool overrides inside the selected server set."""
+        from intric.database.tables.assistant_table import AssistantMCPServerTools
+        from intric.database.tables.mcp_server_table import (
+            MCPServerTools as MCPServerToolsTable,
+        )
+
+        stmt = sa.delete(AssistantMCPServerTools).where(
+            AssistantMCPServerTools.assistant_id == assistant_in_db.id
+        )
+        if mcp_server_ids:
+            selected_tool_ids = sa.select(MCPServerToolsTable.id).where(
+                MCPServerToolsTable.mcp_server_id.in_(mcp_server_ids)
+            )
+            stmt = stmt.where(
+                ~AssistantMCPServerTools.mcp_server_tool_id.in_(selected_tool_ids)
+            )
+        await self.session.execute(stmt)
 
     async def _set_mcp_tools(
         self,

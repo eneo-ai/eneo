@@ -35,25 +35,42 @@ describe("flowStepMcpConfig", () => {
         ]
       })
     ).toEqual({
-      serverCount: 2,
       enabledToolCount: 2,
-      hasConfiguredMcp: true
+      hasActiveMcp: true
     });
   });
 
   it("returns an empty summary when no MCP servers are configured", () => {
     expect(summarizeAssistantMcp({ mcp_servers: [] })).toEqual({
-      serverCount: 0,
       enabledToolCount: 0,
-      hasConfiguredMcp: false
+      hasActiveMcp: false
+    });
+  });
+
+  it("does not treat a server without enabled tools as active MCP", () => {
+    expect(
+      summarizeAssistantMcp({
+        mcp_servers: [
+          {
+            id: "server-1",
+            name: "Weather",
+            tools: [
+              { id: "tool-1", name: "forecast", is_enabled: false },
+              { id: "tool-2", name: "history", is_enabled: false }
+            ]
+          }
+        ]
+      })
+    ).toEqual({
+      enabledToolCount: 0,
+      hasActiveMcp: false
     });
   });
 
   it("provides a reusable empty MCP summary", () => {
     expect(createEmptyFlowStepMcpSummary()).toEqual({
-      serverCount: 0,
       enabledToolCount: 0,
-      hasConfiguredMcp: false
+      hasActiveMcp: false
     });
   });
 

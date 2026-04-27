@@ -43,7 +43,7 @@ from typing import Literal
 from intric.flows.ai_builder.question_catalog import QUESTION_CATALOG, QuestionTemplate
 from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY, FlowCapability
 
-PATTERN_REGISTRY_VERSION: int = 5
+PATTERN_REGISTRY_VERSION: int = 6
 
 PatternId = str
 FLOW_INPUT_AUDIO_TRANSCRIPTION = "flow_input_audio_transcription"
@@ -463,6 +463,26 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "primary_runtime_input",
             "terminal_output",
             "runtime_metadata_fields",
+        ),
+    ),
+    _pattern(
+        id="mcp_tool_step",
+        examples=(
+            "step uses a specific MCP tool for live external data",
+            "external system action isolated to one step with tool-level MCP refs",
+        ),
+        retrieval_hints=(
+            "mcp mcp_tool_refs mcp_server_refs",
+            "external_system live_data integration_endpoint",
+            "least_privilege step_scoped_tool_access",
+        ),
+        required_architectural_slots=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
         ),
     ),
 )

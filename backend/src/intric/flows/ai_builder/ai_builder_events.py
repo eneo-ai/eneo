@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -23,6 +25,7 @@ SSE_EVENT_QUESTION = "question"
 SSE_EVENT_REQUIREMENTS_SUMMARY = "requirements_summary"
 SSE_EVENT_ERROR = "error"
 SSE_EVENT_STATUS = "status"
+SSE_EVENT_USAGE = "usage"
 SSE_EVENT_DONE = "done"
 
 
@@ -37,6 +40,13 @@ def build_status_event(status: str) -> dict[str, str]:
     return {
         "event": SSE_EVENT_STATUS,
         "data": AIBuilderStatusEventData(status=status).model_dump_json(),
+    }
+
+
+def build_usage_event(telemetry: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        "event": SSE_EVENT_USAGE,
+        "data": json.dumps(dict(telemetry), ensure_ascii=False),
     }
 
 

@@ -1,6 +1,8 @@
 import type { FlowStep } from "@intric/intric-js";
 
 type MCPToolLike = {
+  id?: string;
+  name?: string;
   is_enabled?: boolean;
 };
 
@@ -24,9 +26,9 @@ type AssistantMcpLike = {
 };
 
 export type FlowStepMcpSummary = {
-  serverCount: number;
   enabledToolCount: number;
-  hasConfiguredMcp: boolean;
+  // A server assignment alone is not enough; the runtime needs at least one enabled tool.
+  hasActiveMcp: boolean;
 };
 
 export type FlowStepMcpCompatibility = {
@@ -37,7 +39,7 @@ export type FlowStepMcpCompatibility = {
 type FlowStepMcpCompatibilityInput = {
   step: FlowStep;
   steps: FlowStep[];
-  assistantsById: Map<string, AssistantMcpLike | null | undefined>;
+  assistantsById: Map<string, AssistantMcpLike | null | undefined> | Map<string, unknown>;
   availableServers: Array<{
     id: string;
     security_classification?: { security_level?: number } | null;
@@ -47,9 +49,8 @@ type FlowStepMcpCompatibilityInput = {
 
 export function createEmptyFlowStepMcpSummary(): FlowStepMcpSummary {
   return {
-    serverCount: 0,
     enabledToolCount: 0,
-    hasConfiguredMcp: false
+    hasActiveMcp: false
   };
 }
 
@@ -60,9 +61,11 @@ export function shouldShowStepMcpSection(
 }
 
 export function summarizeAssistantMcp(
-  assistant: AssistantMcpLike | null | undefined
+  assistant: { mcp_servers?: unknown } | null | undefined
 ): FlowStepMcpSummary {
-  const servers = Array.isArray(assistant?.mcp_servers) ? assistant.mcp_servers : [];
+  const servers = Array.isArray(assistant?.mcp_servers)
+    ? (assistant.mcp_servers as MCPServerLike[])
+    : [];
   const enabledToolCount = servers.reduce((count, server) => {
     const tools = Array.isArray(server.tools) ? server.tools : [];
     return count + tools.filter((tool) => tool?.is_enabled === true).length;
@@ -70,9 +73,8 @@ export function summarizeAssistantMcp(
 
   return {
     ...createEmptyFlowStepMcpSummary(),
-    serverCount: servers.length,
     enabledToolCount,
-    hasConfiguredMcp: servers.length > 0
+    hasActiveMcp: enabledToolCount > 0
   };
 }
 
@@ -87,7 +89,7 @@ function maxLevel(...levels: Array<number | null>): number | null {
   return presentLevels.length > 0 ? Math.max(...presentLevels) : null;
 }
 
-function assistantKnowledgeLevel(assistant: AssistantMcpLike | undefined): number | null {
+function assistantKnowledgeLevel(assistant: AssistantMcpLike | null | undefined): number | null {
   const sources = [
     ...(assistant?.groups ?? []),
     ...(assistant?.websites ?? []),
@@ -99,7 +101,7 @@ function assistantKnowledgeLevel(assistant: AssistantMcpLike | undefined): numbe
   return levels.length > 0 ? Math.max(...levels) : null;
 }
 
-function assistantMcpLevel(assistant: AssistantMcpLike | undefined): number | null {
+function assistantMcpLevel(assistant: AssistantMcpLike | null | undefined): number | null {
   const levels = (assistant?.mcp_servers ?? [])
     .map((server) => classificationLevel(server.security_classification))
     .filter((level): level is number => level !== null);
@@ -138,7 +140,7 @@ export function buildFlowStepMcpCompatibilityMap(
     }
 
     const assistantId = currentStep.assistant_id ?? "";
-    const assistant = assistantsById.get(assistantId);
+    const assistant = assistantsById.get(assistantId) as AssistantMcpLike | null | undefined;
     const currentInputFloor = inputFloorLevel({
       stepOrder: currentStep.step_order,
       inputSource: currentStep.input_source,
@@ -180,7 +182,7 @@ export function buildFlowStepMcpCompatibilityMap(
 export function hasLoadedFlowStepMcpClassificationInputs(args: {
   step: FlowStep | null | undefined;
   steps: FlowStep[];
-  assistantsById: Map<string, AssistantMcpLike | null | undefined>;
+  assistantsById: Map<string, AssistantMcpLike | null | undefined> | Map<string, unknown>;
 }): boolean {
   const { step, steps, assistantsById } = args;
   if (!step) return false;

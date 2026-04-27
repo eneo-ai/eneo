@@ -158,11 +158,9 @@
           {m.flow_step_card_chain_short()}: {nextChannelLabel}
         </Badge>
       </div>
-      {#if data.mcpSummary?.hasConfiguredMcp}
+      {#if data.mcpSummary?.hasActiveMcp}
         <div class="text-warning-stronger flex items-center gap-1">
-          {data.mcpSummary.enabledToolCount > 0
-            ? m.flow_step_mcp_tools_badge({ count: String(data.mcpSummary.enabledToolCount) })
-            : m.flow_step_mcp_servers_badge({ count: String(data.mcpSummary.serverCount) })}
+          {m.flow_step_mcp_tools_badge({ count: String(data.mcpSummary.enabledToolCount) })}
         </div>
       {/if}
       {#if data.runStatus && (data.numTokensInput || data.numTokensOutput)}

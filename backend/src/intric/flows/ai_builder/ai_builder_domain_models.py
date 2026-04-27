@@ -18,7 +18,7 @@ from typing import Any
 from uuid import UUID
 
 import uuid_utils
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from intric.flows.enums import (
     AIBuilderInputSource as InputSource,
@@ -108,6 +108,8 @@ class AssistantSpec(BaseModel):
     instructions: str
     model_ref: str | None = None
     knowledge_refs: list[str] = Field(default_factory=list)
+    mcp_server_refs: list[str] = Field(default_factory=list)
+    mcp_tool_refs: list[str] = Field(default_factory=list)
 
     @field_validator("model_ref")
     @classmethod
@@ -117,9 +119,9 @@ class AssistantSpec(BaseModel):
         normalized = value.strip()
         return normalized or None
 
-    @field_validator("knowledge_refs")
+    @field_validator("knowledge_refs", "mcp_server_refs", "mcp_tool_refs")
     @classmethod
-    def normalize_knowledge_refs(cls, values: list[str]) -> list[str]:
+    def normalize_resource_refs(cls, values: list[str]) -> list[str]:
         normalized: list[str] = []
         seen: set[str] = set()
         for raw in values:
@@ -129,6 +131,14 @@ class AssistantSpec(BaseModel):
             normalized.append(candidate)
             seen.add(candidate)
         return normalized
+
+    @model_validator(mode="after")
+    def validate_knowledge_mcp_exclusivity(self) -> "AssistantSpec":
+        if self.knowledge_refs and (self.mcp_server_refs or self.mcp_tool_refs):
+            raise ValueError(
+                "A step assistant cannot use knowledge_refs and MCP refs at the same time."
+            )
+        return self
 
 
 class StepSpec(BaseModel):

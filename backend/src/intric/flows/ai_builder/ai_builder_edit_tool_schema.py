@@ -16,6 +16,9 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_mode_values,
     builder_output_type_values,
 )
+from intric.flows.ai_builder.ai_builder_mcp_resources import (
+    AIBuilderMCPResourceInput,
+)
 from intric.flows.ai_builder.ai_builder_new_step_schema import (
     build_new_step_draft_schema,
     small_ref_enums,
@@ -29,6 +32,7 @@ def build_edit_flow_tool_schema(
     current_steps: list[FlowStep],
     available_models: list[dict[str, Any]] | None = None,
     available_kbs: list[dict[str, Any]] | None = None,
+    available_mcps: AIBuilderMCPResourceInput = None,
 ) -> dict[str, Any]:
     """Build the edit_flow tool schema with dynamic constraints.
 
@@ -36,6 +40,8 @@ def build_edit_flow_tool_schema(
         current_steps: Existing flow steps (for valid ref enums).
         available_models: Available model refs (for model_ref enum).
         available_kbs: Available KB refs (for knowledge_refs enum).
+        available_mcps: Available MCP servers/tools. MCP refs stay free-form;
+            the backend catalog resolves or rejects them after tool submission.
     """
     valid_refs = [f"existing_step_{s.step_order}" for s in current_steps]
     # Include None for add operations where target_ref should be absent
@@ -44,8 +50,18 @@ def build_edit_flow_tool_schema(
 
     model_refs = small_ref_enums(available_models)
     kb_refs = small_ref_enums(available_kbs)
+    # Do not constrain MCP refs with schema enums. When a requested MCP is
+    # absent, enums can force the model to pick an unrelated available MCP.
+    # Catalog resolution and quality feedback provide the durable guardrail.
+    mcp_server_refs: list[str] | None = None
+    mcp_tool_refs: list[str] | None = None
 
-    step_payload_schema = _build_step_payload_schema(model_refs, kb_refs)
+    step_payload_schema = _build_step_payload_schema(
+        model_refs,
+        kb_refs,
+        mcp_server_refs,
+        mcp_tool_refs,
+    )
 
     return {
         "type": "function",
@@ -124,7 +140,12 @@ def build_edit_flow_tool_schema(
                                     },
                                 },
                                 "add_payload": step_payload_schema,
-                                "patch": _build_patch_schema(model_refs, kb_refs),
+                                "patch": _build_patch_schema(
+                                    model_refs,
+                                    kb_refs,
+                                    mcp_server_refs,
+                                    mcp_tool_refs,
+                                ),
                             },
                         },
                     },
@@ -143,6 +164,7 @@ def build_edit_mode_tool_schemas(
     current_steps: list[FlowStep],
     available_models: list[dict[str, Any]] | None = None,
     available_kbs: list[dict[str, Any]] | None = None,
+    available_mcps: AIBuilderMCPResourceInput = None,
 ) -> list[dict[str, Any]]:
     """Build the full tool set for edit mode.
 
@@ -154,7 +176,12 @@ def build_edit_mode_tool_schemas(
     )
 
     return [
-        build_edit_flow_tool_schema(current_steps, available_models, available_kbs),
+        build_edit_flow_tool_schema(
+            current_steps,
+            available_models,
+            available_kbs,
+            available_mcps,
+        ),
         build_ask_structured_question_tool_schema(),
         build_confirm_requirements_tool_schema(),
     ]
@@ -168,11 +195,15 @@ def build_edit_mode_tool_schemas(
 def _build_step_payload_schema(
     model_refs: list[str] | None,
     kb_refs: list[str] | None,
+    mcp_server_refs: list[str] | None,
+    mcp_tool_refs: list[str] | None,
 ) -> dict[str, Any]:
     """Schema for add_payload (shared typed draft for new steps)."""
     return build_new_step_draft_schema(
         model_refs=model_refs,
         kb_refs=kb_refs,
+        mcp_server_refs=mcp_server_refs,
+        mcp_tool_refs=mcp_tool_refs,
         description=(
             "Typed authoring draft for a new step added to an existing flow. "
             "Describe only the new step intent; the backend derives output_mode, "
@@ -190,9 +221,16 @@ def _build_step_payload_schema(
 def _build_patch_schema(
     model_refs: list[str] | None,
     kb_refs: list[str] | None,
+    mcp_server_refs: list[str] | None,
+    mcp_tool_refs: list[str] | None,
 ) -> dict[str, Any]:
     """Schema for patch (partial update for modify operations)."""
-    assistant_spec = _build_assistant_spec_schema(model_refs, kb_refs)
+    assistant_spec = _build_assistant_spec_schema(
+        model_refs,
+        kb_refs,
+        mcp_server_refs,
+        mcp_tool_refs,
+    )
 
     return {
         "type": "object",
@@ -241,6 +279,8 @@ def _build_patch_schema(
 def _build_assistant_spec_schema(
     model_refs: list[str] | None,
     kb_refs: list[str] | None,
+    mcp_server_refs: list[str] | None,
+    mcp_tool_refs: list[str] | None,
 ) -> dict[str, Any]:
     schema: dict[str, Any] = {
         "type": "object",
@@ -259,6 +299,21 @@ def _build_assistant_spec_schema(
                 "items": {"type": "string"},
                 "description": "Knowledge base aliases to attach.",
             },
+            "mcp_server_refs": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "MCP server refs to attach. Use only for external tools/live data "
+                    "and do not combine with knowledge_refs."
+                ),
+            },
+            "mcp_tool_refs": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "MCP tool refs to attach for least-privilege tool access."
+                ),
+            },
         },
     }
 
@@ -267,5 +322,9 @@ def _build_assistant_spec_schema(
         schema["properties"]["model_ref"]["enum"] = model_refs + [None]
     if kb_refs is not None:
         schema["properties"]["knowledge_refs"]["items"]["enum"] = kb_refs
+    if mcp_server_refs is not None:
+        schema["properties"]["mcp_server_refs"]["items"]["enum"] = mcp_server_refs
+    if mcp_tool_refs is not None:
+        schema["properties"]["mcp_tool_refs"]["items"]["enum"] = mcp_tool_refs
 
     return schema

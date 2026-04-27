@@ -91,6 +91,8 @@ class TurnTelemetry:
     completion_tokens: int | None
     total_tokens: int | None
     finish_reason: str | None
+    token_usage_source: str | None = None
+    token_usage_estimated: bool = False
     parse_repair_attempts: int = 0
 
 
@@ -201,6 +203,7 @@ async def run_planner_turn(
         architecture_commit_populated: bool,
     ) -> TurnTelemetry:
         completion = pipeline_outcome.final_completion
+        cumulative_usage = pipeline_outcome.cumulative_token_usage
         return TurnTelemetry(
             request_id=str(request_id) if request_id is not None else None,
             model=litellm_model,
@@ -210,12 +213,42 @@ async def run_planner_turn(
             repair_attempts=pipeline_outcome.repair_attempts,
             parse_repair_attempts=pipeline_outcome.parse_repair_attempts,
             architecture_commit_populated=architecture_commit_populated,
-            prompt_tokens=completion.prompt_tokens if completion is not None else None,
-            completion_tokens=(
-                completion.completion_tokens if completion is not None else None
+            prompt_tokens=(
+                cumulative_usage.prompt_tokens
+                if cumulative_usage is not None and cumulative_usage.has_tokens
+                else completion.prompt_tokens
+                if completion is not None
+                else None
             ),
-            total_tokens=completion.total_tokens if completion is not None else None,
+            completion_tokens=(
+                cumulative_usage.completion_tokens
+                if cumulative_usage is not None and cumulative_usage.has_tokens
+                else completion.completion_tokens
+                if completion is not None
+                else None
+            ),
+            total_tokens=(
+                cumulative_usage.total_tokens
+                if cumulative_usage is not None and cumulative_usage.has_tokens
+                else completion.total_tokens
+                if completion is not None
+                else None
+            ),
             finish_reason=completion.finish_reason if completion is not None else None,
+            token_usage_source=(
+                cumulative_usage.source
+                if cumulative_usage is not None and cumulative_usage.has_tokens
+                else completion.token_usage_source
+                if completion is not None
+                else None
+            ),
+            token_usage_estimated=(
+                cumulative_usage.estimated
+                if cumulative_usage is not None and cumulative_usage.has_tokens
+                else completion.token_usage_estimated
+                if completion is not None
+                else False
+            ),
         )
 
     if pipeline_outcome.kind == "parse_failed":

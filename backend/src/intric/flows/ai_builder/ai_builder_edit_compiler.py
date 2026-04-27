@@ -412,9 +412,21 @@ def _resolve_existing_assistant_spec(
     instructions_raw = snapshot.get("instructions")
     model_ref_raw = snapshot.get("model_ref")
     knowledge_refs_raw = snapshot.get("knowledge_refs")
+    mcp_server_refs_raw = snapshot.get("mcp_server_refs")
+    mcp_tool_refs_raw = snapshot.get("mcp_tool_refs")
     knowledge_refs = (
         cast(list[object], knowledge_refs_raw)
         if isinstance(knowledge_refs_raw, list)
+        else []
+    )
+    mcp_server_refs = (
+        cast(list[object], mcp_server_refs_raw)
+        if isinstance(mcp_server_refs_raw, list)
+        else []
+    )
+    mcp_tool_refs = (
+        cast(list[object], mcp_tool_refs_raw)
+        if isinstance(mcp_tool_refs_raw, list)
         else []
     )
     return AssistantSpec(
@@ -425,6 +437,10 @@ def _resolve_existing_assistant_spec(
         if isinstance(model_ref_raw, str) and model_ref_raw.strip()
         else None,
         knowledge_refs=[str(ref).strip() for ref in knowledge_refs if str(ref).strip()],
+        mcp_server_refs=[
+            str(ref).strip() for ref in mcp_server_refs if str(ref).strip()
+        ],
+        mcp_tool_refs=[str(ref).strip() for ref in mcp_tool_refs if str(ref).strip()],
     )
 
 
@@ -432,22 +448,46 @@ def _merge_assistant_specs(
     existing: AssistantSpec,
     patch: AssistantSpec,
 ) -> AssistantSpec:
+    patched_fields = patch.model_fields_set
     instructions = existing.instructions
-    if "instructions" in patch.model_fields_set:
+    if "instructions" in patched_fields:
         instructions = patch.instructions.strip() or existing.instructions
 
     model_ref = existing.model_ref
-    if "model_ref" in patch.model_fields_set:
+    if "model_ref" in patched_fields:
         model_ref = patch.model_ref
 
     knowledge_refs = existing.knowledge_refs
-    if "knowledge_refs" in patch.model_fields_set:
+    if "knowledge_refs" in patched_fields:
         knowledge_refs = patch.knowledge_refs
+
+    mcp_server_refs = existing.mcp_server_refs
+    if "mcp_server_refs" in patched_fields:
+        mcp_server_refs = patch.mcp_server_refs
+
+    mcp_tool_refs = existing.mcp_tool_refs
+    if "mcp_tool_refs" in patched_fields:
+        mcp_tool_refs = patch.mcp_tool_refs
+
+    patch_selects_knowledge = "knowledge_refs" in patched_fields and bool(
+        patch.knowledge_refs
+    )
+    patch_selects_mcp = (
+        "mcp_server_refs" in patched_fields and bool(patch.mcp_server_refs)
+    ) or ("mcp_tool_refs" in patched_fields and bool(patch.mcp_tool_refs))
+
+    if patch_selects_knowledge:
+        mcp_server_refs = []
+        mcp_tool_refs = []
+    elif patch_selects_mcp:
+        knowledge_refs = []
 
     return AssistantSpec(
         instructions=instructions,
         model_ref=model_ref,
         knowledge_refs=knowledge_refs,
+        mcp_server_refs=mcp_server_refs,
+        mcp_tool_refs=mcp_tool_refs,
     )
 
 
@@ -585,6 +625,12 @@ def _describe_step_change(previous: StepSpec | None, current: StepSpec) -> str |
         details.append("model updated")
     if previous.assistant_spec.knowledge_refs != current.assistant_spec.knowledge_refs:
         details.append("knowledge updated")
+    if (
+        previous.assistant_spec.mcp_server_refs
+        != current.assistant_spec.mcp_server_refs
+        or previous.assistant_spec.mcp_tool_refs != current.assistant_spec.mcp_tool_refs
+    ):
+        details.append("MCP tools updated")
     return ", ".join(details) if details else None
 
 

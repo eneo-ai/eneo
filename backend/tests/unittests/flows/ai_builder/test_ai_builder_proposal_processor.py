@@ -10,6 +10,11 @@ import pytest
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_mcp_intent import (
+    MCP_RESOURCE_SELECTION_QUESTION_ID,
+    MCP_SELECTION_USE_SERVER_PREFIX,
+    MCP_SELECTION_WITHOUT,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     ConversationMessage,
@@ -24,9 +29,14 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
     ProposalContext,
+    ProposalUsageTracker,
     SubmissionToolHandlerConfig,
     ToolProcessingResult,
     ToolRetryConfig,
+    _active_submission_tool_schemas,
+)
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
@@ -71,16 +81,32 @@ def _make_context(**overrides) -> ProposalContext:
     return ProposalContext(**defaults)
 
 
-def _make_response_with_tool_calls(*tool_calls: MagicMock) -> SimpleNamespace:
+def _make_response_with_tool_calls(
+    *tool_calls: MagicMock,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    total_tokens: int | None = None,
+) -> SimpleNamespace:
+    usage = (
+        None
+        if prompt_tokens is None and completion_tokens is None and total_tokens is None
+        else SimpleNamespace(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
+    )
     return SimpleNamespace(
         choices=[
             SimpleNamespace(
+                finish_reason="tool_calls",
                 message=SimpleNamespace(
                     tool_calls=list(tool_calls),
                     content=None,
-                )
+                ),
             )
-        ]
+        ],
+        usage=usage,
     )
 
 
@@ -95,7 +121,11 @@ def _make_tool_call(
 
 
 def _make_flow_spec(
-    *, model_ref: str | None, knowledge_refs: list[str]
+    *,
+    model_ref: str | None,
+    knowledge_refs: list[str],
+    mcp_server_refs: list[str] | None = None,
+    mcp_tool_refs: list[str] | None = None,
 ) -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Grounded flow",
@@ -108,6 +138,8 @@ def _make_flow_spec(
                     instructions="Gör analysen.",
                     model_ref=model_ref,
                     knowledge_refs=knowledge_refs,
+                    mcp_server_refs=mcp_server_refs or [],
+                    mcp_tool_refs=mcp_tool_refs or [],
                 ),
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.TEXT,
@@ -117,6 +149,72 @@ def _make_flow_spec(
             )
         ],
     )
+
+
+async def _single_plan_event(**_kwargs):
+    yield {"event": "plan", "data": "{}"}
+
+
+def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
+    schemas = _active_submission_tool_schemas(
+        flow=None,
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "ref": "server-1",
+                "tools": [{"ref": "tool-1", "name": "lookup_case"}],
+            }
+        ],
+    )
+
+    step_props = schemas[0]["function"]["parameters"]["properties"]["steps"]["items"][
+        "properties"
+    ]
+    assert "enum" not in step_props["mcp_server_refs"]["items"]
+    assert "enum" not in step_props["mcp_tool_refs"]["items"]
+
+
+def test_proposal_usage_tracker_counts_only_explicit_repair_calls() -> None:
+    tracker = ProposalUsageTracker(
+        request_id="req-tracker",
+        model="openai/gpt-5.4-nano",
+    )
+
+    tracker.record_response(
+        _make_response_with_tool_calls(
+            _make_tool_call(OUTLINE_FLOW_TOOL_NAME, {"flow_name": "Initial"}),
+            prompt_tokens=10,
+            completion_tokens=2,
+            total_tokens=12,
+        ),
+        messages=[{"role": "user", "content": "Build"}],
+    )
+    tracker.record_response(
+        _make_response_with_tool_calls(
+            _make_tool_call(OUTLINE_FLOW_TOOL_NAME, {"flow_name": "Auxiliary"}),
+            prompt_tokens=4,
+            completion_tokens=1,
+            total_tokens=5,
+        ),
+        messages=[{"role": "user", "content": "Auxiliary"}],
+    )
+    tracker.record_response(
+        _make_response_with_tool_calls(
+            _make_tool_call(OUTLINE_FLOW_TOOL_NAME, {"flow_name": "Repaired"}),
+            prompt_tokens=3,
+            completion_tokens=2,
+            total_tokens=5,
+        ),
+        messages=[{"role": "user", "content": "Repair"}],
+        counts_as_repair=True,
+    )
+
+    telemetry = tracker.build_planner_telemetry(tool_call_count=1)
+
+    assert telemetry["llm_calls_made"] == 3
+    assert telemetry["repair_attempts"] == 1
+    assert telemetry["total_tokens"] == 22
 
 
 @pytest.mark.asyncio
@@ -484,6 +582,317 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
 
 
 @pytest.mark.asyncio
+async def test_propose_plan_asks_before_planning_when_named_mcp_is_unavailable() -> (
+    None
+):
+    processor = _make_processor()
+    session_id = uuid4()
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "svelte-server",
+                "name": "Svelte mcp",
+                "description": "Developer documentation helpers for Svelte apps.",
+                "tools": [{"id": "svelte-docs", "name": "get-documentation"}],
+            }
+        ],
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Använd Time MCP för att hämta aktuell tid.",
+            metadata={"ui_language": "sv"},
+        )
+    ]
+
+    events = [
+        event
+        async for event in processor.propose_plan(
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=0,
+            llm_messages=[{"role": "system", "content": "Prompt"}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=catalog,
+            max_output_tokens=4096,
+            proposal_temperature=0.2,
+            request_id="req-propose",
+            flow=None,
+            lease_request_id=uuid4(),
+            lease_lock_token=uuid4(),
+        )
+    ]
+
+    assert [event["event"] for event in events] == ["text", "question"]
+    question_payload = json.loads(events[1]["data"])
+    assert question_payload["question_id"] == MCP_RESOURCE_SELECTION_QUESTION_ID
+    assert "Time MCP" in question_payload["question"]
+    assert [option["label"] for option in question_payload["options"]] == [
+        "Fortsätt utan MCP",
+        "Använd Svelte mcp",
+    ]
+    assert not processor.litellm_client.acompletion.await_count
+    processor.repo.commit_turn.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_asks_before_planning_when_named_mcp_is_enabled() -> None:
+    processor = _make_processor()
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "description": "Kan hämta tiden.",
+                "tools": [{"id": "current-time", "name": "get_current_time"}],
+            }
+        ],
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Använd Time MCP för att hämta aktuell tid.",
+            metadata={"ui_language": "sv"},
+        )
+    ]
+
+    events = [
+        event
+        async for event in processor.propose_plan(
+            session_id=uuid4(),
+            conversation=conversation,
+            new_messages_start=0,
+            llm_messages=[{"role": "system", "content": "Prompt"}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=catalog,
+            max_output_tokens=4096,
+            proposal_temperature=0.2,
+            request_id="req-propose",
+            flow=None,
+        )
+    ]
+
+    assert [event["event"] for event in events] == ["text", "question"]
+    question_payload = json.loads(events[1]["data"])
+    assert question_payload["question_id"] == MCP_RESOURCE_SELECTION_QUESTION_ID
+    assert [option["label"] for option in question_payload["options"]] == [
+        "Fortsätt utan MCP",
+        "Använd Time MCP",
+    ]
+    assert not processor.litellm_client.acompletion.await_count
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
+    processor = _make_processor()
+    outline_call = _make_tool_call(
+        OUTLINE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Time fallback",
+            "plan_rationale": "Respond without external tools.",
+            "steps": [{"name": "Answer", "task": "Build a response without MCP."}],
+        },
+    )
+    processor.litellm_client.acompletion.return_value = _make_response_with_tool_calls(
+        outline_call
+    )
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[],
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Använd Time MCP för att hämta aktuell tid.",
+            metadata={"ui_language": "sv"},
+        ),
+        ConversationMessage(
+            role="user",
+            content="Fortsätt utan MCP",
+            metadata={
+                "question_answer": {
+                    "question_id": MCP_RESOURCE_SELECTION_QUESTION_ID,
+                    "selected_values": ["without_mcp"],
+                }
+            },
+        ),
+    ]
+
+    with patch.object(
+        processor,
+        "handle_tool_call",
+        side_effect=_single_plan_event,
+    ) as handle_tool_call:
+        events = [
+            event
+            async for event in processor.propose_plan(
+                session_id=uuid4(),
+                conversation=conversation,
+                new_messages_start=2,
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={},
+                available_models=None,
+                available_kbs=None,
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=catalog,
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-propose",
+                flow=None,
+            )
+        ]
+
+    assert events == [{"event": "plan", "data": "{}"}]
+    processor.litellm_client.acompletion.assert_awaited_once()
+    assert handle_tool_call.call_args.kwargs["tool_calls"] == [outline_call]
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_reasks_when_user_requests_mcp_after_declining() -> None:
+    processor = _make_processor()
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "description": "Kan hämta tiden.",
+                "tools": [{"id": "current-time", "name": "get_current_time"}],
+            }
+        ],
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Använd Time MCP för att hämta aktuell tid.",
+            metadata={"ui_language": "sv"},
+        ),
+        ConversationMessage(
+            role="user",
+            content="Fortsätt utan MCP",
+            metadata={
+                "question_answer": {
+                    "question_id": MCP_RESOURCE_SELECTION_QUESTION_ID,
+                    "selected_values": [MCP_SELECTION_WITHOUT],
+                }
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content="Jag ändrade mig, använd Time MCP ändå.",
+            metadata={"ui_language": "sv"},
+        ),
+    ]
+
+    events = [
+        event
+        async for event in processor.propose_plan(
+            session_id=uuid4(),
+            conversation=conversation,
+            new_messages_start=2,
+            llm_messages=[{"role": "system", "content": "Prompt"}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=catalog,
+            max_output_tokens=4096,
+            proposal_temperature=0.2,
+            request_id="req-propose",
+            flow=None,
+        )
+    ]
+
+    assert [event["event"] for event in events] == ["text", "question"]
+    question_payload = json.loads(events[1]["data"])
+    assert question_payload["question_id"] == MCP_RESOURCE_SELECTION_QUESTION_ID
+    assert [option["value"] for option in question_payload["options"]] == [
+        MCP_SELECTION_WITHOUT,
+        f"{MCP_SELECTION_USE_SERVER_PREFIX}time-server",
+    ]
+    assert not processor.litellm_client.acompletion.await_count
+
+
+@pytest.mark.asyncio
+async def test_outline_processing_enforces_without_mcp_selection() -> None:
+    processor = _make_processor()
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [{"id": "current-time", "name": "get_current_time"}],
+            }
+        ],
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Använd Time MCP för att hämta aktuell tid.",
+        ),
+        ConversationMessage(
+            role="user",
+            content="Fortsätt utan MCP",
+            metadata={
+                "question_answer": {
+                    "question_id": MCP_RESOURCE_SELECTION_QUESTION_ID,
+                    "selected_values": ["without_mcp"],
+                }
+            },
+        ),
+    ]
+
+    result = await processor._process_outline_arguments(
+        session_id=uuid4(),
+        conversation=conversation,
+        new_messages_start=0,
+        arguments={
+            "flow_name": "Time flow",
+            "plan_rationale": "Use MCP despite the user's decline.",
+            "steps": [
+                {
+                    "name": "Hämta tid",
+                    "task": "Hämta aktuell tid via Time MCP.",
+                    "mcp_tool_refs": ["current-time"],
+                }
+            ],
+        },
+        assistant_content="",
+        tool_call_id="call-time",
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=catalog,
+    )
+
+    assert result.failure_kind == "quality"
+    assert result.feedback is not None
+    assert "continue without MCP" in result.feedback
+    processor.repo.commit_turn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_handle_submission_tool_call_runs_processor_once_with_flow_context() -> (
     None
 ):
@@ -566,6 +975,164 @@ async def test_handle_submission_tool_call_omits_flow_context_by_default() -> No
     assert events == [{"event": "plan", "data": "{}"}]
     process_tool_arguments.assert_awaited_once()
     assert "flow" not in process_tool_arguments.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
+    processor = _make_processor()
+    tool_call = _make_tool_call(
+        OUTLINE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Simple flow",
+            "plan_rationale": "Classify incoming text.",
+            "steps": [{"name": "Classify", "task": "Classify the request."}],
+        },
+        tool_call_id="call-outline",
+    )
+    processor.litellm_client.acompletion.return_value = _make_response_with_tool_calls(
+        tool_call,
+        prompt_tokens=10,
+        completion_tokens=7,
+        total_tokens=17,
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
+        ),
+        patch.object(
+            processor,
+            "_process_outline_arguments",
+            new=AsyncMock(
+                return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+            ),
+        ) as process_outline,
+    ):
+        events = [
+            event
+            async for event in processor.propose_plan(
+                session_id=uuid4(),
+                conversation=[
+                    ConversationMessage(role="user", content="Bygg ett flöde")
+                ],
+                new_messages_start=1,
+                llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
+                litellm_model="openai/gpt-5.4-nano",
+                litellm_kwargs={},
+                available_models=None,
+                available_kbs=None,
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=None,
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-proposal-usage",
+            )
+        ]
+
+    assert events == [{"event": "plan", "data": "{}"}]
+    metadata = process_outline.await_args.kwargs["assistant_metadata"]
+    planner_telemetry = metadata["planner_telemetry"]
+    assert planner_telemetry["request_id"] == "req-proposal-usage"
+    assert planner_telemetry["model"] == "openai/gpt-5.4-nano"
+    assert planner_telemetry["prompt_tokens"] == 10
+    assert planner_telemetry["completion_tokens"] == 7
+    assert planner_telemetry["total_tokens"] == 17
+    assert planner_telemetry["llm_calls_made"] == 1
+    assert planner_telemetry["token_usage_source"] == "provider"
+    assert planner_telemetry["token_usage_estimated"] is False
+    session_telemetry = metadata["session_telemetry"]
+    assert session_telemetry["total_tokens_total"] == 17
+    assert session_telemetry["last_token_usage_source"] == "provider"
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> None:
+    processor = _make_processor()
+    failed_tool_call = _make_tool_call(
+        OUTLINE_FLOW_TOOL_NAME,
+        {"flow_name": "Broken"},
+        tool_call_id="call-outline-bad",
+    )
+    repaired_tool_call = _make_tool_call(
+        OUTLINE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Repaired flow",
+            "plan_rationale": "Classify incoming text.",
+            "steps": [{"name": "Classify", "task": "Classify the request."}],
+        },
+        tool_call_id="call-outline-repaired",
+    )
+    processor.litellm_client.acompletion.side_effect = [
+        _make_response_with_tool_calls(
+            failed_tool_call,
+            prompt_tokens=10,
+            completion_tokens=7,
+            total_tokens=17,
+        ),
+        _make_response_with_tool_calls(
+            repaired_tool_call,
+            prompt_tokens=4,
+            completion_tokens=3,
+            total_tokens=7,
+        ),
+    ]
+    captured_metadata: list[dict[str, object] | None] = []
+
+    async def process_outline(**kwargs) -> ToolProcessingResult:
+        captured_metadata.append(kwargs.get("assistant_metadata"))
+        if len(captured_metadata) == 1:
+            return ToolProcessingResult(
+                feedback="Invalid outline.",
+                failure_kind="parse",
+            )
+        return ToolProcessingResult(event={"event": "plan", "data": "{}"})
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
+        ),
+        patch.object(
+            processor,
+            "_process_outline_arguments",
+            new=process_outline,
+        ),
+    ):
+        events = [
+            event
+            async for event in processor.propose_plan(
+                session_id=uuid4(),
+                conversation=[
+                    ConversationMessage(role="user", content="Bygg ett flöde")
+                ],
+                new_messages_start=1,
+                llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
+                litellm_model="openai/gpt-5.4-nano",
+                litellm_kwargs={},
+                available_models=None,
+                available_kbs=None,
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=None,
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-proposal-repair-usage",
+            )
+        ]
+
+    assert [event["event"] for event in events] == ["status", "plan"]
+    metadata = captured_metadata[1]
+    assert isinstance(metadata, dict)
+    planner_telemetry = metadata["planner_telemetry"]
+    assert planner_telemetry["prompt_tokens"] == 14
+    assert planner_telemetry["completion_tokens"] == 10
+    assert planner_telemetry["total_tokens"] == 24
+    assert planner_telemetry["llm_calls_made"] == 2
+    assert planner_telemetry["repair_attempts"] == 1
+    assert planner_telemetry["token_usage_source"] == "provider"
+    assert metadata["session_telemetry"]["total_tokens_total"] == 24
 
 
 @pytest.mark.asyncio
@@ -711,6 +1278,201 @@ async def test_process_edit_arguments_retries_on_contextual_quality_feedback() -
     assert result.failure_kind == "quality"
     assert result.feedback is not None
     assert "template_fill" in result.feedback
+    store_plan.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_edit_arguments_asks_before_accepting_mcp_usage() -> None:
+    processor = _make_processor()
+    flow = MagicMock()
+    flow.steps = []
+    flow.draft_revision = 7
+    flow.name = "Rapportflöde"
+    flow.description = "Skapar PDF idag."
+    flow.metadata_json = {}
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [{"id": "current-time", "name": "get_current_time"}],
+            }
+        ],
+    )
+
+    draft = FlowEditDraft.model_validate(
+        {
+            "plan_rationale": "Lägg till ett tidsteg.",
+            "operations": [
+                {
+                    "op": "modify",
+                    "target_ref": "existing_step_1",
+                    "patch": {"output_type": "json"},
+                }
+            ],
+        }
+    )
+    compiled_spec = _make_flow_spec(
+        model_ref=None,
+        knowledge_refs=[],
+        mcp_tool_refs=["current-time"],
+    )
+    edit_result = MagicMock(compiled_spec=compiled_spec, advisories=[])
+    compiled_validation = MagicMock(valid=True, errors=[])
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
+            return_value=SimpleNamespace(
+                spec=compiled_spec,
+                validation=compiled_validation,
+                failure_feedback=None,
+            ),
+        ) as prepare_spec,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_edit_draft",
+            return_value=edit_result,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_edit_draft",
+            return_value=SpecValidationResult(),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            new_callable=AsyncMock,
+        ) as store_plan,
+    ):
+        result = await processor._process_edit_arguments(
+            session_id=uuid4(),
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="Lägg till ett steg som använder Time MCP.",
+                    metadata={"ui_language": "sv"},
+                )
+            ],
+            new_messages_start=0,
+            arguments=draft.model_dump(mode="json"),
+            assistant_content="Här är mitt förslag:",
+            tool_call_id="call_edit",
+            available_model_refs=None,
+            available_kb_refs=None,
+            flow=flow,
+            assistant_snapshots=None,
+            litellm_model="openai/gpt-4",
+            litellm_kwargs={"api_key": "sk-test"},
+            max_output_tokens=1024,
+            resource_catalog=catalog,
+        )
+
+    assert [event["event"] for event in result.iter_events()] == ["text", "question"]
+    question_payload = json.loads(result.iter_events()[1]["data"])
+    assert question_payload["question_id"] == MCP_RESOURCE_SELECTION_QUESTION_ID
+    assert [option["value"] for option in question_payload["options"]] == [
+        MCP_SELECTION_WITHOUT,
+        f"{MCP_SELECTION_USE_SERVER_PREFIX}time-server",
+    ]
+    assert prepare_spec.call_args.kwargs["resource_catalog"] is catalog
+    store_plan.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_edit_arguments_enforces_without_mcp_selection() -> None:
+    processor = _make_processor()
+    flow = MagicMock()
+    flow.steps = []
+    flow.draft_revision = 7
+    flow.name = "Rapportflöde"
+    flow.description = "Skapar PDF idag."
+    flow.metadata_json = {}
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [{"id": "current-time", "name": "get_current_time"}],
+            }
+        ],
+    )
+
+    draft = FlowEditDraft.model_validate(
+        {
+            "plan_rationale": "Lägg till ett tidsteg.",
+            "operations": [
+                {
+                    "op": "modify",
+                    "target_ref": "existing_step_1",
+                    "patch": {"output_type": "json"},
+                }
+            ],
+        }
+    )
+    compiled_spec = _make_flow_spec(
+        model_ref=None,
+        knowledge_refs=[],
+        mcp_tool_refs=["current-time"],
+    )
+    edit_result = MagicMock(compiled_spec=compiled_spec, advisories=[])
+    compiled_validation = MagicMock(valid=True, errors=[])
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
+            return_value=SimpleNamespace(
+                spec=compiled_spec,
+                validation=compiled_validation,
+                failure_feedback=None,
+            ),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_edit_draft",
+            return_value=edit_result,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_edit_draft",
+            return_value=SpecValidationResult(),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            new_callable=AsyncMock,
+        ) as store_plan,
+    ):
+        result = await processor._process_edit_arguments(
+            session_id=uuid4(),
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="Fortsätt utan MCP",
+                    metadata={
+                        "question_answer": {
+                            "question_id": MCP_RESOURCE_SELECTION_QUESTION_ID,
+                            "selected_values": [MCP_SELECTION_WITHOUT],
+                        }
+                    },
+                )
+            ],
+            new_messages_start=0,
+            arguments=draft.model_dump(mode="json"),
+            assistant_content="Här är mitt förslag:",
+            tool_call_id="call_edit",
+            available_model_refs=None,
+            available_kb_refs=None,
+            flow=flow,
+            assistant_snapshots=None,
+            litellm_model="openai/gpt-4",
+            litellm_kwargs={"api_key": "sk-test"},
+            max_output_tokens=1024,
+            resource_catalog=catalog,
+        )
+
+    assert result.event is None
+    assert result.failure_kind == "quality"
+    assert result.feedback is not None
+    assert "continue without MCP" in result.feedback
     store_plan.assert_not_awaited()
 
 

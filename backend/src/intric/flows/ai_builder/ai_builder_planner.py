@@ -48,6 +48,10 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     looks_like_information_request,
 )
+from intric.flows.ai_builder.ai_builder_mcp_intent import (
+    mcp_resource_selection_values,
+)
+from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage, SessionStatus
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     AskQuestionAction,
@@ -66,6 +70,7 @@ from intric.flows.ai_builder.ai_builder_planner_turn import (
 )
 from intric.flows.ai_builder.ai_builder_prompts import (
     build_available_kbs_context,
+    build_available_mcp_context,
     build_available_models_context,
     build_clarification_hints,
     build_flow_context,
@@ -473,6 +478,7 @@ class AIBuilderPlanner:
         allow_discovery_semantic_adjudication: bool = True,
         persisted_planning_state: PlanningState | None = None,
         base_planning_state_version: int | None = None,
+        available_mcps: AIBuilderMCPResourceInput = None,
     ) -> PlannerPreparedRequest:
         requirements_state = resolve_requirements_state(conversation)
         has_requirements_summary = requirements_state.latest_summary is not None
@@ -508,6 +514,9 @@ class AIBuilderPlanner:
             else None
         )
         kbs_ctx = build_available_kbs_context(available_kbs) if available_kbs else None
+        mcps_ctx = (
+            build_available_mcp_context(available_mcps) if available_mcps else None
+        )
         clarification_hints = build_clarification_hints(
             conversation=conversation,
             latest_user_message=message,
@@ -581,6 +590,10 @@ class AIBuilderPlanner:
                 ),
                 flow_context=flow_context,
                 is_edit_mode=is_edit_mode,
+                available_models=available_models,
+                available_kbs=available_kbs,
+                available_mcps=available_mcps,
+                mcp_selection_values=mcp_resource_selection_values(conversation),
             )
             proposal_prompt_tokens = max(1, len(proposal_system_prompt) // 3)
             proposal_budget = compute_conversation_token_budget(
@@ -642,6 +655,7 @@ class AIBuilderPlanner:
             flow_context=flow_context,
             available_models=models_ctx,
             available_knowledge_bases=kbs_ctx,
+            available_mcp_servers=mcps_ctx,
             attachment_context=(
                 attachment_context_result.context
                 if attachment_context_result is not None
@@ -686,6 +700,7 @@ class AIBuilderPlanner:
                 ),
                 "available_models_count": len(models_ctx or []),
                 "available_kbs_count": len(kbs_ctx or []),
+                "available_mcps_count": len(mcps_ctx or []),
                 "conversation_budget_tokens": conversation_budget,
                 "conversation_message_count": len(conversation),
                 "trimmed_message_count": len(trimmed),
@@ -904,6 +919,7 @@ class AIBuilderPlanner:
         litellm_kwargs: dict[str, Any],
         available_models: list[dict[str, Any]] | None = None,
         available_kbs: list[dict[str, Any]] | None = None,
+        available_mcps: AIBuilderMCPResourceInput = None,
         flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
         attachment_files: list[File] | None = None,
@@ -1020,6 +1036,7 @@ class AIBuilderPlanner:
                 litellm_kwargs=litellm_kwargs,
                 available_models=available_models,
                 available_kbs=available_kbs,
+                available_mcps=available_mcps,
                 flow=flow,
                 assistant_snapshots=assistant_snapshots,
                 attachment_files=attachment_files or [],
@@ -1148,6 +1165,7 @@ class AIBuilderPlanner:
                 resource_catalog = build_ai_builder_resource_catalog(
                     available_models=available_models,
                     available_kbs=available_kbs,
+                    available_mcps=available_mcps,
                 )
                 async for event in self.proposal_processor.propose_plan(
                     session_id=session_id,
@@ -1158,6 +1176,7 @@ class AIBuilderPlanner:
                     litellm_kwargs=litellm_kwargs,
                     available_models=available_models,
                     available_kbs=available_kbs,
+                    available_mcps=available_mcps,
                     available_model_refs=resource_catalog.model_refs,
                     available_kb_refs=resource_catalog.knowledge_base_refs,
                     resource_catalog=resource_catalog,

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 from datetime import datetime
 from enum import Enum
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
 
 
 UNAUTHORIZED_EXCEPTION_MESSAGE = "Unauthorized. User has no permissions to access."
+logger = logging.getLogger(__name__)
 
 
 _KnowledgeItemList = Sequence[Union["Collection", "Website", "IntegrationKnowledge"]]
@@ -252,6 +254,19 @@ class Assistant(Entity):
     def has_mcp(self) -> bool:
         return bool(self.mcp_servers)
 
+    def _mcp_servers_for_completion(self) -> list["MCPServer"]:
+        if self.has_knowledge():
+            if self.mcp_servers:
+                logger.warning(
+                    "assistant_mcp_suppressed_due_to_knowledge",
+                    extra={
+                        "assistant_id": str(self.id),
+                        "mcp_server_count": len(self.mcp_servers),
+                    },
+                )
+            return []
+        return self.mcp_servers
+
     def update(
         self,
         name: str | None = None,
@@ -339,11 +354,16 @@ class Assistant(Entity):
             raise NoModelSelectedException()
 
         completion_model = cast("AICompletionModel", self.completion_model)
+        effective_prompt = (
+            prompt_override
+            if prompt_override is not None
+            else prompt or self.get_prompt_text()
+        )
         return await completion_service.get_response(
             model=completion_model,
             text_input=question,
             files=files or [],
-            prompt=prompt or self.get_prompt_text(),
+            prompt=effective_prompt,
             prompt_files=self.attachments,
             info_blob_chunks=info_blob_chunks or [],
             session=session,
@@ -351,6 +371,7 @@ class Assistant(Entity):
             extended_logging=extended_logging,
             model_kwargs=model_kwargs,
             version=version,
+            mcp_servers=self._mcp_servers_for_completion(),
         )
 
     async def ask(
@@ -410,7 +431,7 @@ class Assistant(Entity):
             version=version,
             use_image_generation=self.is_default,
             web_search_results=list(web_search_results or []),
-            mcp_servers=[] if self.has_knowledge() else self.mcp_servers,
+            mcp_servers=self._mcp_servers_for_completion(),
             require_tool_approval=require_tool_approval,
         )
 

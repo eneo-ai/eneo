@@ -11,7 +11,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.ai_models_table import CompletionModels
-from intric.database.tables.assistant_table import Assistants, AssistantsGroups
+from intric.database.tables.assistant_table import (
+    AssistantMCPServers,
+    AssistantMCPServerTools,
+    Assistants,
+    AssistantsGroups,
+)
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.flow_tables import (
     FlowRuns,
@@ -19,6 +24,7 @@ from intric.database.tables.flow_tables import (
     FlowStepResults,
     FlowSteps,
 )
+from intric.database.tables.mcp_server_table import MCPServers, MCPServerTools
 from intric.database.tables.prompts_table import Prompts, PromptsAssistants
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.users_table import Users
@@ -245,6 +251,10 @@ class FlowRepository:
                 "model_label": getattr(row, "model_name", None),
                 "knowledge_refs": [],
                 "knowledge_labels": [],
+                "mcp_server_refs": [],
+                "mcp_server_labels": [],
+                "mcp_tool_refs": [],
+                "mcp_tool_labels": [],
             }
             for row in assistant_rows
         }
@@ -273,6 +283,63 @@ class FlowRepository:
                 continue
             snapshots[row.assistant_id]["knowledge_refs"].append(str(row.id))
             snapshots[row.assistant_id]["knowledge_labels"].append(row.name)
+
+        mcp_server_rows = (
+            await self.session.execute(
+                sa.select(
+                    AssistantMCPServers.assistant_id,
+                    MCPServers.id,
+                    MCPServers.name,
+                )
+                .join(MCPServers, MCPServers.id == AssistantMCPServers.mcp_server_id)
+                .where(AssistantMCPServers.assistant_id.in_(assistant_ids))
+                .where(MCPServers.tenant_id == tenant_id)
+                .order_by(
+                    AssistantMCPServers.assistant_id.asc(),
+                    MCPServers.created_at.asc(),
+                )
+            )
+        ).all()
+        for row in mcp_server_rows:
+            if row.assistant_id not in snapshots:
+                continue
+            snapshots[row.assistant_id].setdefault("mcp_server_refs", []).append(
+                str(row.id)
+            )
+            snapshots[row.assistant_id].setdefault("mcp_server_labels", []).append(
+                row.name
+            )
+
+        mcp_tool_rows = (
+            await self.session.execute(
+                sa.select(
+                    AssistantMCPServerTools.assistant_id,
+                    MCPServerTools.id,
+                    MCPServerTools.name,
+                )
+                .join(
+                    MCPServerTools,
+                    MCPServerTools.id == AssistantMCPServerTools.mcp_server_tool_id,
+                )
+                .join(MCPServers, MCPServers.id == MCPServerTools.mcp_server_id)
+                .where(AssistantMCPServerTools.assistant_id.in_(assistant_ids))
+                .where(AssistantMCPServerTools.is_enabled.is_(True))
+                .where(MCPServers.tenant_id == tenant_id)
+                .order_by(
+                    AssistantMCPServerTools.assistant_id.asc(),
+                    MCPServerTools.name.asc(),
+                )
+            )
+        ).all()
+        for row in mcp_tool_rows:
+            if row.assistant_id not in snapshots:
+                continue
+            snapshots[row.assistant_id].setdefault("mcp_tool_refs", []).append(
+                str(row.id)
+            )
+            snapshots[row.assistant_id].setdefault("mcp_tool_labels", []).append(
+                row.name
+            )
 
         return {
             assistant_id: snapshots[assistant_id]

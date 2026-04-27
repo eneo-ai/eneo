@@ -4,7 +4,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any, cast
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from intric.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
@@ -17,6 +24,9 @@ from intric.flows.ai_builder.ai_builder_flow_name import MAX_FLOW_NAME_LENGTH
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_input_type_values,
     builder_output_type_values,
+)
+from intric.flows.ai_builder.ai_builder_mcp_resources import (
+    AIBuilderMCPResourceInput,
 )
 from intric.flows.ai_builder.ai_builder_models import (
     InputSource,
@@ -32,6 +42,7 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
 )
 from intric.flows.ai_builder.ai_builder_new_step_schema import (
     build_structured_field_schema,
+    small_ref_enums,
 )
 from intric.flows.ai_builder.ai_builder_outline_pattern_chains import (
     chain_requests_docx_template_fill,
@@ -39,6 +50,9 @@ from intric.flows.ai_builder.ai_builder_outline_pattern_chains import (
 )
 from intric.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
+)
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
 )
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
@@ -193,6 +207,10 @@ class OutlineStep(BaseModel):
     output_type: str | None = None
     output_fields: list[StructuredFieldDraft] | None = None
     uses_input_fields: list[str] = Field(default_factory=list)
+    model_ref: str | None = None
+    knowledge_refs: list[str] = Field(default_factory=list)
+    mcp_server_refs: list[str] = Field(default_factory=list)
+    mcp_tool_refs: list[str] = Field(default_factory=list)
     citations_requested: bool = False
 
     @field_validator("name", "task")
@@ -221,9 +239,11 @@ class OutlineStep(BaseModel):
     def _normalize_output_fields(cls, value: Any) -> Any:
         return _normalize_structured_field_list(value)
 
-    @field_validator("uses_input_fields")
+    @field_validator(
+        "uses_input_fields", "knowledge_refs", "mcp_server_refs", "mcp_tool_refs"
+    )
     @classmethod
-    def _normalize_input_fields(cls, values: list[str]) -> list[str]:
+    def _normalize_string_list(cls, values: list[str]) -> list[str]:
         normalized: list[str] = []
         seen: set[str] = set()
         for raw in values:
@@ -233,6 +253,22 @@ class OutlineStep(BaseModel):
             normalized.append(candidate)
             seen.add(candidate)
         return normalized
+
+    @field_validator("model_ref")
+    @classmethod
+    def _normalize_optional_ref(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def _validate_resource_mode(self) -> "OutlineStep":
+        if self.knowledge_refs and (self.mcp_server_refs or self.mcp_tool_refs):
+            raise ValueError(
+                "Outline steps cannot combine knowledge_refs with MCP refs."
+            )
+        return self
 
 
 def _empty_outline_input_fields() -> list[OutlineInputField]:
@@ -493,8 +529,13 @@ def compile_outline_to_create_draft(
     )
     known_field_names = {field.variable_name for field in form_fields}
 
-    outline_steps = _apply_server_pattern_chain(
+    outline_steps = _fold_leading_zero_contract_text_steps(
         steps=list(outline.steps),
+        runtime_input_type=runtime_input_type,
+        final_output_type=final_output_type,
+    )
+    outline_steps = _apply_server_pattern_chain(
+        steps=outline_steps,
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
         context=context,
@@ -557,6 +598,10 @@ def compile_outline_to_create_draft(
                     else None
                 ),
                 uses_form_fields=uses_form_fields,
+                model_ref=outline_step.model_ref,
+                knowledge_refs=list(outline_step.knowledge_refs),
+                mcp_server_refs=list(outline_step.mcp_server_refs),
+                mcp_tool_refs=list(outline_step.mcp_tool_refs),
                 document_delivery_mode=_document_delivery_mode_for_step(
                     output_type=output_type,
                     is_last=index == len(outline_steps) - 1,
@@ -596,6 +641,98 @@ def compile_outline_to_create_draft(
         form_fields=form_fields,
         steps=steps,
     )
+
+
+def attach_selected_mcp_refs_to_explicit_outline_steps(
+    outline: FlowCreateOutline,
+    *,
+    selected_server_refs: set[str] | frozenset[str],
+    catalog: AIBuilderResourceCatalog,
+) -> FlowCreateOutline:
+    """Attach selected MCP refs when an outline step explicitly names them.
+
+    User selection is the permission boundary. The text match is only a
+    catalog-backed recovery path for outline steps that already say which MCP
+    they intend to use but omit the mechanical `mcp_*_refs` fields.
+    """
+
+    selected_refs = frozenset(selected_server_refs)
+    if not selected_refs:
+        return outline
+
+    changed = False
+    patched_steps: list[dict[str, object]] = []
+    updated_steps: list[OutlineStep] = []
+    for step in outline.steps:
+        if step.mcp_server_refs or step.mcp_tool_refs or step.knowledge_refs:
+            updated_steps.append(step)
+            continue
+
+        step_text = f"{step.name}\n{step.task}"
+        mentioned_server_refs = catalog.refs_mentioned_in_text(
+            kind="mcp_server",
+            text=step_text,
+            allowed_refs=selected_refs,
+        )
+        selected_tool_refs = _tool_refs_for_servers(
+            catalog=catalog,
+            server_refs=selected_refs,
+        )
+        mentioned_tool_refs = catalog.refs_mentioned_in_text(
+            kind="mcp_tool",
+            text=step_text,
+            allowed_refs=selected_tool_refs,
+        )
+        if not mentioned_server_refs and not mentioned_tool_refs:
+            updated_steps.append(step)
+            continue
+
+        selected_mcp_server_refs = (
+            [] if mentioned_tool_refs else sorted(mentioned_server_refs)
+        )
+        selected_mcp_tool_refs = sorted(mentioned_tool_refs)
+        # Tool refs are enough: resource canonicalization adds the parent
+        # server without widening to sibling tools. If only the server was
+        # named, keep the server ref so existing server-level behavior applies.
+        updated_steps.append(
+            step.model_copy(
+                update={
+                    "mcp_server_refs": selected_mcp_server_refs,
+                    "mcp_tool_refs": selected_mcp_tool_refs,
+                }
+            )
+        )
+        patched_steps.append(
+            {
+                "step_name": step.name,
+                "mcp_server_refs": selected_mcp_server_refs,
+                "mcp_tool_refs": selected_mcp_tool_refs,
+            }
+        )
+        changed = True
+
+    if not changed:
+        return outline
+    logger.info(
+        "ai_builder_selected_mcp_refs_attached_to_outline_steps",
+        extra={
+            "patched_step_count": len(patched_steps),
+            "patched_steps": patched_steps,
+            "selected_mcp_server_refs": sorted(selected_refs),
+        },
+    )
+    return outline.model_copy(update={"steps": updated_steps})
+
+
+def _tool_refs_for_servers(
+    *,
+    catalog: AIBuilderResourceCatalog,
+    server_refs: frozenset[str],
+) -> frozenset[str]:
+    refs: set[str] = set()
+    for server_ref in server_refs:
+        refs.update(catalog.mcp_tool_refs_for_server(server_ref))
+    return frozenset(refs)
 
 
 def _runtime_input_type_from_planning_state(state: PlanningState) -> InputType | None:
@@ -733,7 +870,18 @@ def _resolved_slot_value(state: PlanningState, slot_name: str) -> str | None:
     return slot.value if slot is not None else None
 
 
-def build_outline_flow_tool_schema() -> dict[str, Any]:
+def build_outline_flow_tool_schema(
+    available_models: list[dict[str, Any]] | None = None,
+    available_kbs: list[dict[str, Any]] | None = None,
+    available_mcps: AIBuilderMCPResourceInput = None,
+) -> dict[str, Any]:
+    model_refs = small_ref_enums(available_models)
+    kb_refs = small_ref_enums(available_kbs)
+    # Keep MCP refs free-form. Catalog resolution and quality feedback handle
+    # unknown or unrelated MCP selections without coercing the planner into an
+    # available-but-wrong server when the requested MCP is absent.
+    mcp_server_refs: list[str] | None = None
+    mcp_tool_refs: list[str] | None = None
     return {
         "type": "function",
         "function": {
@@ -776,7 +924,12 @@ def build_outline_flow_tool_schema() -> dict[str, Any]:
                         "type": "array",
                         "minItems": 1,
                         "maxItems": MAX_OUTLINE_STEPS,
-                        "items": _outline_step_schema(),
+                        "items": _outline_step_schema(
+                            model_refs=model_refs,
+                            kb_refs=kb_refs,
+                            mcp_server_refs=mcp_server_refs,
+                            mcp_tool_refs=mcp_tool_refs,
+                        ),
                     },
                     "assumptions": {
                         "type": "array",
@@ -807,8 +960,14 @@ def _input_field_schema() -> dict[str, Any]:
     }
 
 
-def _outline_step_schema() -> dict[str, Any]:
-    return {
+def _outline_step_schema(
+    *,
+    model_refs: list[str] | None = None,
+    kb_refs: list[str] | None = None,
+    mcp_server_refs: list[str] | None = None,
+    mcp_tool_refs: list[str] | None = None,
+) -> dict[str, Any]:
+    schema: dict[str, Any] = {
         "type": "object",
         "required": ["name", "task"],
         "properties": {
@@ -838,10 +997,58 @@ def _outline_step_schema() -> dict[str, Any]:
                     "compiles them into underlag/input_bindings."
                 ),
             },
+            "model_ref": {
+                "type": ["string", "null"],
+                "description": "Optional canonical model ref to use for this step.",
+            },
+            "knowledge_refs": {
+                "type": "array",
+                "items": {"type": "string"},
+                "uniqueItems": True,
+                "description": (
+                    "Canonical knowledge base refs this semantic step needs. "
+                    "Do not combine with MCP refs on the same step."
+                ),
+            },
+            "mcp_server_refs": {
+                "type": "array",
+                "items": {"type": "string"},
+                "uniqueItems": True,
+                "description": (
+                    "Canonical MCP server refs this semantic step needs. Use only "
+                    "for external tools/live data and never together with knowledge_refs."
+                ),
+            },
+            "mcp_tool_refs": {
+                "type": "array",
+                "items": {"type": "string"},
+                "uniqueItems": True,
+                "description": (
+                    "Canonical MCP tool refs for least-privilege tool access. "
+                    "Prefer tool refs over whole-server refs when possible."
+                ),
+            },
             "citations_requested": {"type": "boolean", "default": False},
         },
         "additionalProperties": False,
     }
+    properties = cast(dict[str, Any], schema["properties"])
+    if model_refs is not None:
+        model_ref_property = cast(dict[str, Any], properties["model_ref"])
+        model_ref_property["enum"] = [*model_refs, None]
+    if kb_refs is not None:
+        knowledge_ref_property = cast(dict[str, Any], properties["knowledge_refs"])
+        knowledge_ref_items = cast(dict[str, Any], knowledge_ref_property["items"])
+        knowledge_ref_items["enum"] = kb_refs
+    if mcp_server_refs is not None:
+        server_refs_property = cast(dict[str, Any], properties["mcp_server_refs"])
+        server_refs_items = cast(dict[str, Any], server_refs_property["items"])
+        server_refs_items["enum"] = mcp_server_refs
+    if mcp_tool_refs is not None:
+        tool_refs_property = cast(dict[str, Any], properties["mcp_tool_refs"])
+        tool_refs_items = cast(dict[str, Any], tool_refs_property["items"])
+        tool_refs_items["enum"] = mcp_tool_refs
+    return schema
 
 
 def _compile_form_fields(
@@ -901,6 +1108,113 @@ def _log_dropped_primary_input_shadow_fields(
             "runtime_input_type": runtime_input_type.value,
         },
     )
+
+
+def _fold_leading_zero_contract_text_steps(
+    *,
+    steps: list["OutlineStep"],
+    runtime_input_type: InputType,
+    final_output_type: OutputType,
+) -> list["OutlineStep"]:
+    """Fold low-value leading text hops without interpreting their wording.
+
+    Small models sometimes emit a first step whose only job is "receive/use the
+    user text" before the first real step. For text runtime input that hop adds
+    latency and token cost but no Flow contract. We fold only a leading
+    structural no-op into the next semantic target and preserve its instructions
+    verbatim by concatenation.
+    """
+
+    if runtime_input_type != InputType.TEXT or len(steps) < 2:
+        return steps
+
+    target_index = _leading_fold_target_index(
+        steps=steps,
+        final_output_type=final_output_type,
+    )
+    if target_index is None or target_index == 0:
+        return steps
+
+    folded_steps = steps[:target_index]
+    target_step = steps[target_index]
+    merged_task = "\n\n".join([*(step.task for step in folded_steps), target_step.task])
+    merged = target_step.model_copy(update={"task": merged_task})
+
+    logger.info(
+        "ai_builder_outline_zero_contract_steps_folded",
+        extra={
+            "folded_count": len(folded_steps),
+            "folded_step_names": [step.name for step in folded_steps],
+            "target_step_name": target_step.name,
+            "runtime_input_type": runtime_input_type.value,
+            "final_output_type": final_output_type.value,
+        },
+    )
+    return [merged, *steps[target_index + 1 :]]
+
+
+def _leading_fold_target_index(
+    *,
+    steps: list["OutlineStep"],
+    final_output_type: OutputType,
+) -> int | None:
+    folded_count = 0
+    for index, step in enumerate(steps[:-1]):
+        if not _is_zero_contract_text_step(step):
+            break
+        candidate_index = index + 1
+        candidate = steps[candidate_index]
+        if not _can_absorb_leading_zero_contract_step(
+            candidate=candidate,
+            candidate_index=candidate_index,
+            step_count=len(steps),
+            final_output_type=final_output_type,
+        ):
+            break
+        folded_count += 1
+
+    return folded_count if folded_count else None
+
+
+def _can_absorb_leading_zero_contract_step(
+    *,
+    candidate: "OutlineStep",
+    candidate_index: int,
+    step_count: int,
+    final_output_type: OutputType,
+) -> bool:
+    if (
+        candidate.output_fields
+        or candidate.uses_input_fields
+        or candidate.mcp_server_refs
+        or candidate.mcp_tool_refs
+    ):
+        return True
+    if candidate.citations_requested:
+        return True
+    if _declared_output_type(candidate) in _DOCUMENT_OUTPUT_TYPES | {OutputType.JSON}:
+        return True
+    return candidate_index == step_count - 1 and final_output_type != OutputType.TEXT
+
+
+def _is_zero_contract_text_step(step: "OutlineStep") -> bool:
+    return (
+        _declared_output_type(step) == OutputType.TEXT
+        and not step.output_fields
+        and not step.uses_input_fields
+        and not step.model_ref
+        and not step.knowledge_refs
+        and not step.mcp_server_refs
+        and not step.mcp_tool_refs
+        and not step.citations_requested
+    )
+
+
+def _declared_output_type(step: "OutlineStep") -> OutputType:
+    try:
+        return OutputType(step.output_type) if step.output_type else OutputType.TEXT
+    except ValueError:
+        return OutputType.TEXT
 
 
 def _compile_input_field(field: OutlineInputField) -> CreateFormFieldDraft:
@@ -1481,6 +1795,7 @@ __all__ = [
     "OUTLINE_FLOW_TOOL_NAME",
     "OutlineCompileContext",
     "OutlineFlowArgumentError",
+    "attach_selected_mcp_refs_to_explicit_outline_steps",
     "build_outline_flow_tool_schema",
     "compile_outline_to_create_draft",
     "outline_compile_context_from_planning_state",

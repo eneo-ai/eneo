@@ -17,6 +17,7 @@ from intric.flows.ai_builder.ai_builder_create_models import (
 from intric.flows.ai_builder.ai_builder_create_outline import (
     MAX_OUTLINE_STEPS,
     OutlineFlowArgumentError,
+    attach_selected_mcp_refs_to_explicit_outline_steps,
     build_outline_flow_tool_schema,
     compile_outline_to_create_draft,
     outline_compile_context_from_planning_state,
@@ -602,6 +603,343 @@ def test_outline_flow_schema_uses_flow_derived_enums() -> None:
     ]
 
 
+def test_outline_flow_schema_keeps_mcp_refs_free_form_for_small_catalog() -> None:
+    schema = build_outline_flow_tool_schema(
+        available_mcps=[
+            {
+                "ref": "server-1",
+                "name": "Case system",
+                "tools": [{"ref": "tool-1", "name": "lookup_case"}],
+            }
+        ]
+    )
+    step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
+        "properties"
+    ]
+
+    assert "enum" not in step_props["mcp_server_refs"]["items"]
+    assert "enum" not in step_props["mcp_tool_refs"]["items"]
+
+
+def test_selected_mcp_server_is_attached_to_explicit_outline_step_only(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(
+        logging.INFO,
+        logger="intric.flows.ai_builder.ai_builder_create_outline",
+    )
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [{"id": "current-time", "name": "get_current_time"}],
+            }
+        ],
+    )
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Tid till JSON",
+            "plan_rationale": "Separera MCP-hämtning från slutlig strukturering.",
+            "final_output_type": "json",
+            "steps": [
+                {
+                    "name": "Hämta aktuell tid med Time MCP",
+                    "task": "Använd Time MCP för att hämta aktuell tid.",
+                    "output_type": "json",
+                },
+                {
+                    "name": "Skapa strukturerat svar",
+                    "task": "Formatera resultatet som JSON.",
+                    "output_type": "json",
+                },
+            ],
+        }
+    )
+
+    updated = attach_selected_mcp_refs_to_explicit_outline_steps(
+        outline,
+        selected_server_refs={"time-server"},
+        catalog=catalog,
+    )
+    draft, issues = canonicalize_create_draft_resources(
+        compile_outline_to_create_draft(updated),
+        catalog=catalog,
+    )
+
+    assert issues == []
+    assert draft.steps[0].mcp_server_refs == ["time-server"]
+    assert draft.steps[0].mcp_tool_refs == ["current-time"]
+    assert draft.steps[1].mcp_server_refs == []
+    assert draft.steps[1].mcp_tool_refs == []
+    record = next(
+        (
+            record
+            for record in caplog.records
+            if record.message
+            == "ai_builder_selected_mcp_refs_attached_to_outline_steps"
+        ),
+        None,
+    )
+    assert record is not None
+    assert record.patched_step_count == 1
+    assert record.patched_steps == [
+        {
+            "step_name": "Hämta aktuell tid med Time MCP",
+            "mcp_server_refs": ["time-server"],
+            "mcp_tool_refs": [],
+        }
+    ]
+    assert record.selected_mcp_server_refs == ["time-server"]
+
+
+def test_selected_mcp_attachment_prefers_explicit_tool_aliases() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [
+                    {"id": "current-time", "name": "get_current_time"},
+                    {"id": "convert-time", "name": "convert_time"},
+                ],
+            }
+        ],
+    )
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Tid till JSON",
+            "plan_rationale": "Använd bara relevant MCP-verktyg.",
+            "final_output_type": "json",
+            "steps": [
+                {
+                    "name": "Hämta tid med Time MCP",
+                    "task": "Använd get_current_time för angiven tidszon.",
+                    "output_type": "json",
+                },
+            ],
+        }
+    )
+
+    updated = attach_selected_mcp_refs_to_explicit_outline_steps(
+        outline,
+        selected_server_refs={"time-server"},
+        catalog=catalog,
+    )
+    draft, issues = canonicalize_create_draft_resources(
+        compile_outline_to_create_draft(updated),
+        catalog=catalog,
+    )
+
+    assert issues == []
+    assert draft.steps[0].mcp_server_refs == ["time-server"]
+    assert draft.steps[0].mcp_tool_refs == ["current-time"]
+
+
+def test_selected_mcp_attachment_uses_explicit_tool_alias_without_server_name() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [
+                    {"id": "current-time", "name": "get_current_time"},
+                    {"id": "convert-time", "name": "convert_time"},
+                ],
+            }
+        ],
+    )
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Tid till JSON",
+            "plan_rationale": "Verktygsnamnet räcker när användaren redan valt servern.",
+            "final_output_type": "json",
+            "steps": [
+                {
+                    "name": "Hämta aktuell tid",
+                    "task": "Använd get_current_time för angiven tidszon.",
+                    "output_type": "json",
+                },
+                {
+                    "name": "Konvertera tiden",
+                    "task": "Använd convert_time till Europe/Stockholm.",
+                    "output_type": "json",
+                },
+            ],
+        }
+    )
+
+    updated = attach_selected_mcp_refs_to_explicit_outline_steps(
+        outline,
+        selected_server_refs={"time-server"},
+        catalog=catalog,
+    )
+    draft, issues = canonicalize_create_draft_resources(
+        compile_outline_to_create_draft(updated),
+        catalog=catalog,
+    )
+
+    assert issues == []
+    assert draft.steps[0].mcp_server_refs == ["time-server"]
+    assert draft.steps[0].mcp_tool_refs == ["current-time"]
+    assert draft.steps[1].mcp_server_refs == ["time-server"]
+    assert draft.steps[1].mcp_tool_refs == ["convert-time"]
+
+
+def test_selected_mcp_attachment_skips_knowledge_steps() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[{"id": "kb-1", "name": "Policy"}],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [{"id": "current-time", "name": "get_current_time"}],
+            }
+        ],
+    )
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Policy och tid",
+            "plan_rationale": "Knowledge och MCP får inte blandas på samma steg.",
+            "final_output_type": "json",
+            "steps": [
+                {
+                    "name": "Grounda i policy",
+                    "task": "Använd get_current_time endast som exempeltext här.",
+                    "output_type": "text",
+                    "knowledge_refs": ["kb-1"],
+                },
+            ],
+        }
+    )
+
+    updated = attach_selected_mcp_refs_to_explicit_outline_steps(
+        outline,
+        selected_server_refs={"time-server"},
+        catalog=catalog,
+    )
+
+    assert updated.steps[0].knowledge_refs == ["kb-1"]
+    assert updated.steps[0].mcp_server_refs == []
+    assert updated.steps[0].mcp_tool_refs == []
+
+
+def test_selected_mcp_attachment_does_not_infer_from_domain_words() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [{"id": "current-time", "name": "get_current_time"}],
+            }
+        ],
+    )
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Tid till JSON",
+            "plan_rationale": "Domänord räcker inte för MCP-koppling.",
+            "final_output_type": "json",
+            "steps": [
+                {
+                    "name": "Hämta aktuell tid",
+                    "task": "Hämta aktuell tid för användarens tidszon.",
+                    "output_type": "json",
+                },
+            ],
+        }
+    )
+
+    updated = attach_selected_mcp_refs_to_explicit_outline_steps(
+        outline,
+        selected_server_refs={"time-server"},
+        catalog=catalog,
+    )
+
+    assert updated.steps[0].mcp_server_refs == []
+    assert updated.steps[0].mcp_tool_refs == []
+
+
+def test_outline_flow_schema_exposes_model_and_knowledge_refs_for_small_catalog() -> (
+    None
+):
+    schema = build_outline_flow_tool_schema(
+        available_models=[{"ref": "model-1", "name": "gpt-5.4-nano"}],
+        available_kbs=[{"ref": "kb-1", "name": "Risk KB"}],
+    )
+    step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
+        "properties"
+    ]
+
+    assert step_props["model_ref"]["enum"] == ["model-1", None]
+    assert step_props["knowledge_refs"]["items"]["enum"] == ["kb-1"]
+
+
+def test_outline_flow_schema_keeps_mcp_refs_free_form_for_malformed_catalog() -> None:
+    schema = build_outline_flow_tool_schema(
+        available_mcps=[
+            {"ref": "", "tools": [{"ref": "ignored-tool"}]},
+            {
+                "ref": "server-1",
+                "tools": [{"ref": ""}, {"ref": "tool-1", "name": "lookup_case"}],
+            },
+        ]
+    )
+    step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
+        "properties"
+    ]
+
+    assert "enum" not in step_props["mcp_server_refs"]["items"]
+    assert "enum" not in step_props["mcp_tool_refs"]["items"]
+
+
+def test_outline_flow_schema_omits_mcp_ref_enums_for_large_catalog() -> None:
+    schema = build_outline_flow_tool_schema(
+        available_mcps=[
+            {
+                "ref": f"server-{index}",
+                "tools": [{"ref": f"tool-{index}", "name": "lookup"}],
+            }
+            for index in range(16)
+        ]
+    )
+    step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
+        "properties"
+    ]
+
+    assert "enum" not in step_props["mcp_server_refs"]["items"]
+    assert "enum" not in step_props["mcp_tool_refs"]["items"]
+
+
+def test_outline_flow_schema_keeps_mcp_refs_free_form_when_tool_catalog_is_large() -> (
+    None
+):
+    schema = build_outline_flow_tool_schema(
+        available_mcps=[
+            {
+                "ref": "server-1",
+                "tools": [
+                    {"ref": f"tool-{index}", "name": "lookup"} for index in range(31)
+                ],
+            }
+        ]
+    )
+    step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
+        "properties"
+    ]
+
+    assert "enum" not in step_props["mcp_server_refs"]["items"]
+    assert "enum" not in step_props["mcp_tool_refs"]["items"]
+
+
 def test_parse_outline_flow_allows_server_owned_core_shape_defaults() -> None:
     outline = parse_outline_flow_arguments(
         {
@@ -618,6 +956,46 @@ def test_parse_outline_flow_allows_server_owned_core_shape_defaults() -> None:
 
     assert outline.runtime_input.input_type == "text"
     assert outline.final_output_type == "text"
+
+
+def test_parse_outline_flow_accepts_create_resource_refs() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Kunskapsflöde",
+            "plan_rationale": "Använder rätt modell och kunskapsbas.",
+            "steps": [
+                {
+                    "name": "Analysera policy",
+                    "task": "Svara med stöd av policyunderlaget.",
+                    "model_ref": " model-1 ",
+                    "knowledge_refs": [" kb-1 ", "kb-1", ""],
+                }
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+
+    assert draft.steps[0].model_ref == "model-1"
+    assert draft.steps[0].knowledge_refs == ["kb-1"]
+
+
+def test_parse_outline_flow_rejects_knowledge_and_mcp_on_same_step() -> None:
+    with pytest.raises(OutlineFlowArgumentError, match="knowledge_refs with MCP refs"):
+        parse_outline_flow_arguments(
+            {
+                "flow_name": "Ogiltigt",
+                "plan_rationale": "Blandar två externa resurslägen.",
+                "steps": [
+                    {
+                        "name": "Analysera",
+                        "task": "Analysera med allt.",
+                        "knowledge_refs": ["kb-1"],
+                        "mcp_tool_refs": ["tool-1"],
+                    }
+                ],
+            }
+        )
 
 
 def test_parse_outline_flow_errors_are_safe_and_field_level() -> None:
@@ -1185,6 +1563,293 @@ def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> 
     assert compiled.steps[1].input_bindings == {
         "question": "{{ step_a.output.structured }}\n\naudience: {{ audience }}"
     }
+    assert validation.valid
+
+
+def test_compile_outline_flow_folds_leading_zero_contract_text_step(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Customer reply",
+            "plan_rationale": "Classify first, then draft the reply.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "final_output_type": "text",
+            "steps": [
+                {
+                    "name": "Receive question",
+                    "task": "Use the customer question as the source material.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Classify request",
+                    "task": "Classify the incoming request.",
+                    "output_fields": [
+                        {
+                            "name": "category",
+                            "field_type": "string",
+                            "description": "Request category.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft reply",
+                    "task": "Draft a concise customer reply.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="intric.flows.ai_builder.ai_builder_create_outline",
+    ):
+        draft = compile_outline_to_create_draft(outline)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    folded_records = [
+        record
+        for record in caplog.records
+        if record.message == "ai_builder_outline_zero_contract_steps_folded"
+    ]
+    assert folded_records
+    assert getattr(folded_records[0], "folded_step_names") == ["Receive question"]
+    assert getattr(folded_records[0], "target_step_name") == "Classify request"
+    assert [step.name for step in draft.steps] == ["Classify request", "Draft reply"]
+    assert (
+        draft.steps[0].instructions
+        == "Use the customer question as the source material.\n\n"
+        "Classify the incoming request."
+    )
+    assert draft.steps[0].input_source.value == "flow_input"
+    assert draft.steps[0].input_type.value == "text"
+    assert draft.steps[0].output_type.value == "json"
+    assert compiled.steps[0].input_bindings == {"question": "{{ indata_text }}"}
+    assert compiled.steps[1].input_type.value == "json"
+    assert validation.valid
+
+
+def test_compile_outline_flow_preserves_leading_step_with_output_contract() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Structured intake",
+            "plan_rationale": "Extract structured fields before writing.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "final_output_type": "text",
+            "steps": [
+                {
+                    "name": "Extract intake",
+                    "task": "Extract the source fields.",
+                    "output_type": "text",
+                    "output_fields": [
+                        {
+                            "name": "topic",
+                            "field_type": "string",
+                            "description": "Main topic.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write answer",
+                    "task": "Write the final answer.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == ["Extract intake", "Write answer"]
+    assert draft.steps[0].output_fields is not None
+    assert compiled.steps[1].input_contract == compiled.steps[0].output_contract
+    assert validation.valid
+
+
+def test_compile_outline_flow_preserves_leading_step_with_form_field_usage() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audience reply",
+            "plan_rationale": "Use runtime audience metadata while drafting.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "final_output_type": "text",
+            "input_fields": [
+                {
+                    "variable_name": "audience",
+                    "label": "Audience",
+                    "field_type": "text",
+                    "required": False,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Prepare audience context",
+                    "task": "Prepare context for the selected audience.",
+                    "output_type": "text",
+                    "uses_input_fields": ["audience"],
+                },
+                {
+                    "name": "Write answer",
+                    "task": "Write the final answer.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == [
+        "Prepare audience context",
+        "Write answer",
+    ]
+    assert draft.steps[0].uses_form_fields == ["audience"]
+    assert compiled.steps[0].input_bindings == {
+        "question": "{{ indata_text }}\n\naudience: {{ audience }}"
+    }
+    assert validation.valid
+
+
+def test_compile_outline_flow_preserves_file_runtime_leading_step() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Document summary",
+            "plan_rationale": "Prepare uploaded documents before summarizing.",
+            "runtime_input": {"input_type": "document", "required": True},
+            "final_output_type": "text",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "task": "Read the uploaded documents.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Summarize",
+                    "task": "Summarize the document material.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == ["Read documents", "Summarize"]
+    assert draft.steps[0].runtime_upload is True
+    assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "document"
+    assert validation.valid
+
+
+def test_compile_outline_flow_preserves_leading_step_with_model_ref() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Specialized first pass",
+            "plan_rationale": "Use a selected model for the first pass.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "final_output_type": "text",
+            "steps": [
+                {
+                    "name": "Specialized reading",
+                    "task": "Read the source text with the selected model.",
+                    "output_type": "text",
+                    "model_ref": "model-specialist",
+                },
+                {
+                    "name": "Write answer",
+                    "task": "Write the final answer.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == [
+        "Specialized reading",
+        "Write answer",
+    ]
+    assert draft.steps[0].model_ref == "model-specialist"
+    assert validation.valid
+
+
+def test_compile_outline_flow_preserves_leading_step_with_knowledge_refs() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Policy grounded reply",
+            "plan_rationale": "Ground the first pass in a selected knowledge base.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "final_output_type": "text",
+            "steps": [
+                {
+                    "name": "Ground in policy",
+                    "task": "Read the source text against the policy base.",
+                    "output_type": "text",
+                    "knowledge_refs": ["kb-policy"],
+                },
+                {
+                    "name": "Write answer",
+                    "task": "Write the final answer.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == ["Ground in policy", "Write answer"]
+    assert draft.steps[0].knowledge_refs == ["kb-policy"]
+    assert validation.valid
+
+
+def test_compile_outline_flow_folds_before_final_artifact_append() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "DOCX report",
+            "plan_rationale": "Prepare source text and generate a report.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "final_output_type": "docx",
+            "steps": [
+                {
+                    "name": "Receive text",
+                    "task": "Use the submitted text as report source.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Draft report content",
+                    "task": "Draft the report body.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == [
+        "Draft report content",
+        "Create DOCX",
+    ]
+    assert draft.steps[0].instructions == (
+        "Use the submitted text as report source.\n\nDraft the report body."
+    )
+    assert draft.steps[-1].output_type.value == "docx"
+    assert compiled.steps[-1].output_type.value == "docx"
     assert validation.valid
 
 
@@ -1938,6 +2603,57 @@ def test_compile_outline_flow_default_outline_stays_linear() -> None:
     assert not any(
         warning.code == "all_previous_overuse" for warning in validation.warnings
     )
+
+
+def test_compile_outline_flow_preserves_step_mcp_refs() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "MCP-flöde",
+            "plan_rationale": "Hämtar extern ärendedata innan analys.",
+            "steps": [
+                {
+                    "name": "Hämta ärendedata",
+                    "task": "Hämta aktuell status från ärendesystemet.",
+                    "mcp_tool_refs": ["case_lookup_tool"],
+                },
+                {
+                    "name": "Sammanfatta",
+                    "task": "Sammanfatta statusen för användaren.",
+                },
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+
+    assert draft.steps[0].mcp_tool_refs == ["case_lookup_tool"]
+    assert draft.steps[0].mcp_server_refs == []
+
+
+def test_compile_outline_flow_does_not_fold_mcp_entry_step() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "MCP-flöde",
+            "plan_rationale": "Hämtar externt underlag och skriver svar.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "steps": [
+                {
+                    "name": "Hämta underlag",
+                    "task": "Använd MCP-verktyget för att hämta underlag.",
+                    "mcp_tool_refs": ["lookup_tool"],
+                },
+                {
+                    "name": "Skriv svar",
+                    "task": "Skriv ett tydligt svar.",
+                },
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+
+    assert [step.name for step in draft.steps] == ["Hämta underlag", "Skriv svar"]
+    assert draft.steps[0].mcp_tool_refs == ["lookup_tool"]
 
 
 def test_compile_outline_flow_comparison_pattern_owns_final_fan_in() -> None:

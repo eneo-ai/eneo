@@ -945,6 +945,7 @@ class TestPlannerContextPreparation:
         assert result.planner_context.available_models == [
             {
                 "id": str(model.id),
+                "ref": str(model.id),
                 "name": "test-model",
                 "display_name": "test-model",
                 "provider": "openai",
@@ -1044,6 +1045,35 @@ class TestPlannerContextPreparation:
         assert litellm_model == "anthropic/claude-3-7-sonnet"
         assert litellm_kwargs == {"api_key": "sk-sync"}
         completion_service.resolve_litellm_params.assert_called_once_with(model)
+        completion_service._get_adapter.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_resolve_planner_params_strips_provider_tool_call_controls(self):
+        completion_service = MagicMock()
+        completion_service.resolve_litellm_params = MagicMock(
+            return_value=(
+                "openai/gpt-5.4",
+                {
+                    "api_key": "sk-sync",
+                    "tools": [{"type": "function", "function": {"name": "external"}}],
+                    "tool_choice": "auto",
+                    "function_call": "auto",
+                    "api_base": "https://api.example.com",
+                },
+            )
+        )
+        completion_service._get_adapter = AsyncMock()
+
+        service = _make_service(completion_service=completion_service)
+
+        model = _make_model()
+        litellm_model, litellm_kwargs = await service.resolve_planner_params(model)
+
+        assert litellm_model == "openai/gpt-5.4"
+        assert litellm_kwargs == {
+            "api_key": "sk-sync",
+            "api_base": "https://api.example.com",
+        }
         completion_service._get_adapter.assert_not_awaited()
 
 

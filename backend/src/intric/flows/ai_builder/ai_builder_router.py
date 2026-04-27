@@ -36,7 +36,14 @@ from intric.flows.ai_builder.ai_builder_context import (
     serialize_space_kbs,
     serialize_space_models,
 )
-from intric.flows.ai_builder.ai_builder_events import SSE_EVENT_DONE, build_error_event
+from intric.flows.ai_builder.ai_builder_events import (
+    SSE_EVENT_DONE,
+    SSE_EVENT_ERROR,
+    SSE_EVENT_STATUS,
+    SSE_EVENT_USAGE,
+    build_error_event,
+    build_usage_event,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse as ApplyResult,
 )
@@ -90,6 +97,20 @@ async def _coerce_event_stream(
     if hasattr(stream, "__aiter__"):
         return cast(EventStream, stream)
     return await cast(Awaitable[EventStream], stream)
+
+
+async def _current_usage_event(
+    *,
+    service: "AIBuilderService",
+    session_id: UUID,
+) -> dict[str, str] | None:
+    session = await service.get_session(session_id)
+    telemetry = summarize_session_telemetry(session.conversation)
+    if telemetry is None:
+        return None
+    return build_usage_event(
+        SessionTelemetrySummary.model_validate(telemetry).model_dump(mode="json")
+    )
 
 
 async def _resolve_litellm_params(
@@ -510,6 +531,7 @@ async def send_message(
                     litellm_kwargs=prepared_context.litellm_kwargs,
                     available_models=prepared_context.planner_context.available_models,
                     available_kbs=prepared_context.planner_context.available_kbs,
+                    available_mcps=prepared_context.planner_context.available_mcps,
                     flow=prepared_context.flow,
                     assistant_snapshots=prepared_context.assistant_snapshots,
                     attachment_files=prepared_context.attachment_files,
@@ -519,10 +541,53 @@ async def send_message(
                 )
             )
 
+            has_committed_event = False
+            usage_event_emitted = False
+            stream_error_seen = False
+            # Keep DONE terminal. Usage can become available only after the
+            # planner stream has committed its final conversation metadata.
+            done_event: dict[str, str] | None = None
             async for event in stream:
+                event_name = event["event"]
+                if event_name == SSE_EVENT_DONE:
+                    done_event = event
+                    continue
+
                 yield ServerSentEvent(
                     data=event["data"],
-                    event=event["event"],
+                    event=event_name,
+                )
+
+                if event_name not in {
+                    SSE_EVENT_DONE,
+                    SSE_EVENT_ERROR,
+                    SSE_EVENT_STATUS,
+                    SSE_EVENT_USAGE,
+                }:
+                    has_committed_event = True
+                elif event_name == SSE_EVENT_ERROR:
+                    stream_error_seen = True
+                elif event_name == SSE_EVENT_USAGE:
+                    usage_event_emitted = True
+
+            if (
+                has_committed_event
+                and not usage_event_emitted
+                and not stream_error_seen
+            ):
+                usage_event = await _current_usage_event(
+                    service=service,
+                    session_id=session_id,
+                )
+                if usage_event is not None:
+                    yield ServerSentEvent(
+                        data=usage_event["data"],
+                        event=usage_event["event"],
+                    )
+            if done_event is not None:
+                yield ServerSentEvent(
+                    data=done_event["data"],
+                    event=done_event["event"],
                 )
         except BadRequestException as error:
             code = error.code or "bad_request"

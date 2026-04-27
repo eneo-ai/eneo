@@ -7,7 +7,9 @@ A Flow is a multi-step AI pipeline you build inside a space. You design it as a 
 <Callout type="info">
   If you want to build on Flows from your own application, read this page first
   and then continue with the{" "}
-  <a href="/guides/flows-api-guide">Flows API Guide</a>.
+  <a href="/guides/flows-api-guide">Flows API Guide</a>.{" "}
+  If you want to draft a Flow conversationally, read{" "}
+  <a href="/docs/ai-builder">AI Builder</a>.
 </Callout>
 
 ![High-level Flows lifecycle diagram showing user-principal-only authoring, publishing to a versioned definition, and runtime execution with outputs, artifacts, and evidence](/diagrams/flows-overview.svg)
@@ -54,6 +56,27 @@ A flow definition lives inside a space and contains:
 | Flow run          | One execution of a published version     | The execution principal: a user principal or a service key |
 
 That split is intentional. Draft editing stays human-governed, while runtime execution can safely belong to a machine principal.
+
+Published versions are schema-versioned and checksummed. When a run starts,
+Eneo verifies that the stored definition still matches the checksum created at
+publish time before it parses or claims any step work.
+
+### Assistant snapshots at publish time
+
+Each published version stores the assistant execution surface used by every step:
+
+- instructions
+- model identity and model parameters
+- knowledge-source references
+- effective MCP tool surface
+
+When a run starts, Eneo compares the published assistant surface with the current
+assistant configuration. If the assistant changed after publish, the run fails
+before any step executes. Republish the Flow after reviewing the change.
+
+This protects against silent configuration drift. It does not freeze the contents
+behind a knowledge source or the implementation behind an external MCP server. If
+those systems change, the Flow still uses their current data at run time.
 
 ### Owner vs creator
 
@@ -110,14 +133,14 @@ Those endpoints are the canonical way for a client to discover what a published 
 
 For API consumers using `frontend/packages/intric-js`, the Flow SDK also supports caller-supplied run idempotency headers and a helper for deriving stable upload-intent idempotency keys after runtime files have been uploaded but before the published run is created.
 
-For audio-first workflows such as Tal till resultat, the intended MVP path is still **completed upload first, then one published Flow run**:
+For audio-first workflows such as meeting transcript summaries or employee review notes, the intended runtime path is **completed upload first, then one published Flow run**:
 
 - record in the browser or pick an audio file
 - upload the completed file through the published Flow runtime contract
 - create one run with a stable `Idempotency-Key`
 - let the Flow steps handle transcription and final output generation
 
-The Flow runtime does **not** require browser-side streaming transcription for this MVP.
+The Flow runtime does **not** require browser-side streaming transcription for this pattern.
 
 ### How form fields map to runtime payloads
 
@@ -155,7 +178,7 @@ Current validation rules:
 
 Use this when a later step should produce a deterministic DOCX document rather than free-form text.
 
-Prefer an **accessibility-reviewed DOCX template asset** whenever a flow uses `template_fill` for a final document. For care-data workflows such as Tal till resultat this is especially important. In practice that means the chosen template should already have the right heading structure, reading order, table semantics, and other accessibility properties before the flow is published.
+Prefer an **accessibility-reviewed DOCX template asset** whenever a flow uses `template_fill` for a final document. This is especially important for sensitive care-data workflows. In practice that means the chosen template should already have the right heading structure, reading order, table semantics, and other accessibility properties before the flow is published.
 
 ## Advanced step input templates ("Underlag till steget")
 
@@ -224,10 +247,17 @@ Current enforcement prevents a step from lowering the effective classification o
 
 Each step has an `mcp_policy`:
 
-- `inherit` uses the shared/default MCP configuration for the step context
-- `restricted` narrows which MCP tools the step can use
+- `inherit` uses the step's configured MCP context
+- `restricted` marks that the step should use a deliberately narrowed MCP context
 
-A common use for `restricted` is to leave most steps on the shared MCP surface while tightening tool access on one especially sensitive or narrowly scoped step.
+A common use for `restricted` is to leave most steps on a broad MCP surface while
+tightening tool access on one especially sensitive or narrowly scoped step. The
+important control is still the actual MCP server and tool selection attached to
+the step assistant.
+
+When a step needs MCP access, prefer tool-level selection over server-level selection. Tool-level access gives the assistant only the specific approved tools it needs. Server-level access gives the step every enabled tool on that server.
+
+AI Builder can read enabled MCP server and tool metadata while drafting a plan. It uses names and descriptions to decide whether a step should reference a tool, but it does not execute MCP tools during planning. Tool execution happens only when a published Flow run reaches the configured step.
 
 ## Ownership and visibility
 
@@ -325,7 +355,7 @@ For sensitive workflows you can also declare governance metadata in `metadata_js
 - `approval_mode`
 - `pre_approval_visibility`
 
-For the current Tal till resultat MVP direction, the intended values are:
+For a sensitive workflow where final approval happens outside the Flow, typical values are:
 
 - `approval_mode = "single_reviewer_outside_flow"`
 - `pre_approval_visibility = "uploader_and_reviewers"`
@@ -367,6 +397,8 @@ AI Builder lives under `/api/v1/flows/ai-builder/` and is session-based. It supp
 - approving and applying plans
 
 Important current rule: **AI Builder requires a user principal**. It relies on flow-edit permission checks plus creator-scoped session access, so it is not a service-key authoring surface.
+
+For the product mental model, including form fields, **"Underlag till steget"**, MCP tool selection, and token usage, see <a href="/docs/ai-builder">AI Builder</a>.
 
 ## Practical takeaway
 

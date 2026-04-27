@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID
@@ -10,6 +8,10 @@ from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.assistants.assistant_service import AssistantService
 from intric.files.file_models import File
 from intric.files.file_repo import FileRepository
+from intric.flows.assistant_execution_snapshot import (
+    build_assistant_execution_snapshot,
+    stable_hash,
+)
 from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, JsonObject
 from intric.flows.flow_care_data_policy import validate_flow_care_data_policy
 from intric.flows.flow_security_classification import (
@@ -37,9 +39,12 @@ from intric.flows.runtime.docx_template_runtime import (
 from intric.flows.step_config_secrets import encrypt_step_headers_for_storage
 from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
+from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 from intric.settings.encryption_service import EncryptionService
 from intric.spaces.space_service import SpaceService
 from intric.users.user import UserInDB
+
+FLOW_DEFINITION_SCHEMA_VERSION = 1
 
 
 class FlowService:
@@ -577,12 +582,23 @@ class FlowService:
                 for integration_knowledge_id in changes["integration_knowledge_ids"]
             ]
 
-        mcp_servers = assistant.mcp_servers
+        mcp_servers: list[MCPServer] = assistant.mcp_servers
         if "mcp_server_ids" in changes and changes["mcp_server_ids"] is not None:
-            mcp_servers = [
-                space.get_mcp_server(mcp_server_id)
-                for mcp_server_id in changes["mcp_server_ids"]
-            ]
+            mcp_servers = []
+            unavailable_mcp_server_ids: list[str] = []
+            for mcp_server_id in changes["mcp_server_ids"]:
+                try:
+                    mcp_servers.append(
+                        cast(MCPServer, space.get_mcp_server(mcp_server_id))
+                    )
+                except NotFoundException:
+                    unavailable_mcp_server_ids.append(str(mcp_server_id))
+            if unavailable_mcp_server_ids:
+                raise BadRequestException(
+                    "MCP server(s) are not available in this flow's space.",
+                    code="flow_mcp_server_not_available",
+                    context={"mcp_server_ids": unavailable_mcp_server_ids},
+                )
 
         return SimpleNamespace(
             completion_model=completion_model,
@@ -669,6 +685,7 @@ class FlowService:
 
     async def _build_definition(self, flow: Flow) -> JsonObject:
         return {
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
             "flow_id": str(flow.id),
             "name": flow.name,
             "description": flow.description,
@@ -722,6 +739,10 @@ class FlowService:
                         "name": tool.name,
                     }
                 )
+        assistant_snapshot = build_assistant_execution_snapshot(
+            assistant=assistant,
+            mcp_server_entities=mcp_server_entities,
+        )
         return {
             "step_id": str(step.id) if step.id is not None else None,
             "step_order": step.step_order,
@@ -738,6 +759,7 @@ class FlowService:
             "mcp_policy": step.mcp_policy,
             "mcp_servers": mcp_servers,
             "mcp_tools_enabled": mcp_tools_enabled,
+            "assistant_snapshot": assistant_snapshot,
             "input_config": step.input_config,
             "output_config": output_config,
         }
@@ -755,13 +777,7 @@ class FlowService:
             raise NotFoundException("Assistant belongs to a different flow.")
 
     def _definition_checksum(self, definition: JsonObject) -> str:
-        serialized = json.dumps(
-            definition,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        )
-        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+        return stable_hash(definition)
 
     async def _prepare_template_output_config_for_publish(
         self,

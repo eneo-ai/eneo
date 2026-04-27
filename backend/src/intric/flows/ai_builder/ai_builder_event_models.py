@@ -24,6 +24,7 @@ class StructuredQuestionPayload(BaseModel):
     options: list[StructuredQuestionOptionPayload]
     selection_mode: Literal["single", "multi"]
     allow_custom: bool
+    requires_confirm: bool = False
 
 
 class AIBuilderTextEventData(BaseModel):

@@ -819,4 +819,7 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
   return flowEditor;
 }
 
+type FlowEditor = ReturnType<typeof initFlowEditor>;
+
 export { initFlowEditor, getFlowEditor };
+export type { FlowEditor };

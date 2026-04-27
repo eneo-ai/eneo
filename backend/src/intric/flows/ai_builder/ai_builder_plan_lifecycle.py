@@ -6,6 +6,7 @@ from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_context import (
     serialize_space_kbs,
+    serialize_space_mcps,
     serialize_space_models,
 )
 from intric.flows.ai_builder.ai_builder_materializer import (
@@ -206,6 +207,7 @@ class AIBuilderPlanLifecycle:
         catalog = build_ai_builder_resource_catalog(
             available_models=serialize_space_models(space),
             available_kbs=serialize_space_kbs(space),
+            available_mcps=serialize_space_mcps(space),
         )
         normalized_spec, resolution_issues = canonicalize_flow_spec_resources(
             spec,

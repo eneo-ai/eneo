@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, cast
+from dataclasses import dataclass, field
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Literal,
+    cast,
+)
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -21,6 +29,7 @@ from intric.flows.ai_builder.ai_builder_create_feedback import (
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
     OutlineFlowArgumentError,
+    attach_selected_mcp_refs_to_explicit_outline_steps,
     compile_outline_to_create_draft,
     outline_compile_context_from_planning_state,
     safe_validation_issues,
@@ -72,6 +81,17 @@ from intric.flows.ai_builder.ai_builder_interaction_utils import (
     analyze_discovery_ready,
     build_question_fallback_text,
 )
+from intric.flows.ai_builder.ai_builder_mcp_intent import (
+    build_mcp_resource_selection_question,
+    find_mcp_usage_without_selection_issue,
+    find_named_mcp_reference_issue,
+    find_named_mcp_request_issue,
+    mcp_resource_selection_values,
+    mcp_selected_server_refs_from_values,
+    mcp_selection_answer_allows_planning,
+    mcp_selection_policy_feedback,
+)
+from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from intric.flows.ai_builder.ai_builder_models import (
     ConversationMessage,
     FlowDraftSpecCore,
@@ -115,6 +135,12 @@ from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
 )
 from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
+    build_planner_telemetry,
+)
+from intric.flows.ai_builder.ai_builder_token_usage import (
+    CompletionTokenUsage,
+    combine_token_usage,
+    completion_token_usage_from_response,
 )
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
@@ -137,6 +163,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 MAX_SELF_CORRECTION_RETRIES = 3
 SUBMISSION_TOOL_NAMES = frozenset({OUTLINE_FLOW_TOOL_NAME, EDIT_FLOW_TOOL_NAME})
+EventBatch = tuple[dict[str, str], ...]
 
 
 def _tool_calls_contain_submission(tool_calls: list[Any]) -> bool:
@@ -146,7 +173,42 @@ def _tool_calls_contain_submission(tool_calls: list[Any]) -> bool:
     )
 
 
-def _resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:
+def _safe_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _completion_text_from_response(response: Any) -> str:
+    parts: list[str] = []
+    for choice in getattr(response, "choices", []) or []:
+        message = getattr(choice, "message", None)
+        content = getattr(message, "content", None)
+        if isinstance(content, str) and content:
+            parts.append(content)
+    return "\n".join(parts)
+
+
+def _assistant_metadata_with_usage(
+    *,
+    conversation: list[ConversationMessage],
+    base_metadata: dict[str, Any] | None,
+    usage_tracker: ProposalUsageTracker | None,
+    tool_calls: list[Any] | None = None,
+) -> dict[str, Any] | None:
+    if usage_tracker is None:
+        return base_metadata
+    return build_assistant_message_metadata(
+        conversation,
+        planner_telemetry=usage_tracker.build_planner_telemetry(
+            tool_call_count=len(tool_calls or [])
+        ),
+        base_metadata=base_metadata,
+        tool_calls=tool_calls,
+    )
+
+
+def _resolve_ui_language(
+    conversation: list[ConversationMessage],
+) -> Literal["sv", "en"] | None:
     for message in reversed(conversation):
         if message.role != "user":
             continue
@@ -157,11 +219,89 @@ def _resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:
     return None
 
 
+def _conversation_user_text(conversation: list[ConversationMessage]) -> str:
+    return "\n".join(
+        message.content
+        for message in conversation
+        if message.role == "user" and message.content
+    )
+
+
 @dataclass(frozen=True)
 class ToolProcessingResult:
     event: dict[str, str] | None = None
+    events: tuple[dict[str, str], ...] = ()
     feedback: str | None = None
     failure_kind: str | None = None
+
+    @property
+    def has_events(self) -> bool:
+        return self.event is not None or bool(self.events)
+
+    def iter_events(self) -> tuple[dict[str, str], ...]:
+        if self.event is None:
+            return self.events
+        return (self.event, *self.events)
+
+
+def _empty_token_usages() -> list[CompletionTokenUsage]:
+    return []
+
+
+@dataclass
+class ProposalUsageTracker:
+    request_id: str
+    model: str
+    token_usages: list[CompletionTokenUsage] = field(
+        default_factory=_empty_token_usages
+    )
+    finish_reason: str | None = None
+    repair_attempts: int = 0
+
+    @property
+    def llm_calls_made(self) -> int:
+        return len(self.token_usages)
+
+    def record_response(
+        self,
+        response: Any,
+        *,
+        messages: list[dict[str, Any]],
+        counts_as_repair: bool = False,
+    ) -> None:
+        choice = response.choices[0] if getattr(response, "choices", None) else None
+        self.finish_reason = _safe_str(getattr(choice, "finish_reason", None))
+        if counts_as_repair:
+            self.repair_attempts += 1
+        self.token_usages.append(
+            completion_token_usage_from_response(
+                response,
+                model_name=self.model,
+                messages=messages,
+                completion_text=_completion_text_from_response(response),
+            )
+        )
+
+    def build_planner_telemetry(self, *, tool_call_count: int = 0) -> dict[str, Any]:
+        usage = combine_token_usage(self.token_usages)
+        return build_planner_telemetry(
+            request_id=self.request_id,
+            model=self.model,
+            finish_reason=self.finish_reason,
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+            tool_call_count=tool_call_count,
+            used_auxiliary_llm=False,
+            token_usage_source=usage.source if usage.has_tokens else None,
+            token_usage_estimated=usage.estimated,
+            outcome_kind="dispatched",
+            wall_clock_ms=0,
+            llm_calls_made=self.llm_calls_made,
+            repair_attempts=self.repair_attempts,
+            parse_repair_attempts=0,
+            architecture_commit_populated=False,
+        )
 
 
 @dataclass(frozen=True)
@@ -185,6 +325,7 @@ class ProposalContext:
     text_content: str | None = None
     assistant_metadata: dict[str, Any] | None = None
     planning_state: PlanningState | None = None
+    usage_tracker: ProposalUsageTracker | None = None
 
 
 @dataclass(frozen=True)
@@ -245,12 +386,14 @@ class AIBuilderProposalProcessor:
         spec: FlowDraftSpecCore,
         flow: "Flow | None" = None,
         aggregation_intent: AggregationIntent = "linear",
+        resource_catalog: AIBuilderResourceCatalog | None = None,
     ) -> str | None:
         return build_conversation_aware_quality_feedback(
             conversation,
             spec,
             flow=flow,
             aggregation_intent=aggregation_intent,
+            resource_catalog=resource_catalog,
         )
 
     async def _process_outline_arguments(
@@ -273,6 +416,14 @@ class AIBuilderProposalProcessor:
     ) -> ToolProcessingResult:
         try:
             outline = parse_outline_flow_arguments(arguments)
+            if resource_catalog is not None:
+                outline = attach_selected_mcp_refs_to_explicit_outline_steps(
+                    outline,
+                    selected_server_refs=mcp_selected_server_refs_from_values(
+                        mcp_resource_selection_values(conversation)
+                    ),
+                    catalog=resource_catalog,
+                )
             runtime_input_field_hints = (
                 extract_runtime_input_field_hints_for_metadata_state(
                     aggregate_freeform_user_text(conversation),
@@ -406,6 +557,40 @@ class AIBuilderProposalProcessor:
         assert prepared.validation is not None
         spec = prepared.spec
         validation = prepared.validation
+
+        mcp_clarification_events = await self._mcp_clarification_events_if_needed(
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            spec=spec,
+            resource_catalog=resource_catalog,
+            flow=flow,
+            assistant_metadata=assistant_metadata,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
+        )
+        if mcp_clarification_events:
+            return ToolProcessingResult(
+                event=mcp_clarification_events[0],
+                events=tuple(mcp_clarification_events[1:]),
+            )
+        mcp_policy_feedback = (
+            mcp_selection_policy_feedback(
+                conversation=conversation,
+                spec=spec,
+                catalog=resource_catalog,
+            )
+            if resource_catalog is not None
+            else None
+        )
+        if mcp_policy_feedback is not None:
+            logger.info(
+                "ai_builder_mcp_selection_policy_violation "
+                "session_id=%s tool_call_id=%s",
+                session_id,
+                tool_call_id,
+            )
+
         if not validation.valid:
             quality_hint = self._format_quality_feedback(validation)
             contextual_hint = self._format_contextual_quality_feedback(
@@ -413,6 +598,7 @@ class AIBuilderProposalProcessor:
                 spec=spec,
                 flow=None,
                 aggregation_intent=aggregation_intent,
+                resource_catalog=resource_catalog,
             )
             hard_feedback = format_validation_feedback(
                 spec=spec,
@@ -420,7 +606,12 @@ class AIBuilderProposalProcessor:
             )
             combined_feedback = "\n\n".join(
                 feedback
-                for feedback in (hard_feedback, quality_hint, contextual_hint)
+                for feedback in (
+                    hard_feedback,
+                    mcp_policy_feedback,
+                    quality_hint,
+                    contextual_hint,
+                )
                 if feedback
             )
             combined_feedback = format_create_quality_feedback(combined_feedback)
@@ -435,11 +626,16 @@ class AIBuilderProposalProcessor:
             spec=spec,
             flow=None,
             aggregation_intent=aggregation_intent,
+            resource_catalog=resource_catalog,
         )
         combined_quality_feedback = (
             "\n\n".join(
                 feedback
-                for feedback in (quality_feedback, contextual_quality_feedback)
+                for feedback in (
+                    mcp_policy_feedback,
+                    quality_feedback,
+                    contextual_quality_feedback,
+                )
                 if feedback is not None
             )
             or None
@@ -475,6 +671,69 @@ class AIBuilderProposalProcessor:
         )
         return ToolProcessingResult(
             event=build_plan_event(plan_id=plan.id, envelope=envelope)
+        )
+
+    async def _mcp_clarification_events_if_needed(
+        self,
+        *,
+        session_id: UUID,
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        spec: FlowDraftSpecCore,
+        resource_catalog: AIBuilderResourceCatalog | None,
+        flow: "Flow | None",
+        assistant_metadata: dict[str, Any] | None,
+        lease_request_id: UUID | None,
+        lease_lock_token: UUID | None,
+    ) -> list[dict[str, str]]:
+        if resource_catalog is None or mcp_selection_answer_allows_planning(
+            conversation
+        ):
+            return []
+
+        issue = find_named_mcp_reference_issue(
+            spec=spec,
+            catalog=resource_catalog,
+            signal_text=aggregate_freeform_user_text(conversation),
+        )
+        if issue is None:
+            issue = find_mcp_usage_without_selection_issue(
+                spec=spec,
+                catalog=resource_catalog,
+            )
+        if issue is None:
+            return []
+
+        question_data, assistant_text = build_mcp_resource_selection_question(
+            issue=issue,
+            catalog=resource_catalog,
+            language=_resolve_ui_language(conversation) or "sv",
+        )
+        logger.info(
+            "ai_builder_mcp_selection_requires_clarification "
+            "session_id=%s step_ref=%s requested_mcp=%s reason=%s selected_server_refs=%s",
+            session_id,
+            issue.step_ref,
+            issue.requested_name,
+            issue.reason,
+            sorted(issue.selected_server_refs),
+        )
+        return await persist_backend_question(
+            repo=self.repo,
+            tenant_id=self.user.tenant_id,
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            question_data=question_data,
+            assistant_text=assistant_text,
+            assistant_metadata=assistant_metadata,
+            tool_content=(
+                "MCP selection question presented because MCP usage requires explicit "
+                "user selection from enabled space resources."
+            ),
+            flow=flow,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
         )
 
     @staticmethod
@@ -526,6 +785,7 @@ class AIBuilderProposalProcessor:
         flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
         planning_state: PlanningState | None = None,
+        usage_tracker: ProposalUsageTracker | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         ctx = ProposalContext(
             session_id=session_id,
@@ -547,6 +807,7 @@ class AIBuilderProposalProcessor:
             text_content=text_content,
             assistant_metadata=assistant_metadata,
             planning_state=planning_state,
+            usage_tracker=usage_tracker,
         )
         if ctx.text_content and not _tool_calls_contain_submission(tool_calls):
             yield build_text_event(ctx.text_content)
@@ -581,6 +842,7 @@ class AIBuilderProposalProcessor:
         planning_state: PlanningState | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
+        available_mcps: AIBuilderMCPResourceInput = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         """Run the server-selected plan proposal task.
 
@@ -590,19 +852,40 @@ class AIBuilderProposalProcessor:
         """
 
         submission_tool_name = _active_submission_tool_name(flow)
+        preflight_events = await self._mcp_preflight_events_if_needed(
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            resource_catalog=resource_catalog,
+            flow=flow,
+            assistant_metadata=assistant_metadata,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
+        )
+        if preflight_events:
+            for event in preflight_events:
+                yield event
+            return
+
         tool_schemas = _active_submission_tool_schemas(
             flow=flow,
             available_models=available_models,
             available_kbs=available_kbs,
+            available_mcps=available_mcps,
+        )
+        usage_tracker = ProposalUsageTracker(
+            request_id=request_id,
+            model=litellm_model,
         )
         try:
-            response = await self._call_repair_completion(
+            response = await self._call_repair_completion_with_usage(
                 messages=llm_messages,
                 tool_schemas=tool_schemas,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
                 max_output_tokens=max_output_tokens,
                 temperature=proposal_temperature,
+                usage_tracker=usage_tracker,
                 tool_choice={
                     "type": "function",
                     "function": {"name": submission_tool_name},
@@ -643,13 +926,14 @@ class AIBuilderProposalProcessor:
                 flow=flow,
                 assistant_snapshots=assistant_snapshots,
                 planning_state=planning_state,
+                usage_tracker=usage_tracker,
             ):
                 yielded = True
                 yield event
             if yielded:
                 return
 
-        forced_event = await self.retry_forced_proposal_after_text(
+        forced_events = await self.retry_forced_proposal_after_text(
             correction_messages=llm_messages,
             assistant_text=message.content or "",
             tool_schemas=tool_schemas,
@@ -667,9 +951,12 @@ class AIBuilderProposalProcessor:
             planning_state=planning_state,
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
+            usage_tracker=usage_tracker,
+            assistant_metadata=assistant_metadata,
         )
-        if forced_event is not None:
-            yield forced_event
+        if forced_events is not None:
+            for event in forced_events:
+                yield event
             return
 
         yield build_error_event(
@@ -711,6 +998,59 @@ class AIBuilderProposalProcessor:
             )
         return None
 
+    async def _mcp_preflight_events_if_needed(
+        self,
+        *,
+        session_id: UUID,
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        resource_catalog: AIBuilderResourceCatalog | None,
+        flow: "Flow | None",
+        assistant_metadata: dict[str, Any] | None,
+        lease_request_id: UUID | None,
+        lease_lock_token: UUID | None,
+    ) -> list[dict[str, str]]:
+        if resource_catalog is None or mcp_selection_answer_allows_planning(
+            conversation
+        ):
+            return []
+
+        issue = find_named_mcp_request_issue(
+            catalog=resource_catalog,
+            signal_text=_conversation_user_text(conversation),
+        )
+        if issue is None:
+            return []
+
+        question_data, assistant_text = build_mcp_resource_selection_question(
+            issue=issue,
+            catalog=resource_catalog,
+            language=_resolve_ui_language(conversation) or "sv",
+        )
+        logger.info(
+            "ai_builder_mcp_preflight_requires_clarification "
+            "session_id=%s requested_mcp=%s",
+            session_id,
+            issue.requested_name,
+        )
+        return await persist_backend_question(
+            repo=self.repo,
+            tenant_id=self.user.tenant_id,
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            question_data=question_data,
+            assistant_text=assistant_text,
+            assistant_metadata=assistant_metadata,
+            tool_content=(
+                "MCP selection question presented before proposal because the user "
+                "requested an MCP by name and must choose from enabled space MCP resources."
+            ),
+            flow=flow,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
+        )
+
     async def _resolve_submission_prerequisite_events(
         self,
         *,
@@ -728,9 +1068,10 @@ class AIBuilderProposalProcessor:
             flow=ctx.flow,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
-            assistant_metadata=build_assistant_message_metadata(
-                ctx.conversation,
+            assistant_metadata=_assistant_metadata_with_usage(
+                conversation=ctx.conversation,
                 base_metadata=ctx.assistant_metadata,
+                usage_tracker=ctx.usage_tracker,
                 tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
             ),
             lease_request_id=ctx.lease_request_id,
@@ -804,7 +1145,12 @@ class AIBuilderProposalProcessor:
             new_messages_start=ctx.new_messages_start,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
-            assistant_metadata=ctx.assistant_metadata,
+            assistant_metadata=_assistant_metadata_with_usage(
+                conversation=ctx.conversation,
+                base_metadata=ctx.assistant_metadata,
+                usage_tracker=ctx.usage_tracker,
+                tool_calls=[tool_call],
+            ),
             tool_call_id=tool_call.id,
             available_model_refs=ctx.available_model_refs,
             available_kb_refs=ctx.available_kb_refs,
@@ -821,10 +1167,10 @@ class AIBuilderProposalProcessor:
             "ai_builder_submission_first_attempt tool=%s request_id=%s success=%s failure_kind=%s",
             config.target_tool_name,
             ctx.request_id,
-            str(submission_result.event is not None).lower(),
+            str(submission_result.has_events).lower(),
             submission_result.failure_kind or "none",
         )
-        if submission_result.event is None:
+        if not submission_result.has_events:
             async for event in self._request_tool_self_correction(
                 ctx=ctx,
                 error_message=submission_result.feedback
@@ -840,7 +1186,8 @@ class AIBuilderProposalProcessor:
                 yield event
             return
 
-        yield submission_result.event
+        for event in submission_result.iter_events():
+            yield event
 
     @staticmethod
     def _build_submission_processing_kwargs(
@@ -925,6 +1272,36 @@ class AIBuilderProposalProcessor:
             **litellm_kwargs,
         )
 
+    async def _call_repair_completion_with_usage(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tool_schemas: list[dict[str, Any]],
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        max_output_tokens: int,
+        temperature: float,
+        usage_tracker: ProposalUsageTracker | None,
+        tool_choice: dict[str, Any] | None = None,
+        counts_as_repair: bool = False,
+    ) -> Any:
+        response = await self._call_repair_completion(
+            messages=messages,
+            tool_schemas=tool_schemas,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            tool_choice=tool_choice,
+        )
+        if usage_tracker is not None:
+            usage_tracker.record_response(
+                response,
+                messages=messages,
+                counts_as_repair=counts_as_repair,
+            )
+        return response
+
     async def request_self_correction(
         self,
         *,
@@ -985,6 +1362,27 @@ class AIBuilderProposalProcessor:
     ) -> AsyncGenerator[dict[str, str], None]:
         merged_process_kwargs = dict(retry_config.process_tool_kwargs)
         merged_process_kwargs.setdefault("resource_catalog", ctx.resource_catalog)
+
+        def _build_assistant_metadata() -> dict[str, Any] | None:
+            return _assistant_metadata_with_usage(
+                conversation=ctx.conversation,
+                base_metadata=ctx.assistant_metadata,
+                usage_tracker=ctx.usage_tracker,
+            )
+
+        async def _call_repair_completion(**kwargs: Any) -> Any:
+            return await self._call_repair_completion_with_usage(
+                **kwargs,
+                usage_tracker=ctx.usage_tracker,
+                counts_as_repair=True,
+            )
+
+        async def _retry_forced_tool_after_text(**kwargs: Any) -> EventBatch | None:
+            return await self.retry_forced_tool_after_text(
+                **kwargs,
+                usage_tracker=ctx.usage_tracker,
+            )
+
         async for event in run_request_self_correction(
             session_id=ctx.session_id,
             conversation=ctx.conversation,
@@ -1001,14 +1399,15 @@ class AIBuilderProposalProcessor:
             self_correction_temperature=self.self_correction_temperature,
             self_correction_bumped_temperature=self.self_correction_bumped_temperature,
             max_self_correction_retries=MAX_SELF_CORRECTION_RETRIES,
-            call_repair_completion=self._call_repair_completion,
+            call_repair_completion=_call_repair_completion,
             process_tool_arguments=retry_config.process_tool_arguments,
             target_tool_name=retry_config.target_tool_name,
             forced_tool_prompt=retry_config.forced_tool_prompt,
             build_self_correction_error_event=self._build_self_correction_error_event,
-            retry_forced_tool_after_text=self.retry_forced_tool_after_text,
+            retry_forced_tool_after_text=_retry_forced_tool_after_text,
             process_tool_kwargs=merged_process_kwargs,
             flow=ctx.flow,
+            build_assistant_metadata=_build_assistant_metadata,
         ):
             yield event
 
@@ -1032,10 +1431,20 @@ class AIBuilderProposalProcessor:
         process_tool_kwargs: dict[str, Any] | None = None,
         flow: "Flow | None" = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
-    ) -> dict[str, str] | None:
+        usage_tracker: ProposalUsageTracker | None = None,
+        build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
+    ) -> EventBatch | None:
         merged_process_kwargs = dict(process_tool_kwargs or {})
         if resource_catalog is not None:
             merged_process_kwargs.setdefault("resource_catalog", resource_catalog)
+
+        async def _call_repair_completion(**kwargs: Any) -> Any:
+            return await self._call_repair_completion_with_usage(
+                **kwargs,
+                usage_tracker=usage_tracker,
+                counts_as_repair=True,
+            )
+
         return await run_retry_forced_tool_after_text(
             correction_messages=correction_messages,
             assistant_text=assistant_text,
@@ -1051,10 +1460,11 @@ class AIBuilderProposalProcessor:
             target_tool_name=target_tool_name,
             forced_tool_prompt=forced_tool_prompt,
             forced_proposal_temperature=self.forced_proposal_temperature,
-            call_repair_completion=self._call_repair_completion,
+            call_repair_completion=_call_repair_completion,
             process_tool_arguments=process_tool_arguments,
             process_tool_kwargs=merged_process_kwargs,
             flow=flow,
+            build_assistant_metadata=build_assistant_metadata,
         )
 
     async def retry_forced_proposal_after_text(
@@ -1077,7 +1487,9 @@ class AIBuilderProposalProcessor:
         planning_state: PlanningState | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
-    ) -> dict[str, str] | None:
+        usage_tracker: ProposalUsageTracker | None = None,
+        assistant_metadata: dict[str, Any] | None = None,
+    ) -> EventBatch | None:
         retry_config = self._submission_retry_config(
             flow=flow,
             litellm_model=litellm_model,
@@ -1105,6 +1517,14 @@ class AIBuilderProposalProcessor:
             process_tool_kwargs=retry_config.process_tool_kwargs,
             resource_catalog=resource_catalog,
             flow=flow,
+            usage_tracker=usage_tracker,
+            build_assistant_metadata=(
+                lambda: _assistant_metadata_with_usage(
+                    conversation=conversation,
+                    base_metadata=assistant_metadata,
+                    usage_tracker=usage_tracker,
+                )
+            ),
         )
 
     async def request_non_question_continuation(
@@ -1125,6 +1545,7 @@ class AIBuilderProposalProcessor:
         flow: "Flow | None" = None,
         original_question_id: str | None = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        usage_tracker: ProposalUsageTracker | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         submission_tool_name = _active_submission_tool_name(flow)
         filtered_tool_schemas = [
@@ -1142,8 +1563,10 @@ class AIBuilderProposalProcessor:
                 flow=flow,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
-                assistant_metadata=build_assistant_message_metadata(
-                    conversation,
+                assistant_metadata=_assistant_metadata_with_usage(
+                    conversation=conversation,
+                    base_metadata=None,
+                    usage_tracker=usage_tracker,
                     tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
                 ),
                 lease_request_id=None,
@@ -1195,14 +1618,16 @@ class AIBuilderProposalProcessor:
         active_messages = correction_messages
         while True:
             try:
-                response = await self._call_repair_completion(
+                response = await self._call_repair_completion_with_usage(
                     messages=active_messages,
                     tool_schemas=filtered_tool_schemas,
                     litellm_model=litellm_model,
                     litellm_kwargs=litellm_kwargs,
                     max_output_tokens=max_output_tokens,
                     temperature=self.self_correction_temperature,
+                    usage_tracker=usage_tracker,
                     tool_choice=forced_tool_choice,
+                    counts_as_repair=True,
                 )
             except Exception as error:
                 logger.error(
@@ -1265,6 +1690,7 @@ class AIBuilderProposalProcessor:
                     request_id="question-recovery",
                     flow=flow,
                     assistant_snapshots=assistant_snapshots,
+                    usage_tracker=usage_tracker,
                 ):
                     yield event
                 return
@@ -1286,9 +1712,10 @@ class AIBuilderProposalProcessor:
             flow=ctx.flow,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
-            assistant_metadata=build_assistant_message_metadata(
-                ctx.conversation,
+            assistant_metadata=_assistant_metadata_with_usage(
+                conversation=ctx.conversation,
                 base_metadata=ctx.assistant_metadata,
+                usage_tracker=ctx.usage_tracker,
                 tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
             ),
             lease_request_id=ctx.lease_request_id,
@@ -1335,7 +1762,12 @@ class AIBuilderProposalProcessor:
                 tool_content=(
                     "Structured question payload was invalid; rendered fallback text question."
                 ),
-                assistant_metadata=ctx.assistant_metadata,
+                assistant_metadata=_assistant_metadata_with_usage(
+                    conversation=ctx.conversation,
+                    base_metadata=ctx.assistant_metadata,
+                    usage_tracker=ctx.usage_tracker,
+                    tool_calls=[tool_call],
+                ),
                 flow=ctx.flow,
                 lease_request_id=ctx.lease_request_id,
                 lease_lock_token=ctx.lease_lock_token,
@@ -1364,7 +1796,12 @@ class AIBuilderProposalProcessor:
                 new_messages_start=ctx.new_messages_start,
                 question_data=backend_question_data,
                 assistant_text=assistant_text,
-                assistant_metadata=ctx.assistant_metadata,
+                assistant_metadata=_assistant_metadata_with_usage(
+                    conversation=ctx.conversation,
+                    base_metadata=ctx.assistant_metadata,
+                    usage_tracker=ctx.usage_tracker,
+                    tool_calls=[tool_call],
+                ),
                 tool_content=(
                     "Backend-owned discovery question presented to user after model signal."
                 ),
@@ -1391,6 +1828,7 @@ class AIBuilderProposalProcessor:
             flow=ctx.flow,
             original_question_id=question_id,
             assistant_snapshots=ctx.assistant_snapshots,
+            usage_tracker=ctx.usage_tracker,
         ):
             yield event
 
@@ -1575,7 +2013,7 @@ class AIBuilderProposalProcessor:
             target_kind=TargetKind.EDIT,
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
-            resource_catalog=None,
+            resource_catalog=resource_catalog,
             valid_existing_step_refs=valid_step_refs,
         )
         if prepared.failure_feedback is not None:
@@ -1594,6 +2032,39 @@ class AIBuilderProposalProcessor:
                     "Compiled edit spec validation failed: " + "; ".join(error_messages)
                 ),
                 failure_kind="validation",
+            )
+
+        mcp_clarification_events = await self._mcp_clarification_events_if_needed(
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            spec=compiled_spec,
+            resource_catalog=resource_catalog,
+            flow=flow,
+            assistant_metadata=assistant_metadata,
+            lease_request_id=lease_request_id,
+            lease_lock_token=lease_lock_token,
+        )
+        if mcp_clarification_events:
+            return ToolProcessingResult(
+                event=mcp_clarification_events[0],
+                events=tuple(mcp_clarification_events[1:]),
+            )
+        mcp_policy_feedback = (
+            mcp_selection_policy_feedback(
+                conversation=conversation,
+                spec=compiled_spec,
+                catalog=resource_catalog,
+            )
+            if resource_catalog is not None
+            else None
+        )
+        if mcp_policy_feedback is not None:
+            logger.info(
+                "ai_builder_edit_mcp_selection_policy_violation "
+                "session_id=%s tool_call_id=%s",
+                session_id,
+                tool_call_id,
             )
 
         current_provenance = _extract_description_provenance(flow.metadata_json)
@@ -1629,10 +2100,15 @@ class AIBuilderProposalProcessor:
             conversation=conversation,
             spec=compiled_spec,
             flow=flow,
+            resource_catalog=resource_catalog,
         )
         combined_quality_feedback = "\n\n".join(
             feedback
-            for feedback in (quality_feedback, contextual_quality_feedback)
+            for feedback in (
+                mcp_policy_feedback,
+                quality_feedback,
+                contextual_quality_feedback,
+            )
             if feedback
         )
         if combined_quality_feedback:
@@ -1696,7 +2172,12 @@ class AIBuilderProposalProcessor:
             new_messages_start=ctx.new_messages_start,
             arguments=arguments,
             assistant_content=ctx.text_content or "",
-            assistant_metadata=ctx.assistant_metadata,
+            assistant_metadata=_assistant_metadata_with_usage(
+                conversation=ctx.conversation,
+                base_metadata=ctx.assistant_metadata,
+                usage_tracker=ctx.usage_tracker,
+                tool_calls=[tool_call],
+            ),
             tool_call_id=tool_call.id,
             available_model_refs=ctx.available_model_refs,
             available_kb_refs=ctx.available_kb_refs,
@@ -1713,9 +2194,10 @@ class AIBuilderProposalProcessor:
                     flow=ctx.flow,
                     litellm_model=ctx.litellm_model,
                     litellm_kwargs=ctx.litellm_kwargs,
-                    assistant_metadata=build_assistant_message_metadata(
-                        ctx.conversation,
+                    assistant_metadata=_assistant_metadata_with_usage(
+                        conversation=ctx.conversation,
                         base_metadata=ctx.assistant_metadata,
+                        usage_tracker=ctx.usage_tracker,
                         tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
                     ),
                     lease_request_id=ctx.lease_request_id,
@@ -1768,6 +2250,12 @@ class AIBuilderProposalProcessor:
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
             max_output_tokens=ctx.max_output_tokens,
+            assistant_metadata=_assistant_metadata_with_usage(
+                conversation=ctx.conversation,
+                base_metadata=ctx.assistant_metadata,
+                usage_tracker=ctx.usage_tracker,
+                tool_calls=[tool_call],
+            ),
             resource_catalog=ctx.resource_catalog,
         )
         if edit_result.event is None:
@@ -1979,13 +2467,21 @@ def _active_submission_tool_schemas(
     flow: "Flow | None",
     available_models: list[dict[str, Any]] | None,
     available_kbs: list[dict[str, Any]] | None,
+    available_mcps: AIBuilderMCPResourceInput,
 ) -> list[dict[str, Any]]:
     if flow is None:
-        return [build_outline_flow_tool_schema()]
+        return [
+            build_outline_flow_tool_schema(
+                available_models=available_models,
+                available_kbs=available_kbs,
+                available_mcps=available_mcps,
+            )
+        ]
     return [
         build_edit_flow_tool_schema(
             list(flow.steps),
             available_models=available_models,
             available_kbs=available_kbs,
+            available_mcps=available_mcps,
         )
     ]

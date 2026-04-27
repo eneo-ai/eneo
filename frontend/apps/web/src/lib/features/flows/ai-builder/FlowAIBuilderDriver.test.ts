@@ -132,36 +132,6 @@ describe("FlowAIBuilderDriver", () => {
 
     expect(driver.isQuestionAnswered("input_mode")).toBe(true);
     expect(driver.isQuestionAnswered("output_mode")).toBe(false);
-    expect(driver.getQuestionAnswerText(question)).toBe("Documents");
-  });
-
-  it("renders custom structured question answers for collapsed answered questions", async () => {
-    const { driver } = makeDriver();
-    const question = {
-      question_id: "output_mode",
-      question: "What should the flow produce?",
-      options: [{ label: "DOCX document", id: "docx", value: "docx_document" }],
-      selection_mode: "single" as const,
-      allow_custom: true
-    };
-    driver.seedState({
-      messages: [
-        { role: "assistant", content: "", question, timestamp: 1 },
-        {
-          role: "user",
-          content: "PowerPoint deck",
-          metadata: {
-            question_answer: {
-              question_id: "output_mode",
-              custom_value: "PowerPoint deck"
-            }
-          },
-          timestamp: 2
-        }
-      ]
-    });
-
-    expect(driver.getQuestionAnswerText(question)).toBe("PowerPoint deck");
   });
 
   it("only treats the latest requirements summary as active", async () => {
@@ -436,6 +406,127 @@ describe("FlowAIBuilderDriver", () => {
     await driver.sendMessage("Build a flow");
 
     expect(stream).toHaveBeenCalledOnce();
+  });
+
+  it("preserves explicit-confirm structured question metadata from stream events", async () => {
+    const { driver } = makeDriver({
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onMessage({
+          event: "question",
+          data: JSON.stringify({
+            question_id: "mcp_resource_selection",
+            question: "Should AI Builder use MCP tools?",
+            selection_mode: "single",
+            allow_custom: false,
+            requires_confirm: true,
+            options: [
+              {
+                id: "use_time",
+                label: "Use Time MCP",
+                value: "use_mcp_server:time-server"
+              }
+            ]
+          })
+        });
+        handlers.onClose();
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow");
+
+    expect(driver.state.messages[1]?.question).toMatchObject({
+      question_id: "mcp_resource_selection",
+      requires_confirm: true
+    });
+  });
+
+  it("updates session telemetry from usage stream events", async () => {
+    const { driver } = makeDriver({
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onMessage({
+          event: "usage",
+          data: JSON.stringify({
+            planner_request_count: 1,
+            clarification_question_count: 0,
+            prompt_tokens_total: 1200,
+            completion_tokens_total: 300,
+            total_tokens_total: 1500,
+            tool_call_count_total: 1,
+            auxiliary_llm_call_count: 0,
+            architecture_commit_count: 0,
+            repair_attempts_total: 1,
+            parse_repair_attempts_total: 0,
+            wall_clock_ms_total: 0,
+            llm_calls_made_total: 2,
+            token_usage_estimated: false,
+            last_request_id: "request-1",
+            last_model: "gpt-5.4-nano",
+            last_finish_reason: "tool_calls",
+            last_outcome_kind: "dispatched",
+            last_token_usage_source: "provider",
+            last_token_usage_estimated: false
+          })
+        });
+        handlers.onClose();
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow");
+
+    expect(driver.state.session?.telemetry?.total_tokens_total).toBe(1500);
+    expect(driver.state.session?.telemetry?.prompt_tokens_total).toBe(1200);
+    expect(driver.state.session?.telemetry?.last_model).toBe("gpt-5.4-nano");
+  });
+
+  it("refreshes session telemetry after a plan stream without usage event", async () => {
+    const plan = makePlan();
+    const sessionWithTelemetry = makeSession({
+      latest_plan_id: "plan-1",
+      telemetry: {
+        planner_request_count: 1,
+        clarification_question_count: 0,
+        prompt_tokens_total: 900,
+        completion_tokens_total: 200,
+        total_tokens_total: 1100,
+        tool_call_count_total: 1,
+        auxiliary_llm_call_count: 0,
+        architecture_commit_count: 0,
+        repair_attempts_total: 0,
+        parse_repair_attempts_total: 0,
+        wall_clock_ms_total: 0,
+        llm_calls_made_total: 1,
+        token_usage_estimated: false,
+        last_request_id: "request-plan",
+        last_model: "gpt-5.4-nano",
+        last_finish_reason: "tool_calls",
+        last_outcome_kind: "dispatched",
+        last_token_usage_source: "provider",
+        last_token_usage_estimated: false
+      }
+    });
+    const fetch = vi.fn().mockResolvedValueOnce(sessionWithTelemetry).mockResolvedValueOnce(plan);
+    const { driver } = makeDriver({
+      fetchImpl: fetch,
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onMessage({
+          event: "plan",
+          data: JSON.stringify(plan)
+        });
+        handlers.onClose();
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow");
+
+    expect(driver.state.session?.telemetry?.total_tokens_total).toBe(1100);
+    expect(driver.state.currentPlan?.plan_id).toBe("plan-1");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/flows/ai-builder/sessions/session-1",
+      expect.objectContaining({ method: "get" })
+    );
   });
 
   it("forwards file_ids with AI Builder messages", async () => {

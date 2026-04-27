@@ -174,6 +174,56 @@ class TestBuildSystemPrompt:
         assert "do not emit input_source in create mode" in prompt
         assert '"input_source":' not in prompt
 
+    def test_prompt_exposes_mcp_refs_as_step_scoped_resources(self) -> None:
+        prompt = build_system_prompt(
+            available_mcp_servers=[
+                {
+                    "ref": "server-1",
+                    "name": "Case system",
+                    "display_name": "Case system",
+                    "description": "Live case data.",
+                    "tools": [
+                        {
+                            "ref": "tool-1",
+                            "name": "lookup_case",
+                            "display_name": "Lookup case",
+                            "description": "Fetch a case.",
+                        }
+                    ],
+                }
+            ]
+        )
+
+        assert "Tillgängliga MCP-verktyg" in prompt
+        assert "server_ref=`server-1`" in prompt
+        assert "Lookup case [tool-1]: Fetch a case." in prompt
+        assert "mcp_tool_refs" in prompt
+        assert "ska inte köra MCP-verktyg" in prompt
+        assert "Verktygsbeskrivningar är beslutsstöd" in prompt
+        assert "systemval eller tillstånd saknas" in prompt
+        assert "ställ en kort förtydligande fråga" in prompt
+        assert "Kombinera inte MCP med `knowledge_refs`" in prompt
+
+    def test_prompt_omits_malformed_mcp_resources(self) -> None:
+        prompt = build_system_prompt(
+            available_mcp_servers=[
+                {"ref": "", "name": "Broken", "tools": [{"ref": "ignored-tool"}]},
+                {
+                    "ref": "server-1",
+                    "name": "Case system",
+                    "tools": [
+                        {"ref": " ", "name": "blank"},
+                        {"ref": "tool-1", "name": "lookup_case"},
+                    ],
+                },
+            ]
+        )
+
+        assert "server_ref=`server-1`" in prompt
+        assert "lookup_case [tool-1]" in prompt
+        assert "ignored-tool" not in prompt
+        assert "blank [" not in prompt
+
     def test_edit_mode_prompt_contains_flow_chaining_rules(self) -> None:
         prompt = build_system_prompt(
             flow_context="Namn: Test\nAntal steg: 2",

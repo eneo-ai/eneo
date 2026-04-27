@@ -90,6 +90,27 @@ def clean_intric_tag(input_string: str) -> str:
     return re.sub(AT_TAG_PATTERN, "", input_string)
 
 
+def _reject_direct_flow_managed_assistant_mutation(
+    assistant: Assistant, *, action: str
+) -> None:
+    if assistant.origin != AssistantOrigin.FLOW_MANAGED:
+        return
+
+    raise BadRequestException(
+        "Flow-managed assistants must be modified through flow endpoints.",
+        code="flow_managed_assistant",
+        context={
+            "assistant_id": str(assistant.id),
+            "flow_id": (
+                str(assistant.managing_flow_id)
+                if assistant.managing_flow_id is not None
+                else None
+            ),
+            "action": action,
+        },
+    )
+
+
 TReference = TypeVar("TReference")
 
 
@@ -1196,6 +1217,10 @@ class AssistantService:
                 },
             )
 
+        _reject_direct_flow_managed_assistant_mutation(
+            assistant, action="add_mcp_server"
+        )
+
         # Get existing associations from the database
         import sqlalchemy as sa
 
@@ -1284,6 +1309,10 @@ class AssistantService:
                 },
             )
 
+        _reject_direct_flow_managed_assistant_mutation(
+            assistant, action="remove_mcp_server"
+        )
+
         # Get existing associations from the database
         import sqlalchemy as sa
 
@@ -1346,6 +1375,10 @@ class AssistantService:
                     "auth_layer": "domain_policy",
                 },
             )
+
+        _reject_direct_flow_managed_assistant_mutation(
+            assistant, action="update_mcp_server_config"
+        )
 
         # Get existing associations from the database
         import sqlalchemy as sa

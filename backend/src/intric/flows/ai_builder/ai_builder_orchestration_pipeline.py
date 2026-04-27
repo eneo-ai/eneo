@@ -60,8 +60,13 @@ from intric.flows.ai_builder.ai_builder_repair import (
     ParseRepairOutcome,
     RepairOutcome,
     build_repair_messages,
+    completion_metadata_from_response,
     repair_parse_failure,
     repair_planner_turn,
+)
+from intric.flows.ai_builder.ai_builder_token_usage import (
+    CompletionTokenUsage,
+    combine_token_usage,
 )
 
 PipelineOutcomeKind = Literal["accepted", "rejected", "parse_failed"]
@@ -104,6 +109,7 @@ class PipelineOutcome:
     repair_attempts: int = 0
     parse_repair_attempts: int = 0
     final_completion: CompletionMetadata | None = None
+    cumulative_token_usage: CompletionTokenUsage | None = None
     parse_error_raw: str | None = None
     parse_error_message: str | None = None
     parse_failure_diagnostics: dict[str, Any] | None = None
@@ -131,13 +137,11 @@ async def _call_planner(
         **litellm_kwargs,
     )
     raw = response.choices[0].message.content or ""
-    choice = response.choices[0]
-    usage = getattr(response, "usage", None)
-    metadata = CompletionMetadata(
-        finish_reason=getattr(choice, "finish_reason", None),
-        prompt_tokens=getattr(usage, "prompt_tokens", None) if usage else None,
-        completion_tokens=getattr(usage, "completion_tokens", None) if usage else None,
-        total_tokens=getattr(usage, "total_tokens", None) if usage else None,
+    metadata = completion_metadata_from_response(
+        response,
+        litellm_model=litellm_model,
+        messages=messages,
+        completion_text=raw,
     )
     try:
         parsed = parse_planner_output(raw)
@@ -190,6 +194,10 @@ async def run_planner_pipeline(
     repair_attempts = 0
     parse_repair_attempts = 0
     final_metadata = initial.metadata
+    token_usages: list[CompletionTokenUsage] = [initial.metadata.token_usage()]
+
+    def _cumulative_usage() -> CompletionTokenUsage:
+        return combine_token_usage(token_usages)
 
     if initial.parsed is None:
         # Truncation skips parse-repair: a corrective turn would just be
@@ -202,6 +210,7 @@ async def run_planner_pipeline(
                 repair_attempts=repair_attempts,
                 parse_repair_attempts=parse_repair_attempts,
                 final_completion=final_metadata,
+                cumulative_token_usage=_cumulative_usage(),
                 parse_error_raw=initial.raw,
                 parse_error_message=initial.parse_error,
                 parse_failure_diagnostics=initial.parse_failure_diagnostics,
@@ -217,6 +226,7 @@ async def run_planner_pipeline(
         llm_calls_made += parse_repair_result.attempts
         parse_repair_attempts = parse_repair_result.attempts
         final_metadata = parse_repair_result.final_metadata
+        token_usages.extend(parse_repair_result.token_usages)
         if parse_repair_result.repaired_output is None:
             return PipelineOutcome(
                 kind="parse_failed",
@@ -224,6 +234,7 @@ async def run_planner_pipeline(
                 repair_attempts=repair_attempts,
                 parse_repair_attempts=parse_repair_attempts,
                 final_completion=final_metadata,
+                cumulative_token_usage=_cumulative_usage(),
                 parse_error_raw=parse_repair_result.failed_raw,
                 parse_error_message=parse_repair_result.failed_error,
                 parse_failure_diagnostics=parse_repair_result.failed_diagnostics,
@@ -257,10 +268,12 @@ async def run_planner_pipeline(
                 repair_attempts=repair_attempts,
                 parse_repair_attempts=parse_repair_attempts,
                 final_completion=final_metadata,
+                cumulative_token_usage=_cumulative_usage(),
             )
         llm_calls_made += 1
         assert repair_outcome.completion_metadata is not None
         final_metadata = repair_outcome.completion_metadata
+        token_usages.append(final_metadata.token_usage())
         if repair_outcome.kind == "parse_failed":
             if final_metadata.finish_reason == "length":
                 return PipelineOutcome(
@@ -269,6 +282,7 @@ async def run_planner_pipeline(
                     repair_attempts=repair_attempts,
                     parse_repair_attempts=parse_repair_attempts,
                     final_completion=final_metadata,
+                    cumulative_token_usage=_cumulative_usage(),
                     parse_error_raw=repair_outcome.parse_error_raw,
                     parse_error_message=repair_outcome.parse_error_message,
                     parse_failure_diagnostics=repair_outcome.parse_failure_diagnostics,
@@ -289,6 +303,7 @@ async def run_planner_pipeline(
             llm_calls_made += parse_repair_result.attempts
             parse_repair_attempts += parse_repair_result.attempts
             final_metadata = parse_repair_result.final_metadata
+            token_usages.extend(parse_repair_result.token_usages)
             if parse_repair_result.repaired_output is not None:
                 output = normalize_planner_output(
                     parse_repair_result.repaired_output,
@@ -304,6 +319,7 @@ async def run_planner_pipeline(
                 repair_attempts=repair_attempts,
                 parse_repair_attempts=parse_repair_attempts,
                 final_completion=final_metadata,
+                cumulative_token_usage=_cumulative_usage(),
                 parse_error_raw=parse_repair_result.failed_raw,
                 parse_error_message=parse_repair_result.failed_error,
                 parse_failure_diagnostics=parse_repair_result.failed_diagnostics,
@@ -316,6 +332,7 @@ async def run_planner_pipeline(
                 repair_attempts=repair_attempts,
                 parse_repair_attempts=parse_repair_attempts,
                 final_completion=final_metadata,
+                cumulative_token_usage=_cumulative_usage(),
             )
         assert repair_outcome.repaired_output is not None
         output = normalize_planner_output(
@@ -334,6 +351,7 @@ async def run_planner_pipeline(
             repair_attempts=repair_attempts,
             parse_repair_attempts=parse_repair_attempts,
             final_completion=final_metadata,
+            cumulative_token_usage=_cumulative_usage(),
         )
 
     return PipelineOutcome(
@@ -343,6 +361,7 @@ async def run_planner_pipeline(
         repair_attempts=repair_attempts,
         parse_repair_attempts=parse_repair_attempts,
         final_completion=final_metadata,
+        cumulative_token_usage=_cumulative_usage(),
     )
 
 
@@ -360,6 +379,7 @@ class _ParseRepairResult:
     attempts: int
     repaired_output: PlannerOutput | None
     final_metadata: CompletionMetadata
+    token_usages: tuple[CompletionTokenUsage, ...]
     failed_raw: str
     failed_error: str
     failed_diagnostics: dict[str, Any] | None
@@ -384,6 +404,7 @@ async def _run_parse_repair_loop(
         completion_tokens=None,
         total_tokens=None,
     )
+    token_usages: list[CompletionTokenUsage] = []
     while attempts < MAX_PARSE_REPAIR_RETRIES:
         outcome: ParseRepairOutcome = await repair_parse_failure(
             litellm_client=litellm_client,
@@ -397,12 +418,14 @@ async def _run_parse_repair_loop(
         metadata = outcome.completion_metadata
         assert metadata is not None
         last_metadata = metadata
+        token_usages.append(last_metadata.token_usage())
         if outcome.kind == "repaired":
             assert outcome.repaired_output is not None
             return _ParseRepairResult(
                 attempts=attempts,
                 repaired_output=outcome.repaired_output,
                 final_metadata=last_metadata,
+                token_usages=tuple(token_usages),
                 failed_raw=last_raw,
                 failed_error=last_error,
                 failed_diagnostics=None,
@@ -415,6 +438,7 @@ async def _run_parse_repair_loop(
                 attempts=attempts,
                 repaired_output=None,
                 final_metadata=last_metadata,
+                token_usages=tuple(token_usages),
                 failed_raw=last_raw,
                 failed_error=last_error,
                 failed_diagnostics=last_diagnostics,
@@ -423,6 +447,7 @@ async def _run_parse_repair_loop(
         attempts=attempts,
         repaired_output=None,
         final_metadata=last_metadata,
+        token_usages=tuple(token_usages),
         failed_raw=last_raw,
         failed_error=last_error,
         failed_diagnostics=last_diagnostics if attempts > 0 else None,

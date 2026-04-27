@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from intric.flows.ai_builder.ai_builder_critic_invariants import (
     CriticContext,
@@ -30,6 +30,11 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
 from intric.flows.ai_builder.planning_state import AggregationIntent
 from intric.flows.domain.flow import Flow
 
+if TYPE_CHECKING:
+    from intric.flows.ai_builder.ai_builder_resource_catalog import (
+        AIBuilderResourceCatalog,
+    )
+
 
 def build_conversation_aware_quality_feedback(
     conversation: list[ConversationMessage] | list[Mapping[str, Any]],
@@ -37,6 +42,7 @@ def build_conversation_aware_quality_feedback(
     *,
     flow: Flow | None = None,
     aggregation_intent: AggregationIntent = "linear",
+    resource_catalog: "AIBuilderResourceCatalog | None" = None,
 ) -> str | None:
     answer_signals = extract_answer_signals(conversation)
     text = aggregate_freeform_user_text(conversation)
@@ -68,6 +74,7 @@ def build_conversation_aware_quality_feedback(
         output_intent=output_intent,
         mixed_audio_doc_input=mixed_audio_document_input_requested(text, flow=flow),
         aggregation_intent=aggregation_intent,
+        resource_catalog=resource_catalog,
     )
     issues = render_critic_issues(context)
 

@@ -9,7 +9,10 @@ from typing import Any
 
 from intric.main.exceptions import TypedIOValidationException
 
-_DEJAVU_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+_PDF_FONT_ENV_VAR = "ENEO_FLOW_PDF_FONT_PATH"
+# The production backend image installs fonts-dejavu-core. Custom images can
+# point this env var at another TTF/OTF font with broader glyph coverage.
+_DEFAULT_PDF_FONT_PATH = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 _DOCX_TEMPLATE_PATH = Path(__file__).with_name("templates") / "default.docx"
 _MARKDOWN_TABLE_SEPARATOR = re.compile(
     r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$"
@@ -17,6 +20,17 @@ _MARKDOWN_TABLE_SEPARATOR = re.compile(
 _HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+)$")
 _BULLET_PATTERN = re.compile(r"^[-*]\s+(.+)$")
 _NUMBERED_PATTERN = re.compile(r"^\d+\.\s+(.+)$")
+_CORE_PDF_FONT_REPLACEMENTS = str.maketrans(
+    {
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2026": "...",
+    }
+)
 
 
 def render_document(
@@ -47,13 +61,37 @@ def _render_pdf(text: str, *, step_order: int) -> tuple[bytes, str, str]:
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
-    if os.path.exists(_DEJAVU_PATH):
-        pdf.add_font("DejaVu", fname=_DEJAVU_PATH)
-        pdf.set_font("DejaVu", size=11)
+    unicode_font_path = _resolved_pdf_unicode_font()
+    if unicode_font_path is not None:
+        pdf.add_font("EneoUnicode", fname=unicode_font_path)
+        pdf.set_font("EneoUnicode", size=11)
+        pdf_text = text
     else:
         pdf.set_font("Helvetica", size=11)
-    pdf.multi_cell(0, 6, text)  # pyright: ignore[reportUnknownMemberType]
+        pdf_text = _text_for_core_pdf_font(text)
+    pdf.multi_cell(0, 6, pdf_text)  # pyright: ignore[reportUnknownMemberType]
     return bytes(pdf.output()), "application/pdf", f"step_{step_order}_output.pdf"
+
+
+def _resolved_pdf_unicode_font() -> str | None:
+    configured_path = os.environ.get(_PDF_FONT_ENV_VAR)
+    if configured_path and Path(configured_path).is_file():
+        return configured_path
+
+    if _DEFAULT_PDF_FONT_PATH.is_file():
+        return str(_DEFAULT_PDF_FONT_PATH)
+    return None
+
+
+def _text_for_core_pdf_font(text: str) -> str:
+    return (
+        text.translate(_CORE_PDF_FONT_REPLACEMENTS)
+        .encode(
+            "latin-1",
+            errors="replace",
+        )
+        .decode("latin-1")
+    )
 
 
 def _render_docx(text: str, *, step_order: int) -> tuple[bytes, str, str]:

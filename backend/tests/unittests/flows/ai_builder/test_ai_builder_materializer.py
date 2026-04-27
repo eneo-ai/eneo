@@ -8,6 +8,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    FlowEditDraft,
+    StepEditOperation,
+    StepPatch,
+    StepPlacement,
+)
 from intric.flows.ai_builder.ai_builder_materializer import (
     compile_changeset,
     execute_changeset,
@@ -27,6 +34,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     StepChangeKind,
     StepSpec,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.flow import Flow, FlowStep
 from intric.main.exceptions import BadRequestException
 
@@ -1242,6 +1250,61 @@ class TestExecuteCreateFlow:
         assert update_kwargs["prompt"].text == "Detailed prompt here"
         assert update_kwargs["completion_model_id"] == model_id
         assert update_kwargs["groups"] == [kb_id_1, kb_id_2]
+        assert update_kwargs["websites"] == []
+        assert update_kwargs["integration_knowledge_ids"] == []
+        assert update_kwargs["mcp_server_ids"] == []
+        assert update_kwargs["mcp_tools"] == []
+
+    @pytest.mark.asyncio
+    async def test_assistant_configured_with_mcp_refs(self) -> None:
+        flow_id = uuid4()
+        space_id = uuid4()
+        assistant_id = uuid4()
+        mcp_server_id = uuid4()
+        mcp_tool_id = uuid4()
+
+        mock_flow_service = AsyncMock()
+        created_flow = _make_flow(flow_id=flow_id, space_id=space_id)
+        mock_flow_service.create_flow.return_value = created_flow
+
+        mock_assistant = MagicMock()
+        mock_assistant.id = assistant_id
+        mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
+        mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
+
+        changeset = FlowChangeSet(
+            flow_name="Test",
+            flow_description="",
+            assistants_to_create=[
+                AssistantToCreate(
+                    plan_step_ref="step_a",
+                    assistant_spec=AssistantSpec(
+                        instructions="Fetch from the case system",
+                        mcp_server_refs=[str(mcp_server_id)],
+                        mcp_tool_refs=[str(mcp_tool_id)],
+                    ),
+                ),
+            ],
+            compiled_steps=[
+                _compiled_step(
+                    plan_step_ref="step_a",
+                    step_order=1,
+                    change_kind=StepChangeKind.ADDED,
+                ),
+            ],
+        )
+
+        await execute_changeset(
+            changeset=changeset,
+            flow_service=mock_flow_service,
+            space_id=space_id,
+            flow_id=None,
+        )
+
+        update_kwargs = mock_flow_service.update_flow_assistant.call_args.kwargs
+        assert update_kwargs["mcp_server_ids"] == [mcp_server_id]
+        assert update_kwargs["mcp_tools"] == [(mcp_tool_id, True)]
+        assert update_kwargs["groups"] == []
 
     @pytest.mark.asyncio
     async def test_create_mode_cleans_up_exact_temp_flow_when_apply_fails(self) -> None:
@@ -1492,6 +1555,213 @@ class TestExecuteEditFlow:
 
         update_kwargs = mock_flow_service.update_flow_assistant.call_args.kwargs
         assert "completion_model_id" not in update_kwargs
+
+    @pytest.mark.asyncio
+    async def test_update_without_external_resources_clears_stale_resources(
+        self,
+    ) -> None:
+        flow_id = uuid4()
+        space_id = uuid4()
+        assistant_id = uuid4()
+
+        mock_flow_service = AsyncMock()
+        updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
+        mock_flow_service.update_flow.return_value = updated_flow
+        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
+
+        changeset = FlowChangeSet(
+            flow_name="Test",
+            flow_description="",
+            assistants_to_update=[
+                AssistantToUpdate(
+                    existing_step_id=uuid4(),
+                    existing_assistant_id=assistant_id,
+                    assistant_spec=AssistantSpec(instructions="Pure text step"),
+                ),
+            ],
+            compiled_steps=[
+                _compiled_step(
+                    plan_step_ref="step_a",
+                    step_order=1,
+                    change_kind=StepChangeKind.MODIFIED,
+                    assistant_id=assistant_id,
+                ),
+            ],
+        )
+
+        await execute_changeset(
+            changeset=changeset,
+            flow_service=mock_flow_service,
+            space_id=space_id,
+            flow_id=flow_id,
+        )
+
+        update_kwargs = mock_flow_service.update_flow_assistant.call_args.kwargs
+        assert update_kwargs["groups"] == []
+        assert update_kwargs["websites"] == []
+        assert update_kwargs["integration_knowledge_ids"] == []
+        assert update_kwargs["mcp_server_ids"] == []
+        assert update_kwargs["mcp_tools"] == []
+
+    @pytest.mark.asyncio
+    async def test_instructions_only_edit_preserves_mcp_refs_through_apply(
+        self,
+    ) -> None:
+        flow_id = uuid4()
+        space_id = uuid4()
+        step_id = uuid4()
+        assistant_id = uuid4()
+        mcp_server_id = uuid4()
+        mcp_tool_id = uuid4()
+
+        existing_step = _make_flow_step(
+            step_id=step_id,
+            flow_id=flow_id,
+            assistant_id=assistant_id,
+            step_order=1,
+            user_description="Hämta kundärende",
+        )
+        current_flow = _make_flow(
+            flow_id=flow_id,
+            space_id=space_id,
+            name="Kundärende",
+            description="Hämtar ärendedata.",
+            draft_revision=4,
+            steps=[existing_step],
+        )
+        edit_result = compile_edit_draft(
+            FlowEditDraft(
+                operations=[
+                    StepEditOperation(
+                        op="modify",
+                        target_ref="existing_step_1",
+                        patch=StepPatch(
+                            assistant_spec=AssistantSpec(
+                                instructions="Hämta och sammanfatta aktuellt kundärende."
+                            )
+                        ),
+                    )
+                ],
+                plan_rationale="Uppdatera instruktionen utan att ändra verktygsåtkomst.",
+            ),
+            [existing_step],
+            base_flow_revision=4,
+            flow_name=current_flow.name,
+            flow_description=current_flow.description,
+            assistant_snapshots={
+                assistant_id: {
+                    "instructions": "Hämta aktuellt kundärende.",
+                    "knowledge_refs": [],
+                    "mcp_server_refs": [str(mcp_server_id)],
+                    "mcp_tool_refs": [str(mcp_tool_id)],
+                }
+            },
+        )
+        changeset = compile_changeset(edit_result.compiled_spec, current_flow)
+
+        mock_flow_service = AsyncMock()
+        mock_flow_service.update_flow.return_value = current_flow
+        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
+
+        await execute_changeset(
+            changeset=changeset,
+            flow_service=mock_flow_service,
+            space_id=space_id,
+            flow_id=flow_id,
+            expected_revision=4,
+        )
+
+        update_kwargs = mock_flow_service.update_flow_assistant.call_args.kwargs
+        assert update_kwargs["prompt"].text == (
+            "Hämta och sammanfatta aktuellt kundärende."
+        )
+        assert update_kwargs["mcp_server_ids"] == [mcp_server_id]
+        assert update_kwargs["mcp_tools"] == [(mcp_tool_id, True)]
+        assert update_kwargs["groups"] == []
+        assert update_kwargs["websites"] == []
+        assert update_kwargs["integration_knowledge_ids"] == []
+
+    @pytest.mark.asyncio
+    async def test_edit_adds_mcp_step_with_step_scoped_tool_access(self) -> None:
+        flow_id = uuid4()
+        space_id = uuid4()
+        existing_assistant_id = uuid4()
+        created_assistant_id = uuid4()
+        mcp_server_id = uuid4()
+        mcp_tool_id = uuid4()
+
+        existing_step = _make_flow_step(
+            flow_id=flow_id,
+            assistant_id=existing_assistant_id,
+            step_order=1,
+            user_description="Analysera befintligt underlag",
+        )
+        current_flow = _make_flow(
+            flow_id=flow_id,
+            space_id=space_id,
+            name="Ärendeanalys",
+            steps=[existing_step],
+            draft_revision=2,
+        )
+        edit_result = compile_edit_draft(
+            FlowEditDraft(
+                operations=[
+                    StepEditOperation(
+                        op="add",
+                        placement=StepPlacement(position="append"),
+                        add_payload=NewStepDraft(
+                            name="Hämta live-data",
+                            instructions="Hämta aktuell ärendedata via valt MCP-verktyg.",
+                            input_source=InputSource.PREVIOUS_STEP,
+                            input_type=InputType.TEXT,
+                            output_type=OutputType.JSON,
+                            mcp_server_refs=[str(mcp_server_id)],
+                            mcp_tool_refs=[str(mcp_tool_id)],
+                        ),
+                    )
+                ],
+                plan_rationale="Lägg till live-data utan att ändra första steget.",
+            ),
+            [existing_step],
+            base_flow_revision=2,
+            flow_name=current_flow.name,
+            flow_description=current_flow.description,
+            assistant_snapshots={
+                existing_assistant_id: {
+                    "instructions": "Analysera befintligt underlag.",
+                    "knowledge_refs": [],
+                    "mcp_server_refs": [],
+                    "mcp_tool_refs": [],
+                }
+            },
+        )
+        changeset = compile_changeset(edit_result.compiled_spec, current_flow)
+
+        created_assistant = MagicMock()
+        created_assistant.id = created_assistant_id
+        mock_flow_service = AsyncMock()
+        mock_flow_service.create_flow_assistant.return_value = (created_assistant, [])
+        mock_flow_service.update_flow.return_value = current_flow
+        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
+
+        await execute_changeset(
+            changeset=changeset,
+            flow_service=mock_flow_service,
+            space_id=space_id,
+            flow_id=flow_id,
+            expected_revision=2,
+        )
+
+        mcp_update_kwargs = next(
+            call.kwargs
+            for call in mock_flow_service.update_flow_assistant.await_args_list
+            if call.kwargs["assistant_id"] == created_assistant_id
+        )
+        assert mcp_update_kwargs["mcp_server_ids"] == [mcp_server_id]
+        assert mcp_update_kwargs["mcp_tools"] == [(mcp_tool_id, True)]
+        assert mcp_update_kwargs["groups"] == []
+        assert mcp_update_kwargs["websites"] == []
+        assert mcp_update_kwargs["integration_knowledge_ids"] == []
 
     @pytest.mark.asyncio
     async def test_invalid_knowledge_ref_raises_instead_of_silently_skipping(

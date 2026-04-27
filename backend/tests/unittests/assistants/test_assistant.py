@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -262,7 +263,7 @@ def assistant_with_model():
 
 
 @pytest.mark.asyncio
-async def test_ask_skips_mcp_when_knowledge_present(assistant_with_model):
+async def test_ask_skips_mcp_when_knowledge_present(assistant_with_model, caplog):
     embedding_model = MagicMock(id=1)
     assistant_with_model.mcp_servers = [MagicMock()]
     assistant_with_model.collections = [MagicMock(embedding_model=embedding_model)]
@@ -274,18 +275,20 @@ async def test_ask_skips_mcp_when_knowledge_present(assistant_with_model):
     completion_service = MagicMock()
     completion_service.get_response = AsyncMock(return_value=MagicMock())
 
-    await assistant_with_model.ask(
-        question="test",
-        references_service=references_service,
-        completion_service=completion_service,
-        version=2,
-    )
+    with caplog.at_level(logging.WARNING):
+        await assistant_with_model.ask(
+            question="test",
+            references_service=references_service,
+            completion_service=completion_service,
+            version=2,
+        )
 
     # Knowledge retrieval should be called
     references_service.get_references.assert_called_once()
     # MCP servers should be excluded from completion call
     call_kwargs = completion_service.get_response.call_args.kwargs
     assert call_kwargs["mcp_servers"] == []
+    assert "assistant_mcp_suppressed_due_to_knowledge" in caplog.messages
 
 
 @pytest.mark.asyncio
@@ -314,3 +317,37 @@ async def test_ask_uses_mcp_when_no_knowledge(assistant_with_model):
     # MCP servers should be passed to completion call
     call_kwargs = completion_service.get_response.call_args.kwargs
     assert call_kwargs["mcp_servers"] == mcp_servers
+
+
+@pytest.mark.asyncio
+async def test_get_response_uses_mcp_when_no_knowledge(assistant_with_model):
+    mcp_servers = [MagicMock()]
+    assistant_with_model.mcp_servers = mcp_servers
+    assistant_with_model.collections = []
+    assistant_with_model.websites = []
+
+    completion_service = MagicMock()
+    completion_service.get_response = AsyncMock(return_value=MagicMock())
+
+    await assistant_with_model.get_response(
+        question="test",
+        completion_service=completion_service,
+    )
+
+    call_kwargs = completion_service.get_response.call_args.kwargs
+    assert call_kwargs["mcp_servers"] == mcp_servers
+
+
+@pytest.mark.asyncio
+async def test_get_response_applies_prompt_override(assistant_with_model):
+    completion_service = MagicMock()
+    completion_service.get_response = AsyncMock(return_value=MagicMock())
+
+    await assistant_with_model.get_response(
+        question="test",
+        completion_service=completion_service,
+        prompt_override="runtime prompt",
+    )
+
+    call_kwargs = completion_service.get_response.call_args.kwargs
+    assert call_kwargs["prompt"] == "runtime prompt"

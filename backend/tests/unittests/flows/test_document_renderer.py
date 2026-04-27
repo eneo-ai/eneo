@@ -1,4 +1,5 @@
 """Tests for intric.flows.runtime.document_renderer — PDF/DOCX generation."""
+
 from __future__ import annotations
 
 import io
@@ -9,7 +10,6 @@ from docx import Document
 
 from intric.flows.runtime.document_renderer import render_document
 from intric.main.exceptions import TypedIOValidationException
-
 
 # --- PDF rendering ---
 
@@ -44,7 +44,10 @@ def test_render_docx_valid_blob():
 
 def test_render_docx_correct_mime():
     _, mimetype, _ = render_document("Test", "docx", step_order=1)
-    assert mimetype == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert (
+        mimetype
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
 
 
 def test_render_docx_filename_pattern():
@@ -137,8 +140,15 @@ def test_render_pdf_unicode_characters():
 
 
 def test_render_pdf_font_fallback():
-    """When DejaVu font is not installed, Helvetica fallback renders ASCII."""
-    with patch("intric.flows.runtime.document_renderer.os.path.exists", return_value=False):
-        blob, _, _ = render_document("ASCII only text", "pdf", step_order=1)
+    """When no Unicode font is available, PDF rendering still degrades safely."""
+    with patch(
+        "intric.flows.runtime.document_renderer._resolved_pdf_unicode_font",
+        return_value=None,
+    ):
+        blob, _, _ = render_document(
+            "Em-dash \u2014 and curly \u201cquotes\u201d",
+            "pdf",
+            step_order=1,
+        )
     assert isinstance(blob, bytes)
     assert blob[:5] == b"%PDF-"

@@ -139,7 +139,7 @@ The idea is:
 - override only the sensitive classes that need stricter handling
 - send `null` in a PATCH request to clear an override and fall back to the shared/default hierarchy
 
-This is the intended operator-facing seam for care-data workflows such as Tal till resultat. Avoid hardcoding these policies in consumer apps when an admin/operator setting is the more appropriate control point.
+This is the intended operator-facing seam for sensitive care-data workflows. Avoid hardcoding these policies in consumer apps when an admin/operator setting is the more appropriate control point.
 
 ### Flow evidence policy shape
 
@@ -164,12 +164,12 @@ Current supported fields are:
 - `approval_mode`
 - `pre_approval_visibility`
 
-Current approved MVP values are:
+Common values for that review model are:
 
 - `approval_mode: "single_reviewer_outside_flow"`
 - `pre_approval_visibility: "uploader_and_reviewers"`
 
-This is the intended contract seam for workflows such as Tal till resultat where review happens outside the flow but the workflow still needs explicit governance metadata.
+This is the intended contract seam for workflows where review happens outside the flow but the workflow still needs explicit governance metadata.
 
 Sensitive flows still deny evidence export by default until tenant flow settings explicitly enable `evidence_policy.allow_sensitive_flow_exports`, even for elevated human roles.
 
@@ -414,9 +414,9 @@ await client.flows.runs.create({
 });
 ```
 
-### Tal till resultat MVP runtime pattern
+### Audio-to-document runtime pattern
 
-For the current Tal till resultat MVP, the recommended runtime shape is:
+For an audio workflow that generates structured output or a DOCX artifact, the recommended runtime shape is:
 
 1. record audio in the browser **or** select an audio file
 2. upload the completed audio file through the published Flow runtime upload contract
@@ -424,13 +424,13 @@ For the current Tal till resultat MVP, the recommended runtime shape is:
 4. create one published Flow run
 5. let the first step transcribe and the later steps produce the final structured output / DOCX artifact
 
-Important non-goals for this MVP:
+Important non-goals for this pattern:
 
 - no live transcription streaming while the browser is still recording
 - no frontend chunk orchestration for oversized files
 - no separate browser-only retry protocol outside the shared `Idempotency-Key` contract
 
-Approval and visibility boundary for sensitive Tal till resultat flows:
+Approval and visibility boundary for sensitive audio-to-document flows:
 
 - final approval is a **single authorized reviewer outside the flow**
 - before final approval, generated output and run evidence should be treated as visible only to the uploader and explicitly authorized reviewers
@@ -669,8 +669,12 @@ Important current behavior:
 - access is session-creator-scoped for session and plan details
 - service keys are not supported on this surface
 - planner interaction happens over SSE on `POST /api/v1/flows/ai-builder/sessions/{session_id}/messages`
+- AI Builder can read MCP server and tool metadata during planning, but it does not execute MCP tools while drafting
+- MCP tool execution happens only when a published Flow run reaches a step configured with MCP access
 
-For template-fill document output, treat the DOCX template asset path as an **accessibility-reviewed template path**. For Tal till resultat-style flows this is especially important:
+For the product mental model behind the authoring conversation, see <a href="/docs/ai-builder">AI Builder</a>.
+
+For template-fill document output, treat the DOCX template asset path as an **accessibility-reviewed template path**. This is especially important for sensitive document workflows:
 
 - upload reusable DOCX templates through the template asset route
 - verify placeholders and mappings before publish

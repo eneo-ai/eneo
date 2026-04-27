@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+from intric.flows.ai_builder.ai_builder_api_models import SessionTelemetrySummary
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_planner_turn import TurnTelemetry
 from intric.flows.ai_builder.ai_builder_telemetry import (
+    _empty_session_telemetry,
     build_assistant_message_metadata,
     build_planner_telemetry,
     build_planner_telemetry_from_turn,
     summarize_session_telemetry,
+)
+
+_REPO_ROOT = Path(__file__).resolve().parents[5]
+_FRONTEND_TELEMETRY_CONTRACT = (
+    _REPO_ROOT
+    / "frontend/apps/web/src/lib/features/flows/ai-builder/__fixtures__"
+    / "sessionTelemetrySummary.json"
 )
 
 
@@ -49,6 +61,20 @@ def test_summarize_session_telemetry_aggregates_planner_metadata_without_snapsho
     assert summary["total_tokens_total"] == 13
     assert summary["tool_call_count_total"] == 1
     assert summary["last_request_id"] == "req-1"
+
+
+def test_session_telemetry_api_model_covers_aggregator_keys() -> None:
+    summary_keys = set(_empty_session_telemetry())
+
+    assert summary_keys <= set(SessionTelemetrySummary.model_fields)
+
+
+def test_session_telemetry_frontend_contract_fixture_matches_api_model() -> None:
+    payload = json.loads(_FRONTEND_TELEMETRY_CONTRACT.read_text())
+
+    assert set(payload) == set(SessionTelemetrySummary.model_fields)
+    validated = SessionTelemetrySummary.model_validate(payload)
+    assert validated.model_dump(mode="json") == payload
 
 
 def test_build_assistant_message_metadata_advances_existing_session_summary() -> None:
@@ -114,6 +140,8 @@ def _turn_telemetry(
     finish_reason: str = "stop",
     request_id: str | None = "req-turn",
     model: str = "openai/gpt-5.4",
+    token_usage_source: str | None = "provider",
+    token_usage_estimated: bool = False,
 ) -> TurnTelemetry:
     return TurnTelemetry(
         request_id=request_id,
@@ -127,6 +155,8 @@ def _turn_telemetry(
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
         finish_reason=finish_reason,
+        token_usage_source=token_usage_source,
+        token_usage_estimated=token_usage_estimated,
     )
 
 
@@ -151,6 +181,8 @@ def test_build_planner_telemetry_from_turn_renders_per_turn_fields() -> None:
     assert rendered["prompt_tokens"] == 40
     assert rendered["completion_tokens"] == 8
     assert rendered["total_tokens"] == 48
+    assert rendered["token_usage_source"] == "provider"
+    assert rendered["token_usage_estimated"] is False
     assert rendered["tool_call_count"] == 3
     assert rendered["used_auxiliary_llm"] is True
     assert rendered["outcome_kind"] == "dispatched"
@@ -190,6 +222,8 @@ def test_session_summary_accumulates_per_turn_fields_from_turn_telemetry() -> No
             repair_attempts=2,
             architecture_commit_populated=False,
             request_id="req-2",
+            token_usage_source="litellm_estimate",
+            token_usage_estimated=True,
         )
     )
 
@@ -214,8 +248,11 @@ def test_session_summary_accumulates_per_turn_fields_from_turn_telemetry() -> No
     assert summary["repair_attempts_total"] == 2
     assert summary["wall_clock_ms_total"] == 350
     assert summary["llm_calls_made_total"] == 4
+    assert summary["token_usage_estimated"] is True
     assert summary["last_outcome_kind"] == "rejected"
     assert summary["last_request_id"] == "req-2"
+    assert summary["last_token_usage_source"] == "litellm_estimate"
+    assert summary["last_token_usage_estimated"] is True
 
 
 def test_session_summary_rehydrates_per_turn_fields_from_snapshot() -> None:
@@ -231,10 +268,13 @@ def test_session_summary_rehydrates_per_turn_fields_from_snapshot() -> None:
         "repair_attempts_total": 3,
         "wall_clock_ms_total": 780,
         "llm_calls_made_total": 6,
+        "token_usage_estimated": True,
         "last_request_id": "req-last",
         "last_model": "openai/gpt-5.4",
         "last_finish_reason": "stop",
         "last_outcome_kind": "dispatched",
+        "last_token_usage_source": "provider",
+        "last_token_usage_estimated": False,
     }
 
     conversation = [
@@ -252,7 +292,10 @@ def test_session_summary_rehydrates_per_turn_fields_from_snapshot() -> None:
     assert summary["repair_attempts_total"] == 3
     assert summary["wall_clock_ms_total"] == 780
     assert summary["llm_calls_made_total"] == 6
+    assert summary["token_usage_estimated"] is True
     assert summary["last_outcome_kind"] == "dispatched"
+    assert summary["last_token_usage_source"] == "provider"
+    assert summary["last_token_usage_estimated"] is False
 
 
 def test_session_summary_sanitizes_missing_per_turn_fields_to_zero() -> None:
@@ -284,7 +327,10 @@ def test_session_summary_sanitizes_missing_per_turn_fields_to_zero() -> None:
     assert summary["repair_attempts_total"] == 0
     assert summary["wall_clock_ms_total"] == 0
     assert summary["llm_calls_made_total"] == 0
+    assert summary["token_usage_estimated"] is False
     assert summary["last_outcome_kind"] is None
+    assert summary["last_token_usage_source"] is None
+    assert summary["last_token_usage_estimated"] is False
 
 
 def test_session_summary_clamps_negative_additive_deltas_per_turn() -> None:

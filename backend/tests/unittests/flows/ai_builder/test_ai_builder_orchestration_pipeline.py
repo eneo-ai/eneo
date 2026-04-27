@@ -43,6 +43,9 @@ from intric.flows.ai_builder.ai_builder_orchestration_pipeline import (
     run_planner_pipeline,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import OrchestrationContext
+from intric.flows.ai_builder.ai_builder_token_usage import (
+    TOKEN_USAGE_SOURCE_PROVIDER,
+)
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -172,17 +175,21 @@ def _llm_response(
     prompt_tokens: int = 100,
     completion_tokens: int = 50,
     total_tokens: int = 150,
+    include_usage: bool = True,
 ) -> Any:
     choice = AsyncMock()
     choice.message.content = content
     choice.finish_reason = finish_reason
     wrapper = AsyncMock()
     wrapper.choices = [choice]
-    usage = AsyncMock()
-    usage.prompt_tokens = prompt_tokens
-    usage.completion_tokens = completion_tokens
-    usage.total_tokens = total_tokens
-    wrapper.usage = usage
+    if include_usage:
+        usage = AsyncMock()
+        usage.prompt_tokens = prompt_tokens
+        usage.completion_tokens = completion_tokens
+        usage.total_tokens = total_tokens
+        wrapper.usage = usage
+    else:
+        wrapper.usage = None
     return wrapper
 
 
@@ -788,3 +795,45 @@ class TestCompletionMetadataThreading:
         assert outcome.final_completion.finish_reason == "length"
         assert outcome.final_completion.prompt_tokens == 600
         assert outcome.final_completion.completion_tokens == 1024
+
+    async def test_cumulative_token_usage_sums_initial_and_repair_calls(
+        self,
+    ) -> None:
+        llm = AsyncMock()
+        first = _llm_response(
+            _ask_question_json(
+                question_id="primary_runtime_input",
+                slot_name="primary_runtime_input",
+            ),
+            prompt_tokens=100,
+            completion_tokens=20,
+            total_tokens=120,
+        )
+        second = _llm_response(
+            _planner_output_json(kind="confirm_requirements"),
+            prompt_tokens=200,
+            completion_tokens=30,
+            total_tokens=230,
+        )
+        llm.acompletion.side_effect = [first, second]
+
+        outcome = await run_planner_pipeline(
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=_make_context(
+                asked_question_ids=frozenset({"primary_runtime_input"}),
+                required_slot_names=frozenset({"primary_runtime_input"}),
+            ),
+        )
+
+        assert outcome.kind == "accepted"
+        assert outcome.final_completion is not None
+        assert outcome.final_completion.prompt_tokens == 200
+        assert outcome.cumulative_token_usage is not None
+        assert outcome.cumulative_token_usage.prompt_tokens == 300
+        assert outcome.cumulative_token_usage.completion_tokens == 50
+        assert outcome.cumulative_token_usage.total_tokens == 350
+        assert outcome.cumulative_token_usage.source == TOKEN_USAGE_SOURCE_PROVIDER
+        assert outcome.cumulative_token_usage.estimated is False

@@ -1,9 +1,6 @@
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import type { Intric } from "@intric/intric-js";
-import type {
-  StructuredQuestion,
-  StructuredQuestionAnswerMetadata
-} from "./structuredQuestionAnswer";
+import type { StructuredQuestionAnswerMetadata } from "./structuredQuestionAnswer";
 import {
   createInitialFlowAIBuilderState,
   FlowAIBuilderDriver,
@@ -166,10 +163,6 @@ export class FlowAIBuilderService {
 
   isQuestionAnswered(questionId: string): boolean {
     return this.#driver.isQuestionAnswered(questionId);
-  }
-
-  getQuestionAnswerText(question: StructuredQuestion): string | null {
-    return this.#driver.getQuestionAnswerText(question);
   }
 
   seedState(partial: Partial<FlowAIBuilderState>): void {

@@ -39,6 +39,9 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     has_real_audio_transcription_step,
     uses_pseudo_transcription_without_audio_step,
 )
+from intric.flows.ai_builder.ai_builder_mcp_intent import (
+    find_named_mcp_reference_issue,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     FlowDraftSpecCore,
     InputSource,
@@ -52,6 +55,9 @@ from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
 from intric.flows.ai_builder.planning_state import AggregationIntent
 
 if TYPE_CHECKING:
+    from intric.flows.ai_builder.ai_builder_resource_catalog import (
+        AIBuilderResourceCatalog,
+    )
     from intric.flows.domain.flow import Flow
 
 
@@ -75,6 +81,7 @@ class CriticContext:
     output_intent: OutputIntentResolution
     mixed_audio_doc_input: bool
     aggregation_intent: AggregationIntent = "linear"
+    resource_catalog: "AIBuilderResourceCatalog | None" = None
 
 
 CriticCheck = Callable[[CriticContext], bool]
@@ -221,6 +228,20 @@ def _spec_uses_input_bindings(spec: FlowDraftSpecCore) -> bool:
 def _spec_uses_all_previous_steps(spec: FlowDraftSpecCore) -> bool:
     return any(
         step.input_source == InputSource.ALL_PREVIOUS_STEPS for step in spec.steps
+    )
+
+
+def _mcp_selection_lacks_semantic_support(context: CriticContext) -> bool:
+    catalog = context.resource_catalog
+    if catalog is None:
+        return False
+    return (
+        find_named_mcp_reference_issue(
+            spec=context.spec,
+            catalog=catalog,
+            signal_text=context.signal_text,
+        )
+        is not None
     )
 
 
@@ -626,6 +647,26 @@ _MULTI_DOCUMENT_COMPARE_REQUIRES_ALL_PREVIOUS_STEPS = CriticInvariant(
 )
 
 
+# ── MCP resource alignment ───────────────────────────────────────────────
+
+
+_MCP_SELECTION_REQUIRES_SEMANTIC_SUPPORT = CriticInvariant(
+    id="mcp_selection_requires_semantic_support",
+    description=(
+        "A step must not attach unrelated MCP resources just because the user "
+        "mentioned MCP. Selected server/tool metadata must match the step "
+        "intent; otherwise the planner should ask for clarification."
+    ),
+    evidence=_mcp_selection_lacks_semantic_support,
+    remediation=(
+        "Planen hänvisar till MCP på ett sätt som inte matchar tillgänglig metadata. "
+        "Välj bara MCP-server eller MCP-verktyg när användarens namngivna MCP finns "
+        "aktiverat i ytan och matchar samma server. Om MCP-valet är oklart eller saknas, "
+        "fråga om förtydligande i stället för att ersätta det med ett annat MCP."
+    ),
+)
+
+
 # ── JSON input rejects all_previous_steps source ────────────────────────
 
 
@@ -797,6 +838,7 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP,
     _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
     _MULTI_DOCUMENT_COMPARE_REQUIRES_ALL_PREVIOUS_STEPS,
+    _MCP_SELECTION_REQUIRES_SEMANTIC_SUPPORT,
     _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE,
     _TEMPLATE_FILL_DOCX_REQUIRES_TEMPLATE_FILL_STEP,
     _GENERATED_DOCX_REJECTS_TEMPLATE_FILL,

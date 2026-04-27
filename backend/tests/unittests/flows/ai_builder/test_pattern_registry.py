@@ -62,6 +62,7 @@ _EXPECTED_POSITIVE_IDS: frozenset[str] = frozenset(
         "comparison",
         "sectioned_form_intake",
         "form_field_runtime_inputs",
+        "mcp_tool_step",
     }
 )
 
@@ -138,8 +139,8 @@ _NEGATIVE_FCM_ASSERTIONS: dict[str, Callable[[], None]] = {
 
 
 class TestPatternDataclass:
-    def test_pattern_version_is_five(self) -> None:
-        assert PATTERN_REGISTRY_VERSION == 5
+    def test_pattern_version_is_six(self) -> None:
+        assert PATTERN_REGISTRY_VERSION == 6
 
     def test_pattern_is_frozen_with_structural_fields(self) -> None:
         pattern = Pattern(
@@ -457,6 +458,29 @@ class TestPatternRegistryPublicApi:
         assert "form_field_runtime_inputs" in matched_ids, (
             f"form_field_runtime_inputs should match runtime-variable prose; "
             f"got {matched_ids}"
+        )
+
+    def test_find_pattern_candidates_matches_mcp_tool_step(self) -> None:
+        matches = find_pattern_candidates(
+            "Use an MCP tool to fetch live data from an external CRM system."
+        )
+        matched_ids = {match.pattern.id for match in matches}
+
+        assert "mcp_tool_step" in matched_ids, (
+            f"mcp_tool_step should match MCP/external-data prose; got {matched_ids}"
+        )
+
+    def test_find_pattern_candidates_does_not_overmatch_generic_system_data(
+        self,
+    ) -> None:
+        matches = find_pattern_candidates(
+            "Build a flow that reads uploaded system data and produces an API report."
+        )
+        matched_ids = {match.pattern.id for match in matches}
+
+        assert "mcp_tool_step" not in matched_ids, (
+            "mcp_tool_step should require MCP-specific retrieval signals, not "
+            f"generic system/data/API prose; got {matched_ids}"
         )
 
     def test_find_pattern_candidates_does_not_match_on_substrings(self) -> None:

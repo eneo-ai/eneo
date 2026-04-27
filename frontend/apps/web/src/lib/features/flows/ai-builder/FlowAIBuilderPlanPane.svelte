@@ -4,9 +4,15 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import FlowAIBuilderStepCard from "./FlowAIBuilderStepCard.svelte";
+  import FlowAIBuilderTokenUsage from "./FlowAIBuilderTokenUsage.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import type { EditAdvisory } from "./protocol";
+  import {
+    buildAIBuilderMcpResourceLabelMaps,
+    type AIBuilderMcpServerLike
+  } from "./flowAIBuilderMcpResources";
   import {
     getFirstChangedStepIndex,
     getRemovedStepChanges,
@@ -21,6 +27,9 @@
   let { onapplied, onsuggestchange }: Props = $props();
 
   const service = getAIBuilderService();
+  const {
+    state: { currentSpace }
+  } = getSpacesManager();
 
   // ---- Derivations ---------------------------------------------------------
 
@@ -48,6 +57,20 @@
   function resolveModelName(ref: string | null): string | null {
     if (!ref) return null;
     return service.availableModels.find((model) => model.id === ref)?.name ?? ref;
+  }
+
+  const mcpResourceLabels = $derived(
+    buildAIBuilderMcpResourceLabelMaps(
+      ($currentSpace.mcp_servers ?? []) as unknown as AIBuilderMcpServerLike[]
+    )
+  );
+
+  function resolveMcpServerName(ref: string): string | null {
+    return mcpResourceLabels.serverLabels.get(ref) ?? null;
+  }
+
+  function resolveMcpToolName(ref: string): string | null {
+    return mcpResourceLabels.toolLabels.get(ref) ?? null;
   }
 
   let isApproving = $state(false);
@@ -270,6 +293,7 @@
               </span>
               <span class="text-muted text-xs">·</span>
               <span class="text-muted text-xs">{m.ai_builder_phase_reviewing()}</span>
+              <FlowAIBuilderTokenUsage telemetry={service.session?.telemetry} />
             </div>
             <h2
               id="plan-heading"
@@ -478,6 +502,8 @@
                   stepNumber={i + 1}
                   changeKind={getStepChangeKind(step, plan.edit_diff ?? null)}
                   {resolveModelName}
+                  {resolveMcpServerName}
+                  {resolveMcpToolName}
                   isFirst={i === 0}
                   isLast={i === spec.steps.length - 1}
                   planStatus={plan.status}

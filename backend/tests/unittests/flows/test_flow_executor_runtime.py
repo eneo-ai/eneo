@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -12,13 +13,19 @@ import pytest
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.outcome import Outcome
+from intric.flows.assistant_execution_snapshot import (
+    build_assistant_execution_snapshot,
+    stable_hash,
+)
 from intric.flows.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowStepResultStatus,
-    FlowVersion,
+)
+from intric.flows.flow import (
+    FlowVersion as FlowVersionModel,
 )
 from intric.flows.runtime.executor import (
     FlowRunExecutor,
@@ -48,6 +55,30 @@ def _run(*, status: FlowRunStatus, user) -> FlowRun:
         job_id=None,
         created_at=now,
         updated_at=now,
+    )
+
+
+def FlowVersion(
+    *,
+    flow_id,
+    version,
+    tenant_id,
+    definition_checksum,
+    definition_json,
+    created_at,
+    updated_at,
+) -> FlowVersionModel:
+    """Build canonical versions unless a test intentionally passes a bad checksum."""
+    if definition_checksum == "checksum":
+        definition_checksum = stable_hash(definition_json)
+    return FlowVersionModel(
+        flow_id=flow_id,
+        version=version,
+        tenant_id=tenant_id,
+        definition_checksum=definition_checksum,
+        definition_json=definition_json,
+        created_at=created_at,
+        updated_at=updated_at,
     )
 
 
@@ -117,6 +148,17 @@ def _build_executor(user):
         max_inline_text_bytes=1024 * 1024,
     )
     return executor, flow_repo, flow_run_repo, flow_version_repo
+
+
+def _empty_execution_state() -> RunExecutionState:
+    return RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        all_previous_segments=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
 
 
 @pytest.mark.asyncio
@@ -2576,6 +2618,127 @@ def _step_for_execute_step(*, step_order: int = 1) -> RuntimeStep:
     )
 
 
+def _assistant_for_snapshot(
+    *,
+    assistant_id,
+    model_id,
+    prompt: str,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=assistant_id,
+        origin="flow_managed",
+        prompt=SimpleNamespace(text=prompt),
+        completion_model=SimpleNamespace(
+            id=model_id,
+            name="gpt-5.4-nano",
+            nickname="Nano",
+            litellm_model_name="openai/gpt-5.4-nano",
+        ),
+        completion_model_kwargs={"temperature": 0.2},
+        collections=[],
+        websites=[],
+        integration_knowledge_list=[],
+        mcp_servers=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_validate_assistant_snapshots_accepts_matching_execution_surface(user):
+    executor, _, _, _ = _build_executor(user)
+    assistant_id = uuid4()
+    model_id = uuid4()
+    assistant = _assistant_for_snapshot(
+        assistant_id=assistant_id,
+        model_id=model_id,
+        prompt="Summarize the case.",
+    )
+    snapshot = build_assistant_execution_snapshot(
+        assistant=assistant,
+        mcp_server_entities=[],
+    )
+    assert snapshot is not None
+    step = replace(
+        _step_for_execute_step(),
+        assistant_id=assistant_id,
+        assistant_snapshot=snapshot,
+    )
+    state = _empty_execution_state()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+
+    await executor._validate_assistant_snapshots(
+        steps=[step],
+        state=state,
+        run_id=uuid4(),
+    )
+
+    executor._load_assistant.assert_awaited_once_with(assistant_id, state)
+
+
+@pytest.mark.asyncio
+async def test_validate_assistant_snapshots_rejects_prompt_drift(user):
+    executor, _, _, _ = _build_executor(user)
+    assistant_id = uuid4()
+    model_id = uuid4()
+    published_assistant = _assistant_for_snapshot(
+        assistant_id=assistant_id,
+        model_id=model_id,
+        prompt="Summarize the case.",
+    )
+    current_assistant = _assistant_for_snapshot(
+        assistant_id=assistant_id,
+        model_id=model_id,
+        prompt="Summarize the case and make recommendations.",
+    )
+    snapshot = build_assistant_execution_snapshot(
+        assistant=published_assistant,
+        mcp_server_entities=[],
+    )
+    assert snapshot is not None
+    step = replace(
+        _step_for_execute_step(),
+        assistant_id=assistant_id,
+        assistant_snapshot=snapshot,
+    )
+    executor._load_assistant = AsyncMock(return_value=current_assistant)
+
+    with pytest.raises(BadRequestException, match="changed after publish"):
+        await executor._validate_assistant_snapshots(
+            steps=[step],
+            state=_empty_execution_state(),
+            run_id=uuid4(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_validate_assistant_snapshots_skips_legacy_steps_without_snapshot(user):
+    executor, _, _, _ = _build_executor(user)
+    executor._load_assistant = AsyncMock()
+
+    await executor._validate_assistant_snapshots(
+        steps=[_step_for_execute_step()],
+        state=_empty_execution_state(),
+        run_id=uuid4(),
+    )
+
+    executor._load_assistant.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_validate_assistant_snapshots_requires_schema_versioned_snapshots(user):
+    executor, _, _, _ = _build_executor(user)
+    executor._load_assistant = AsyncMock()
+
+    with pytest.raises(BadRequestException, match="snapshot is missing"):
+        await executor._validate_assistant_snapshots(
+            steps=[_step_for_execute_step()],
+            state=_empty_execution_state(),
+            run_id=uuid4(),
+            require_snapshots=True,
+        )
+
+    executor._load_assistant.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
     executor, _, _, _ = _build_executor(user)
@@ -2941,6 +3104,177 @@ async def test_prior_results_bootstrap_once(user):
 
     # list_step_results: 1 bootstrap + 1 final = 2 total (NOT per-step)
     assert flow_run_repo.list_step_results.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    assistant_id = uuid4()
+    model_id = uuid4()
+    published_assistant = _assistant_for_snapshot(
+        assistant_id=assistant_id,
+        model_id=model_id,
+        prompt="Summarize the case.",
+    )
+    current_assistant = _assistant_for_snapshot(
+        assistant_id=assistant_id,
+        model_id=model_id,
+        prompt="Summarize the case and include recommendations.",
+    )
+    snapshot = build_assistant_execution_snapshot(
+        assistant=published_assistant,
+        mcp_server_entities=[],
+    )
+    assert snapshot is not None
+    step_id = uuid4()
+
+    flow_run_repo.get = AsyncMock(return_value=queued_run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.update_status = AsyncMock()
+    flow_run_repo.list_step_results = AsyncMock(return_value=[])
+    flow_run_repo.claim_step_result = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum="checksum",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                        "assistant_snapshot": snapshot,
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    executor._load_assistant = AsyncMock(return_value=current_assistant)
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "error": "assistant_snapshot_drift"}
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    flow_run_repo.update_status.assert_awaited_once()
+    assert (
+        flow_run_repo.update_status.await_args.kwargs["status"] == FlowRunStatus.FAILED
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_fails_before_parse_when_definition_checksum_drifted(user):
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    step_id = uuid4()
+    assistant_id = uuid4()
+
+    flow_run_repo.get = AsyncMock(return_value=queued_run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.update_status = AsyncMock()
+    flow_run_repo.list_step_results = AsyncMock()
+    flow_run_repo.claim_step_result = AsyncMock()
+    executor._parse_runtime_steps = MagicMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum=stable_hash({"steps": []}),
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "error": "definition_checksum_mismatch"}
+    executor._parse_runtime_steps.assert_not_called()
+    flow_run_repo.list_step_results.assert_not_awaited()
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    flow_run_repo.update_status.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_fails_before_claim_when_schema_versioned_snapshot_missing(user):
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    step_id = uuid4()
+    assistant_id = uuid4()
+
+    flow_run_repo.get = AsyncMock(return_value=queued_run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.update_status = AsyncMock()
+    flow_run_repo.list_step_results = AsyncMock(return_value=[])
+    flow_run_repo.claim_step_result = AsyncMock()
+    executor._load_assistant = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum="checksum",
+            definition_json={
+                "schema_version": 1,
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    }
+                ],
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "error": "assistant_snapshot_drift"}
+    executor._load_assistant.assert_not_awaited()
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    flow_run_repo.update_status.assert_awaited_once()
 
 
 # --- File cache ---

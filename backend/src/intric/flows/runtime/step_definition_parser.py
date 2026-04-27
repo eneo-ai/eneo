@@ -146,6 +146,7 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
         input_bindings = _optional_json_object(item_dict.get("input_bindings"))
         output_contract = _optional_json_object(item_dict.get("output_contract"))
         input_contract = _optional_json_object(item_dict.get("input_contract"))
+        assistant_snapshot = _optional_json_object(item_dict.get("assistant_snapshot"))
         parsed.append(
             RuntimeStep(
                 step_id=step_id,
@@ -171,6 +172,7 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
                 output_contract=output_contract,
                 input_type=input_type,
                 input_contract=input_contract,
+                assistant_snapshot=assistant_snapshot,
             )
         )
     step_orders = [step.step_order for step in parsed]

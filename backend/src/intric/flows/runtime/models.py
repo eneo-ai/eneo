@@ -37,6 +37,7 @@ class RuntimeStep:
     input_contract: dict[str, Any] | None = None
     plan_step_ref: str | None = None
     existing_step_ref: str | None = None
+    assistant_snapshot: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

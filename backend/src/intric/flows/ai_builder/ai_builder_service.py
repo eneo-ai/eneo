@@ -41,6 +41,10 @@ from intric.flows.ai_builder.ai_builder_events import (
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_TEXT as _SSE_EVENT_TEXT,
 )
+from intric.flows.ai_builder.ai_builder_events import (
+    SSE_EVENT_USAGE as _SSE_EVENT_USAGE,
+)
+from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
     BuilderPlan,
@@ -90,11 +94,32 @@ SSE_EVENT_PLAN = _SSE_EVENT_PLAN
 SSE_EVENT_QUESTION = _SSE_EVENT_QUESTION
 SSE_EVENT_ERROR = _SSE_EVENT_ERROR
 SSE_EVENT_STATUS = _SSE_EVENT_STATUS
+SSE_EVENT_USAGE = _SSE_EVENT_USAGE
 SSE_EVENT_DONE = _SSE_EVENT_DONE
 
 logger = logging.getLogger(__name__)
 
+_AI_BUILDER_CONTROLLED_TOOL_KEYS = frozenset({"tools", "tool_choice", "function_call"})
+
 configure_litellm_runtime(litellm)
+
+
+def _sanitize_ai_builder_litellm_kwargs(
+    litellm_kwargs: dict[str, object],
+) -> dict[str, object]:
+    """Keep provider credentials separate from AI Builder tool-call control.
+
+    Proposal generation intentionally uses LiteLLM tool calls for the internal
+    `outline_flow` / edit tools. Those schemas are passed by the proposal
+    boundary itself, not by tenant model credential resolution. Dropping inherited
+    tool-call keys here prevents accidental provider/MCP tool execution during
+    planner turns and avoids duplicate keyword conflicts in proposal calls.
+    """
+    return {
+        key: value
+        for key, value in litellm_kwargs.items()
+        if key not in _AI_BUILDER_CONTROLLED_TOOL_KEYS
+    }
 
 
 class _CredentialResolverProtocol(Protocol):
@@ -313,7 +338,11 @@ class AIBuilderService:
                 and isinstance(resolved_tuple[0], str)
                 and isinstance(resolved_tuple[1], dict)
             ):
-                return cast(tuple[str, dict[str, object]], resolved_tuple)
+                litellm_model = resolved_tuple[0]
+                litellm_kwargs = cast(dict[str, object], resolved_tuple[1])
+                return litellm_model, _sanitize_ai_builder_litellm_kwargs(
+                    litellm_kwargs
+                )
 
         adapter = cast(
             _CompletionModelAdapterProtocol,
@@ -336,7 +365,9 @@ class AIBuilderService:
             if value:
                 litellm_kwargs[key] = value
 
-        return adapter.litellm_model, litellm_kwargs
+        return adapter.litellm_model, _sanitize_ai_builder_litellm_kwargs(
+            litellm_kwargs
+        )
 
     async def prepare_message_context(
         self,
@@ -434,6 +465,7 @@ class AIBuilderService:
         litellm_kwargs: dict[str, Any],
         available_models: list[dict[str, Any]] | None = None,
         available_kbs: list[dict[str, Any]] | None = None,
+        available_mcps: AIBuilderMCPResourceInput = None,
         flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
         attachment_files: list[File] | None = None,
@@ -451,6 +483,7 @@ class AIBuilderService:
             litellm_kwargs=litellm_kwargs,
             available_models=available_models,
             available_kbs=available_kbs,
+            available_mcps=available_mcps,
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             attachment_files=attachment_files or [],

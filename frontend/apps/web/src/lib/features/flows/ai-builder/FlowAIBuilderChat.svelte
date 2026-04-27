@@ -33,7 +33,6 @@
     })
   );
 
-  // Only show the centered welcome state when truly empty — no messages and not streaming
   const showEmptyState = $derived(
     service.messages.length === 0 &&
       !service.isStreaming &&
@@ -48,7 +47,6 @@
 
   let inputRef = $state<FlowAIBuilderInput | undefined>();
 
-  // Track if a plan existed before (for context-aware generating text)
   let hadPlanBefore = $state(false);
   $effect(() => {
     if (service.currentPlan !== null) hadPlanBefore = true;
@@ -104,7 +102,6 @@
     return ids.size;
   });
 
-  // Auto-scroll when messages change or streaming state changes
   $effect(() => {
     void service.messages.length;
     void service.isStreaming;
@@ -118,7 +115,6 @@
   class:justify-center={showEmptyState}
   class:max-md:min-h-[calc(100dvh-var(--page-header-h,4rem))]={showEmptyState}
 >
-  <!-- Error banner: full-width inline Alert pinned above content, no absolute overlap -->
   {#if service.error}
     <div
       class="w-full shrink-0 px-4 pt-3 max-sm:px-3 max-sm:pt-2"
@@ -177,7 +173,6 @@
   {/if}
 
   {#if showEmptyState}
-    <!-- Empty state: guiding welcome + hero input centered -->
     <div class="flex-1" aria-hidden="true"></div>
     <div
       class="empty-welcome relative flex w-full max-w-[32rem] flex-col items-center px-6 pb-6 text-center max-sm:px-4"
@@ -205,7 +200,6 @@
       </p>
     </div>
   {:else}
-    <!-- Messages area: scrolls within chat pane on md+, flows naturally on mobile -->
     <div
       bind:this={scrollContainer}
       class="px-4 py-6 max-sm:px-3 max-sm:py-4 md:flex-1 md:overflow-y-auto"
@@ -221,9 +215,6 @@
             questionAnswered={message.question
               ? service.isQuestionAnswered(message.question.question_id)
               : false}
-            questionAnswerText={message.question
-              ? service.getQuestionAnswerText(message.question)
-              : null}
             requirementsSummary={message.requirementsSummary}
             requirementsConfirmed={message.requirementsSummary
               ? service.isRequirementsSummaryConfirmed(message.requirementsSummary)
@@ -256,7 +247,6 @@
     </div>
   {/if}
 
-  <!-- Input area -->
   <div
     class="bg-primary border-border-default w-full border-t px-4 pt-3 pb-4 max-sm:px-2 max-sm:pt-2 max-sm:pb-3"
     class:input-area-hero={showEmptyState}
@@ -270,8 +260,6 @@
 
 <style lang="postcss">
   @reference "@intric/ui/styles";
-
-  /* --- Welcome hero --- */
 
   .empty-welcome {
     opacity: 0;
@@ -323,8 +311,6 @@
       transform: translateY(0);
     }
   }
-
-  /* --- Generating indicator (unchanged behavior, aligned tokens) --- */
 
   .generating-badge {
     @apply relative inline-flex items-center gap-2.5 overflow-hidden rounded-full px-4 py-2;

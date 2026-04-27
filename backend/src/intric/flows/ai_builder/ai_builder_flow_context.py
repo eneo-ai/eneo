@@ -7,6 +7,10 @@ from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     FlowCapabilityProfile,
     build_flow_capability_profile,
 )
+from intric.flows.ai_builder.ai_builder_mcp_resources import (
+    AIBuilderMCPResourceInput,
+    normalize_ai_builder_mcp_resources,
+)
 from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore
 from intric.flows.domain.flow import Flow, FlowStep, JsonObject
 
@@ -122,6 +126,27 @@ def _build_detailed_flow_context(
                             label = labels[index] if index < len(labels) else None
                             display_refs.append(f"{label} [{ref}]" if label else ref)
                         lines.append(f"     Kunskapsbaser: {', '.join(display_refs)}")
+
+                mcp_tool_refs = snapshot.get("mcp_tool_refs")
+                mcp_tool_labels = snapshot.get("mcp_tool_labels")
+                if isinstance(mcp_tool_refs, list):
+                    refs_raw = cast(list[object], mcp_tool_refs)
+                    refs = [str(ref).strip() for ref in refs_raw if str(ref).strip()]
+                    labels = (
+                        [
+                            str(label).strip()
+                            for label in cast(list[object], mcp_tool_labels)
+                            if str(label).strip()
+                        ]
+                        if isinstance(mcp_tool_labels, list)
+                        else []
+                    )
+                    if refs:
+                        display_refs = []
+                        for index, ref in enumerate(refs):
+                            label = labels[index] if index < len(labels) else None
+                            display_refs.append(f"{label} [{ref}]" if label else ref)
+                        lines.append(f"     MCP-verktyg: {', '.join(display_refs)}")
 
             if step.output_config:
                 output_config_str = str(step.output_config)
@@ -264,6 +289,30 @@ def build_available_kbs_context(
             "description": str(kb.get("description", "")),
         }
         for kb in knowledge_bases
+    ]
+
+
+def build_available_mcp_context(
+    mcp_servers: AIBuilderMCPResourceInput,
+) -> list[dict[str, Any]]:
+    """Build MCP resource context for prompt injection."""
+    return [
+        {
+            "ref": server["ref"],
+            "name": server["name"],
+            "display_name": server["display_name"],
+            "description": server["description"],
+            "tools": [
+                {
+                    "ref": tool["ref"],
+                    "name": tool["name"],
+                    "display_name": tool["display_name"],
+                    "description": tool["description"],
+                }
+                for tool in server["tools"]
+            ],
+        }
+        for server in normalize_ai_builder_mcp_resources(mcp_servers)
     ]
 
 

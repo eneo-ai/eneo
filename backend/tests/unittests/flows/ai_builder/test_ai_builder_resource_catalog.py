@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    FlowEditDraft,
+    StepEditOperation,
+    StepPlacement,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -10,9 +15,11 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputType,
     StepSpec,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
     canonicalize_assistant_spec_resources,
+    canonicalize_edit_draft_resources,
     canonicalize_flow_spec_resources,
     format_resource_resolution_feedback,
 )
@@ -110,3 +117,189 @@ def test_unknown_model_alias_returns_typed_issue() -> None:
     assert len(issues) == 1
     assert issues[0].code == "unknown_model_ref"
     assert issues[0].provided_value == "nano-fast"
+
+
+def test_mcp_tool_alias_adds_parent_server_without_enabling_sibling_tools() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "server-uuid-1",
+                "name": "Ärendesystem",
+                "tools": [
+                    {"id": "tool-uuid-1", "name": "lookup_case"},
+                    {"id": "tool-uuid-2", "name": "delete_case"},
+                ],
+            }
+        ],
+    )
+
+    assistant_spec, issues = canonicalize_assistant_spec_resources(
+        AssistantSpec(
+            instructions="Hämta aktuell ärendedata.",
+            mcp_tool_refs=["lookup_case"],
+        ),
+        catalog=catalog,
+        location_prefix="step 'step_a'",
+    )
+
+    assert issues == []
+    assert assistant_spec.mcp_server_refs == ["server-uuid-1"]
+    assert assistant_spec.mcp_tool_refs == ["tool-uuid-1"]
+
+
+def test_edit_add_payload_canonicalizes_mcp_tool_refs() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "server-uuid-1",
+                "name": "Ärendesystem",
+                "tools": [
+                    {"id": "tool-uuid-1", "name": "lookup_case"},
+                    {"id": "tool-uuid-2", "name": "delete_case"},
+                ],
+            }
+        ],
+    )
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="add",
+                placement=StepPlacement(position="append"),
+                add_payload=NewStepDraft(
+                    name="Hämta ärende",
+                    instructions="Hämta aktuell ärendedata med valt MCP-verktyg.",
+                    input_source=InputSource.FLOW_INPUT,
+                    mcp_tool_refs=["lookup_case"],
+                ),
+            )
+        ],
+        plan_rationale="Lägg till ett steg för live-data.",
+    )
+
+    canonicalized, issues = canonicalize_edit_draft_resources(
+        draft,
+        catalog=catalog,
+    )
+
+    assert issues == []
+    add_payload = canonicalized.operations[0].add_payload
+    assert add_payload is not None
+    assert add_payload.mcp_server_refs == ["server-uuid-1"]
+    assert add_payload.mcp_tool_refs == ["tool-uuid-1"]
+
+
+def test_mcp_server_ref_expands_to_enabled_server_tools() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "server-uuid-1",
+                "name": "Ärendesystem",
+                "tools": [
+                    {"id": "tool-uuid-1", "name": "lookup_case"},
+                    {"id": "tool-uuid-2", "name": "list_cases"},
+                ],
+            }
+        ],
+    )
+
+    assistant_spec, issues = canonicalize_assistant_spec_resources(
+        AssistantSpec(
+            instructions="Använd ärendesystemet.",
+            mcp_server_refs=["Ärendesystem"],
+        ),
+        catalog=catalog,
+        location_prefix="step 'step_a'",
+    )
+
+    assert issues == []
+    assert assistant_spec.mcp_server_refs == ["server-uuid-1"]
+    assert assistant_spec.mcp_tool_refs == ["tool-uuid-1", "tool-uuid-2"]
+
+
+def test_catalog_detects_explicit_resource_alias_mentions_with_boundaries() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [
+                    {"id": "current-time", "name": "get_current_time"},
+                    {"id": "convert-time", "name": "convert_time"},
+                ],
+            }
+        ],
+    )
+
+    assert catalog.refs_mentioned_in_text(
+        kind="mcp_server",
+        text="Hämta aktuell tid med Time MCP.",
+    ) == frozenset({"time-server"})
+    assert catalog.refs_mentioned_in_text(
+        kind="mcp_tool",
+        text="Använd get_current_time och convert_time i detta steg.",
+    ) == frozenset({"current-time", "convert-time"})
+    assert (
+        catalog.refs_mentioned_in_text(
+            kind="mcp_server",
+            text="Runtime-input ska anges manuellt.",
+        )
+        == frozenset()
+    )
+
+
+def test_unknown_mcp_tool_alias_returns_typed_issue() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "server-uuid-1",
+                "name": "Ärendesystem",
+                "tools": [{"id": "tool-uuid-1", "name": "lookup_case"}],
+            }
+        ],
+    )
+
+    assistant_spec, issues = canonicalize_assistant_spec_resources(
+        AssistantSpec(
+            instructions="Hämta aktuell ärendedata.",
+            mcp_tool_refs=["missing_tool"],
+        ),
+        catalog=catalog,
+        location_prefix="step 'step_a'",
+    )
+
+    assert assistant_spec.mcp_tool_refs == []
+    assert len(issues) == 1
+    assert issues[0].code == "unknown_mcp_tool_ref"
+    assert "MCP tool" in format_resource_resolution_feedback(issues)
+
+
+def test_malformed_mcp_resources_do_not_enter_catalog() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {"ref": "", "name": "No ref", "tools": [{"ref": "tool-ignored"}]},
+            {
+                "ref": "server-uuid-1",
+                "name": "Ärendesystem",
+                "tools": [
+                    {"ref": "", "name": "empty"},
+                    {"ref": " ", "name": "blank"},
+                    {"ref": "tool-uuid-1", "name": "lookup_case"},
+                ],
+            },
+        ],
+    )
+
+    assert catalog.mcp_server_refs == {"server-uuid-1"}
+    assert catalog.mcp_tool_refs == {"tool-uuid-1"}

@@ -44,6 +44,8 @@ async def test_get_assistant_snapshots_scopes_collection_query_to_tenant() -> No
                     )
                 ]
             ),
+            _RowsResult([]),
+            _RowsResult([]),
         ]
     )
     repo = FlowRepository(session=session, factory=FlowFactory())
@@ -60,6 +62,10 @@ async def test_get_assistant_snapshots_scopes_collection_query_to_tenant() -> No
             "model_label": None,
             "knowledge_refs": [str(kb_id)],
             "knowledge_labels": ["tenant-visible-kb"],
+            "mcp_server_refs": [],
+            "mcp_server_labels": [],
+            "mcp_tool_refs": [],
+            "mcp_tool_labels": [],
         }
     }
     collection_stmt = session.execute.await_args_list[1].args[0]

@@ -92,6 +92,8 @@ class NewStepDraft(BaseModel):
     output_type: OutputType = OutputType.TEXT
     model_ref: str | None = None
     knowledge_refs: list[str] = Field(default_factory=list)
+    mcp_server_refs: list[str] = Field(default_factory=list)
+    mcp_tool_refs: list[str] = Field(default_factory=list)
     runtime_upload: bool = False
     runtime_required: bool = False
     runtime_max_files: int | None = None
@@ -130,7 +132,9 @@ class NewStepDraft(BaseModel):
         normalized = value.strip()
         return normalized or None
 
-    @field_validator("knowledge_refs", "uses_form_fields")
+    @field_validator(
+        "knowledge_refs", "mcp_server_refs", "mcp_tool_refs", "uses_form_fields"
+    )
     @classmethod
     def _normalize_string_lists(cls, values: list[str]) -> list[str]:
         normalized: list[str] = []
@@ -161,6 +165,14 @@ class NewStepDraft(BaseModel):
                 self.model_ref = self.assistant_spec.model_ref
             if not self.knowledge_refs:
                 self.knowledge_refs = list(self.assistant_spec.knowledge_refs)
+            if not self.mcp_server_refs:
+                self.mcp_server_refs = list(self.assistant_spec.mcp_server_refs)
+            if not self.mcp_tool_refs:
+                self.mcp_tool_refs = list(self.assistant_spec.mcp_tool_refs)
+        if self.knowledge_refs and (self.mcp_server_refs or self.mcp_tool_refs):
+            raise ValueError(
+                "A step cannot use knowledge_refs and MCP refs at the same time."
+            )
         if self.output_fields:
             _ensure_field_depth(self.output_fields)
         return self

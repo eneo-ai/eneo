@@ -19,11 +19,17 @@ from intric.completion_models.infrastructure.completion_service import Completio
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.files.file_models import FileCreate, FileType
 from intric.files.file_repo import FileRepository
+from intric.flows.assistant_execution_snapshot import (
+    assistant_execution_surface_hash,
+    build_assistant_execution_snapshot,
+    stable_hash,
+)
 from intric.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepAttemptStatus,
     FlowStepResult,
+    FlowVersion,
 )
 from intric.flows.flow_run_provenance import (
     FlowAttemptProvenance,
@@ -349,6 +355,18 @@ class FlowRunExecutor:
             tenant_id=tenant_id,
         )
         try:
+            self._validate_definition_checksum(version=version, run_id=run_id)
+        except BadRequestException as exc:
+            await self.flow_run_repo.update_status(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                status=FlowRunStatus.FAILED,
+                error_message=str(exc),
+                from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
+            )
+            await self._commit()
+            return {"status": "failed", "error": "definition_checksum_mismatch"}
+        try:
             steps = self._parse_runtime_steps(version.definition_json)
         except BadRequestException as exc:
             await self.flow_run_repo.update_status(
@@ -368,6 +386,25 @@ class FlowRunExecutor:
         state = build_run_execution_state(
             steps=steps, persisted_results=persisted_results
         )
+        try:
+            await self._validate_assistant_snapshots(
+                steps=steps,
+                state=state,
+                run_id=run_id,
+                require_snapshots=self._requires_assistant_snapshots(
+                    version.definition_json
+                ),
+            )
+        except BadRequestException as exc:
+            await self.flow_run_repo.update_status(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                status=FlowRunStatus.FAILED,
+                error_message=str(exc),
+                from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
+            )
+            await self._commit()
+            return {"status": "failed", "error": "assistant_snapshot_drift"}
 
         logger.info(
             "flow_executor.steps_parsed run_id=%s step_count=%d", run_id, len(steps)
@@ -1166,6 +1203,56 @@ class FlowRunExecutor:
             state.assistant_cache[assistant_id] = assistant
         return assistant
 
+    async def _validate_assistant_snapshots(
+        self,
+        *,
+        steps: list[RuntimeStep],
+        state: RunExecutionState,
+        run_id: UUID,
+        require_snapshots: bool = False,
+    ) -> None:
+        for step in steps:
+            if step.assistant_snapshot is None:
+                if require_snapshots:
+                    raise BadRequestException(
+                        f"Step {step.step_order}: assistant snapshot is missing from the published flow definition. Republish the flow before running it."
+                    )
+                continue
+
+            current_assistant = await self._load_assistant(step.assistant_id, state)
+            mcp_servers = getattr(current_assistant, "mcp_servers", [])
+            if not isinstance(mcp_servers, list):
+                mcp_servers = []
+            current_snapshot = build_assistant_execution_snapshot(
+                assistant=current_assistant,
+                mcp_server_entities=cast(list[Any], mcp_servers),
+            )
+            if current_snapshot is None:
+                raise BadRequestException(
+                    f"Step {step.step_order}: assistant snapshot could not be validated."
+                )
+
+            expected_hash = step.assistant_snapshot.get("execution_surface_hash")
+            if not isinstance(expected_hash, str) or not expected_hash:
+                expected_hash = assistant_execution_surface_hash(
+                    step.assistant_snapshot
+                )
+            current_hash = current_snapshot.get("execution_surface_hash")
+            if expected_hash == current_hash:
+                continue
+
+            logger.warning(
+                "flow_executor.assistant_snapshot_drift run_id=%s step_order=%d assistant_id=%s expected_hash=%s current_hash=%s",
+                run_id,
+                step.step_order,
+                step.assistant_id,
+                expected_hash,
+                current_hash,
+            )
+            raise BadRequestException(
+                f"Step {step.step_order}: assistant configuration changed after publish. Republish the flow before running it."
+            )
+
     async def _validate_runtime_step_security(
         self,
         *,
@@ -1317,6 +1404,29 @@ class FlowRunExecutor:
     @staticmethod
     def _parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
         return parse_runtime_steps(definition_json)
+
+    @staticmethod
+    def _validate_definition_checksum(*, version: FlowVersion, run_id: UUID) -> None:
+        current_checksum = stable_hash(version.definition_json)
+        if version.definition_checksum == current_checksum:
+            return
+
+        logger.error(
+            "flow_executor.definition_checksum_mismatch run_id=%s flow_id=%s version=%s expected_checksum=%s current_checksum=%s",
+            run_id,
+            version.flow_id,
+            version.version,
+            version.definition_checksum,
+            current_checksum,
+        )
+        raise BadRequestException(
+            "Published flow definition changed after publish. Republish the flow before running it."
+        )
+
+    @staticmethod
+    def _requires_assistant_snapshots(definition_json: dict[str, Any]) -> bool:
+        schema_version = definition_json.get("schema_version")
+        return isinstance(schema_version, int) and schema_version >= 1
 
     async def _commit(self) -> None:
         await self.session.commit()

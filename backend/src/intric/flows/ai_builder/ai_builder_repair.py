@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, cast
 
 from pydantic import ValidationError
 
@@ -59,6 +59,14 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     RejectionReason,
     parse_planner_output,
     summarize_parse_failure,
+)
+from intric.flows.ai_builder.ai_builder_token_usage import (
+    TOKEN_USAGE_SOURCE_ESTIMATE,
+    TOKEN_USAGE_SOURCE_NONE,
+    TOKEN_USAGE_SOURCE_PROVIDER,
+    CompletionTokenUsage,
+    TokenUsageSource,
+    completion_token_usage_from_response,
 )
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
@@ -97,6 +105,24 @@ class CompletionMetadata:
     prompt_tokens: int | None
     completion_tokens: int | None
     total_tokens: int | None
+    token_usage_source: str | None = None
+    token_usage_estimated: bool = False
+
+    def token_usage(self) -> CompletionTokenUsage:
+        source = self.token_usage_source
+        if source not in {
+            TOKEN_USAGE_SOURCE_PROVIDER,
+            TOKEN_USAGE_SOURCE_ESTIMATE,
+            TOKEN_USAGE_SOURCE_NONE,
+        }:
+            source = TOKEN_USAGE_SOURCE_NONE
+        return CompletionTokenUsage(
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+            total_tokens=self.total_tokens,
+            source=cast(TokenUsageSource, source),
+            estimated=self.token_usage_estimated,
+        )
 
 
 # Repair-eligible rejection codes. A rejection outside this set means
@@ -292,7 +318,12 @@ async def repair_planner_turn(
         **litellm_kwargs,
     )
     raw_content = response.choices[0].message.content or ""
-    completion_metadata = _extract_completion_metadata(response)
+    completion_metadata = completion_metadata_from_response(
+        response,
+        litellm_model=litellm_model,
+        messages=messages,
+        completion_text=raw_content,
+    )
 
     try:
         repaired_output = parse_planner_output(raw_content)
@@ -414,7 +445,12 @@ async def repair_parse_failure(
         **litellm_kwargs,
     )
     raw_content = response.choices[0].message.content or ""
-    completion_metadata = _extract_completion_metadata(response)
+    completion_metadata = completion_metadata_from_response(
+        response,
+        litellm_model=litellm_model,
+        messages=messages,
+        completion_text=raw_content,
+    )
 
     try:
         repaired_output = parse_planner_output(raw_content)
@@ -434,14 +470,27 @@ async def repair_parse_failure(
     )
 
 
-def _extract_completion_metadata(response: Any) -> CompletionMetadata:
+def completion_metadata_from_response(
+    response: Any,
+    *,
+    litellm_model: str,
+    messages: list[dict[str, Any]],
+    completion_text: str,
+) -> CompletionMetadata:
     choice = response.choices[0]
-    usage = getattr(response, "usage", None)
+    usage = completion_token_usage_from_response(
+        response,
+        model_name=litellm_model,
+        messages=messages,
+        completion_text=completion_text,
+    )
     return CompletionMetadata(
         finish_reason=getattr(choice, "finish_reason", None),
-        prompt_tokens=getattr(usage, "prompt_tokens", None) if usage else None,
-        completion_tokens=getattr(usage, "completion_tokens", None) if usage else None,
-        total_tokens=getattr(usage, "total_tokens", None) if usage else None,
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        total_tokens=usage.total_tokens,
+        token_usage_source=usage.source,
+        token_usage_estimated=usage.estimated,
     )
 
 
@@ -482,6 +531,7 @@ __all__ = [
     "build_repair_messages",
     "build_parse_repair_user_message",
     "build_repair_user_message",
+    "completion_metadata_from_response",
     "repair_parse_failure",
     "repair_planner_turn",
 ]

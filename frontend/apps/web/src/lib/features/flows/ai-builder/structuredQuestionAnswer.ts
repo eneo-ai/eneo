@@ -11,6 +11,7 @@ export interface StructuredQuestion {
   options: StructuredQuestionOption[];
   selection_mode: "single" | "multi";
   allow_custom: boolean;
+  requires_confirm?: boolean;
 }
 
 export interface StructuredQuestionAnswerMetadata {

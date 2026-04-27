@@ -48,3 +48,18 @@ Eneo Backend (via LiteLLM)
                                         ▼
                                    Insights / Admin Dashboard
 ```
+
+## AI Builder Usage
+
+AI Builder also surfaces token usage during Flow authoring. The builder usage total includes planner calls, plan proposal generation, and any repair attempts needed to produce a valid plan.
+
+The AI Builder token display shows:
+
+- total tokens
+- input and output token split
+- model name
+- whether the count is estimated
+
+The same precedence applies: provider-reported usage is preferred, and local LiteLLM-based estimation is used only when the provider does not return usage. The estimate label is shown so users do not confuse an approximation with an exact provider count.
+
+This is a transparency feature, not a billing view.

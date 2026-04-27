@@ -1,3 +1,4 @@
+import type { components } from "@intric/intric-js";
 import type { StructuredQuestion } from "./structuredQuestionAnswer";
 
 export type AIBuilderEventType =
@@ -5,6 +6,7 @@ export type AIBuilderEventType =
   | "plan"
   | "question"
   | "requirements_summary"
+  | "usage"
   | "error"
   | "status"
   | "done";
@@ -50,6 +52,7 @@ export interface AIBuilderSession {
   target_kind: TargetKind;
   flow_id: string | null;
   latest_plan_id: string | null;
+  telemetry?: AIBuilderTelemetrySummary | null;
   conversation?: AIBuilderConversationMessage[];
   attachments?: AIBuilderAttachmentFile[];
   attachment_warnings?: string[];
@@ -70,6 +73,8 @@ export interface StepSpec {
     instructions: string;
     model_ref: string | null;
     knowledge_refs: string[];
+    mcp_server_refs?: string[];
+    mcp_tool_refs?: string[];
   };
   input_source: string;
   input_type: string;
@@ -212,3 +217,7 @@ export interface AIBuilderErrorEventData {
 }
 
 export type AIBuilderQuestionEventData = StructuredQuestion;
+
+export type AIBuilderTelemetrySummary = Required<components["schemas"]["SessionTelemetrySummary"]>;
+
+export type AIBuilderUsageEventData = AIBuilderTelemetrySummary;

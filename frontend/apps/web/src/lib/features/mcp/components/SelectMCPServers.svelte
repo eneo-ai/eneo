@@ -11,6 +11,7 @@
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
+  import { sanitizeMcpSelection } from "../mcpSelection";
 
   interface MCPTool {
     id: string;
@@ -36,7 +37,7 @@
 
   type Props = {
     /** Array of MCP server objects that are selected. Uses index signature for schema compatibility. */
-    selectedMCPServers: { [key: string]: unknown }[];
+    selectedMCPServers?: { [key: string]: unknown }[];
     /** Optional: MCP tool settings to track tool-level overrides */
     selectedMCPTools?: Array<{ tool_id: string; is_enabled: boolean }>;
     /** Optional: Currently selected completion model to check tool calling support */
@@ -86,14 +87,31 @@
     return server.tools ?? [];
   }
 
+  function sanitizeSelection() {
+    const sanitizedSelection = sanitizeMcpSelection({
+      selectedServers: servers,
+      selectedTools: selectedMCPTools,
+      availableServers
+    });
+
+    selectedMCPServers = sanitizedSelection.selectedServers;
+    selectedMCPTools = sanitizedSelection.selectedTools;
+
+    return {
+      selectedMCPServers,
+      selectedMCPTools
+    };
+  }
+
   function getServerCompatibility(serverId: string): ServerCompatibility {
     return serverCompatibilityById[serverId] ?? { isCompatible: true };
   }
 
   function notifySelectionChange() {
+    const sanitizedSelection = sanitizeSelection();
     dispatch("change", {
-      selectedMCPServers,
-      selectedMCPTools
+      selectedMCPServers: sanitizedSelection.selectedMCPServers,
+      selectedMCPTools: sanitizedSelection.selectedMCPTools
     });
   }
 

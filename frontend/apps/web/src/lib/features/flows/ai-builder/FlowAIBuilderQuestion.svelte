@@ -19,11 +19,10 @@
   interface Props {
     question: StructuredQuestion;
     answered?: boolean;
-    answerText?: string | null;
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
   }
 
-  let { question, answered = false, answerText = null, onanswer }: Props = $props();
+  let { question, answered = false, onanswer }: Props = $props();
 
   // Generated once per instance so radiogroup + its label can link without colliding.
   const questionLabelId = `ai-builder-q-${Math.random().toString(36).slice(2, 10)}`;
@@ -34,13 +33,12 @@
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
 
   const isSingle = $derived(question.selection_mode === "single");
+  const requiresConfirm = $derived(question.requires_confirm === true);
 
   const canConfirm = $derived.by(() => {
     if (answered) return false;
     if (customSelected) return customText.trim().length > 0;
-    if (!isSingle) return selectedOptionKeys.size > 0;
-    // single-select auto-submits on click, so the Confirm button is only
-    // needed when the user is typing a custom answer.
+    if (!isSingle || requiresConfirm) return selectedOptionKeys.size > 0;
     return false;
   });
 
@@ -54,12 +52,19 @@
       customText = "";
     }
 
-    if (isSingle) {
+    const optionKey = getStructuredQuestionOptionKey(option);
+
+    if (isSingle && !requiresConfirm) {
       onanswer?.(buildStructuredQuestionSelection(question, [option]));
       return;
     }
 
-    const optionKey = getStructuredQuestionOptionKey(option);
+    if (isSingle) {
+      selectedOptionKeys.clear();
+      selectedOptionKeys.add(optionKey);
+      return;
+    }
+
     if (selectedOptionKeys.has(optionKey)) {
       selectedOptionKeys.delete(optionKey);
     } else {
@@ -70,8 +75,8 @@
   function selectCustom() {
     if (answered) return;
     customSelected = true;
-    // Clearing the list keeps single- and multi-select "custom" paths
-    // consistent — a custom answer never mixes with preset selections.
+    // Custom answers intentionally replace preset selections instead of mixing
+    // both answer types in one payload.
     selectedOptionKeys.clear();
     queueMicrotask(() => textareaRef?.focus());
   }
@@ -100,21 +105,19 @@
 </script>
 
 <div class="question-panel" class:answered>
-  <p id={questionLabelId} class="question-title">
-    <span class="question-dot" aria-hidden="true"></span>
-    {question.question}
-  </p>
-
   {#if answered}
-    <div class="answered-summary" aria-live="polite">
+    <div class="answered-prompt">
       <span class="answered-check" aria-hidden="true">
-        <CheckIcon class="size-3.5" />
+        <CheckIcon class="size-3" />
       </span>
-      {#if answerText}
-        <span class="answered-text">{answerText}</span>
-      {/if}
+      <span>{question.question}</span>
     </div>
   {:else}
+    <p id={questionLabelId} class="question-title">
+      <span class="question-dot" aria-hidden="true"></span>
+      {question.question}
+    </p>
+
     <div
       class="options-stack"
       role={isSingle ? "radiogroup" : "group"}
@@ -208,7 +211,7 @@
       {/if}
     </div>
 
-    {#if !isSingle || customSelected}
+    {#if !isSingle || customSelected || requiresConfirm}
       <div class="actions-row">
         <Button variant="default" size="sm" onclick={handleConfirm} disabled={!canConfirm}>
           {m.ai_builder_question_confirm()}
@@ -221,8 +224,6 @@
 <style lang="postcss">
   @reference "@intric/ui/styles";
 
-  /* --- Outer panel: soft card that signals "the assistant is asking" --- */
-
   .question-panel {
     @apply mt-3 flex flex-col rounded-xl border;
     border-color: var(--border-default);
@@ -234,10 +235,9 @@
   }
 
   .question-panel.answered {
-    background: oklch(from var(--accent-default) l c h / 0.045);
+    border-color: oklch(from var(--border-default) l c h / 0.55);
+    background: oklch(from var(--bg-secondary) l c h / 0.28);
   }
-
-  /* --- Question prompt --- */
 
   .question-title {
     @apply mb-3 flex items-start gap-2 text-sm leading-snug font-medium;
@@ -250,27 +250,19 @@
     opacity: 0.7;
   }
 
-  /* --- Option list --- */
-
   .options-stack {
     @apply flex flex-col gap-1.5;
   }
 
-  .answered-summary {
-    @apply flex items-center gap-2 rounded-lg border px-3 py-2;
-    border-color: oklch(from var(--accent-default) l c h / 0.22);
-    background: var(--bg-primary);
-    color: var(--text-primary);
+  .answered-prompt {
+    @apply flex min-w-0 items-start gap-2 text-[0.8125rem] leading-relaxed;
+    color: var(--text-secondary);
   }
 
   .answered-check {
-    @apply flex size-6 shrink-0 items-center justify-center rounded-full;
+    @apply mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full;
     background: oklch(from var(--accent-default) l c h / 0.11);
     color: var(--accent-stronger);
-  }
-
-  .answered-text {
-    @apply min-w-0 truncate text-[0.8125rem] leading-snug font-medium;
   }
 
   .option-row {
@@ -310,15 +302,12 @@
   }
 
   .option-row-custom {
-    /* Visually peers with preset options but hints "you write it yourself". */
     border-style: dashed;
   }
 
   .option-row-custom.is-selected {
     border-style: solid;
   }
-
-  /* --- Indicator: reuses the shadcn radio visual language without owning state --- */
 
   .option-indicator {
     @apply relative mt-[0.1875rem] flex size-[1.125rem] shrink-0 items-center justify-center rounded-md;
@@ -350,8 +339,6 @@
     background: var(--text-on-fill);
   }
 
-  /* --- Body: label + description --- */
-
   .option-body {
     @apply flex min-w-0 flex-col gap-0.5;
   }
@@ -366,8 +353,6 @@
     color: var(--text-secondary);
   }
 
-  /* --- Custom text input --- */
-
   .custom-input-wrap {
     @apply mt-1 rounded-lg;
     padding: 0.25rem 0.25rem 0;
@@ -378,13 +363,9 @@
     min-height: 4rem;
   }
 
-  /* --- Action row --- */
-
   .actions-row {
     @apply mt-3 flex items-center justify-end gap-2;
   }
-
-  /* --- Entrance animation (scales with option count) --- */
 
   .question-panel {
     animation: questionReveal 260ms cubic-bezier(0.16, 1, 0.3, 1);

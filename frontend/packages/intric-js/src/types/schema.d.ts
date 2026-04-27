@@ -9096,6 +9096,10 @@ export interface components {
       model_ref?: string | null;
       /** Knowledge Refs */
       knowledge_refs?: string[];
+      /** Mcp Server Refs */
+      mcp_server_refs?: string[];
+      /** Mcp Tool Refs */
+      mcp_tool_refs?: string[];
     };
     /**
      * AssistantTemplateAdminCreate
@@ -17347,6 +17351,7 @@ export interface components {
       flow_id?: string | null;
       /** Latest Plan Id */
       latest_plan_id?: string | null;
+      telemetry?: components["schemas"]["SessionTelemetrySummary"] | null;
       /** Conversation */
       conversation?: components["schemas"]["ConversationMessage"][];
       /** Attachments */
@@ -17363,6 +17368,89 @@ export interface components {
      * @enum {string}
      */
     SessionStatus: "chatting" | "awaiting_approval" | "applying" | "applied" | "cancelled";
+    /** SessionTelemetrySummary */
+    SessionTelemetrySummary: {
+      /**
+       * Planner Request Count
+       * @default 0
+       */
+      planner_request_count?: number;
+      /**
+       * Clarification Question Count
+       * @default 0
+       */
+      clarification_question_count?: number;
+      /**
+       * Prompt Tokens Total
+       * @default 0
+       */
+      prompt_tokens_total?: number;
+      /**
+       * Completion Tokens Total
+       * @default 0
+       */
+      completion_tokens_total?: number;
+      /**
+       * Total Tokens Total
+       * @default 0
+       */
+      total_tokens_total?: number;
+      /**
+       * Tool Call Count Total
+       * @default 0
+       */
+      tool_call_count_total?: number;
+      /**
+       * Auxiliary Llm Call Count
+       * @default 0
+       */
+      auxiliary_llm_call_count?: number;
+      /**
+       * Architecture Commit Count
+       * @default 0
+       */
+      architecture_commit_count?: number;
+      /**
+       * Repair Attempts Total
+       * @default 0
+       */
+      repair_attempts_total?: number;
+      /**
+       * Parse Repair Attempts Total
+       * @default 0
+       */
+      parse_repair_attempts_total?: number;
+      /**
+       * Wall Clock Ms Total
+       * @default 0
+       */
+      wall_clock_ms_total?: number;
+      /**
+       * Llm Calls Made Total
+       * @default 0
+       */
+      llm_calls_made_total?: number;
+      /**
+       * Token Usage Estimated
+       * @default false
+       */
+      token_usage_estimated?: boolean;
+      /** Last Request Id */
+      last_request_id?: string | null;
+      /** Last Model */
+      last_model?: string | null;
+      /** Last Finish Reason */
+      last_finish_reason?: string | null;
+      /** Last Outcome Kind */
+      last_outcome_kind?: string | null;
+      /** Last Token Usage Source */
+      last_token_usage_source?: string | null;
+      /**
+       * Last Token Usage Estimated
+       * @default false
+       */
+      last_token_usage_estimated?: boolean;
+    };
     /**
      * SetFederationRequest
      * @description Request model for providing a full tenant federation config.

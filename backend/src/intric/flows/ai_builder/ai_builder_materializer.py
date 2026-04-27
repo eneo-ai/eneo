@@ -683,7 +683,7 @@ async def _configure_assistant(
     assistant_id: UUID,
     assistant_spec: AssistantSpec,
 ) -> None:
-    """Configure a flow-managed assistant with prompt, model, and knowledge bases."""
+    """Configure a flow-managed assistant with prompt, model, knowledge, and MCP."""
     kwargs: dict[str, Any] = {
         "flow_id": flow_id,
         "assistant_id": assistant_id,
@@ -700,7 +700,10 @@ async def _configure_assistant(
                 context={"model_ref": assistant_spec.model_ref},
             ) from exc
 
-    if assistant_spec.knowledge_refs:
+    uses_knowledge = bool(assistant_spec.knowledge_refs)
+    uses_mcp = bool(assistant_spec.mcp_server_refs or assistant_spec.mcp_tool_refs)
+
+    if uses_knowledge:
         try:
             kwargs["groups"] = [UUID(ref) for ref in assistant_spec.knowledge_refs]
         except (ValueError, AttributeError) as exc:
@@ -717,6 +720,59 @@ async def _configure_assistant(
                 code="invalid_kb_ref",
                 context={"knowledge_refs": assistant_spec.knowledge_refs},
             ) from exc
+
+    if uses_mcp:
+        try:
+            kwargs["mcp_server_ids"] = [
+                UUID(ref) for ref in assistant_spec.mcp_server_refs
+            ]
+            kwargs["mcp_tools"] = [
+                (UUID(ref), True) for ref in assistant_spec.mcp_tool_refs
+            ]
+        except (ValueError, AttributeError) as exc:
+            invalid_ref = next(
+                (
+                    ref
+                    for ref in [
+                        *assistant_spec.mcp_server_refs,
+                        *assistant_spec.mcp_tool_refs,
+                    ]
+                    if not _looks_like_uuid(ref)
+                ),
+                (
+                    assistant_spec.mcp_server_refs[0]
+                    if assistant_spec.mcp_server_refs
+                    else assistant_spec.mcp_tool_refs[0]
+                ),
+            )
+            raise BadRequestException(
+                f"Invalid MCP reference '{invalid_ref}'.",
+                code="invalid_mcp_ref",
+                context={
+                    "mcp_server_refs": assistant_spec.mcp_server_refs,
+                    "mcp_tool_refs": assistant_spec.mcp_tool_refs,
+                },
+            ) from exc
+        # Assistants cannot combine knowledge and MCP. When a step intentionally
+        # switches to MCP, clear existing knowledge attachments in the same update.
+        kwargs["groups"] = []
+        kwargs["websites"] = []
+        kwargs["integration_knowledge_ids"] = []
+    elif uses_knowledge:
+        # Symmetric cleanup for edits that switch an existing MCP step to KB/RAG.
+        kwargs["mcp_server_ids"] = []
+        kwargs["mcp_tools"] = []
+        kwargs["websites"] = []
+        kwargs["integration_knowledge_ids"] = []
+    else:
+        # Flow-managed assistant specs are the desired state. If the compiled
+        # step has no KB/RAG or MCP refs, clear stale external resources from
+        # previous versions of the same step assistant.
+        kwargs["groups"] = []
+        kwargs["websites"] = []
+        kwargs["integration_knowledge_ids"] = []
+        kwargs["mcp_server_ids"] = []
+        kwargs["mcp_tools"] = []
 
     await flow_service.update_flow_assistant(**kwargs)
 

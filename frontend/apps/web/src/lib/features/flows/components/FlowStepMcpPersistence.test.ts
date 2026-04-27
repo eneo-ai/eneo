@@ -43,6 +43,27 @@ describe("Flow step MCP persistence wiring", () => {
     expect(screen.getByTestId("last-save").textContent).toContain('"tool_id":"tool-forecast"');
   });
 
+  it("drops stale MCP servers that are no longer available in the space before saving", async () => {
+    render(FlowStepMcpPersistenceHarness, {
+      initialServers: [
+        {
+          id: "server-stale",
+          name: "Disabled Server",
+          tools: [{ id: "tool-stale", name: "disabled_tool", is_enabled: false }]
+        }
+      ],
+      initialTools: [{ tool_id: "tool-stale", is_enabled: false }]
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Weather Server" }));
+
+    expect(screen.getByTestId("save-call-count").textContent).toBe("1");
+    expect(screen.getByTestId("last-save").textContent).not.toContain("server-stale");
+    expect(screen.getByTestId("last-save").textContent).not.toContain("tool-stale");
+    expect(screen.getByTestId("last-save").textContent).toContain("server-weather");
+    expect(screen.getByTestId("last-save").textContent).toContain("tool-forecast");
+  });
+
   it("saves MCP tool toggles as one batched payload", async () => {
     render(FlowStepMcpPersistenceHarness);
 

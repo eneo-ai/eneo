@@ -1,8 +1,8 @@
+import { Callout } from "nextra/components";
+
 # MCP Servers
 
 Model Context Protocol (MCP) servers extend your assistants with external tools and data sources. This guide covers how to add MCP servers, manage tools, understand the sync and approval flow, and make tools available in spaces.
-
-import { Callout } from 'nextra/components'
 
 ## Overview
 
@@ -137,6 +137,22 @@ When a server is added to a space, all its tools are enabled by default. You can
 If your organisation uses security classifications, an MCP server must meet the space's classification level to be selectable. Servers that don't meet the requirement are greyed out with a tooltip explaining why.
 
 For example, if a space is classified as "Confidential" (level 3), only MCP servers with a security classification at level 3 or higher can be enabled in that space.
+
+---
+
+## Using MCP Tools in Flows and AI Builder
+
+Flows can attach MCP access to the assistant configuration used by an individual step. Prefer enabling only the tools a step needs. Server-level access is useful when a step genuinely needs the whole server surface, but tool-level access is easier to review and safer by default.
+
+AI Builder can see the MCP servers and tools enabled in the current space. During planning it reads tool names, descriptions, and metadata so it can decide whether a step should use external access. It does **not** execute MCP tools while drafting a plan. Tool execution happens only when a published Flow run reaches the step that has MCP access.
+
+Good MCP descriptions improve plan quality. Describe what the tool reads, what it writes, when it should be used, and any side effects. If a tool writes to an external system, make that explicit.
+
+<Callout type="info">
+  Keep knowledge retrieval and MCP execution on separate Flow steps when both
+  are needed. That separation makes the source of each result easier to inspect
+  and keeps retrieval context distinct from external tool execution.
+</Callout>
 
 ---
 

@@ -21,7 +21,6 @@ from intric.database.tables.base_class import (
 )
 from intric.database.tables.files_table import Files
 from intric.database.tables.job_table import Jobs
-from intric.database.tables.mcp_server_table import MCPServerTools
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
@@ -180,34 +179,6 @@ class FlowSteps(BasePublic):
             ["flows.id", "flows.tenant_id"],
             ondelete="CASCADE",
             name="fk_flow_steps_flow_tenant",
-        ),
-    )
-
-
-class FlowStepMCPTools(BaseCrossReference):
-    # Deprecated: flow step MCP configuration is stored on the flow-managed assistant
-    # through assistant_mcp_servers and assistant_mcp_server_tools. Keep this table
-    # until a dedicated cleanup migration removes the obsolete schema surface.
-    flow_step_id: Mapped[UUID] = mapped_column(
-        ForeignKey(FlowSteps.id, ondelete="CASCADE"),
-        primary_key=True,
-    )
-    mcp_server_tool_id: Mapped[UUID] = mapped_column(
-        ForeignKey(MCPServerTools.id, ondelete="CASCADE"),
-        primary_key=True,
-    )
-    tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Tenants.id, ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["flow_step_id", "tenant_id"],
-            ["flow_steps.id", "flow_steps.tenant_id"],
-            ondelete="CASCADE",
-            name="fk_flow_step_mcp_tools_step_tenant",
         ),
     )
 
@@ -766,6 +737,13 @@ class BuilderSessions(BasePublic):
             ondelete="CASCADE",
             name="fk_builder_sessions_flow_tenant",
         ),
+        ForeignKeyConstraint(
+            ["latest_plan_id", "id"],
+            ["builder_plans.id", "builder_plans.session_id"],
+            name="fk_builder_sessions_latest_plan_session",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
         CheckConstraint(
             f"target_kind IN ({','.join(repr(v) for v in BUILDER_TARGET_KIND_VALUES)})",
             name="ck_builder_sessions_target_kind",
@@ -827,6 +805,7 @@ class BuilderPlans(BasePublic):
 
     __table_args__ = (
         UniqueConstraint("id", "tenant_id", name="uq_builder_plans_id_tenant_id"),
+        UniqueConstraint("id", "session_id", name="uq_builder_plans_id_session_id"),
         ForeignKeyConstraint(
             ["session_id", "tenant_id"],
             ["builder_sessions.id", "builder_sessions.tenant_id"],

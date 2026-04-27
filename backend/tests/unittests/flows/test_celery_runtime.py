@@ -126,19 +126,18 @@ async def test_celery_execution_backend_dispatch_propagates_send_task_failure():
 
 def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
     celery_app_module = importlib.import_module("intric.flows.runtime.celery_app")
-    monkeypatch.setattr(
-        celery_app_module,
-        "get_settings",
-        lambda: SimpleNamespace(
-            redis_host="redis",
-            redis_port=6379,
-            redis_db_celery_broker=2,
-            redis_db_celery_result=3,
-            flow_celery_queue="flows.execute",
-            celery_visibility_timeout_seconds=7200,
-            flow_task_timeout_seconds=540,
-        ),
+    shared_celery_app_module = importlib.import_module("intric.worker.celery.app")
+    settings = SimpleNamespace(
+        redis_host="redis",
+        redis_port=6379,
+        redis_db_celery_broker=2,
+        redis_db_celery_result=3,
+        flow_celery_queue="flows.execute",
+        celery_visibility_timeout_seconds=7200,
+        flow_task_timeout_seconds=540,
     )
+    monkeypatch.setattr(celery_app_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(shared_celery_app_module, "get_settings", lambda: settings)
 
     app = celery_app_module.create_flow_celery_app()
 

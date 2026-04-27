@@ -9,6 +9,7 @@ import pytest
 
 from intric.ai_models.completion_models.completion_model import ModelKwargs
 from intric.assistants.assistant import Assistant, AssistantOrigin
+from intric.flows.assistant_execution_snapshot import stable_hash
 from intric.flows.flow import Flow, FlowStep, FlowVersion
 from intric.flows.flow_service import FlowService
 from intric.main.exceptions import BadRequestException, NotFoundException
@@ -80,6 +81,8 @@ class _FlowSecuritySpaceStub:
         }
 
     def get_mcp_server(self, server_id):
+        if server_id not in self._mcp_servers:
+            raise NotFoundException()
         return self._mcp_servers[server_id]
 
     def get_completion_model(self, model_id):
@@ -337,18 +340,35 @@ async def test_publish_flow_includes_mcp_snapshot_fields(user):
     flow_repo.get.return_value = flow
     version_repo.get_latest.return_value = None
     flow_repo.update.return_value = flow.model_copy(update={"published_version": 1})
+    model_id = uuid4()
+    tool_schema = {"type": "object", "properties": {"city": {"type": "string"}}}
     service.assistant_service.get_assistant.return_value = (
         SimpleNamespace(
             id=step.assistant_id,
             origin=AssistantOrigin.FLOW_MANAGED,
             managing_flow_id=flow_id,
+            prompt=SimpleNamespace(text="Use the weather tool only when needed."),
+            completion_model=SimpleNamespace(
+                id=model_id,
+                name="gpt-5.4-nano",
+                nickname="Nano",
+                litellm_model_name="openai/gpt-5.4-nano",
+            ),
+            completion_model_kwargs=ModelKwargs(temperature=0.2),
+            collections=[],
+            websites=[],
+            integration_knowledge_list=[],
             mcp_servers=[
                 SimpleNamespace(
                     id=uuid4(),
                     name="Weather Server",
                     tools=[
                         SimpleNamespace(
-                            id=uuid4(), name="forecast_tool", is_enabled=True
+                            id=uuid4(),
+                            name="forecast_tool",
+                            description="Fetches a forecast by city.",
+                            input_schema=tool_schema,
+                            is_enabled=True,
                         ),
                         SimpleNamespace(
                             id=uuid4(), name="history_tool", is_enabled=False
@@ -363,6 +383,7 @@ async def test_publish_flow_includes_mcp_snapshot_fields(user):
     await service.publish_flow(flow_id=flow_id)
 
     definition = version_repo.create.await_args.kwargs["definition_json"]
+    assert definition["schema_version"] == 1
     assert definition["steps"][0]["mcp_servers"] == [
         {
             "id": str(
@@ -389,6 +410,68 @@ async def test_publish_flow_includes_mcp_snapshot_fields(user):
             "name": "forecast_tool",
         }
     ]
+    snapshot = definition["steps"][0]["assistant_snapshot"]
+    assert snapshot["schema_version"] == 1
+    assert snapshot["assistant_id"] == str(step.assistant_id)
+    assert snapshot["origin"] == "flow_managed"
+    assert snapshot["instructions"] == "Use the weather tool only when needed."
+    assert snapshot["completion_model"] == {
+        "id": str(model_id),
+        "name": "gpt-5.4-nano",
+        "nickname": "Nano",
+        "litellm_model_name": "openai/gpt-5.4-nano",
+    }
+    assert snapshot["completion_model_kwargs"] == {"temperature": 0.2}
+    assert snapshot["knowledge_refs"] == []
+    assert snapshot["mcp_tools"][0] == {
+        "tool_id": str(
+            service.assistant_service.get_assistant.return_value[0]
+            .mcp_servers[0]
+            .tools[0]
+            .id
+        ),
+        "server_id": str(
+            service.assistant_service.get_assistant.return_value[0].mcp_servers[0].id
+        ),
+        "server_name": "Weather Server",
+        "name": "forecast_tool",
+        "description": "Fetches a forecast by city.",
+        "input_schema": tool_schema,
+        "input_schema_hash": stable_hash(tool_schema),
+    }
+    assert snapshot["tool_surface_hash"] == stable_hash(snapshot["mcp_tools"])
+    assert snapshot["execution_surface_hash"] == stable_hash(
+        {
+            "schema_version": 1,
+            "assistant_id": str(step.assistant_id),
+            "instructions": "Use the weather tool only when needed.",
+            "completion_model": {
+                "id": str(model_id),
+                "litellm_model_name": "openai/gpt-5.4-nano",
+            },
+            "completion_model_kwargs": {"temperature": 0.2},
+            "knowledge_refs": [],
+            "mcp_tools": [
+                {
+                    "tool_id": str(
+                        service.assistant_service.get_assistant.return_value[0]
+                        .mcp_servers[0]
+                        .tools[0]
+                        .id
+                    ),
+                    "server_id": str(
+                        service.assistant_service.get_assistant.return_value[0]
+                        .mcp_servers[0]
+                        .id
+                    ),
+                    "server_name": "Weather Server",
+                    "name": "forecast_tool",
+                    "description": "Fetches a forecast by city.",
+                    "input_schema_hash": stable_hash(tool_schema),
+                }
+            ],
+        }
+    )
 
 
 @pytest.mark.asyncio
@@ -1730,6 +1813,67 @@ async def test_update_flow_assistant_rejects_step_incompatible_mcp_server(user):
         )
 
     assert exc_info.value.code == "flow_step_mcp_security_classification_mismatch"
+    assistant_service.update_assistant.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_flow_assistant_rejects_unavailable_mcp_server(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_service = AsyncMock()
+    space_service = AsyncMock()
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=assistant_service,
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+        space_service=space_service,
+    )
+
+    flow_id = uuid4()
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1)],
+    )
+    flow_repo.get.return_value = flow
+
+    assistant = _build_assistant(flow_id=flow_id, space_id=flow.space_id, user=user)
+    assistant.id = flow.steps[0].assistant_id
+    assistant.completion_model = SimpleNamespace(
+        security_classification=_classification(3),
+        can_access=True,
+    )
+    assistant_service.get_assistant.return_value = (assistant, [])
+    space_service.get_space.return_value = _FlowSecuritySpaceStub(
+        level=1,
+        mcp_servers=[],
+    )
+    unavailable_server_ids = [uuid4(), uuid4()]
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow_assistant(
+            flow_id=flow_id,
+            assistant_id=assistant.id,
+            mcp_server_ids=unavailable_server_ids,
+        )
+
+    assert exc_info.value.code == "flow_mcp_server_not_available"
+    assert exc_info.value.context == {
+        "mcp_server_ids": [str(server_id) for server_id in unavailable_server_ids]
+    }
     assistant_service.update_assistant.assert_not_awaited()
 
 

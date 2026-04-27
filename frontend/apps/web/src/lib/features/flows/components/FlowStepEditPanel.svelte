@@ -486,10 +486,10 @@
     )
   );
   const mcpSummary = $derived(summarizeAssistantMcp(assistantState.assistant));
-  const hasConfiguredMcp = $derived(mcpSummary.hasConfiguredMcp);
+  const hasActiveMcp = $derived(mcpSummary.hasActiveMcp);
   const showMcpSection = $derived(shouldShowStepMcpSection(activeStep?.output_mode));
-  const knowledgeDisabledByMcp = $derived(hasConfiguredMcp && !hasKnowledgeSelections);
-  const mcpDisabledByKnowledge = $derived(hasKnowledgeSelections && !hasConfiguredMcp);
+  const knowledgeDisabledByMcp = $derived(hasActiveMcp && !hasKnowledgeSelections);
+  const mcpDisabledByKnowledge = $derived(hasKnowledgeSelections && !hasActiveMcp);
   const flowMcpCompatibilityById = $derived.by(() => {
     if (!activeStep || !showMcpSection) {
       return {};
@@ -617,18 +617,6 @@
   );
   const outputHintKind = $derived(activeStep ? getOutputHintKind(activeStep.output_type) : null);
 
-  const stepSummaryModel = $derived(
-    activeStep
-      ? getStepSummaryModel({
-          step: activeStep,
-          previousStep,
-          hasInputTemplateOverride,
-          hasKnowledge: hasKnowledgeSelections,
-          hasAttachments: hasAttachmentSelections
-        })
-      : null
-  );
-
   const isTemplateFill = $derived(isTemplateFillStep(activeStep));
   const templateFillConfig = $derived(getTemplateFillOutputConfig(activeStep));
   const templateDerived = $derived(templateState.getDerived(activeStep, steps, formSchema));
@@ -693,6 +681,17 @@
       : ""
   );
   const hasInputTemplateOverride = $derived(inputTemplateText.trim().length > 0);
+  const stepSummaryModel = $derived(
+    activeStep
+      ? getStepSummaryModel({
+          step: activeStep,
+          previousStep,
+          hasInputTemplateOverride,
+          hasKnowledge: hasKnowledgeSelections,
+          hasAttachments: hasAttachmentSelections
+        })
+      : null
+  );
   let revealInputTemplateInUserMode = $state(false);
   const canRevealInputTemplate = $derived(
     !isTranscribeOnly && activeStep !== null && !isAdvancedMode
@@ -1025,7 +1024,6 @@
 
         {#if isTemplateFill}
           <FlowStepTemplateFillSection
-            step={activeStep}
             {isPublished}
             {isAdvancedMode}
             {templateFillConfig}

@@ -246,6 +246,157 @@ def test_edit_compiler_ignores_form_field_that_shadows_primary_text_input():
     )
 
 
+def test_edit_compiler_preserves_mcp_refs_when_patch_omits_resource_fields() -> None:
+    existing_step = _make_flow_step(step_order=1, user_description="Fetch case")
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(
+                    assistant_spec=AssistantSpec(instructions="Use the case data."),
+                ),
+            )
+        ],
+        plan_rationale="Update wording only.",
+    )
+
+    result = compile_edit_draft(
+        draft,
+        [existing_step],
+        base_flow_revision=1,
+        assistant_snapshots={
+            existing_step.assistant_id: {
+                "instructions": "Original prompt",
+                "knowledge_refs": [],
+                "mcp_server_refs": ["server-1"],
+                "mcp_tool_refs": ["tool-1"],
+            }
+        },
+    )
+
+    assistant_spec = result.compiled_spec.steps[0].assistant_spec
+    assert assistant_spec.instructions == "Use the case data."
+    assert assistant_spec.mcp_server_refs == ["server-1"]
+    assert assistant_spec.mcp_tool_refs == ["tool-1"]
+
+
+def test_edit_compiler_clears_mcp_refs_when_patch_sets_empty_lists() -> None:
+    existing_step = _make_flow_step(step_order=1, user_description="Fetch case")
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(
+                    assistant_spec=AssistantSpec(
+                        instructions="No external case lookup is needed.",
+                        mcp_server_refs=[],
+                        mcp_tool_refs=[],
+                    ),
+                ),
+            )
+        ],
+        plan_rationale="Remove external lookup.",
+    )
+
+    result = compile_edit_draft(
+        draft,
+        [existing_step],
+        base_flow_revision=1,
+        assistant_snapshots={
+            existing_step.assistant_id: {
+                "instructions": "Original prompt",
+                "knowledge_refs": [],
+                "mcp_server_refs": ["server-1"],
+                "mcp_tool_refs": ["tool-1"],
+            }
+        },
+    )
+
+    assistant_spec = result.compiled_spec.steps[0].assistant_spec
+    assert assistant_spec.instructions == "No external case lookup is needed."
+    assert assistant_spec.mcp_server_refs == []
+    assert assistant_spec.mcp_tool_refs == []
+
+
+def test_edit_compiler_switches_mcp_step_to_knowledge_without_stale_mcp_refs() -> None:
+    existing_step = _make_flow_step(step_order=1, user_description="Fetch case")
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(
+                    assistant_spec=AssistantSpec(
+                        instructions="Use approved policy knowledge.",
+                        knowledge_refs=["kb-1"],
+                    ),
+                ),
+            )
+        ],
+        plan_rationale="Replace live lookup with static knowledge.",
+    )
+
+    result = compile_edit_draft(
+        draft,
+        [existing_step],
+        base_flow_revision=1,
+        assistant_snapshots={
+            existing_step.assistant_id: {
+                "instructions": "Original prompt",
+                "knowledge_refs": [],
+                "mcp_server_refs": ["server-1"],
+                "mcp_tool_refs": ["tool-1"],
+            }
+        },
+    )
+
+    assistant_spec = result.compiled_spec.steps[0].assistant_spec
+    assert assistant_spec.knowledge_refs == ["kb-1"]
+    assert assistant_spec.mcp_server_refs == []
+    assert assistant_spec.mcp_tool_refs == []
+
+
+def test_edit_compiler_switches_knowledge_step_to_mcp_without_stale_kb_refs() -> None:
+    existing_step = _make_flow_step(step_order=1, user_description="Search policies")
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(
+                    assistant_spec=AssistantSpec(
+                        instructions="Fetch the live case record.",
+                        mcp_server_refs=["server-1"],
+                        mcp_tool_refs=["tool-1"],
+                    ),
+                ),
+            )
+        ],
+        plan_rationale="Replace static policy lookup with live case lookup.",
+    )
+
+    result = compile_edit_draft(
+        draft,
+        [existing_step],
+        base_flow_revision=1,
+        assistant_snapshots={
+            existing_step.assistant_id: {
+                "instructions": "Original prompt",
+                "knowledge_refs": ["kb-1"],
+                "mcp_server_refs": [],
+                "mcp_tool_refs": [],
+            }
+        },
+    )
+
+    assistant_spec = result.compiled_spec.steps[0].assistant_spec
+    assert assistant_spec.knowledge_refs == []
+    assert assistant_spec.mcp_server_refs == ["server-1"]
+    assert assistant_spec.mcp_tool_refs == ["tool-1"]
+
+
 class TestUntouchedStepsPreserved:
     def test_modify_one_step_preserves_others(self):
         existing = [

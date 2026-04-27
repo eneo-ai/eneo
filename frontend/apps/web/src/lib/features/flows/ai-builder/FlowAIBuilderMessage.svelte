@@ -15,7 +15,6 @@
     isStreaming?: boolean;
     question?: StructuredQuestion;
     questionAnswered?: boolean;
-    questionAnswerText?: string | null;
     requirementsSummary?: RequirementsSummary;
     requirementsConfirmed?: boolean;
     requirementsActive?: boolean;
@@ -31,7 +30,6 @@
     isStreaming = false,
     question = undefined,
     questionAnswered = false,
-    questionAnswerText = null,
     requirementsSummary = undefined,
     requirementsConfirmed = false,
     requirementsActive = true,
@@ -48,14 +46,12 @@
   class:message-enter={isLast}
 >
   {#if role === "user"}
-    <!-- User message: right-aligned bubble, reads as speech not a chip. -->
     <div class="flex justify-end">
       <div class="user-bubble">
         <p class="text-[0.9375rem] leading-relaxed whitespace-pre-wrap">{content}</p>
       </div>
     </div>
   {:else}
-    <!-- Assistant message: left-aligned prose with a subtle thread anchor. -->
     <div class="assistant-message">
       {#if content || (isStreaming && isLast)}
         <div class="assistant-body">
@@ -74,7 +70,6 @@
         <FlowAIBuilderQuestion
           {question}
           answered={questionAnswered}
-          answerText={questionAnswerText}
           onanswer={(payload) => onQuestionAnswer?.(payload)}
         />
       {/if}
@@ -94,8 +89,6 @@
 <style lang="postcss">
   @reference "@intric/ui/styles";
 
-  /* --- Row rhythm --- */
-
   .message-row {
     margin-bottom: 1.25rem;
   }
@@ -103,8 +96,6 @@
   .message-row.is-assistant {
     margin-top: 0.25rem;
   }
-
-  /* --- User bubble --- */
 
   .user-bubble {
     max-width: min(72%, 34rem);
@@ -114,8 +105,6 @@
     border: 1px solid oklch(from var(--border-default) l c h / 0.6);
     color: var(--text-primary);
   }
-
-  /* --- Assistant message --- */
 
   .assistant-message {
     max-width: 100%;
@@ -146,7 +135,6 @@
     line-height: 1.65;
   }
 
-  /* Markdown output: lock consistent size + reading rhythm. */
   .assistant-prose :global(p),
   .assistant-prose :global(li),
   .assistant-prose :global(span) {
@@ -174,8 +162,6 @@
     border-radius: 0.25rem;
     background: var(--bg-secondary);
   }
-
-  /* --- Entrance animation (muted, municipal-calm) --- */
 
   .message-enter.is-user {
     animation: user-enter 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -206,8 +192,6 @@
       transform: translateX(0);
     }
   }
-
-  /* --- Streaming cursor --- */
 
   .streaming-cursor {
     display: inline-block;

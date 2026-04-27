@@ -15,6 +15,9 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
 )
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_critic_invariants import CriticContext
@@ -71,6 +74,166 @@ def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None
     feedback = build_conversation_aware_quality_feedback(conversation, spec)
     assert feedback is not None
     assert "form_fields" in feedback
+
+
+def test_flags_unrelated_mcp_selection_when_requested_mcp_is_unavailable() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "svelte-server",
+                "name": "Svelte mcp",
+                "description": "Developer documentation helpers for Svelte apps.",
+                "tools": [
+                    {
+                        "id": "svelte-docs",
+                        "name": "get-documentation",
+                        "description": "Fetch Svelte documentation sections.",
+                    }
+                ],
+            }
+        ],
+    )
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Bygg ett flöde som använder Time MCP för att hämta aktuell tid "
+                "och konvertera den till Europe/Stockholm."
+            ),
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Konvertera tid via Time MCP",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Hämta aktuell tid via Time MCP",
+                assistant_spec=AssistantSpec(
+                    instructions="Hämta aktuell tid för angiven tidszon.",
+                    mcp_server_refs=["svelte-server"],
+                    mcp_tool_refs=["svelte-docs"],
+                ),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+            )
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(
+        conversation,
+        spec,
+        resource_catalog=catalog,
+    )
+
+    assert feedback is not None
+    assert "Planen hänvisar till MCP" in feedback
+    assert "fråga om förtydligande" in feedback
+
+
+def test_flags_named_mcp_step_without_attached_mcp_refs() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "svelte-server",
+                "name": "Svelte mcp",
+                "tools": [{"id": "svelte-docs", "name": "get-documentation"}],
+            }
+        ],
+    )
+    conversation = [
+        {
+            "role": "user",
+            "content": "Använd Time MCP för att hämta aktuell tid.",
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Tid via Time MCP",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Hämta aktuell tid via Time MCP",
+                assistant_spec=AssistantSpec(
+                    instructions="Hämta aktuell tid via Time MCP.",
+                ),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+            )
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(
+        conversation,
+        spec,
+        resource_catalog=catalog,
+    )
+
+    assert feedback is not None
+    assert "Planen hänvisar till MCP" in feedback
+
+
+def test_accepts_mcp_selection_when_resource_metadata_matches_step_intent() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "description": "Kan hämta tiden och konvertera tidszoner.",
+                "tools": [
+                    {
+                        "id": "current-time",
+                        "name": "get_current_time",
+                        "description": "Get current time in a specific timezone.",
+                    }
+                ],
+            }
+        ],
+    )
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Bygg ett flöde som använder Time MCP för att hämta aktuell tid "
+                "och konvertera den till Europe/Stockholm."
+            ),
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Konvertera tid via Time MCP",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Hämta aktuell tid via Time MCP",
+                assistant_spec=AssistantSpec(
+                    instructions="Hämta aktuell tid för angiven tidszon.",
+                    mcp_server_refs=["time-server"],
+                    mcp_tool_refs=["current-time"],
+                ),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+            )
+        ],
+    )
+
+    assert (
+        build_conversation_aware_quality_feedback(
+            conversation,
+            spec,
+            resource_catalog=catalog,
+        )
+        is None
+    )
 
 
 def test_flags_missing_form_fields_for_sectioned_rubric_intake_flows() -> None:
@@ -1245,6 +1408,7 @@ class TestCriticInvariantRegistry:
             "standalone_audio_requires_transcription_step",
             "field_reuse_requires_input_bindings",
             "multi_document_compare_requires_all_previous_steps",
+            "mcp_selection_requires_semantic_support",
             "json_input_rejects_all_previous_steps_source",
             "template_fill_docx_requires_template_fill_step",
             "generated_docx_rejects_template_fill",

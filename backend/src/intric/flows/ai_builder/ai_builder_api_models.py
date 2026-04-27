@@ -30,9 +30,18 @@ AI_BUILDER_SESSION_RESPONSE_EXAMPLE: JsonObject = {
         "total_tokens_total": 1440,
         "tool_call_count_total": 1,
         "auxiliary_llm_call_count": 0,
+        "architecture_commit_count": 1,
+        "repair_attempts_total": 0,
+        "parse_repair_attempts_total": 0,
+        "wall_clock_ms_total": 3200,
+        "llm_calls_made_total": 2,
+        "token_usage_estimated": False,
         "last_request_id": "req-123",
         "last_model": "openai/gpt-5.4",
         "last_finish_reason": "stop",
+        "last_outcome_kind": "dispatched",
+        "last_token_usage_source": "provider",
+        "last_token_usage_estimated": False,
     },
     "conversation": [
         {
@@ -96,6 +105,8 @@ AI_BUILDER_PLAN_RESPONSE_EXAMPLE: JsonObject = {
                         "instructions": "Transcribe the uploaded audio into Swedish text.",
                         "model_ref": "model:gpt-5.4",
                         "knowledge_refs": [],
+                        "mcp_server_refs": [],
+                        "mcp_tool_refs": [],
                     },
                     "input_source": "flow_input",
                     "input_type": "audio",
@@ -114,6 +125,8 @@ AI_BUILDER_PLAN_RESPONSE_EXAMPLE: JsonObject = {
                         "instructions": "Summarize the transcription into a professional PDF.",
                         "model_ref": "model:gpt-5.4",
                         "knowledge_refs": [],
+                        "mcp_server_refs": [],
+                        "mcp_tool_refs": [],
                     },
                     "input_source": "previous_step",
                     "input_type": "text",
@@ -264,9 +277,18 @@ class SessionTelemetrySummary(BaseModel):
     total_tokens_total: int = 0
     tool_call_count_total: int = 0
     auxiliary_llm_call_count: int = 0
+    architecture_commit_count: int = 0
+    repair_attempts_total: int = 0
+    parse_repair_attempts_total: int = 0
+    wall_clock_ms_total: int = 0
+    llm_calls_made_total: int = 0
+    token_usage_estimated: bool = False
     last_request_id: str | None = None
     last_model: str | None = None
     last_finish_reason: str | None = None
+    last_outcome_kind: str | None = None
+    last_token_usage_source: str | None = None
+    last_token_usage_estimated: bool = False
 
 
 class SessionListResponse(BaseModel):

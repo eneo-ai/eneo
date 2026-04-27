@@ -27,6 +27,8 @@ def build_new_step_draft_schema(
     kb_refs: list[str] | None,
     description: str,
     input_source_description: str,
+    mcp_server_refs: list[str] | None = None,
+    mcp_tool_refs: list[str] | None = None,
     expose_previous_field_refs: bool = True,
 ) -> dict[str, Any]:
     properties: dict[str, Any] = {
@@ -122,6 +124,34 @@ def build_new_step_draft_schema(
         knowledge_ref_property = cast(dict[str, Any], properties["knowledge_refs"])
         knowledge_ref_items = cast(dict[str, Any], knowledge_ref_property["items"])
         knowledge_ref_items["enum"] = kb_refs
+
+    properties["mcp_server_refs"] = {
+        "type": "array",
+        "items": {"type": "string"},
+        "uniqueItems": True,
+        "description": (
+            "Optional canonical MCP server refs for this step. Use only when the "
+            "step needs external tools or live data. Do not combine with knowledge_refs."
+        ),
+    }
+    if mcp_server_refs is not None:
+        mcp_server_ref_property = cast(dict[str, Any], properties["mcp_server_refs"])
+        mcp_server_ref_items = cast(dict[str, Any], mcp_server_ref_property["items"])
+        mcp_server_ref_items["enum"] = mcp_server_refs
+
+    properties["mcp_tool_refs"] = {
+        "type": "array",
+        "items": {"type": "string"},
+        "uniqueItems": True,
+        "description": (
+            "Optional canonical MCP tool refs for least-privilege tool access. "
+            "Prefer this over enabling a whole server when one specific tool is enough."
+        ),
+    }
+    if mcp_tool_refs is not None:
+        mcp_tool_ref_property = cast(dict[str, Any], properties["mcp_tool_refs"])
+        mcp_tool_ref_items = cast(dict[str, Any], mcp_tool_ref_property["items"])
+        mcp_tool_ref_items["enum"] = mcp_tool_refs
 
     if expose_previous_field_refs:
         properties["uses_previous_fields"] = {

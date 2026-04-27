@@ -50,16 +50,34 @@ def build_planner_telemetry(
     total_tokens: object,
     tool_call_count: int,
     used_auxiliary_llm: bool,
+    token_usage_source: object | None = None,
+    token_usage_estimated: bool = False,
+    outcome_kind: object | None = None,
+    wall_clock_ms: int = 0,
+    llm_calls_made: int = 1,
+    repair_attempts: int = 0,
+    parse_repair_attempts: int = 0,
+    architecture_commit_populated: bool = False,
 ) -> dict[str, Any]:
+    total = _safe_int(total_tokens)
     return {
         "request_id": request_id,
         "model": model,
         "finish_reason": _safe_str(finish_reason),
         "prompt_tokens": _safe_int(prompt_tokens),
         "completion_tokens": _safe_int(completion_tokens),
-        "total_tokens": _safe_int(total_tokens),
+        "total_tokens": total,
         "tool_call_count": tool_call_count,
         "used_auxiliary_llm": used_auxiliary_llm,
+        "token_usage_source": _safe_str(token_usage_source)
+        or ("provider" if total is not None else None),
+        "token_usage_estimated": token_usage_estimated,
+        "outcome_kind": _safe_str(outcome_kind),
+        "wall_clock_ms": wall_clock_ms,
+        "llm_calls_made": llm_calls_made,
+        "repair_attempts": repair_attempts,
+        "parse_repair_attempts": parse_repair_attempts,
+        "architecture_commit_populated": architecture_commit_populated,
     }
 
 
@@ -103,6 +121,8 @@ def build_planner_telemetry_from_turn(
         "prompt_tokens": telemetry.prompt_tokens,
         "completion_tokens": telemetry.completion_tokens,
         "total_tokens": telemetry.total_tokens,
+        "token_usage_source": telemetry.token_usage_source,
+        "token_usage_estimated": telemetry.token_usage_estimated,
         "tool_call_count": tool_call_count,
         "used_auxiliary_llm": used_auxiliary_llm,
         "outcome_kind": telemetry.outcome_kind,
@@ -204,10 +224,13 @@ def _empty_session_telemetry() -> dict[str, Any]:
         "parse_repair_attempts_total": 0,
         "wall_clock_ms_total": 0,
         "llm_calls_made_total": 0,
+        "token_usage_estimated": False,
         "last_request_id": None,
         "last_model": None,
         "last_finish_reason": None,
         "last_outcome_kind": None,
+        "last_token_usage_source": None,
+        "last_token_usage_estimated": False,
     }
 
 
@@ -250,10 +273,13 @@ def _sanitize_session_telemetry(value: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "wall_clock_ms_total": _non_negative_int(value.get("wall_clock_ms_total")),
         "llm_calls_made_total": _non_negative_int(value.get("llm_calls_made_total")),
+        "token_usage_estimated": value.get("token_usage_estimated") is True,
         "last_request_id": _safe_str(value.get("last_request_id")),
         "last_model": _safe_str(value.get("last_model")),
         "last_finish_reason": _safe_str(value.get("last_finish_reason")),
         "last_outcome_kind": _safe_str(value.get("last_outcome_kind")),
+        "last_token_usage_source": _safe_str(value.get("last_token_usage_source")),
+        "last_token_usage_estimated": value.get("last_token_usage_estimated") is True,
     }
 
 
@@ -290,10 +316,18 @@ def _apply_planner_telemetry(
     summary["llm_calls_made_total"] += _non_negative_int(
         planner_telemetry.get("llm_calls_made")
     )
+    if planner_telemetry.get("token_usage_estimated") is True:
+        summary["token_usage_estimated"] = True
     summary["last_request_id"] = _safe_str(planner_telemetry.get("request_id"))
     summary["last_model"] = _safe_str(planner_telemetry.get("model"))
     summary["last_finish_reason"] = _safe_str(planner_telemetry.get("finish_reason"))
     summary["last_outcome_kind"] = _safe_str(planner_telemetry.get("outcome_kind"))
+    summary["last_token_usage_source"] = _safe_str(
+        planner_telemetry.get("token_usage_source")
+    )
+    summary["last_token_usage_estimated"] = (
+        planner_telemetry.get("token_usage_estimated") is True
+    )
 
 
 def _planner_telemetry_from_metadata(

@@ -32,6 +32,8 @@ def rewrite_step_spec_variables(
             instructions=rewritten_instructions,
             model_ref=step_spec.assistant_spec.model_ref,
             knowledge_refs=list(step_spec.assistant_spec.knowledge_refs),
+            mcp_server_refs=list(step_spec.assistant_spec.mcp_server_refs),
+            mcp_tool_refs=list(step_spec.assistant_spec.mcp_tool_refs),
         )
 
     if step_spec.input_bindings:

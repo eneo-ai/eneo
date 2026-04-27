@@ -13,6 +13,7 @@ allow_indirect_imports = true
 source_modules =
     intric.flows.api
     intric.flows.application
+    intric.flows.assistant_execution_snapshot
     intric.flows.citation_sidecar
     intric.flows.domain
     intric.flows.enums
@@ -80,3 +81,17 @@ source_modules =
     intric.flows.flow_capability_manifest
 forbidden_modules =
     intric.flows.ai_builder
+
+[importlinter:contract:ai-builder-no-mcp-execution]
+# AI Builder may read MCP server/tool metadata while planning, but it must not
+# open MCP clients, proxy sessions, or admin/test connections. Runtime MCP tool
+# execution belongs to the published Flow assistant/runtime path.
+name = AI Builder must not import MCP execution surfaces
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    intric.flows.ai_builder
+forbidden_modules =
+    intric.mcp_servers.infrastructure.proxy
+    intric.mcp_servers.infrastructure.client
+    intric.mcp_servers.application.mcp_server_service

@@ -2,18 +2,11 @@ import type { FlowStep, UploadedFile } from "@intric/intric-js";
 import type { FlowEditor } from "$lib/features/flows/FlowEditor";
 import type { Intric } from "@intric/intric-js";
 import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
+import type { Attachment } from "$lib/features/attachments/AttachmentManager";
 import { SvelteSet } from "svelte/reactivity";
-import type { Writable } from "svelte/store";
+import type { Readable, Writable } from "svelte/store";
 
 export type LoadedAssistant = NonNullable<Awaited<ReturnType<FlowEditor["loadAssistant"]>>>;
-type PendingUpload = {
-  id: string;
-  file: File;
-  status: string;
-  progress: number;
-  remove: () => void;
-  fileRef?: { id: string };
-};
 
 /**
  * Manages the assistant lifecycle for the active flow step:
@@ -23,7 +16,7 @@ export class FlowStepAssistantState {
   #flowEditor: FlowEditor;
   #intric: Intric;
   #attachmentRules: Writable<Record<string, unknown>>;
-  #newAttachments: Writable<PendingUpload[]>;
+  #newAttachments: Readable<Attachment[]>;
   #clearUploads: () => void;
   #getActiveStep: () => FlowStep | null;
 
@@ -44,7 +37,7 @@ export class FlowStepAssistantState {
     flowEditor: FlowEditor;
     intric: Intric;
     attachmentRules: Writable<Record<string, unknown>>;
-    newAttachments: Writable<PendingUpload[]>;
+    newAttachments: Readable<Attachment[]>;
     clearUploads: () => void;
     getActiveStep: () => FlowStep | null;
   }) {
@@ -57,7 +50,7 @@ export class FlowStepAssistantState {
   }
 
   #getNewAttachments() {
-    let value: PendingUpload[] = [];
+    let value: Attachment[] = [];
     this.#newAttachments.subscribe((v) => (value = v))();
     return value;
   }

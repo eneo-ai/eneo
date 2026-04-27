@@ -102,6 +102,7 @@ def _make_container(
         planner_context=SimpleNamespace(
             available_models=[],
             available_kbs=[],
+            available_mcps=[],
             max_input_tokens=4096,
             max_output_tokens=2048,
             budget_policy=SimpleNamespace(),
@@ -1165,6 +1166,156 @@ class TestSendMessageEndpoint:
         assert service.send_message.call_args.kwargs["file_ids"] == [file_id]
 
     @pytest.mark.anyio
+    async def test_streams_usage_event_after_committed_message_event(self):
+        container = _make_container()
+        _configure_space_with_planner_model(container)
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        session.conversation = [
+            ConversationMessage(
+                role="assistant",
+                content="Plan ready",
+                metadata={
+                    "session_telemetry": {
+                        "planner_request_count": 1,
+                        "clarification_question_count": 0,
+                        "prompt_tokens_total": 10,
+                        "completion_tokens_total": 7,
+                        "total_tokens_total": 17,
+                        "tool_call_count_total": 1,
+                        "auxiliary_llm_call_count": 0,
+                        "architecture_commit_count": 0,
+                        "repair_attempts_total": 0,
+                        "parse_repair_attempts_total": 0,
+                        "wall_clock_ms_total": 0,
+                        "llm_calls_made_total": 1,
+                        "token_usage_estimated": False,
+                        "last_request_id": "req-usage",
+                        "last_model": "openai/gpt-5.4-nano",
+                        "last_finish_reason": "tool_calls",
+                        "last_outcome_kind": "dispatched",
+                        "last_token_usage_source": "provider",
+                        "last_token_usage_estimated": False,
+                    }
+                },
+            )
+        ]
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        async def mock_events(*args, **kwargs):
+            yield {"event": "plan", "data": '{"plan_id":"plan-1"}'}
+            yield {"event": "done", "data": ""}
+
+        service.send_message.return_value = mock_events()
+
+        result = await send_message(
+            request=MagicMock(),
+            session_id=session.id,
+            body=SendMessageRequest(message="Build a flow"),
+            container=container,
+        )
+
+        events = await _read_sse_events(result)
+        assert [event["event"] for event in events] == ["plan", "usage", "done"]
+        usage = events[1]["data"]
+        assert usage["total_tokens_total"] == 17
+        assert usage["last_model"] == "openai/gpt-5.4-nano"
+        assert usage["last_token_usage_source"] == "provider"
+
+    @pytest.mark.anyio
+    async def test_streams_late_usage_before_done_when_summary_is_ready_after_stream(
+        self,
+    ):
+        container = _make_container()
+        _configure_space_with_planner_model(container)
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        telemetry_session = _make_session_domain(
+            session_id=session.id,
+            space_id=session.space_id,
+            target_kind=session.target_kind,
+            actor_user_id=session.actor_user_id,
+        )
+        telemetry_session.conversation = [
+            ConversationMessage(
+                role="assistant",
+                content="Plan ready",
+                metadata={
+                    "session_telemetry": {
+                        "planner_request_count": 1,
+                        "clarification_question_count": 0,
+                        "prompt_tokens_total": 20,
+                        "completion_tokens_total": 5,
+                        "total_tokens_total": 25,
+                        "tool_call_count_total": 1,
+                        "auxiliary_llm_call_count": 0,
+                        "architecture_commit_count": 0,
+                        "repair_attempts_total": 0,
+                        "parse_repair_attempts_total": 0,
+                        "wall_clock_ms_total": 0,
+                        "llm_calls_made_total": 1,
+                        "token_usage_estimated": False,
+                        "last_request_id": "req-retry-usage",
+                        "last_model": "openai/gpt-5.4-nano",
+                        "last_finish_reason": "tool_calls",
+                        "last_outcome_kind": "dispatched",
+                        "last_token_usage_source": "provider",
+                        "last_token_usage_estimated": False,
+                    }
+                },
+            )
+        ]
+        service = container.ai_builder_service.return_value
+        service.get_session.side_effect = [session, telemetry_session]
+
+        async def mock_events(*args, **kwargs):
+            yield {"event": "plan", "data": '{"plan_id":"plan-1"}'}
+            yield {"event": "done", "data": ""}
+
+        service.send_message.return_value = mock_events()
+
+        result = await send_message(
+            request=MagicMock(),
+            session_id=session.id,
+            body=SendMessageRequest(message="Build a flow"),
+            container=container,
+        )
+
+        events = await _read_sse_events(result)
+        assert [event["event"] for event in events] == ["plan", "usage", "done"]
+        usage = events[1]["data"]
+        assert usage["total_tokens_total"] == 25
+        assert usage["last_request_id"] == "req-retry-usage"
+
+    @pytest.mark.anyio
+    async def test_forwards_existing_usage_event_without_duplicate(self):
+        container = _make_container()
+        _configure_space_with_planner_model(container)
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        async def mock_events(*args, **kwargs):
+            yield {"event": "plan", "data": '{"plan_id":"plan-1"}'}
+            yield {
+                "event": "usage",
+                "data": json.dumps({"total_tokens_total": 11}),
+            }
+            yield {"event": "done", "data": ""}
+
+        service.send_message.return_value = mock_events()
+
+        result = await send_message(
+            request=MagicMock(),
+            session_id=session.id,
+            body=SendMessageRequest(message="Build a flow"),
+            container=container,
+        )
+
+        events = await _read_sse_events(result)
+        assert [event["event"] for event in events] == ["plan", "usage", "done"]
+        assert events[1]["data"] == {"total_tokens_total": 11}
+
+    @pytest.mark.anyio
     async def test_checks_flow_edit_permission(self):
         container = _make_container(can_edit_flows=False)
         session = _make_session_domain()
@@ -1240,6 +1391,7 @@ class TestSendMessageEndpoint:
                         "description": "Documentation",
                     }
                 ],
+                available_mcps=[],
                 max_input_tokens=4096,
                 max_output_tokens=2048,
                 budget_policy=SimpleNamespace(),
@@ -1296,6 +1448,7 @@ class TestSendMessageEndpoint:
                     {"id": str(model.id), "name": "GPT-4", "provider": "azure"}
                 ],
                 available_kbs=[],
+                available_mcps=[],
                 max_input_tokens=4096,
                 max_output_tokens=4096,
                 budget_policy=SimpleNamespace(),

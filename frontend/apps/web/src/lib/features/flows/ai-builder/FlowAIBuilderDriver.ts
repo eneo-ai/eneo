@@ -15,6 +15,7 @@ import type {
   AIBuilderStatusEventData,
   AIBuilderStreamEvent,
   AIBuilderTextEventData,
+  AIBuilderUsageEventData,
   ApplyError,
   ApplyResult,
   ChatMessage,
@@ -89,32 +90,6 @@ function extractQuestionAnswer(
     return null;
   }
   return questionAnswer as StructuredQuestionAnswerMetadata;
-}
-
-function renderQuestionAnswer(
-  question: StructuredQuestion,
-  answer: StructuredQuestionAnswerMetadata
-): string | null {
-  if (typeof answer.custom_value === "string" && answer.custom_value.trim()) {
-    return answer.custom_value.trim();
-  }
-
-  const selectedOptionIds = new Set(answer.selected_option_ids ?? []);
-  const selectedValues = answer.selected_values ?? [];
-  const labels = question.options
-    .filter((option) => {
-      if (option.id && selectedOptionIds.has(option.id)) {
-        return true;
-      }
-      if (option.value === undefined) {
-        return false;
-      }
-      return selectedValues.some((value) => value === option.value);
-    })
-    .map((option) => option.label.trim())
-    .filter(Boolean);
-
-  return labels.length > 0 ? labels.join(", ") : null;
 }
 
 export class FlowAIBuilderDriver {
@@ -366,6 +341,7 @@ export class FlowAIBuilderDriver {
     this.#notify();
 
     let assistantText = "";
+    let receivedUsageEvent = false;
 
     try {
       const requestBody: {
@@ -429,6 +405,11 @@ export class FlowAIBuilderDriver {
                 this.#updateOrAddAssistantMessage(assistantText, undefined, undefined, data);
                 break;
               }
+              case "usage": {
+                receivedUsageEvent = true;
+                this.#updateSessionTelemetry(JSON.parse(ev.data) as AIBuilderUsageEventData);
+                break;
+              }
               case "status": {
                 const data = JSON.parse(ev.data) as AIBuilderStatusEventData;
                 this.#state.statusMessage = data.status;
@@ -465,7 +446,10 @@ export class FlowAIBuilderDriver {
         abortController
       );
 
-      if (fileIds && fileIds.length > 0 && !abortController.signal.aborted) {
+      const shouldRefreshAfterStream =
+        (fileIds && fileIds.length > 0) ||
+        (!receivedUsageEvent && this.#state.currentPlan !== null);
+      if (shouldRefreshAfterStream && !abortController.signal.aborted) {
         await this.refreshSession();
       }
     } catch (e) {
@@ -714,25 +698,6 @@ export class FlowAIBuilderDriver {
     return false;
   }
 
-  getQuestionAnswerText(question: StructuredQuestion): string | null {
-    for (let index = this.#state.messages.length - 1; index >= 0; index -= 1) {
-      const message = this.#state.messages[index];
-      const questionAnswer = extractQuestionAnswer(message?.metadata);
-      if (questionAnswer?.question_id !== question.question_id) {
-        continue;
-      }
-
-      const answerText = renderQuestionAnswer(question, questionAnswer);
-      if (answerText) {
-        return answerText;
-      }
-
-      const fallbackText = message?.role === "user" ? message.content.trim() : "";
-      return fallbackText || null;
-    }
-    return null;
-  }
-
   async continueEditing(): Promise<void> {
     const editableFlowId =
       this.#state.applyResult?.flow_id ?? this.#state.session?.flow_id ?? this.#flowId;
@@ -818,6 +783,16 @@ export class FlowAIBuilderDriver {
 
   #resetFlowState(): void {
     this.#state = createInitialFlowAIBuilderState();
+  }
+
+  #updateSessionTelemetry(telemetry: AIBuilderUsageEventData): void {
+    if (!this.#state.session) return;
+
+    this.#state.session = {
+      ...this.#state.session,
+      telemetry
+    };
+    this.#notify();
   }
 
   #hydrateMessagesFromConversation(conversation: AIBuilderConversationMessage[]): void {
@@ -916,7 +891,8 @@ export class FlowAIBuilderDriver {
         }
       ),
       selection_mode: question.selection_mode,
-      allow_custom: question.allow_custom
+      allow_custom: question.allow_custom,
+      requires_confirm: question.requires_confirm === true
     };
   }
 

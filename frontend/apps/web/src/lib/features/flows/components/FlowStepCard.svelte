@@ -238,13 +238,13 @@
           <span class="text-accent-stronger text-[10px] font-medium tabular-nums">
             {m.flow_step_card_chain_short()}: {nextChannelLabel}
           </span>
-          {#if mcpSummary?.hasConfiguredMcp}
+          {#if mcpSummary?.hasActiveMcp}
             <Badge
               variant="secondary"
               class="bg-warning-dimmer text-warning-stronger h-5 px-1.5 text-[10px] font-semibold tabular-nums"
-              >{mcpSummary.enabledToolCount > 0
-                ? m.flow_step_mcp_tools_badge({ count: String(mcpSummary.enabledToolCount) })
-                : m.flow_step_mcp_servers_badge({ count: String(mcpSummary.serverCount) })}</Badge
+              >{m.flow_step_mcp_tools_badge({
+                count: String(mcpSummary.enabledToolCount)
+              })}</Badge
             >
           {/if}
         </div>

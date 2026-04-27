@@ -1,0 +1,21 @@
+{
+  "planner_request_count": 2,
+  "clarification_question_count": 1,
+  "prompt_tokens_total": 1200,
+  "completion_tokens_total": 240,
+  "total_tokens_total": 1440,
+  "tool_call_count_total": 1,
+  "auxiliary_llm_call_count": 0,
+  "architecture_commit_count": 1,
+  "repair_attempts_total": 1,
+  "parse_repair_attempts_total": 0,
+  "wall_clock_ms_total": 3200,
+  "llm_calls_made_total": 2,
+  "token_usage_estimated": false,
+  "last_request_id": "req-telemetry-contract",
+  "last_model": "openai/gpt-5.4-nano",
+  "last_finish_reason": "tool_calls",
+  "last_outcome_kind": "dispatched",
+  "last_token_usage_source": "provider",
+  "last_token_usage_estimated": false
+}

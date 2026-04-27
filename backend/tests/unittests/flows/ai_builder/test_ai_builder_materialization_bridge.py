@@ -734,6 +734,8 @@ def _archetype_case(
     envelope_form_fields: list[dict[str, Any]] | None = None,
     expected_assistants_to_create: int,
     expected_output_modes: list[str],
+    expected_mcp_server_refs_by_step: list[list[str]] | None = None,
+    expected_mcp_tool_refs_by_step: list[list[str]] | None = None,
 ) -> dict[str, Any]:
     """Bundle the per-pattern fixture so the parametrize table is readable.
 
@@ -748,6 +750,8 @@ def _archetype_case(
         "envelope_form_fields": envelope_form_fields or [],
         "expected_assistants_to_create": expected_assistants_to_create,
         "expected_output_modes": expected_output_modes,
+        "expected_mcp_server_refs_by_step": expected_mcp_server_refs_by_step,
+        "expected_mcp_tool_refs_by_step": expected_mcp_tool_refs_by_step,
     }
 
 
@@ -1149,6 +1153,32 @@ _ARCHETYPE_CASES: tuple[dict[str, Any], ...] = (
         expected_assistants_to_create=1,
         expected_output_modes=["pass_through"],
     ),
+    # mcp_tool_step — runtime MCP access is step-scoped. The bridge
+    # carries refs through the normal new-step compiler; actual MCP
+    # execution remains runtime-only.
+    _archetype_case(
+        pattern_id="mcp_tool_step",
+        tuples_chain=[
+            StepTriple(
+                input_type="text", output_type="text", output_mode="pass_through"
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Hämta ärendedata",
+                "instructions": "Använd ärendesystemets MCP-verktyg för att hämta live-data.",
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_type": "text",
+                "mcp_server_refs": ["11111111-1111-4111-8111-111111111111"],
+                "mcp_tool_refs": ["22222222-2222-4222-8222-222222222222"],
+            },
+        ],
+        expected_assistants_to_create=1,
+        expected_output_modes=["pass_through"],
+        expected_mcp_server_refs_by_step=[["11111111-1111-4111-8111-111111111111"]],
+        expected_mcp_tool_refs_by_step=[["22222222-2222-4222-8222-222222222222"]],
+    ),
 )
 
 
@@ -1222,6 +1252,23 @@ class TestArchetypeCoverage:
                 f"{result.spec.steps[step_index].output_mode.value!r} did not "
                 f"match expected {expected_mode!r}"
             )
+        if case["expected_mcp_server_refs_by_step"] is not None:
+            assert [
+                step.assistant_spec.mcp_server_refs for step in result.spec.steps
+            ] == case["expected_mcp_server_refs_by_step"]
+        if case["expected_mcp_tool_refs_by_step"] is not None:
+            assert [
+                step.assistant_spec.mcp_tool_refs for step in result.spec.steps
+            ] == case["expected_mcp_tool_refs_by_step"]
+            assert [
+                assistant.assistant_spec.mcp_tool_refs
+                for assistant in result.changeset.assistants_to_create
+            ] == case["expected_mcp_tool_refs_by_step"]
+        if case["expected_mcp_server_refs_by_step"] is not None:
+            assert [
+                assistant.assistant_spec.mcp_server_refs
+                for assistant in result.changeset.assistants_to_create
+            ] == case["expected_mcp_server_refs_by_step"]
         assert (
             len(result.changeset.assistants_to_create)
             == case["expected_assistants_to_create"]

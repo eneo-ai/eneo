@@ -24,11 +24,15 @@ sudo apt-get install -y libmagic1 ffmpeg
 # Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
+export UV_LINK_MODE=copy
 
 # The backend .venv is on a named Docker volume (see docker-compose.yml).
 # Docker creates named volume mount points as root:root, but post-create.sh
-# runs as vscode — without this chown, `uv sync` fails to write CACHEDIR.TAG.
-sudo chown vscode:vscode /workspace/backend/.venv
+# runs as vscode. The recursive repair handles volumes reused after root-owned
+# package installs from older containers or sibling services.
+sudo mkdir -p /workspace/backend/.venv
+sudo chown -R vscode:vscode /workspace/backend/.venv
+sudo chmod -R u+rwX /workspace/backend/.venv
 
 # Install Python dependencies
 # Use --reinstall-package to ensure the project entry points are up-to-date

@@ -18,10 +18,25 @@ from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
 _EXTRA_RETRY_FAILURE_KINDS = frozenset({"recoverable_parse"})
+EventBatch = tuple[dict[str, str], ...]
 
 
 def _invalid_tool_arguments_message(error: Exception) -> str:
     return f"Invalid tool call arguments: {error}"
+
+
+def _tool_result_has_events(tool_result: Any) -> bool:
+    event = getattr(tool_result, "event", None)
+    events = getattr(tool_result, "events", None)
+    return event is not None or bool(events)
+
+
+def _tool_result_events(tool_result: Any) -> EventBatch:
+    event = getattr(tool_result, "event", None)
+    events = tuple(getattr(tool_result, "events", tuple()) or tuple())
+    if event is None:
+        return events
+    return (event, *events)
 
 
 def _build_process_tool_kwargs(
@@ -42,6 +57,26 @@ def _build_process_tool_kwargs(
     if "flow" in signature.parameters:
         kwargs["flow"] = flow
     return kwargs
+
+
+def _add_assistant_metadata_if_supported(
+    *,
+    process_tool_arguments: Callable[..., Awaitable[Any]],
+    invocation_kwargs: dict[str, Any],
+    build_assistant_metadata: Callable[[], dict[str, Any] | None] | None,
+) -> None:
+    if build_assistant_metadata is None:
+        return
+    try:
+        signature = inspect.signature(process_tool_arguments)
+    except (TypeError, ValueError):
+        return
+    accepts_kwargs = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+    if "assistant_metadata" in signature.parameters or accepts_kwargs:
+        invocation_kwargs["assistant_metadata"] = build_assistant_metadata()
 
 
 def build_tool_retry_messages(
@@ -167,9 +202,10 @@ async def request_self_correction(
     target_tool_name: str,
     forced_tool_prompt: str,
     build_self_correction_error_event: Callable[..., dict[str, str]],
-    retry_forced_tool_after_text: Callable[..., Awaitable[dict[str, str] | None]],
+    retry_forced_tool_after_text: Callable[..., Awaitable[EventBatch | None]],
     process_tool_kwargs: dict[str, Any] | None = None,
     flow: Any = None,
+    build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
 ) -> AsyncGenerator[dict[str, str], None]:
     yield build_status_event("repairing")
     correction_messages = build_tool_retry_messages(
@@ -245,6 +281,11 @@ async def request_self_correction(
                     process_tool_kwargs=process_tool_kwargs,
                     flow=flow,
                 )
+                _add_assistant_metadata_if_supported(
+                    process_tool_arguments=process_tool_arguments,
+                    invocation_kwargs=invocation_kwargs,
+                    build_assistant_metadata=build_assistant_metadata,
+                )
                 tool_result = await process_tool_arguments(
                     session_id=session_id,
                     conversation=conversation,
@@ -257,7 +298,7 @@ async def request_self_correction(
                     available_kb_refs=available_kb_refs,
                     **invocation_kwargs,
                 )
-                if tool_result.event is None:
+                if not _tool_result_has_events(tool_result):
                     if _retry_budget_available(
                         attempts_remaining=attempts_remaining,
                         failure_kind=tool_result.failure_kind,
@@ -281,7 +322,8 @@ async def request_self_correction(
                     )
                     return
 
-                yield tool_result.event
+                for event in _tool_result_events(tool_result):
+                    yield event
                 return
 
             if retry_feedback is not None:
@@ -304,7 +346,7 @@ async def request_self_correction(
             if looks_like_information_request(assistant_text):
                 yield build_text_event(assistant_text)
                 return
-            forced_event = await retry_forced_tool_after_text(
+            forced_events = await retry_forced_tool_after_text(
                 correction_messages=correction_messages,
                 assistant_text=assistant_text,
                 tool_schemas=tool_schemas,
@@ -321,9 +363,11 @@ async def request_self_correction(
                 process_tool_arguments=process_tool_arguments,
                 process_tool_kwargs=process_tool_kwargs,
                 flow=flow,
+                build_assistant_metadata=build_assistant_metadata,
             )
-            if forced_event is not None:
-                yield forced_event
+            if forced_events is not None:
+                for event in forced_events:
+                    yield event
                 return
 
             logger.warning(
@@ -364,11 +408,12 @@ async def retry_forced_tool_after_text(
     process_tool_arguments: Callable[..., Awaitable[Any]],
     process_tool_kwargs: dict[str, Any] | None = None,
     flow: Any = None,
-) -> dict[str, str] | None:
+    build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
+) -> EventBatch | None:
     if looks_like_information_request(assistant_text):
         return None
 
-    direct_event = await _try_process_json_text_as_tool_arguments(
+    direct_events = await _try_process_json_text_as_tool_arguments(
         assistant_text=assistant_text,
         session_id=session_id,
         conversation=conversation,
@@ -379,9 +424,10 @@ async def retry_forced_tool_after_text(
         process_tool_arguments=process_tool_arguments,
         process_tool_kwargs=process_tool_kwargs,
         flow=flow,
+        build_assistant_metadata=build_assistant_metadata,
     )
-    if direct_event is not None:
-        return direct_event
+    if direct_events is not None:
+        return direct_events
 
     forced_messages = list(correction_messages) + [
         {"role": "assistant", "content": assistant_text},
@@ -427,6 +473,11 @@ async def retry_forced_tool_after_text(
             process_tool_kwargs=process_tool_kwargs,
             flow=flow,
         )
+        _add_assistant_metadata_if_supported(
+            process_tool_arguments=process_tool_arguments,
+            invocation_kwargs=invocation_kwargs,
+            build_assistant_metadata=build_assistant_metadata,
+        )
         tool_result = await process_tool_arguments(
             session_id=session_id,
             conversation=conversation,
@@ -438,7 +489,7 @@ async def retry_forced_tool_after_text(
             available_kb_refs=available_kb_refs,
             **invocation_kwargs,
         )
-        if tool_result.event is None:
+        if not _tool_result_has_events(tool_result):
             logger.warning(
                 "Forced tool retry returned %s issue: %s",
                 tool_result.failure_kind or "unknown",
@@ -446,7 +497,7 @@ async def retry_forced_tool_after_text(
             )
             return None
 
-        return tool_result.event
+        return _tool_result_events(tool_result)
 
     return None
 
@@ -463,7 +514,8 @@ async def _try_process_json_text_as_tool_arguments(
     process_tool_arguments: Callable[..., Awaitable[Any]],
     process_tool_kwargs: dict[str, Any] | None,
     flow: Any,
-) -> dict[str, str] | None:
+    build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
+) -> EventBatch | None:
     arguments = _parse_json_object_text(assistant_text)
     if arguments is None:
         return None
@@ -472,6 +524,11 @@ async def _try_process_json_text_as_tool_arguments(
         process_tool_arguments=process_tool_arguments,
         process_tool_kwargs=process_tool_kwargs,
         flow=flow,
+    )
+    _add_assistant_metadata_if_supported(
+        process_tool_arguments=process_tool_arguments,
+        invocation_kwargs=invocation_kwargs,
+        build_assistant_metadata=build_assistant_metadata,
     )
     tool_result = await process_tool_arguments(
         session_id=session_id,
@@ -484,12 +541,12 @@ async def _try_process_json_text_as_tool_arguments(
         available_kb_refs=available_kb_refs,
         **invocation_kwargs,
     )
-    if tool_result.event is not None:
+    if _tool_result_has_events(tool_result):
         logger.info(
             "Accepted %s arguments returned as JSON text during forced retry.",
             target_tool_name,
         )
-        return tool_result.event
+        return _tool_result_events(tool_result)
 
     logger.warning(
         "JSON text fallback for %s returned %s issue: %s",

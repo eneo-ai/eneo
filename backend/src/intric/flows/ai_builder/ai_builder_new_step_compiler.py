@@ -41,6 +41,8 @@ def compile_new_step_draft(
             instructions=assistant_instructions,
             model_ref=step_draft.model_ref,
             knowledge_refs=list(step_draft.knowledge_refs),
+            mcp_server_refs=list(step_draft.mcp_server_refs),
+            mcp_tool_refs=list(step_draft.mcp_tool_refs),
         ),
         mcp_policy=MCPPolicy.INHERIT,
         input_source=step_draft.input_source,

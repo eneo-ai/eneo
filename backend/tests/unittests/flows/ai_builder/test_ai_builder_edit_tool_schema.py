@@ -104,6 +104,55 @@ class TestBuildEditFlowToolSchema:
         assert "output_fields" in add_payload["properties"]
         assert "uses_previous_fields" not in add_payload["properties"]
 
+    def test_mcp_refs_are_exposed_without_schema_enums_on_add_and_patch_payloads(
+        self,
+    ):
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            available_mcps=[
+                {
+                    "ref": "server-1",
+                    "tools": [{"ref": "tool-1", "name": "lookup_case"}],
+                }
+            ],
+        )
+
+        add_payload = schema["function"]["parameters"]["properties"]["operations"][
+            "items"
+        ]["properties"]["add_payload"]
+        patch = schema["function"]["parameters"]["properties"]["operations"]["items"][
+            "properties"
+        ]["patch"]
+
+        assert "enum" not in add_payload["properties"]["mcp_server_refs"]["items"]
+        assert "enum" not in add_payload["properties"]["mcp_tool_refs"]["items"]
+        assistant_spec = patch["properties"]["assistant_spec"]
+        assert "enum" not in assistant_spec["properties"]["mcp_server_refs"]["items"]
+        assert "enum" not in assistant_spec["properties"]["mcp_tool_refs"]["items"]
+
+    def test_mcp_refs_stay_free_form_with_empty_or_malformed_resources(self):
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            available_mcps=[
+                {"ref": "", "tools": [{"ref": "ignored-tool"}]},
+                {
+                    "ref": "server-1",
+                    "tools": [
+                        {"ref": ""},
+                        {"ref": " "},
+                        {"ref": "tool-1", "name": "lookup_case"},
+                    ],
+                },
+            ],
+        )
+
+        add_payload = schema["function"]["parameters"]["properties"]["operations"][
+            "items"
+        ]["properties"]["add_payload"]
+
+        assert "enum" not in add_payload["properties"]["mcp_server_refs"]["items"]
+        assert "enum" not in add_payload["properties"]["mcp_tool_refs"]["items"]
+
     def test_patch_schema_hides_backend_owned_previous_field_paths(self):
         schema = build_edit_flow_tool_schema([_make_step(1), _make_step(2)])
         patch = schema["function"]["parameters"]["properties"]["operations"]["items"][

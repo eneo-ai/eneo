@@ -1759,6 +1759,37 @@ def test_parse_runtime_steps_includes_typed_fields():
     assert steps[0].input_contract == {"type": "string"}
 
 
+def test_parse_runtime_steps_includes_publish_assistant_snapshot():
+    steps = FlowRunExecutor._parse_runtime_steps(
+        {
+            "steps": [
+                {
+                    "step_id": str(uuid4()),
+                    "step_order": 1,
+                    "assistant_id": str(uuid4()),
+                    "input_source": "flow_input",
+                    "output_mode": "pass_through",
+                    "assistant_snapshot": {
+                        "schema_version": 1,
+                        "instructions": "Pinned at publish time.",
+                        "mcp_tools": [],
+                        "tool_surface_hash": "abc",
+                        "execution_surface_hash": "def",
+                    },
+                }
+            ]
+        }
+    )
+    assert steps[0].step_order == 1
+    assert steps[0].assistant_snapshot == {
+        "schema_version": 1,
+        "instructions": "Pinned at publish time.",
+        "mcp_tools": [],
+        "tool_surface_hash": "abc",
+        "execution_surface_hash": "def",
+    }
+
+
 def test_parse_runtime_steps_defaults_typed_fields():
     """When typed fields are missing from snapshot, default to text/None."""
     steps = FlowRunExecutor._parse_runtime_steps(

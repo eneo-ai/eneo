@@ -16,6 +16,9 @@ from intric.flows.ai_builder.ai_builder_models import (
     StepSpec,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 
 
@@ -115,3 +118,66 @@ def test_prepare_compiled_spec_for_session_returns_resource_failure_feedback() -
     assert result.spec is None
     assert result.validation is None
     assert result.failure_feedback == "resource issue"
+
+
+def test_prepare_compiled_spec_for_session_expands_mcp_server_refs_to_tools() -> None:
+    spec = _make_spec()
+    spec = spec.model_copy(
+        update={
+            "steps": [
+                spec.steps[0].model_copy(
+                    update={
+                        "assistant_spec": spec.steps[0].assistant_spec.model_copy(
+                            update={"mcp_server_refs": ["Time MCP"]}
+                        )
+                    }
+                )
+            ]
+        }
+    )
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "server-time",
+                "name": "Time MCP",
+                "tools": [
+                    {"id": "tool-current-time", "name": "get_current_time"},
+                    {"id": "tool-convert-time", "name": "convert_time"},
+                ],
+            }
+        ],
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_compiled_spec_for_session",
+            side_effect=lambda spec, target_kind: spec,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
+            side_effect=lambda spec: (spec, []),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            return_value=SpecValidationResult(),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_compiled_spec_for_session",
+            return_value=MagicMock(errors=[]),
+        ),
+    ):
+        result = prepare_compiled_spec_for_session(
+            spec=spec,
+            target_kind=TargetKind.CREATE,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=catalog,
+            valid_existing_step_refs=None,
+        )
+
+    assert result.spec is not None
+    assistant_spec = result.spec.steps[0].assistant_spec
+    assert assistant_spec.mcp_server_refs == ["server-time"]
+    assert assistant_spec.mcp_tool_refs == ["tool-current-time", "tool-convert-time"]

@@ -130,6 +130,21 @@ class TestFlowDraftSpecCore:
         assert spec_obj.model_ref == "gpt-4o-mini"
         assert spec_obj.knowledge_refs == ["kb_policy", "kb_guidelines"]
 
+    def test_assistant_spec_normalizes_mcp_refs(self) -> None:
+        spec_obj = AssistantSpec(
+            instructions="Test",
+            mcp_tool_refs=[" tool_a ", "tool_a", ""],
+        )
+        assert spec_obj.mcp_tool_refs == ["tool_a"]
+
+    def test_assistant_spec_rejects_knowledge_and_mcp_mix(self) -> None:
+        with pytest.raises(ValueError, match="knowledge_refs and MCP refs"):
+            AssistantSpec(
+                instructions="Test",
+                knowledge_refs=["kb_policy"],
+                mcp_tool_refs=["tool_a"],
+            )
+
     def test_step_spec_strips_input_binding_question(self) -> None:
         step = _make_step(input_bindings={"question": "  {{ step_a.output.text }}  "})
         assert step.input_bindings == {"question": "{{ step_a.output.text }}"}
