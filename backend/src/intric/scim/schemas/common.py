@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -49,4 +50,4 @@ class ListResponse(BaseModel):
     totalResults: int
     startIndex: int = 1
     itemsPerPage: int
-    Resources: list[dict] = []
+    Resources: list[dict[str, Any]] = []

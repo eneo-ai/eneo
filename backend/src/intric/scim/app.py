@@ -13,7 +13,7 @@ logger = get_logger(__name__)
 def _scim_error_json(
     status_code: int, detail: str, scim_type: str | None = None
 ) -> JSONResponse:
-    content: dict = {
+    content: dict[str, object] = {
         "schemas": [_SCIM_ERROR_SCHEMA],
         "status": str(status_code),
         "detail": detail,

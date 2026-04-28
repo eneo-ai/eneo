@@ -8,7 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from intric.database.tables.user_groups_table import UserGroups
-from intric.database.tables.users_table import Users, usergroups_users_table as usergroups_users
+from intric.database.tables.users_table import Users
+from intric.database.tables.users_table import (
+    usergroups_users_table as usergroups_users,
+)
 from intric.scim.schemas.common import ScimFilter, ScimSort
 from intric.user_groups.user_group import UserGroupState
 
@@ -22,7 +25,7 @@ _GROUP_ATTR_MAP = {
 _NOT_DELETED = GroupModel.state.is_(None) | (GroupModel.state != UserGroupState.DELETED)
 
 
-def _apply_filter(query: Select, scim_filter: ScimFilter | None) -> Select:
+def _apply_filter(query: Select[tuple[UserGroups]], scim_filter: ScimFilter | None) -> Select[tuple[UserGroups]]:
     if scim_filter is None:
         return query
     col = _GROUP_ATTR_MAP.get(scim_filter.attribute.lower())
@@ -97,7 +100,7 @@ class ScimGroupRepository:
         )
         return set(result.scalars().all())
 
-    def _base_list_query(self, tenant_id: UUID, scim_filter: ScimFilter | None) -> Select:
+    def _base_list_query(self, tenant_id: UUID, scim_filter: ScimFilter | None) -> Select[tuple[UserGroups]]:
         query = (
             select(GroupModel)
             .options(selectinload(GroupModel.users))

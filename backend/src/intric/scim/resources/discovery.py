@@ -7,7 +7,7 @@ router = APIRouter(dependencies=[Depends(require_scim_auth)], tags=["SCIM Discov
 
 
 @router.get("/ServiceProviderConfig")
-async def service_provider_config() -> dict:
+async def service_provider_config() -> dict[str, object]:
     return {
         "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
         "patch": {"supported": True},

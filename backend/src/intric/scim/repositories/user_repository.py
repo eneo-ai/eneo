@@ -17,7 +17,7 @@ _ATTR_MAP = {
 }
 
 
-def _apply_filter(query: Select, scim_filter: ScimFilter | None) -> Select:
+def _apply_filter(query: Select[tuple[Users]], scim_filter: ScimFilter | None) -> Select[tuple[Users]]:
     if scim_filter is None:
         return query
     col = _ATTR_MAP.get(scim_filter.attribute.lower().replace(".", ""))
@@ -120,7 +120,7 @@ class ScimUserRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    def _base_list_query(self, tenant_id: UUID, scim_filter: ScimFilter | None) -> Select:
+    def _base_list_query(self, tenant_id: UUID, scim_filter: ScimFilter | None) -> Select[tuple[Users]]:
         query = select(UserModel).where(
             UserModel.state == "active",
             UserModel.tenant_id == tenant_id,

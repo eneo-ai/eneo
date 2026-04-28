@@ -18,11 +18,11 @@ from intric.scim.services.user_service import ScimUserService
 router = APIRouter(dependencies=[Depends(require_scim_auth)], tags=["SCIM Users"])
 
 
-@router.post("/Users", status_code=status.HTTP_201_CREATED)
+@router.post("/Users", status_code=status.HTTP_201_CREATED, response_model=ScimUser)
 async def create_user(
     payload: ScimUserRequest,
     service: Annotated[ScimUserService, Depends(get_scim_user_service)],
-) -> ScimUser:
+) -> Response:
     try:
         user = await service.create_user(payload)
         location = f"/scim/v2/Users/{user.id}"

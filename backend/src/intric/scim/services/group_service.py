@@ -1,4 +1,5 @@
 import re
+from typing import Any, cast
 from uuid import UUID
 
 from intric.audit.application.audit_service import AuditService
@@ -40,7 +41,7 @@ def _to_scim_group(model: GroupModel) -> ScimGroup:
     )
 
 
-def _group_target(model: GroupModel) -> dict:
+def _group_target(model: GroupModel) -> dict[str, Any]:
     return {
         "id": str(model.id),
         "display_name": model.name,
@@ -83,7 +84,7 @@ class ScimGroupService:
         self._tenant_id = tenant_id
         self._audit = audit_service
 
-    async def _log(self, action: ActionType, entity_id: UUID, description: str, target: dict) -> None:
+    async def _log(self, action: ActionType, entity_id: UUID, description: str, target: dict[str, Any]) -> None:
         if self._audit is None:
             return
         await self._audit.log(
@@ -121,17 +122,19 @@ class ScimGroupService:
                 },
             )
             raise
-        model = GroupModel(
-            external_id=data.externalId,
-            name=data.displayName,
-            tenant_id=self._tenant_id,
+        model = GroupModel(  # pyright: ignore[reportCallIssue]
+            external_id=data.externalId,  # pyright: ignore[reportCallIssue]
+            name=data.displayName,  # pyright: ignore[reportCallIssue]
+            tenant_id=self._tenant_id,  # pyright: ignore[reportCallIssue]
         )
         member_ids = [UUID(m.value) for m in data.members]
         await _validate_member_ids(self._repository, self._tenant_id, member_ids)
         model = await self._repository.create(model)
         if data.members:
             await self._repository.set_members(model.id, member_ids)
-        model = await self._repository.get_by_id(model.id, tenant_id=self._tenant_id)
+        refreshed = await self._repository.get_by_id(model.id, tenant_id=self._tenant_id)
+        assert refreshed is not None
+        model = refreshed
         logger.info(
             "scim.group.created",
             extra={
@@ -196,7 +199,9 @@ class ScimGroupService:
         await _validate_member_ids(self._repository, self._tenant_id, member_ids)
         await self._repository.set_members(group_id, member_ids)
         await self._repository.update(model)
-        model = await self._repository.get_by_id(group_id, tenant_id=self._tenant_id)
+        refreshed = await self._repository.get_by_id(group_id, tenant_id=self._tenant_id)
+        assert refreshed is not None
+        model = refreshed
         logger.info(
             "scim.group.replaced",
             extra={
@@ -228,7 +233,9 @@ class ScimGroupService:
                 op,
             )
         await self._repository.update(model)
-        model = await self._repository.get_by_id(group_id, tenant_id=self._tenant_id)
+        refreshed = await self._repository.get_by_id(group_id, tenant_id=self._tenant_id)
+        assert refreshed is not None
+        model = refreshed
         logger.info(
             "scim.group.patched",
             extra={
@@ -276,28 +283,54 @@ async def _apply_patch_operation(
     op: PatchOperation,
 ) -> None:
     op_lower = op.op.lower()
+
+    if op.path is None and op_lower in {"replace", "add"} and isinstance(op.value, dict):
+        for key, val in cast(dict[str, Any], op.value).items():  # pyright: ignore[reportUnknownMemberType]
+            await _apply_group_attr(repo, tenant_id, group_id, model, key.lower(), val, op_lower)
+        return
+
     path = (op.path or "").lower()
 
     if path == "displayname" and op_lower in {"replace", "add"}:
-        display_name = str(op.value)
-        existing = await repo.get_by_name(display_name, tenant_id=tenant_id)
-        if _is_different_group(existing, group_id):
-            raise ScimGroupConflictError(f"Group '{display_name}' already exists")
-        model.name = display_name
+        await _apply_group_attr(repo, tenant_id, group_id, model, "displayname", op.value, op_lower)  # pyright: ignore[reportUnknownMemberType]
         return
 
-    if path == "members" and op_lower == "add":
-        values = op.value if isinstance(op.value, list) else [op.value]
-        member_ids = [
-            UUID(entry["value"] if isinstance(entry, dict) else entry.value)
-            for entry in values
-        ]
-        await _validate_member_ids(repo, tenant_id, member_ids)
-        for user_id in member_ids:
-            await repo.add_member(group_id, user_id)
+    if path == "members" and op_lower in {"replace", "add"}:
+        await _apply_group_attr(repo, tenant_id, group_id, model, "members", op.value, op_lower)
         return
 
     if op_lower == "remove" and op.path:
         match = _MEMBER_VALUE_RE.match(op.path)
         if match:
             await repo.remove_member(group_id, UUID(match.group(1)))
+
+
+async def _apply_group_attr(
+    repo: ScimGroupRepository,
+    tenant_id: UUID,
+    group_id: UUID,
+    model: GroupModel,
+    attr: str,
+    value: Any,
+    op_lower: str,
+) -> None:
+    if attr == "displayname":
+        display_name = str(value)
+        existing = await repo.get_by_name(display_name, tenant_id=tenant_id)
+        if _is_different_group(existing, group_id):
+            raise ScimGroupConflictError(f"Group '{display_name}' already exists")
+        model.name = display_name
+    elif attr == "externalid":
+        model.external_id = str(value) if value is not None else None
+    elif attr == "members":
+        values: list[Any] = value if isinstance(value, list) else [value]  # pyright: ignore[reportUnknownVariableType]
+        member_ids = [
+            UUID(str(entry["value"] if isinstance(entry, dict) else entry.value))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+            for entry in values
+        ]
+        await _validate_member_ids(repo, tenant_id, member_ids)
+        if op_lower == "replace":
+            await repo.set_members(group_id, member_ids)
+        else:
+            for user_id in member_ids:
+                await repo.add_member(group_id, user_id)

@@ -18,7 +18,12 @@ from intric.scim.domain.errors import (
     ScimUserNotFoundError,
     ScimValidationError,
 )
-from intric.scim.schemas.bulk import BulkOperation, BulkOperationResponse, BulkRequest, BulkResponse
+from intric.scim.schemas.bulk import (
+    BulkOperation,
+    BulkOperationResponse,
+    BulkRequest,
+    BulkResponse,
+)
 from intric.scim.schemas.group import ScimGroupRequest
 from intric.scim.schemas.user import PatchRequest, ScimUserRequest
 from intric.scim.services.group_service import ScimGroupService
@@ -35,7 +40,7 @@ def _resolve_path(path: str, bulk_id_map: dict[str, str]) -> str:
 
 
 def _scim_error_response(method: str, bulk_id: str | None, status: int, detail: str, scim_type: str | None = None) -> BulkOperationResponse:
-    body: dict = {
+    body: dict[str, object] = {
         "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
         "status": str(status),
         "detail": detail,

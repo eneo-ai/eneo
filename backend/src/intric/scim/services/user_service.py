@@ -1,3 +1,4 @@
+from typing import Any, cast
 from uuid import UUID
 
 from intric.audit.application.audit_service import AuditService
@@ -42,7 +43,7 @@ def _to_scim_user(model: UserModel) -> ScimUser:
     return ScimUser(
         id=str(model.id),
         externalId=model.external_id,
-        userName=model.username,
+        userName=model.username or model.email,
         emails=[ScimEmail(value=model.email, primary=True)] if model.email else [],
         active=model.state == ScimUserState.ACTIVE,
         meta=ScimMeta(
@@ -53,7 +54,7 @@ def _to_scim_user(model: UserModel) -> ScimUser:
     )
 
 
-def _user_target(model: UserModel) -> dict:
+def _user_target(model: UserModel) -> dict[str, Any]:
     return {
         "id": str(model.id),
         "username": model.username,
@@ -77,7 +78,7 @@ class ScimUserService:
         self._tenant_id = tenant_id
         self._audit = audit_service
 
-    async def _log(self, action: ActionType, entity_id: UUID, description: str, target: dict) -> None:
+    async def _log(self, action: ActionType, entity_id: UUID, description: str, target: dict[str, Any]) -> None:
         if self._audit is None:
             return
         await self._audit.log(
@@ -206,12 +207,12 @@ class ScimUserService:
             email=email,
             external_id=data.externalId,
         )
-        model = UserModel(
-            external_id=data.externalId,
-            username=data.userName,
-            email=email,
-            state=ScimUserState.ACTIVE,
-            tenant_id=self._tenant_id,
+        model = UserModel(  # pyright: ignore[reportCallIssue]
+            external_id=data.externalId,  # pyright: ignore[reportCallIssue]
+            username=data.userName,  # pyright: ignore[reportCallIssue]
+            email=email,  # pyright: ignore[reportCallIssue]
+            state=ScimUserState.ACTIVE,  # pyright: ignore[reportCallIssue]
+            tenant_id=self._tenant_id,  # pyright: ignore[reportCallIssue]
         )
         model = await self._repository.create(model)
         logger.info(
@@ -308,7 +309,7 @@ class ScimUserService:
             _apply_patch_operation(model, op)
         await self._validate_unique_fields(
             user_id=model.id,
-            username=model.username,
+            username=model.username or model.email,
             email=model.email,
             external_id=model.external_id,
         )
@@ -353,22 +354,30 @@ class ScimUserService:
         )
 
 
+def _apply_user_attr(model: UserModel, attr: str, value: Any) -> None:
+    if attr == "active":
+        model.state = ScimUserState.ACTIVE if bool(value) else ScimUserState.INACTIVE
+    elif attr == "username":
+        model.username = str(value) if value is not None else model.username
+    elif attr == "externalid":
+        model.external_id = str(value) if value is not None else None
+    elif attr == "emails":
+        entries: list[Any] = value if isinstance(value, list) else [value]  # pyright: ignore[reportUnknownVariableType]
+        primary: str | None = next(
+            (str(e["value"]) for e in entries if isinstance(e, dict) and e.get("primary")),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+            None,
+        ) or (
+            str(entries[0]["value"]) if entries and isinstance(entries[0], dict) else None  # pyright: ignore[reportUnknownArgumentType]
+        )
+        if primary:
+            model.email = primary
+
+
 def _apply_patch_operation(model: UserModel, op: PatchOperation) -> None:
     if op.op.lower() not in {"replace", "add"}:
         return
-    path = (op.path or "").lower()
-    if path == "active":
-        model.state = ScimUserState.ACTIVE if bool(op.value) else ScimUserState.INACTIVE
-    elif path in ("username", "username"):
-        model.username = str(op.value)
-    elif path == "externalid":
-        model.external_id = str(op.value) if op.value is not None else None
-    elif path == "emails":
-        # value is a list of email objects: [{"value": "a@b.com", "primary": true}, ...]
-        entries = op.value if isinstance(op.value, list) else [op.value]
-        primary = next(
-            (e["value"] for e in entries if isinstance(e, dict) and e.get("primary")),
-            None,
-        ) or (entries[0]["value"] if entries and isinstance(entries[0], dict) else None)
-        if primary:
-            model.email = primary
+    if op.path is None and isinstance(op.value, dict):
+        for key, val in cast(dict[str, Any], op.value).items():  # pyright: ignore[reportUnknownMemberType]
+            _apply_user_attr(model, key.lower(), val)
+        return
+    _apply_user_attr(model, (op.path or "").lower(), op.value)  # pyright: ignore[reportUnknownMemberType]

@@ -19,11 +19,11 @@ from intric.scim.services.group_service import ScimGroupService
 router = APIRouter(dependencies=[Depends(require_scim_auth)], tags=["SCIM Groups"])
 
 
-@router.post("/Groups", status_code=status.HTTP_201_CREATED)
+@router.post("/Groups", status_code=status.HTTP_201_CREATED, response_model=ScimGroup)
 async def create_group(
     payload: ScimGroupRequest,
     service: Annotated[ScimGroupService, Depends(get_scim_group_service)],
-) -> ScimGroup:
+) -> Response:
     try:
         group = await service.create_group(payload)
         location = f"/scim/v2/Groups/{group.id}"
