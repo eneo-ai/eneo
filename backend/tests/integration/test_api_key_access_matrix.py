@@ -1651,15 +1651,24 @@ async def test_tenant_key_revoked_after_admin_role_removed(
     )
 
     # ---- 3. Revoke admin role (downgrade to "User") ----
-    # Look up the "User" predefined role and the current user's username
+    # Look up the tenant-scoped "User" default role and the current user's username
     async with db_container() as container:
-        predefined_roles_repo = container.predefined_roles_repo()
-        user_role = await predefined_roles_repo.get_predefined_role_by_name("User")
+        role_repo = container.role_repo()
+        tenant_roles = await role_repo.get_by_tenant(default_user.tenant_id)
+        user_role = next(
+            (
+                role
+                for role in tenant_roles
+                if role.predefined_source == "User" or role.name == "User"
+            ),
+            None,
+        )
+        assert user_role is not None, "Expected tenant-scoped User role to exist"
 
     # Use the admin API to downgrade the user's role
     resp = await api_client.post(
         f"/api/v1/admin/users/{default_user.username}/",
-        json={"predefined_roles": [{"id": str(user_role.id)}]},
+        json={"roles": [{"id": str(user_role.id)}]},
         headers={"Authorization": f"Bearer {bearer_token}"},
     )
     assert resp.status_code == 200, f"Role downgrade failed: {resp.text}"
