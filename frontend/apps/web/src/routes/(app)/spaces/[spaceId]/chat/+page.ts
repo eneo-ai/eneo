@@ -32,6 +32,9 @@ export const load: PageLoad = async (event) => {
         });
       // instead of case "default-assistant"
       default:
+        if (!currentSpace.default_assistant) {
+          throw new Error("No default assistant available for this space");
+        }
         return currentSpace.default_assistant;
     }
   };
