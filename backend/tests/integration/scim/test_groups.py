@@ -164,6 +164,45 @@ async def test_get_by_name_returns_group(db_session, scim_group):
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_get_user_ids_in_tenant_excludes_other_tenants(db_session, test_tenant):
+    """get_user_ids_in_tenant() only returns IDs owned by the requested tenant."""
+    async with db_session() as session:
+        container = Container(session=providers.Object(session))
+        tenant_service = container.tenant_service()
+        other_tenant = await tenant_service.create_tenant(
+            TenantBase(name="tenant_member_scope_scim", slug="tenant-member-scope-scim")
+        )
+        same_tenant_user = Users(
+            email="same-tenant-member@example.com",
+            username="same.tenant.member",
+            state="active",
+            tenant_id=test_tenant.id,
+        )
+        other_tenant_user = Users(
+            email="other-tenant-member@example.com",
+            username="other.tenant.member",
+            state="active",
+            tenant_id=other_tenant.id,
+        )
+        session.add(same_tenant_user)
+        session.add(other_tenant_user)
+        await session.flush()
+        same_tenant_user_id = same_tenant_user.id
+        other_tenant_user_id = other_tenant_user.id
+
+    async with db_session() as session:
+        repo = ScimGroupRepository(session)
+        result = await repo.get_user_ids_in_tenant(
+            [same_tenant_user_id, other_tenant_user_id],
+            tenant_id=test_tenant.id,
+        )
+
+    assert same_tenant_user_id in result
+    assert other_tenant_user_id not in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_add_member_links_user_to_group(db_session, scim_user, scim_group):
     """add_member() inserts a row in the usergroups_users junction table."""
     async with db_session() as session:
@@ -355,6 +394,44 @@ async def test_create_group_http(client, bypass_scim_auth):
     }
     response = await client.post("/scim/v2/Groups", json=payload)
     assert response.status_code == 201
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_create_group_http_rejects_other_tenant_member(
+    client,
+    db_session,
+    test_tenant,
+    bypass_scim_auth,
+):
+    """POST /scim/v2/Groups rejects member IDs outside the authenticated tenant."""
+    async with db_session() as session:
+        container = Container(session=providers.Object(session))
+        tenant_service = container.tenant_service()
+        other_tenant = await tenant_service.create_tenant(
+            TenantBase(name="tenant_http_member_scope_scim", slug="tenant-http-member-scope-scim")
+        )
+        other_tenant_user = Users(
+            email="http-other-tenant-member@example.com",
+            username="http.other.tenant.member",
+            state="active",
+            tenant_id=other_tenant.id,
+        )
+        session.add(other_tenant_user)
+        await session.flush()
+        other_tenant_user_id = other_tenant_user.id
+
+    payload = {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+        "displayName": "Cross Tenant Member Group",
+        "members": [{"value": str(other_tenant_user_id)}],
+    }
+    response = await client.post("/scim/v2/Groups", json=payload)
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["scimType"] == "invalidValue"
+    assert "Group members must belong to the authenticated tenant" in body["detail"]
 
 
 @pytest.mark.asyncio

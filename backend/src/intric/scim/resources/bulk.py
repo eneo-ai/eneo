@@ -16,6 +16,7 @@ from intric.scim.domain.errors import (
     ScimHttpError,
     ScimUserConflictError,
     ScimUserNotFoundError,
+    ScimValidationError,
 )
 from intric.scim.schemas.bulk import BulkOperation, BulkOperationResponse, BulkRequest, BulkResponse
 from intric.scim.schemas.group import ScimGroupRequest
@@ -92,6 +93,8 @@ async def _execute_operation(
                 return await _handle_group_op(method, resource_id, op, bulk_id_map, group_service)
     except ScimHttpError as e:
         return _scim_error_response(method, op.bulkId, e.status_code, e.detail, e.scim_type)
+    except ScimValidationError as e:
+        return _scim_error_response(method, op.bulkId, 400, str(e), "invalidValue")
     except Exception as e:
         return _scim_error_response(method, op.bulkId, 500, str(e))
 

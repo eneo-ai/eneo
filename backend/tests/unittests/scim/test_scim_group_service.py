@@ -3,7 +3,11 @@ from datetime import datetime, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock
 from uuid import uuid4
 
-from intric.scim.domain.errors import ScimGroupConflictError, ScimGroupNotFoundError
+from intric.scim.domain.errors import (
+    ScimGroupConflictError,
+    ScimGroupNotFoundError,
+    ScimValidationError,
+)
 from intric.scim.schemas.group import ScimGroupMember, ScimGroupRequest
 from intric.scim.schemas.user import PatchOperation
 from intric.scim.services.group_service import ScimGroupService
@@ -61,6 +65,7 @@ class TestCreateGroup:
         repo.get_by_name.return_value = None
         repo.create.return_value = db_group
         repo.get_by_id.return_value = db_group
+        repo.get_user_ids_in_tenant.return_value = {user_id}
 
         service = _make_service(repo)
         request = ScimGroupRequest(
@@ -71,6 +76,24 @@ class TestCreateGroup:
 
         assert len(result.members) == 1
         assert result.members[0].value == str(user_id)
+
+    async def test_rejects_members_outside_tenant(self):
+        repo = AsyncMock()
+        user_id = uuid4()
+        repo.get_by_name.return_value = None
+        repo.get_user_ids_in_tenant.return_value = set()
+
+        service = _make_service(repo)
+        request = ScimGroupRequest(
+            displayName="Engineering",
+            members=[ScimGroupMember(value=str(user_id))],
+        )
+
+        with pytest.raises(ScimValidationError):
+            await service.create_group(request)
+
+        repo.create.assert_not_called()
+        repo.set_members.assert_not_called()
 
 
 class TestGetGroup:
@@ -158,6 +181,7 @@ class TestReplaceGroup:
         repo.get_by_id.return_value = db_group
         repo.set_members.return_value = None
         repo.update.return_value = db_group
+        repo.get_user_ids_in_tenant.return_value = set()
 
         service = _make_service(repo)
         result = await service.replace_group(db_group.id, CREATE_REQUEST)
@@ -173,6 +197,25 @@ class TestReplaceGroup:
         with pytest.raises(ScimGroupNotFoundError):
             await service.replace_group(uuid4(), CREATE_REQUEST)
 
+    async def test_rejects_members_outside_tenant(self):
+        repo = AsyncMock()
+        db_group = _make_db_group()
+        user_id = uuid4()
+        repo.get_by_id.return_value = db_group
+        repo.get_user_ids_in_tenant.return_value = set()
+
+        service = _make_service(repo)
+        request = ScimGroupRequest(
+            displayName="Engineering",
+            members=[ScimGroupMember(value=str(user_id))],
+        )
+
+        with pytest.raises(ScimValidationError):
+            await service.replace_group(db_group.id, request)
+
+        repo.set_members.assert_not_called()
+        repo.update.assert_not_called()
+
 
 class TestPatchGroup:
     async def test_add_member(self):
@@ -181,6 +224,7 @@ class TestPatchGroup:
         user_id = uuid4()
         repo.get_by_id.return_value = db_group
         repo.update.return_value = db_group
+        repo.get_user_ids_in_tenant.return_value = {user_id}
 
         service = _make_service(repo)
         await service.patch_group(
@@ -189,6 +233,24 @@ class TestPatchGroup:
         )
 
         repo.add_member.assert_called_once_with(db_group.id, user_id)
+
+    async def test_rejects_add_member_outside_tenant(self):
+        repo = AsyncMock()
+        db_group = _make_db_group()
+        user_id = uuid4()
+        repo.get_by_id.return_value = db_group
+        repo.get_user_ids_in_tenant.return_value = set()
+
+        service = _make_service(repo)
+
+        with pytest.raises(ScimValidationError):
+            await service.patch_group(
+                db_group.id,
+                [PatchOperation(op="Add", path="members", value=[{"value": str(user_id)}])],
+            )
+
+        repo.add_member.assert_not_called()
+        repo.update.assert_not_called()
 
     async def test_remove_member(self):
         repo = AsyncMock()

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from intric.database.tables.user_groups_table import UserGroups
-from intric.database.tables.users_table import usergroups_users_table as usergroups_users
+from intric.database.tables.users_table import Users, usergroups_users_table as usergroups_users
 from intric.scim.schemas.common import ScimFilter, ScimSort
 from intric.user_groups.user_group import UserGroupState
 
@@ -82,6 +82,20 @@ class ScimGroupRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def get_user_ids_in_tenant(
+        self, user_ids: list[UUID], tenant_id: UUID
+    ) -> set[UUID]:
+        if not user_ids:
+            return set()
+
+        result = await self._session.execute(
+            select(Users.id).where(
+                Users.id.in_(user_ids),
+                Users.tenant_id == tenant_id,
+            )
+        )
+        return set(result.scalars().all())
 
     def _base_list_query(self, tenant_id: UUID, scim_filter: ScimFilter | None) -> Select:
         query = (

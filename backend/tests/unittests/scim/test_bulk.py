@@ -146,6 +146,33 @@ class TestBulkCreate:
         assert ops[0]["status"] == "409"
         assert ops[0]["response"]["scimType"] == "uniqueness"
 
+    async def test_validation_error_returns_400_in_operations(self, client: AsyncClient):
+        from intric.scim.domain.errors import ScimValidationError
+
+        mock_svc = AsyncMock()
+        mock_svc.create_group.side_effect = ScimValidationError(
+            "Group members must belong to the authenticated tenant"
+        )
+        scim_app.dependency_overrides[get_scim_group_service] = lambda: mock_svc
+        try:
+            res = await client.post(
+                "/scim/v2/Bulk",
+                json={
+                    "Operations": [{
+                        "method": "POST",
+                        "path": "/Groups",
+                        "data": {"displayName": "Engineering", "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"]},
+                    }]
+                },
+                headers=AUTH,
+            )
+        finally:
+            scim_app.dependency_overrides.pop(get_scim_group_service, None)
+
+        ops = res.json()["Operations"]
+        assert ops[0]["status"] == "400"
+        assert ops[0]["response"]["scimType"] == "invalidValue"
+
 
 class TestBulkFailOnErrors:
     async def test_stops_after_fail_on_errors(self, client: AsyncClient):

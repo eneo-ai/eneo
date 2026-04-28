@@ -7,7 +7,11 @@ from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
 from intric.database.tables.user_groups_table import UserGroups as GroupModel
 from intric.main.logging import get_logger
-from intric.scim.domain.errors import ScimGroupConflictError, ScimGroupNotFoundError
+from intric.scim.domain.errors import (
+    ScimGroupConflictError,
+    ScimGroupNotFoundError,
+    ScimValidationError,
+)
 from intric.scim.repositories.group_repository import ScimGroupRepository
 from intric.scim.schemas.common import ScimFilter, ScimSort
 from intric.scim.schemas.group import ScimGroup, ScimGroupMember, ScimGroupRequest
@@ -42,6 +46,26 @@ def _group_target(model: GroupModel) -> dict:
         "display_name": model.name,
         "external_id": model.external_id,
     }
+
+
+async def _validate_member_ids(
+    repo: ScimGroupRepository,
+    tenant_id: UUID,
+    member_ids: list[UUID],
+) -> None:
+    if not member_ids:
+        return
+
+    valid_member_ids = await repo.get_user_ids_in_tenant(member_ids, tenant_id)
+    invalid_member_ids = sorted(
+        set(member_ids) - valid_member_ids,
+        key=str,
+    )
+    if invalid_member_ids:
+        raise ScimValidationError(
+            "Group members must belong to the authenticated tenant: "
+            + ", ".join(str(member_id) for member_id in invalid_member_ids)
+        )
 
 
 class ScimGroupService:
@@ -86,9 +110,10 @@ class ScimGroupService:
             name=data.displayName,
             tenant_id=self._tenant_id,
         )
+        member_ids = [UUID(m.value) for m in data.members]
+        await _validate_member_ids(self._repository, self._tenant_id, member_ids)
         model = await self._repository.create(model)
         if data.members:
-            member_ids = [UUID(m.value) for m in data.members]
             await self._repository.set_members(model.id, member_ids)
         model = await self._repository.get_by_id(model.id, tenant_id=self._tenant_id)
         logger.info(
@@ -151,6 +176,7 @@ class ScimGroupService:
         model.external_id = data.externalId
         model.name = data.displayName
         member_ids = [UUID(m.value) for m in data.members]
+        await _validate_member_ids(self._repository, self._tenant_id, member_ids)
         await self._repository.set_members(group_id, member_ids)
         await self._repository.update(model)
         model = await self._repository.get_by_id(group_id, tenant_id=self._tenant_id)
@@ -177,7 +203,13 @@ class ScimGroupService:
         if model is None:
             raise ScimGroupNotFoundError(f"Group '{group_id}' not found")
         for op in operations:
-            await _apply_patch_operation(self._repository, group_id, model, op)
+            await _apply_patch_operation(
+                self._repository,
+                self._tenant_id,
+                group_id,
+                model,
+                op,
+            )
         await self._repository.update(model)
         model = await self._repository.get_by_id(group_id, tenant_id=self._tenant_id)
         logger.info(
@@ -221,6 +253,7 @@ class ScimGroupService:
 
 async def _apply_patch_operation(
     repo: ScimGroupRepository,
+    tenant_id: UUID,
     group_id: UUID,
     model: GroupModel,
     op: PatchOperation,
@@ -234,8 +267,12 @@ async def _apply_patch_operation(
 
     if path == "members" and op_lower == "add":
         values = op.value if isinstance(op.value, list) else [op.value]
-        for entry in values:
-            user_id = UUID(entry["value"] if isinstance(entry, dict) else entry.value)
+        member_ids = [
+            UUID(entry["value"] if isinstance(entry, dict) else entry.value)
+            for entry in values
+        ]
+        await _validate_member_ids(repo, tenant_id, member_ids)
+        for user_id in member_ids:
             await repo.add_member(group_id, user_id)
         return
 
