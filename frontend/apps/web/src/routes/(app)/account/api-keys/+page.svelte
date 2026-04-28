@@ -12,6 +12,8 @@
   import { Key, AlertCircle, RefreshCw, Search, X, ShieldAlert } from "lucide-svelte";
   import ExpiringKeysBanner from "$lib/features/api-keys/ExpiringKeysBanner.svelte";
   import NotificationPreferences from "$lib/features/api-keys/NotificationPreferences.svelte";
+  import ApiKeyStateFilter from "$lib/features/api-keys/ApiKeyStateFilter.svelte";
+  import type { ApiKeyStateFilterValue } from "$lib/features/api-keys/apiKeyTableUtils";
   import type { ExpiringKeyDisplayItem } from "$lib/features/api-keys/expirationUtils";
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -31,6 +33,7 @@
   let loading = $state(true);
   let errorMessage = $state<string | null>(null);
   let searchQuery = $state("");
+  let stateFilter = $state<ApiKeyStateFilterValue>("active");
   let secretDialogOpen = $state(false);
   let latestSecret = $state<string | null>(null);
   let secretSource = $state<"created" | "rotated">("created");
@@ -63,7 +66,10 @@
     loading = true;
     errorMessage = null;
     try {
-      const response = await intric.apiKeys.list({ limit: 100 });
+      const response = await intric.apiKeys.list({
+        limit: 100,
+        state: stateFilter || null
+      });
       keys = response.items ?? [];
       nextCursor = response.next_cursor ?? null;
     } catch (error: unknown) {
@@ -78,7 +84,11 @@
     if (!nextCursor || loadingMore) return;
     loadingMore = true;
     try {
-      const response = await intric.apiKeys.list({ limit: 100, cursor: nextCursor });
+      const response = await intric.apiKeys.list({
+        limit: 100,
+        cursor: nextCursor,
+        state: stateFilter || null
+      });
       keys = [...keys, ...(response.items ?? [])];
       nextCursor = response.next_cursor ?? null;
     } catch (error: unknown) {
@@ -309,6 +319,11 @@
                 <CreateApiKeyDialog onCreated={handleCreated} />
               </div>
             </div>
+            <ApiKeyStateFilter
+              bind:value={stateFilter}
+              onChange={() => void loadKeys()}
+              class="mt-3"
+            />
           </div>
 
           <div class="p-4">
