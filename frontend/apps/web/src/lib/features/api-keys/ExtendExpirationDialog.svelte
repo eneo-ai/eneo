@@ -42,7 +42,7 @@
 
   async function loadConstraints() {
     try {
-      const constraints = await intric.apiKeys.getCreationConstraints();
+      const constraints = await intric.apiKeys.getPolicyConstraints();
       maxDays = constraints.max_expiration_days ?? null;
       requireExpiration = constraints.require_expiration ?? false;
     } catch (error) {

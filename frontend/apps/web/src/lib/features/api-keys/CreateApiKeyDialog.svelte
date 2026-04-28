@@ -431,7 +431,7 @@
 
   async function loadCreationConstraints() {
     try {
-      const constraints = await intric.apiKeys.getCreationConstraints();
+      const constraints = await intric.apiKeys.getPolicyConstraints();
       requireExpiration = constraints.require_expiration ?? false;
       maxExpirationDays = constraints.max_expiration_days ?? null;
       maxRateLimit = constraints.max_rate_limit ?? null;

@@ -44,7 +44,7 @@
 
   async function loadConstraints() {
     try {
-      const constraints = await intric.apiKeys.getCreationConstraints();
+      const constraints = await intric.apiKeys.getPolicyConstraints();
       rotationGraceHours = constraints.rotation_grace_hours ?? 24;
       maxDays = constraints.max_expiration_days ?? null;
       requireExpiration = constraints.require_expiration ?? false;

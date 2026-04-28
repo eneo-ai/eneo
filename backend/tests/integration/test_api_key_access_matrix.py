@@ -1210,7 +1210,7 @@ def _build_probes(resource_ids: dict) -> list[dict]:
         {
             "name": "api-key-constraints",
             "method": "GET",
-            "path": "/api/v1/api-keys/creation-constraints",
+            "path": "/api/v1/api-keys/policy-constraints",
             "resource_type": None,
             "scope_resource": "admin",
             "is_admin_scope": True,

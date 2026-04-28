@@ -442,7 +442,7 @@ async def test_creation_constraints_reflect_tenant_policy(
     assert update_response.status_code == 200, update_response.text
 
     admin_constraints = await client.get(
-        "/api/v1/api-keys/creation-constraints",
+        "/api/v1/api-keys/policy-constraints",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert admin_constraints.status_code == 200, admin_constraints.text
@@ -452,7 +452,7 @@ async def test_creation_constraints_reflect_tenant_policy(
     assert admin_payload["max_rate_limit"] == 123
 
     user_constraints = await client.get(
-        "/api/v1/api-keys/creation-constraints",
+        "/api/v1/api-keys/policy-constraints",
         headers={"Authorization": f"Bearer {regular_user_token}"},
     )
     assert user_constraints.status_code == 200, user_constraints.text

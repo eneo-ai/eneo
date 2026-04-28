@@ -198,12 +198,13 @@ export function initApiKeys(client) {
     },
 
     /**
-     * Get creation constraints (policy limits) for the current user.
+     * Get tenant API key policy constraints (expiration limits, rate limit ceiling,
+     * rotation grace). Applies to creation, rotation, and expiration changes.
      * @returns {Promise<ApiKeyCreationConstraints>}
      * @throws {IntricError}
      * */
-    getCreationConstraints: async () => {
-      const res = await client.fetch("/api/v1/api-keys/creation-constraints", {
+    getPolicyConstraints: async () => {
+      const res = await client.fetch("/api/v1/api-keys/policy-constraints", {
         method: "get"
       });
       return res;

@@ -430,17 +430,20 @@ async def _collect_manageable_keys_for_page(
 
 
 @router.get(
-    "/api-keys/creation-constraints",
+    "/api-keys/policy-constraints",
     response_model=ApiKeyCreationConstraints,
     tags=["API Keys"],
-    summary="Get API key creation constraints",
-    description="Returns tenant policy limits relevant to key creation UX (expiration, rate limit).",
+    summary="Get API key policy constraints",
+    description=(
+        "Returns tenant policy limits relevant to key UX — applies to creation, "
+        "rotation, and expiration changes (expiration, rate limit, rotation grace)."
+    ),
     responses={
-        200: {"description": "Creation constraints from tenant policy."},
+        200: {"description": "Policy constraints for the current tenant."},
         **error_responses([401, 429]),
     },
 )
-async def get_creation_constraints(
+async def get_policy_constraints(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ApiKeyCreationConstraints:
     user: UserInDB = container.user()

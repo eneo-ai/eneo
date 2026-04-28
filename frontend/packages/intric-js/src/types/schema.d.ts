@@ -110,7 +110,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/api-keys/creation-constraints": {
+  "/api/v1/api-keys/policy-constraints": {
     parameters: {
       query?: never;
       header?: never;
@@ -118,10 +118,10 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get API key creation constraints
-     * @description Returns tenant policy limits relevant to key creation UX (expiration, rate limit).
+     * Get API key policy constraints
+     * @description Returns tenant policy limits relevant to key UX — applies to creation, rotation, and expiration changes (expiration, rate limit, rotation grace).
      */
-    get: operations["get_creation_constraints_api_v1_api_keys_creation_constraints_get"];
+    get: operations["get_policy_constraints_api_v1_api_keys_policy_constraints_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -17251,7 +17251,7 @@ export interface operations {
       };
     };
   };
-  get_creation_constraints_api_v1_api_keys_creation_constraints_get: {
+  get_policy_constraints_api_v1_api_keys_policy_constraints_get: {
     parameters: {
       query?: never;
       header?: never;
@@ -17260,7 +17260,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Creation constraints from tenant policy. */
+      /** @description Policy constraints for the current tenant. */
       200: {
         headers: {
           [name: string]: unknown;
