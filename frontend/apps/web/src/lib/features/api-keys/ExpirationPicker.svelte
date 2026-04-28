@@ -190,12 +190,12 @@
   <!-- Custom date picker -->
   {#if showCustom}
     <div
-      class="border-default bg-subtle space-y-3 rounded-lg border p-4"
+      class="border-default bg-primary space-y-3 rounded-lg border p-4 shadow-sm"
       transition:fly={{ y: -4, duration: 150 }}
     >
       <div class="grid gap-3 sm:grid-cols-2">
         <div class="flex flex-col gap-1.5">
-          <Label for="expiration-date" class="text-muted text-xs">
+          <Label for="expiration-date" class="text-default text-xs font-medium">
             {m.api_keys_exp_date()}
           </Label>
           <Input
@@ -205,15 +205,16 @@
             min={minDate()}
             max={maxDate()}
             {disabled}
+            class="bg-primary text-default h-10"
           />
         </div>
         <div class="flex flex-col gap-1.5">
-          <Label for="expiration-time" class="text-muted text-xs">
+          <Label for="expiration-time" class="text-default text-xs font-medium">
             {m.api_keys_exp_time()}
           </Label>
           <div class="relative">
             <Clock
-              class="text-muted pointer-events-none absolute top-1/2 left-3 z-10 h-4 w-4 -translate-y-1/2"
+              class="text-secondary pointer-events-none absolute top-1/2 left-3 z-10 h-4 w-4 -translate-y-1/2"
               aria-hidden="true"
             />
             <Input
@@ -221,14 +222,14 @@
               type="time"
               bind:value={customTime}
               {disabled}
-              class="pl-9"
+              class="bg-primary text-default h-10 pl-9"
             />
           </div>
         </div>
       </div>
 
       {#if maxDays}
-        <p class="text-muted flex items-center gap-1.5 text-xs">
+        <p class="text-secondary flex items-center gap-1.5 text-xs">
           <AlertTriangle class="h-3.5 w-3.5" aria-hidden="true" />
           {m.api_keys_exp_max_days({ days: maxDays })}
         </p>

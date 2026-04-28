@@ -89,7 +89,7 @@
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="sm:max-w-md">
+  <Dialog.Content class="sm:max-w-lg">
     <Dialog.Header>
       <Dialog.Title>{m.api_keys_rotate_confirm_title()}</Dialog.Title>
       <Dialog.Description>{m.api_keys_rotate_confirm_description()}</Dialog.Description>
