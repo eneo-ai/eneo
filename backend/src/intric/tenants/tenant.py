@@ -257,6 +257,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         - input_limits.audio_max_size_bytes
         - input_limits.max_files_per_run
         - input_limits.audio_max_files_per_run
+        - document_render_limits.*
         - ai_builder.conversation_safety_buffer_tokens
         - ai_builder.minimum_conversation_budget_tokens
         - ai_builder.unknown_model_context_window_tokens
@@ -271,6 +272,18 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
 
             try:
                 validate_flow_input_limits_object(input_limits)
+            except BadRequestException as error:
+                raise ValueError(str(error)) from error
+
+        document_render_limits = v.get("document_render_limits")
+        if document_render_limits is not None:
+            from intric.flows.flow_document_limits import (
+                validate_flow_document_render_limits_object,
+            )
+            from intric.main.exceptions import BadRequestException
+
+            try:
+                validate_flow_document_render_limits_object(document_render_limits)
             except BadRequestException as error:
                 raise ValueError(str(error)) from error
 

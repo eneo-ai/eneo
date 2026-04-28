@@ -160,6 +160,32 @@ export function initSettings(client) {
     },
 
     /**
+     * Get generated PDF/DOCX render limits for the current tenant.
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').FlowDocumentRenderLimits>}
+     */
+    getFlowDocumentRenderLimits: async () => {
+      const res = await client.fetch("/api/v1/settings/flow-document-render-limits", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Update generated PDF/DOCX render limits for the current tenant.
+     * @param {Partial<import('../types/resources').FlowDocumentRenderLimits>} patch
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').FlowDocumentRenderLimits>}
+     */
+    updateFlowDocumentRenderLimits: async (patch) => {
+      const res = await client.fetch("/api/v1/settings/flow-document-render-limits", {
+        method: "patch",
+        requestBody: { "application/json": patch }
+      });
+      return res;
+    },
+
+    /**
      * Get AI Builder budget settings for the current tenant.
      * @throws {IntricError}
      * @returns {Promise<import('../types/resources').AIBuilderBudgetSettings>}

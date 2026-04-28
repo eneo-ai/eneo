@@ -9,6 +9,8 @@ from intric.roles.permissions import Permission
 from intric.settings.settings import (
     AIBuilderBudgetSettingsPublic,
     AIBuilderBudgetSettingsUpdate,
+    FlowDocumentRenderLimitsPublic,
+    FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyPublic,
     FlowEvidencePolicyUpdate,
     FlowInputLimitsPublic,
@@ -18,10 +20,12 @@ from intric.settings.settings import (
 )
 from intric.settings.settings_router import (
     get_ai_builder_budget_settings,
+    get_flow_document_render_limits,
     get_flow_evidence_policy,
     get_flow_input_limits,
     get_flow_retention_policy,
     update_ai_builder_budget_settings,
+    update_flow_document_render_limits,
     update_flow_evidence_policy,
     update_flow_input_limits,
     update_flow_retention_policy,
@@ -116,6 +120,69 @@ async def test_patch_with_file_count_fields() -> None:
     assert response.max_files_per_run == 100
     assert response.audio_max_files_per_run == 30
     service.update_flow_input_limits.assert_awaited_once_with(payload)
+
+
+@pytest.mark.asyncio
+async def test_get_flow_document_render_limits_delegates_to_service() -> None:
+    container = MagicMock()
+    service = AsyncMock()
+    service.get_flow_document_render_limits.return_value = (
+        FlowDocumentRenderLimitsPublic(
+            max_source_chars=500_000,
+            max_blocks=2_000,
+            max_text_chars=500_000,
+            max_table_rows=5_000,
+            max_table_columns=50,
+            max_table_cells=50_000,
+            max_cell_chars=20_000,
+            max_list_items=5_000,
+            max_structured_nodes=10_000,
+            max_structured_depth=32,
+            max_object_fields=200,
+        )
+    )
+    container.settings_service.return_value = service
+    container.user.return_value = SimpleNamespace(
+        id="u", tenant_id="t", permissions=[Permission.ADMIN]
+    )
+
+    response = await get_flow_document_render_limits(container=container)
+
+    assert response.max_source_chars == 500_000
+    service.get_flow_document_render_limits.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_patch_flow_document_render_limits_delegates_to_service() -> None:
+    container = MagicMock()
+    service = AsyncMock()
+    service.update_flow_document_render_limits.return_value = (
+        FlowDocumentRenderLimitsPublic(
+            max_source_chars=800_000,
+            max_blocks=2_000,
+            max_text_chars=500_000,
+            max_table_rows=5_000,
+            max_table_columns=50,
+            max_table_cells=50_000,
+            max_cell_chars=20_000,
+            max_list_items=5_000,
+            max_structured_nodes=10_000,
+            max_structured_depth=32,
+            max_object_fields=200,
+        )
+    )
+    container.settings_service.return_value = service
+    container.user.return_value = SimpleNamespace(
+        id="u", tenant_id="t", permissions=[Permission.ADMIN]
+    )
+
+    payload = FlowDocumentRenderLimitsUpdate(max_source_chars=800_000)
+    response = await update_flow_document_render_limits(
+        payload=payload, container=container
+    )
+
+    assert response.max_source_chars == 800_000
+    service.update_flow_document_render_limits.assert_awaited_once_with(payload)
 
 
 @pytest.mark.asyncio

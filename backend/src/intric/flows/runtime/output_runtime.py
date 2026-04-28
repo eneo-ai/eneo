@@ -6,6 +6,11 @@ from typing import Any, Callable, Protocol
 
 from intric.files.file_models import FileCreate, FileType
 from intric.flows.principal import FlowPrincipal
+from intric.flows.runtime.document_rendering.limits import (
+    DEFAULT_DOCUMENT_RENDER_LIMITS,
+    DocumentRenderLimits,
+    ensure_source_within_limits,
+)
 
 
 class RuntimeOutputStep(Protocol):
@@ -72,6 +77,7 @@ class OutputRuntimeDeps:
     validate_against_contract: ValidateAgainstContractFn
     render_document: RenderDocumentFn
     render_structured_document: RenderStructuredDocumentFn
+    document_render_limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS
     principal: FlowPrincipal | None = None
 
 
@@ -111,6 +117,7 @@ async def process_typed_output(
                 schema=step.output_contract,
             )
         elif step.output_type == "pdf" and _is_pdf_bytes_text(full_text):
+            ensure_source_within_limits(full_text, limits=deps.document_render_limits)
             blob = _pdf_bytes_from_text(full_text)
             mimetype = "application/pdf"
             filename = f"step_{step.step_order}_output.pdf"

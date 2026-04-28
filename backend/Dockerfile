@@ -1,7 +1,10 @@
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y ffmpeg libmagic1 && rm -rf /var/lib/apt/lists/*
+# Build dependencies for packages that may compile from source on some
+# architectures, for example psutil on the current builder image.
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set uv optimizations
 ENV UV_LINK_MODE=copy \
@@ -33,8 +36,18 @@ ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base
 # Production stage
 FROM python:3.11-slim-bookworm
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y ffmpeg libmagic1 fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+# Runtime dependencies:
+# - ffmpeg/libmagic1 support existing audio and file type detection paths.
+# - fontconfig/fonts/harfbuzz/pango support WeasyPrint PDF rendering.
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    fontconfig \
+    fonts-dejavu-core \
+    libharfbuzz-subset0 \
+    libmagic1 \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy venv and tiktoken from builder
 COPY --from=builder /app/.venv /app/.venv

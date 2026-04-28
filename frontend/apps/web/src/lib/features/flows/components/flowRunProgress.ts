@@ -124,6 +124,23 @@ export function getFlowRunProgressStats(snapshot: FlowRunProgressSnapshot): Flow
   return { total, completed, failed, running, pending, terminal, progressRatio };
 }
 
+export function getFlowRunFocusedStepOrder(snapshot: FlowRunProgressSnapshot): number | null {
+  const runningStep = snapshot.steps.find((step) => step.status === "running");
+  if (runningStep) return runningStep.stepOrder;
+
+  const failedStep = snapshot.steps.find(
+    (step) => step.status === "failed" || step.status === "cancelled"
+  );
+  if (failedStep) return failedStep.stepOrder;
+
+  const nextPendingStep = snapshot.steps.find(
+    (step) => step.status === "queued" || step.status === "pending"
+  );
+  if (nextPendingStep) return nextPendingStep.stepOrder;
+
+  return snapshot.steps.at(-1)?.stepOrder ?? null;
+}
+
 export function formatFlowRunStepDuration(step: FlowRunProgressStep): string | null {
   if (step.status !== "completed" && step.status !== "failed" && step.status !== "cancelled") {
     return null;

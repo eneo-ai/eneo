@@ -173,7 +173,7 @@
 
     <div class="max-h-[68vh] overflow-y-auto">
       <div class="grid gap-4 p-4 lg:grid-cols-[minmax(230px,280px)_minmax(0,1fr)]">
-        <aside class="space-y-3">
+        <aside class="flex flex-col gap-3">
           <div class="border-default bg-hover-dimmer rounded-md border p-3">
             <div class="text-secondary text-sm font-medium">
               {cleanSourceDisplay(title, sourceUrl) || m.flow_run_knowledge_untitled_source()}
@@ -197,6 +197,7 @@
                 </Tooltip.Provider>
               {/if}
               {#if sourceUrl}
+                <!-- eslint-disable svelte/no-navigation-without-resolve -- external source URL from flow evidence -->
                 <a
                   href={sourceUrl}
                   target="_blank"
@@ -205,11 +206,12 @@
                 >
                   {m.go_to_website()}
                 </a>
+                <!-- eslint-enable svelte/no-navigation-without-resolve -->
               {/if}
             </div>
           </div>
 
-          <div class="space-y-2">
+          <div class="flex flex-col gap-2">
             <div class="flex items-center justify-between">
               <h4 class="text-muted text-xs font-semibold">
                 {m.flow_run_knowledge_segment_header({ count: String(chunkItems.length) })}
@@ -228,7 +230,7 @@
                 {m.flow_run_knowledge_no_snippets()}
               </p>
             {:else}
-              <div class="max-h-[44vh] space-y-1.5 overflow-auto pr-1">
+              <div class="flex max-h-[44vh] flex-col gap-1.5 overflow-auto pr-1">
                 {#each chunkItems as chunk, index (`${chunk.chunk_no ?? 0}-${index}`)}
                   <button
                     class="border-default hover:bg-hover-default w-full rounded-md border px-2.5 py-2 text-left text-xs transition-colors"

@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from intric.files.file_models import FileType
+from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from intric.flows.runtime.output_runtime import OutputRuntimeDeps, process_typed_output
 from intric.main.exceptions import TypedIOValidationException
 
@@ -185,6 +186,47 @@ async def test_process_typed_output_pdf_preserves_pdf_bytes_from_model() -> None
     assert artifacts[0]["name"] == "step_8_output.pdf"
     file_create = file_repo.add.await_args.args[0]
     assert file_create.blob == raw_pdf.encode("latin-1")
+
+
+@pytest.mark.asyncio
+async def test_process_typed_output_pdf_bytes_obeys_document_render_limits() -> None:
+    step = _Step(step_order=8, output_type="pdf", output_contract=None)
+    run = _Run(tenant_id=uuid4())
+    file_repo = SimpleNamespace(add=AsyncMock())
+
+    deps = OutputRuntimeDeps(
+        file_repo=file_repo,
+        user_id=uuid4(),
+        compile_validators=lambda steps: {},
+        parse_json_output=lambda text: {"unused": True},
+        validate_against_contract=lambda data, schema, label: None,
+        render_document=lambda text, output_type, step_order: (
+            b"",
+            "",
+            "",
+        ),
+        render_structured_document=lambda data, output_type, step_order, schema=None: (
+            b"",
+            "",
+            "",
+        ),
+        document_render_limits=DocumentRenderLimits(max_source_chars=5),
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await process_typed_output(
+            full_text="%PDF-1.4 oversized",
+            step=step,
+            run=run,
+            deps=deps,
+        )
+
+    assert exc_info.value.context == {
+        "metric": "source_chars",
+        "actual": 18,
+        "limit": 5,
+    }
+    file_repo.add.assert_not_called()
 
 
 @pytest.mark.asyncio

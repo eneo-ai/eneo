@@ -17,6 +17,7 @@
   import { m } from "$lib/paraglide/messages";
   import { isFlowRunActive, type FlowRunProgressSnapshot } from "./flowRunProgress";
   import { shouldHandleFlowRunsReload } from "./flowRunsReload";
+  import { getActiveFlowRunId, shouldAutoFocusFlowRun } from "./flowRunsFocus";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
 
@@ -120,6 +121,7 @@
   let pendingCancelRunId: string | null = $state(null);
   let progressSnapshotsByRunId = $state<Record<string, FlowRunProgressSnapshot>>({});
   let isRunListPolling = $state(false);
+  let lastAutoFocusedRunId: string | null = $state(null);
 
   async function loadRuns() {
     if (isRunListPolling) return;
@@ -134,11 +136,26 @@
     loadError = null;
     try {
       const result = await eneo.flows.runs.list({ flowId: flow.id });
-      runs = (result.items ?? result) as FlowRun[];
+      const nextRuns = (result.items ?? result) as FlowRun[];
+      runs = nextRuns;
       latestRunPayload = runs.length > 0 ? (runs[0].input_payload_json ?? null) : null;
       if (pendingHighlightRunId && runs.some((r) => r.id === pendingHighlightRunId)) {
         selectedRunId = pendingHighlightRunId;
         pendingHighlightRunId = null;
+      } else {
+        const activeRunId = getActiveFlowRunId(nextRuns);
+        if (
+          activeRunId &&
+          shouldAutoFocusFlowRun({
+            runs: nextRuns,
+            activeRunId,
+            selectedRunId,
+            lastAutoFocusedRunId
+          })
+        ) {
+          selectedRunId = activeRunId;
+          lastAutoFocusedRunId = activeRunId;
+        }
       }
       isInitialLoad = false;
     } catch (e) {
@@ -281,11 +298,6 @@
     <h2 class="text-primary text-base font-semibold tracking-tight sm:text-lg">
       {m.flow_history()}
     </h2>
-    {#if runs.length > 0}
-      <p class="text-muted text-xs tabular-nums">
-        {runs.length}
-      </p>
-    {/if}
   </header>
 
   {#if loading}

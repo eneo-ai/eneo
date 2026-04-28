@@ -27,6 +27,7 @@ from intric.flows.flow import (
 from intric.flows.flow import (
     FlowVersion as FlowVersionModel,
 )
+from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from intric.flows.runtime.executor import (
     FlowRunExecutor,
     FlowRunExecutorConfig,
@@ -194,6 +195,7 @@ def test_executor_accepts_grouped_config(user):
         rag_retrieval_timeout_seconds=44.0,
         rag_max_reference_sources=12,
         rag_max_chunks_per_source=6,
+        document_render_limits=DocumentRenderLimits(max_source_chars=123),
     )
 
     executor = FlowRunExecutor(
@@ -219,6 +221,7 @@ def test_executor_accepts_grouped_config(user):
     assert executor.rag_retrieval_timeout_seconds == 44.0
     assert executor.rag_max_reference_sources == 12
     assert executor.rag_max_chunks_per_source == 6
+    assert executor.document_render_service.limits.max_source_chars == 123
 
 
 def _assistant_for_execute_step(*, has_knowledge: bool):

@@ -77,6 +77,19 @@ export type FlowInputLimits = {
 };
 export type FlowEvidencePolicy = components["schemas"]["FlowEvidencePolicyPublic"];
 export type FlowRetentionPolicy = components["schemas"]["FlowRetentionPolicyPublic"];
+export type FlowDocumentRenderLimits = {
+  max_source_chars: number;
+  max_blocks: number;
+  max_text_chars: number;
+  max_table_rows: number;
+  max_table_columns: number;
+  max_table_cells: number;
+  max_cell_chars: number;
+  max_list_items: number;
+  max_structured_nodes: number;
+  max_structured_depth: number;
+  max_object_fields: number;
+};
 export type AIBuilderBudgetSettings = components["schemas"]["AIBuilderBudgetSettingsPublic"];
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
 export type Space = components["schemas"]["SpacePublic"];

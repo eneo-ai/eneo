@@ -14,6 +14,7 @@ from intric.authentication.principal_types import PrincipalType
 from intric.authentication.service_key_user import build_service_key_user
 from intric.database.database import sessionmanager
 from intric.flows.domain.flow import FlowRunStatus
+from intric.flows.flow_document_limits import resolve_flow_document_render_limits
 from intric.flows.flow_input_limits import (
     DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     resolve_flow_input_limits,
@@ -108,6 +109,9 @@ async def _execute_flow_run_async(
         flow_limits = resolve_flow_input_limits(
             tenant.flow_settings if tenant else None
         )
+        document_render_limits = resolve_flow_document_render_limits(
+            tenant.flow_settings if tenant else None
+        )
 
         executor = FlowRunExecutor(
             user=user,
@@ -131,6 +135,7 @@ async def _execute_flow_run_async(
                 max_audio_files=flow_limits.audio_max_files_per_run
                 or DEFAULT_MAX_AUDIO_FILES_PER_RUN,
                 max_generic_files=flow_limits.max_files_per_run,
+                document_render_limits=document_render_limits,
             ),
         )
         result = await executor.execute(

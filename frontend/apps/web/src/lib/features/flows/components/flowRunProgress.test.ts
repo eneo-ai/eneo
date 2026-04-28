@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   buildFlowRunProgressSnapshot,
+  getFlowRunFocusedStepOrder,
   isFlowRunActive,
   isFlowRunTerminal
 } from "./flowRunProgress";
@@ -128,5 +129,41 @@ describe("flowRunProgress helpers", () => {
         updatedAt: "2026-01-01T00:00:00Z"
       }
     ]);
+  });
+
+  test("focuses the running step while a run progresses", () => {
+    expect(
+      getFlowRunFocusedStepOrder({
+        steps: [
+          { stepOrder: 1, label: "Transcribe", status: "completed" },
+          { stepOrder: 2, label: "Structure", status: "running" },
+          { stepOrder: 3, label: "Summarize", status: "queued" }
+        ]
+      })
+    ).toBe(2);
+  });
+
+  test("focuses the next queued step when no step is running", () => {
+    expect(
+      getFlowRunFocusedStepOrder({
+        steps: [
+          { stepOrder: 1, label: "Transcribe", status: "completed" },
+          { stepOrder: 2, label: "Structure", status: "completed" },
+          { stepOrder: 3, label: "Summarize", status: "queued" }
+        ]
+      })
+    ).toBe(3);
+  });
+
+  test("focuses the failed step before queued work", () => {
+    expect(
+      getFlowRunFocusedStepOrder({
+        steps: [
+          { stepOrder: 1, label: "Transcribe", status: "completed" },
+          { stepOrder: 2, label: "Structure", status: "failed" },
+          { stepOrder: 3, label: "Summarize", status: "queued" }
+        ]
+      })
+    ).toBe(2);
   });
 });

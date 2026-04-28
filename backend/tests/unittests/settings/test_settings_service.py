@@ -6,6 +6,7 @@ from intric.main.exceptions import BadRequestException
 from intric.settings.setting_service import SettingService
 from intric.settings.settings import (
     AIBuilderBudgetSettingsUpdate,
+    FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyUpdate,
     FlowInputLimitsUpdate,
     FlowRetentionPolicyUpdate,
@@ -308,6 +309,119 @@ async def test_update_flow_input_limits_rejects_empty_patch():
         BadRequestException, match="At least one flow input limit field"
     ):
         await service.update_flow_input_limits(FlowInputLimitsUpdate())
+
+
+async def test_get_flow_document_render_limits_reads_tenant_override():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "document_render_limits": {
+                    "max_source_chars": 750_000,
+                    "max_table_cells": 75_000,
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    limits = await service.get_flow_document_render_limits()
+
+    assert limits.max_source_chars == 750_000
+    assert limits.max_table_cells == 75_000
+
+
+async def test_update_flow_document_render_limits_persists_and_audits():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log_async = _capture
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+    )
+
+    updated = await service.update_flow_document_render_limits(
+        FlowDocumentRenderLimitsUpdate(max_source_chars=800_000)
+    )
+
+    assert updated.max_source_chars == 800_000
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["document_render_limits"]["max_source_chars"] == 800_000
+    assert calls[0]["metadata"]["setting"] == "flow_document_render_limits"
+    assert calls[0]["metadata"]["changes"] == {
+        "max_source_chars": {"old": 500_000, "new": 800_000}
+    }
+
+
+async def test_update_flow_document_render_limits_null_clears_override():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "document_render_limits": {
+                    "max_source_chars": 800_000,
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    updated = await service.update_flow_document_render_limits(
+        FlowDocumentRenderLimitsUpdate(max_source_chars=None)
+    )
+
+    assert updated.max_source_chars == 500_000
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "document_render_limits" not in tenant.flow_settings
+
+
+async def test_update_flow_document_render_limits_rejects_empty_patch():
+    service = SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=MockTenantRepo(),
+        audit_service=MockAuditService(),
+    )
+
+    with pytest.raises(
+        BadRequestException, match="At least one flow document render limit"
+    ):
+        await service.update_flow_document_render_limits(
+            FlowDocumentRenderLimitsUpdate()
+        )
 
 
 async def test_get_flow_evidence_policy_reads_tenant_override():

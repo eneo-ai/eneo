@@ -11,6 +11,7 @@
   import FlowRunProgressStepCard from "./FlowRunProgressStepCard.svelte";
   import {
     formatFlowRunElapsed,
+    getFlowRunFocusedStepOrder,
     getFlowRunProgressStats,
     type FlowRunProgressSnapshot
   } from "./flowRunProgress";
@@ -40,23 +41,19 @@
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;
   let now = $state(Date.now());
   let tickInterval: ReturnType<typeof setInterval> | null = null;
+  let lastFocusedStepOrder: number | null = $state(null);
 
   const stats = $derived(getFlowRunProgressStats(snapshot));
   const elapsedLabel = $derived(formatFlowRunElapsed(runStartedAt, now));
   const progressPercent = $derived(Math.round(stats.progressRatio * 100));
-
-  const autoExpandedOrders = $derived(
-    new Set(
-      snapshot.steps
-        .filter((step) => step.status !== "pending" && step.status !== "queued")
-        .map((step) => step.stepOrder)
-    )
-  );
+  const focusedStepOrder = $derived(getFlowRunFocusedStepOrder(snapshot));
+  const isLiveRun = $derived(stats.running > 0 || stats.pending > 0);
 
   function isStepExpanded(stepOrder: number): boolean {
     const toggled = userToggles[stepOrder];
     if (toggled !== undefined) return toggled;
-    return autoExpandedOrders.has(stepOrder);
+    if (isLiveRun) return stepOrder === focusedStepOrder;
+    return stepOrder === focusedStepOrder;
   }
 
   $effect(() => {
@@ -81,6 +78,20 @@
         tickInterval = null;
       }
     };
+  });
+
+  $effect(() => {
+    if (focusedStepOrder === null || focusedStepOrder === lastFocusedStepOrder) return;
+
+    lastFocusedStepOrder = focusedStepOrder;
+    userToggles = {};
+
+    if (!browser || prefersReducedMotion) return;
+    requestAnimationFrame(() => {
+      document
+        .getElementById(`flow-run-progress-step-${focusedStepOrder}`)
+        ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
   });
 
   $effect(() => {
@@ -207,6 +218,7 @@
   <div class="flex flex-col gap-3">
     {#each snapshot.steps as step (step.stepOrder)}
       <div
+        id="flow-run-progress-step-{step.stepOrder}"
         in:fly={{
           y: prefersReducedMotion ? 0 : 6,
           duration: prefersReducedMotion ? 0 : 200,
@@ -217,6 +229,7 @@
         <FlowRunProgressStepCard
           {step}
           expanded={isStepExpanded(step.stepOrder)}
+          focused={focusedStepOrder === step.stepOrder}
           inputExpanded={expandedInputSteps.includes(step.stepOrder)}
           {copiedKey}
           panelId={getStepPanelId(step.stepOrder)}

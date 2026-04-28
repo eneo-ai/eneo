@@ -16,12 +16,12 @@ Pins the dispatcher surface callers rely on:
 
 from __future__ import annotations
 
+from html import escape
 from io import BytesIO
 
 import numpy as np
 import soundfile
 from docx import Document
-from fpdf import FPDF
 from openpyxl import Workbook
 
 from intric.flows.ai_builder.attachment_observation import DeterministicSignals
@@ -361,18 +361,21 @@ def _build_pdf(*, pages: list[str]) -> bytes:
     """Build a minimal in-memory PDF with the given page texts.
 
     Empty-string page entries produce blank pages (no rendered text),
-    which is how the tests exercise the scanned-PDF signal. fpdf2 is
-    already a backend dep; round-tripping through fpdf2 → pdfplumber
-    means the test covers the same reader the extractor uses in
-    production, not a hand-rolled fake.
+    which is how the tests exercise the scanned-PDF signal. WeasyPrint
+    keeps PDF fixtures on the same generation stack as flow PDF outputs
+    instead of retaining a second PDF writer only for tests.
     """
-    pdf = FPDF()
-    pdf.set_font("Helvetica", size=12)
-    for text in pages:
-        pdf.add_page()
-        if text:
-            pdf.cell(0, 10, text)
-    return bytes(pdf.output())
+    from weasyprint import HTML
+
+    sections: list[str] = []
+    for index, text in enumerate(pages):
+        page_break = "page-break-after: always;" if index < len(pages) - 1 else ""
+        content = f"<p>{escape(text)}</p>" if text else ""
+        sections.append(
+            f'<section style="min-height: 250mm; {page_break}">{content}</section>'
+        )
+    html = "<!doctype html><html><body>" + "".join(sections) + "</body></html>"
+    return bytes(HTML(string=html).write_pdf())
 
 
 class TestPdfExtractor:

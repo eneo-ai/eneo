@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
@@ -46,6 +46,14 @@ from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.claim_resolution import resolve_step_claim
+from intric.flows.runtime.document_rendering import DocumentRenderService
+from intric.flows.runtime.document_rendering.limits import (
+    DEFAULT_DOCUMENT_RENDER_LIMITS,
+    DocumentRenderLimits,
+)
+from intric.flows.runtime.document_rendering.service import (
+    default_document_render_service,
+)
 from intric.flows.runtime.execution_state_builder import build_run_execution_state
 from intric.flows.runtime.http_audit import (
     HttpAuditDeps,
@@ -134,6 +142,9 @@ class FlowRunExecutorConfig:
     rag_retrieval_timeout_seconds: float = 30.0
     rag_max_reference_sources: int = 25
     rag_max_chunks_per_source: int = 5
+    document_render_limits: DocumentRenderLimits = field(
+        default_factory=lambda: DEFAULT_DOCUMENT_RENDER_LIMITS
+    )
 
     @classmethod
     def from_settings(
@@ -142,6 +153,7 @@ class FlowRunExecutorConfig:
         max_inline_text_bytes: int,
         max_audio_files: int = 10,
         max_generic_files: int | None = None,
+        document_render_limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS,
     ) -> "FlowRunExecutorConfig":
         settings = get_settings()
         return cls(
@@ -153,6 +165,7 @@ class FlowRunExecutorConfig:
             ),
             http_max_timeout_seconds=float(settings.flow_http_max_timeout_seconds),
             http_allow_private_networks=bool(settings.flow_http_allow_private_networks),
+            document_render_limits=document_render_limits,
         )
 
 
@@ -289,6 +302,11 @@ class FlowRunExecutor:
         )
         self.rag_retrieval_timeout_seconds = (
             resolved_config.rag_retrieval_timeout_seconds
+        )
+        self.document_render_service: DocumentRenderService = (
+            default_document_render_service(
+                limits=resolved_config.document_render_limits
+            )
         )
         self.rag_max_reference_sources = resolved_config.rag_max_reference_sources
         self.rag_max_chunks_per_source = resolved_config.rag_max_chunks_per_source
@@ -1343,10 +1361,6 @@ class FlowRunExecutor:
             parse_json_output,
             validate_against_contract,
         )
-        from intric.flows.runtime.document_renderer import (
-            render_document,
-            render_structured_document,
-        )
 
         deps = OutputRuntimeDeps(
             file_repo=self.file_repo,
@@ -1355,8 +1369,11 @@ class FlowRunExecutor:
             compile_validators=compile_validators,
             parse_json_output=parse_json_output,
             validate_against_contract=validate_against_contract,
-            render_document=render_document,
-            render_structured_document=render_structured_document,
+            render_document=self.document_render_service.render_document,
+            render_structured_document=(
+                self.document_render_service.render_structured_document
+            ),
+            document_render_limits=self.document_render_service.limits,
         )
         return await process_typed_output_runtime(
             full_text=full_text,

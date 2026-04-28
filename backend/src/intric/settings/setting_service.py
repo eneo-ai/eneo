@@ -11,6 +11,10 @@ from intric.flows.ai_builder.ai_builder_settings import (
     apply_ai_builder_budget_policy_patch,
     resolve_ai_builder_budget_policy,
 )
+from intric.flows.flow_document_limits import (
+    apply_flow_document_render_limits_patch,
+    resolve_flow_document_render_limits,
+)
 from intric.flows.flow_evidence_policy import (
     apply_flow_evidence_policy_patch,
     resolve_flow_evidence_policy,
@@ -31,6 +35,8 @@ from intric.roles.permissions import Permission, validate_permissions
 from intric.settings.settings import (
     AIBuilderBudgetSettingsPublic,
     AIBuilderBudgetSettingsUpdate,
+    FlowDocumentRenderLimitsPublic,
+    FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyPublic,
     FlowEvidencePolicyUpdate,
     FlowInputLimitsPublic,
@@ -248,6 +254,55 @@ class SettingService:
             description="Updated flow input limits",
             metadata={
                 "setting": "flow_input_limits",
+                "changes": {
+                    key: {
+                        "old": getattr(previous, key),
+                        "new": getattr(updated, key),
+                    }
+                    for key in patch
+                },
+            },
+        )
+        return updated
+
+    @validate_permissions(Permission.ADMIN)
+    async def get_flow_document_render_limits(
+        self,
+    ) -> FlowDocumentRenderLimitsPublic:
+        tenant = await self._get_tenant_for_flow_settings()
+        limits = resolve_flow_document_render_limits(
+            getattr(tenant, "flow_settings", None)
+        )
+        return FlowDocumentRenderLimitsPublic.from_domain(limits)
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_flow_document_render_limits(
+        self,
+        payload: FlowDocumentRenderLimitsUpdate,
+    ) -> FlowDocumentRenderLimitsPublic:
+        patch = payload.model_dump(exclude_unset=True)
+        if not patch:
+            raise BadRequestException(
+                "At least one flow document render limit field must be provided."
+            )
+        previous = await self.get_flow_document_render_limits()
+        tenant = await self._get_tenant_for_flow_settings()
+        next_flow_settings = apply_flow_document_render_limits_patch(
+            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
+            remove_keys={key for key, value in patch.items() if value is None},
+            **{key: value for key, value in patch.items() if value is not None},
+        )
+        await self._persist_flow_settings(next_flow_settings)
+        updated = await self.get_flow_document_render_limits()
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description="Updated flow document render limits",
+            metadata={
+                "setting": "flow_document_render_limits",
                 "changes": {
                     key: {
                         "old": getattr(previous, key),

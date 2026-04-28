@@ -1,15 +1,18 @@
+from dataclasses import asdict
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from intric.ai_models.completion_models.completion_model import CompletionModelPublic
 from intric.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
+from intric.flows.flow_document_limits import FLOW_DOCUMENT_RENDER_HARD_LIMITS
 from intric.flows.flow_input_limits import (
     FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
     FLOW_INPUT_MAX_FILES_COUNT,
     FLOW_INPUT_MAX_LIMIT_BYTES,
     FLOW_INPUT_MIN_LIMIT_BYTES,
 )
+from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from intric.main.models import InDB
 
 
@@ -95,6 +98,110 @@ class FlowInputLimitsUpdate(BaseModel):
         ge=1,
         le=FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
         description="Set the tenant ceiling, or send null to use the default audio ceiling.",
+    )
+
+
+class FlowDocumentRenderLimitsPublic(BaseModel):
+    max_source_chars: int = Field(
+        ge=1, le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_source_chars
+    )
+    max_blocks: int = Field(ge=1, le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_blocks)
+    max_text_chars: int = Field(
+        ge=1, le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_text_chars
+    )
+    max_table_rows: int = Field(
+        ge=1, le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_table_rows
+    )
+    max_table_columns: int = Field(
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_table_columns,
+    )
+    max_table_cells: int = Field(
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_table_cells,
+    )
+    max_cell_chars: int = Field(
+        ge=1, le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_cell_chars
+    )
+    max_list_items: int = Field(
+        ge=1, le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_list_items
+    )
+    max_structured_nodes: int = Field(
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_structured_nodes,
+    )
+    max_structured_depth: int = Field(
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_structured_depth,
+    )
+    max_object_fields: int = Field(
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_object_fields,
+    )
+
+    @classmethod
+    def from_domain(
+        cls,
+        limits: DocumentRenderLimits,
+    ) -> "FlowDocumentRenderLimitsPublic":
+        return cls(**asdict(limits))
+
+
+class FlowDocumentRenderLimitsUpdate(BaseModel):
+    max_source_chars: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_source_chars,
+    )
+    max_blocks: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_blocks,
+    )
+    max_text_chars: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_text_chars,
+    )
+    max_table_rows: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_table_rows,
+    )
+    max_table_columns: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_table_columns,
+    )
+    max_table_cells: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_table_cells,
+    )
+    max_cell_chars: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_cell_chars,
+    )
+    max_list_items: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_list_items,
+    )
+    max_structured_nodes: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_structured_nodes,
+    )
+    max_structured_depth: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_structured_depth,
+    )
+    max_object_fields: int | None = Field(
+        default=None,
+        ge=1,
+        le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_object_fields,
     )
 
 

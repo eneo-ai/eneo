@@ -57,4 +57,33 @@ describe("settings flow policy endpoints", () => {
     expect(fetch.mock.calls[0][0]).toBe("/api/v1/settings/ai-builder-budget");
     expect(fetch.mock.calls[0][1].method).toBe("get");
   });
+
+  it("gets flow document render limits from canonical settings route", async () => {
+    const fetch = vi.fn(async () => ({ max_source_chars: 500000 }));
+    const settings = initSettings({ fetch });
+
+    await settings.getFlowDocumentRenderLimits();
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/settings/flow-document-render-limits");
+    expect(fetch.mock.calls[0][1].method).toBe("get");
+  });
+
+  it("patches flow document render limits to canonical settings route", async () => {
+    const fetch = vi.fn(async () => ({ max_source_chars: 800000 }));
+    const settings = initSettings({ fetch });
+
+    await settings.updateFlowDocumentRenderLimits({ max_source_chars: 800000 });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/settings/flow-document-render-limits");
+    expect(fetch.mock.calls[0][1]).toMatchObject({
+      method: "patch",
+      requestBody: {
+        "application/json": {
+          max_source_chars: 800000
+        }
+      }
+    });
+  });
 });

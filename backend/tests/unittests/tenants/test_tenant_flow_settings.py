@@ -115,6 +115,50 @@ def test_tenant_in_db_rejects_flow_input_limits_outside_runtime_bounds():
         )
 
 
+def test_tenant_in_db_validates_document_render_limit_settings():
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="Tenant",
+        display_name="Tenant",
+        quota_limit=1024**3,
+        modules=[],
+        api_credentials={},
+        federation_config={},
+        crawler_settings={},
+        api_key_policy={},
+        flow_settings={
+            "document_render_limits": {
+                "max_source_chars": 750_000,
+                "max_table_cells": 75_000,
+            }
+        },
+        state=TenantState.ACTIVE,
+    )
+
+    assert tenant.flow_settings["document_render_limits"]["max_source_chars"] == 750_000
+
+
+def test_tenant_in_db_rejects_invalid_document_render_limit_settings():
+    with pytest.raises(ValueError, match="max_source_chars"):
+        TenantInDB(
+            id=uuid4(),
+            name="Tenant",
+            display_name="Tenant",
+            quota_limit=1024**3,
+            modules=[],
+            api_credentials={},
+            federation_config={},
+            crawler_settings={},
+            api_key_policy={},
+            flow_settings={
+                "document_render_limits": {
+                    "max_source_chars": "many",
+                }
+            },
+            state=TenantState.ACTIVE,
+        )
+
+
 def test_tenant_in_db_validates_flow_evidence_policy_settings():
     tenant = TenantInDB(
         id=uuid4(),

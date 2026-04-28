@@ -24,6 +24,7 @@
   let {
     step,
     expanded,
+    focused = false,
     inputExpanded,
     copiedKey,
     panelId,
@@ -34,6 +35,7 @@
   }: {
     step: FlowRunProgressStep;
     expanded: boolean;
+    focused?: boolean;
     inputExpanded: boolean;
     copiedKey: string | null;
     panelId: string;
@@ -86,15 +88,18 @@
 </script>
 
 <Card.Root
-  class="overflow-hidden {isRunning
-    ? 'ring-accent-default/40 bg-accent-dimmer/20 ring-2'
-    : ''} {isFailed ? 'ring-negative-default/30 ring-1' : ''}"
+  class="overflow-hidden transition-[box-shadow,background-color,border-color] duration-300 {focused
+    ? 'border-accent-default/40 bg-accent-dimmer/15 shadow-sm'
+    : ''} {isRunning ? 'ring-accent-default/35 ring-2' : ''} {isFailed
+    ? 'ring-negative-default/30 ring-1'
+    : ''}"
 >
   <button
     type="button"
-    class="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors active:scale-[0.995] disabled:cursor-default"
+    class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors active:scale-[0.995] disabled:cursor-default"
     aria-expanded={expanded}
     aria-controls={panelId}
+    aria-current={focused ? "step" : undefined}
     disabled={!canExpand}
     onclick={() => {
       if (canExpand) onToggle(step.stepOrder);
@@ -107,7 +112,7 @@
         {step.stepOrder}
       </span>
       <div class="min-w-0 flex-1">
-        <div class="flex min-w-0 items-center gap-2">
+        <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <span class="truncate text-sm font-medium">{step.label}</span>
           <span
             class="{statusColor} inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium"
@@ -123,6 +128,15 @@
             <span class="text-secondary shrink-0 text-xs tabular-nums">{duration}</span>
           {/if}
         </div>
+        {#if focused && isRunning}
+          <p class="text-muted mt-1 text-xs">
+            {m.flow_run_progress_active_step_hint()}
+          </p>
+        {:else if focused && step.status === "queued"}
+          <p class="text-muted mt-1 text-xs">
+            {m.flow_run_progress_next_step_hint()}
+          </p>
+        {/if}
       </div>
     </div>
     <div class="flex shrink-0 items-center gap-2">

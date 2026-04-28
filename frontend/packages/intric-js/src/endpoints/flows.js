@@ -430,13 +430,14 @@ export function initFlows(client) {
         step_inputs,
         file_ids
       }) => {
-        const { flow_id: _ignoredFlowId, ...normalizedRequest } = _normalizeRunIntent({
+        const normalizedRequest = _normalizeRunIntent({
           flowId: flow.id,
           expectedFlowVersion: expected_flow_version,
           input_payload_json,
           step_inputs,
           file_ids
         });
+        delete normalizedRequest.flow_id;
         return _fetch(`/api/v1/flows/${flow.id}/runs/`, {
           method: "post",
           headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,

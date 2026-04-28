@@ -15,6 +15,8 @@ from intric.settings.setting_service import SettingService
 from intric.settings.settings import (
     AIBuilderBudgetSettingsPublic,
     AIBuilderBudgetSettingsUpdate,
+    FlowDocumentRenderLimitsPublic,
+    FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyPublic,
     FlowEvidencePolicyUpdate,
     FlowInputLimitsPublic,
@@ -37,6 +39,12 @@ class _FlowSettingsServiceProtocol(Protocol):
     async def update_flow_input_limits(
         self, payload: FlowInputLimitsUpdate
     ) -> FlowInputLimitsPublic: ...
+    async def get_flow_document_render_limits(
+        self,
+    ) -> FlowDocumentRenderLimitsPublic: ...
+    async def update_flow_document_render_limits(
+        self, payload: FlowDocumentRenderLimitsUpdate
+    ) -> FlowDocumentRenderLimitsPublic: ...
     async def get_flow_evidence_policy(self) -> FlowEvidencePolicyPublic: ...
     async def update_flow_evidence_policy(
         self, payload: FlowEvidencePolicyUpdate
@@ -137,6 +145,43 @@ async def update_flow_input_limits(
     validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_input_limits(payload)
+
+
+@settings_admin_router.get(
+    "/flow-document-render-limits",
+    response_model=FlowDocumentRenderLimitsPublic,
+    summary="Get flow document render limits",
+    description="Return tenant-level guardrails for generated flow PDF/DOCX outputs.",
+)
+async def get_flow_document_render_limits(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowDocumentRenderLimitsPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.get_flow_document_render_limits()
+
+
+@settings_admin_router.patch(
+    "/flow-document-render-limits",
+    response_model=FlowDocumentRenderLimitsPublic,
+    summary="Update flow document render limits",
+    description=(
+        "Update tenant-level guardrails for generated flow PDF/DOCX outputs. "
+        "Omit a field to leave it unchanged. Send null to remove the tenant "
+        "override and fall back to the product default."
+    ),
+    responses={
+        400: {"description": "Invalid flow document render limit payload."},
+        403: {"description": "Caller lacks permission to update tenant settings."},
+    },
+)
+async def update_flow_document_render_limits(
+    payload: FlowDocumentRenderLimitsUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowDocumentRenderLimitsPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.update_flow_document_render_limits(payload)
 
 
 @settings_admin_router.get(
