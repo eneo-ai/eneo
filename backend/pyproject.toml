@@ -7,7 +7,7 @@ requires-python = ">=3.11,<4"
 dependencies = [
     "fastapi>=0,<1",
     "uvicorn[standard]>=0.30.0,<1",
-    "python-dotenv>=1.1.0",
+    "python-dotenv==1.0.1",
     "pydantic[email]>=2,<3",
     "tenacity>=8.2.1,<9",
     "tiktoken>=0,<1",
@@ -51,7 +51,7 @@ dependencies = [
     "sentry-sdk[fastapi]==2.8.0",
     "tavily-python>=0.5.1,<0.6",
     "greenlet>=3.2.2,<4",
-    "litellm==1.83.0",
+    "litellm==1.83.10",
     "mcp>=1.2.0,<2", # Model Context Protocol SDK for MCP server integration
     "cryptography>=43.0.0,<44", # For Fernet encryption of HTTP auth passwords
     "httpx~=0.28.0",
