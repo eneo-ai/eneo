@@ -2828,5 +2828,9 @@
   "permission_admin_description": "Organisationsägare. Hantering av användare, roller och grupper.",
   "permission_shared_spaces": "Delade ytor",
   "permission_shared_spaces_description": "Skapa delade ytor. Visning, redigering och borttagning av delade ytor styrs av ytmedlemskap.",
+  "permission_api_keys": "API-nycklar",
+  "permission_api_keys_description": "Skapa API-nycklar via gränssnittet. Krävs för att skapa nycklar med tenant-, yt-, assistent- eller app-omfattning.",
+  "api_keys_no_create_permission": "Din roll saknar behörighet att skapa API-nycklar. Kontakta en administratör om du behöver en ny nyckel.",
+  "api_keys_no_create_permission_short": "Att skapa API-nycklar ingår inte i din roll.",
   "permissions_selected_count": "{selected} av {total} valda"
 }

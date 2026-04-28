@@ -54,6 +54,7 @@
   const intric = getIntric();
   const { user } = getAppContext();
   const isAdmin = user.hasPermission("admin");
+  const canCreateApiKeys = user.hasPermission("api_keys");
 
   type DialogMode = "create" | "edit" | "view";
 
@@ -823,7 +824,7 @@
     if (!open) handleOpenChange(false);
   }}
 >
-  {#if isCreateMode}
+  {#if isCreateMode && canCreateApiKeys}
     <Dialog.Trigger>
       {#snippet child({ props })}
         <Button {...props} variant={triggerVariant === "outlined" ? "outline" : "default"}>

@@ -14,11 +14,14 @@ from uuid import uuid4
 import pytest
 
 from intric.main.exceptions import UnauthorizedException
-from intric.roles.permissions import Permission, validate_permission, validate_permissions
+from intric.roles.permissions import (
+    Permission,
+    validate_permission,
+    validate_permissions,
+)
 from intric.roles.role import RoleInDB
 from intric.tenants.tenant import TenantInDB
 from intric.users.user import UserInDB
-
 
 _TEST_TENANT = TenantInDB(id=uuid4(), name="test", quota_limit=1024**3)
 
@@ -63,6 +66,7 @@ def _make_user_with_roles(*roles: RoleInDB) -> UserInDB:
 
 # --- Original decorator test ---
 
+
 class MockService:
     def __init__(self, user: UserInDB):
         self.user = user
@@ -89,6 +93,7 @@ async def test_validation_decorator():
 
 
 # --- validate_permission function tests ---
+
 
 class TestValidatePermission:
     """Test the validate_permission function for each permission."""
@@ -121,6 +126,7 @@ class TestPermissionsAreIndependent:
 
 # --- UserInDB.permissions aggregation tests ---
 
+
 class TestUserPermissionsAggregation:
     """UserInDB.permissions should combine permissions from all assigned roles."""
 
@@ -134,39 +140,48 @@ class TestUserPermissionsAggregation:
 
     def test_multiple_roles_combine_permissions(self):
         role1 = RoleInDB(
-            id=uuid4(), name="role1",
+            id=uuid4(),
+            name="role1",
             permissions=[Permission.ASSISTANTS, Permission.APPS],
             tenant_id=_TEST_TENANT.id,
         )
         role2 = RoleInDB(
-            id=uuid4(), name="role2",
+            id=uuid4(),
+            name="role2",
             permissions=[Permission.ADMIN, Permission.INSIGHTS],
             tenant_id=_TEST_TENANT.id,
         )
         user = _make_user_with_roles(role1, role2)
         assert user.permissions == {
-            Permission.ASSISTANTS, Permission.APPS,
-            Permission.ADMIN, Permission.INSIGHTS,
+            Permission.ASSISTANTS,
+            Permission.APPS,
+            Permission.ADMIN,
+            Permission.INSIGHTS,
         }
 
     def test_overlapping_permissions_are_deduplicated(self):
         role1 = RoleInDB(
-            id=uuid4(), name="role1",
+            id=uuid4(),
+            name="role1",
             permissions=[Permission.ASSISTANTS, Permission.ADMIN],
             tenant_id=_TEST_TENANT.id,
         )
         role2 = RoleInDB(
-            id=uuid4(), name="role2",
+            id=uuid4(),
+            name="role2",
             permissions=[Permission.ADMIN, Permission.INSIGHTS],
             tenant_id=_TEST_TENANT.id,
         )
         user = _make_user_with_roles(role1, role2)
         assert user.permissions == {
-            Permission.ASSISTANTS, Permission.ADMIN, Permission.INSIGHTS,
+            Permission.ASSISTANTS,
+            Permission.ADMIN,
+            Permission.INSIGHTS,
         }
 
 
 # --- Permission semantics ---
+
 
 class TestPermissionSemantics:
     """Document and verify expected behavior of the permissions system."""
@@ -174,9 +189,19 @@ class TestPermissionSemantics:
     def test_all_expected_permissions_exist(self):
         """Ensure all expected permissions are defined in the enum."""
         expected = {
-            "assistants", "group_chats", "apps", "services", "collections",
-            "insights", "AI", "editor", "admin", "websites", "integrations",
+            "assistants",
+            "group_chats",
+            "apps",
+            "services",
+            "collections",
+            "insights",
+            "AI",
+            "editor",
+            "admin",
+            "websites",
+            "integrations",
             "shared_spaces",
+            "api_keys",
         }
         actual = {p.value for p in Permission}
         assert actual == expected
@@ -202,13 +227,20 @@ class TestPermissionSemantics:
 
 # --- Template validation ---
 
+
 class TestRoleTemplates:
     """Verify predefined role templates have expected permissions."""
 
     @pytest.fixture
     def templates(self):
-        from intric.server.dependencies.predefined_roles import load_predefined_roles_from_config
-        return {t["name"]: set(t["permissions"]) for t in load_predefined_roles_from_config()}
+        from intric.server.dependencies.predefined_roles import (
+            load_predefined_roles_from_config,
+        )
+
+        return {
+            t["name"]: set(t["permissions"])
+            for t in load_predefined_roles_from_config()
+        }
 
     def test_owner_has_all_permissions(self, templates):
         """Owner template should include all permissions."""
@@ -237,4 +269,6 @@ class TestRoleTemplates:
     def test_all_templates_have_spaces(self, templates):
         """All templates should have spaces permission (current expected behavior)."""
         for name, perms in templates.items():
-            assert "shared_spaces" in perms, f"Template '{name}' missing shared_spaces permission"
+            assert "shared_spaces" in perms, (
+                f"Template '{name}' missing shared_spaces permission"
+            )

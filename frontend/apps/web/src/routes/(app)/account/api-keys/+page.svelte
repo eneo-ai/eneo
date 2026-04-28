@@ -26,6 +26,7 @@
   } = getAppContext();
   const intric = getIntric();
   const { forceRefresh: forceRefreshExpiringStore } = getExpiringKeysStore();
+  const canCreateApiKeys = user.hasPermission("api_keys");
 
   let keys = $state<ApiKeyV2[]>([]);
   let loading = $state(true);
@@ -214,6 +215,14 @@
               <CreateApiKeyDialog onCreated={handleCreated} />
             </div>
           </div>
+        {/if}
+
+        <!-- Permission notice -->
+        {#if !canCreateApiKeys}
+          <Alert.Root>
+            <ShieldAlert />
+            <Alert.Description>{m.api_keys_no_create_permission()}</Alert.Description>
+          </Alert.Root>
         {/if}
 
         <!-- Error Message -->

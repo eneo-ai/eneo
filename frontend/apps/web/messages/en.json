@@ -2792,5 +2792,9 @@
   "permission_admin_description": "Organization owner. Management of users, roles, and groups.",
   "permission_shared_spaces": "Shared spaces",
   "permission_shared_spaces_description": "Create shared spaces. Viewing, editing, and deleting shared spaces are governed by space membership.",
+  "permission_api_keys": "API keys",
+  "permission_api_keys_description": "Create API keys via the dashboard. Required to mint tenant, space, assistant, and app-scoped keys.",
+  "api_keys_no_create_permission": "Your role does not include API key creation. Contact a tenant admin if you need to mint a new key.",
+  "api_keys_no_create_permission_short": "API key creation is not part of your role.",
   "permissions_selected_count": "{selected} of {total} selected"
 }

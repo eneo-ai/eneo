@@ -12972,7 +12972,8 @@ export interface components {
       | "admin"
       | "websites"
       | "integrations"
-      | "shared_spaces";
+      | "shared_spaces"
+      | "api_keys";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];

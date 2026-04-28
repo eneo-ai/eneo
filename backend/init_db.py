@@ -115,6 +115,7 @@ def add_tenant_user(
                 "websites",
                 "integrations",
                 "shared_spaces",
+                "api_keys",
             ]
             add_role_query = sql.SQL(
                 "INSERT INTO roles (name, permissions, tenant_id, predefined_source) "

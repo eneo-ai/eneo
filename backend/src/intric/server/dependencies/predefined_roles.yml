@@ -32,3 +32,4 @@ roles:
       - websites
       - integrations
       - shared_spaces
+      - api_keys

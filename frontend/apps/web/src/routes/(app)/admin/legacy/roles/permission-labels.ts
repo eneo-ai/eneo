@@ -58,6 +58,11 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
         label: m.permission_shared_spaces(),
         description: m.permission_shared_spaces_description()
       };
+    case "api_keys":
+      return {
+        label: m.permission_api_keys(),
+        description: m.permission_api_keys_description()
+      };
     default:
       // Unknown permission — degrade gracefully: reformat the key so
       // "unknown_permission" shows as "Unknown permission" rather than raw
