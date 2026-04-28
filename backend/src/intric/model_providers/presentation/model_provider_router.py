@@ -87,6 +87,24 @@ def serialize_fields(fields: list[FieldDefinition]) -> list[SerializedField]:
     ]
 
 
+# Trailing-date stripping for collapsing dated snapshots into their rolling alias.
+# Only matches at the END of the name so embedded dates like "gpt-4-0314" are untouched.
+_TRAILING_DATE_PATTERNS = (
+    re.compile(r"-\d{4}-\d{2}-\d{2}$"),  # OpenAI: gpt-4o-2024-08-06
+    re.compile(r"@\d{8}$"),  # Vertex: claude-3-5-sonnet@20240620
+    re.compile(r"-\d{8}$"),  # Anthropic: claude-opus-4-7-20260416
+)
+
+
+def strip_trailing_date(name: str) -> str | None:
+    """Return the alias (date suffix removed) if name ends with a date, else None."""
+    for pattern in _TRAILING_DATE_PATTERNS:
+        m = pattern.search(name)
+        if m:
+            return name[: m.start()]
+    return None
+
+
 def get_model_provider_service(
     user: CurrentUser,
     session: SessionDep,
@@ -215,6 +233,17 @@ async def get_provider_capabilities(
                 model_info["max_input_tokens"] = info.get("max_input_tokens")
                 model_info["output_vector_size"] = info.get("output_vector_size")
             raw[provider][mode][model_key] = model_info
+
+    # Collapse dated snapshots (e.g. "claude-opus-4-7-20260416") into their rolling
+    # alias (e.g. "claude-opus-4-7") when both exist in the same provider/mode.
+    # If only the dated form exists (no alias), keep it so the model stays reachable.
+    for modes in raw.values():
+        for models_dict in modes.values():
+            names_in_group = set(models_dict.keys())
+            for key in list(models_dict.keys()):
+                alias = strip_trailing_date(key)
+                if alias and alias in names_in_group:
+                    models_dict.pop(key, None)
 
     # Build response sorted by release date (newest first)
     providers: dict[str, ProviderCapabilities] = {}
