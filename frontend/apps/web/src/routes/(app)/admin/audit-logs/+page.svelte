@@ -300,6 +300,61 @@
       category: "admin"
     },
     {
+      value: "api_key_created" as ActionType,
+      label: m.audit_action_api_key_created(),
+      category: "admin"
+    },
+    {
+      value: "api_key_updated" as ActionType,
+      label: m.audit_action_api_key_updated(),
+      category: "admin"
+    },
+    {
+      value: "api_key_revoked" as ActionType,
+      label: m.audit_action_api_key_revoked(),
+      category: "admin"
+    },
+    {
+      value: "api_key_suspended" as ActionType,
+      label: m.audit_action_api_key_suspended(),
+      category: "admin"
+    },
+    {
+      value: "api_key_reactivated" as ActionType,
+      label: m.audit_action_api_key_reactivated(),
+      category: "admin"
+    },
+    {
+      value: "api_key_rotated" as ActionType,
+      label: m.audit_action_api_key_rotated(),
+      category: "admin"
+    },
+    {
+      value: "api_key_expired" as ActionType,
+      label: m.audit_action_api_key_expired(),
+      category: "admin"
+    },
+    {
+      value: "api_key_expiration_extended" as ActionType,
+      label: m.audit_action_api_key_expiration_extended(),
+      category: "admin"
+    },
+    {
+      value: "api_key_purged" as ActionType,
+      label: m.audit_action_api_key_purged(),
+      category: "admin"
+    },
+    {
+      value: "api_key_used" as ActionType,
+      label: m.audit_action_api_key_used(),
+      category: "admin"
+    },
+    {
+      value: "api_key_auth_failed" as ActionType,
+      label: m.audit_action_api_key_auth_failed(),
+      category: "admin"
+    },
+    {
       value: "assistant_created" as ActionType,
       label: m.audit_action_assistant_created(),
       category: "user"
