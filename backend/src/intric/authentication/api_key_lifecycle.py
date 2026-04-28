@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID
 
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -39,6 +39,25 @@ from intric.main.config import get_settings
 if TYPE_CHECKING:
     from intric.audit.application.audit_service import AuditService
     from intric.users.user import UserInDB
+
+
+def _normalize_future_expiration(value: object) -> datetime | None:
+    """Normalize a user-supplied expiration: assume UTC for naive datetimes and
+    require it lies in the future. Returns None when value is None."""
+    if value is None:
+        return None
+    if not isinstance(value, datetime):
+        return value  # type: ignore[return-value]
+    normalized = (
+        value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    )
+    if normalized < datetime.now(timezone.utc):
+        raise ApiKeyValidationError(
+            status_code=400,
+            code="invalid_request",
+            message="expires_at must be in the future.",
+        )
+    return normalized
 
 
 class ApiKeyLifecycleService:
@@ -345,16 +364,12 @@ class ApiKeyLifecycleService:
                 )
                 raise exc
 
-        if "expires_at" in updates and updates.get("expires_at") is not None:
-            expires_at = updates.get("expires_at")
-            if isinstance(expires_at, datetime) and expires_at < datetime.now(
-                timezone.utc
-            ):
-                exc = ApiKeyValidationError(
-                    status_code=400,
-                    code="invalid_request",
-                    message="expires_at must be in the future.",
+        if "expires_at" in updates:
+            try:
+                updates["expires_at"] = _normalize_future_expiration(
+                    updates.get("expires_at")
                 )
+            except ApiKeyValidationError as exc:
                 await self._log_lifecycle_failure(
                     action=ActionType.API_KEY_UPDATED,
                     user=user,
@@ -365,7 +380,7 @@ class ApiKeyLifecycleService:
                     request_id=request_id,
                     user_agent=user_agent,
                 )
-                raise exc
+                raise
 
         try:
             await self.policy_service.validate_update_request(key=key, updates=updates)
@@ -976,27 +991,10 @@ class ApiKeyLifecycleService:
             )
             raise exc
 
-        if new_expires_at is not None and new_expires_at < datetime.now(timezone.utc):
-            exc = ApiKeyValidationError(
-                status_code=400,
-                code="invalid_request",
-                message="expires_at must be in the future.",
-            )
-            await self._log_lifecycle_failure(
-                action=failure_action,
-                user=user,
-                key_id=key.id,
-                key=key,
-                error=exc,
-                ip_address=ip_address,
-                request_id=request_id,
-                user_agent=user_agent,
-            )
-            raise exc
-
         try:
+            normalized = _normalize_future_expiration(new_expires_at)
             await self.policy_service.validate_update_request(
-                key=key, updates={"expires_at": new_expires_at}
+                key=key, updates={"expires_at": normalized}
             )
         except ApiKeyValidationError as exc:
             await self._log_lifecycle_failure(
@@ -1011,7 +1009,7 @@ class ApiKeyLifecycleService:
             )
             raise
 
-        return new_expires_at
+        return normalized
 
     async def _log_expiration_extended(
         self,
@@ -1020,7 +1018,7 @@ class ApiKeyLifecycleService:
         key: ApiKeyV2InDB,
         previous_expires_at: datetime | None,
         new_expires_at: datetime | None,
-        via: str,
+        via: Literal["standalone", "rotation"],
         ip_address: str | None,
         request_id: UUID | None,
         user_agent: str | None,

@@ -601,6 +601,43 @@ async def test_rotate_with_update_expiration_logs_two_audits(user):
 
 
 @pytest.mark.asyncio
+async def test_rotate_with_update_expiration_but_same_date_skips_extension_event(user):
+    """When update_expiration=true but the date is unchanged, only the rotation
+    event is emitted — there is no expiration change to record."""
+    expires = datetime.now(timezone.utc) + timedelta(days=30)
+    key = _make_key(tenant_id=user.tenant_id, expires_at=expires)
+    rotated = _make_key(
+        tenant_id=user.tenant_id, rotated_from_key_id=key.id, expires_at=expires
+    )
+    repo = AsyncMock()
+    repo.get.return_value = key
+    repo.create.return_value = rotated
+    repo.update.return_value = key
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
+        validate_key_state=AsyncMock(),
+        validate_update_request=AsyncMock(),
+    )
+    audit = AsyncMock()
+
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        user=user,
+    )
+
+    await service.rotate_key(
+        key_id=key.id,
+        request=ApiKeyRotateRequest(update_expiration=True, expires_at=expires),
+    )
+
+    actions = [c.kwargs["action"] for c in audit.log_async.call_args_list]
+    assert actions == [ActionType.API_KEY_ROTATED]
+
+
+@pytest.mark.asyncio
 async def test_rotate_without_update_expiration_preserves_existing(user):
     original = datetime.now(timezone.utc) + timedelta(days=10)
     key = _make_key(tenant_id=user.tenant_id, expires_at=original)
