@@ -251,7 +251,7 @@ def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
                         "id": "source-1",
                         "id_short": "source-1",
                         "title": "Knowledge A",
-                        "hit_count": 1,
+                        "matched_chunk_count": 1,
                         "best_score": 0.8,
                         "chunks": [],
                     },
@@ -259,7 +259,7 @@ def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
                         "id": "source-2",
                         "id_short": "source-2",
                         "title": None,
-                        "hit_count": 1,
+                        "matched_chunk_count": 1,
                         "best_score": 0.7,
                         "chunks": [],
                     },
@@ -326,6 +326,30 @@ def test_normalize_rag_payload_adds_prompt_context_display_names_and_usage_state
     assert normalized["prompt_context"]["included_source_display_names"] == [
         "kunskap.example.se/beslut/underlag"
     ]
+
+
+def test_normalize_rag_payload_derives_reference_match_count_from_display_chunks() -> (
+    None
+):
+    normalized = normalize_rag_payload(
+        {
+            "references": [
+                {
+                    "id": "source-1",
+                    "id_short": "source-1",
+                    "chunks": [
+                        {"chunk_no": 1, "score": 0.9, "snippet": "First snippet"},
+                        {"chunk_no": 2, "score": 0.7, "snippet": ""},
+                        {"chunk_no": 3, "score": 0.6, "snippet": "Third snippet"},
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert normalized is not None
+    reference = normalized["references"][0]
+    assert reference["matched_chunk_count"] == 2
 
 
 def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
@@ -459,7 +483,7 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
                                 "title": "https://psykologi.se/psykologilexikon/affekt/",
                                 "id_short": "source-1",
                                 "chunks": [],
-                                "hit_count": 1,
+                                "matched_chunk_count": 1,
                                 "best_score": 0.9,
                             }
                         ],
@@ -671,7 +695,7 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
                         "source_container_name": "Kunskapsbanken",
                         "source_container_id": "website-1",
                         "usage_state": "inserted_into_prompt",
-                        "hit_count": 1,
+                        "matched_chunk_count": 1,
                         "best_score": 0.82,
                         "chunks": [],
                     }
@@ -1009,7 +1033,7 @@ def test_render_evidence_json_export_adds_fallback_container_display_name_and_mo
                         "source_container_id": "website-1",
                         "usage_state": "retrieved_candidate",
                         "chunks": [],
-                        "hit_count": 1,
+                        "matched_chunk_count": 1,
                         "best_score": 0.8,
                     }
                 ],
@@ -1180,7 +1204,7 @@ def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_s
                         "id_short": "11111111",
                         "title": "Kalla ett",
                         "usage_state": "inserted_into_prompt",
-                        "hit_count": 2,
+                        "matched_chunk_count": 2,
                         "best_score": 0.9,
                         "chunks": [],
                     },
@@ -1189,7 +1213,7 @@ def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_s
                         "id_short": "22222222",
                         "title": "Kalla tva",
                         "usage_state": "inserted_into_prompt",
-                        "hit_count": 1,
+                        "matched_chunk_count": 1,
                         "best_score": 0.7,
                         "chunks": [],
                     },

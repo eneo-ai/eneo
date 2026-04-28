@@ -12234,10 +12234,10 @@ export interface components {
       /** Snippet Quality */
       snippet_quality?: string | null;
       /**
-       * Hit Count
+       * Matched Chunk Count
        * @default 0
        */
-      hit_count?: number;
+      matched_chunk_count?: number;
       /**
        * Best Score
        * @default 0

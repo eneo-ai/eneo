@@ -2778,7 +2778,7 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
                             "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                             "id_short": "aaaaaaaa",
                             "title": "Sundsvall source",
-                            "hit_count": 2,
+                            "matched_chunk_count": 2,
                             "best_score": 0.92,
                             "chunks": [
                                 {

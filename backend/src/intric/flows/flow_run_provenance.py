@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict
@@ -240,6 +241,7 @@ def normalize_rag_payload(value: Any) -> dict[str, Any] | None:
                 normalized_reference.get("usage_state")
             )
             _normalize_reference_display_fields(normalized_reference)
+            _normalize_reference_chunk_counts(normalized_reference)
             if (
                 included_source_ids
                 and str(normalized_reference.get("id")) in included_source_ids
@@ -398,6 +400,40 @@ def _normalize_reference_display_fields(reference: dict[str, Any]) -> None:
     container_label = format_source_container_label(reference)
     if container_label is not None:
         reference["source_container_label"] = container_label
+
+
+def _normalize_reference_chunk_counts(reference: dict[str, Any]) -> None:
+    matched_chunk_count = _coerce_non_negative_int(reference.get("matched_chunk_count"))
+    if matched_chunk_count is None:
+        matched_chunk_count = _count_displayable_reference_chunks(
+            reference.get("chunks")
+        )
+
+    reference["matched_chunk_count"] = matched_chunk_count
+
+
+def _count_displayable_reference_chunks(value: Any) -> int:
+    if not isinstance(value, list):
+        return 0
+    count = 0
+    for chunk in cast(list[object], value):
+        if not isinstance(chunk, Mapping):
+            continue
+        chunk_mapping = cast(Mapping[str, object], chunk)
+        snippet = chunk_mapping.get("snippet")
+        if isinstance(snippet, str) and snippet.strip():
+            count += 1
+    return count
+
+
+def _coerce_non_negative_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, float) and value.is_integer():
+        return max(0, int(value))
+    return None
 
 
 def _normalize_parameter_semantics(

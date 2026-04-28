@@ -14,7 +14,7 @@ def test_build_chunk_snippet_uses_interior_slice_for_long_text():
     assert "MIDDLE" in snippet
 
 
-def test_build_rag_references_aggregates_hits_and_caps_chunks():
+def test_build_rag_references_counts_matches_and_caps_display_chunks():
     source_id = uuid4()
     chunks = [
         SimpleNamespace(
@@ -49,7 +49,7 @@ def test_build_rag_references_aggregates_hits_and_caps_chunks():
     assert truncated is False
     assert len(references) == 1
     assert references[0]["id"] == str(source_id)
-    assert references[0]["hit_count"] == 3
+    assert references[0]["matched_chunk_count"] == 3
     assert references[0]["best_score"] == 0.95
     assert len(references[0]["chunks"]) == 2
     assert references[0]["chunks"][0]["chunk_no"] == 1
@@ -77,7 +77,11 @@ def test_build_rag_references_truncates_sources_and_handles_invalid_scores():
 
     assert truncated is True
     assert len(references) == 3
-    assert references[0]["best_score"] >= references[1]["best_score"] >= references[2]["best_score"]
+    assert (
+        references[0]["best_score"]
+        >= references[1]["best_score"]
+        >= references[2]["best_score"]
+    )
 
 
 def test_build_rag_references_enriches_source_metadata_when_available():
@@ -159,3 +163,44 @@ def test_build_rag_references_adds_display_quality_and_raw_display_fields() -> N
     assert reference["display_selection_reason"] == "highest_signal_chunk"
     assert isinstance(reference["quality_flags"], list)
     assert isinstance(reference["boilerplate_likelihood"], float)
+
+
+def test_build_rag_references_selects_display_chunk_beyond_display_cap() -> None:
+    source_id = uuid4()
+    chunks = [
+        SimpleNamespace(
+            info_blob_id=source_id,
+            info_blob_title="https://kunskap.example.se/navigation",
+            chunk_no=index,
+            score=0.99 - (index * 0.01),
+            text="Hem\nMeny\nKontakt\nLogga in\nCookies",
+        )
+        for index in range(1, 6)
+    ]
+    chunks.append(
+        SimpleNamespace(
+            info_blob_id=source_id,
+            info_blob_title="https://kunskap.example.se/beslut/underlag",
+            chunk_no=6,
+            score=0.72,
+            text=(
+                "Detta underlag beskriver hur beslut dokumenteras i praktiken. "
+                "Texten forklarar vilka kriterier som ska vaxas samman, hur "
+                "bedomningen kan motiveras och vilka fragor som bor foljas upp."
+            ),
+        )
+    )
+
+    references, truncated = build_rag_references(
+        chunks,
+        max_sources=25,
+        max_chunks_per_source=2,
+    )
+
+    assert truncated is False
+    reference = references[0]
+    assert reference["matched_chunk_count"] == 6
+    assert len(reference["chunks"]) == 2
+    assert reference["display_chunk_no"] == 6
+    assert "beslut dokumenteras" in reference["display_snippet"]
+    assert reference["display_selection_reason"] == "highest_signal_chunk"

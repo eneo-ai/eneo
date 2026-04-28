@@ -4,13 +4,14 @@
   import { IconChevronRight } from "@intric/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Card from "$lib/components/ui/card/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
-  import FlowRunKnowledgeSourceCard from "./FlowRunKnowledgeSourceCard.svelte";
+  import FlowRunKnowledgeSourceRow from "./FlowRunKnowledgeSourceRow.svelte";
   import { getKnowledgeReferencePreviewReferences } from "./flowRunKnowledgeTrace";
+  import { getKnowledgeSourceSearchText } from "./flowRunKnowledgePresentation";
 
   const INLINE_REFERENCE_LIMIT = 4;
+  const MODAL_REFERENCE_LIMIT = 50;
 
   let {
     rag = null,
@@ -26,6 +27,7 @@
   let didInit = $state(false);
   let showAllSources = $state(false);
   let sourceQuery = $state("");
+  let normalizedSourceQuery = $derived(sourceQuery.trim().toLowerCase());
 
   let references = $derived(
     ((rag?.references ?? []) as FlowRunDebugRagReference[]).filter(
@@ -35,15 +37,20 @@
   let referencePreview = $derived(
     getKnowledgeReferencePreviewReferences(references, INLINE_REFERENCE_LIMIT)
   );
-  let filteredReferences = $derived(
-    sourceQuery.trim().length === 0
-      ? references
-      : references.filter((reference) => {
-          const query = sourceQuery.trim().toLowerCase();
-          return [reference.title, reference.id_short, reference.id]
-            .filter((value): value is string => typeof value === "string")
-            .some((value) => value.toLowerCase().includes(query));
-        })
+  let searchableReferences = $derived(
+    references.map((reference, index) => ({
+      reference,
+      index,
+      searchText: getKnowledgeSourceSearchText(reference)
+    }))
+  );
+  let filteredReferenceMatches = $derived(
+    normalizedSourceQuery.length === 0
+      ? searchableReferences
+      : searchableReferences.filter(({ searchText }) => searchText.includes(normalizedSourceQuery))
+  );
+  let visibleFilteredReferenceMatches = $derived(
+    filteredReferenceMatches.slice(0, MODAL_REFERENCE_LIMIT)
   );
 
   $effect(() => {
@@ -94,7 +101,7 @@
 
 {#if rag}
   <Collapsible.Root bind:open={expanded}>
-    <Card.Root class="bg-primary overflow-hidden">
+    <section class="bg-primary overflow-hidden">
       <Collapsible.Trigger
         class="hover:bg-hover-dimmer focus-visible:ring-accent-default/30 flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
         aria-controls={`flow-knowledge-trace-${stepOrder}`}
@@ -137,28 +144,8 @@
       <Collapsible.Content>
         <div
           id={`flow-knowledge-trace-${stepOrder}`}
-          class="border-default flex flex-col gap-3 border-t px-4 py-4"
+          class="border-default flex flex-col gap-3 border-t px-4 py-3"
         >
-          <div
-            class="border-default bg-hover-dimmer text-muted flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-xs"
-          >
-            <span class={["inline-flex items-center gap-1.5 font-medium", statusClass(rag.status)]}>
-              <span class="size-1.5 rounded-full bg-current opacity-80"></span>
-              {m.flow_run_knowledge_status_label()}: {statusLabel(rag.status)}
-            </span>
-            <span
-              >{m.flow_run_knowledge_sources_label()}: {rag.unique_sources ??
-                references.length}</span
-            >
-            <span>{m.flow_run_knowledge_chunks_label()}: {rag.chunks_retrieved ?? 0}</span>
-            <span
-              >{m.flow_run_knowledge_latency_label()}: {formatLatency(
-                rag.retrieval_duration_ms
-              )}</span
-            >
-            <span>{m.flow_run_knowledge_version_label()}: v{rag.version ?? 1}</span>
-          </div>
-
           {#if rag.retrieval_error_type}
             <p class="text-muted text-xs">
               {m.flow_run_knowledge_error_type()}:
@@ -167,23 +154,21 @@
           {/if}
 
           {#if references.length === 0}
-            <Card.Root size="sm" class="bg-hover-dimmer">
-              <Card.Content class="p-3">
-                <p class="text-muted text-sm">
-                  {m.flow_run_knowledge_no_sources()}
-                </p>
-              </Card.Content>
-            </Card.Root>
+            <p class="text-muted rounded-md px-3 py-6 text-center text-sm">
+              {m.flow_run_knowledge_no_sources()}
+            </p>
           {:else}
-            <div class="flex flex-col gap-2">
+            <ol
+              class="border-default bg-primary divide-default divide-y overflow-hidden rounded-lg border"
+            >
               {#each referencePreview.references as reference, index (reference.id)}
-                <FlowRunKnowledgeSourceCard {intric} {reference} {index} />
+                <FlowRunKnowledgeSourceRow {intric} {reference} {index} />
               {/each}
-            </div>
+            </ol>
 
             {#if referencePreview.hiddenCount > 0}
               <div
-                class="border-default bg-hover-dimmer flex flex-col gap-3 rounded-lg border px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+                class="border-default flex flex-col gap-3 border-t pt-3 sm:flex-row sm:items-center sm:justify-between"
               >
                 <p class="text-muted text-xs">
                   {m.flow_run_knowledge_inline_sources_summary({
@@ -205,12 +190,12 @@
           {/if}
         </div>
       </Collapsible.Content>
-    </Card.Root>
+    </section>
   </Collapsible.Root>
 
   <Dialog.Root bind:open={showAllSources}>
-    <Dialog.Content class="!max-w-5xl">
-      <Dialog.Header>
+    <Dialog.Content class="!flex max-h-[86vh] !max-w-4xl flex-col !gap-0 overflow-hidden !p-0">
+      <Dialog.Header class="px-5 pt-5 pb-3">
         <Dialog.Title>{m.flow_run_knowledge_all_sources_title()}</Dialog.Title>
         <Dialog.Description>
           {m.flow_run_knowledge_all_sources_description({
@@ -219,7 +204,7 @@
         </Dialog.Description>
       </Dialog.Header>
 
-      <div class="border-default bg-primary sticky top-0 z-10 flex flex-col gap-2 border-b pb-3">
+      <div class="border-default bg-primary flex flex-col gap-2 border-b px-5 pb-3">
         <Input
           bind:value={sourceQuery}
           placeholder={m.flow_run_knowledge_filter_sources_placeholder()}
@@ -227,24 +212,34 @@
         />
         <p class="text-muted text-xs">
           {m.flow_run_knowledge_filter_sources_summary({
-            shown: String(filteredReferences.length),
-            total: String(references.length)
+            shown: String(visibleFilteredReferenceMatches.length),
+            total: String(filteredReferenceMatches.length)
           })}
         </p>
       </div>
 
-      <div class="max-h-[62vh] overflow-y-auto pr-1">
-        <div class="flex flex-col gap-1.5 py-3">
-          {#if filteredReferences.length === 0}
-            <p class="text-muted rounded-md px-3 py-6 text-center text-sm">
-              {m.flow_run_knowledge_no_matching_sources()}
-            </p>
-          {:else}
-            {#each filteredReferences as reference, index (reference.id)}
-              <FlowRunKnowledgeSourceCard {intric} {reference} {index} />
+      <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {#if filteredReferenceMatches.length === 0}
+          <p class="text-muted rounded-md px-3 py-6 text-center text-sm">
+            {m.flow_run_knowledge_no_matching_sources()}
+          </p>
+        {:else}
+          <ol
+            class="border-default bg-primary divide-default divide-y overflow-hidden rounded-lg border"
+          >
+            {#each visibleFilteredReferenceMatches as { reference, index } (reference.id)}
+              <FlowRunKnowledgeSourceRow {intric} {reference} {index} />
             {/each}
+          </ol>
+          {#if visibleFilteredReferenceMatches.length < filteredReferenceMatches.length}
+            <p class="text-muted rounded-md px-3 py-6 text-center text-sm">
+              {m.flow_run_knowledge_filter_sources_limit_hint({
+                shown: String(visibleFilteredReferenceMatches.length),
+                total: String(filteredReferenceMatches.length)
+              })}
+            </p>
           {/if}
-        </div>
+        {/if}
       </div>
     </Dialog.Content>
   </Dialog.Root>

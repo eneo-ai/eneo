@@ -762,7 +762,7 @@ class FlowRunDebugRagReference(BaseModel):
     quality_flags: list[str] = Field(default_factory=list)
     boilerplate_likelihood: float | None = None
     snippet_quality: str | None = None
-    hit_count: int = 0
+    matched_chunk_count: int = 0
     best_score: float = 0.0
     chunks: list[FlowRunDebugRagReferenceChunk] = Field(
         default_factory=lambda: cast(list[FlowRunDebugRagReferenceChunk], [])

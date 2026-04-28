@@ -10,6 +10,15 @@
     createDocumentHighlighter,
     type FlowDocumentHighlighter
   } from "$lib/features/flows/utils/document-highlighter";
+  import {
+    getDisplayableKnowledgeChunks,
+    normalizeKnowledgeMatchedCount
+  } from "./flowRunKnowledgeTrace";
+  import {
+    formatKnowledgeSourceLabel,
+    getKnowledgeRelevanceBadgeClass,
+    getKnowledgeRelevanceLevel
+  } from "./flowRunKnowledgePresentation";
 
   let {
     intric,
@@ -17,6 +26,7 @@
     title = null,
     sourceIdShort = null,
     chunks = [],
+    matchedChunkCount = null,
     children
   }: {
     intric: Intric;
@@ -24,6 +34,7 @@
     title?: string | null;
     sourceIdShort?: string | null;
     chunks?: FlowRunDebugRagReferenceChunk[];
+    matchedChunkCount?: number | null;
     children?: Snippet<[{ showViewer: () => void }]>;
   } = $props();
 
@@ -37,11 +48,13 @@
   let activeChunkIndex: number | null = $state(null);
 
   let chunkItems = $derived(
-    (chunks ?? [])
-      .filter((chunk) => typeof chunk.snippet === "string" && chunk.snippet.trim().length > 0)
-      .sort((a, b) => (a.chunk_no ?? 0) - (b.chunk_no ?? 0))
+    getDisplayableKnowledgeChunks(chunks).sort((a, b) => (a.chunk_no ?? 0) - (b.chunk_no ?? 0))
   );
   let allSnippets = $derived(chunkItems.map((chunk) => chunk.snippet));
+  let totalMatchedChunkCount = $derived(
+    normalizeKnowledgeMatchedCount(matchedChunkCount, chunkItems.length)
+  );
+  let hasHiddenMatchedChunks = $derived(totalMatchedChunkCount > chunkItems.length);
 
   $effect(() => {
     if (isOpen && !loadingDocument && !documentText && !loadError) {
@@ -69,29 +82,15 @@
     };
   });
 
-  function cleanSourceDisplay(displayTitle: string | null, url: string | null): string {
-    if (displayTitle && !displayTitle.startsWith("http")) return displayTitle;
-    const urlStr = url || displayTitle;
-    if (!urlStr) return "";
-    try {
-      const u = new URL(urlStr);
-      const path = u.pathname.length > 30 ? u.pathname.slice(0, 27) + "..." : u.pathname;
-      return u.hostname + (path === "/" ? "" : path);
-    } catch {
-      return urlStr.slice(0, 50);
-    }
-  }
-
-  function scoreBadgeClass(score: number): string {
-    if (score >= 0.5) return "bg-positive-dimmer text-positive-stronger";
-    if (score >= 0.3) return "bg-warning-dimmer text-warning-stronger";
-    return "bg-negative-dimmer text-negative-stronger";
-  }
-
   function scoreLabel(score: number): string {
-    if (score >= 0.5) return m.flow_run_knowledge_relevance_high();
-    if (score >= 0.3) return m.flow_run_knowledge_relevance_moderate();
-    return m.flow_run_knowledge_relevance_low();
+    switch (getKnowledgeRelevanceLevel(score)) {
+      case "high":
+        return m.flow_run_knowledge_relevance_high();
+      case "moderate":
+        return m.flow_run_knowledge_relevance_moderate();
+      case "low":
+        return m.flow_run_knowledge_relevance_low();
+    }
   }
 
   async function loadDocument() {
@@ -154,6 +153,11 @@
         : (activeChunkIndex - 1 + chunkItems.length) % chunkItems.length;
     activateChunk(prev);
   }
+
+  function openSourceUrl() {
+    if (!sourceUrl) return;
+    window.open(sourceUrl, "_blank", "noopener,noreferrer");
+  }
 </script>
 
 <Dialog.Root bind:open={isOpen}>
@@ -164,7 +168,10 @@
   <Dialog.Content class="!max-w-5xl" showCloseButton={false}>
     <Dialog.Header>
       <Dialog.Title>
-        {cleanSourceDisplay(title, sourceUrl) || m.flow_run_knowledge_untitled_source()}
+        {formatKnowledgeSourceLabel(title, sourceUrl, {
+          maxPathLength: 30,
+          maxFallbackLength: 50
+        }) || m.flow_run_knowledge_untitled_source()}
       </Dialog.Title>
       <Dialog.Description class="sr-only"
         >{m.flow_run_knowledge_document_description()}</Dialog.Description
@@ -174,13 +181,19 @@
     <div class="max-h-[68vh] overflow-y-auto">
       <div class="grid gap-4 p-4 lg:grid-cols-[minmax(230px,280px)_minmax(0,1fr)]">
         <aside class="flex flex-col gap-3">
-          <div class="border-default bg-hover-dimmer rounded-md border p-3">
+          <div class="border-default border-b pb-3">
             <div class="text-secondary text-sm font-medium">
-              {cleanSourceDisplay(title, sourceUrl) || m.flow_run_knowledge_untitled_source()}
+              {formatKnowledgeSourceLabel(title, sourceUrl, {
+                maxPathLength: 30,
+                maxFallbackLength: 50
+              }) || m.flow_run_knowledge_untitled_source()}
             </div>
             {#if sourceUrl && title && !title.startsWith("http")}
               <div class="text-muted mt-0.5 truncate font-mono text-[11px]">
-                {cleanSourceDisplay(null, sourceUrl)}
+                {formatKnowledgeSourceLabel(null, sourceUrl, {
+                  maxPathLength: 30,
+                  maxFallbackLength: 50
+                })}
               </div>
             {/if}
             <div class="mt-1.5 flex items-center gap-3">
@@ -197,16 +210,13 @@
                 </Tooltip.Provider>
               {/if}
               {#if sourceUrl}
-                <!-- eslint-disable svelte/no-navigation-without-resolve -- external source URL from flow evidence -->
-                <a
-                  href={sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
                   class="text-accent-stronger text-[11px] font-medium hover:underline"
+                  onclick={openSourceUrl}
                 >
                   {m.go_to_website()}
-                </a>
-                <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                </button>
               {/if}
             </div>
           </div>
@@ -214,10 +224,18 @@
           <div class="flex flex-col gap-2">
             <div class="flex items-center justify-between">
               <h4 class="text-muted text-xs font-semibold">
-                {m.flow_run_knowledge_segment_header({ count: String(chunkItems.length) })}
+                {#if hasHiddenMatchedChunks}
+                  {m.flow_run_knowledge_segment_header_displayed({
+                    displayed: String(chunkItems.length),
+                    matched: String(totalMatchedChunkCount)
+                  })}
+                {:else}
+                  {m.flow_run_knowledge_segment_header({ count: String(chunkItems.length) })}
+                {/if}
               </h4>
               {#if activeChunkIndex !== null}
                 <button
+                  type="button"
                   class="text-accent-stronger hover:bg-hover-default rounded px-2 py-1 text-[11px] font-medium"
                   onclick={resetChunkHighlight}
                 >
@@ -230,10 +248,13 @@
                 {m.flow_run_knowledge_no_snippets()}
               </p>
             {:else}
-              <div class="flex max-h-[44vh] flex-col gap-1.5 overflow-auto pr-1">
+              <div
+                class="border-default divide-default flex max-h-[44vh] flex-col divide-y overflow-auto rounded-lg border"
+              >
                 {#each chunkItems as chunk, index (`${chunk.chunk_no ?? 0}-${index}`)}
                   <button
-                    class="border-default hover:bg-hover-default w-full rounded-md border px-2.5 py-2 text-left text-xs transition-colors"
+                    type="button"
+                    class="hover:bg-hover-default w-full px-2.5 py-2 text-left text-xs transition-colors"
                     class:bg-accent-dimmer={activeChunkIndex === index}
                     onclick={() => activateChunk(index)}
                   >
@@ -247,7 +268,7 @@
                             <span
                               class={[
                                 "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-                                scoreBadgeClass(Number(chunk.score ?? 0))
+                                getKnowledgeRelevanceBadgeClass(Number(chunk.score ?? 0))
                               ]}
                             >
                               {scoreLabel(Number(chunk.score ?? 0))}
@@ -304,6 +325,11 @@
                     {m.flow_run_knowledge_chunk_position({
                       current: String(activeChunkIndex + 1),
                       total: String(chunkItems.length)
+                    })}
+                  {:else if hasHiddenMatchedChunks}
+                    {m.flow_run_knowledge_chunks_displayed_of_matched({
+                      displayed: String(chunkItems.length),
+                      matched: String(totalMatchedChunkCount)
                     })}
                   {:else}
                     {m.flow_run_knowledge_chunk_count({ count: String(chunkItems.length) })}

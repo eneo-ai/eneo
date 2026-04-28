@@ -49,7 +49,7 @@ def build_rag_references(
                 "id_short": source_id[:8],
                 "title": reference_title,
                 "source_title_raw": reference_title,
-                "hit_count": 0,
+                "matched_chunk_count": 0,
                 "best_score": 0.0,
                 "chunks": [],
                 "_display_candidates": [],
@@ -60,17 +60,18 @@ def build_rag_references(
             references_by_source[source_id] = entry
 
         score_value = _safe_score(getattr(chunk, "score", 0.0))
-        entry["hit_count"] += 1
+        entry["matched_chunk_count"] += 1
         entry["best_score"] = max(entry["best_score"], score_value)
 
-        if len(entry["chunks"]) >= max_chunks_per_source:
+        chunk_text = str(getattr(chunk, "text", "") or "")
+        chunk_snippet = build_chunk_snippet(chunk_text, max_chars=snippet_chars)
+        if not chunk_snippet.strip():
             continue
 
-        chunk_text = str(getattr(chunk, "text", "") or "")
         chunk_payload = {
             "chunk_no": int(getattr(chunk, "chunk_no", 0) or 0),
             "score": round(score_value, 4),
-            "snippet": build_chunk_snippet(chunk_text, max_chars=snippet_chars),
+            "snippet": chunk_snippet,
             "text": chunk_text,
         }
         entry["_display_candidates"].append(chunk_payload)
@@ -89,7 +90,7 @@ def build_rag_references(
     references = list(references_by_source.values())
     references.sort(
         key=lambda reference: (
-            -int(reference["hit_count"]),
+            -int(reference["matched_chunk_count"]),
             -float(reference["best_score"]),
             int(reference["_source_order"]),
         ),

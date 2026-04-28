@@ -427,7 +427,17 @@ export type FlowRunDebugRagReference = {
   id: string;
   id_short: string;
   title?: string | null;
-  hit_count?: number | null;
+  display_title?: string | null;
+  source_display_name?: string | null;
+  source_url?: string | null;
+  source_kind?: string | null;
+  source_container_kind?: string | null;
+  source_container_name?: string | null;
+  source_container_display_name?: string | null;
+  source_container_label?: string | null;
+  source_container_id?: string | null;
+  usage_state?: string | null;
+  matched_chunk_count?: number | null;
   best_score?: number | null;
   chunks?: FlowRunDebugRagReferenceChunk[] | null;
 };

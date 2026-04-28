@@ -2805,7 +2805,7 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
     assert output.rag_metadata["references_truncated"] is False
     assert len(output.rag_metadata["references"]) == 1
     assert output.rag_metadata["references"][0]["id"] == str(source_id)
-    assert output.rag_metadata["references"][0]["hit_count"] == 2
+    assert output.rag_metadata["references"][0]["matched_chunk_count"] == 2
     assert output.rag_metadata["references"][0]["best_score"] == pytest.approx(0.91)
     assert len(output.rag_metadata["references"][0]["chunks"]) == 2
 
