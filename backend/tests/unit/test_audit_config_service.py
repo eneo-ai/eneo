@@ -1,19 +1,19 @@
 """Unit tests for AuditConfigService - testing all 7 categories and configurations."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+import pytest
+
 from intric.audit.application.audit_config_service import (
-    AuditConfigService,
     AUDIT_CONFIG_CACHE_TTL,
+    AuditConfigService,
 )
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.category_mappings import (
     CATEGORY_DESCRIPTIONS,
     CATEGORY_MAPPINGS,
 )
-
 
 # === All 7 Categories (ordered) ===
 ALL_CATEGORIES = [
@@ -28,7 +28,7 @@ ALL_CATEGORIES = [
 
 # Expected action counts per category
 EXPECTED_CATEGORY_COUNTS = {
-    "admin_actions": 23,
+    "admin_actions": 25,
     "user_actions": 29,
     "security_events": 6,
     "file_operations": 2,
@@ -315,8 +315,8 @@ class TestUpdateConfig:
         tenant_id = uuid4()
         mock_repository.find_by_tenant.return_value = []
 
-        from intric.audit.schemas.audit_config_schemas import CategoryUpdate
         from intric.audit.domain.category_mappings import CATEGORY_MAPPINGS
+        from intric.audit.schemas.audit_config_schemas import CategoryUpdate
 
         updates = [CategoryUpdate(category="admin_actions", enabled=False)]
 
@@ -662,10 +662,10 @@ class TestUpdateActionConfig:
 class TestAllCategoriesHaveCorrectActionCounts:
     """Verify each category has the expected number of actions mapped."""
 
-    def test_admin_actions_has_23_actions(self):
-        """Verify admin_actions has 23 action types."""
+    def test_admin_actions_has_25_actions(self):
+        """Verify admin_actions has 25 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "admin_actions")
-        assert count == 23
+        assert count == 25
 
     def test_user_actions_has_29_actions(self):
         """Verify user_actions has 29 action types."""

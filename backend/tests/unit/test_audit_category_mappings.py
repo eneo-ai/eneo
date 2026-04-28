@@ -54,8 +54,8 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "admin_actions"
         ]
-        assert len(admin_actions) == 23, (
-            f"Expected 23 admin actions, got {len(admin_actions)}"
+        assert len(admin_actions) == 25, (
+            f"Expected 25 admin actions, got {len(admin_actions)}"
         )
 
     def test_admin_actions_mapping(self):
@@ -75,6 +75,8 @@ class TestCategoryMappings:
             ActionType.API_KEY_SUSPENDED,
             ActionType.API_KEY_REACTIVATED,
             ActionType.API_KEY_ROTATED,
+            ActionType.API_KEY_EXPIRATION_EXTENDED,
+            ActionType.API_KEY_PURGED,
             ActionType.API_KEY_EXPIRED,
             ActionType.API_KEY_USED,
             ActionType.API_KEY_AUTH_FAILED,
@@ -297,7 +299,7 @@ class TestCategoryDistribution:
     def test_category_counts_match_expected(self):
         """Verify exact counts for each category."""
         expected_counts = {
-            "admin_actions": 23,
+            "admin_actions": 25,
             "user_actions": 29,
             "security_events": 6,
             "file_operations": 2,
