@@ -5,6 +5,7 @@
     Ban,
     Bell,
     BellOff,
+    CalendarClock,
     Eye,
     MoreVertical,
     Pencil,
@@ -24,7 +25,10 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import ExpirationPicker from "$lib/features/api-keys/ExpirationPicker.svelte";
+  import ExtendExpirationDialog from "$lib/features/api-keys/ExtendExpirationDialog.svelte";
 
   const intric = getIntric();
 
@@ -55,15 +59,21 @@
   let showRevokeDialog = $state(false);
   let showSuspendDialog = $state(false);
   let showRotateDialog = $state(false);
+  let showExtendDialog = $state(false);
   let actionPending = $state(false);
   let errorMessage = $state<string | null>(null);
   let reasonText = $state("");
   let followLoading = $state(false);
   let rotationGraceHours = $state(24);
+  let rotateAlsoExtend = $state(false);
+  let rotateNewExpiresAt = $state<string | null>(null);
+  let rotateMaxDays = $state<number | null>(null);
+  let rotateRequireExpiration = $state(false);
 
   const isActive = $derived(apiKey.state === "active");
   const isSuspended = $derived(apiKey.state === "suspended");
   const canRotate = $derived(apiKey.state === "active");
+  const canExtendExpiration = $derived(apiKey.state === "active" || apiKey.state === "suspended");
   const isAdmin = $derived(mode === "admin");
   const reasonCode = $derived(isAdmin ? ("admin_action" as const) : ("user_request" as const));
   // In user mode, personal keys can only be managed by their owner; service keys are
@@ -91,11 +101,15 @@
   }
 
   async function openRotateDialog() {
+    rotateAlsoExtend = false;
+    rotateNewExpiresAt = apiKey.expires_at ?? null;
     try {
       const constraints = await intric.apiKeys.getCreationConstraints();
       rotationGraceHours = constraints.rotation_grace_hours ?? 24;
+      rotateMaxDays = constraints.max_expiration_days ?? null;
+      rotateRequireExpiration = constraints.require_expiration ?? false;
     } catch {
-      // Fall back to default
+      // Fall back to defaults
     }
     showRotateDialog = true;
   }
@@ -103,9 +117,12 @@
   async function rotateKey() {
     actionPending = true;
     try {
+      const params = rotateAlsoExtend
+        ? { id: apiKey.id, update_expiration: true, expires_at: rotateNewExpiresAt }
+        : { id: apiKey.id };
       const response = isAdmin
-        ? await intric.apiKeys.admin.rotate({ id: apiKey.id })
-        : await intric.apiKeys.rotate({ id: apiKey.id });
+        ? await intric.apiKeys.admin.rotate(params)
+        : await intric.apiKeys.rotate(params);
       if (!response?.secret) {
         throw new Error("rotate_missing_secret");
       }
@@ -233,6 +250,13 @@
         <DropdownMenu.Item onclick={openRotateDialog} disabled={!canManage}>
           <RotateCcw />
           {isAdmin ? m.api_keys_admin_action_rotate() : m.api_keys_action_rotate()}
+        </DropdownMenu.Item>
+      {/if}
+
+      {#if canExtendExpiration}
+        <DropdownMenu.Item onclick={() => (showExtendDialog = true)} disabled={!canManage}>
+          <CalendarClock />
+          {isAdmin ? m.api_keys_admin_action_extend() : m.api_keys_action_extend()}
         </DropdownMenu.Item>
       {/if}
 
@@ -422,6 +446,23 @@
           {m.api_keys_rotate_grace_info({ hours: rotationGraceHours })}
         </Alert.Description>
       </Alert.Root>
+
+      <label class="flex items-center gap-2 text-sm">
+        <Checkbox
+          checked={rotateAlsoExtend}
+          onCheckedChange={(v) => (rotateAlsoExtend = v === true)}
+        />
+        <span>{m.api_keys_rotate_also_extend_label()}</span>
+      </label>
+
+      {#if rotateAlsoExtend}
+        <ExpirationPicker
+          bind:value={rotateNewExpiresAt}
+          maxDays={rotateMaxDays}
+          requireExpiration={rotateRequireExpiration}
+          disabled={actionPending}
+        />
+      {/if}
     </div>
 
     <Dialog.Footer>
@@ -436,3 +477,5 @@
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
+
+<ExtendExpirationDialog {apiKey} {mode} bind:open={showExtendDialog} {onChanged} />

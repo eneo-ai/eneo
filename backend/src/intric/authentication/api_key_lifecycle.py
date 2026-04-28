@@ -18,9 +18,11 @@ from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
+    ApiKeyExtendRequest,
     ApiKeyHashVersion,
     ApiKeyOwnership,
     ApiKeyPermission,
+    ApiKeyRotateRequest,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyStateChangeRequest,
@@ -151,6 +153,7 @@ class ApiKeyLifecycleService:
         self,
         *,
         key_id: UUID,
+        request: ApiKeyRotateRequest | None = None,
         skip_manage_authorization: bool = False,
         ip_address: str | None = None,
         request_id: UUID | None = None,
@@ -178,6 +181,20 @@ class ApiKeyLifecycleService:
             raise
 
         assert key is not None
+
+        update_expiration = bool(request and request.update_expiration)
+        new_expires_at = key.expires_at
+        if update_expiration:
+            new_expires_at = await self._validate_expiration_change(
+                user=user,
+                key=key,
+                new_expires_at=request.expires_at if request else None,
+                failure_action=ActionType.API_KEY_ROTATED,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+
         secret = self._generate_secret(key.key_prefix)
         key_hash = self._hash_hmac(secret)
 
@@ -204,7 +221,7 @@ class ApiKeyLifecycleService:
             description=key.description,
             allowed_origins=key.allowed_origins,
             allowed_ips=key.allowed_ips,
-            expires_at=key.expires_at,
+            expires_at=new_expires_at,
             rate_limit=key.rate_limit,
             resource_permissions=resource_permissions_value,
             state=ApiKeyState.ACTIVE.value,
@@ -245,6 +262,18 @@ class ApiKeyLifecycleService:
                 request_id=request_id,
                 user_agent=user_agent,
             )
+
+            if update_expiration and new_expires_at != key.expires_at:
+                await self._log_expiration_extended(
+                    user=user,
+                    key=record,
+                    previous_expires_at=key.expires_at,
+                    new_expires_at=new_expires_at,
+                    via="rotation",
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                )
 
         return ApiKeyCreatedResponse(
             api_key=ApiKeyV2.model_validate(record),
@@ -407,6 +436,70 @@ class ApiKeyLifecycleService:
                 request_id=request_id,
                 user_agent=user_agent,
             )
+
+        return ApiKeyV2.model_validate(updated_key)
+
+    async def extend_expiration(
+        self,
+        *,
+        key_id: UUID,
+        request: ApiKeyExtendRequest,
+        skip_manage_authorization: bool = False,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
+    ) -> ApiKeyV2:
+        user = self._require_user()
+        key: ApiKeyV2InDB | None = None
+        try:
+            key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
+            if not skip_manage_authorization:
+                await self.policy_service.ensure_manage_authorized(key=key)
+                await self.policy_service.ensure_ownership_authorized(key=key)
+        except ApiKeyValidationError as exc:
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_EXPIRATION_EXTENDED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise
+
+        assert key is not None
+        new_expires_at = await self._validate_expiration_change(
+            user=user,
+            key=key,
+            new_expires_at=request.expires_at,
+            failure_action=ActionType.API_KEY_EXPIRATION_EXTENDED,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
+
+        if new_expires_at == key.expires_at:
+            return ApiKeyV2.model_validate(key)
+
+        updated = await self.api_key_repo.update(
+            key_id=key.id,
+            tenant_id=key.tenant_id,
+            expires_at=new_expires_at,
+        )
+        updated_key = updated or key
+
+        await self._log_expiration_extended(
+            user=user,
+            key=updated_key,
+            previous_expires_at=key.expires_at,
+            new_expires_at=new_expires_at,
+            via="standalone",
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
 
         return ApiKeyV2.model_validate(updated_key)
 
@@ -847,6 +940,116 @@ class ApiKeyLifecycleService:
             plain_key.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
+
+    async def _validate_expiration_change(
+        self,
+        *,
+        user: "UserInDB",
+        key: ApiKeyV2InDB,
+        new_expires_at: datetime | None,
+        failure_action: ActionType,
+        ip_address: str | None,
+        request_id: UUID | None,
+        user_agent: str | None,
+    ) -> datetime | None:
+        effective_state = compute_effective_state(
+            revoked_at=key.revoked_at,
+            suspended_at=key.suspended_at,
+            expires_at=key.expires_at,
+            rotation_grace_until=getattr(key, "rotation_grace_until", None),
+        )
+        if effective_state in (ApiKeyState.REVOKED, ApiKeyState.EXPIRED):
+            exc = ApiKeyValidationError(
+                status_code=400,
+                code="invalid_request",
+                message="Cannot change expiration on a revoked or expired API key.",
+            )
+            await self._log_lifecycle_failure(
+                action=failure_action,
+                user=user,
+                key_id=key.id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise exc
+
+        if new_expires_at is not None and new_expires_at < datetime.now(timezone.utc):
+            exc = ApiKeyValidationError(
+                status_code=400,
+                code="invalid_request",
+                message="expires_at must be in the future.",
+            )
+            await self._log_lifecycle_failure(
+                action=failure_action,
+                user=user,
+                key_id=key.id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise exc
+
+        try:
+            await self.policy_service.validate_update_request(
+                key=key, updates={"expires_at": new_expires_at}
+            )
+        except ApiKeyValidationError as exc:
+            await self._log_lifecycle_failure(
+                action=failure_action,
+                user=user,
+                key_id=key.id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise
+
+        return new_expires_at
+
+    async def _log_expiration_extended(
+        self,
+        *,
+        user: "UserInDB",
+        key: ApiKeyV2InDB,
+        previous_expires_at: datetime | None,
+        new_expires_at: datetime | None,
+        via: str,
+        ip_address: str | None,
+        request_id: UUID | None,
+        user_agent: str | None,
+    ) -> None:
+        if self.audit_service is None:
+            return
+
+        await self.audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.API_KEY_EXPIRATION_EXTENDED,
+            entity_type=EntityType.API_KEY,
+            entity_id=key.id,
+            description=f"Changed expiration on API key '{key.name}'",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=key,
+                changes={
+                    "expires_at": {
+                        "old": previous_expires_at,
+                        "new": new_expires_at,
+                    }
+                },
+                extra={"via": via},
+            ),
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
 
     def _require_user(self) -> "UserInDB":
         if self.user is None:

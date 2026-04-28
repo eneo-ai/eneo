@@ -22,6 +22,7 @@ class ActionType(str, Enum):
     API_KEY_SUSPENDED = "api_key_suspended"
     API_KEY_REACTIVATED = "api_key_reactivated"
     API_KEY_ROTATED = "api_key_rotated"
+    API_KEY_EXPIRATION_EXTENDED = "api_key_expiration_extended"
     API_KEY_EXPIRED = "api_key_expired"
     API_KEY_USED = "api_key_used"
     API_KEY_AUTH_FAILED = "api_key_auth_failed"

@@ -331,6 +331,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/api-keys/{id}/extend": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change API key expiration
+     * @description Change an API key's expiration date. Pass null to remove the expiration if the tenant policy allows it.
+     */
+    post: operations["extend_api_key_expiration_api_v1_api_keys__id__extend_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/api-keys/{id}/suspend": {
     parameters: {
       query?: never;
@@ -2273,6 +2293,26 @@ export interface paths {
      * @description Rotate an API key and return the new one-time secret.
      */
     post: operations["rotate_api_key_admin_api_v1_admin_api_keys__id__rotate_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/api-keys/{id}/extend": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change tenant API key expiration
+     * @description Change an API key's expiration date. Pass null to remove the expiration if the tenant policy allows it.
+     */
+    post: operations["extend_api_key_expiration_admin_api_v1_admin_api_keys__id__extend_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -6779,6 +6819,7 @@ export interface components {
       | "api_key_suspended"
       | "api_key_reactivated"
       | "api_key_rotated"
+      | "api_key_expiration_extended"
       | "api_key_expired"
       | "api_key_used"
       | "api_key_auth_failed"
@@ -7050,6 +7091,11 @@ export interface components {
       /** @default exact_secret */
       match_reason?: components["schemas"]["ApiKeySearchMatchReason"];
     };
+    /** ApiKeyExtendRequest */
+    ApiKeyExtendRequest: {
+      /** Expires At */
+      expires_at?: string | null;
+    };
     /**
      * ApiKeyListResponse
      * @description Response model for the API key list endpoint. Uses Optional total_count
@@ -7198,6 +7244,16 @@ export interface components {
       max_rate_limit_override?: number | null;
       /** Rotation Grace Hours */
       rotation_grace_hours?: number | null;
+    };
+    /** ApiKeyRotateRequest */
+    ApiKeyRotateRequest: {
+      /**
+       * Update Expiration
+       * @default false
+       */
+      update_expiration?: boolean;
+      /** Expires At */
+      expires_at?: string | null;
     };
     /**
      * ApiKeyScopeType
@@ -18167,7 +18223,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyRotateRequest"] | null;
+      };
+    };
     responses: {
       /** @description Rotated API key and one-time secret. */
       200: {
@@ -18200,6 +18260,107 @@ export interface operations {
            *     }
            */
           "application/json": components["schemas"]["ApiKeyCreatedResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  extend_api_key_expiration_api_v1_api_keys__id__extend_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyExtendRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated API key. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "id": "3cbf5fde-7288-4f03-bf06-f71c14f76854",
+           *       "name": "Production Backend",
+           *       "description": "Used by backend workers",
+           *       "key_type": "sk_",
+           *       "permission": "write",
+           *       "scope_type": "space",
+           *       "scope_id": "11111111-1111-1111-1111-111111111111",
+           *       "allowed_ips": [
+           *         "203.0.113.0/24"
+           *       ],
+           *       "rate_limit": 5000,
+           *       "state": "active",
+           *       "key_prefix": "sk_",
+           *       "key_suffix": "ab12cd34",
+           *       "expires_at": "2030-01-01T00:00:00Z",
+           *       "created_at": "2026-02-05T12:00:00Z",
+           *       "updated_at": "2026-02-05T12:00:00Z"
+           *     }
+           */
+          "application/json": components["schemas"]["ApiKeyV2"];
         };
       };
       /** @description Bad Request */
@@ -24474,7 +24635,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyRotateRequest"] | null;
+      };
+    };
     responses: {
       /** @description Rotated tenant API key and one-time secret. */
       200: {
@@ -24508,6 +24673,86 @@ export interface operations {
            *     }
            */
           "application/json": components["schemas"]["ApiKeyCreatedResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  extend_api_key_expiration_admin_api_v1_admin_api_keys__id__extend_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyExtendRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated API key. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
         };
       };
       /** @description Bad Request */

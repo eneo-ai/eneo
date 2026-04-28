@@ -1352,6 +1352,121 @@ async def test_rotate_preserves_resource_permissions(client, default_user_token)
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_extend_expiration_changes_date(client, default_user_token):
+    initial = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Extend Target",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "expires_at": initial,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
+    extend_response = await client.post(
+        f"/api/v1/api-keys/{key_id}/extend",
+        json={"expires_at": new_expiry},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert extend_response.status_code == 200, extend_response.text
+    assert extend_response.json()["expires_at"].startswith(new_expiry[:10])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_extend_expiration_rejects_past_date(client, default_user_token):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Extend Past Date",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    response = await client.post(
+        f"/api/v1/api-keys/{key_id}/extend",
+        json={"expires_at": past},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_request"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_extend_expiration_rejects_revoked_key(client, default_user_token):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Extend Revoked",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    revoke_response = await client.post(
+        f"/api/v1/api-keys/{key_id}/revoke",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert revoke_response.status_code == 200, revoke_response.text
+
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    response = await client.post(
+        f"/api/v1/api-keys/{key_id}/extend",
+        json={"expires_at": new_expiry},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_request"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_rotate_can_update_expiration(client, default_user_token):
+    initial = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Rotate With Extend",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "expires_at": initial,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=180)).isoformat()
+    rotate_response = await client.post(
+        f"/api/v1/api-keys/{key_id}/rotate",
+        json={"update_expiration": True, "expires_at": new_expiry},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert rotate_response.status_code == 200, rotate_response.text
+    rotated = rotate_response.json()["api_key"]
+    assert rotated["expires_at"].startswith(new_expiry[:10])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_method_aware_guard_blocks_write_key_on_app_run_delete(
     client,
     default_user_token,

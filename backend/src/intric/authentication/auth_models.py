@@ -265,6 +265,15 @@ class ApiKeyExactLookupRequest(BaseModel):
     secret: str
 
 
+class ApiKeyExtendRequest(BaseModel):
+    expires_at: Optional[datetime] = None
+
+
+class ApiKeyRotateRequest(BaseModel):
+    update_expiration: bool = False
+    expires_at: Optional[datetime] = None
+
+
 class ApiKeyUserSnapshot(BaseModel):
     id: UUID
     email: Optional[str] = None
