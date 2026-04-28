@@ -821,6 +821,85 @@ class ApiKeyLifecycleService:
 
         return ApiKeyV2.model_validate(updated_key)
 
+    async def purge_key(
+        self,
+        *,
+        key_id: UUID,
+        skip_manage_authorization: bool = False,
+        ip_address: str | None = None,
+        request_id: UUID | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        user = self._require_user()
+        key: ApiKeyV2InDB | None = None
+        try:
+            key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
+            if not skip_manage_authorization:
+                await self.policy_service.ensure_manage_authorized(key=key)
+                await self.policy_service.ensure_ownership_authorized(key=key)
+        except ApiKeyValidationError as exc:
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_PURGED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise
+
+        assert key is not None
+        effective_state = compute_effective_state(
+            revoked_at=key.revoked_at,
+            suspended_at=key.suspended_at,
+            expires_at=key.expires_at,
+            rotation_grace_until=getattr(key, "rotation_grace_until", None),
+        )
+        if effective_state not in (ApiKeyState.REVOKED, ApiKeyState.EXPIRED):
+            exc = ApiKeyValidationError(
+                status_code=400,
+                code="invalid_request",
+                message="Only revoked or expired API keys can be deleted.",
+            )
+            await self._log_lifecycle_failure(
+                action=ActionType.API_KEY_PURGED,
+                user=user,
+                key_id=key_id,
+                key=key,
+                error=exc,
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+            raise exc
+
+        # Log before deletion so the audit row references a still-valid key snapshot.
+        if self.audit_service is not None:
+            await self.audit_service.log_async(
+                tenant_id=user.tenant_id,
+                actor_id=user.id,
+                action=ActionType.API_KEY_PURGED,
+                entity_type=EntityType.API_KEY,
+                entity_id=key.id,
+                description=f"Permanently deleted API key '{key.name}'",
+                metadata=AuditMetadata.standard(
+                    actor=user,
+                    target=key,
+                    extra={
+                        "previous_state": effective_state.value,
+                        "key_prefix": key.key_prefix,
+                        "key_suffix": key.key_suffix,
+                    },
+                ),
+                ip_address=ip_address,
+                request_id=request_id,
+                user_agent=user_agent,
+            )
+
+        await self.api_key_repo.delete(key_id=key.id, tenant_id=key.tenant_id)
+
     async def expire_key(self, *, key_id: UUID, tenant_id: UUID) -> ApiKeyV2 | None:
         key = await self.api_key_repo.get(key_id=key_id, tenant_id=tenant_id)
         if key is None:

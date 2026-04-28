@@ -10,7 +10,8 @@
     MoreVertical,
     Pencil,
     RefreshCw,
-    RotateCcw
+    RotateCcw,
+    Trash2
   } from "lucide-svelte";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
@@ -22,6 +23,7 @@
   } from "$lib/features/api-keys/notificationPreferences";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -59,6 +61,7 @@
   let showSuspendDialog = $state(false);
   let showRotateDialog = $state(false);
   let showExtendDialog = $state(false);
+  let showPurgeDialog = $state(false);
   let actionPending = $state(false);
   let errorMessage = $state<string | null>(null);
   let reasonText = $state("");
@@ -68,6 +71,7 @@
   const isSuspended = $derived(apiKey.state === "suspended");
   const canRotate = $derived(apiKey.state === "active");
   const canExtendExpiration = $derived(apiKey.state === "active" || apiKey.state === "suspended");
+  const canPurge = $derived(apiKey.state === "revoked" || apiKey.state === "expired");
   const isAdmin = $derived(mode === "admin");
   const reasonCode = $derived(isAdmin ? ("admin_action" as const) : ("user_request" as const));
   // In user mode, personal keys can only be managed by their owner; service keys are
@@ -147,6 +151,25 @@
     }
   }
 
+  async function purgeKey() {
+    actionPending = true;
+    try {
+      if (isAdmin) {
+        await intric.apiKeys.admin.purge({ id: apiKey.id });
+      } else {
+        await intric.apiKeys.purge({ id: apiKey.id });
+      }
+      onChanged();
+      showPurgeDialog = false;
+      toast.success(m.api_keys_action_purge());
+    } catch (error) {
+      console.error(error);
+      toast.error(getErrorMessage(error));
+    } finally {
+      actionPending = false;
+    }
+  }
+
   async function toggleFollow() {
     followLoading = true;
     try {
@@ -165,7 +188,7 @@
   }
 </script>
 
-{#if apiKey.state !== "revoked" || isAdmin}
+{#if apiKey.state !== "revoked" || isAdmin || canPurge}
   <DropdownMenu.Root>
     <DropdownMenu.Trigger>
       {#snippet child({ props })}
@@ -256,6 +279,18 @@
           {isAdmin ? m.api_keys_admin_action_revoke() : m.api_keys_action_revoke()}
         </DropdownMenu.Item>
       {/if}
+
+      {#if canPurge}
+        <DropdownMenu.Separator />
+        <DropdownMenu.Item
+          variant="destructive"
+          onclick={() => (showPurgeDialog = true)}
+          disabled={!canManage}
+        >
+          <Trash2 />
+          {isAdmin ? m.api_keys_admin_action_purge() : m.api_keys_action_purge()}
+        </DropdownMenu.Item>
+      {/if}
     </DropdownMenu.Content>
   </DropdownMenu.Root>
 {/if}
@@ -341,3 +376,26 @@
 <RotateApiKeyDialog {apiKey} {mode} bind:open={showRotateDialog} {onSecret} />
 
 <ExtendExpirationDialog {apiKey} {mode} bind:open={showExtendDialog} {onChanged} />
+
+<AlertDialog.Root bind:open={showPurgeDialog}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.api_keys_purge_dialog_title()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.api_keys_purge_dialog_description()}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <div class="bg-subtle border-default rounded-lg border p-3">
+      <p class="text-default text-sm font-medium">{apiKey.name}</p>
+      <p class="text-muted mt-0.5 font-mono text-xs">
+        {apiKey.key_prefix}...{apiKey.key_suffix}
+      </p>
+    </div>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action variant="destructive" onclick={purgeKey} disabled={actionPending}>
+        {m.api_keys_purge_confirm()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

@@ -1438,6 +1438,65 @@ async def test_extend_expiration_rejects_revoked_key(client, default_user_token)
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_purge_revoked_key(client, default_user_token):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Purge Target",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    revoke = await client.post(
+        f"/api/v1/api-keys/{key_id}/revoke",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert revoke.status_code == 200, revoke.text
+
+    purge = await client.post(
+        f"/api/v1/api-keys/{key_id}/purge",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert purge.status_code == 204, purge.text
+
+    get_after = await client.get(
+        f"/api/v1/api-keys/{key_id}",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert get_after.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_purge_active_key_rejected(client, default_user_token):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Active No Purge",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    purge = await client.post(
+        f"/api/v1/api-keys/{key_id}/purge",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert purge.status_code == 400
+    assert purge.json()["code"] == "invalid_request"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_rotate_can_update_expiration(client, default_user_token):
     initial = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
     create_response = await client.post(

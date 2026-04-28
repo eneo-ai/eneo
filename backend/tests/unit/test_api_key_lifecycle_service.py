@@ -601,6 +601,120 @@ async def test_rotate_with_update_expiration_logs_two_audits(user):
 
 
 @pytest.mark.asyncio
+async def test_purge_revoked_key_deletes_and_audits(user):
+    key = _make_key(
+        tenant_id=user.tenant_id,
+        revoked_at=datetime.now(timezone.utc),
+        state=ApiKeyState.REVOKED,
+    )
+    repo = AsyncMock()
+    repo.get.return_value = key
+    repo.delete.return_value = True
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
+    )
+    audit = AsyncMock()
+
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        user=user,
+    )
+
+    await service.purge_key(key_id=key.id)
+
+    repo.delete.assert_awaited_once_with(key_id=key.id, tenant_id=key.tenant_id)
+    audit.log_async.assert_awaited_once()
+    call = audit.log_async.call_args.kwargs
+    assert call["action"] == ActionType.API_KEY_PURGED
+    metadata = call["metadata"]
+    assert metadata["extra"]["previous_state"] == "revoked"
+
+
+@pytest.mark.asyncio
+async def test_purge_expired_key_deletes(user):
+    key = _make_key(
+        tenant_id=user.tenant_id,
+        expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+    )
+    repo = AsyncMock()
+    repo.get.return_value = key
+    repo.delete.return_value = True
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
+    )
+    audit = AsyncMock()
+
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        user=user,
+    )
+
+    await service.purge_key(key_id=key.id)
+
+    repo.delete.assert_awaited_once()
+    metadata = audit.log_async.call_args.kwargs["metadata"]
+    assert metadata["extra"]["previous_state"] == "expired"
+
+
+@pytest.mark.asyncio
+async def test_purge_active_key_rejected(user):
+    key = _make_key(tenant_id=user.tenant_id)
+    repo = AsyncMock()
+    repo.get.return_value = key
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
+    )
+    audit = AsyncMock()
+
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        user=user,
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.purge_key(key_id=key.id)
+
+    assert "revoked or expired" in exc.value.message
+    repo.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_purge_suspended_key_rejected(user):
+    key = _make_key(
+        tenant_id=user.tenant_id,
+        suspended_at=datetime.now(timezone.utc),
+        state=ApiKeyState.SUSPENDED,
+    )
+    repo = AsyncMock()
+    repo.get.return_value = key
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
+    )
+    audit = AsyncMock()
+
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        user=user,
+    )
+
+    with pytest.raises(ApiKeyValidationError):
+        await service.purge_key(key_id=key.id)
+    repo.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_rotate_with_update_expiration_but_same_date_skips_extension_event(user):
     """When update_expiration=true but the date is unchanged, only the rotation
     event is emitted — there is no expiration change to record."""

@@ -146,6 +146,19 @@ export function initApiKeys(client) {
     },
 
     /**
+     * Permanently delete a revoked or expired API key.
+     * @param {{id: string}} params
+     * @returns {Promise<void>}
+     * @throws {IntricError}
+     * */
+    purge: async ({ id }) => {
+      await client.fetch("/api/v1/api-keys/{id}/purge", {
+        method: "post",
+        params: { path: { id } }
+      });
+    },
+
+    /**
      * Suspend an API key.
      * @param {{id: string, request?: ApiKeyStateChangeRequest}} params
      * @returns {Promise<ApiKeyV2>}
@@ -470,6 +483,19 @@ export function initApiKeys(client) {
           requestBody: { "application/json": { expires_at } }
         });
         return await client.fetch("/api/v1/admin/api-keys/{id}/extend", options);
+      },
+
+      /**
+       * Permanently delete a revoked or expired API key (admin only).
+       * @param {{id: string}} params
+       * @returns {Promise<void>}
+       * @throws {IntricError}
+       * */
+      purge: async ({ id }) => {
+        await client.fetch("/api/v1/admin/api-keys/{id}/purge", {
+          method: "post",
+          params: { path: { id } }
+        });
       },
 
       /**
