@@ -54,15 +54,14 @@
   function setDateFromPicker(next: DateValue | undefined) {
     if (!next) return;
     customDate = next.toString();
-    datePopoverOpen = false;
   }
 
-  function formatDateOnly(iso: string): string {
-    return new Date(`${iso}T00:00:00`).toLocaleDateString(locale, {
+  function formatDateTimeShort(iso: string, time: string): string {
+    return `${new Date(`${iso}T00:00:00`).toLocaleDateString(locale, {
       year: "numeric",
       month: "short",
       day: "numeric"
-    });
+    })}, ${time}`;
   }
 
   // Preset options with their days (using getter for translations)
@@ -218,55 +217,50 @@
       class="border-default bg-primary space-y-3 rounded-lg border p-4 shadow-sm"
       transition:fly={{ y: -4, duration: 150 }}
     >
-      <div class="grid gap-3 sm:grid-cols-2">
-        <div class="flex flex-col gap-1.5">
-          <Label for="expiration-date-trigger" class="text-default text-xs font-medium">
-            {m.api_keys_exp_date()}
-          </Label>
-          <Popover.Root bind:open={datePopoverOpen}>
-            <Popover.Trigger
-              id="expiration-date-trigger"
-              {disabled}
-              class="border-default bg-primary text-default hover:bg-subtle focus-visible:border-ring focus-visible:ring-ring/50 inline-flex h-10 w-full items-center justify-between rounded-md border px-3 text-sm transition-colors focus-visible:ring-3 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <span class="flex items-center gap-2">
-                <CalendarIcon class="text-secondary h-4 w-4" aria-hidden="true" />
-                {dateValue ? formatDateOnly(customDate) : m.api_keys_exp_custom()}
-              </span>
-              <ChevronDown class="text-secondary h-4 w-4" aria-hidden="true" />
-            </Popover.Trigger>
-            <Popover.Content class="w-auto p-0" align="start">
-              <Calendar
-                type="single"
-                value={dateValue}
-                onValueChange={setDateFromPicker}
-                minValue={minDateValue}
-                maxValue={maxDateValue}
-                captionLayout="dropdown"
-                {locale}
+      <div class="flex flex-col gap-1.5">
+        <Label for="expiration-datetime-trigger" class="text-default text-xs font-medium">
+          {m.api_keys_expiration()}
+        </Label>
+        <Popover.Root bind:open={datePopoverOpen}>
+          <Popover.Trigger
+            id="expiration-datetime-trigger"
+            {disabled}
+            class="border-default bg-primary text-default hover:bg-subtle focus-visible:border-ring focus-visible:ring-ring/50 inline-flex h-10 w-full items-center justify-between rounded-md border px-3 text-sm transition-colors focus-visible:ring-3 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span class="flex items-center gap-2">
+              <CalendarIcon class="text-secondary h-4 w-4" aria-hidden="true" />
+              {dateValue
+                ? formatDateTimeShort(customDate, customTime)
+                : m.api_keys_exp_pick_datetime()}
+            </span>
+            <ChevronDown class="text-secondary h-4 w-4" aria-hidden="true" />
+          </Popover.Trigger>
+          <Popover.Content class="w-auto p-0" align="start">
+            <Calendar
+              type="single"
+              value={dateValue}
+              onValueChange={setDateFromPicker}
+              minValue={minDateValue}
+              maxValue={maxDateValue}
+              captionLayout="dropdown"
+              {locale}
+            />
+            <div class="border-default flex items-center gap-2 border-t px-3 py-2.5">
+              <Label for="expiration-time" class="text-secondary flex items-center gap-1.5 text-xs">
+                <Clock class="h-3.5 w-3.5" aria-hidden="true" />
+                {m.api_keys_exp_time()}
+              </Label>
+              <Input
+                id="expiration-time"
+                type="time"
+                bind:value={customTime}
+                {disabled}
+                style="color-scheme: light"
+                class="bg-primary text-default ml-auto h-9 w-32"
               />
-            </Popover.Content>
-          </Popover.Root>
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <Label for="expiration-time" class="text-default text-xs font-medium">
-            {m.api_keys_exp_time()}
-          </Label>
-          <div class="relative">
-            <Clock
-              class="text-secondary pointer-events-none absolute top-1/2 left-3 z-10 h-4 w-4 -translate-y-1/2"
-              aria-hidden="true"
-            />
-            <Input
-              id="expiration-time"
-              type="time"
-              bind:value={customTime}
-              {disabled}
-              style="color-scheme: light"
-              class="bg-primary text-default h-10 pl-9"
-            />
-          </div>
-        </div>
+            </div>
+          </Popover.Content>
+        </Popover.Root>
       </div>
 
       {#if maxDays}

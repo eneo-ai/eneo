@@ -2462,6 +2462,7 @@
   "api_keys_extend_summary_new": "Nytt utgångsdatum",
   "api_keys_extend_summary_no_expiration": "Ingen utgång",
   "api_keys_extend_no_change_hint": "Välj ett nytt datum för att tillämpa en ändring.",
+  "api_keys_exp_pick_datetime": "Välj datum och tid",
   "api_keys_action_suspend": "Pausa",
   "api_keys_action_reactivate": "Återaktivera",
   "api_keys_action_revoke": "Återkalla",

@@ -2426,6 +2426,7 @@
   "api_keys_extend_summary_new": "New expiration",
   "api_keys_extend_summary_no_expiration": "No expiration",
   "api_keys_extend_no_change_hint": "Pick a new date to apply a change.",
+  "api_keys_exp_pick_datetime": "Pick date and time",
   "api_keys_action_suspend": "Suspend",
   "api_keys_action_reactivate": "Reactivate",
   "api_keys_action_revoke": "Revoke",
