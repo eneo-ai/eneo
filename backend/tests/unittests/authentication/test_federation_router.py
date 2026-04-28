@@ -702,18 +702,6 @@ async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email
 
 # --- JIT Provisioning Tests ---
 
-from intric.predefined_roles.predefined_role import PredefinedRoleInDB
-
-
-class PredefinedRolesRepoStub:
-    def __init__(self, user_role: PredefinedRoleInDB | None):
-        self._user_role = user_role
-
-    async def get_predefined_role_by_name(self, name):
-        if self._user_role and self._user_role.name == name.value:
-            return self._user_role
-        return None
-
 
 class UserRepoStubForJIT:
     """User repo stub that can simulate a user not existing initially, then being created."""
@@ -769,7 +757,6 @@ class MockContainerForJIT:
         auth_service,
         redis_client,
         encryption_service,
-        predefined_roles_repo=None,
         audit_service=None,
         allowed_origin_repo=None,
     ):
@@ -778,7 +765,6 @@ class MockContainerForJIT:
         self._auth_service = auth_service
         self._redis_client = redis_client
         self._encryption_service = encryption_service
-        self._predefined_roles_repo = predefined_roles_repo
         self._audit_service = audit_service
         self._allowed_origin_repo = allowed_origin_repo
 
@@ -797,9 +783,6 @@ class MockContainerForJIT:
     def user_repo(self):
         return self._user_repo
 
-    def predefined_roles_repo(self):
-        return self._predefined_roles_repo
-
     def audit_service(self):
         return self._audit_service
 
@@ -816,9 +799,9 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
     redis_client = FakeRedis()
     tenant_id = uuid4()
     slug = "tenant-jit"
-    role_id = uuid4()
+    default_role_id = uuid4()
 
-    # Tenant with provisioning enabled
+    # Tenant with provisioning enabled and default role set
     tenant = TenantInDB(
         id=tenant_id,
         name="Tenant JIT",
@@ -827,6 +810,7 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
         quota_limit=1024**3,
         state=TenantState.ACTIVE,
         provisioning=True,  # JIT provisioning enabled
+        default_role_id=default_role_id,
         modules=[],
         api_credentials={},
         federation_config={
@@ -845,15 +829,6 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
         updated_at=datetime.now(timezone.utc),
     )
 
-    # User role
-    user_role = PredefinedRoleInDB(
-        id=role_id,
-        name="User",
-        permissions=[],
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-
     # User repo that returns None (user doesn't exist)
     user_repo = UserRepoStubForJIT(existing_user=None, tenant=tenant)
     audit_service = AuditServiceStub()
@@ -864,7 +839,6 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
         auth_service=AuthServiceStub(),
         redis_client=redis_client,
         encryption_service=EncryptionService(None),
-        predefined_roles_repo=PredefinedRolesRepoStub(user_role),
         audit_service=audit_service,
     )
 
@@ -976,7 +950,6 @@ async def test_jit_provisioning_returns_403_when_disabled(monkeypatch):
         auth_service=AuthServiceStub(),
         redis_client=redis_client,
         encryption_service=EncryptionService(None),
-        predefined_roles_repo=None,
         audit_service=None,
     )
 

@@ -739,12 +739,22 @@ class TestGuardrailPolicyEnforcement:
 # ---------------------------------------------------------------------------
 
 
-class TestUserListingEndpointGuards:
-    """Verify GET /users/ has router-level admin scope + permission guards.
+class TestUserListingEndpointSplitGate:
+    """Verify GET /users/ is bearer-open but API-key-admin-gated.
 
-    The listing endpoint is on users_admin_router (mounted with router-level
-    guards) rather than the main users router, so the config-stash pattern
-    works correctly.
+    The listing endpoint returns UserSparse (id, email, username, timestamps)
+    — a strict subset of the Microsoft 365 GAL already available to every
+    authenticated tenant member. It is mounted on the non-admin `router`
+    with route-level API-key guards that stash deferred-enforcement state
+    consumed by `_resolve_api_key`. Those guards are no-ops for bearer auth
+    (where `request.state.api_key` is never set), so space-admins can
+    populate member/group pickers with their bearer token while scoped API
+    keys (space/assistant/app/etc.) cannot enumerate the tenant directory
+    outside their scope.
+
+    The handler body does NOT call `validate_permission(ADMIN)`; bearer-token
+    tenant members pass through. Mutating endpoints on /users/admin/* remain
+    admin-gated; see TestAdminApiKeyGuardContract below.
     """
 
     def _get_users_listing_route(self):
@@ -768,79 +778,37 @@ class TestUserListingEndpointGuards:
                     return True
         return False
 
-    def test_space_scoped_read_key_denied_by_scope(self):
-        """Space-scoped read key -> GET /users/ => 403 insufficient_scope."""
-        key = _make_key(
-            permission=ApiKeyPermission.READ.value,
-            scope_type=ApiKeyScopeType.SPACE.value,
-            scope_id=str(uuid4()),
-        )
-        request = _scope_request()
-
-        svc = _make_user_service()
-
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            import asyncio
-
-            asyncio.get_event_loop().run_until_complete(
-                svc._enforce_api_key_scope(
-                    request,
-                    key,
-                    {"resource_type": "admin", "path_param": None},
-                )
-            )
-        assert exc_info.value.code == "insufficient_scope"
-
-    def test_tenant_scoped_read_key_denied_by_permission(self):
-        """Tenant-scoped read key -> GET /users/ => 403 insufficient_permission.
-
-        The router-level require_api_key_permission(ADMIN) blocks read keys.
-        """
-        key = _make_key(
-            permission=ApiKeyPermission.READ.value,
-            scope_type=ApiKeyScopeType.TENANT.value,
-        )
-
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            _check_management_permission(key, ApiKeyPermission.ADMIN.value)
-        assert exc_info.value.code == "insufficient_permission"
-
-    def test_tenant_scoped_admin_key_passes(self):
-        """Tenant-scoped admin key + admin user => passes all guards."""
-        key = _make_key(
-            permission=ApiKeyPermission.ADMIN.value,
-            scope_type=ApiKeyScopeType.TENANT.value,
-        )
-
-        # Scope enforcement: tenant-scoped keys always pass
-        request = _scope_request()
-        svc = _make_user_service()
-        import asyncio
-
-        # Should NOT raise — tenant scope bypasses all scope checks
-        asyncio.get_event_loop().run_until_complete(
-            svc._enforce_api_key_scope(
-                request,
-                key,
-                {"resource_type": "admin", "path_param": None},
-            )
-        )
-
-        # Permission check: admin key passes admin requirement
-        _check_management_permission(key, ApiKeyPermission.ADMIN.value)
-
-    def test_listing_route_has_router_level_scope_guard(self):
-        """GET /users/ must have require_api_key_scope_check at router level."""
+    def test_listing_route_has_route_level_scope_guard(self):
+        """GET /users/ must have route-level admin scope guard for API keys."""
         route = self._get_users_listing_route()
         assert self._route_has_dependency(route, "_scope_check_dep"), (
-            "GET /users/ missing router-level require_api_key_scope_check"
+            "GET /users/ missing route-level require_api_key_scope_check; "
+            "scoped API keys must not enumerate the tenant directory"
         )
 
-    def test_listing_route_has_router_level_permission_guard(self):
-        """GET /users/ must have require_api_key_permission at router level."""
+    def test_listing_route_has_route_level_permission_guard(self):
+        """GET /users/ must have route-level admin permission guard for API keys."""
         route = self._get_users_listing_route()
         assert self._route_has_dependency(route, "_api_key_permission_dep"), (
-            "GET /users/ missing router-level require_api_key_permission"
+            "GET /users/ missing route-level require_api_key_permission; "
+            "API keys below admin must not list the tenant directory"
+        )
+
+    def test_listing_handler_has_no_validate_permission_call(self):
+        """Handler body must not call validate_permission(ADMIN).
+
+        Bearer-token tenant members (including space-admins without
+        tenant-admin) must pass through. API-key enforcement happens via
+        the route-level guards above and `_resolve_api_key`.
+        """
+        import inspect
+
+        from intric.users.user_router import get_tenant_users
+
+        source = inspect.getsource(get_tenant_users)
+        assert "validate_permission" not in source, (
+            "get_tenant_users unexpectedly contains validate_permission; "
+            "the endpoint was intentionally relaxed for bearer-auth pickers"
         )
 
 

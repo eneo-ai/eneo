@@ -327,6 +327,16 @@ class ApiKeysV2Repository:
 
         return ApiKeyV2InDB.model_validate(record)
 
+    async def delete(self, *, key_id: UUID, tenant_id: UUID) -> bool:
+        query = (
+            sa.delete(self.table)
+            .where(self.table.id == key_id)
+            .where(self.table.tenant_id == tenant_id)
+            .returning(self.table.id)
+        )
+        deleted_id = await self.session.scalar(query)
+        return deleted_id is not None
+
     async def update_last_used_at(
         self,
         *,

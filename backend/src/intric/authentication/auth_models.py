@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 from uuid import UUID
 
 from pydantic import (
@@ -13,6 +13,9 @@ from pydantic import (
 )
 
 from intric.main.config import get_settings
+
+if TYPE_CHECKING:
+    from intric.users.user import UserInDB
 
 
 class JWTMeta(BaseModel):
@@ -47,6 +50,24 @@ class AccessToken(BaseModel):
 class ApiKeyOwnership(str, Enum):
     USER = "user"
     SERVICE = "service"
+
+
+def is_service_api_key(user: "UserInDB") -> bool:
+    """Single source of truth: is the request authenticated via a service API key?
+
+    Service keys resolve to a synthetic UserInDB with no roles. Callers that
+    need to bypass role-based gates (because service keys authorize via
+    scope+permission instead) should use this check.
+
+    Accepts any user-like object — raw SQLAlchemy `Users` rows (e.g. from
+    test fixtures constructing a SpaceActor directly) lack `active_api_key`
+    entirely, so the getattr guard avoids AttributeError and correctly
+    reports "not a service key" for those paths.
+    """
+    key = getattr(user, "active_api_key", None)
+    if key is None:
+        return False
+    return key.ownership == ApiKeyOwnership.SERVICE
 
 
 class ApiKeyType(str, Enum):
@@ -242,6 +263,15 @@ class ApiKeyUpdateRequest(BaseModel):
 
 class ApiKeyExactLookupRequest(BaseModel):
     secret: str
+
+
+class ApiKeyExtendRequest(BaseModel):
+    expires_at: Optional[datetime] = None
+
+
+class ApiKeyRotateRequest(BaseModel):
+    update_expiration: bool = False
+    expires_at: Optional[datetime] = None
 
 
 class ApiKeyUserSnapshot(BaseModel):

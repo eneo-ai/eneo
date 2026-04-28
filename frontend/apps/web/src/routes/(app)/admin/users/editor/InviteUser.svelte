@@ -10,10 +10,14 @@
   import { toastError } from "$lib/core/errors";
 
   const intric = getIntric();
-  const { defaultRoles } = getAdminUserCtx();
+  const { roles: allRoles } = getAdminUserCtx();
   const { tenant } = getAppContext();
 
-  let userRole = [defaultRoles[0]]; // Array to match SelectRole API
+  // Pre-select the tenant's configured default role
+  const defaultRole = tenant.default_role_id
+    ? allRoles.find((r) => r.id === tenant.default_role_id)
+    : null;
+  let userRole = defaultRole ? [defaultRole] : [];
   let userEmail = "";
   let emailIsValid: boolean;
   let showDialog: Dialog.OpenState;
@@ -25,7 +29,7 @@
     try {
       await intric.users.invite({
         email: userEmail,
-        predefined_role: userRole[0] // Get first role from array
+        role: userRole[0] // Get first role from array
       });
       invalidate("admin:users:load");
       $showDialog = false;
@@ -56,7 +60,7 @@
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
       ></Input.Text>
 
-      <SelectRole {defaultRoles} customRoles={[]} bind:value={userRole}></SelectRole>
+      <SelectRole roles={allRoles} bind:value={userRole}></SelectRole>
     </Dialog.Section>
 
     <Dialog.Controls let:close>

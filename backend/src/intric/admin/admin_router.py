@@ -37,11 +37,13 @@ from intric.authentication.auth_models import (
     ApiKeyCreatedResponse,
     ApiKeyExactLookupRequest,
     ApiKeyExactLookupResponse,
+    ApiKeyExtendRequest,
     ApiKeyNotificationPolicyResponse,
     ApiKeyNotificationPolicyUpdate,
     ApiKeyPermission,
     ApiKeyPolicyResponse,
     ApiKeyPolicyUpdate,
+    ApiKeyRotateRequest,
     ApiKeySearchMatchReason,
     ApiKeyStateChangeRequest,
     ApiKeyUpdateRequest,
@@ -59,7 +61,7 @@ from intric.main.container.container import Container
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.main.models import CursorPaginatedResponse, DeleteResponse
-from intric.predefined_roles.predefined_role import PredefinedRoleInDB
+from intric.roles.role import RolePublic
 from intric.server.dependencies.container import get_container
 from intric.tenants.tenant import TenantPublic
 from intric.users.user import (
@@ -225,7 +227,6 @@ GET /api/v1/admin/users/?sort_by=email&sort_order=asc
                                 "created_at": "2025-09-01T08:30:00Z",
                                 "updated_at": "2025-10-15T14:20:00Z",
                                 "roles": [],
-                                "predefined_roles": [],
                                 "user_groups": [],
                             }
                         ],
@@ -325,8 +326,7 @@ async def register_user(
     - username: Unique identifier (if not provided, will use email prefix)
     - password: User password (minimum 7 characters, maximum 100)
     - quota_limit: Storage limit in bytes (minimum 1000 bytes = 1KB)
-    - roles: List of custom role IDs to assign (empty list by default)
-    - predefined_roles: List of predefined role IDs to assign (empty list by default)
+    - roles: List of role IDs to assign (empty list by default)
 
     Example request:
     {
@@ -350,27 +350,6 @@ async def register_user(
     }
 
     # Add role information from the input request
-    if new_user.predefined_roles:
-        import sqlalchemy as sa
-
-        from intric.database.tables.roles_table import PredefinedRoles
-
-        session = cast(AsyncSession, container.session())
-        role_ids = [role.id for role in new_user.predefined_roles]
-        role_query = sa.select(PredefinedRoles).where(PredefinedRoles.id.in_(role_ids))
-        role_result = await session.execute(role_query)
-        predefined_roles = role_result.scalars().all()
-
-        role_names = [role.name for role in predefined_roles]
-        all_permissions: set[str] = set()
-        for role in predefined_roles:
-            all_permissions.update(role.permissions)
-
-        if role_names:
-            extra["predefined_roles"] = role_names
-            extra["permissions"] = sorted(all_permissions)
-
-    # Add custom roles if any
     if new_user.roles:
         import sqlalchemy as sa
 
@@ -386,13 +365,6 @@ async def register_user(
             extra["roles"] = [role.name for role in custom_roles]
 
     # Check if user object has roles loaded (in case service returns them)
-    if (
-        hasattr(user, "predefined_roles")
-        and user.predefined_roles
-        and "predefined_roles" not in extra
-    ):
-        extra["predefined_roles"] = [role.name for role in user.predefined_roles]
-
     if hasattr(user, "roles") and user.roles and "roles" not in extra:
         extra["roles"] = [role.name for role in user.roles]
 
@@ -510,8 +482,7 @@ async def update_user(
     - password: New password (minimum 7 characters, maximum 100)
     - quota_limit: New storage limit in bytes (minimum 1000 bytes = 1KB)
     - state: User state (invited/active/inactive/deleted)
-    - roles: List of custom role IDs (replaces existing roles)
-    - predefined_roles: List of predefined role IDs (replaces existing)
+    - roles: List of role IDs (replaces existing roles)
 
     Note: Username cannot be changed after creation.
 
@@ -562,21 +533,6 @@ async def update_user(
         if old_roles != new_roles:
             changes["roles"] = {"old": old_roles, "new": new_roles}
 
-    if user.predefined_roles is not None:
-        old_pred_roles = (
-            [role.name for role in old_user.predefined_roles]
-            if hasattr(old_user, "predefined_roles") and old_user.predefined_roles
-            else []
-        )
-        new_pred_roles = (
-            [role.name for role in user_updated.predefined_roles]
-            if hasattr(user_updated, "predefined_roles")
-            and user_updated.predefined_roles
-            else []
-        )
-        if old_pred_roles != new_pred_roles:
-            changes["predefined_roles"] = {"old": old_pred_roles, "new": new_pred_roles}
-
     # Track permission changes (computed from role changes)
     old_permissions = (
         sorted([p.value for p in old_user.permissions])
@@ -604,11 +560,6 @@ async def update_user(
     extra: dict[str, object] = {
         "state": user_updated.state.value if hasattr(user_updated, "state") else None,
     }
-
-    if hasattr(user_updated, "predefined_roles") and user_updated.predefined_roles:
-        extra["predefined_roles"] = [
-            role.name for role in user_updated.predefined_roles
-        ]
 
     if hasattr(user_updated, "roles") and user_updated.roles:
         extra["roles"] = [role.name for role in user_updated.roles]
@@ -690,11 +641,6 @@ async def delete_user(username: str, container: AdminContainer):
         if hasattr(user_to_delete, "state")
         else None,
     }
-
-    if hasattr(user_to_delete, "predefined_roles") and user_to_delete.predefined_roles:
-        extra["predefined_roles"] = [
-            role.name for role in user_to_delete.predefined_roles
-        ]
 
     if hasattr(user_to_delete, "roles") and user_to_delete.roles:
         extra["roles"] = [role.name for role in user_to_delete.roles]
@@ -940,98 +886,23 @@ async def get_deleted_users(
 
 @router.get(
     "/predefined-roles/",
-    response_model=list[PredefinedRoleInDB],
-    summary="Get predefined roles for tenant",
-    description="Retrieves all predefined roles available for the authenticated tenant. Requires tenant admin (owner) permissions. Returns the same structure as the sysadmin endpoint for consistency.",
+    response_model=list[RolePublic],
+    summary="Get default roles for tenant",
+    description="Retrieves all default (predefined-source) roles for the authenticated tenant.",
     responses={
-        200: {
-            "description": "List of predefined roles successfully retrieved",
-            "content": {
-                "application/json": {
-                    "example": [
-                        {
-                            "id": "550e8400-e29b-41d4-a716-446655440001",
-                            "name": "Owner",
-                            "permissions": ["admin", "AI", "assistants", "group_chats"],
-                            "created_at": "2024-01-15T10:30:00Z",
-                            "updated_at": "2024-01-15T10:30:00Z",
-                        },
-                        {
-                            "id": "550e8400-e29b-41d4-a716-446655440002",
-                            "name": "AI Configurator",
-                            "permissions": ["AI", "assistants"],
-                            "created_at": "2024-01-15T10:30:00Z",
-                            "updated_at": "2024-01-15T10:30:00Z",
-                        },
-                    ]
-                }
-            },
-        },
-        401: {"description": "Authentication required (invalid or missing API key)"},
-        403: {"description": "Admin permissions required (owner role)"},
-        500: {"description": "Internal server error while fetching predefined roles"},
+        200: {"description": "List of default roles successfully retrieved"},
+        401: {"description": "Authentication required"},
+        403: {"description": "Admin permissions required"},
     },
 )
-async def get_predefined_roles(
-    container: AdminContainer,
-):
-    """
-    Get all predefined roles available for your tenant.
-
-    This endpoint returns the predefined roles that can be assigned to users
-    when creating or updating user accounts. The response format matches the
-    sysadmin endpoint for API consistency.
-
-    Predefined roles include:
-    - **Owner**: Full admin permissions including user management
-    - **AI Configurator**: AI and assistant configuration permissions
-    - **User**: Basic user permissions for using assistants
-
-    ## Important Notes
-
-    - This endpoint requires admin (owner) permissions
-    - Returns the same roles for all tenants (future: tenant-specific filtering)
-    - Role IDs are stable and can be cached client-side
-    - Use these IDs in POST /api/v1/admin/users/ for user provisioning
-
-    ## Response Format
-
-    Returns an array of PredefinedRoleInDB objects containing:
-    - `id`: UUID of the role (use this when assigning roles)
-    - `name`: Human-readable name of the role
-    - `permissions`: List of permission strings granted by this role
-    - `created_at`: Timestamp when the role was created
-    - `updated_at`: Timestamp when the role was last modified
-    """
-    # Get admin service and validate permissions
+async def get_predefined_roles(container: AdminContainer):
+    """Get all default roles for your tenant (backward-compatible endpoint)."""
     admin_service = container.admin_service()
-    user = admin_service.user
-
-    # Log the request for audit trail
-    logger.info(
-        f"Admin user '{user.username}' (ID: {user.id}) from tenant '{user.tenant_id}' "
-        f"is retrieving predefined roles"
-    )
-
-    # Validate admin permissions (will raise UnauthorizedException if not admin)
     await admin_service.validate_admin_permission()
 
-    # Get the predefined roles service
-    predefined_role_service = container.predefined_role_service()
-
-    # Fetch all predefined roles
-    roles = await predefined_role_service.get_predefined_roles()
-
-    # Log successful retrieval
-    logger.info(
-        f"Successfully retrieved {len(roles)} predefined roles for admin user "
-        f"'{user.username}' in tenant '{user.tenant_id}'. "
-        f"Roles: {[role.name for role in roles]}"
-    )
-
-    # Future enhancement: Filter roles based on tenant subscription/features
-    # For now, return all roles as per requirements
-    return roles
+    role_service = container.role_service()
+    all_roles = await role_service.get_all_roles()
+    return [role for role in all_roles if role.predefined_source]
 
 
 @router.post("/privacy-policy/", response_model=TenantPublic)
@@ -1953,6 +1824,7 @@ async def rotate_api_key_admin(
     http_request: Request,
     container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    payload: Annotated[ApiKeyRotateRequest | None, Body()] = None,
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -1961,6 +1833,7 @@ async def rotate_api_key_admin(
     try:
         return await lifecycle.rotate_key(
             key_id=id,
+            request=payload,
             skip_manage_authorization=True,
             ip_address=ip_address,
             request_id=request_id,
@@ -1968,3 +1841,84 @@ async def rotate_api_key_admin(
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
+
+
+@router.post(
+    "/api-keys/{id}/extend",
+    response_model=ApiKeyV2,
+    tags=["Admin API Keys"],
+    summary="Change tenant API key expiration",
+    description=(
+        "Change an API key's expiration date. Pass null to remove the expiration "
+        "if the tenant policy allows it."
+    ),
+    responses={
+        200: {
+            "description": "Updated API key.",
+        },
+        **error_responses([400, 401, 403, 404, 429]),
+    },
+)
+async def extend_api_key_expiration_admin(
+    id: UUID,
+    http_request: Request,
+    payload: Annotated[
+        ApiKeyExtendRequest,
+        Body(examples=[{"expires_at": "2030-01-01T00:00:00Z"}]),
+    ],
+    container: AdminContainer,
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    ip_address, request_id, user_agent = extract_audit_context(http_request)
+    try:
+        return await lifecycle.extend_expiration(
+            key_id=id,
+            request=payload,
+            skip_manage_authorization=True,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
+    except ApiKeyValidationError as exc:
+        raise_api_key_http_error(exc)
+
+
+@router.post(
+    "/api-keys/{id}/purge",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    tags=["Admin API Keys"],
+    summary="Permanently delete tenant API key",
+    description=(
+        "Permanently delete a revoked or expired API key. Audit history is "
+        "preserved. Active or suspended keys cannot be deleted — revoke them first."
+    ),
+    responses={
+        204: {"description": "API key permanently deleted."},
+        **error_responses([400, 401, 403, 404, 429]),
+    },
+)
+async def purge_api_key_admin(
+    id: UUID,
+    http_request: Request,
+    container: AdminContainer,
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+) -> Response:
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    ip_address, request_id, user_agent = extract_audit_context(http_request)
+    try:
+        await lifecycle.purge_key(
+            key_id=id,
+            skip_manage_authorization=True,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
+    except ApiKeyValidationError as exc:
+        raise_api_key_http_error(exc)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

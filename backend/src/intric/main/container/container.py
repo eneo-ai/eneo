@@ -253,8 +253,6 @@ from intric.mcp_servers.presentation.assemblers.mcp_server_tool_assembler import
     MCPServerToolAssembler,
 )
 from intric.modules.module_repo import ModuleRepository
-from intric.predefined_roles.predefined_role_service import PredefinedRolesService
-from intric.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
 from intric.prompts.api.prompt_assembler import PromptAssembler
 from intric.prompts.prompt_factory import PromptFactory
 from intric.prompts.prompt_repo import PromptRepository
@@ -585,9 +583,6 @@ class Container(containers.DeclarativeContainer):
     info_blob_repo = providers.Factory(InfoBlobRepository, session=session)
     job_repo = providers.Factory(JobRepository, session=session)
     allowed_origin_repo = providers.Factory(AllowedOriginRepository, session=session)
-    predefined_roles_repo = providers.Factory(
-        PredefinedRolesRepository, session=session
-    )
     role_repo = providers.Factory(RolesRepository, session=session)
     completion_model_repo = providers.Factory(
         CompletionModelsRepository, session=session
@@ -819,19 +814,6 @@ class Container(containers.DeclarativeContainer):
         api_key_repo=api_key_repo,
         api_key_v2_repo=api_key_v2_repo,
     )
-    tenant_service = providers.Factory(
-        TenantService,
-        repo=tenant_repo,
-        completion_model_repo=completion_model_repo,
-        embedding_model_repo=embedding_model_repo,
-        transcription_model_enable_service=transcription_model_enable_service,
-    )
-    security_classification_service = providers.Factory(
-        SecurityClassificationService,
-        user=user,
-        repo=security_classification_repo,
-        tenant_service=tenant_service,
-    )
     # Feature flag service for audit logging and other toggles
     feature_flag_service = providers.Factory(
         FeatureFlagService,
@@ -842,6 +824,21 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    tenant_service = providers.Factory(
+        TenantService,
+        repo=tenant_repo,
+        completion_model_repo=completion_model_repo,
+        embedding_model_repo=embedding_model_repo,
+        transcription_model_enable_service=transcription_model_enable_service,
+        role_repo=role_repo,
+        audit_service=audit_service,
+    )
+    security_classification_service = providers.Factory(
+        SecurityClassificationService,
+        user=user,
+        repo=security_classification_repo,
+        tenant_service=tenant_service,
     )
     api_key_scope_revoker = providers.Factory(
         ApiKeyScopeRevoker,
@@ -959,10 +956,9 @@ class Container(containers.DeclarativeContainer):
         user=user,
         repo=allowed_origin_repo,
     )
-    predefined_role_service = providers.Factory(
-        PredefinedRolesService, repo=predefined_roles_repo
+    role_service = providers.Factory(
+        RolesService, user=user, repo=role_repo, user_repo=user_repo
     )
-    role_service = providers.Factory(RolesService, user=user, repo=role_repo)
     settings_service = providers.Factory(
         SettingService,
         user=user,
@@ -1115,7 +1111,6 @@ class Container(containers.DeclarativeContainer):
         audit_service=audit_service,
         settings_repo=settings_repo,
         tenant_repo=tenant_repo,
-        predefined_roles_repo=predefined_roles_repo,
         info_blob_repo=info_blob_repo,
         api_key_rate_limiter=api_key_rate_limiter,
         feature_flag_service=feature_flag_service,

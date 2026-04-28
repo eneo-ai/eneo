@@ -10,16 +10,21 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import SpacesTable from "./SpacesTable.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { getAppContext } from "$lib/core/AppContext";
 
   const {
     state: { nonOrgSpaces }
   } = getSpacesManager();
+  const { user } = getAppContext();
+  const canCreateSharedSpace = user.hasPermission("shared_spaces");
 </script>
 
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.your_spaces()}></Page.Title>
-    <CreateSpaceDialog includeTrigger={true} forwardToNewSpace={true}></CreateSpaceDialog>
+    {#if canCreateSharedSpace}
+      <CreateSpaceDialog includeTrigger={true} forwardToNewSpace={true}></CreateSpaceDialog>
+    {/if}
   </Page.Header>
 
   <Page.Main>

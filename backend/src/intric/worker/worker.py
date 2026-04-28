@@ -366,7 +366,6 @@ class Worker:
                                 .where(Users.deleted_at.is_(None))  # Soft-delete safety
                                 .options(
                                     selectinload(Users.roles),
-                                    selectinload(Users.predefined_roles),
                                     selectinload(Users.tenant).selectinload(
                                         Tenants.modules
                                     ),

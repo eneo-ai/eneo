@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
+
 import pytest
 import sqlalchemy as sa
 
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
-from intric.spaces.api.space_models import SpaceRoleValue
 from intric.main.config import get_settings, set_settings
+from intric.spaces.api.space_models import SpaceRoleValue
 from intric.users.user import UserAdd, UserState
 
 # Authenticated endpoint for guardrail/enforcement tests.
@@ -441,7 +442,7 @@ async def test_creation_constraints_reflect_tenant_policy(
     assert update_response.status_code == 200, update_response.text
 
     admin_constraints = await client.get(
-        "/api/v1/api-keys/creation-constraints",
+        "/api/v1/api-keys/policy-constraints",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert admin_constraints.status_code == 200, admin_constraints.text
@@ -451,7 +452,7 @@ async def test_creation_constraints_reflect_tenant_policy(
     assert admin_payload["max_rate_limit"] == 123
 
     user_constraints = await client.get(
-        "/api/v1/api-keys/creation-constraints",
+        "/api/v1/api-keys/policy-constraints",
         headers={"Authorization": f"Bearer {regular_user_token}"},
     )
     assert user_constraints.status_code == 200, user_constraints.text
@@ -1347,6 +1348,180 @@ async def test_rotate_preserves_resource_permissions(client, default_user_token)
     assert rotate_response.status_code == 200, rotate_response.text
     rotated_payload = rotate_response.json()
     assert rotated_payload["api_key"]["resource_permissions"] == requested_permissions
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_extend_expiration_changes_date(client, default_user_token):
+    initial = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Extend Target",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "expires_at": initial,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
+    extend_response = await client.post(
+        f"/api/v1/api-keys/{key_id}/extend",
+        json={"expires_at": new_expiry},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert extend_response.status_code == 200, extend_response.text
+    assert extend_response.json()["expires_at"].startswith(new_expiry[:10])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_extend_expiration_rejects_past_date(client, default_user_token):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Extend Past Date",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    response = await client.post(
+        f"/api/v1/api-keys/{key_id}/extend",
+        json={"expires_at": past},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_request"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_extend_expiration_rejects_revoked_key(client, default_user_token):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Extend Revoked",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    revoke_response = await client.post(
+        f"/api/v1/api-keys/{key_id}/revoke",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert revoke_response.status_code == 200, revoke_response.text
+
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    response = await client.post(
+        f"/api/v1/api-keys/{key_id}/extend",
+        json={"expires_at": new_expiry},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_request"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_purge_revoked_key(client, default_user_token):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Purge Target",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    revoke = await client.post(
+        f"/api/v1/api-keys/{key_id}/revoke",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert revoke.status_code == 200, revoke.text
+
+    purge = await client.post(
+        f"/api/v1/api-keys/{key_id}/purge",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert purge.status_code == 204, purge.text
+
+    get_after = await client.get(
+        f"/api/v1/api-keys/{key_id}",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert get_after.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_purge_active_key_rejected(client, default_user_token):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Active No Purge",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    purge = await client.post(
+        f"/api/v1/api-keys/{key_id}/purge",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert purge.status_code == 400
+    assert purge.json()["code"] == "invalid_request"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_rotate_can_update_expiration(client, default_user_token):
+    initial = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Rotate With Extend",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "expires_at": initial,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=180)).isoformat()
+    rotate_response = await client.post(
+        f"/api/v1/api-keys/{key_id}/rotate",
+        json={"update_expiration": True, "expires_at": new_expiry},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert rotate_response.status_code == 200, rotate_response.text
+    rotated = rotate_response.json()["api_key"]
+    assert rotated["expires_at"].startswith(new_expiry[:10])
 
 
 @pytest.mark.integration

@@ -448,10 +448,12 @@ async def delete_tenant_by_id(
 
 
 @router.get("/predefined-roles/")
-async def get_predefined_roles(
-    container: Annotated[Container, Depends(get_container())],
-):
-    return await container.predefined_role_service().get_predefined_roles()
+async def get_predefined_roles():
+    from intric.server.dependencies.predefined_roles import (
+        load_predefined_roles_from_config,
+    )
+
+    return load_predefined_roles_from_config()
 
 
 @router.post("/crawl-all-weekly-websites/")

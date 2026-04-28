@@ -108,17 +108,54 @@ export function initApiKeys(client) {
     },
 
     /**
-     * Rotate an API key.
-     * @param {{id: string}} params
+     * Rotate an API key. Optionally also change the expiration in the same call.
+     * @param {{id: string, update_expiration?: boolean, expires_at?: string | null}} params
      * @returns {Promise<ApiKeyCreatedResponse>}
      * @throws {IntricError}
      * */
-    rotate: async ({ id }) => {
-      const res = await client.fetch("/api/v1/api-keys/{id}/rotate", {
+    rotate: async ({ id, update_expiration, expires_at }) => {
+      if (update_expiration) {
+        const options = /** @type {any} */ ({
+          method: "post",
+          params: { path: { id } },
+          requestBody: {
+            "application/json": { update_expiration: true, expires_at: expires_at ?? null }
+          }
+        });
+        return await client.fetch("/api/v1/api-keys/{id}/rotate", options);
+      }
+      return await client.fetch("/api/v1/api-keys/{id}/rotate", {
         method: "post",
         params: { path: { id } }
       });
-      return res;
+    },
+
+    /**
+     * Change the expiration of an API key. Pass null to remove expiration if policy allows.
+     * @param {{id: string, expires_at: string | null}} params
+     * @returns {Promise<ApiKeyV2>}
+     * @throws {IntricError}
+     * */
+    extend: async ({ id, expires_at }) => {
+      const options = /** @type {any} */ ({
+        method: "post",
+        params: { path: { id } },
+        requestBody: { "application/json": { expires_at } }
+      });
+      return await client.fetch("/api/v1/api-keys/{id}/extend", options);
+    },
+
+    /**
+     * Permanently delete a revoked or expired API key.
+     * @param {{id: string}} params
+     * @returns {Promise<void>}
+     * @throws {IntricError}
+     * */
+    purge: async ({ id }) => {
+      await client.fetch("/api/v1/api-keys/{id}/purge", {
+        method: "post",
+        params: { path: { id } }
+      });
     },
 
     /**
@@ -174,12 +211,13 @@ export function initApiKeys(client) {
     },
 
     /**
-     * Get creation constraints (policy limits) for the current user.
+     * Get tenant API key policy constraints (expiration limits, rate limit ceiling,
+     * rotation grace). Applies to creation, rotation, and expiration changes.
      * @returns {Promise<ApiKeyCreationConstraints>}
      * @throws {IntricError}
      * */
-    getCreationConstraints: async () => {
-      const res = await client.fetch("/api/v1/api-keys/creation-constraints", {
+    getPolicyConstraints: async () => {
+      const res = await client.fetch("/api/v1/api-keys/policy-constraints", {
         method: "get"
       });
       return res;
@@ -410,17 +448,54 @@ export function initApiKeys(client) {
       },
 
       /**
-       * Rotate an API key (admin only).
-       * @param {{id: string}} params
+       * Rotate an API key (admin only). Optionally also change the expiration in the same call.
+       * @param {{id: string, update_expiration?: boolean, expires_at?: string | null}} params
        * @returns {Promise<ApiKeyCreatedResponse>}
        * @throws {IntricError}
        * */
-      rotate: async ({ id }) => {
-        const res = await client.fetch("/api/v1/admin/api-keys/{id}/rotate", {
+      rotate: async ({ id, update_expiration, expires_at }) => {
+        if (update_expiration) {
+          const options = /** @type {any} */ ({
+            method: "post",
+            params: { path: { id } },
+            requestBody: {
+              "application/json": { update_expiration: true, expires_at: expires_at ?? null }
+            }
+          });
+          return await client.fetch("/api/v1/admin/api-keys/{id}/rotate", options);
+        }
+        return await client.fetch("/api/v1/admin/api-keys/{id}/rotate", {
           method: "post",
           params: { path: { id } }
         });
-        return res;
+      },
+
+      /**
+       * Change the expiration of an API key (admin only).
+       * @param {{id: string, expires_at: string | null}} params
+       * @returns {Promise<ApiKeyV2>}
+       * @throws {IntricError}
+       * */
+      extend: async ({ id, expires_at }) => {
+        const options = /** @type {any} */ ({
+          method: "post",
+          params: { path: { id } },
+          requestBody: { "application/json": { expires_at } }
+        });
+        return await client.fetch("/api/v1/admin/api-keys/{id}/extend", options);
+      },
+
+      /**
+       * Permanently delete a revoked or expired API key (admin only).
+       * @param {{id: string}} params
+       * @returns {Promise<void>}
+       * @throws {IntricError}
+       * */
+      purge: async ({ id }) => {
+        await client.fetch("/api/v1/admin/api-keys/{id}/purge", {
+          method: "post",
+          params: { path: { id } }
+        });
       },
 
       /**

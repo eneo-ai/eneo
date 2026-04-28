@@ -87,8 +87,13 @@ class UserGroupsService:
 
         return await self.repo.delete_user_group(user_group_uuid)
 
-    @validate_permissions(Permission.ADMIN)
     async def get_all_user_groups(self):
+        """List tenant user-groups for member/group pickers.
+
+        Tenant-scoped at the repo layer. Exposes `UserSparse` per member
+        (id, email, username) — no `quota_used`. Mutations (create/update/
+        delete/add_user/remove_user) remain gated on Permission.ADMIN.
+        """
         return await self.repo.get_all_user_groups(self.user.tenant_id)
 
     def _append_items_list(

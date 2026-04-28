@@ -19,7 +19,9 @@
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 
-  const { data } = $props();
+  const { data: rawData } = $props();
+  // +page.ts throws when partnerId is missing, so chatPartner is always set here.
+  const data = $derived.by(() => ({ ...rawData, chatPartner: rawData.chatPartner! }));
 
   const {
     state: { userInfo }

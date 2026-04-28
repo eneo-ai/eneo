@@ -110,7 +110,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/api-keys/creation-constraints": {
+  "/api/v1/api-keys/policy-constraints": {
     parameters: {
       query?: never;
       header?: never;
@@ -118,10 +118,10 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get API key creation constraints
-     * @description Returns tenant policy limits relevant to key creation UX (expiration, rate limit).
+     * Get API key policy constraints
+     * @description Returns tenant policy limits relevant to key UX — applies to creation, rotation, and expiration changes (expiration, rate limit, rotation grace).
      */
-    get: operations["get_creation_constraints_api_v1_api_keys_creation_constraints_get"];
+    get: operations["get_policy_constraints_api_v1_api_keys_policy_constraints_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -331,6 +331,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/api-keys/{id}/extend": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change API key expiration
+     * @description Change an API key's expiration date. Pass null to remove the expiration if the tenant policy allows it.
+     */
+    post: operations["extend_api_key_expiration_api_v1_api_keys__id__extend_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/api-keys/{id}/purge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Permanently delete API key
+     * @description Permanently delete a revoked or expired API key. Audit history is preserved. Active or suspended keys cannot be deleted — revoke them first.
+     */
+    post: operations["purge_api_key_api_v1_api_keys__id__purge_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/api-keys/{id}/suspend": {
     parameters: {
       query?: never;
@@ -365,23 +405,6 @@ export interface paths {
      * @description Reactivate a previously suspended API key.
      */
     post: operations["reactivate_api_key_api_v1_api_keys__id__reactivate_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/users/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Get Tenant Users */
-    get: operations["get_tenant_users_api_v1_users__get"];
-    put?: never;
-    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -498,6 +521,36 @@ export interface paths {
      * @description OpenID Connect Login (generic OIDC provider).
      */
     post: operations["login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Tenant Users
+     * @description List tenant members for member/group pickers.
+     *
+     *     Returns `UserSparse` (id, email, username, timestamps) — a strict subset
+     *     of the information any authenticated tenant member can retrieve via
+     *     Microsoft 365 / Outlook GAL. Tenant-scoped at the repo layer; mutations
+     *     on /users/admin/* remain gated on Permission.ADMIN.
+     *
+     *     Bearer tokens: any authenticated tenant member may list. API keys: must
+     *     be tenant-scoped with admin permission — the route-level guards above
+     *     stash deferred-enforcement state consumed by `_resolve_api_key`, which
+     *     is a no-op for bearer auth where `request.state.api_key` is unset.
+     */
+    get: operations["get_tenant_users_api_v1_users__get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1980,8 +2033,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get predefined roles for tenant
-     * @description Retrieves all predefined roles available for the authenticated tenant. Requires tenant admin (owner) permissions. Returns the same structure as the sysadmin endpoint for consistency.
+     * Get default roles for tenant
+     * @description Retrieves all default (predefined-source) roles for the authenticated tenant.
      */
     get: operations["get_predefined_roles_api_v1_admin_predefined_roles__get"];
     put?: never;
@@ -2260,6 +2313,46 @@ export interface paths {
      * @description Rotate an API key and return the new one-time secret.
      */
     post: operations["rotate_api_key_admin_api_v1_admin_api_keys__id__rotate_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/api-keys/{id}/extend": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change tenant API key expiration
+     * @description Change an API key's expiration date. Pass null to remove the expiration if the tenant policy allows it.
+     */
+    post: operations["extend_api_key_expiration_admin_api_v1_admin_api_keys__id__extend_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/api-keys/{id}/purge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Permanently delete tenant API key
+     * @description Permanently delete a revoked or expired API key. Audit history is preserved. Active or suspended keys cannot be deleted — revoke them first.
+     */
+    post: operations["purge_api_key_admin_api_v1_admin_api_keys__id__purge_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -3899,10 +3992,7 @@ export interface paths {
     put?: never;
     /**
      * Add Space Group Member
-     * @description Add a user group to a space with the specified role.
-     *
-     *     All members of the group will gain access to the space at that role level.
-     *     Groups cannot be added to personal spaces.
+     * @description Attach a user group to a space. Groups cannot be attached to personal spaces.
      */
     post: operations["add_space_group_member_api_v1_spaces__id__group_members__post"];
     delete?: never;
@@ -6399,6 +6489,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/roles/templates/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Role Templates */
+    get: operations["get_role_templates_api_v1_roles_templates__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/roles/": {
     parameters: {
       query?: never;
@@ -6431,6 +6538,57 @@ export interface paths {
     post: operations["update_role_api_v1_roles__role_id___post"];
     /** Delete Role By Id */
     delete: operations["delete_role_by_id_api_v1_roles__role_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/roles/{role_id}/reset/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Reset Role To Default */
+    post: operations["reset_role_to_default_api_v1_roles__role_id__reset__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/roles/{role_id}/set-default/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Set Default Role */
+    post: operations["set_default_role_api_v1_roles__role_id__set_default__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/roles/clear-default/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Clear Default Role */
+    post: operations["clear_default_role_api_v1_roles_clear_default__post"];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -6701,7 +6859,9 @@ export interface components {
       | "api_key_suspended"
       | "api_key_reactivated"
       | "api_key_rotated"
+      | "api_key_expiration_extended"
       | "api_key_expired"
+      | "api_key_purged"
       | "api_key_used"
       | "api_key_auth_failed"
       | "tenant_policy_updated"
@@ -6972,6 +7132,11 @@ export interface components {
       /** @default exact_secret */
       match_reason?: components["schemas"]["ApiKeySearchMatchReason"];
     };
+    /** ApiKeyExtendRequest */
+    ApiKeyExtendRequest: {
+      /** Expires At */
+      expires_at?: string | null;
+    };
     /**
      * ApiKeyListResponse
      * @description Response model for the API key list endpoint. Uses Optional total_count
@@ -7120,6 +7285,16 @@ export interface components {
       max_rate_limit_override?: number | null;
       /** Rotation Grace Hours */
       rotation_grace_hours?: number | null;
+    };
+    /** ApiKeyRotateRequest */
+    ApiKeyRotateRequest: {
+      /**
+       * Update Expiration
+       * @default false
+       */
+      update_expiration?: boolean;
+      /** Expires At */
+      expires_at?: string | null;
     };
     /**
      * ApiKeyScopeType
@@ -12323,19 +12498,6 @@ export interface components {
        */
       readonly count: number;
     };
-    /** PaginatedResponse[PredefinedRolePublic] */
-    PaginatedResponse_PredefinedRolePublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["PredefinedRolePublic"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      readonly count: number;
-    };
     /** PaginatedResponse[PromptSparse] */
     PaginatedResponse_PromptSparse_: {
       /**
@@ -12763,7 +12925,7 @@ export interface components {
     };
     /** PartialPropUserUpdate */
     PartialPropUserUpdate: {
-      predefined_role?: components["schemas"]["ModelId"] | null;
+      role?: components["schemas"]["ModelId"] | null;
       state?: components["schemas"]["UserState"] | null;
     };
     /** PartialServiceUpdatePublic */
@@ -12906,44 +13068,14 @@ export interface components {
       | "editor"
       | "admin"
       | "websites"
-      | "integrations";
+      | "integrations"
+      | "shared_spaces"
+      | "api_keys";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
       /** Description */
       description: string;
-    };
-    /** PredefinedRoleInDB */
-    PredefinedRoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /** Name */
-      name: string;
-      /** Permissions */
-      permissions: components["schemas"]["Permission"][];
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-    };
-    /** PredefinedRolePublic */
-    PredefinedRolePublic: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /** Name */
-      name: string;
-      /** Permissions */
-      permissions: components["schemas"]["Permission"][];
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
     };
     /** PrivacyPolicy */
     PrivacyPolicy: {
@@ -13020,7 +13152,7 @@ export interface components {
     };
     /** PropUserInvite */
     PropUserInvite: {
-      predefined_role?: components["schemas"]["ModelId"] | null;
+      role?: components["schemas"]["ModelId"] | null;
       state?: components["schemas"]["UserState"] | null;
       /**
        * Email
@@ -13160,6 +13292,8 @@ export interface components {
        * Format: uuid
        */
       tenant_id: string;
+      /** Predefined Source */
+      predefined_source?: string | null;
     };
     /** RolePublic */
     RolePublic: {
@@ -13176,6 +13310,8 @@ export interface components {
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
+      /** Predefined Source */
+      predefined_source?: string | null;
     };
     /** RoleUpdateRequest */
     RoleUpdateRequest: {
@@ -13187,7 +13323,7 @@ export interface components {
     /** RolesPaginatedResponse */
     RolesPaginatedResponse: {
       roles: components["schemas"]["PaginatedResponse_RolePublic_"];
-      predefined_roles: components["schemas"]["PaginatedResponse_PredefinedRolePublic_"];
+      predefined_roles: components["schemas"]["PaginatedResponse_RolePublic_"];
     };
     /** RunAppRequest */
     RunAppRequest: {
@@ -13845,10 +13981,7 @@ export interface components {
       /** Data Retention Days */
       data_retention_days?: number | null;
     };
-    /**
-     * SpaceGroupMember
-     * @description A user group that is a member of a space with a specific role.
-     */
+    /** SpaceGroupMember */
     SpaceGroupMember: {
       /** Created At */
       created_at?: string | null;
@@ -14492,6 +14625,8 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /** Default Role Id */
+      default_role_id?: string | null;
       /**
        * Modules
        * @default []
@@ -14618,6 +14753,8 @@ export interface components {
       security_enabled?: boolean;
       /** Privacy Policy */
       privacy_policy?: string | null;
+      /** Default Role Id */
+      default_role_id?: string | null;
     };
     /**
      * TenantSharePointAppCreate
@@ -14792,6 +14929,8 @@ export interface components {
       state?: components["schemas"]["TenantState"] | null;
       /** Security Enabled */
       security_enabled?: boolean | null;
+      /** Default Role Id */
+      default_role_id?: string | null;
     };
     /**
      * TenantWithMaskedCredentials
@@ -14841,6 +14980,8 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /** Default Role Id */
+      default_role_id?: string | null;
       /**
        * Modules
        * @default []
@@ -15245,18 +15386,11 @@ export interface components {
       quota_limit?: number | null;
       /**
        * Roles
-       * @description List of custom role IDs to assign to the user
+       * @description List of role IDs to assign to the user
        * @default []
        * @example []
        */
       roles?: components["schemas"]["ModelId"][];
-      /**
-       * Predefined Roles
-       * @description List of predefined role IDs to assign to the user
-       * @default []
-       * @example []
-       */
-      predefined_roles?: components["schemas"]["ModelId"][];
     };
     /** UserAddSuperAdmin */
     UserAddSuperAdmin: {
@@ -15287,18 +15421,11 @@ export interface components {
       quota_limit?: number | null;
       /**
        * Roles
-       * @description List of custom role IDs to assign to the user
+       * @description List of role IDs to assign to the user
        * @default []
        * @example []
        */
       roles?: components["schemas"]["ModelId"][];
-      /**
-       * Predefined Roles
-       * @description List of predefined role IDs to assign to the user
-       * @default []
-       * @example []
-       */
-      predefined_roles?: components["schemas"]["ModelId"][];
       /**
        * Tenant Id
        * Format: uuid
@@ -15345,8 +15472,6 @@ export interface components {
       state: components["schemas"]["UserState"];
       /** Roles */
       roles: components["schemas"]["RolePublic"][];
-      /** Predefined Roles */
-      predefined_roles: components["schemas"]["PredefinedRolePublic"][];
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
     };
@@ -15415,11 +15540,6 @@ export interface components {
        */
       roles?: components["schemas"]["RoleInDB"][];
       /**
-       * Predefined Roles
-       * @default []
-       */
-      predefined_roles?: components["schemas"]["PredefinedRoleInDB"][];
-      /**
        * Quota Used
        * @default 0
        */
@@ -15477,8 +15597,6 @@ export interface components {
       state: components["schemas"]["UserState"];
       /** Roles */
       roles: components["schemas"]["RolePublic"][];
-      /** Predefined Roles */
-      predefined_roles: components["schemas"]["PredefinedRolePublic"][];
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
       api_key: components["schemas"]["ApiKey"];
@@ -15549,7 +15667,7 @@ export interface components {
        * Users
        * @default []
        */
-      users?: components["schemas"]["UserPublicBase"][];
+      users?: components["schemas"]["UserSparse"][];
     };
     /** UserGroupRead */
     UserGroupRead: {
@@ -15639,11 +15757,6 @@ export interface components {
        * @default []
        */
       roles?: components["schemas"]["RoleInDB"][];
-      /**
-       * Predefined Roles
-       * @default []
-       */
-      predefined_roles?: components["schemas"]["PredefinedRoleInDB"][];
       /**
        * Quota Used
        * @default 0
@@ -15742,8 +15855,6 @@ export interface components {
       quota_limit?: number | null;
       /** Roles */
       roles: components["schemas"]["RolePublic"][];
-      /** Predefined Roles */
-      predefined_roles: components["schemas"]["PredefinedRolePublic"][];
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
     };
@@ -15951,16 +16062,10 @@ export interface components {
       quota_limit?: number | null;
       /**
        * Roles
-       * @description List of custom role IDs to assign (replaces existing roles)
+       * @description List of role IDs to assign (replaces existing roles)
        * @example []
        */
       roles?: components["schemas"]["ModelId"][] | null;
-      /**
-       * Predefined Roles
-       * @description List of predefined role IDs to assign (replaces existing predefined roles)
-       * @example []
-       */
-      predefined_roles?: components["schemas"]["ModelId"][] | null;
       /**
        * @description User state (invited/active/inactive)
        * @example active
@@ -17188,7 +17293,7 @@ export interface operations {
       };
     };
   };
-  get_creation_constraints_api_v1_api_keys_creation_constraints_get: {
+  get_policy_constraints_api_v1_api_keys_policy_constraints_get: {
     parameters: {
       query?: never;
       header?: never;
@@ -17197,7 +17302,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Creation constraints from tenant policy. */
+      /** @description Policy constraints for the current tenant. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -18160,7 +18265,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyRotateRequest"] | null;
+      };
+    };
     responses: {
       /** @description Rotated API key and one-time secret. */
       200: {
@@ -18194,6 +18303,181 @@ export interface operations {
            */
           "application/json": components["schemas"]["ApiKeyCreatedResponse"];
         };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  extend_api_key_expiration_api_v1_api_keys__id__extend_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyExtendRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated API key. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "id": "3cbf5fde-7288-4f03-bf06-f71c14f76854",
+           *       "name": "Production Backend",
+           *       "description": "Used by backend workers",
+           *       "key_type": "sk_",
+           *       "permission": "write",
+           *       "scope_type": "space",
+           *       "scope_id": "11111111-1111-1111-1111-111111111111",
+           *       "allowed_ips": [
+           *         "203.0.113.0/24"
+           *       ],
+           *       "rate_limit": 5000,
+           *       "state": "active",
+           *       "key_prefix": "sk_",
+           *       "key_suffix": "ab12cd34",
+           *       "expires_at": "2030-01-01T00:00:00Z",
+           *       "created_at": "2026-02-05T12:00:00Z",
+           *       "updated_at": "2026-02-05T12:00:00Z"
+           *     }
+           */
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  purge_api_key_api_v1_api_keys__id__purge_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description API key permanently deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Bad Request */
       400: {
@@ -18445,44 +18729,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ApiKeyErrorResponse"];
-        };
-      };
-    };
-  };
-  get_tenant_users_api_v1_users__get: {
-    parameters: {
-      query?: {
-        /** @description Email of user */
-        email?: string | null;
-        /** @description Users per page */
-        limit?: number | null;
-        /** @description Current cursor */
-        cursor?: string | null;
-        /** @description Show previous page */
-        previous?: boolean | null;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["CursorPaginatedResponse_UserSparse_"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -18739,6 +18985,44 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AccessToken"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_tenant_users_api_v1_users__get: {
+    parameters: {
+      query?: {
+        /** @description Email of user */
+        email?: string | null;
+        /** @description Users per page */
+        limit?: number | null;
+        /** @description Current cursor */
+        cursor?: string | null;
+        /** @description Show previous page */
+        previous?: boolean | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_UserSparse_"];
         };
       };
       /** @description Validation Error */
@@ -22708,7 +22992,6 @@ export interface operations {
            *           "created_at": "2025-09-01T08:30:00Z",
            *           "updated_at": "2025-10-15T14:20:00Z",
            *           "roles": [],
-           *           "predefined_roles": [],
            *           "user_groups": []
            *         }
            *       ],
@@ -23212,57 +23495,24 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List of predefined roles successfully retrieved */
+      /** @description List of default roles successfully retrieved */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          /**
-           * @example [
-           *       {
-           *         "id": "550e8400-e29b-41d4-a716-446655440001",
-           *         "name": "Owner",
-           *         "permissions": [
-           *           "admin",
-           *           "AI",
-           *           "assistants",
-           *           "group_chats"
-           *         ],
-           *         "created_at": "2024-01-15T10:30:00Z",
-           *         "updated_at": "2024-01-15T10:30:00Z"
-           *       },
-           *       {
-           *         "id": "550e8400-e29b-41d4-a716-446655440002",
-           *         "name": "AI Configurator",
-           *         "permissions": [
-           *           "AI",
-           *           "assistants"
-           *         ],
-           *         "created_at": "2024-01-15T10:30:00Z",
-           *         "updated_at": "2024-01-15T10:30:00Z"
-           *       }
-           *     ]
-           */
-          "application/json": components["schemas"]["PredefinedRoleInDB"][];
+          "application/json": components["schemas"]["RolePublic"][];
         };
       };
-      /** @description Authentication required (invalid or missing API key) */
+      /** @description Authentication required */
       401: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
-      /** @description Admin permissions required (owner role) */
+      /** @description Admin permissions required */
       403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Internal server error while fetching predefined roles */
-      500: {
         headers: {
           [name: string]: unknown;
         };
@@ -24501,7 +24751,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyRotateRequest"] | null;
+      };
+    };
     responses: {
       /** @description Rotated tenant API key and one-time secret. */
       200: {
@@ -24536,6 +24790,160 @@ export interface operations {
            */
           "application/json": components["schemas"]["ApiKeyCreatedResponse"];
         };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  extend_api_key_expiration_admin_api_v1_admin_api_keys__id__extend_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyExtendRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated API key. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  purge_api_key_admin_api_v1_admin_api_keys__id__purge_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description API key permanently deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Bad Request */
       400: {
@@ -34586,6 +34994,26 @@ export interface operations {
       };
     };
   };
+  get_role_templates_api_v1_roles_templates__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
   get_roles_api_v1_roles__get: {
     parameters: {
       query?: never;
@@ -34759,6 +35187,115 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  reset_role_to_default_api_v1_roles__role_id__reset__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        role_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RolePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  set_default_role_api_v1_roles__role_id__set_default__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        role_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RolePublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  clear_default_role_api_v1_roles_clear_default__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
         };
       };
     };

@@ -11,7 +11,6 @@
   import { getIntric } from "$lib/core/Intric.js";
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
-  import { resolve } from "$app/paths";
 
   const { tenant } = getAppContext();
   const intric = getIntric();
@@ -128,17 +127,6 @@
           description={m.enable_provisioning_description()}
         >
           <Input.Switch bind:value={provisioningEnabled} sideEffect={handleToggleProvisioning} />
-        </Settings.Row>
-        <Settings.Row
-          title="API key settings"
-          description="Scope enforcement, strict mode, and expiry notification controls are now managed on the API keys admin page."
-        >
-          <a
-            href={resolve("/(app)/admin/api-keys")}
-            class="text-accent-default hover:text-accent-default/80 text-sm font-medium"
-          >
-            Open `/admin/api-keys`
-          </a>
         </Settings.Row>
       </Settings.Group>
     </Settings.Page>

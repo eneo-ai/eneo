@@ -19,6 +19,8 @@
   import SuperKeyStatusPanel from "./SuperKeyStatusPanel.svelte";
   import ScopeResourceSelector from "$lib/features/api-keys/ScopeResourceSelector.svelte";
   import ApiKeySecretDialog from "$lib/features/api-keys/ApiKeySecretDialog.svelte";
+  import ApiKeyStateFilter from "$lib/features/api-keys/ApiKeyStateFilter.svelte";
+  import type { ApiKeyStateFilterValue } from "$lib/features/api-keys/apiKeyTableUtils";
   import {
     Filter,
     X,
@@ -52,7 +54,7 @@
 
   // Filter states
   let scopeType = $state("");
-  let stateFilter = $state("");
+  let stateFilter = $state<ApiKeyStateFilterValue>("active");
   let keyType = $state("");
   let scopeId = $state<string | null>(null);
   let createdByUserId = $state("");
@@ -92,30 +94,10 @@
   let notificationPolicyDaysInput = $state("30");
   let notificationPolicyMaxDaysInput = $state("365");
 
-  // Quick filter chips
+  // Quick filter chips — state lives in <ApiKeyStateFilter>; key class stays here
   const quickFilters = $derived([
-    {
-      label: m.api_keys_admin_quick_active(),
-      filter: { state: "active" },
-      color: "green" as const
-    },
-    {
-      label: m.api_keys_admin_quick_suspended(),
-      filter: { state: "suspended" },
-      color: "yellow" as const
-    },
-    {
-      label: m.api_keys_admin_quick_expired(),
-      filter: { state: "expired" },
-      color: "gray" as const
-    },
-    {
-      label: m.api_keys_admin_quick_revoked(),
-      filter: { state: "revoked" },
-      color: "red" as const
-    },
-    { label: m.api_keys_admin_quick_secret(), filter: { keyType: "sk_" }, color: "blue" as const },
-    { label: m.api_keys_admin_quick_public(), filter: { keyType: "pk_" }, color: "orange" as const }
+    { label: m.api_keys_admin_quick_secret(), filter: { keyType: "sk_" } },
+    { label: m.api_keys_admin_quick_public(), filter: { keyType: "pk_" } }
   ]);
 
   const scopeOptions = $derived([
@@ -124,14 +106,6 @@
     { value: "space", label: m.api_keys_admin_scope_space() },
     { value: "assistant", label: m.api_keys_admin_scope_assistant() },
     { value: "app", label: m.api_keys_admin_scope_app() }
-  ]);
-
-  const stateOptions = $derived([
-    { value: "", label: m.api_keys_admin_state_all() },
-    { value: "active", label: m.api_keys_admin_state_active() },
-    { value: "suspended", label: m.api_keys_admin_state_suspended() },
-    { value: "revoked", label: m.api_keys_admin_state_revoked() },
-    { value: "expired", label: m.api_keys_admin_state_expired() }
   ]);
 
   const keyTypeOptions = $derived([
@@ -470,7 +444,7 @@
 
   function resetFilters() {
     scopeType = "";
-    stateFilter = "";
+    stateFilter = "active";
     keyType = "";
     scopeId = null;
     expiresWithinDays = "";
@@ -483,20 +457,13 @@
     void loadKeys({ reset: true });
   }
 
-  function applyQuickFilter(filter: { state?: string; keyType?: string }) {
-    if (filter.state) {
-      stateFilter = stateFilter === filter.state ? "" : filter.state;
-    }
-    if (filter.keyType) {
-      keyType = keyType === filter.keyType ? "" : filter.keyType;
-    }
+  function applyQuickFilter(filter: { keyType: string }) {
+    keyType = keyType === filter.keyType ? "" : filter.keyType;
     void loadKeys({ reset: true });
   }
 
-  function isQuickFilterActive(filter: { state?: string; keyType?: string }): boolean {
-    if (filter.state) return stateFilter === filter.state;
-    if (filter.keyType) return keyType === filter.keyType;
-    return false;
+  function isQuickFilterActive(filter: { keyType: string }): boolean {
+    return keyType === filter.keyType;
   }
 
   function handleSecret(
@@ -942,18 +909,8 @@
                   >
                     {#if qf.filter.keyType === "sk_"}
                       <Lock class="h-3 w-3" />
-                    {:else if qf.filter.keyType === "pk_"}
-                      <Globe class="h-3 w-3" />
                     {:else}
-                      <span
-                        class="h-2 w-2 rounded-full
-                             {qf.color === 'green' ? 'bg-positive-default' : ''}
-                             {qf.color === 'yellow' ? 'bg-warning-default' : ''}
-                             {qf.color === 'gray' ? 'bg-tertiary' : ''}
-                             {qf.color === 'red' ? 'bg-negative-default' : ''}
-                             {qf.color === 'blue' ? 'bg-accent-default' : ''}
-                             {qf.color === 'orange' ? 'bg-warning-default' : ''}"
-                      ></span>
+                      <Globe class="h-3 w-3" />
                     {/if}
                     {qf.label}
                     {#if isActive}
@@ -997,19 +954,9 @@
                 />
 
                 <!-- Row 2: lifecycle state + key class -->
-                <Field.Field>
-                  <Field.Label for="filter-state">{m.api_keys_admin_label_state()}</Field.Label>
-                  <Select.Root type="single" bind:value={stateFilter}>
-                    <Select.Trigger id="filter-state">
-                      {stateOptions.find((o) => o.value === stateFilter)?.label ??
-                        m.api_keys_admin_state_all()}
-                    </Select.Trigger>
-                    <Select.Content>
-                      {#each stateOptions as opt (opt.value)}
-                        <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
-                      {/each}
-                    </Select.Content>
-                  </Select.Root>
+                <Field.Field class="md:col-span-2">
+                  <Field.Label>{m.api_keys_admin_label_state()}</Field.Label>
+                  <ApiKeyStateFilter bind:value={stateFilter} />
                 </Field.Field>
                 <Field.Field>
                   <Field.Label for="filter-key-type">

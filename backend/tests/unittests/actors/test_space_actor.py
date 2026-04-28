@@ -6,6 +6,10 @@ from intric.actors import SpaceAction, SpaceActor, SpaceResourceType
 from intric.modules.module import Modules
 from intric.roles.permissions import Permission
 
+# All tenant-level permissions — test users should have these by default
+# so tests focus on space-role logic, not tenant-permission blocking
+ALL_PERMISSIONS = set(Permission)
+
 
 # Mocking external dependencies
 class MockUser:
@@ -13,10 +17,16 @@ class MockUser:
         self, id, permissions=None, modules=None, role=None, user_groups_ids=None
     ):
         self.id = id
-        self.permissions = permissions or []
+        if permissions is None:
+            self.permissions = {Permission.SHARED_SPACES}
+        else:
+            self.permissions = permissions
         self.modules = modules or []
         self.role = role
         self.user_groups_ids = user_groups_ids or set()
+        # Matches UserInDB shape — always defined, None for token auth, set for
+        # API-key auth. The consolidated is_service_api_key helper reads this.
+        self.active_api_key = None
 
 
 class MockGroupMember:
@@ -75,17 +85,17 @@ def owner_user():
 
 @pytest.fixture
 def viewer_user():
-    return MockUser(id=2, role=MockSpaceRole.VIEWER)
+    return MockUser(id=2, role=MockSpaceRole.VIEWER, permissions=ALL_PERMISSIONS)
 
 
 @pytest.fixture
 def editor_user():
-    return MockUser(id=3, role=MockSpaceRole.EDITOR)
+    return MockUser(id=3, role=MockSpaceRole.EDITOR, permissions=ALL_PERMISSIONS)
 
 
 @pytest.fixture
 def admin_user():
-    return MockUser(id=4, role=MockSpaceRole.ADMIN)
+    return MockUser(id=4, role=MockSpaceRole.ADMIN, permissions=ALL_PERMISSIONS)
 
 
 @pytest.fixture
@@ -179,7 +189,7 @@ def test_owner_can_not_create_services_without_services_permission(
         is False
     )
 
-    owner_user.permissions.append(MockPermission.SERVICES)
+    owner_user.permissions.add(MockPermission.SERVICES)
     actor = SpaceActor(owner_user, personal_space)
     assert (
         actor.can_perform_action(
@@ -192,7 +202,7 @@ def test_owner_can_not_create_services_without_services_permission(
 def test_owner_can_not_create_services_without_applications_modules(
     owner_user: MockUser, personal_space: MockSpace
 ):
-    owner_user.permissions.append(MockPermission.SERVICES)
+    owner_user.permissions.add(MockPermission.SERVICES)
     actor = SpaceActor(owner_user, personal_space)
     assert (
         actor.can_perform_action(
@@ -278,13 +288,13 @@ def test_viewers_can_only_read_published_resources(
 @pytest.fixture
 def group_member_user():
     """A user who is a member of group 100."""
-    return MockUser(id=10, user_groups_ids={100})
+    return MockUser(id=10, user_groups_ids={100}, permissions=ALL_PERMISSIONS)
 
 
 @pytest.fixture
 def multi_group_user():
     """A user who is a member of multiple groups."""
-    return MockUser(id=11, user_groups_ids={100, 200, 300})
+    return MockUser(id=11, user_groups_ids={100, 200, 300}, permissions=ALL_PERMISSIONS)
 
 
 @pytest.fixture
@@ -992,4 +1002,85 @@ def test_group_admin_can_create_integration_knowledge(
     assert actor.can_perform_action(
         action=SpaceAction.CREATE,
         resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+# shared_spaces tenant permission — gates space CREATION only, not viewing.
+# Membership alone is the authoritative read/edit gate on a shared space.
+
+
+def _permissions_without_shared_spaces():
+    return {p for p in ALL_PERMISSIONS if p != Permission.SHARED_SPACES}
+
+
+def test_member_without_shared_spaces_can_read_shared_space(
+    shared_space: MockSpace,
+):
+    """A direct member of a shared space retains access even without the
+    tenant-level `shared_spaces` permission — the permission gates creation
+    only. This is the post-narrowing semantic (April 2026)."""
+    user = MockUser(
+        id=42,
+        role=MockSpaceRole.ADMIN,
+        permissions=_permissions_without_shared_spaces(),
+    )
+    shared_space.members = {user.id: user}
+    actor = SpaceActor(user, shared_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.READ, resource_type=SpaceResourceType.SPACE
+    )
+
+
+def test_non_member_without_shared_spaces_has_no_role_on_shared_space(
+    shared_space: MockSpace,
+):
+    """A non-member still cannot access a shared space regardless of the
+    tenant permission — the permission was never the authorizer; membership is."""
+    user = MockUser(
+        id=43,
+        role=MockSpaceRole.ADMIN,
+        permissions=_permissions_without_shared_spaces(),
+    )
+    actor = SpaceActor(user, shared_space)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.READ, resource_type=SpaceResourceType.SPACE
+        )
+        is False
+    )
+
+
+def test_admin_without_shared_spaces_retains_org_space_access(
+    organization_space: MockSpace,
+):
+    """Org-space access is governed by ORG_SPACE_PERMISSIONS, not shared_spaces.
+    A tenant admin who opts out of Delat participation must still manage the hub."""
+    admin = MockUser(
+        id=99,
+        role=MockSpaceRole.ADMIN,
+        permissions=_permissions_without_shared_spaces(),
+    )
+    organization_space.members = {admin.id: admin}
+    actor = SpaceActor(admin, organization_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.READ, resource_type=SpaceResourceType.SPACE
+    )
+
+
+def test_viewer_without_shared_spaces_has_no_org_space_access(
+    organization_space: MockSpace,
+):
+    """Viewer role has no org-space permissions regardless of shared_spaces."""
+    viewer = MockUser(
+        id=100,
+        role=MockSpaceRole.VIEWER,
+        permissions=_permissions_without_shared_spaces(),
+    )
+    organization_space.members = {viewer.id: viewer}
+    actor = SpaceActor(viewer, organization_space)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.READ, resource_type=SpaceResourceType.SPACE
+        )
+        is False
     )

@@ -207,7 +207,7 @@ export function initSpaces(client) {
       /**
        * Add a user group to a space.
        * @param {{spaceId: string, group: {id: string, role: "editor" | "admin" | "viewer"}}} params - Space ID and group with role
-       * @returns Added group member
+       * @returns `SpaceGroupMember`
        * @throws {IntricError}
        * */
       add: async ({ spaceId, group }) => {

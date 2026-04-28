@@ -3,8 +3,7 @@ import type { Role, UserGroup } from "@intric/intric-js";
 
 type AdminUserCtx = {
   userGroups: UserGroup[];
-  defaultRoles: Role[];
-  customRoles: Role[];
+  roles: Role[];
 };
 
 export const [getAdminUserCtx, setAdminUserCtx] = createContext<AdminUserCtx>();

@@ -16,6 +16,7 @@
   import CreateSpaceDialog from "./CreateSpaceDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { getAppContext } from "$lib/core/AppContext";
 
   export let showSelectPrompt = false;
 
@@ -23,6 +24,8 @@
   const {
     state: { currentSpace, accessibleSpaces }
   } = spaces;
+  const { user } = getAppContext();
+  const canCreateSharedSpace = user.hasPermission("shared_spaces");
 
   const {
     elements: { trigger, menu, item, overlay, arrow },
@@ -118,21 +121,25 @@
         </Button>
       {/each}
     </div>
-    <Button
-      unstyled
-      on:click={() => {
-        $showCreateDialog = true;
-      }}
-      is={[$item]}
-      class="border-default bg-accent-default text-on-fill hover:bg-accent-stronger mt-1 !justify-center rounded-lg border !py-2 shadow-md focus:ring-offset-4 focus:outline-offset-4"
-      >{m.create_new_space()}</Button
-    >
+    {#if canCreateSharedSpace}
+      <Button
+        unstyled
+        on:click={() => {
+          $showCreateDialog = true;
+        }}
+        is={[$item]}
+        class="border-default bg-accent-default text-on-fill hover:bg-accent-stronger mt-1 !justify-center rounded-lg border !py-2 shadow-md focus:ring-offset-4 focus:outline-offset-4"
+        >{m.create_new_space()}</Button
+      >
+    {/if}
     <div {...$arrow} use:arrow class="border-stronger !z-10"></div>
   </div>
 {/if}
 
-<CreateSpaceDialog includeTrigger={false} forwardToNewSpace={true} bind:isOpen={showCreateDialog}
-></CreateSpaceDialog>
+{#if canCreateSharedSpace}
+  <CreateSpaceDialog includeTrigger={false} forwardToNewSpace={true} bind:isOpen={showCreateDialog}
+  ></CreateSpaceDialog>
+{/if}
 
 <style>
   .items {

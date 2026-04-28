@@ -4,8 +4,8 @@ import sqlalchemy as sa
 from sqlalchemy import Select, asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.database.tables.roles_table import PredefinedRoles
-from intric.database.tables.users_table import Users, users_predefined_roles_table
+from intric.database.tables.tenant_table import Tenants
+from intric.database.tables.users_table import Users, users_roles_table
 from intric.scim.schemas.common import ScimFilter, ScimSort
 
 UserModel = Users
@@ -55,20 +55,20 @@ class ScimUserRepository:
     async def create(self, model: UserModel) -> UserModel:
         self._session.add(model)
         await self._session.flush()
-        await self._assign_user_predefined_role(model.id)
+        await self._assign_default_role(model.id, model.tenant_id)
         return model
 
-    async def _assign_user_predefined_role(self, user_id: UUID) -> None:
+    async def _assign_default_role(self, user_id: UUID, tenant_id: UUID) -> None:
         role_id_row = await self._session.execute(
-            select(PredefinedRoles.id).where(PredefinedRoles.name == "User")
+            select(Tenants.default_role_id).where(Tenants.id == tenant_id)
         )
         role_id = role_id_row.scalar_one_or_none()
         if role_id is None:
             return
         await self._session.execute(
-            sa.insert(users_predefined_roles_table).values(
+            sa.insert(users_roles_table).values(
                 user_id=user_id,
-                predefined_role_id=role_id,
+                role_id=role_id,
             )
         )
 

@@ -12,6 +12,7 @@ from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.authentication.auth_dependencies import get_scope_filter, require_permission
+from intric.authentication.auth_models import is_service_api_key
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
 from intric.integration.presentation.assemblers.integration_knowledge_assembler import (
@@ -21,7 +22,7 @@ from intric.integration.presentation.models import IntegrationKnowledgePublic
 from intric.jobs.job_models import JobPublic
 from intric.main.container.container import Container
 from intric.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
-from intric.roles.permissions import Permission
+from intric.roles.permissions import Permission, validate_permission
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
@@ -78,7 +79,11 @@ async def forbid_org_space(
         raise
 
 
-@router.post("/", response_model=SpacePublic, status_code=201)
+@router.post(
+    "/",
+    response_model=SpacePublic,
+    status_code=201,
+)
 async def create_space(
     create_space_req: CreateSpaceRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -86,6 +91,22 @@ async def create_space(
     space_creation_service = container.space_init_service()
     space_assembler = container.space_assembler()
     current_user = container.user()
+
+    # Service keys cannot create spaces: space_init_service creates a default
+    # assistant with `user_id = current_user.id`, but the service-key synthetic
+    # user has no row in `users`. That would violate `assistants_users_fkey`
+    # and surface as a 500. Reject with a clear 403 instead, matching the
+    # scope-intent of service keys (act on existing resources, not provision).
+    if is_service_api_key(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Service API keys cannot create shared spaces. "
+                "Create the space with a user account; the service key can "
+                "then operate on it via its scope."
+            ),
+        )
+    validate_permission(current_user, Permission.SHARED_SPACES)
 
     # Create space
     space = await space_creation_service.create_space(name=create_space_req.name)
@@ -141,7 +162,6 @@ async def update_space(
     assembler = container.space_assembler()
     current_user = container.user()
 
-    # Get old state
     old_space = await service.get_space(id)
 
     def _get_model_ids_or_none(models: list[ModelId] | None):
@@ -319,7 +339,6 @@ async def delete_space(
     service = container.space_service()
     user = container.user()
 
-    # Get space info before deletion (for audit log context)
     space = await service.get_space(id)
 
     # Delete space
@@ -1277,21 +1296,16 @@ async def add_space_group_member(
     request: AddSpaceGroupMemberRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    """Add a user group to a space with the specified role.
-
-    All members of the group will gain access to the space at that role level.
-    Groups cannot be added to personal spaces.
-    """
+    """Attach a user group to a space. Groups cannot be attached to personal spaces."""
     service = container.space_service()
     current_user = container.user()
 
-    group_member = await service.add_group_member(
+    member = await service.add_group_member(
         space_id=id,
         group_id=request.id,
         role=request.role,
     )
 
-    # Get space for context (graceful degradation if space fetch fails)
     space = None
     try:
         space = await service.get_space(id)
@@ -1301,8 +1315,8 @@ async def add_space_group_member(
     extra = {
         "group": {
             "id": str(request.id),
-            "name": group_member.name,
-            "user_count": group_member.user_count,
+            "name": member.name,
+            "user_count": member.user_count,
         },
         "role": request.role,
     }
@@ -1314,16 +1328,16 @@ async def add_space_group_member(
         action=ActionType.SPACE_MEMBER_ADDED,
         entity_type=EntityType.SPACE,
         entity_id=id,
-        description=f"Added group '{group_member.name}' to space '{space.name if space else 'unknown'}' with role '{request.role}'",
+        description=f"Added group '{member.name}' to space '{space.name if space else 'unknown'}' with role '{request.role}'",
         metadata=AuditMetadata.standard(
             actor=current_user,
-            target=space if space else group_member,
+            target=space if space else member,
             space=space,
             extra=extra,
         ),
     )
 
-    return group_member
+    return member
 
 
 @router.patch(

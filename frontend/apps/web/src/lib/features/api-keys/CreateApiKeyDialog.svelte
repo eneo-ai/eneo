@@ -54,6 +54,7 @@
   const intric = getIntric();
   const { user } = getAppContext();
   const isAdmin = user.hasPermission("admin");
+  const canCreateApiKeys = user.hasPermission("api_keys");
 
   type DialogMode = "create" | "edit" | "view";
 
@@ -431,7 +432,7 @@
 
   async function loadCreationConstraints() {
     try {
-      const constraints = await intric.apiKeys.getCreationConstraints();
+      const constraints = await intric.apiKeys.getPolicyConstraints();
       requireExpiration = constraints.require_expiration ?? false;
       maxExpirationDays = constraints.max_expiration_days ?? null;
       maxRateLimit = constraints.max_rate_limit ?? null;
@@ -823,7 +824,7 @@
     if (!open) handleOpenChange(false);
   }}
 >
-  {#if isCreateMode}
+  {#if isCreateMode && canCreateApiKeys}
     <Dialog.Trigger>
       {#snippet child({ props })}
         <Button {...props} variant={triggerVariant === "outlined" ? "outline" : "default"}>

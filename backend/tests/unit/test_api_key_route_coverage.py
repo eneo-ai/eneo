@@ -106,7 +106,7 @@ def _get_intric_src_path() -> pathlib.Path:
 # Each entry has a rationale — no silent omissions.
 INTENTIONALLY_UNGUARDED = {
     "/settings": "Admin settings endpoints are mounted on a dedicated router with admin scope + admin key guards",
-    "/users": "Admin user endpoints are mounted on users_admin_router with admin scope + admin key guards; /me/ and /tenant/ safe for any scoped key",
+    "/users": "Admin mutation endpoints (POST /admin/invite/, PATCH /admin/{id}/, DELETE /admin/{id}/, /api-keys/) are on users_admin_router with admin scope + admin key guards. GET / carries route-level admin scope + admin key guards (no-op for bearer tokens) so scoped API keys cannot enumerate the tenant directory while space-admin bearer users still populate member pickers. /me/ and /tenant/ safe for any scoped key.",
     "/admin": "Admin endpoints are mounted with admin scope + admin key guards",
     "/dashboard": "Read-only aggregation endpoint with scope guard",
     "/icons": "Public static assets",
