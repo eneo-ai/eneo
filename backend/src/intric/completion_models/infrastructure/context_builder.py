@@ -10,6 +10,7 @@ from intric.ai_models.completion_models.completion_model import (
     Context,
     FunctionDefinition,
     Message,
+    MessageToolCall,
 )
 from intric.completion_models.infrastructure.static_prompts import (
     HALLUCINATION_GUARD,
@@ -18,10 +19,57 @@ from intric.completion_models.infrastructure.static_prompts import (
 )
 from intric.files.file_models import File, FileType
 from intric.main.exceptions import QueryException
+from intric.questions.question import ToolCallInfo
 from intric.sessions.session import SessionInDB
 from intric.tokens.token_utils import (
     count_tokens,  # noqa: F401 — re-exported for external callers
 )
+
+
+def _replayable_tool_calls(
+    tool_calls: Optional[list[ToolCallInfo]],
+) -> list[MessageToolCall]:
+    """Filter persisted tool calls down to those that can be replayed to the LLM.
+
+    Replayable means the call has a stable id to pair with a result and a
+    concrete result payload. Denied calls are included — the result there is
+    the denial JSON, which lets the model see both the attempted invocation and
+    that the user refused it. Pending calls and legacy rows persisted before
+    `result` was captured have no payload and fall back to text-only replay.
+
+    The emitted `tool_name` is the prefixed MCP identifier (what the LLM sees
+    on the current turn's tool registration) — we prefer `mcp_tool_name` and
+    fall back to the split `tool_name` for legacy rows that predate this field.
+    """
+    if not tool_calls:
+        return []
+    replayable: list[MessageToolCall] = []
+    for tc in tool_calls:
+        if tc.tool_call_id is None or tc.tool_call_id == "":
+            continue
+        if tc.result is None:
+            continue
+        replayable.append(
+            MessageToolCall(
+                tool_call_id=tc.tool_call_id,
+                tool_name=tc.mcp_tool_name or tc.tool_name,
+                arguments=tc.arguments,
+                result=tc.result,
+            )
+        )
+    return replayable
+
+
+def _tool_calls_token_count(tool_calls: list[MessageToolCall], model_name: str) -> int:
+    """Count tokens contributed by replayed tool_use + tool_result blocks."""
+    total = 0
+    for tc in tool_calls:
+        arguments_json = json.dumps(tc.arguments) if tc.arguments is not None else ""
+        total += count_tokens(tc.tool_name, model_name)
+        total += count_tokens(arguments_json, model_name)
+        total += count_tokens(tc.result, model_name)
+    return total
+
 
 MIN_PERCENTAGE_KNOWLEDGE = (
     0.8  # Strive towards a minimum of 80% of the context as knowledge
@@ -381,9 +429,12 @@ class ContextBuilder:
             generated_images = self._get_files_by_type(
                 message.generated_files, FileType.IMAGE
             )
+            tool_calls = _replayable_tool_calls(message.tool_calls)
 
-            message_tokens = count_tokens(question, model_name) + count_tokens(
-                answer, model_name
+            message_tokens = (
+                count_tokens(question, model_name)
+                + count_tokens(answer, model_name)
+                + _tool_calls_token_count(tool_calls, model_name)
             )
 
             if len(messages) > min_len and total_tokens + message_tokens > max_tokens:
@@ -396,6 +447,7 @@ class ContextBuilder:
                     answer=answer,
                     images=images,
                     generated_images=generated_images,
+                    tool_calls=tool_calls,
                 ),
             )
 

@@ -14957,6 +14957,10 @@ export interface components {
       approved?: boolean | null;
       /** Result Status */
       result_status?: string | null;
+      /** Result */
+      result?: string | null;
+      /** Mcp Tool Name */
+      mcp_tool_name?: string | null;
     };
     /**
      * ToolChangePublic
@@ -21302,6 +21306,10 @@ export interface operations {
                     approved?: boolean | null;
                     /** Result Status */
                     result_status?: string | null;
+                    /** Result */
+                    result?: string | null;
+                    /** Mcp Tool Name */
+                    mcp_tool_name?: string | null;
                   };
                 };
               }
@@ -21347,6 +21355,10 @@ export interface operations {
                     approved?: boolean | null;
                     /** Result Status */
                     result_status?: string | null;
+                    /** Result */
+                    result?: string | null;
+                    /** Mcp Tool Name */
+                    mcp_tool_name?: string | null;
                   };
                 };
               }
@@ -21392,6 +21404,10 @@ export interface operations {
                     approved?: boolean | null;
                     /** Result Status */
                     result_status?: string | null;
+                    /** Result */
+                    result?: string | null;
+                    /** Mcp Tool Name */
+                    mcp_tool_name?: string | null;
                   };
                 };
               }

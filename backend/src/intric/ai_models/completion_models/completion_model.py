@@ -67,6 +67,14 @@ class ToolCallMetadata:
     approved: Optional[bool] = None  # True=approved, False=denied, None=pending/auto
     # Additive state field for richer clients; legacy `approved` remains authoritative.
     result_status: Optional[str] = None
+    # Text extraction of the MCP tool result. Populated once the tool has executed
+    # so it can be persisted on the Question and replayed to the LLM on later turns.
+    result: Optional[str] = None
+    # The prefixed tool identifier the LLM sees when calling (e.g.
+    # `server__tool`). `tool_name` / `server_name` above are the split/display
+    # forms used by the UI; this field preserves the exact identifier needed
+    # to replay the tool_use so it matches the currently-registered tools.
+    mcp_tool_name: Optional[str] = None
 
 
 @dataclass
@@ -204,11 +212,31 @@ class CompletionModelResponse(BaseModel):
     usage: Optional[TokenUsage] = None
 
 
+class MessageToolCall(BaseModel):
+    """A replayable tool-use record for the LLM-facing Message.
+
+    Carries only the fields needed to reconstruct OpenAI-style tool_calls +
+    role:"tool" result messages in history. The persisted ToolCallInfo
+    (intric.questions.question) is a superset — this type deliberately excludes
+    approval metadata and non-replayable fields.
+
+    `tool_name` here is the LLM-visible prefixed identifier (e.g.
+    `server__tool`) — matching the currently-registered tools — not the
+    split/display form that the UI uses.
+    """
+
+    tool_call_id: str
+    tool_name: str
+    arguments: Optional[dict[str, object]] = None
+    result: str
+
+
 class Message(BaseModel):
     question: str
     answer: str
     images: list[File] = []
     generated_images: list[File] = []
+    tool_calls: list[MessageToolCall] = []
 
 
 class Context(BaseModel):
