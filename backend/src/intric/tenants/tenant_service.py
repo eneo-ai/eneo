@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import HttpUrl
 
-from intric.main.exceptions import NotFoundException
+from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.main.models import ModelId
 from intric.tenants.crawler_settings_helper import get_all_crawler_settings
 from intric.tenants.masking import mask_api_key
@@ -167,6 +167,17 @@ class TenantService:
         tenant = await self.get_tenant_by_id(id)
         self._validate(tenant, id)
         assert tenant is not None
+
+        if tenant_update.default_role_id is not None:
+            if self.role_repo is None:
+                raise BadRequestException(
+                    "Cannot update default role without role repository"
+                )
+            role = await self.role_repo.get_role(tenant_update.default_role_id)
+            if role is None or role.tenant_id != tenant.id:
+                raise BadRequestException(
+                    "Default role must belong to the tenant being updated"
+                )
 
         tenant_update = TenantUpdate(
             **tenant_update.model_dump(exclude_unset=True), id=tenant.id
