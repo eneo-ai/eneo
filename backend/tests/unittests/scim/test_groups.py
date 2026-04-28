@@ -1,17 +1,17 @@
-import pytest
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 
-from intric.server.main import app
 from intric.scim.app import scim_app
 from intric.scim.auth import require_scim_auth
 from intric.scim.deps import get_scim_group_service
 from intric.scim.domain.errors import ScimGroupConflictError, ScimGroupNotFoundError
-from intric.scim.schemas.group import ScimGroup, ScimGroupRequest
+from intric.scim.schemas.group import ScimGroup
 from intric.scim.schemas.user import ScimMeta
 from intric.scim.services.group_service import ScimGroupService
+from intric.server.main import app
 
 TEST_TOKEN = "test-scim-token"
 AUTH = {"Authorization": f"Bearer {TEST_TOKEN}"}
@@ -189,6 +189,12 @@ class TestReplaceGroup:
         res = await client.put(f"/scim/v2/Groups/{uuid4()}", json=CREATE_PAYLOAD, headers=AUTH)
         assert "urn:ietf:params:scim:api:messages:2.0:Error" in res.json()["schemas"]
 
+    async def test_conflict_returns_409(self, client: AsyncClient, mock_service: AsyncMock):
+        mock_service.replace_group.side_effect = ScimGroupConflictError("already exists")
+        res = await client.put(f"/scim/v2/Groups/{uuid4()}", json=CREATE_PAYLOAD, headers=AUTH)
+        assert res.status_code == 409
+        assert res.json()["scimType"] == "uniqueness"
+
 
 class TestPatchGroup:
     async def test_add_member_returns_200(self, client: AsyncClient, mock_service: AsyncMock):
@@ -231,6 +237,16 @@ class TestPatchGroup:
         }
         res = await client.patch(f"/scim/v2/Groups/{uuid4()}", json=payload, headers=AUTH)
         assert res.status_code == 404
+
+    async def test_conflict_returns_409(self, client: AsyncClient, mock_service: AsyncMock):
+        mock_service.patch_group.side_effect = ScimGroupConflictError("already exists")
+        payload = {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            "Operations": [{"op": "Replace", "path": "displayName", "value": "Taken"}],
+        }
+        res = await client.patch(f"/scim/v2/Groups/{uuid4()}", json=payload, headers=AUTH)
+        assert res.status_code == 409
+        assert res.json()["scimType"] == "uniqueness"
 
 
 class TestDeleteGroup:

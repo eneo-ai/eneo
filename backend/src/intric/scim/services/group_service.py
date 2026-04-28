@@ -48,6 +48,10 @@ def _group_target(model: GroupModel) -> dict:
     }
 
 
+def _is_different_group(model: GroupModel | None, group_id: UUID | None) -> bool:
+    return model is not None and (group_id is None or model.id != group_id)
+
+
 async def _validate_member_ids(
     repo: ScimGroupRepository,
     tenant_id: UUID,
@@ -93,9 +97,21 @@ class ScimGroupService:
             metadata={"actor": _SCIM_ACTOR, "target": target},
         )
 
+    async def _validate_unique_display_name(
+        self,
+        display_name: str,
+        group_id: UUID | None = None,
+    ) -> None:
+        existing = await self._repository.get_by_name(
+            display_name, tenant_id=self._tenant_id
+        )
+        if _is_different_group(existing, group_id):
+            raise ScimGroupConflictError(f"Group '{display_name}' already exists")
+
     async def create_group(self, data: ScimGroupRequest) -> ScimGroup:
-        existing = await self._repository.get_by_name(data.displayName, tenant_id=self._tenant_id)
-        if existing is not None:
+        try:
+            await self._validate_unique_display_name(data.displayName)
+        except ScimGroupConflictError:
             logger.warning(
                 "scim.group.conflict",
                 extra={
@@ -104,7 +120,7 @@ class ScimGroupService:
                     "external_id": data.externalId,
                 },
             )
-            raise ScimGroupConflictError(f"Group '{data.displayName}' already exists")
+            raise
         model = GroupModel(
             external_id=data.externalId,
             name=data.displayName,
@@ -173,6 +189,7 @@ class ScimGroupService:
         model = await self._repository.get_by_id(group_id, tenant_id=self._tenant_id)
         if model is None:
             raise ScimGroupNotFoundError(f"Group '{group_id}' not found")
+        await self._validate_unique_display_name(data.displayName, group_id=model.id)
         model.external_id = data.externalId
         model.name = data.displayName
         member_ids = [UUID(m.value) for m in data.members]
@@ -262,7 +279,11 @@ async def _apply_patch_operation(
     path = (op.path or "").lower()
 
     if path == "displayname" and op_lower in {"replace", "add"}:
-        model.name = str(op.value)
+        display_name = str(op.value)
+        existing = await repo.get_by_name(display_name, tenant_id=tenant_id)
+        if _is_different_group(existing, group_id):
+            raise ScimGroupConflictError(f"Group '{display_name}' already exists")
+        model.name = display_name
         return
 
     if path == "members" and op_lower == "add":

@@ -6,7 +6,11 @@ from fastapi.responses import JSONResponse, Response
 
 from intric.scim.auth import require_scim_auth
 from intric.scim.deps import get_scim_group_service
-from intric.scim.domain.errors import ScimGroupConflictError, ScimGroupNotFoundError, ScimHttpError
+from intric.scim.domain.errors import (
+    ScimGroupConflictError,
+    ScimGroupNotFoundError,
+    ScimHttpError,
+)
 from intric.scim.schemas.common import ListResponse
 from intric.scim.schemas.group import ScimGroup, ScimGroupRequest
 from intric.scim.schemas.user import PatchRequest
@@ -78,6 +82,8 @@ async def replace_group(
         return await service.replace_group(group_id, payload)
     except ScimGroupNotFoundError as e:
         raise ScimHttpError(404, "Group not found") from e
+    except ScimGroupConflictError as e:
+        raise ScimHttpError(409, str(e), scim_type="uniqueness") from e
 
 
 @router.patch("/Groups/{group_id}")
@@ -90,6 +96,8 @@ async def patch_group(
         return await service.patch_group(group_id, payload.Operations)
     except ScimGroupNotFoundError as e:
         raise ScimHttpError(404, "Group not found") from e
+    except ScimGroupConflictError as e:
+        raise ScimHttpError(409, str(e), scim_type="uniqueness") from e
 
 
 @router.delete("/Groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -1,13 +1,13 @@
-import traceback
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from intric.main.logging import get_logger
 from intric.scim.domain.errors import ScimHttpError, ScimValidationError
 from intric.scim.router import router as scim_router
 
 _SCIM_ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
+logger = get_logger(__name__)
 
 
 def _scim_error_json(
@@ -57,4 +57,8 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
 @scim_app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    return _scim_error_json(500, f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
+    logger.exception(
+        "scim.unhandled_exception",
+        extra={"path": request.url.path, "method": request.method},
+    )
+    return _scim_error_json(500, "Internal server error")

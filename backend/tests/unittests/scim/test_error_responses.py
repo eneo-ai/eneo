@@ -1,9 +1,8 @@
 """Verify that all error responses on SCIM routes use the SCIM error schema."""
-import pytest
 from unittest.mock import AsyncMock
-from httpx import ASGITransport, AsyncClient
 
-from uuid import uuid4
+import pytest
+from httpx import ASGITransport, AsyncClient
 
 from intric.scim.app import scim_app
 from intric.scim.auth import require_scim_auth
@@ -45,6 +44,23 @@ class TestScimErrorSchema:
         assert SCIM_ERROR_SCHEMA in body["schemas"]
         assert body["status"] == "422"
         assert "detail" in body
+
+    async def test_unhandled_error_returns_generic_scim_500(
+        self,
+        client: AsyncClient,
+    ):
+        mock_service = AsyncMock(spec=ScimUserService)
+        mock_service.list_users.side_effect = RuntimeError("database password leaked")
+        scim_app.dependency_overrides[get_scim_user_service] = lambda: mock_service
+
+        res = await client.get("/scim/v2/Users", headers=AUTH)
+
+        assert res.status_code == 500
+        body = res.json()
+        assert SCIM_ERROR_SCHEMA in body["schemas"]
+        assert body["status"] == "500"
+        assert body["detail"] == "Internal server error"
+        assert "database password leaked" not in body["detail"]
 
     async def test_non_scim_error_uses_default_format(self, client: AsyncClient):
         # Non-SCIM routes should not use the SCIM error schema format

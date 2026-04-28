@@ -99,6 +99,17 @@ class ScimUserRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_external_id(
+        self, external_id: str, tenant_id: UUID
+    ) -> UserModel | None:
+        result = await self._session.execute(
+            select(UserModel).where(
+                UserModel.external_id == external_id,
+                UserModel.tenant_id == tenant_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def email_exists_in_other_tenant(self, email: str, tenant_id: UUID) -> bool:
         result = await self._session.execute(
             select(UserModel.id).where(

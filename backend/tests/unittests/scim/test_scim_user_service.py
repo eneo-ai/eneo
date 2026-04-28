@@ -1,9 +1,14 @@
-import pytest
 from datetime import datetime, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock
 from uuid import uuid4
 
-from intric.scim.domain.errors import ScimUserConflictError, ScimUserNotFoundError, ScimValidationError
+import pytest
+
+from intric.scim.domain.errors import (
+    ScimUserConflictError,
+    ScimUserNotFoundError,
+    ScimValidationError,
+)
 from intric.scim.schemas.common import ScimFilter
 from intric.scim.schemas.user import PatchOperation, ScimUserRequest
 from intric.scim.services.user_service import ScimUserService
@@ -23,7 +28,17 @@ def _make_db_user(user_name: str = "jane@example.com", active: bool = True):
 
 def _make_service(repo=None) -> ScimUserService:
     from intric.scim.repositories.user_repository import ScimUserRepository
-    return ScimUserService(repository=repo or AsyncMock(spec=ScimUserRepository), tenant_id=uuid4())
+
+    repo = repo or AsyncMock(spec=ScimUserRepository)
+    if isinstance(repo.get_by_username.return_value, AsyncMock):
+        repo.get_by_username.return_value = None
+    if isinstance(repo.get_by_email.return_value, AsyncMock):
+        repo.get_by_email.return_value = None
+    if isinstance(repo.get_by_external_id.return_value, AsyncMock):
+        repo.get_by_external_id.return_value = None
+    if isinstance(repo.email_exists_in_other_tenant.return_value, AsyncMock):
+        repo.email_exists_in_other_tenant.return_value = False
+    return ScimUserService(repository=repo, tenant_id=uuid4())
 
 
 CREATE_REQUEST = ScimUserRequest(
@@ -70,6 +85,38 @@ class TestCreateUser:
         service = _make_service(repo)
         with pytest.raises(ScimUserConflictError, match="already in use by another tenant"):
             await service.create_user(CREATE_REQUEST)
+
+        repo.create.assert_not_called()
+
+    async def test_raises_conflict_for_existing_email_in_tenant(self):
+        repo = AsyncMock()
+        repo.get_by_username.return_value = None
+        repo.get_by_email.return_value = _make_db_user("other@example.com")
+        repo.email_exists_in_other_tenant.return_value = False
+
+        service = _make_service(repo)
+        request = ScimUserRequest(
+            userName="jane",
+            emails=[{"value": "other@example.com", "primary": True}],
+        )
+
+        with pytest.raises(ScimUserConflictError, match="Email"):
+            await service.create_user(request)
+
+        repo.create.assert_not_called()
+
+    async def test_raises_conflict_for_existing_external_id(self):
+        repo = AsyncMock()
+        repo.get_by_username.return_value = None
+        repo.get_by_email.return_value = None
+        repo.get_by_external_id.return_value = _make_db_user("other@example.com")
+        repo.email_exists_in_other_tenant.return_value = False
+
+        service = _make_service(repo)
+        request = ScimUserRequest(userName="jane@example.com", externalId="ext-123")
+
+        with pytest.raises(ScimUserConflictError, match="External ID"):
+            await service.create_user(request)
 
         repo.create.assert_not_called()
 
@@ -144,6 +191,21 @@ class TestCreateUser:
         assert inactive.state == "active"
         assert inactive.external_id == "new-ext-id"
         assert result.active is True
+
+    async def test_reactivation_raises_conflict_for_existing_external_id(self):
+        repo = AsyncMock()
+        inactive = _make_db_user(active=False)
+        other_user = _make_db_user("taken@example.com")
+        repo.get_by_username.return_value = inactive
+        repo.get_by_external_id.return_value = other_user
+
+        service = _make_service(repo)
+        request = ScimUserRequest(userName="jane@example.com", externalId="ext-123")
+
+        with pytest.raises(ScimUserConflictError, match="External ID"):
+            await service.create_user(request)
+
+        repo.update.assert_not_called()
 
 
 class TestGetUser:
@@ -272,6 +334,36 @@ class TestReplaceUser:
         with pytest.raises(ScimUserNotFoundError):
             await service.replace_user(uuid4(), CREATE_REQUEST)
 
+    async def test_raises_conflict_when_username_belongs_to_another_user(self):
+        repo = AsyncMock()
+        db_user = _make_db_user("jane@example.com")
+        other_user = _make_db_user("taken@example.com")
+        repo.get_by_id.return_value = db_user
+        repo.get_by_username.return_value = other_user
+
+        service = _make_service(repo)
+        request = ScimUserRequest(userName="taken@example.com")
+
+        with pytest.raises(ScimUserConflictError, match="already exists"):
+            await service.replace_user(db_user.id, request)
+
+        repo.update.assert_not_called()
+
+    async def test_raises_conflict_when_external_id_belongs_to_another_user(self):
+        repo = AsyncMock()
+        db_user = _make_db_user("jane@example.com")
+        other_user = _make_db_user("taken@example.com")
+        repo.get_by_id.return_value = db_user
+        repo.get_by_external_id.return_value = other_user
+
+        service = _make_service(repo)
+        request = ScimUserRequest(userName="jane@example.com", externalId="ext-123")
+
+        with pytest.raises(ScimUserConflictError, match="External ID"):
+            await service.replace_user(db_user.id, request)
+
+        repo.update.assert_not_called()
+
 
 class TestPatchUser:
     async def test_patch_sets_active_false(self):
@@ -356,6 +448,23 @@ class TestPatchUser:
         service = _make_service(repo)
         with pytest.raises(ScimUserNotFoundError):
             await service.patch_user(uuid4(), [])
+
+    async def test_raises_conflict_when_external_id_belongs_to_another_user(self):
+        repo = AsyncMock()
+        db_user = _make_db_user()
+        other_user = _make_db_user("taken@example.com")
+        repo.get_by_id.return_value = db_user
+        repo.get_by_external_id.return_value = other_user
+
+        service = _make_service(repo)
+
+        with pytest.raises(ScimUserConflictError, match="External ID"):
+            await service.patch_user(
+                db_user.id,
+                [PatchOperation(op="Replace", path="externalId", value="ext-123")],
+            )
+
+        repo.update.assert_not_called()
 
 
 class TestDeleteUser:

@@ -6,7 +6,11 @@ from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
 from intric.database.tables.users_table import Users as UserModel
 from intric.main.logging import get_logger
-from intric.scim.domain.errors import ScimUserConflictError, ScimUserNotFoundError, ScimValidationError
+from intric.scim.domain.errors import (
+    ScimUserConflictError,
+    ScimUserNotFoundError,
+    ScimValidationError,
+)
 from intric.scim.repositories.user_repository import ScimUserRepository
 from intric.scim.schemas.common import ScimFilter, ScimSort
 from intric.scim.schemas.user import (
@@ -58,6 +62,10 @@ def _user_target(model: UserModel) -> dict:
     }
 
 
+def _is_different_user(model: UserModel | None, user_id: UUID | None) -> bool:
+    return model is not None and (user_id is None or model.id != user_id)
+
+
 class ScimUserService:
     def __init__(
         self,
@@ -83,6 +91,40 @@ class ScimUserService:
             metadata={"actor": _SCIM_ACTOR, "target": target},
         )
 
+    async def _validate_unique_fields(
+        self,
+        *,
+        user_id: UUID | None = None,
+        username: str,
+        email: str,
+        external_id: str | None,
+    ) -> None:
+        username_owner = await self._repository.get_by_username(
+            username, tenant_id=self._tenant_id
+        )
+        if _is_different_user(username_owner, user_id):
+            raise ScimUserConflictError(f"User '{username}' already exists")
+
+        email_owner = await self._repository.get_by_email(
+            email, tenant_id=self._tenant_id
+        )
+        if _is_different_user(email_owner, user_id):
+            raise ScimUserConflictError(f"Email '{email}' already exists")
+
+        if await self._repository.email_exists_in_other_tenant(email, self._tenant_id):
+            raise ScimUserConflictError(
+                f"Email '{email}' is already in use by another tenant"
+            )
+
+        if external_id is not None:
+            external_id_owner = await self._repository.get_by_external_id(
+                external_id, tenant_id=self._tenant_id
+            )
+            if _is_different_user(external_id_owner, user_id):
+                raise ScimUserConflictError(
+                    f"External ID '{external_id}' already exists"
+                )
+
     async def create_user(self, data: ScimUserRequest) -> ScimUser:
         existing = await self._repository.get_by_username(data.userName, tenant_id=self._tenant_id)
         if existing is None and "@" in data.userName:
@@ -93,6 +135,14 @@ class ScimUserService:
             )
             existing = await self._repository.get_by_email(search_email, tenant_id=self._tenant_id)
             if existing is not None:
+                if data.externalId is not None:
+                    external_id_owner = await self._repository.get_by_external_id(
+                        data.externalId, tenant_id=self._tenant_id
+                    )
+                    if _is_different_user(external_id_owner, existing.id):
+                        raise ScimUserConflictError(
+                            f"External ID '{data.externalId}' already exists"
+                        )
                 existing.external_id = data.externalId
                 existing.username = data.userName
                 result = _to_scim_user(await self._repository.update(existing))
@@ -123,6 +173,14 @@ class ScimUserService:
                     },
                 )
                 raise ScimUserConflictError(f"User '{data.userName}' already exists")
+            if data.externalId is not None:
+                external_id_owner = await self._repository.get_by_external_id(
+                    data.externalId, tenant_id=self._tenant_id
+                )
+                if _is_different_user(external_id_owner, existing.id):
+                    raise ScimUserConflictError(
+                        f"External ID '{data.externalId}' already exists"
+                    )
             existing.state = ScimUserState.ACTIVE
             existing.external_id = data.externalId
             result = _to_scim_user(await self._repository.update(existing))
@@ -143,18 +201,11 @@ class ScimUserService:
             )
             return result
         email = _resolve_email(data)
-        if await self._repository.email_exists_in_other_tenant(email, self._tenant_id):
-            logger.warning(
-                "scim.user.email_conflict",
-                extra={
-                    "tenant_id": str(self._tenant_id),
-                    "username": data.userName,
-                    "email": email,
-                },
-            )
-            raise ScimUserConflictError(
-                f"Email '{email}' is already in use by another tenant"
-            )
+        await self._validate_unique_fields(
+            username=data.userName,
+            email=email,
+            external_id=data.externalId,
+        )
         model = UserModel(
             external_id=data.externalId,
             username=data.userName,
@@ -219,9 +270,16 @@ class ScimUserService:
         model = await self._repository.get_by_id(user_id, tenant_id=self._tenant_id)
         if model is None or model.state != ScimUserState.ACTIVE:
             raise ScimUserNotFoundError(f"User '{user_id}' not found")
+        email = _resolve_email(data)
+        await self._validate_unique_fields(
+            user_id=model.id,
+            username=data.userName,
+            email=email,
+            external_id=data.externalId,
+        )
         model.external_id = data.externalId
         model.username = data.userName
-        model.email = _resolve_email(data)
+        model.email = email
         model.state = ScimUserState.ACTIVE if data.active else ScimUserState.INACTIVE
         model = await self._repository.update(model)
         logger.info(
@@ -248,6 +306,12 @@ class ScimUserService:
             raise ScimUserNotFoundError(f"User '{user_id}' not found")
         for op in operations:
             _apply_patch_operation(model, op)
+        await self._validate_unique_fields(
+            user_id=model.id,
+            username=model.username,
+            email=model.email,
+            external_id=model.external_id,
+        )
         model = await self._repository.update(model)
         logger.info(
             "scim.user.patched",

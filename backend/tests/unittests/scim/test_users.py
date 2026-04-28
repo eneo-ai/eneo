@@ -1,16 +1,16 @@
-import pytest
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 
-from intric.server.main import app
 from intric.scim.app import scim_app
 from intric.scim.auth import require_scim_auth
 from intric.scim.deps import get_scim_user_service
 from intric.scim.domain.errors import ScimUserConflictError, ScimUserNotFoundError
 from intric.scim.schemas.user import ScimMeta, ScimUser
 from intric.scim.services.user_service import ScimUserService
+from intric.server.main import app
 
 TEST_TOKEN = "test-scim-token"
 AUTH = {"Authorization": f"Bearer {TEST_TOKEN}"}
@@ -205,6 +205,12 @@ class TestReplaceUser:
         res = await client.put(f"/scim/v2/Users/{uuid4()}", json=CREATE_PAYLOAD, headers=AUTH)
         assert "urn:ietf:params:scim:api:messages:2.0:Error" in res.json()["schemas"]
 
+    async def test_conflict_returns_409(self, client: AsyncClient, mock_service: AsyncMock):
+        mock_service.replace_user.side_effect = ScimUserConflictError("already exists")
+        res = await client.put(f"/scim/v2/Users/{uuid4()}", json=CREATE_PAYLOAD, headers=AUTH)
+        assert res.status_code == 409
+        assert res.json()["scimType"] == "uniqueness"
+
 
 class TestPatchUser:
     async def test_returns_200(self, client: AsyncClient, mock_service: AsyncMock):
@@ -247,6 +253,14 @@ class TestPatchUser:
                    "Operations": [{"op": "Replace", "path": "active", "value": False}]}
         res = await client.patch(f"/scim/v2/Users/{uuid4()}", json=payload, headers=AUTH)
         assert res.status_code == 404
+
+    async def test_conflict_returns_409(self, client: AsyncClient, mock_service: AsyncMock):
+        mock_service.patch_user.side_effect = ScimUserConflictError("already exists")
+        payload = {"schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                   "Operations": [{"op": "Replace", "path": "userName", "value": "taken@example.com"}]}
+        res = await client.patch(f"/scim/v2/Users/{uuid4()}", json=payload, headers=AUTH)
+        assert res.status_code == 409
+        assert res.json()["scimType"] == "uniqueness"
 
 
 class TestDeleteUser:

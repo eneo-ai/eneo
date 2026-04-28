@@ -6,7 +6,11 @@ from fastapi.responses import JSONResponse, Response
 
 from intric.scim.auth import require_scim_auth
 from intric.scim.deps import get_scim_user_service
-from intric.scim.domain.errors import ScimHttpError, ScimUserConflictError, ScimUserNotFoundError
+from intric.scim.domain.errors import (
+    ScimHttpError,
+    ScimUserConflictError,
+    ScimUserNotFoundError,
+)
 from intric.scim.schemas.common import ListResponse
 from intric.scim.schemas.user import PatchRequest, ScimUser, ScimUserRequest
 from intric.scim.services.user_service import ScimUserService
@@ -77,6 +81,8 @@ async def replace_user(
         return await service.replace_user(user_id, payload)
     except ScimUserNotFoundError as e:
         raise ScimHttpError(404, "User not found") from e
+    except ScimUserConflictError as e:
+        raise ScimHttpError(409, str(e), scim_type="uniqueness") from e
 
 
 @router.patch("/Users/{user_id}")
@@ -89,6 +95,8 @@ async def patch_user(
         return await service.patch_user(user_id, payload.Operations)
     except ScimUserNotFoundError as e:
         raise ScimHttpError(404, "User not found") from e
+    except ScimUserConflictError as e:
+        raise ScimHttpError(409, str(e), scim_type="uniqueness") from e
 
 
 @router.delete("/Users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

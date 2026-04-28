@@ -1,7 +1,8 @@
-import pytest
 from datetime import datetime, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock
 from uuid import uuid4
+
+import pytest
 
 from intric.scim.domain.errors import (
     ScimGroupConflictError,
@@ -26,7 +27,13 @@ def _make_db_group(display_name: str = "Engineering"):
 
 def _make_service(repo=None) -> ScimGroupService:
     from intric.scim.repositories.group_repository import ScimGroupRepository
-    return ScimGroupService(repository=repo or AsyncMock(spec=ScimGroupRepository), tenant_id=uuid4())
+
+    repo = repo or AsyncMock(spec=ScimGroupRepository)
+    if isinstance(repo.get_by_name.return_value, AsyncMock):
+        repo.get_by_name.return_value = None
+    if isinstance(repo.get_user_ids_in_tenant.return_value, AsyncMock):
+        repo.get_user_ids_in_tenant.return_value = set()
+    return ScimGroupService(repository=repo, tenant_id=uuid4())
 
 
 CREATE_REQUEST = ScimGroupRequest(displayName="Engineering")
@@ -197,6 +204,21 @@ class TestReplaceGroup:
         with pytest.raises(ScimGroupNotFoundError):
             await service.replace_group(uuid4(), CREATE_REQUEST)
 
+    async def test_raises_conflict_when_display_name_belongs_to_another_group(self):
+        repo = AsyncMock()
+        db_group = _make_db_group("Engineering")
+        other_group = _make_db_group("Taken")
+        repo.get_by_id.return_value = db_group
+        repo.get_by_name.return_value = other_group
+
+        service = _make_service(repo)
+        request = ScimGroupRequest(displayName="Taken")
+
+        with pytest.raises(ScimGroupConflictError):
+            await service.replace_group(db_group.id, request)
+
+        repo.update.assert_not_called()
+
     async def test_rejects_members_outside_tenant(self):
         repo = AsyncMock()
         db_group = _make_db_group()
@@ -266,6 +288,23 @@ class TestPatchGroup:
         )
 
         repo.remove_member.assert_called_once_with(db_group.id, user_id)
+
+    async def test_raises_conflict_when_display_name_belongs_to_another_group(self):
+        repo = AsyncMock()
+        db_group = _make_db_group("Engineering")
+        other_group = _make_db_group("Taken")
+        repo.get_by_id.return_value = db_group
+        repo.get_by_name.return_value = other_group
+
+        service = _make_service(repo)
+
+        with pytest.raises(ScimGroupConflictError):
+            await service.patch_group(
+                db_group.id,
+                [PatchOperation(op="Replace", path="displayName", value="Taken")],
+            )
+
+        repo.update.assert_not_called()
 
     async def test_raises_not_found(self):
         repo = AsyncMock()
