@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -160,7 +161,11 @@ def test_invalid_stored_capability_metadata_falls_back(
         provider_type=None,
     )
 
-    model = CompletionModelSparse.model_validate(source_model)
+    with caplog.at_level(
+        logging.WARNING,
+        logger="intric.completion_models.domain.model_kwargs_capabilities",
+    ):
+        model = CompletionModelSparse.model_validate(source_model)
 
     assert model.model_kwargs_capabilities is None
     assert model.supported_model_kwargs.temperature.supported is True

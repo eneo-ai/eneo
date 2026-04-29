@@ -6,7 +6,7 @@ existing GPT-5 rows had before this migration; future rows must opt in through
 the explicit JSONB metadata.
 
 Revision ID: 202604291030
-Revises: f8c4e1b9d2a7
+Revises: 202604281200
 Create Date: 2026-04-29 10:30:00.000000
 """
 
@@ -19,7 +19,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "202604291030"
-down_revision = "f8c4e1b9d2a7"
+down_revision = "202604281200"
 branch_labels = None
 depends_on = None
 
