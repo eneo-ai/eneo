@@ -83,6 +83,28 @@ def test_capability_override_wins_over_model_name_and_reasoning_flag():
     assert model.supported_model_kwargs.verbosity.supported is False
 
 
+def test_reasoning_flag_disables_stored_reasoning_effort_capability():
+    model = _completion_model_sparse(
+        name="gpt-5.1",
+        reasoning=False,
+        model_kwargs_capabilities={
+            "reasoning_effort": {
+                "supported": True,
+                "control": "select",
+                "options": ["low", "medium", "high"],
+            },
+            "verbosity": {
+                "supported": True,
+                "control": "select",
+                "options": ["low", "medium", "high"],
+            },
+        },
+    )
+
+    assert model.supported_model_kwargs.reasoning_effort.supported is False
+    assert model.supported_model_kwargs.verbosity.supported is True
+
+
 def test_reasoning_fallback_is_name_agnostic():
     model = _completion_model_sparse(name="gpt-5.1", reasoning=True)
 
@@ -336,7 +358,7 @@ def test_public_completion_model_preserves_litellm_capabilities():
         deployment_name=None,
         org=None,
         vision=False,
-        reasoning=False,
+        reasoning=True,
         supports_tool_calling=True,
         base_url=None,
         litellm_model_name="mistral/mistral-large-latest",

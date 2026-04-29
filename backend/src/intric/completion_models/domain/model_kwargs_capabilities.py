@@ -1,7 +1,8 @@
 """Completion-model parameter controls.
 
-Resolution order is explicit metadata, reasoning fallback, tenant/LiteLLM
-sampling controls, then legacy temperature-only behavior.
+Resolution order is explicit metadata constrained by core model flags, reasoning
+fallback, tenant/LiteLLM sampling controls, then legacy temperature-only
+behavior.
 """
 
 from __future__ import annotations
@@ -79,6 +80,19 @@ def _tenant_supported_model_kwargs() -> SupportedModelKwargs:
     )
 
 
+def _apply_model_capability_flags(
+    supported_model_kwargs: SupportedModelKwargs,
+    *,
+    reasoning: bool,
+) -> SupportedModelKwargs:
+    if reasoning:
+        return supported_model_kwargs
+
+    return supported_model_kwargs.model_copy(
+        update={"reasoning_effort": ModelKwargCapability()}
+    )
+
+
 def coerce_model_kwargs_capabilities(
     model_kwargs_capabilities: object | None,
     *,
@@ -121,15 +135,24 @@ def resolve_supported_model_kwargs(
         tenant_id=tenant_id,
     )
     if override is not None:
-        return override
+        return _apply_model_capability_flags(override, reasoning=reasoning)
 
     if reasoning:
-        return _default_supported_model_kwargs(reasoning=reasoning)
+        return _apply_model_capability_flags(
+            _default_supported_model_kwargs(reasoning=reasoning),
+            reasoning=reasoning,
+        )
 
     # Tenant models run through LiteLLM with drop_params=True, so this contract
     # can expose the common sampling controls without duplicating provider
     # support tables in the frontend.
     if provider_type or litellm_model_name:
-        return _tenant_supported_model_kwargs()
+        return _apply_model_capability_flags(
+            _tenant_supported_model_kwargs(),
+            reasoning=reasoning,
+        )
 
-    return _default_supported_model_kwargs(reasoning=reasoning)
+    return _apply_model_capability_flags(
+        _default_supported_model_kwargs(reasoning=reasoning),
+        reasoning=reasoning,
+    )
