@@ -191,6 +191,10 @@ class CompletionModel(CompletionModelBase, InDB):
     # Tenant model fields (required for provider-based architecture)
     tenant_id: Optional[UUID] = None
     provider_id: Optional[UUID] = None
+    provider_type: Optional[str] = None
+
+    def _provider_type(self) -> str | None:
+        return self.provider_type
 
 
 class CompletionModelPublic(CompletionModel):
@@ -199,13 +203,7 @@ class CompletionModelPublic(CompletionModel):
     lock_reason: Optional[str] = None
     credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
-    # tenant_id and provider_id inherited from CompletionModel
-    # Provider info for grouped display in UI
     provider_name: Optional[str] = None
-    provider_type: Optional[str] = None
-
-    def _provider_type(self) -> str | None:
-        return self.provider_type
 
     @classmethod
     def from_domain(cls, completion_model: CompletionModelDomain):

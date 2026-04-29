@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import BasePublic
+from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.security_classifications_table import (
     SecurityClassification as SecurityClassificationsTable,
 )
@@ -62,6 +63,7 @@ class CompletionModels(BasePublic):
     security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
         relationship(back_populates="completion_models")
     )
+    provider: Mapped[Optional[ModelProviders]] = relationship()
 
     __table_args__ = (
         CheckConstraint(

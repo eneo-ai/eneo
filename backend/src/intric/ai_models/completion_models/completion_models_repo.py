@@ -11,6 +11,7 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.ai_models_table import CompletionModels
+from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.exceptions import UniqueException
 from intric.main.models import IdAndName
 
@@ -27,23 +28,31 @@ class CompletionModelsRepository:
 
     async def get_model(self, id: UUID, tenant_id: UUID) -> CompletionModel:
         # Query the model with tenant filtering
-        stmt = sa.select(CompletionModels).where(
-            CompletionModels.id == id,
-            sa.or_(
-                CompletionModels.tenant_id.is_(None),
-                CompletionModels.tenant_id == tenant_id,
-            ),
+        stmt = (
+            sa.select(CompletionModels, ModelProviders.provider_type)
+            .outerjoin(
+                ModelProviders, CompletionModels.provider_id == ModelProviders.id
+            )
+            .where(
+                CompletionModels.id == id,
+                sa.or_(
+                    CompletionModels.tenant_id.is_(None),
+                    CompletionModels.tenant_id == tenant_id,
+                ),
+            )
         )
         result = await self.session.execute(stmt)
-        db_model = result.scalar_one_or_none()
+        row = result.one_or_none()
 
-        if db_model is None:
+        if row is None:
             from intric.main.exceptions import NotFoundException
 
             raise NotFoundException()
 
+        db_model, provider_type = row
         model = CompletionModel.model_validate(db_model)
         model.is_org_enabled = db_model.is_enabled
+        model.provider_type = provider_type
         return model
 
     async def get_model_by_name(self, name: str) -> CompletionModel | None:
@@ -96,7 +105,10 @@ class CompletionModelsRepository:
         id_list: list[UUID] | None = None,
     ) -> list[CompletionModel]:
         query = (
-            sa.select(CompletionModels)
+            sa.select(CompletionModels, ModelProviders.provider_type)
+            .outerjoin(
+                ModelProviders, CompletionModels.provider_id == ModelProviders.id
+            )
             .where(CompletionModels.is_deprecated == is_deprecated)
             .order_by(CompletionModels.created_at)
         )
@@ -114,12 +126,13 @@ class CompletionModelsRepository:
             )
 
         result = await self.session.execute(query)
-        db_models = result.scalars().all()
+        rows = result.all()
 
         models: list[CompletionModel] = []
-        for db_model in db_models:
+        for db_model, provider_type in rows:
             model = CompletionModel.model_validate(db_model)
             model.is_org_enabled = db_model.is_enabled
+            model.provider_type = provider_type
             models.append(model)
 
         return models

@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from intric.ai_models.completion_models.completion_model import (
+    CompletionModel,
     CompletionModelCreate,
     CompletionModelPublic,
     CompletionModelSecurityStatus,
@@ -274,6 +275,42 @@ def test_sparse_completion_model_preserves_provider_capabilities():
 
     assert sparse_model.provider_type == "vllm"
     assert sparse_model.litellm_model_name == "vllm/meta-llama/Llama-3.1-70B-Instruct"
+    assert sparse_model.supported_model_kwargs.top_p.supported is True
+    assert sparse_model.supported_model_kwargs.top_k.supported is True
+
+
+def test_sparse_projection_preserves_admin_completion_model_provider_type():
+    now = datetime.now(timezone.utc)
+    admin_model = CompletionModel(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="meta-llama/Llama-3.1-70B-Instruct",
+        nickname="Llama 3.1",
+        family=None,
+        max_input_tokens=128000,
+        max_output_tokens=4096,
+        is_deprecated=False,
+        nr_billion_parameters=70,
+        hf_link=None,
+        stability=None,
+        hosting="self-hosted",
+        open_source=True,
+        description=None,
+        deployment_name=None,
+        org=None,
+        vision=False,
+        reasoning=False,
+        supports_tool_calling=True,
+        base_url=None,
+        litellm_model_name=None,
+        model_kwargs_capabilities=None,
+        provider_type="vllm",
+    )
+
+    sparse_model = CompletionModelSparse.model_validate(admin_model)
+
+    assert sparse_model.provider_type == "vllm"
     assert sparse_model.supported_model_kwargs.top_p.supported is True
     assert sparse_model.supported_model_kwargs.top_k.supported is True
 
