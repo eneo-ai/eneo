@@ -71,7 +71,9 @@ async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
                 },
             )
             if resp.status_code == 401:
-                return "Authentication failed (401 Unauthorized). Check your bearer token."
+                return (
+                    "Authentication failed (401 Unauthorized). Check your bearer token."
+                )
             elif resp.status_code == 403:
                 return "Access denied (403 Forbidden). Check your credentials."
             elif resp.status_code >= 500:
@@ -142,7 +144,9 @@ class MCPClient:
                 error_msg = await _diagnose_http(
                     self.mcp_server.http_url, self._build_auth_headers()
                 )
-            logger.error(f"Failed to connect to MCP server {self.mcp_server.name}: {error_msg}")
+            logger.error(
+                f"Failed to connect to MCP server {self.mcp_server.name}: {error_msg}"
+            )
             await self._cleanup_contexts()
             raise MCPClientError(error_msg) from e
 
@@ -187,7 +191,9 @@ class MCPClient:
         # Successfully entered - now save the reference
         self._streams_context = streams_context
         read, write, _ = streams
-        logger.debug(f"Streamable HTTP transport connected to {self.mcp_server.http_url}")
+        logger.debug(
+            f"Streamable HTTP transport connected to {self.mcp_server.http_url}"
+        )
 
         # Create and enter session context
         session_context = ClientSession(read, write)
@@ -230,11 +236,13 @@ class MCPClient:
             tools: list[dict[str, Any]] = []
 
             for tool in response.tools:
-                tools.append({
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": tool.inputSchema,
-                })
+                tools.append(
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.inputSchema,
+                    }
+                )
 
             logger.debug(f"Listed {len(tools)} tools from {self.mcp_server.name}")
             return tools
@@ -243,10 +251,14 @@ class MCPClient:
             raise
         except BaseException as e:
             error_msg = _extract_error_message(e) or str(e)
-            logger.error(f"Failed to list tools from {self.mcp_server.name}: {error_msg}")
+            logger.error(
+                f"Failed to list tools from {self.mcp_server.name}: {error_msg}"
+            )
             raise MCPClientError(f"Failed to list tools: {error_msg}") from e
 
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call_tool(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Call a tool on the MCP server.
 
@@ -268,22 +280,28 @@ class MCPClient:
 
             for content_item in response.content:
                 if content_item.type == "text":
-                    content_list.append({
-                        "type": "text",
-                        "text": content_item.text,
-                    })
+                    content_list.append(
+                        {
+                            "type": "text",
+                            "text": content_item.text,
+                        }
+                    )
                 elif content_item.type == "image":
-                    content_list.append({
-                        "type": "image",
-                        "data": content_item.data,
-                        "mime_type": content_item.mimeType,
-                    })
+                    content_list.append(
+                        {
+                            "type": "image",
+                            "data": content_item.data,
+                            "mime_type": content_item.mimeType,
+                        }
+                    )
                 elif content_item.type == "resource":
-                    content_list.append({
-                        "type": "resource",
-                        "uri": getattr(content_item, "uri", None),
-                        "text": getattr(content_item, "text", None),
-                    })
+                    content_list.append(
+                        {
+                            "type": "resource",
+                            "uri": getattr(content_item, "uri", None),
+                            "text": getattr(content_item, "text", None),
+                        }
+                    )
 
             result: dict[str, Any] = {
                 "content": content_list,
@@ -297,15 +315,20 @@ class MCPClient:
             raise
         except BaseException as e:
             error_msg = _extract_error_message(e) or str(e)
-            logger.error(f"Failed to call tool {tool_name} on {self.mcp_server.name}: {error_msg}")
+            logger.error(
+                f"Failed to call tool {tool_name} on {self.mcp_server.name}: {error_msg}"
+            )
             raise MCPClientError(f"Tool call failed: {error_msg}") from e
 
     async def disconnect(self) -> None:
         """Disconnect from the MCP server.
 
-        Note: Due to anyio's task boundary restrictions, cleanup may fail if
-        disconnect is called from a different task than connect. In this case,
-        we just clear references and let GC handle cleanup.
+        Must run on the same asyncio.Task that called connect(). The MCP SDK's
+        streamablehttp_client uses anyio cancel scopes bound to the entering
+        task; calling __aexit__ from a different task fails the task-boundary
+        check and leaks the internal anyio TaskGroup's child tasks (the
+        persistent HTTP read/write loops). We log this case explicitly so
+        leaks are visible rather than disguised as a slow CPU climb.
         """
         # Clear session first
         session_ctx = self._session_context
@@ -315,18 +338,34 @@ class MCPClient:
         streams_ctx = self._streams_context
         self._streams_context = None
 
-        # Try to properly close contexts, but don't fail if task boundary issues
+        cleanup_errors: list[BaseException] = []
+
         try:
             if session_ctx:
                 await session_ctx.__aexit__(None, None, None)
-        except BaseException:
-            pass  # Task boundary issue or cleanup error - GC will handle
+        except BaseException as e:
+            cleanup_errors.append(e)
 
         try:
             if streams_ctx:
                 await streams_ctx.__aexit__(None, None, None)
-        except BaseException:
-            pass  # Task boundary issue or cleanup error - GC will handle
+        except BaseException as e:
+            cleanup_errors.append(e)
+
+        for err in cleanup_errors:
+            msg = str(err).lower()
+            if "cancel scope" in msg or "different task" in msg:
+                logger.error(
+                    "MCP cleanup task-boundary error for %s: %s. This leaks the "
+                    "streamablehttp_client TaskGroup; ensure connect() and "
+                    "disconnect() run on the same asyncio.Task.",
+                    self.mcp_server.name,
+                    err,
+                )
+            else:
+                logger.warning(
+                    "MCP cleanup error for %s: %s", self.mcp_server.name, err
+                )
 
         logger.debug(f"Disconnected from MCP server: {self.mcp_server.name}")
 
