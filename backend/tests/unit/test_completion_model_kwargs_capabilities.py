@@ -15,6 +15,7 @@ from intric.ai_models.completion_models.completion_model import (
     CompletionModelSecurityStatus,
     CompletionModelSparse,
     CompletionModelUpdate,
+    ModelKwargs,
 )
 from intric.completion_models.domain.completion_model import (
     CompletionModel as CompletionModelDomain,
@@ -103,6 +104,35 @@ def test_reasoning_flag_disables_stored_reasoning_effort_capability():
 
     assert model.supported_model_kwargs.reasoning_effort.supported is False
     assert model.supported_model_kwargs.verbosity.supported is True
+
+
+def test_filter_unsupported_strips_disabled_kwargs():
+    model = _completion_model_sparse(name="gpt-5.1", reasoning=False)
+    kwargs = ModelKwargs(temperature=0.4, reasoning_effort="high", verbosity="low")
+
+    filtered = kwargs.filter_unsupported(model.supported_model_kwargs)
+
+    assert filtered.temperature == 0.4
+    assert filtered.reasoning_effort is None
+    assert filtered.verbosity is None
+
+
+def test_filter_unsupported_returns_self_when_all_supported():
+    model = _completion_model_sparse(name="gpt-5.1", reasoning=True)
+    kwargs = ModelKwargs(reasoning_effort="medium")
+
+    filtered = kwargs.filter_unsupported(model.supported_model_kwargs)
+
+    assert filtered is kwargs
+
+
+def test_filter_unsupported_preserves_response_format():
+    model = _completion_model_sparse(reasoning=False)
+    kwargs = ModelKwargs(response_format={"type": "json_object"})
+
+    filtered = kwargs.filter_unsupported(model.supported_model_kwargs)
+
+    assert filtered.response_format == {"type": "json_object"}
 
 
 def test_reasoning_fallback_is_name_agnostic():
