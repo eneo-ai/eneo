@@ -18,7 +18,7 @@ from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.flows.api import flow_router_common as common
-from intric.flows.api.flow_api_common import error_response
+from intric.flows.api.flow_api_common import audit_actor_kwargs, error_response
 from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_models import (
     FlowRunCreateRequest,
@@ -165,14 +165,14 @@ async def create_flow_run(
         request,
         container,
         flow_id=id,
-        required_access="run",
+        required_access=common.FlowApiAction.RUN,
         allow_service_key_principals=True,
         require_published_for_service_key=True,
     )
     assembler = FlowAssembler()
     run_service = _get_flow_run_service(container)
     user = container.user()
-    actor_kwargs = common.audit_actor_kwargs(user)
+    actor_kwargs = audit_actor_kwargs(user)
     run = await run_service.create_run(
         flow_id=id,
         input_payload_json=run_in.input_payload_json,
@@ -249,7 +249,7 @@ async def list_flow_runs_alias(
         request,
         container,
         flow_id=id,
-        required_access="view",
+        required_access=common.FlowApiAction.VIEW,
         require_flow_lookup_without_scope=True,
         allow_service_key_principals=True,
     )
@@ -302,7 +302,7 @@ async def get_flow_run_alias(
         request,
         container,
         flow_id=id,
-        required_access="view",
+        required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
     run = await _get_flow_run_service(container).get_run(run_id=run_id, flow_id=id)
@@ -344,11 +344,11 @@ async def cancel_flow_run_alias(
         request,
         container,
         flow_id=id,
-        required_access="run",
+        required_access=common.FlowApiAction.RUN,
         allow_service_key_principals=True,
     )
     user = container.user()
-    actor_kwargs = common.audit_actor_kwargs(user)
+    actor_kwargs = audit_actor_kwargs(user)
     run_service = _get_flow_run_service(container)
     await run_service.get_run(run_id=run_id, flow_id=id)
     run = await run_service.cancel_run(run_id=run_id)
@@ -412,11 +412,11 @@ async def redispatch_flow_run_alias(
         request,
         container,
         flow_id=id,
-        required_access="run",
+        required_access=common.FlowApiAction.RUN,
         allow_service_key_principals=True,
     )
     user = container.user()
-    actor_kwargs = common.audit_actor_kwargs(user)
+    actor_kwargs = audit_actor_kwargs(user)
     run_service = _get_flow_run_service(container)
     run = await run_service.get_run(run_id=run_id, flow_id=id)
 

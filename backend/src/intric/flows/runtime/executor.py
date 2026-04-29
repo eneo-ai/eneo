@@ -45,6 +45,7 @@ from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
+from intric.flows.published_definition import parse_published_runtime_steps
 from intric.flows.runtime.claim_resolution import resolve_step_claim
 from intric.flows.runtime.document_rendering import DocumentRenderService
 from intric.flows.runtime.document_rendering.limits import (
@@ -385,7 +386,7 @@ class FlowRunExecutor:
             await self._commit()
             return {"status": "failed", "error": "definition_checksum_mismatch"}
         try:
-            steps = self._parse_runtime_steps(version.definition_json)
+            steps = self._parse_published_runtime_steps(version.definition_json)
         except BadRequestException as exc:
             await self.flow_run_repo.update_status(
                 run_id=run_id,
@@ -1421,6 +1422,12 @@ class FlowRunExecutor:
         step: RuntimeStep,
     ) -> tuple[str, list[UUID]]:
         return await self._apply_output_cap(text=text, run=run, step=step)
+
+    @staticmethod
+    def _parse_published_runtime_steps(
+        definition_json: dict[str, Any],
+    ) -> list[RuntimeStep]:
+        return parse_published_runtime_steps(definition_json)
 
     @staticmethod
     def _parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:

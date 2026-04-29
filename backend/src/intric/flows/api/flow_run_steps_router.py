@@ -12,7 +12,7 @@ from intric.audit.domain.entity_types import EntityType
 from intric.authentication.signed_urls import generate_signed_token
 from intric.files.file_models import SignedURLRequest, SignedURLResponse
 from intric.flows.api import flow_router_common as common
-from intric.flows.api.flow_api_common import error_response
+from intric.flows.api.flow_api_common import audit_actor_kwargs, error_response
 from intric.flows.api.flow_graph import (
     build_graph_from_steps,
     enrich_nodes_with_run_results,
@@ -21,6 +21,8 @@ from intric.flows.api.flow_models import FlowRunStepPublic, GraphResponse
 from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.application.flow_service import FlowService
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from intric.flows.published_definition import parse_published_definition
+from intric.flows.principal import FlowPrincipal
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes, NotFoundException
 from intric.server.dependencies.container import get_container
@@ -111,7 +113,7 @@ async def list_flow_run_steps(
         request,
         container,
         flow_id=id,
-        required_access="view",
+        required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
     step_results = await _get_flow_run_service(container).list_step_results(
@@ -187,7 +189,7 @@ async def get_flow_graph(
         request,
         container,
         flow_id=id,
-        required_access="view",
+        required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
     flow_service = _get_flow_service(container)
@@ -205,7 +207,7 @@ async def get_flow_graph(
             version=run.flow_version,
             tenant_id=run.tenant_id,
         )
-        definition_steps = version.definition_json.get("steps", [])
+        definition_steps = parse_published_definition(version.definition_json).steps
         nodes, edges = build_graph_from_steps(definition_steps)
         step_results = await flow_run_service.list_step_results(
             run_id=run.id,
@@ -219,7 +221,7 @@ async def get_flow_graph(
 
     flow = await flow_service.get_flow(id)
     if (
-        common.is_service_key_principal(container.user())
+        FlowPrincipal.from_user(container.user()).is_service_key
         and flow.published_version is None
     ):
         raise NotFoundException("Flow not found.")
@@ -272,12 +274,12 @@ async def generate_flow_run_artifact_signed_url(
         request,
         container,
         flow_id=id,
-        required_access="view",
+        required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
     run_service = _get_flow_run_service(container)
     user = container.user()
-    actor_kwargs = common.audit_actor_kwargs(user)
+    actor_kwargs = audit_actor_kwargs(user)
 
     file = await run_service.get_run_artifact_file(
         run_id=run_id,

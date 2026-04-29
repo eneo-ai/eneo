@@ -855,11 +855,11 @@ async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatc
         _container,
         *,
         flow_id,
-        required_access="view",
+        required_access=router_common_module.FlowApiAction.VIEW,
         load_actor_context=True,
     ):
         requested_flow_ids.append(str(flow_id))
-        assert required_access == "manage"
+        assert required_access == router_common_module.FlowApiAction.EDIT
         assert load_actor_context is True
         flow = _flow(flow_id)
         flow.owner_user_id = container.user.return_value.id
@@ -941,11 +941,11 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
         _container,
         *,
         flow_id,
-        required_access="view",
+        required_access=router_common_module.FlowApiAction.VIEW,
         load_actor_context=True,
     ):
         requested_flow_ids.append(str(flow_id))
-        assert required_access == "manage"
+        assert required_access == router_common_module.FlowApiAction.EDIT
         assert load_actor_context is True
         flow = _flow(flow_id)
         flow.owner_user_id = container.user.return_value.id
@@ -990,12 +990,12 @@ async def test_get_flow_run_contract_enforces_scope_and_returns_contract(monkeyp
         _container,
         *,
         flow_id,
-        required_access="view",
+        required_access=router_common_module.FlowApiAction.VIEW,
         require_flow_lookup_without_scope=False,
         allow_service_key_principals=False,
         require_published_for_service_key=False,
     ):
-        assert required_access == "view"
+        assert required_access == router_common_module.FlowApiAction.VIEW
         assert require_flow_lookup_without_scope is False
         assert allow_service_key_principals is True
         assert require_published_for_service_key is True
@@ -1042,12 +1042,12 @@ async def test_upload_flow_runtime_file_calls_step_upload_service(monkeypatch):
         _container,
         *,
         flow_id,
-        required_access="view",
+        required_access=router_common_module.FlowApiAction.VIEW,
         require_flow_lookup_without_scope=False,
         allow_service_key_principals=False,
         require_published_for_service_key=False,
     ):
-        assert required_access == "run"
+        assert required_access == router_common_module.FlowApiAction.RUN
         assert require_flow_lookup_without_scope is False
         assert allow_service_key_principals is True
         assert require_published_for_service_key is True

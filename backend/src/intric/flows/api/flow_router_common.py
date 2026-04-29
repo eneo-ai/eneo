@@ -8,18 +8,11 @@ from fastapi import HTTPException, Request, status
 from intric.assistants.api.assistant_models import AssistantUpdatePublic
 from intric.authentication.auth_dependencies import get_scope_filter
 from intric.flows.api.flow_api_common import (
-    AuditActorKwargs,
     FlowAccessContext,
     FlowSpaceAccessContext,
     enforce_flow_scope,
     resolve_flow_access_context,
     resolve_space_access_context,
-)
-from intric.flows.api.flow_api_common import (
-    audit_actor_kwargs as _audit_actor_kwargs,
-)
-from intric.flows.api.flow_api_common import (
-    is_service_key_principal as _is_service_key_principal,
 )
 from intric.flows.api.flow_models import (
     FlowCreateRequest,
@@ -28,6 +21,7 @@ from intric.flows.api.flow_models import (
     FlowUpdateRequest,
 )
 from intric.flows.application import flow_dispatch
+from intric.flows.flow_access_policy import FlowApiAction
 from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.main.container.container import Container
 
@@ -151,20 +145,12 @@ def flow_upload_service(container: Container) -> FlowFileUploadService:
     )
 
 
-def audit_actor_kwargs(user: object) -> AuditActorKwargs:
-    return _audit_actor_kwargs(user)
-
-
-def is_service_key_principal(user: object) -> bool:
-    return _is_service_key_principal(user)
-
-
 async def enforce_flow_scope_for_request(
     request: Request,
     container: Container,
     *,
     flow_id: UUID,
-    required_access: str = "view",
+    required_access: FlowApiAction = FlowApiAction.VIEW,
     require_flow_lookup_without_scope: bool = False,
     allow_service_key_principals: bool = False,
     require_published_for_service_key: bool = False,
@@ -186,7 +172,7 @@ async def get_flow_access_context_for_request(
     container: Container,
     *,
     flow_id: UUID,
-    required_access: str = "view",
+    required_access: FlowApiAction = FlowApiAction.VIEW,
     load_actor_context: bool = True,
     allow_service_key_principals: bool = False,
     require_published_for_service_key: bool = False,
@@ -208,7 +194,7 @@ async def get_space_access_context_for_request(
     container: Container,
     *,
     space_id: UUID,
-    required_access: str = "view",
+    required_access: FlowApiAction = FlowApiAction.VIEW,
     scope_mismatch_message: str = "API key space scope does not match requested flow.",
     allow_service_key_principals: bool = False,
 ) -> FlowSpaceAccessContext:

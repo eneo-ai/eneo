@@ -25,6 +25,7 @@ from intric.flows.flow import (
     FlowStepResult,
     FlowVersion,
 )
+from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -109,8 +110,26 @@ def _service_key_user(user):
 
 def _trace_user(user):
     return user.model_copy(
-        update={"roles": [SimpleNamespace(permissions=[Permission.FLOWS_TRACE])]}
+        update={
+            "permissions": {Permission.FLOWS_VIEW, Permission.FLOWS_TRACE},
+            "roles": [
+                SimpleNamespace(
+                    permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE]
+                )
+            ],
+        }
     )
+
+
+def _published_definition_json(
+    flow: Flow,
+    steps: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+        "flow_id": str(flow.id),
+        "steps": steps,
+    }
 
 
 def _step_result_record(
@@ -198,16 +217,17 @@ def _version(user, flow: Flow, version: int = 1) -> FlowVersion:
         version=version,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={
-            "steps": [
+        definition_json=_published_definition_json(
+            flow,
+            [
                 {
                     "step_id": str(step.id),
                     "step_order": step.step_order,
                     "assistant_id": str(step.assistant_id),
                 }
                 for step in flow.steps
-            ]
-        },
+            ],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -422,6 +442,40 @@ async def test_create_run_replays_existing_run_for_matching_idempotency_key(user
     assert result == existing_run
     flow_run_repo.create.assert_not_awaited()
     flow_run_repo.get_idempotent_run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_run_with_idempotency_key_creates_when_no_retained_row_exists(
+    user,
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    created_run = _run(user=user, flow_id=flow.id)
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = flow
+    flow_run_repo.get_idempotent_run.return_value = None
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_run_repo.create.return_value = created_run
+
+    result = await service.create_run(
+        flow_id=flow.id,
+        input_payload_json={"x": "y"},
+        idempotency_key="abc123",
+    )
+
+    assert result == created_run
+    flow_run_repo.get_idempotent_run.assert_awaited_once()
+    flow_run_repo.count_active_runs.assert_awaited_once()
+    flow_run_repo.create.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -835,8 +889,9 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
         version=2,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={
-            "steps": [
+        definition_json=_published_definition_json(
+            flow,
+            [
                 {
                     "step_id": str(runtime_step.id),
                     "step_order": 1,
@@ -858,8 +913,8 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
                     "output_type": "json",
                     "mcp_policy": "inherit",
                 },
-            ]
-        },
+            ],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -932,8 +987,9 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
         version=2,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={
-            "steps": [
+        definition_json=_published_definition_json(
+            flow,
+            [
                 {
                     "step_id": str(runtime_step.id),
                     "step_order": 1,
@@ -945,8 +1001,8 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
                     "output_type": "json",
                     "mcp_policy": "inherit",
                 }
-            ]
-        },
+            ],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -991,8 +1047,9 @@ async def test_create_run_rejects_duplicate_legacy_and_canonical_step_one_input(
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={
-            "steps": [
+        definition_json=_published_definition_json(
+            flow,
+            [
                 {
                     "step_id": str(runtime_step.id),
                     "step_order": 1,
@@ -1004,8 +1061,8 @@ async def test_create_run_rejects_duplicate_legacy_and_canonical_step_one_input(
                     "output_type": "json",
                     "mcp_policy": "inherit",
                 }
-            ]
-        },
+            ],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -1055,8 +1112,9 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={
-            "steps": [
+        definition_json=_published_definition_json(
+            flow,
+            [
                 {
                     "step_id": str(runtime_step.id),
                     "step_order": 1,
@@ -1068,8 +1126,8 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
                     "output_type": "json",
                     "mcp_policy": "inherit",
                 }
-            ]
-        },
+            ],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -2303,24 +2361,26 @@ async def test_create_run_rejects_oversized_input_payload(user):
     [
         (
             {},
+            "missing schema_version",
+            "flow_definition_schema_version_missing",
+            None,
+        ),
+        (
+            {"schema_version": 1, "flow_id": str(uuid4()), "steps": []},
             "does not contain executable steps",
             "flow_version_no_executable_steps",
             None,
         ),
         (
-            {"steps": []},
-            "does not contain executable steps",
-            "flow_version_no_executable_steps",
-            None,
-        ),
-        (
-            {"steps": ["bad-step"]},
-            "Invalid flow version step definition",
-            "flow_version_invalid_step_definition",
+            {"schema_version": 1, "flow_id": str(uuid4()), "steps": ["bad-step"]},
+            "Invalid step definition",
+            "flow_definition_steps_invalid",
             None,
         ),
         (
             {
+                "schema_version": 1,
+                "flow_id": str(uuid4()),
                 "steps": [
                     {
                         "step_order": 0,
@@ -2335,6 +2395,8 @@ async def test_create_run_rejects_oversized_input_payload(user):
         ),
         (
             {
+                "schema_version": 1,
+                "flow_id": str(uuid4()),
                 "steps": [
                     {
                         "step_order": "abc",
@@ -2349,6 +2411,8 @@ async def test_create_run_rejects_oversized_input_payload(user):
         ),
         (
             {
+                "schema_version": 1,
+                "flow_id": str(uuid4()),
                 "steps": [
                     {
                         "step_order": True,
@@ -2363,6 +2427,8 @@ async def test_create_run_rejects_oversized_input_payload(user):
         ),
         (
             {
+                "schema_version": 1,
+                "flow_id": str(uuid4()),
                 "steps": [
                     {
                         "step_order": 1,
@@ -2377,6 +2443,8 @@ async def test_create_run_rejects_oversized_input_payload(user):
         ),
         (
             {
+                "schema_version": 1,
+                "flow_id": str(uuid4()),
                 "steps": [
                     {
                         "step_order": 1,
@@ -2511,16 +2579,17 @@ async def test_create_run_resolves_missing_snapshot_identifiers_from_fallback_st
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={
-            "steps": [
+        definition_json=_published_definition_json(
+            flow,
+            [
                 {"step_order": 1},
                 {
                     "step_order": 2,
                     "step_id": str(flow.steps[1].id),
                     "assistant_id": str(flow.steps[1].assistant_id),
                 },
-            ]
-        },
+            ],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -2560,15 +2629,16 @@ async def test_create_run_rejects_missing_snapshot_identifiers_without_fallback(
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={
-            "steps": [
+        definition_json=_published_definition_json(
+            flow,
+            [
                 {
                     "step_order": 2,
                     "step_id": None,
                     "assistant_id": None,
                 }
-            ]
-        },
+            ],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -2605,8 +2675,9 @@ async def test_get_evidence_redacts_sensitive_values(user):
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={
-            "steps": [
+        definition_json=_published_definition_json(
+            flow,
+            [
                 {
                     "step_order": 1,
                     "output_config": {
@@ -2618,8 +2689,8 @@ async def test_get_evidence_redacts_sensitive_values(user):
                         },
                     },
                 }
-            ]
-        },
+            ],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -2734,8 +2805,9 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={
-            "steps": [
+        definition_json=_published_definition_json(
+            flow,
+            [
                 {
                     "step_order": 1,
                     "step_id": str(uuid4()),
@@ -2746,8 +2818,8 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
                     "output_type": "text",
                     "mcp_policy": "inherit",
                 }
-            ]
-        },
+            ],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -2839,8 +2911,9 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={
-            "steps": [
+        definition_json=_published_definition_json(
+            flow,
+            [
                 {
                     "step_order": 1,
                     "step_id": str(uuid4()),
@@ -2851,8 +2924,8 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
                     "output_type": "text",
                     "mcp_policy": "inherit",
                 }
-            ]
-        },
+            ],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -2914,7 +2987,7 @@ async def test_export_evidence_json_returns_hashed_redacted_bundle(user):
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={"steps": []},
+        definition_json=_published_definition_json(flow, []),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -2956,7 +3029,7 @@ async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={"steps": []},
+        definition_json=_published_definition_json(flow, []),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -3004,8 +3077,9 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={
-            "steps": [
+        definition_json=_published_definition_json(
+            flow,
+            [
                 {
                     "step_order": 1,
                     "step_id": str(uuid4()),
@@ -3016,8 +3090,8 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
                     "output_type": "text",
                     "mcp_policy": "inherit",
                 }
-            ]
-        },
+            ],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -3057,8 +3131,9 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json={
-            "steps": [
+        definition_json=_published_definition_json(
+            flow,
+            [
                 {
                     "step_order": 1,
                     "step_id": str(uuid4()),
@@ -3069,8 +3144,8 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
                     "output_type": "text",
                     "mcp_policy": "inherit",
                 }
-            ]
-        },
+            ],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )

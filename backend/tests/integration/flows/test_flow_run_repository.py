@@ -8,7 +8,9 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
+from intric.authentication.principal_types import PrincipalType
 from intric.database.database import sessionmanager
+from intric.database.tables.api_keys_v2_table import ApiKeysV2
 from intric.database.tables.flow_tables import (
     FlowRuns,
     FlowStepAttempts,
@@ -23,6 +25,7 @@ from intric.flows import (
 )
 from intric.flows.flow import FlowRunStatus, FlowStepAttemptStatus, FlowStepResultStatus
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.principal import FlowPrincipal
 
 
 def _build_flow(
@@ -361,6 +364,125 @@ async def test_get_idempotent_run_returns_existing_run_and_fingerprint(
     existing_run, existing_fingerprint = existing
     assert existing_run.id == created.id
     assert existing_fingerprint == "abc123fingerprint"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_idempotency_key_isolated_between_user_and_service_key_principals(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(
+            session, "Flows idempotent principal isolation", [model.id]
+        )
+        assistant = await assistant_factory(
+            session,
+            "Flow Run Assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        flow = flow.model_copy(update={"published_version": 1})
+        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_checksum="checksum-idempotent-principal-isolation",
+            definition_json={"steps": []},
+            tenant_id=admin_user.tenant_id,
+        )
+
+        service_key_id = uuid4()
+        await session.execute(
+            sa.insert(ApiKeysV2).values(
+                id=service_key_id,
+                tenant_id=admin_user.tenant_id,
+                ownership=PrincipalType.SERVICE_KEY.value,
+                owner_user_id=admin_user.id,
+                scope_type="tenant",
+                scope_id=None,
+                permission="read_write",
+                key_type="api_key",
+                key_hash=f"hash-{service_key_id}",
+                hash_version="v1",
+                key_prefix="test",
+                key_suffix="test",
+                name="Flow service key",
+                description=None,
+                resource_permissions=None,
+                created_by_user_id=admin_user.id,
+            )
+        )
+
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        user_run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            principal_type=PrincipalType.USER.value,
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"question": "user"},
+            preseed_steps=[],
+            idempotency_key="same-key",
+            request_fingerprint="user-fingerprint",
+        )
+        service_key_run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=None,
+            principal_type=PrincipalType.SERVICE_KEY.value,
+            principal_user_id=None,
+            principal_api_key_id=service_key_id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"question": "service-key"},
+            preseed_steps=[],
+            idempotency_key="same-key",
+            request_fingerprint="service-key-fingerprint",
+        )
+
+        user_existing = await run_repo.get_idempotent_run(
+            tenant_id=admin_user.tenant_id,
+            flow_id=flow.id,
+            idempotency_key="same-key",
+            principal=FlowPrincipal(
+                principal_type=PrincipalType.USER,
+                principal_user_id=admin_user.id,
+            ),
+        )
+        service_key_existing = await run_repo.get_idempotent_run(
+            tenant_id=admin_user.tenant_id,
+            flow_id=flow.id,
+            idempotency_key="same-key",
+            principal=FlowPrincipal(
+                principal_type=PrincipalType.SERVICE_KEY,
+                principal_api_key_id=service_key_id,
+            ),
+        )
+
+    assert user_existing is not None
+    assert service_key_existing is not None
+    assert user_existing[0].id == user_run.id
+    assert user_existing[1] == "user-fingerprint"
+    assert service_key_existing[0].id == service_key_run.id
+    assert service_key_existing[1] == "service-key-fingerprint"
 
 
 @pytest.mark.asyncio

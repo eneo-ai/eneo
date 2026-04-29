@@ -23,6 +23,7 @@ from intric.flows.api.flow_models import (
     FlowUpdateRequest,
 )
 from intric.flows.application.flow_service import FlowService
+from intric.flows.principal import FlowPrincipal
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes, NotFoundException, UnauthorizedException
 from intric.main.models import NOT_PROVIDED, OffsetPaginatedResponse
@@ -108,7 +109,7 @@ async def create_flow(
         request,
         container,
         space_id=flow_in.space_id,
-        required_access="manage",
+        required_access=common.FlowApiAction.EDIT,
         scope_mismatch_message=(
             f"API key is scoped to space '{common.get_scope_filter(request).space_id}'. "
             f"Cannot create flow in space '{flow_in.space_id}'."
@@ -203,7 +204,7 @@ async def list_flows(
         request,
         container,
         space_id=space_id,
-        required_access="view",
+        required_access=common.FlowApiAction.VIEW,
         scope_mismatch_message="API key space scope does not match requested space.",
         allow_service_key_principals=True,
     )
@@ -214,7 +215,7 @@ async def list_flows(
             context={"auth_layer": "space_membership"},
         )
 
-    service_key_principal = common.is_service_key_principal(container.user())
+    service_key_principal = FlowPrincipal.from_user(container.user()).is_service_key
     assembler = FlowAssembler()
     flows = await _get_flow_service(container).list_flows(
         space_id=space_id,
@@ -270,7 +271,7 @@ async def get_flow(
         request,
         container,
         flow_id=id,
-        required_access="view",
+        required_access=common.FlowApiAction.VIEW,
     )
     assembler = FlowAssembler()
     actor = cast(_FlowReaderProtocol | None, access_context.actor)
@@ -330,7 +331,7 @@ async def get_published_flow_runtime(
         request,
         container,
         flow_id=id,
-        required_access="view",
+        required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
         require_published_for_service_key=True,
     )
@@ -472,7 +473,7 @@ async def delete_flow(
         request,
         container,
         flow_id=id,
-        required_access="manage",
+        required_access=common.FlowApiAction.EDIT,
     )
     if access_context.actor is None or not access_context.actor.can_delete_flows():
         raise UnauthorizedException(
@@ -538,7 +539,7 @@ async def publish_flow(
         request,
         container,
         flow_id=id,
-        required_access="manage",
+        required_access=common.FlowApiAction.EDIT,
     )
     if access_context.actor is None or not access_context.actor.can_publish_flows():
         raise UnauthorizedException(
@@ -606,7 +607,7 @@ async def unpublish_flow(
         request,
         container,
         flow_id=id,
-        required_access="manage",
+        required_access=common.FlowApiAction.EDIT,
     )
     if access_context.actor is None or not access_context.actor.can_publish_flows():
         raise UnauthorizedException(

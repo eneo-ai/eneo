@@ -10,11 +10,11 @@ from fastapi import HTTPException, Request, status
 
 from intric.audit.domain.actor_types import ActorType
 from intric.authentication.auth_dependencies import ScopeFilter, get_scope_filter
-from intric.flows.flow_permissions import (
-    ensure_can_manage_flows,
-    ensure_can_run_flows,
-    ensure_can_view_flows,
+from intric.flows.flow_access_policy import (
+    FlowApiAction,
+    require_flow_action,
 )
+from intric.flows.principal import FlowPrincipal
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes, NotFoundException, UnauthorizedException
 from intric.main.models import GeneralError
@@ -90,28 +90,12 @@ def _scope_type_value(scope_type: object | None) -> str | None:
     return str(scope_type)
 
 
-def is_service_key_principal(user: Any) -> bool:
-    key = getattr(user, "active_api_key", None)
-    if key is None:
-        return False
-    ownership = getattr(key, "ownership", "user")
-    if isinstance(ownership, Enum):
-        ownership = ownership.value
-    return str(ownership) == "service"
-
-
 def audit_actor_kwargs(user: Any) -> AuditActorKwargs:
-    if is_service_key_principal(user):
-        key = getattr(user, "active_api_key", None)
-        return {
-            "actor_id": None,
-            "actor_type": ActorType.API_KEY,
-            "actor_api_key_id": getattr(key, "id", None),
-        }
+    fields = FlowPrincipal.from_user(user).audit_actor_fields()
     return {
-        "actor_id": getattr(user, "id", None),
-        "actor_type": ActorType.USER,
-        "actor_api_key_id": None,
+        "actor_id": fields["actor_id"],
+        "actor_type": fields["actor_type"],
+        "actor_api_key_id": fields["actor_api_key_id"],
     }
 
 
@@ -131,7 +115,7 @@ async def enforce_flow_scope(
     container: Container,
     *,
     flow_id: UUID,
-    required_access: str = "view",
+    required_access: FlowApiAction = FlowApiAction.VIEW,
     require_flow_lookup_without_scope: bool = False,
     allow_service_key_principals: bool = False,
     require_published_for_service_key: bool = False,
@@ -154,7 +138,7 @@ async def enforce_flow_scope(
         scope_filter_getter=getter,
         load_actor_context=(
             allow_service_key_principals
-            or not is_service_key_principal(container.user())
+            or not FlowPrincipal.from_user(container.user()).is_service_key
         ),
     )
 
@@ -176,21 +160,17 @@ async def enforce_flow_scope(
     return access_context.flow
 
 
-def _ensure_required_tenant_permission(
+def _ensure_required_flow_action(
     user: Any,
     *,
-    required_access: str,
+    required_access: FlowApiAction,
     allow_service_key_principals: bool = False,
 ) -> None:
-    if allow_service_key_principals and is_service_key_principal(user):
-        if required_access in {"view", "run"}:
-            return
-    if required_access == "manage":
-        ensure_can_manage_flows(user)
-    elif required_access == "run":
-        ensure_can_run_flows(user)
-    else:
-        ensure_can_view_flows(user)
+    require_flow_action(
+        user,
+        required_access,
+        allow_service_key_principals=allow_service_key_principals,
+    )
 
 
 async def resolve_flow_access_context(
@@ -198,7 +178,7 @@ async def resolve_flow_access_context(
     container: Container,
     *,
     flow_id: UUID,
-    required_access: str = "view",
+    required_access: FlowApiAction = FlowApiAction.VIEW,
     allow_service_key_principals: bool = False,
     require_published_for_service_key: bool = False,
     scope_filter: ScopeFilter | None = None,
@@ -224,12 +204,12 @@ async def resolve_flow_access_context(
     if (
         require_published_for_service_key
         and allow_service_key_principals
-        and is_service_key_principal(container.user())
+        and FlowPrincipal.from_user(container.user()).is_service_key
         and flow.published_version is None
     ):
         raise NotFoundException("Flow not found.")
 
-    _ensure_required_tenant_permission(
+    _ensure_required_flow_action(
         container.user(),
         required_access=required_access,
         allow_service_key_principals=allow_service_key_principals,
@@ -258,7 +238,7 @@ async def resolve_space_access_context(
     container: Container,
     *,
     space_id: UUID,
-    required_access: str = "view",
+    required_access: FlowApiAction = FlowApiAction.VIEW,
     allow_service_key_principals: bool = False,
     scope_filter: ScopeFilter | None = None,
     scope_filter_getter: Callable[[Request], ScopeFilter] | None = None,
@@ -277,7 +257,7 @@ async def resolve_space_access_context(
     ):
         raise_scope_mismatch(scope_mismatch_message)
 
-    _ensure_required_tenant_permission(
+    _ensure_required_flow_action(
         container.user(),
         required_access=required_access,
         allow_service_key_principals=allow_service_key_principals,

@@ -42,7 +42,7 @@ async def _require_flow_assistant_access(
         request,
         container,
         flow_id=flow_id,
-        required_access="manage",
+        required_access=common.FlowApiAction.EDIT,
     )
     if access_context.actor is None or not access_context.actor.can_edit_flows():
         raise UnauthorizedException(

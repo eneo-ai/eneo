@@ -31,10 +31,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_router import (
-    _get_planner_model,
-    _get_space_kbs,
-    _get_space_models,
-    _require_flow_edit_permission,
+    _authorize_ai_builder_request,
     apply_plan,
     approve_plan,
     cancel_session,
@@ -48,6 +45,7 @@ from intric.flows.ai_builder.ai_builder_router import (
     revise_plan,
     send_message,
 )
+from intric.flows.flow_access_policy import FlowApiAction
 from intric.main.exceptions import (
     BadRequestException,
     ErrorCodes,
@@ -149,7 +147,6 @@ def _make_request(*, scoped_space_id=None) -> MagicMock:
         request.state = SimpleNamespace()
     else:
         request.state = SimpleNamespace(
-            scope_enforcement_enabled=True,
             api_key_scope_type="space",
             api_key_scope_id=scoped_space_id,
         )
@@ -270,98 +267,29 @@ def _make_plan_domain(
 # ---------------------------------------------------------------------------
 
 
-class TestRequireFlowEditPermission:
+class TestAuthorizeAIBuilderRequest:
     @pytest.mark.anyio
     async def test_allows_when_can_edit(self):
         container = _make_container(can_edit_flows=True)
-        # Should not raise
-        await _require_flow_edit_permission(container, uuid4())
+        authorization = await _authorize_ai_builder_request(
+            _make_request(),
+            container,
+            action=FlowApiAction.BUILDER_SESSION_CREATE,
+            space_id=uuid4(),
+        )
+
+        assert authorization.space is not None
 
     @pytest.mark.anyio
     async def test_raises_when_cannot_edit(self):
         container = _make_container(can_edit_flows=False)
         with pytest.raises(UnauthorizedException, match="permission"):
-            await _require_flow_edit_permission(container, uuid4())
-
-
-class TestGetPlannerModel:
-    @pytest.mark.anyio
-    async def test_returns_default_model_when_available(self):
-        container = _make_container()
-        default_model = MagicMock()
-        space_service = container.space_service.return_value
-        space = space_service.get_space.return_value
-        space.get_default_completion_model.return_value = default_model
-
-        result = await _get_planner_model(container, uuid4())
-        assert result is default_model
-
-    @pytest.mark.anyio
-    async def test_returns_first_model_when_no_default(self):
-        container = _make_container()
-        model = MagicMock()
-        space_service = container.space_service.return_value
-        space = space_service.get_space.return_value
-        space.get_default_completion_model.return_value = None
-        space.completion_models = [model]
-
-        result = await _get_planner_model(container, uuid4())
-        assert result is model
-
-    @pytest.mark.anyio
-    async def test_raises_when_no_space_model_is_available(self):
-        container = _make_container()
-        space_service = container.space_service.return_value
-        space = space_service.get_space.return_value
-        space.get_default_completion_model.return_value = None
-        space.completion_models = []
-
-        model_service = container.completion_model_crud_service.return_value
-
-        with pytest.raises(BadRequestException, match="No AI builder planner model"):
-            await _get_planner_model(container, uuid4())
-
-        model_service.get_default_completion_model.assert_not_called()
-
-
-class TestGetSpaceModels:
-    @pytest.mark.anyio
-    async def test_returns_model_info(self):
-        container = _make_container()
-        model = MagicMock()
-        model.id = uuid4()
-        model.name = "GPT-4"
-        model.provider_type = "openai"
-        space_service = container.space_service.return_value
-        space_service.get_space.return_value.completion_models = [model]
-
-        result = await _get_space_models(container, uuid4())
-        assert len(result) == 1
-        assert result[0]["name"] == "GPT-4"
-        assert result[0]["provider"] == "openai"
-
-    @pytest.mark.anyio
-    async def test_returns_empty_for_no_models(self):
-        container = _make_container()
-        result = await _get_space_models(container, uuid4())
-        assert result == []
-
-
-class TestGetSpaceKBs:
-    @pytest.mark.anyio
-    async def test_returns_kb_info(self):
-        container = _make_container()
-        collection = MagicMock()
-        collection.id = uuid4()
-        collection.name = "Docs"
-        collection.description = "Documentation"
-        space_service = container.space_service.return_value
-        space_service.get_space.return_value.collections = [collection]
-
-        result = await _get_space_kbs(container, uuid4())
-        assert len(result) == 1
-        assert result[0]["name"] == "Docs"
-        assert result[0]["description"] == "Documentation"
+            await _authorize_ai_builder_request(
+                _make_request(),
+                container,
+                action=FlowApiAction.BUILDER_SESSION_CREATE,
+                space_id=uuid4(),
+            )
 
 
 # ---------------------------------------------------------------------------

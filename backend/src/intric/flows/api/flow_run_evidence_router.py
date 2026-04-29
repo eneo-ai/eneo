@@ -110,7 +110,7 @@ async def get_flow_run_evidence_alias(
         request,
         container,
         flow_id=id,
-        required_access="view",
+        required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
     user = container.user()
@@ -216,7 +216,7 @@ async def export_flow_run_evidence_alias(
         request,
         container,
         flow_id=id,
-        required_access="view",
+        required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
     user = container.user()

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncGenerator, Awaitable
+from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, NoReturn, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request, status
@@ -15,6 +16,7 @@ from sse_starlette import EventSourceResponse, ServerSentEvent
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.authentication.auth_dependencies import get_scope_filter
 from intric.files.file_models import FilePublic
 from intric.flows.ai_builder.ai_builder_api_models import (
     ApplyPlanRequest,
@@ -33,7 +35,6 @@ from intric.flows.ai_builder.ai_builder_api_models import (
 )
 from intric.flows.ai_builder.ai_builder_context import (
     resolve_planner_model,
-    serialize_space_kbs,
     serialize_space_models,
 )
 from intric.flows.ai_builder.ai_builder_events import (
@@ -59,7 +60,13 @@ from intric.flows.ai_builder.ai_builder_service import (
 from intric.flows.ai_builder.ai_builder_telemetry import (
     summarize_session_telemetry,
 )
-from intric.flows.flow_permissions import ensure_can_use_flow_ai_builder
+from intric.flows.flow_access_policy import (
+    FlowAccessFilterMode,
+    FlowApiAction,
+    ai_builder_scoped_space_id,
+    require_ai_builder_space_scope,
+    require_flow_action,
+)
 from intric.main.container.container import Container
 from intric.main.exceptions import (
     BadRequestException,
@@ -82,13 +89,10 @@ logger = logging.getLogger(__name__)
 EventStream = AsyncGenerator[dict[str, str], None]
 
 
-def _scope_type_to_str(scope_type: object) -> str | None:
-    if isinstance(scope_type, str):
-        return scope_type
-    value = getattr(scope_type, "value", None)
-    if isinstance(value, str):
-        return value
-    return None
+@dataclass(frozen=True)
+class AIBuilderAuthorization:
+    space: "Space | None" = None
+    scoped_space_id: UUID | None = None
 
 
 async def _coerce_event_stream(
@@ -125,8 +129,7 @@ async def _resolve_litellm_params(
 # ---------------------------------------------------------------------------
 
 
-def _ensure_flow_edit_permission(container: Container, space: "Space") -> None:
-    ensure_can_use_flow_ai_builder(container.user())
+def _ensure_space_flow_edit_permission(container: Container, space: "Space") -> None:
     actor = container.actor_manager().get_space_actor_from_space(space)
     if not actor.can_edit_flows():
         raise UnauthorizedException(
@@ -136,18 +139,45 @@ def _ensure_flow_edit_permission(container: Container, space: "Space") -> None:
         )
 
 
-async def _require_flow_edit_permission(
+async def _authorize_ai_builder_request(
+    request: Request,
     container: Container,
-    space_id: UUID,
     *,
-    space: "Space | None" = None,
-) -> "Space":
-    """Check that the current user can edit flows in the given space."""
-    resolved_space = space
-    if resolved_space is None:
-        resolved_space = await container.space_service().get_space(space_id)
-    _ensure_flow_edit_permission(container, resolved_space)
-    return resolved_space
+    action: FlowApiAction,
+    space_id: UUID | None = None,
+    session: BuilderSession | None = None,
+    require_creator: bool = False,
+    filter_mode: FlowAccessFilterMode | None = None,
+) -> AIBuilderAuthorization:
+    require_flow_action(container.user(), action)
+    scope_filter = get_scope_filter(request)
+
+    if filter_mode == FlowAccessFilterMode.VISIBLE:
+        return AIBuilderAuthorization(
+            scoped_space_id=ai_builder_scoped_space_id(scope_filter)
+        )
+
+    if space_id is None:
+        if require_creator and session is not None:
+            _ensure_session_creator(container, session)
+        return AIBuilderAuthorization()
+
+    require_ai_builder_space_scope(
+        scope_filter,
+        space_id=space_id,
+        raise_scope_mismatch=_raise_scope_mismatch,
+    )
+    space = await container.space_service().get_space(space_id)
+    _ensure_space_flow_edit_permission(container, space)
+    if require_creator and session is not None:
+        _ensure_session_creator(container, session)
+    return AIBuilderAuthorization(space=space)
+
+
+def _authorized_space(authorization: AIBuilderAuthorization) -> "Space":
+    if authorization.space is None:
+        raise RuntimeError("AI Builder authorization did not load a space.")
+    return authorization.space
 
 
 def _ensure_session_creator(
@@ -162,7 +192,7 @@ def _ensure_session_creator(
         )
 
 
-def _raise_scope_mismatch() -> None:
+def _raise_scope_mismatch() -> NoReturn:
     raise UnauthorizedException(
         "API key space scope does not match requested AI builder resource.",
         code="insufficient_scope",
@@ -177,68 +207,8 @@ def _request_correlation_id(request: Request) -> str | None:
     return request_id if isinstance(request_id, str) else None
 
 
-def _require_ai_builder_scope(request: Request, *, space_id: UUID) -> None:
-    """Enforce space-scoped API key compatibility for AI Builder routes."""
-    state = getattr(request, "state", None)
-    if state is None or getattr(state, "scope_enforcement_enabled", True) is False:
-        return
-
-    scope_type = getattr(state, "api_key_scope_type", None)
-    scope_id = getattr(state, "api_key_scope_id", None)
-    if not isinstance(scope_id, UUID):
-        return
-
-    scope_type_str = _scope_type_to_str(scope_type)
-    if scope_type_str == "space" and scope_id != space_id:
-        _raise_scope_mismatch()
-
-
-def _get_ai_builder_scoped_space_id(request: Request) -> UUID | None:
-    """Return the enforced space scope for API keys, if present."""
-    state = getattr(request, "state", None)
-    if state is None or getattr(state, "scope_enforcement_enabled", True) is False:
-        return None
-
-    scope_type = getattr(state, "api_key_scope_type", None)
-    scope_id = getattr(state, "api_key_scope_id", None)
-    if not isinstance(scope_id, UUID):
-        return None
-
-    scope_type_str = _scope_type_to_str(scope_type)
-    if scope_type_str != "space":
-        return None
-    return scope_id
-
-
 def _get_ai_builder_service(container: Container) -> AIBuilderService:
     return container.ai_builder_service()
-
-
-async def _get_space_models(
-    container: Container, space_id: UUID
-) -> list[dict[str, str]]:
-    """Get available completion models for a space."""
-    space = await container.space_service().get_space(space_id)
-    return serialize_space_models(space)
-
-
-async def _get_space_kbs(container: Container, space_id: UUID) -> list[dict[str, str]]:
-    """Get available knowledge bases for a space."""
-    space = await container.space_service().get_space(space_id)
-    return serialize_space_kbs(space)
-
-
-async def _get_planner_model(container: Container, space_id: UUID) -> object:
-    """Get a completion model to use for the AI builder planner."""
-    space = await container.space_service().get_space(space_id)
-    return resolve_planner_model(space)
-
-
-_ROUTER_TEST_COMPAT_HELPERS = (
-    _get_space_models,
-    _get_space_kbs,
-    _get_planner_model,
-)
 
 
 def _get_audit_service(container: Container) -> "AuditService":
@@ -352,8 +322,13 @@ async def create_session(
     body: CreateSessionRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    _require_ai_builder_scope(request, space_id=body.space_id)
-    space = await _require_flow_edit_permission(container, body.space_id)
+    authorization = await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_SESSION_CREATE,
+        space_id=body.space_id,
+    )
+    space = _authorized_space(authorization)
     resolve_planner_model(space)
 
     service = _get_ai_builder_service(container)
@@ -415,10 +390,15 @@ async def list_sessions(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    ensure_can_use_flow_ai_builder(container.user())
+    authorization = await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_SESSION_LIST,
+        filter_mode=FlowAccessFilterMode.VISIBLE,
+    )
     service = _get_ai_builder_service(container)
     sessions: list[SessionListItemResponse] = await service.list_sessions()
-    scoped_space_id = _get_ai_builder_scoped_space_id(request)
+    scoped_space_id = authorization.scoped_space_id
 
     visible_sessions: list[SessionListItemResponse] = []
     for session in sessions:
@@ -438,7 +418,7 @@ async def list_sessions(
             continue
 
         try:
-            _ensure_flow_edit_permission(container, space)
+            _ensure_space_flow_edit_permission(container, space)
         except UnauthorizedException:
             continue
         visible_sessions.append(session)
@@ -505,9 +485,15 @@ async def send_message(
 ):
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
-    _require_ai_builder_scope(request, space_id=session.space_id)
-    space = await _require_flow_edit_permission(container, session.space_id)
-    _ensure_session_creator(container, session)
+    authorization = await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_MESSAGE_SEND,
+        space_id=session.space_id,
+        session=session,
+        require_creator=True,
+    )
+    space = _authorized_space(authorization)
     tenant = await _get_tenant_repo(container).get(container.user().tenant_id)
     prepared_context: PreparedMessageContext = await service.prepare_message_context(
         session=session,
@@ -667,9 +653,14 @@ async def get_session(
     attachment_snapshot = await service.get_session_attachment_snapshot(
         session_id=session.id
     )
-    _require_ai_builder_scope(request, space_id=session.space_id)
-    await _require_flow_edit_permission(container, session.space_id)
-    _ensure_session_creator(container, session)
+    await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_SESSION_READ,
+        space_id=session.space_id,
+        session=session,
+        require_creator=True,
+    )
 
     return _to_session_response(
         session,
@@ -693,9 +684,14 @@ async def detach_session_attachment(
 ):
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
-    _require_ai_builder_scope(request, space_id=session.space_id)
-    await _require_flow_edit_permission(container, session.space_id)
-    _ensure_session_creator(container, session)
+    await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_ATTACHMENT_DETACH,
+        space_id=session.space_id,
+        session=session,
+        require_creator=True,
+    )
     await service.detach_session_attachment(session_id=session.id, file_id=file_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -736,9 +732,15 @@ async def get_session_models(
     """Return the completion models available in the session's space."""
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
-    _require_ai_builder_scope(request, space_id=session.space_id)
-    space = await _require_flow_edit_permission(container, session.space_id)
-    _ensure_session_creator(container, session)
+    authorization = await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_MODELS_LIST,
+        space_id=session.space_id,
+        session=session,
+        require_creator=True,
+    )
+    space = _authorized_space(authorization)
     models = serialize_space_models(space)
     default_model = resolve_planner_model(space)
     default_model_id = default_model.id if default_model else None
@@ -783,9 +785,14 @@ async def get_plan(
     service = _get_ai_builder_service(container)
     plan: BuilderPlan = await service.get_plan(plan_id)
     session: BuilderSession = await service.get_session(plan.session_id)
-    _require_ai_builder_scope(request, space_id=session.space_id)
-    await _require_flow_edit_permission(container, session.space_id)
-    _ensure_session_creator(container, session)
+    await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_PLAN_READ,
+        space_id=session.space_id,
+        session=session,
+        require_creator=True,
+    )
     return _to_plan_response(plan)
 
 
@@ -824,9 +831,14 @@ async def list_session_plans(
 ):
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
-    _require_ai_builder_scope(request, space_id=session.space_id)
-    await _require_flow_edit_permission(container, session.space_id)
-    _ensure_session_creator(container, session)
+    await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_PLAN_LIST,
+        space_id=session.space_id,
+        session=session,
+        require_creator=True,
+    )
     plans: list[BuilderPlan] = await service.list_session_plans(session_id)
     return SessionPlansResponse(plans=[_to_plan_response(plan) for plan in plans])
 
@@ -864,9 +876,14 @@ async def cancel_session(
 ):
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
-    _require_ai_builder_scope(request, space_id=session.space_id)
-    await _require_flow_edit_permission(container, session.space_id)
-    _ensure_session_creator(container, session)
+    await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_SESSION_CANCEL,
+        space_id=session.space_id,
+        session=session,
+        require_creator=True,
+    )
     session = await service.cancel_session(session_id)
 
     user = container.user()
@@ -922,8 +939,13 @@ async def approve_plan(
     service = _get_ai_builder_service(container)
     plan: BuilderPlan = await service.get_plan(plan_id)
     session: BuilderSession = await service.get_session(plan.session_id)
-    _require_ai_builder_scope(request, space_id=session.space_id)
-    await _require_flow_edit_permission(container, session.space_id)
+    await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_PLAN_APPROVE,
+        space_id=session.space_id,
+        session=session,
+    )
     plan = await service.approve_plan(plan_id=plan_id)
 
     # Audit
@@ -1004,8 +1026,13 @@ async def apply_plan(
     # Verify plan exists and get session for permission check
     plan: BuilderPlan = await service.get_plan(plan_id)
     session: BuilderSession = await service.get_session(plan.session_id)
-    _require_ai_builder_scope(request, space_id=session.space_id)
-    await _require_flow_edit_permission(container, session.space_id)
+    await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_PLAN_APPLY,
+        space_id=session.space_id,
+        session=session,
+    )
 
     try:
         result: ApplyResult = await service.apply_plan(
@@ -1091,8 +1118,13 @@ async def revise_plan(
     # Verify plan exists and get session for permission check
     plan: BuilderPlan = await service.get_plan(plan_id)
     session: BuilderSession = await service.get_session(plan.session_id)
-    _require_ai_builder_scope(request, space_id=session.space_id)
-    await _require_flow_edit_permission(container, session.space_id)
+    await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_PLAN_REVISE,
+        space_id=session.space_id,
+        session=session,
+    )
 
     new_plan: BuilderPlan = await service.revise_plan(
         plan_id=plan_id,

@@ -43,7 +43,10 @@ from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository, PreseedStep
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
-from intric.flows.runtime.step_definition_parser import parse_runtime_steps
+from intric.flows.published_definition import (
+    parse_published_definition,
+    parse_published_runtime_steps,
+)
 from intric.main.config import get_settings
 from intric.main.exceptions import (
     BadRequestException,
@@ -370,7 +373,7 @@ class FlowRunService:
                 version=flow.published_version,
                 tenant_id=self.user.tenant_id,
             )
-            runtime_steps = parse_runtime_steps(runtime_version.definition_json)
+            runtime_steps = parse_published_runtime_steps(runtime_version.definition_json)
             settings_service = cast(
                 _SettingsServiceProtocol | None, self.settings_service
             )
@@ -844,8 +847,8 @@ class FlowRunService:
         definition_json: JsonObject,
         fallback_steps: list[FlowStep],
     ) -> list[PreseedStep]:
-        raw_steps = definition_json.get("steps")
-        if not isinstance(raw_steps, list) or not raw_steps:
+        raw_steps = parse_published_definition(definition_json).steps
+        if not raw_steps:
             raise BadRequestException(
                 "Published flow version does not contain executable steps.",
                 code="flow_version_no_executable_steps",
@@ -858,13 +861,7 @@ class FlowRunService:
             by_step_order[int(step.step_order)] = step
 
         preseed: list[PreseedStep] = []
-        for raw_step in cast(list[Any], raw_steps):
-            if not isinstance(raw_step, dict):
-                raise BadRequestException(
-                    "Invalid flow version step definition.",
-                    code="flow_version_invalid_step_definition",
-                )
-            raw_step_dict = cast(dict[str, Any], raw_step)
+        for raw_step_dict in raw_steps:
             step_order_raw = raw_step_dict.get("step_order", 0)
             if isinstance(step_order_raw, bool):
                 raise BadRequestException(

@@ -10,7 +10,6 @@ from intric.files.file_models import File
 from intric.files.file_repo import FileRepository
 from intric.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
-    stable_hash,
 )
 from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, JsonObject
 from intric.flows.flow_care_data_policy import validate_flow_care_data_policy
@@ -32,6 +31,10 @@ from intric.flows.http_transport import (
 )
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from intric.flows.published_definition import (
+    build_published_definition_json,
+    published_definition_checksum,
+)
 from intric.flows.runtime.docx_template_runtime import (
     extract_docx_template_text_preview,
     inspect_docx_template_bytes,
@@ -43,8 +46,6 @@ from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 from intric.settings.encryption_service import EncryptionService
 from intric.spaces.space_service import SpaceService
 from intric.users.user import UserInDB
-
-FLOW_DEFINITION_SCHEMA_VERSION = 1
 
 
 class FlowService:
@@ -684,17 +685,16 @@ class FlowService:
         return merged.model_dump(mode="json")
 
     async def _build_definition(self, flow: Flow) -> JsonObject:
-        return {
-            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
-            "flow_id": str(flow.id),
-            "name": flow.name,
-            "description": flow.description,
-            "metadata_json": flow.metadata_json,
-            "steps": [
+        return build_published_definition_json(
+            flow_id=cast(UUID, flow.id),
+            name=flow.name,
+            description=flow.description,
+            metadata_json=flow.metadata_json,
+            steps=[
                 await self._step_to_definition(step, flow=flow)
                 for step in sorted(flow.steps, key=lambda item: item.step_order)
             ],
-        }
+        )
 
     async def _step_to_definition(
         self,
@@ -777,7 +777,7 @@ class FlowService:
             raise NotFoundException("Assistant belongs to a different flow.")
 
     def _definition_checksum(self, definition: JsonObject) -> str:
-        return stable_hash(definition)
+        return published_definition_checksum(definition)
 
     async def _prepare_template_output_config_for_publish(
         self,

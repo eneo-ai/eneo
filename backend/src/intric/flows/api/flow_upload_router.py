@@ -10,7 +10,7 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.files.file_models import FilePublic
 from intric.flows.api import flow_router_common as common
-from intric.flows.api.flow_api_common import error_response
+from intric.flows.api.flow_api_common import audit_actor_kwargs, error_response
 from intric.flows.api.flow_models import FlowInputPolicyPublic, FlowRunContractPublic
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
@@ -73,7 +73,7 @@ async def get_flow_run_contract(
         request,
         container,
         flow_id=id,
-        required_access="view",
+        required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
         require_published_for_service_key=True,
     )
@@ -129,7 +129,7 @@ async def get_flow_input_policy(
         request,
         container,
         flow_id=id,
-        required_access="view",
+        required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
         require_published_for_service_key=True,
     )
@@ -234,7 +234,7 @@ async def upload_flow_file(
         request,
         container,
         flow_id=id,
-        required_access="run",
+        required_access=common.FlowApiAction.RUN,
         allow_service_key_principals=True,
         require_published_for_service_key=True,
     )
@@ -243,7 +243,7 @@ async def upload_flow_file(
         upload_file=upload_file,
     )
     user = container.user()
-    actor_kwargs = common.audit_actor_kwargs(user)
+    actor_kwargs = audit_actor_kwargs(user)
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
         actor_id=actor_kwargs["actor_id"],
@@ -351,7 +351,7 @@ async def upload_flow_runtime_file(
         request,
         container,
         flow_id=id,
-        required_access="run",
+        required_access=common.FlowApiAction.RUN,
         allow_service_key_principals=True,
         require_published_for_service_key=True,
     )
@@ -361,7 +361,7 @@ async def upload_flow_runtime_file(
         upload_file=upload_file,
     )
     user = container.user()
-    actor_kwargs = common.audit_actor_kwargs(user)
+    actor_kwargs = audit_actor_kwargs(user)
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
         actor_id=actor_kwargs["actor_id"],

@@ -59,7 +59,7 @@ async def require_flow_edit_access(
         request,
         container,
         flow_id=flow_id,
-        required_access="manage",
+        required_access=common.FlowApiAction.EDIT,
     )
     if require_flow_lookup_without_scope:
         pass

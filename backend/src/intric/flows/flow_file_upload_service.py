@@ -24,7 +24,7 @@ from intric.flows.flow_input_limits import (
     effective_flow_input_limit,
     effective_runtime_max_files,
 )
-from intric.flows.runtime.step_definition_parser import parse_runtime_steps
+from intric.flows.published_definition import parse_published_runtime_steps
 from intric.flows.runtime_input import (
     build_runtime_input_config,
     runtime_input_accept_mimetypes,
@@ -308,7 +308,7 @@ class FlowFileUploadService:
             tenant_id=flow.tenant_id,
         )
         limits = await self.settings_service.get_flow_input_limits_resolved()
-        steps = parse_runtime_steps(version.definition_json)
+        steps = parse_published_runtime_steps(version.definition_json)
         steps_requiring_input: list[dict[str, object]] = []
         aggregate_max_files: int | None = 0
 
@@ -471,7 +471,7 @@ class FlowFileUploadService:
             version=flow.published_version,
             tenant_id=flow.tenant_id,
         )
-        steps = parse_runtime_steps(version.definition_json)
+        steps = parse_published_runtime_steps(version.definition_json)
         runtime_step = next((step for step in steps if step.step_id == step_id), None)
         if runtime_step is None:
             raise BadRequestException(
