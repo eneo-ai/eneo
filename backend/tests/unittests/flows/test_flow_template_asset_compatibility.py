@@ -9,10 +9,10 @@ from uuid import uuid4
 import pytest
 from docx import Document
 
+from intric.flows.application.flow_service import FlowService
 from intric.flows.flow import Flow, FlowStep
 from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.flows.flow_input_limits import FlowInputLimits
-from intric.flows.flow_service import FlowService
 from intric.main.exceptions import BadRequestException, NotFoundException
 
 
@@ -58,7 +58,9 @@ def _flow(*steps: FlowStep) -> Flow:
 
 
 @pytest.mark.asyncio
-async def test_publish_flow_resolves_legacy_template_file_id_through_flow_asset(user) -> None:
+async def test_publish_flow_resolves_legacy_template_file_id_through_flow_asset(
+    user,
+) -> None:
     template_file_id = uuid4()
     template_asset_id = uuid4()
     template_step = _step().model_copy(
@@ -127,7 +129,9 @@ async def test_publish_flow_resolves_legacy_template_file_id_through_flow_asset(
 
     definition_json = version_repo.create.await_args.kwargs["definition_json"]
     published_step = definition_json["steps"][0]
-    assert published_step["output_config"]["template_asset_id"] == str(template_asset_id)
+    assert published_step["output_config"]["template_asset_id"] == str(
+        template_asset_id
+    )
     assert published_step["output_config"]["template_file_id"] == str(template_file_id)
     template_asset_repo.get_by_flow_file.assert_awaited_once_with(
         flow_id=flow.id,
@@ -137,7 +141,9 @@ async def test_publish_flow_resolves_legacy_template_file_id_through_flow_asset(
 
 
 @pytest.mark.asyncio
-async def test_publish_flow_promotes_legacy_template_file_id_into_flow_asset_when_missing(user) -> None:
+async def test_publish_flow_promotes_legacy_template_file_id_into_flow_asset_when_missing(
+    user,
+) -> None:
     template_file_id = uuid4()
     created_asset_id = uuid4()
     template_step = _step().model_copy(
@@ -224,7 +230,9 @@ async def test_publish_flow_promotes_legacy_template_file_id_into_flow_asset_whe
 
 
 @pytest.mark.asyncio
-async def test_publish_flow_reports_missing_legacy_template_file_as_bad_request(user) -> None:
+async def test_publish_flow_reports_missing_legacy_template_file_as_bad_request(
+    user,
+) -> None:
     template_file_id = uuid4()
     template_step = _step().model_copy(
         update={
@@ -265,12 +273,16 @@ async def test_publish_flow_reports_missing_legacy_template_file_as_bad_request(
     )
     service._validate_assistant_scope_for_steps = AsyncMock()  # type: ignore[method-assign]
 
-    with pytest.raises(BadRequestException, match="selected DOCX template is no longer available"):
+    with pytest.raises(
+        BadRequestException, match="selected DOCX template is no longer available"
+    ):
         await service.publish_flow(flow_id=flow.id)
 
 
 @pytest.mark.asyncio
-async def test_run_contract_marks_legacy_template_file_selection_as_ready_when_asset_exists() -> None:
+async def test_run_contract_marks_legacy_template_file_selection_as_ready_when_asset_exists() -> (
+    None
+):
     flow_service = AsyncMock()
     file_service = AsyncMock()
     settings_service = AsyncMock()

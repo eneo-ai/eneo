@@ -14,6 +14,7 @@ from intric.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
+from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
 from intric.flows.flow import (
     Flow,
@@ -24,7 +25,6 @@ from intric.flows.flow import (
     FlowStepResult,
     FlowVersion,
 )
-from intric.flows.flow_run_service import FlowRunService
 from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,

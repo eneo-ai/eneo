@@ -35,13 +35,10 @@ _LAZY_EXPORTS = {
     "ai_builder": ("intric.flows.ai_builder", None),
     "flow_file_upload_service": ("intric.flows.flow_file_upload_service", None),
     "flow_input_limits": ("intric.flows.flow_input_limits", None),
-    "flow_run_service": ("intric.flows.application.flow_run_service", None),
-    "flow_service": ("intric.flows.application.flow_service", None),
 }
 
 if TYPE_CHECKING:
     from intric.flows import ai_builder, flow_file_upload_service, flow_input_limits
-    from intric.flows.application import flow_run_service, flow_service
     from intric.flows.application.flow_run_service import FlowRunService
     from intric.flows.application.flow_service import FlowService
     from intric.flows.flow_factory import FlowFactory
@@ -71,8 +68,6 @@ __all__ = [
     "ai_builder",
     "flow_file_upload_service",
     "flow_input_limits",
-    "flow_run_service",
-    "flow_service",
     "iter_template_expressions",
 ]
 

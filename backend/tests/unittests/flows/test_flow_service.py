@@ -9,9 +9,9 @@ import pytest
 
 from intric.ai_models.completion_models.completion_model import ModelKwargs
 from intric.assistants.assistant import Assistant, AssistantOrigin
+from intric.flows.application.flow_service import FlowService
 from intric.flows.assistant_execution_snapshot import stable_hash
 from intric.flows.flow import Flow, FlowStep, FlowVersion
-from intric.flows.flow_service import FlowService
 from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.main.models import NOT_PROVIDED
 

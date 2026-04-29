@@ -13,7 +13,7 @@ from fastapi import BackgroundTasks, HTTPException, UploadFile
 
 import intric.flows.api.flow_http_test_router as flow_http_test_router_module
 import intric.flows.api.flow_trace_audit as flow_trace_audit_module
-import intric.flows.flow_dispatch as flow_dispatch_module
+import intric.flows.application.flow_dispatch as flow_dispatch_module
 from intric.actors.actors.space_actor import SpaceRole
 from intric.assistants.api.assistant_models import AssistantUpdatePublic
 from intric.audit.domain.action_types import ActionType
@@ -46,22 +46,6 @@ from intric.flows.api.flow_authoring_router import (
 from intric.flows.api.flow_authoring_router import (
     update_flow as definition_update_flow,
 )
-from intric.flows.api.flow_consumer_router import (
-    cancel_flow_run_alias,
-    create_flow_run,
-    export_flow_run_evidence_alias,
-    generate_flow_run_artifact_signed_url,
-    get_flow_graph,
-    get_flow_input_policy,
-    get_flow_run_alias,
-    get_flow_run_contract,
-    get_flow_run_evidence_alias,
-    list_flow_run_steps,
-    list_flow_runs_alias,
-    redispatch_flow_run_alias,
-    upload_flow_file,
-    upload_flow_runtime_file,
-)
 from intric.flows.api.flow_http_test_router import (
     test_flow_http as flow_definition_test_flow_http,
 )
@@ -75,9 +59,31 @@ from intric.flows.api.flow_models import (
     FlowUpdateRequest,
 )
 from intric.flows.api.flow_router_common import dispatch_flow_run_after_commit
+from intric.flows.api.flow_run_evidence_router import (
+    export_flow_run_evidence_alias,
+    get_flow_run_evidence_alias,
+)
+from intric.flows.api.flow_run_execution_router import (
+    cancel_flow_run_alias,
+    create_flow_run,
+    get_flow_run_alias,
+    list_flow_runs_alias,
+    redispatch_flow_run_alias,
+)
+from intric.flows.api.flow_run_steps_router import (
+    generate_flow_run_artifact_signed_url,
+    get_flow_graph,
+    list_flow_run_steps,
+)
 from intric.flows.api.flow_template_router import (
     inspect_flow_template,
     upload_flow_template_file,
+)
+from intric.flows.api.flow_upload_router import (
+    get_flow_input_policy,
+    get_flow_run_contract,
+    upload_flow_file,
+    upload_flow_runtime_file,
 )
 from intric.flows.flow import (
     Flow,
@@ -454,7 +460,7 @@ async def test_test_flow_http_applies_ssrf_runtime_guards(monkeypatch):
     assert guard_calls["peer_ips"] == {"203.0.113.10"}
 
 
-def test_find_stored_http_config_logs_parse_failures(caplog):
+def test_find_stored_http_config_logs_parse_failures(caplog, monkeypatch):
     flow = _flow(uuid4()).model_copy(
         update={
             "steps": [
@@ -469,7 +475,11 @@ def test_find_stored_http_config_logs_parse_failures(caplog):
         }
     )
 
-    with caplog.at_level("WARNING"):
+    logger = flow_http_test_router_module.logger
+    monkeypatch.setattr(logger, "disabled", False)
+    monkeypatch.setattr(logger, "propagate", True)
+
+    with caplog.at_level("WARNING", logger=logger.name):
         result = flow_http_test_router_module._find_stored_http_config(flow, "output")
 
     assert result is None
@@ -1319,6 +1329,7 @@ async def test_get_flow_input_policy_for_audio_step_returns_audio_mime_and_limit
         FlowInputLimitsPublic(
             file_max_size_bytes=10_000_000,
             audio_max_size_bytes=25_000_000,
+            max_files_per_run=10,
             audio_max_files_per_run=10,
         )
     )
@@ -1456,6 +1467,8 @@ async def test_upload_flow_file_rejects_when_flow_input_type_not_file_upload(
         FlowInputLimitsPublic(
             file_max_size_bytes=10_000_000,
             audio_max_size_bytes=25_000_000,
+            max_files_per_run=10,
+            audio_max_files_per_run=10,
         )
     )
     container.flow_service.return_value = flow_service
@@ -1503,6 +1516,8 @@ async def test_upload_flow_file_uses_flow_limit_override(monkeypatch):
         FlowInputLimitsPublic(
             file_max_size_bytes=10_000_000,
             audio_max_size_bytes=31_000_000,
+            max_files_per_run=10,
+            audio_max_files_per_run=10,
         )
     )
     file_service.save_file.return_value = SimpleNamespace(

@@ -7,8 +7,8 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.application.flow_service import FlowService
 from intric.flows.flow import FlowStep
-from intric.flows.flow_service import FlowService
 from intric.main.exceptions import BadRequestException
 
 

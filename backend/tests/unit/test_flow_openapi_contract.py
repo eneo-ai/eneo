@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi.routing import APIRoute
 
 from intric.server.main import get_application
 
@@ -9,6 +10,20 @@ from intric.server.main import get_application
 def openapi_spec() -> dict:
     app = get_application()
     return app.openapi()
+
+
+@pytest.fixture(scope="module")
+def flow_route_operations() -> dict[tuple[str, str], str]:
+    app = get_application()
+    operations: dict[tuple[str, str], str] = {}
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if not route.path.startswith("/api/v1/flows"):
+            continue
+        for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
+            operations[(route.path, method.lower())] = route.operation_id or ""
+    return operations
 
 
 def _resolve_component_ref(openapi_spec: dict, schema: dict) -> dict:
@@ -79,6 +94,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/runs/{run_id}/cancel/": {"post"},
     "/api/v1/flows/{id}/runs/{run_id}/redispatch/": {"post"},
     "/api/v1/flows/{id}/runs/{run_id}/evidence/": {"get"},
+    "/api/v1/flows/{id}/runs/{run_id}/evidence/export": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/steps/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/": {"post"},
     "/api/v1/settings/flow-input-limits": {"get", "patch"},
@@ -133,6 +149,10 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
         "/api/v1/flows/{id}/runs/{run_id}/evidence/",
         "get",
     ): "get_flow_run_evidence_alias",
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/evidence/export",
+        "get",
+    ): "export_flow_run_evidence_alias",
     ("/api/v1/flows/{id}/runs/{run_id}/steps/", "get"): "list_flow_run_steps",
     (
         "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
@@ -190,6 +210,10 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
         "/api/v1/flows/{id}/runs/{run_id}/evidence/",
         "get",
     ): {"403", "404", "422"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/evidence/export",
+        "get",
+    ): {"400", "403", "404", "422", "503"},
     (
         "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
         "post",
@@ -250,6 +274,10 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
         "get",
     ): {"403", "404"},
     (
+        "/api/v1/flows/{id}/runs/{run_id}/evidence/export",
+        "get",
+    ): {"400", "403", "404", "503"},
+    (
         "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
         "post",
     ): {"403", "404"},
@@ -270,6 +298,20 @@ def test_openapi_flow_operation_ids_are_pinned(openapi_spec: dict) -> None:
     for (path, method), expected_operation_id in REQUIRED_OPERATION_IDS.items():
         operation = paths[path][method]
         assert operation.get("operationId") == expected_operation_id
+
+
+def test_flow_routes_register_pinned_operation_ids(
+    flow_route_operations: dict[tuple[str, str], str],
+) -> None:
+    missing = sorted(
+        f"{method.upper()} {path}"
+        for path, method in REQUIRED_OPERATION_IDS
+        if (path, method) not in flow_route_operations
+    )
+    assert missing == []
+
+    for route_key, expected_operation_id in REQUIRED_OPERATION_IDS.items():
+        assert flow_route_operations[route_key] == expected_operation_id
 
 
 def test_openapi_legacy_flow_run_paths_absent(openapi_spec: dict) -> None:
@@ -343,6 +385,32 @@ def test_openapi_flow_consumer_schemas_present(openapi_spec: dict) -> None:
     schemas = openapi_spec.get("components", {}).get("schemas", {})
     missing = REQUIRED_SCHEMAS - set(schemas.keys())
     assert not missing, f"Missing OpenAPI schemas: {sorted(missing)}"
+
+
+def test_openapi_flow_pagination_response_shape_is_current(
+    openapi_spec: dict,
+) -> None:
+    targets = {
+        "/api/v1/flows/": "PaginatedResponse_FlowSparsePublic_",
+        "/api/v1/flows/{id}/runs/": "PaginatedResponse_FlowRunPublic_",
+    }
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+
+    for path, expected_component in targets.items():
+        operation = _get_operation(openapi_spec, path, "get")
+        response_schema = (
+            operation.get("responses", {})
+            .get("200", {})
+            .get("content", {})
+            .get("application/json", {})
+            .get("schema", {})
+        )
+        assert response_schema.get("$ref") == (
+            f"#/components/schemas/{expected_component}"
+        )
+        component = schemas.get(expected_component, {})
+        assert set(component.get("properties", {})) == {"items", "count"}
+        assert set(component.get("required", [])) == {"items", "count"}
 
 
 def test_openapi_flow_input_policy_schema_contains_consumer_hints(
@@ -449,6 +517,27 @@ def test_openapi_flow_run_create_example_shape_is_consumer_valid(
     assert isinstance(step_inputs, dict)
     assert step_inputs, (
         "FlowRunCreateRequest.example.step_inputs must include at least one step"
+    )
+
+
+def test_openapi_flow_run_create_schema_still_exposes_top_level_file_ids(
+    openapi_spec: dict,
+) -> None:
+    schema = (
+        openapi_spec.get("components", {})
+        .get("schemas", {})
+        .get("FlowRunCreateRequest", {})
+    )
+    properties = schema.get("properties", {})
+    file_ids = properties.get("file_ids", {})
+
+    assert "file_ids" in properties
+    assert file_ids.get("title") == "File Ids"
+    assert any(
+        option.get("type") == "array"
+        and option.get("items", {}).get("format") == "uuid"
+        for option in file_ids.get("anyOf", [])
+        if isinstance(option, dict)
     )
 
 

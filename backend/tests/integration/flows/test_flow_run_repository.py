@@ -22,7 +22,7 @@ from intric.flows import (
     FlowVersionRepository,
 )
 from intric.flows.flow import FlowRunStatus, FlowStepAttemptStatus, FlowStepResultStatus
-from intric.flows.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 
 
 def _build_flow(

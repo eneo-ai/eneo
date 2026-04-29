@@ -21,13 +21,11 @@ source_modules =
     intric.flows.flow
     intric.flows.flow_capability_manifest
     intric.flows.flow_care_data_policy
-    intric.flows.flow_dispatch
     intric.flows.flow_evidence_policy
     intric.flows.flow_factory
     intric.flows.flow_file_upload_service
     intric.flows.flow_input_limits
     intric.flows.flow_permissions
-    intric.flows.flow_repo
     intric.flows.flow_retention_policy
     intric.flows.flow_run_evidence
     intric.flows.flow_run_evidence_bundle
@@ -35,11 +33,8 @@ source_modules =
     intric.flows.flow_run_input_payload
     intric.flows.flow_run_provenance
     intric.flows.flow_run_redaction
-    intric.flows.flow_run_repo
-    intric.flows.flow_run_service
     intric.flows.flow_run_step_inputs
     intric.flows.flow_security_classification
-    intric.flows.flow_service
     intric.flows.flow_template_asset_repo
     intric.flows.flow_template_asset_service
     intric.flows.flow_template_validation
@@ -48,7 +43,6 @@ source_modules =
     intric.flows.flow_validators_http
     intric.flows.flow_validators_template
     intric.flows.flow_variable_definitions
-    intric.flows.flow_version_repo
     intric.flows.http_transport
     intric.flows.infrastructure
     intric.flows.output_modes

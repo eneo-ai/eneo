@@ -1,4 +1,5 @@
 """TDD tests for file_ids support in FlowRunService — RED phase."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -7,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.flow import (
     Flow,
     FlowRun,
@@ -14,7 +16,6 @@ from intric.flows.flow import (
     FlowStep,
     FlowVersion,
 )
-from intric.flows.flow_run_service import FlowRunService
 
 
 def _flow_repo() -> AsyncMock:
