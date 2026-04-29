@@ -12,12 +12,16 @@
   import { IconQuestionMark } from "@intric/icons/question-mark";
   import { Input, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import {
+    shouldShowModelSpecificParametersInfo,
+    supportsBehaviorPresets,
+    type CompletionModelWithSupportedKwargs
+  } from "../ModelKwargCapabilities";
 
   export let kwArgs: ModelKwArgs;
   export let isDisabled: boolean;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  export let selectedModel: any = null; // CompletionModel from the parent
+  export let selectedModel: CompletionModelWithSupportedKwargs | null = null;
   export let aria: AriaProps = { "aria-label": m.select_model_behaviour() };
 
   const behaviourLabels: Record<ModelBehaviour, string> = {
@@ -27,11 +31,11 @@
     custom: m.custom()
   };
 
-  // Check if model has custom parameters that should override behavior presets
-  // For reasoning models, disable behavior controls as they have model-specific parameters
-  $: hasModelSpecificParams = selectedModel?.reasoning || selectedModel?.litellm_model_name;
-  $: isDisabledDueToModelParams = !!hasModelSpecificParams;
-  $: finalIsDisabled = isDisabled || isDisabledDueToModelParams;
+  $: selectedModelHasCapabilityContract = selectedModel?.supported_model_kwargs != null;
+  $: shouldShowModelSpecificInfo = shouldShowModelSpecificParametersInfo(selectedModel);
+  $: isDisabledDueToUnsupportedTemperature =
+    selectedModelHasCapabilityContract && !supportsBehaviorPresets(selectedModel);
+  $: finalIsDisabled = isDisabled || isDisabledDueToUnsupportedTemperature;
 
   const {
     elements: { trigger, menu, option },
@@ -49,20 +53,17 @@
       const behaviorKwargs = next?.value ? getKwargs(next.value) : getKwargs("default");
 
       if (behaviorKwargs) {
-        // Preserve all existing fields while only updating the behavior-relevant ones
         kwArgs = {
           ...kwArgs,
           ...behaviorKwargs
         };
       } else {
-        // For custom behavior, preserve current kwargs if already custom, otherwise set defaults
         const customArgs =
           getBehaviour(kwArgs) === "custom"
             ? kwArgs
             : {
                 ...kwArgs,
-                temperature: 1,
-                top_p: null
+                temperature: 1
               };
         kwArgs = customArgs;
       }
@@ -70,14 +71,10 @@
     }
   });
 
-  // This function will only be called on direct user input of custom temperature
-  // If the selected value is not a named value, it will set the Kwargs
-  // This can't be a declarative statement with $: as it would fire in too many situations
   let customTemp: number = 1;
   function maybeSetKwArgsCustom() {
-    const args = { temperature: customTemp, top_p: null };
+    const args = { temperature: customTemp };
     if (getBehaviour(args) === "custom") {
-      // Preserve all existing fields while only updating temperature and top_p
       kwArgs = {
         ...kwArgs,
         ...args
@@ -94,7 +91,7 @@
 
     if (
       behaviour === "custom" &&
-      currentKwArgs.temperature &&
+      currentKwArgs.temperature != null &&
       currentKwArgs.temperature !== customTemp
     ) {
       customTemp = currentKwArgs.temperature;
@@ -103,14 +100,11 @@
 
   $: watchChanges(kwArgs);
 
-  // Track previous disabled state to only reset on transition
   let previousDisabledState = finalIsDisabled;
   $: {
-    // Only reset when transitioning from enabled to disabled
     if (finalIsDisabled && !previousDisabledState) {
       $selected = { value: "default" };
-      const defaultKwargs = getKwargs("default") || { temperature: null, top_p: null };
-      // Preserve all existing fields while only updating the behavior-relevant ones
+      const defaultKwargs = getKwargs("default") || { temperature: null };
       kwArgs = {
         ...kwArgs,
         ...defaultKwargs
@@ -189,14 +183,13 @@
   </div>
 {/if}
 
-{#if isDisabledDueToModelParams}
+{#if shouldShowModelSpecificInfo}
   <p
     class="label-info border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
   >
-    <span class="font-bold">Info:&nbsp;</span>This model uses model-specific parameters instead of
-    behavior presets.
+    <span class="font-bold">Info:&nbsp;</span>{m.model_uses_specific_parameters_info()}
   </p>
-{:else if isDisabled}
+{:else if isDisabled || isDisabledDueToUnsupportedTemperature}
   <p
     class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
   >
@@ -209,8 +202,6 @@
   div[data-highlighted] {
     @apply bg-hover-default;
   }
-
-  /* div[data-selected] { } */
 
   div[data-disabled] {
     @apply opacity-30 hover:bg-transparent;

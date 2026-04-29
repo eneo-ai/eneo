@@ -1,113 +1,236 @@
 <script lang="ts">
   import { IconQuestionMark } from "@intric/icons/question-mark";
-  import { Tooltip } from "@intric/ui";
+  import { Input, Tooltip } from "@intric/ui";
   import type { ModelKwargs } from "@intric/intric-js";
+  import { m } from "$lib/paraglide/messages";
+  import {
+    getModelKwargCapability,
+    getModelSpecificKwargNames,
+    type CompletionModelWithSupportedKwargs,
+    type ModelKwargName
+  } from "../ModelKwargCapabilities";
 
   export let kwArgs: ModelKwargs;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  export let selectedModel: any = null; // CompletionModel from the parent
+  export let selectedModel: CompletionModelWithSupportedKwargs | null = null;
 
-  // Determine which parameters to show based on model capabilities
-  // Show reasoning effort for models that support reasoning
-  $: showReasoningEffort = selectedModel?.reasoning === true;
+  type NumericKwargName = Extract<
+    ModelKwargName,
+    "top_p" | "presence_penalty" | "frequency_penalty" | "top_k"
+  >;
+  type SelectKwargName = Extract<ModelKwargName, "reasoning_effort" | "verbosity">;
 
-  // Show verbosity for GPT-5.x models that support it
-  $: showVerbosity = selectedModel?.name?.toLowerCase().includes("gpt-5");
+  const numericKwargNames = [
+    "top_p",
+    "presence_penalty",
+    "frequency_penalty",
+    "top_k"
+  ] as const satisfies readonly NumericKwargName[];
 
-  // Check if model supports "none" reasoning effort (GPT-5.x but not plain GPT-5)
-  $: supportsNoneReasoning = /gpt-5\.\d/i.test(selectedModel?.name || "");
+  const defaultNumericValues: Record<NumericKwargName, number> = {
+    top_p: 1,
+    presence_penalty: 0,
+    frequency_penalty: 0,
+    top_k: 40
+  };
 
-  // Local state for the custom parameters
-  let customReasoningEffort: string = "";
-  let customVerbosity: string = "";
-  let initialized = false;
+  const defaultMaximumValues: Record<NumericKwargName, number> = {
+    top_p: 1,
+    presence_penalty: 2,
+    frequency_penalty: 2,
+    top_k: 100
+  };
 
-  // Initialize custom values from kwArgs only once
-  $: if (kwArgs && !initialized) {
-    customReasoningEffort = kwArgs.reasoning_effort || "";
-    customVerbosity = kwArgs.verbosity || "";
-    initialized = true;
+  let numericValues: Record<NumericKwargName, number> = { ...defaultNumericValues };
+  let useDefaultNumeric: Record<NumericKwargName, boolean> = {
+    top_p: true,
+    presence_penalty: true,
+    frequency_penalty: true,
+    top_k: true
+  };
+  let selectValues: Partial<Record<SelectKwargName, string>> = {};
+  let lastSyncedStateKey = "";
+
+  $: modelSpecificKwargNames = getModelSpecificKwargNames(selectedModel);
+  $: syncLocalState(kwArgs, selectedModel);
+
+  function isNumericKwargName(kwargName: ModelKwargName): kwargName is NumericKwargName {
+    return numericKwargNames.includes(kwargName as NumericKwargName);
   }
 
-  function updateKwArgs() {
-    const args = { ...kwArgs };
-
-    // Update reasoning effort
-    if (customReasoningEffort) {
-      args.reasoning_effort = customReasoningEffort;
-    } else {
-      args.reasoning_effort = null;
-    }
-
-    // Update verbosity
-    if (customVerbosity) {
-      args.verbosity = customVerbosity;
-    } else {
-      args.verbosity = null;
-    }
-
-    kwArgs = args;
+  function isSelectKwargName(kwargName: ModelKwargName): kwargName is SelectKwargName {
+    return kwargName === "reasoning_effort" || kwargName === "verbosity";
   }
 
-  // Reactive updates for verbosity (since event handlers don't work reliably)
-  let previousVerbosity = customVerbosity;
-  $: if (customVerbosity !== previousVerbosity) {
-    previousVerbosity = customVerbosity;
-    updateKwArgs();
+  function syncLocalState(
+    currentKwArgs: ModelKwargs | null | undefined,
+    currentModel: CompletionModelWithSupportedKwargs | null
+  ) {
+    const nextStateKey = JSON.stringify({
+      modelId: currentModel?.id ?? currentModel?.name ?? null,
+      kwargs: currentKwArgs ?? {}
+    });
+    if (nextStateKey === lastSyncedStateKey) return;
+
+    for (const kwargName of numericKwargNames) {
+      const currentValue = currentKwArgs?.[kwargName];
+      useDefaultNumeric[kwargName] = currentValue == null;
+      numericValues[kwargName] =
+        typeof currentValue === "number" ? currentValue : defaultNumericValues[kwargName];
+    }
+    selectValues.reasoning_effort = currentKwArgs?.reasoning_effort ?? "";
+    selectValues.verbosity = currentKwArgs?.verbosity ?? "";
+    lastSyncedStateKey = nextStateKey;
+  }
+
+  function setNumericDefault(kwargName: NumericKwargName, useDefault: boolean) {
+    useDefaultNumeric[kwargName] = useDefault;
+    kwArgs = {
+      ...kwArgs,
+      [kwargName]: useDefault ? null : numericValues[kwargName]
+    };
+  }
+
+  function setNumericKwarg(kwargName: NumericKwargName, value = numericValues[kwargName]) {
+    numericValues[kwargName] = value;
+    if (useDefaultNumeric[kwargName]) return;
+
+    kwArgs = {
+      ...kwArgs,
+      [kwargName]: value
+    };
+  }
+
+  function setSelectKwarg(kwargName: SelectKwargName, value: string) {
+    selectValues[kwargName] = value;
+    kwArgs = {
+      ...kwArgs,
+      [kwargName]: value || null
+    };
+  }
+
+  function getNumericMinimum(kwargName: NumericKwargName) {
+    return getModelKwargCapability(selectedModel, kwargName)?.minimum ?? 0;
+  }
+
+  function getNumericMaximum(kwargName: NumericKwargName) {
+    return (
+      getModelKwargCapability(selectedModel, kwargName)?.maximum ?? defaultMaximumValues[kwargName]
+    );
+  }
+
+  function getNumericStep(kwargName: NumericKwargName) {
+    return getModelKwargCapability(selectedModel, kwargName)?.step ?? 1;
+  }
+
+  function getSelectOptions(kwargName: SelectKwargName) {
+    return getModelKwargCapability(selectedModel, kwargName)?.options ?? [];
+  }
+
+  function getKwargLabel(kwargName: ModelKwargName) {
+    switch (kwargName) {
+      case "reasoning_effort":
+        return m.reasoning_effort();
+      case "verbosity":
+        return m.verbosity();
+      case "top_p":
+        return m.top_p();
+      case "presence_penalty":
+        return m.presence_penalty();
+      case "frequency_penalty":
+        return m.frequency_penalty();
+      case "top_k":
+        return m.top_k();
+      default:
+        return kwargName;
+    }
+  }
+
+  function getKwargTooltip(kwargName: ModelKwargName) {
+    switch (kwargName) {
+      case "reasoning_effort":
+        return m.reasoning_effort_tooltip();
+      case "verbosity":
+        return m.verbosity_tooltip();
+      case "top_p":
+        return m.top_p_tooltip();
+      case "presence_penalty":
+        return m.presence_penalty_tooltip();
+      case "frequency_penalty":
+        return m.frequency_penalty_tooltip();
+      case "top_k":
+        return m.top_k_tooltip();
+      default:
+        return "";
+    }
+  }
+
+  function getOptionLabel(option: string) {
+    switch (option) {
+      case "none":
+        return m.none();
+      case "low":
+        return m.parameter_option_low();
+      case "medium":
+        return m.parameter_option_medium();
+      case "high":
+        return m.parameter_option_high();
+      default:
+        return option;
+    }
   }
 </script>
 
-<!-- Reasoning Effort Control (for GPT-5 reasoning models) -->
-{#if showReasoningEffort}
+{#each modelSpecificKwargNames as kwargName (kwargName)}
   <div
-    class="border-default hover:bg-hover-stronger flex h-[4.125rem] items-center justify-between gap-8 border-b px-4"
+    class="border-default hover:bg-hover-stronger flex min-h-[4.125rem] items-center justify-between gap-8 border-b px-4 py-3"
   >
     <div class="flex items-center gap-2">
-      <p class="w-24" aria-label="Reasoning effort setting">Reasoning</p>
-      <Tooltip
-        text="How much reasoning effort to apply (Default: medium)\nHigher effort improves accuracy but increases response time."
-      >
+      <p class="w-36" aria-label={getKwargLabel(kwargName)}>{getKwargLabel(kwargName)}</p>
+      <Tooltip text={getKwargTooltip(kwargName)}>
         <IconQuestionMark class="text-muted hover:text-primary" />
       </Tooltip>
     </div>
-    <select
-      bind:value={customReasoningEffort}
-      on:change={updateKwArgs}
-      class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"
-    >
-      <option value="">Default</option>
-      {#if supportsNoneReasoning}
-        <option value="none">None</option>
-      {/if}
-      <option value="low">Low</option>
-      <option value="medium">Medium</option>
-      <option value="high">High</option>
-    </select>
-  </div>
-{/if}
 
-<!-- Verbosity Control -->
-{#if showVerbosity}
-  <div
-    class="border-default hover:bg-hover-stronger flex h-[4.125rem] items-center justify-between gap-8 border-b px-4"
-  >
-    <div class="flex items-center gap-2">
-      <p class="w-24" aria-label="Verbosity setting">Verbosity</p>
-      <Tooltip
-        text="Controls response length and detail level (Default: medium)\nLow: Concise and to the point\nMedium: Balanced detail\nHigh: Comprehensive and detailed"
+    {#if isSelectKwargName(kwargName)}
+      <select
+        value={selectValues[kwargName] ?? ""}
+        on:change={(event) => setSelectKwarg(kwargName, event.currentTarget.value)}
+        class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"
       >
-        <IconQuestionMark class="text-muted hover:text-primary" />
-      </Tooltip>
-    </div>
-    <select
-      bind:value={customVerbosity}
-      on:change={updateKwArgs}
-      class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"
-    >
-      <option value="">Default</option>
-      <option value="low">Low</option>
-      <option value="medium">Medium</option>
-      <option value="high">High</option>
-    </select>
+        <option value="">{m.default_behavior()}</option>
+        {#each getSelectOptions(kwargName) as option (option)}
+          <option value={option}>{getOptionLabel(option)}</option>
+        {/each}
+      </select>
+    {:else if isNumericKwargName(kwargName)}
+      <div class="flex flex-1 items-center justify-end gap-4">
+        <label class="flex items-center gap-2 text-sm whitespace-nowrap">
+          <input
+            type="checkbox"
+            checked={useDefaultNumeric[kwargName]}
+            on:change={(event) => setNumericDefault(kwargName, event.currentTarget.checked)}
+          />
+          {m.default_behavior()}
+        </label>
+
+        {#if !useDefaultNumeric[kwargName]}
+          <Input.Slider
+            bind:value={numericValues[kwargName]}
+            min={getNumericMinimum(kwargName)}
+            max={getNumericMaximum(kwargName)}
+            step={getNumericStep(kwargName)}
+            onInput={(value) => setNumericKwarg(kwargName, value)}
+          />
+          <Input.Number
+            bind:value={numericValues[kwargName]}
+            min={getNumericMinimum(kwargName)}
+            max={getNumericMaximum(kwargName)}
+            step={getNumericStep(kwargName)}
+            hiddenLabel={true}
+            on:input={() => setNumericKwarg(kwargName)}
+          />
+        {/if}
+      </div>
+    {/if}
   </div>
-{/if}
+{/each}

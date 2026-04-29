@@ -8846,6 +8846,8 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Model Kwargs Capabilities */
+      model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /**
        * Is Org Enabled
        * @default false
@@ -8865,6 +8867,8 @@ export interface components {
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
       readonly token_limit: number;
+      /** Supported Model Kwargs */
+      readonly supported_model_kwargs?: components["schemas"]["SupportedModelKwargs"];
     };
     /** CompletionModelCreate */
     CompletionModelCreate: {
@@ -8909,6 +8913,8 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Model Kwargs Capabilities */
+      model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
     };
     /** CompletionModelPublic */
     CompletionModelPublic: {
@@ -8962,6 +8968,8 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Model Kwargs Capabilities */
+      model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /**
        * Is Org Enabled
        * @default false
@@ -9000,6 +9008,8 @@ export interface components {
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
       readonly token_limit: number;
+      /** Supported Model Kwargs */
+      readonly supported_model_kwargs?: components["schemas"]["SupportedModelKwargs"];
     };
     /** CompletionModelPublicAppTemplate */
     CompletionModelPublicAppTemplate: {
@@ -9069,6 +9079,8 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Model Kwargs Capabilities */
+      model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /**
        * Is Org Enabled
        * @default false
@@ -9109,6 +9121,8 @@ export interface components {
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
       readonly token_limit: number;
+      /** Supported Model Kwargs */
+      readonly supported_model_kwargs?: components["schemas"]["SupportedModelKwargs"];
     };
     /** CompletionModelSparse */
     CompletionModelSparse: {
@@ -9162,11 +9176,17 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Model Kwargs Capabilities */
+      model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Provider Type */
+      provider_type?: string | null;
       /**
        * Token Limit
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
       readonly token_limit: number;
+      /** Supported Model Kwargs */
+      readonly supported_model_kwargs?: components["schemas"]["SupportedModelKwargs"];
     };
     /** CompletionModelUpdateFlags */
     CompletionModelUpdateFlags: {
@@ -11679,6 +11699,41 @@ export interface components {
        */
       readonly token_limit: number;
     };
+    /** ModelKwargCapability */
+    ModelKwargCapability: {
+      /**
+       * Supported
+       * @default false
+       */
+      supported?: boolean;
+      /** Control */
+      control?: "slider" | "select" | null;
+      /** Minimum */
+      minimum?: number | null;
+      /** Maximum */
+      maximum?: number | null;
+      /** Step */
+      step?: number | null;
+      /** Options */
+      options?: string[] | null;
+    };
+    /** SupportedModelKwargs */
+    SupportedModelKwargs: {
+      /** Temperature */
+      temperature?: components["schemas"]["ModelKwargCapability"];
+      /** Top P */
+      top_p?: components["schemas"]["ModelKwargCapability"];
+      /** Reasoning Effort */
+      reasoning_effort?: components["schemas"]["ModelKwargCapability"];
+      /** Verbosity */
+      verbosity?: components["schemas"]["ModelKwargCapability"];
+      /** Presence Penalty */
+      presence_penalty?: components["schemas"]["ModelKwargCapability"];
+      /** Frequency Penalty */
+      frequency_penalty?: components["schemas"]["ModelKwargCapability"];
+      /** Top K */
+      top_k?: components["schemas"]["ModelKwargCapability"];
+    };
     /** ModelKwargs */
     ModelKwargs: {
       /** Temperature */
@@ -12889,6 +12944,8 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Model Kwargs Capabilities */
+      model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Id */
       id?: string | null;
     };

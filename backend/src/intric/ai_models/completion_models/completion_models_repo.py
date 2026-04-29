@@ -14,6 +14,8 @@ from intric.database.tables.ai_models_table import CompletionModels
 from intric.main.exceptions import UniqueException
 from intric.main.models import IdAndName
 
+COMPLETION_MODEL_DB_WRITE_EXCLUDE = {"token_limit", "supported_model_kwargs"}
+
 
 class CompletionModelsRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -48,7 +50,7 @@ class CompletionModelsRepository:
         return await self.delegate.get_by(conditions={CompletionModels.name: name})
 
     async def create_model(self, model: CompletionModelCreate) -> CompletionModel:
-        return await self.delegate.add(model, exclude={"token_limit"})
+        return await self.delegate.add(model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE)
 
     async def enable_completion_model(
         self,
@@ -74,7 +76,9 @@ class CompletionModelsRepository:
     async def update_model(
         self, model: CompletionModelUpdate
     ) -> CompletionModel | None:
-        return await self.delegate.update(model, exclude={"token_limit"})
+        return await self.delegate.update(
+            model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE
+        )
 
     async def delete_model(self, id: UUID) -> CompletionModel | None:
         stmt = (

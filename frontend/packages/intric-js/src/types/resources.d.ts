@@ -183,6 +183,8 @@ export type UserTokenUsage = components["schemas"]["UserTokenUsage"];
 export type UserSortBy = components["schemas"]["UserSortBy"];
 export type ModelUsage = components["schemas"]["ModelUsage"];
 export type ModelKwargs = components["schemas"]["ModelKwargs"];
+export type ModelKwargCapability = components["schemas"]["ModelKwargCapability"];
+export type SupportedModelKwargs = components["schemas"]["SupportedModelKwargs"];
 
 // Tenant model update types
 export type TenantCompletionModelUpdate = components["schemas"]["TenantCompletionModelUpdate"];
