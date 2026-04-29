@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -137,12 +136,24 @@ async def get_flow_run_evidence_alias(
 
 @router.get(
     "/{id}/runs/{run_id}/evidence/export",
-    response_model=FlowRunEvidenceExportResponse,
     status_code=status.HTTP_200_OK,
     operation_id="export_flow_run_evidence_alias",
     summary="Export flow run evidence bundle",
     description=_FLOW_EVIDENCE_EXPORT_DESCRIPTION,
     responses={
+        200: {
+            "model": FlowRunEvidenceExportResponse,
+            "description": "Redacted JSON evidence bundle returned as a downloadable attachment.",
+            "headers": {
+                "Content-Disposition": {
+                    "description": "Attachment filename for the JSON evidence bundle.",
+                    "schema": {
+                        "type": "string",
+                        "example": 'attachment; filename="flow-run-evidence-00000000-0000-0000-0000-000000000000.json"',
+                    },
+                }
+            },
+        },
         400: error_response(
             description="Requested evidence export format is not supported.",
             message="Evidence export format is not supported.",
@@ -244,8 +255,9 @@ async def export_flow_run_evidence_alias(
     if audit_failure is not None:
         return audit_failure
     filename = f"flow-run-evidence-{run_id}.json"
+    validated_export = FlowRunEvidenceExportResponse.model_validate(export_payload)
     return Response(
-        content=json.dumps(export_payload, ensure_ascii=False, indent=2),
+        content=validated_export.model_dump_json(indent=2),
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

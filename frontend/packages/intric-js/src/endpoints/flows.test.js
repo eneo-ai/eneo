@@ -40,6 +40,21 @@ describe("flows templates endpoint", () => {
     expect(fetch.mock.calls[0][1].method).toBe("get");
   });
 
+  it("loads the published runtime projection from the canonical route", async () => {
+    const fetch = vi.fn(async () => ({
+      id: "flow-1",
+      published_version: 7,
+      runtime_paths: {}
+    }));
+    const flows = initFlows({ fetch });
+
+    await flows.published.get({ id: "flow-1" });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/published/");
+    expect(fetch.mock.calls[0][1].method).toBe("get");
+  });
+
   it("generates template signed url from flow route", async () => {
     const fetch = vi.fn(async () => ({ url: "https://example.com" }));
     const flows = initFlows({ fetch });
@@ -108,6 +123,7 @@ describe("flows templates endpoint", () => {
 
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/runs/");
+    expect(fetch.mock.calls[0][1].requestBody["application/json"]).not.toHaveProperty("flow_id");
     expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
       expected_flow_version: 7,
       input_payload_json: { text: "test" },

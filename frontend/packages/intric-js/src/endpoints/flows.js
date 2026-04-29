@@ -96,6 +96,37 @@ export function initFlows(client) {
 
   /**
    * @param {{
+   *   expected_flow_version?: number,
+   *   input_payload_json?: any,
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   file_ids?: string[]
+   * }} params
+   * @returns {{
+   *   expected_flow_version?: number,
+   *   input_payload_json?: any,
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   file_ids?: string[]
+   * }}
+   */
+  const _buildRunRequestBody = ({
+    expected_flow_version,
+    input_payload_json,
+    step_inputs,
+    file_ids
+  }) => {
+    const normalizedStepInputs = _normalizeStepInputs(step_inputs);
+    return {
+      ...(expected_flow_version != null ? { expected_flow_version } : {}),
+      ...(input_payload_json !== undefined
+        ? { input_payload_json: _stableSortObjectKeys(input_payload_json) }
+        : {}),
+      ...(normalizedStepInputs ? { step_inputs: normalizedStepInputs } : {}),
+      ...(file_ids?.length ? { file_ids: [...file_ids].sort() } : {})
+    };
+  };
+
+  /**
+   * @param {{
    *   flowId: string,
    *   expectedFlowVersion?: number,
    *   input_payload_json?: any,
@@ -235,6 +266,17 @@ export function initFlows(client) {
      */
     inputPolicy: async ({ id }) => {
       return _fetch(`/api/v1/flows/${id}/input-policy/`, { method: "get" });
+    },
+
+    published: {
+      /**
+       * Fetch the published runtime projection for a Flow.
+       * @param {{id: string}} params
+       * @throws {IntricError}
+       */
+      get: async ({ id }) => {
+        return _fetch(`/api/v1/flows/${id}/published/`, { method: "get" });
+      }
     },
 
     runContract: {
@@ -430,19 +472,17 @@ export function initFlows(client) {
         step_inputs,
         file_ids
       }) => {
-        const normalizedRequest = _normalizeRunIntent({
-          flowId: flow.id,
-          expectedFlowVersion: expected_flow_version,
+        const requestBody = _buildRunRequestBody({
+          expected_flow_version,
           input_payload_json,
           step_inputs,
           file_ids
         });
-        delete normalizedRequest.flow_id;
         return _fetch(`/api/v1/flows/${flow.id}/runs/`, {
           method: "post",
           headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
           requestBody: {
-            "application/json": normalizedRequest
+            "application/json": requestBody
           }
         });
       },

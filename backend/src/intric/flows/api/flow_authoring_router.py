@@ -25,7 +25,7 @@ from intric.flows.api.flow_models import (
 from intric.flows.application.flow_service import FlowService
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes, NotFoundException, UnauthorizedException
-from intric.main.models import NOT_PROVIDED, PaginatedResponse
+from intric.main.models import NOT_PROVIDED, OffsetPaginatedResponse
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
@@ -165,7 +165,7 @@ async def create_flow(
 
 @router.get(
     "/",
-    response_model=PaginatedResponse[FlowSparsePublic],
+    response_model=OffsetPaginatedResponse[FlowSparsePublic],
     status_code=status.HTTP_200_OK,
     operation_id="list_flows",
     summary="List Flows",
@@ -173,6 +173,7 @@ async def create_flow(
         "List flow definitions in a space with pagination-friendly sparse metadata. "
         "The `count` field in the paginated response reports the number of items returned "
         "in the current page, not the total number of matching flows across all pages. "
+        "`has_more` reports whether another page exists after this offset window. "
         f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION} {_FLOW_SERVICE_KEY_DISCOVERY_DESCRIPTION}"
     ),
     responses={
@@ -220,12 +221,14 @@ async def list_flows(
         sparse=True,
         published_only=service_key_principal
         or not access_context.actor.can_edit_flows(),
-        limit=limit,
+        limit=limit + 1,
         offset=offset,
     )
+    page_items = flows[:limit]
     return {
-        "count": len(flows),
-        "items": [assembler.to_sparse_public(flow) for flow in flows],
+        "count": len(page_items),
+        "items": [assembler.to_sparse_public(flow) for flow in page_items],
+        "has_more": len(flows) > limit,
     }
 
 

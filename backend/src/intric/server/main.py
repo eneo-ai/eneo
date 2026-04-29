@@ -310,30 +310,6 @@ def get_application():
 
         _retag_flow_ai_builder_operations(openapi_schema)
 
-        paths = _json_obj(openapi_schema.get("paths"))
-        flow_upload_operation = _json_obj(
-            _json_obj(paths.get("/api/v1/flows/{id}/files/")).get("post")
-        )
-        flow_upload_schema = _json_obj(
-            _json_obj(
-                _json_obj(
-                    _json_obj(flow_upload_operation.get("requestBody")).get("content")
-                ).get("multipart/form-data")
-            ).get("schema")
-        )
-        if "$ref" in flow_upload_schema:
-            ref = str(flow_upload_schema["$ref"])
-            prefix = "#/components/schemas/"
-            if ref.startswith(prefix):
-                component_name = ref.removeprefix(prefix)
-                upload_component = _json_obj(schemas.get(component_name))
-                properties = _json_obj(upload_component.setdefault("properties", {}))
-                upload_field = _json_obj(properties.get("upload_file"))
-                if upload_field:
-                    upload_field["type"] = "string"
-                    upload_field["format"] = "binary"
-                    upload_field.pop("contentMediaType", None)
-
         # Fix only the missing SSE-related schemas that FastAPI doesn't auto-detect
         components = _json_obj(openapi_schema.setdefault("components", {}))
         schemas = _json_obj(components.setdefault("schemas", {}))

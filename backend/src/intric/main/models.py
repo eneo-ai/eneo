@@ -134,6 +134,12 @@ class PaginatedResponse(BaseModel, Generic[T]):
         return len(self.items)
 
 
+class OffsetPaginatedResponse(PaginatedResponse[T], Generic[T]):
+    has_more: bool = Field(
+        description="Whether another page exists after the returned offset window"
+    )
+
+
 class CursorPaginatedResponse(PaginatedResponse[T], Generic[T]):
     limit: Optional[int] = None
     next_cursor: Optional[Union[datetime, str]] = None

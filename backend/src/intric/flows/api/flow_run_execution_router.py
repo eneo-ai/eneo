@@ -28,7 +28,7 @@ from intric.flows.api.flow_models import (
 from intric.flows.application.flow_run_service import FlowRunService
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
-from intric.main.models import PaginatedResponse
+from intric.main.models import OffsetPaginatedResponse
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
@@ -45,7 +45,9 @@ _FLOW_RUN_FORBIDDEN_DESCRIPTION = (
 _FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION = (
     "Optional caller-supplied idempotency key. Reusing the same key with the same "
     "request payload returns the existing run payload. Reusing the same key with a "
-    "different payload returns `400` with code `flow_run_idempotency_conflict`."
+    "different payload returns `400` with code `flow_run_idempotency_conflict`. "
+    "Replay is available while the matching run row is retained; clients should keep "
+    "the returned run id as the durable polling handle."
 )
 
 _FLOW_RUN_CREATE_DESCRIPTION = """
@@ -62,7 +64,9 @@ _FLOW_RUN_CREATE_DESCRIPTION = """
 
     `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
     the same request payload returns the existing run payload. Reusing the same key with a
-    different payload returns `400` with code `flow_run_idempotency_conflict`.
+    different payload returns `400` with code `flow_run_idempotency_conflict`. Replay lasts while
+    the matching run row is retained; clients should keep the returned run id as the durable
+    polling handle.
 
     Service-key principals may create published-flow runs in v1. Draft ownership and AI Builder
     flows still require a user principal.
@@ -82,7 +86,8 @@ _FLOW_RUN_LIST_DESCRIPTION = """
 
     This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
     The `count` field in the paginated response reports the number of items returned in the
-    current page, not the total number of matching runs across all pages.
+    current page, not the total number of matching runs across all pages. `has_more` reports
+    whether another page exists after this offset window.
 
     Current runtime visibility is policy-based: callers always list their own runs, tenant admins
     can list runs across the tenant, same-space admins and owners can list run metadata for flows
@@ -206,7 +211,7 @@ async def create_flow_run(
 
 @router.get(
     "/{id}/runs/",
-    response_model=PaginatedResponse[FlowRunPublic],
+    response_model=OffsetPaginatedResponse[FlowRunPublic],
     status_code=status.HTTP_200_OK,
     operation_id="list_flow_runs_alias",
     summary="List flow runs (flow-first)",
@@ -250,13 +255,15 @@ async def list_flow_runs_alias(
     )
     runs = await _get_flow_run_service(container).list_runs(
         flow_id=id,
-        limit=limit,
+        limit=limit + 1,
         offset=offset,
     )
     assembler = FlowAssembler()
+    page_items = runs[:limit]
     return {
-        "count": len(runs),
-        "items": [assembler.to_run_public(item) for item in runs],
+        "count": len(page_items),
+        "items": [assembler.to_run_public(item) for item in page_items],
+        "has_more": len(runs) > limit,
     }
 
 

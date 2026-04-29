@@ -15543,26 +15543,36 @@ export interface components {
        */
       readonly count: number;
     };
-    /** PaginatedResponse[FlowRunPublic] */
-    PaginatedResponse_FlowRunPublic_: {
+    /** OffsetPaginatedResponse[FlowRunPublic] */
+    OffsetPaginatedResponse_FlowRunPublic_: {
       /**
        * Items
        * @description List of items returned in the response
        */
       items: components["schemas"]["FlowRunPublic"][];
       /**
+       * Has More
+       * @description Whether another page exists after the returned offset window
+       */
+      has_more: boolean;
+      /**
        * Count
        * @description Number of items returned in the response
        */
       readonly count: number;
     };
-    /** PaginatedResponse[FlowSparsePublic] */
-    PaginatedResponse_FlowSparsePublic_: {
+    /** OffsetPaginatedResponse[FlowSparsePublic] */
+    OffsetPaginatedResponse_FlowSparsePublic_: {
       /**
        * Items
        * @description List of items returned in the response
        */
       items: components["schemas"]["FlowSparsePublic"][];
+      /**
+       * Has More
+       * @description Whether another page exists after the returned offset window
+       */
+      has_more: boolean;
       /**
        * Count
        * @description Number of items returned in the response
@@ -31924,7 +31934,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_FlowSparsePublic_"];
+          "application/json": components["schemas"]["OffsetPaginatedResponse_FlowSparsePublic_"];
         };
       };
       /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, `flow_owner_required` when the caller is not allowed to override another member's draft, and the current fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints before first-class support lands. */
@@ -33570,7 +33580,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_FlowRunPublic_"];
+          "application/json": components["schemas"]["OffsetPaginatedResponse_FlowRunPublic_"];
         };
       };
       /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to access a run outside the current visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
@@ -34028,6 +34038,8 @@ export interface operations {
       /** @description Successful Response */
       200: {
         headers: {
+          /** @description Attachment filename for the JSON evidence bundle. */
+          "Content-Disposition"?: string;
           [name: string]: unknown;
         };
         content: {

@@ -157,6 +157,68 @@ def _run(flow_id, tenant_id):
     )
 
 
+def _evidence_export_payload(run: FlowRun) -> dict:
+    generated_at = datetime.now(timezone.utc).isoformat()
+    content_hash = "abc123"
+    return {
+        "schema_version": "flow-evidence-export.v2",
+        "generated_at": generated_at,
+        "content_hash": content_hash,
+        "manifest": {
+            "run_id": str(run.id),
+            "flow_id": str(run.flow_id),
+            "trace_id": str(run.trace_id),
+            "flow_version": run.flow_version,
+            "content_hash": content_hash,
+            "redaction_applied": True,
+            "masked_fields_count": 0,
+            "redaction_policy_version": "flow-evidence-redaction.v3",
+        },
+        "summary": {
+            "status": run.status.value,
+            "trace_id": str(run.trace_id),
+            "steps_count": 0,
+        },
+        "redaction": {
+            "applied": True,
+            "policy_version": "flow-evidence-redaction.v3",
+            "masked_fields_count": 0,
+            "masked_paths": [],
+            "masked_fields": [],
+        },
+        "bundle": {
+            "run": run.model_dump(mode="json"),
+            "definition_snapshot": {"steps": []},
+            "step_results": [],
+            "step_attempts": [],
+            "debug_export": {
+                "schema_version": "eneo.flow.debug-export.v2",
+                "generated_at": generated_at,
+                "run": {
+                    "run_id": str(run.id),
+                    "flow_id": str(run.flow_id),
+                    "flow_version": run.flow_version,
+                    "trace_id": str(run.trace_id),
+                    "status": run.status.value,
+                },
+                "definition": {
+                    "flow_id": str(run.flow_id),
+                    "version": 1,
+                    "checksum": "abc",
+                    "steps_count": 0,
+                },
+                "definition_snapshot": {"steps": []},
+                "steps": [],
+                "security": {
+                    "redaction_applied": True,
+                    "classification_field": "output_classification_override",
+                    "mcp_policy_field": "mcp_policy",
+                },
+            },
+        },
+    }
+
+
 def _enable_space_access(
     container,
     *,
@@ -1606,11 +1668,12 @@ async def test_flow_run_alias_endpoints_delegate_to_run_service(monkeypatch):
     )
 
     assert list_response["count"] == 1
+    assert list_response["has_more"] is False
     assert get_response.id == run.id
     assert step_response == []
     # get_flow is called once per endpoint (3 total) via enforce_flow_scope space check
     assert flow_service.get_flow.await_count == 3
-    run_service.list_runs.assert_awaited_once_with(flow_id=flow_id, limit=20, offset=2)
+    run_service.list_runs.assert_awaited_once_with(flow_id=flow_id, limit=21, offset=2)
     run_service.get_run.assert_awaited_once_with(run_id=run.id, flow_id=flow_id)
     run_service.list_step_results.assert_awaited_once_with(
         run_id=run.id, flow_id=flow_id
@@ -2019,41 +2082,7 @@ async def test_flow_run_evidence_export_alias_returns_json_attachment(monkeypatc
     container = MagicMock()
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
-    export_payload = {
-        "schema_version": "flow-evidence-export.v2",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "content_hash": "abc123",
-        "bundle": {
-            "run": run.model_dump(mode="json"),
-            "definition_snapshot": {"steps": []},
-            "step_results": [],
-            "step_attempts": [],
-            "debug_export": {
-                "schema_version": "eneo.flow.debug-export.v2",
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "run": {
-                    "run_id": str(run.id),
-                    "flow_id": str(run.flow_id),
-                    "flow_version": run.flow_version,
-                    "trace_id": str(run.trace_id),
-                    "status": run.status.value,
-                },
-                "definition": {
-                    "flow_id": str(run.flow_id),
-                    "version": 1,
-                    "checksum": "abc",
-                    "steps_count": 0,
-                },
-                "definition_snapshot": {"steps": []},
-                "steps": [],
-                "security": {
-                    "redaction_applied": True,
-                    "classification_field": "output_classification_override",
-                    "mcp_policy_field": "mcp_policy",
-                },
-            },
-        },
-    }
+    export_payload = _evidence_export_payload(run)
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     run_service.export_evidence_json.return_value = export_payload
@@ -2226,41 +2255,7 @@ async def test_flow_run_evidence_export_alias_fails_closed_when_audit_write_fail
     container = MagicMock()
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
-    export_payload = {
-        "schema_version": "flow-evidence-export.v2",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "content_hash": "abc123",
-        "bundle": {
-            "run": run.model_dump(mode="json"),
-            "definition_snapshot": {"steps": []},
-            "step_results": [],
-            "step_attempts": [],
-            "debug_export": {
-                "schema_version": "eneo.flow.debug-export.v2",
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "run": {
-                    "run_id": str(run.id),
-                    "flow_id": str(run.flow_id),
-                    "flow_version": run.flow_version,
-                    "trace_id": str(run.trace_id),
-                    "status": run.status.value,
-                },
-                "definition": {
-                    "flow_id": str(run.flow_id),
-                    "version": 1,
-                    "checksum": "abc",
-                    "steps_count": 0,
-                },
-                "definition_snapshot": {"steps": []},
-                "steps": [],
-                "security": {
-                    "redaction_applied": True,
-                    "classification_field": "output_classification_override",
-                    "mcp_policy_field": "mcp_policy",
-                },
-            },
-        },
-    }
+    export_payload = _evidence_export_payload(run)
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     run_service.export_evidence_json.return_value = export_payload
@@ -2309,7 +2304,7 @@ async def test_flow_run_evidence_export_alias_passes_raw_detail_and_reason(monke
     container = MagicMock()
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
-    export_payload = {"schema_version": "flow-evidence-export.v2", "bundle": {}}
+    export_payload = _evidence_export_payload(run)
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     run_service.export_evidence_json.return_value = export_payload
@@ -3068,12 +3063,13 @@ async def test_list_flows_allows_service_key_principals_for_published_discovery(
     )
 
     assert result["count"] == 1
+    assert result["has_more"] is False
     assert result["items"][0].id == visible_flow.id
     flow_service.list_flows.assert_awaited_once_with(
         space_id=space_id,
         sparse=True,
         published_only=True,
-        limit=50,
+        limit=51,
         offset=0,
     )
 
@@ -3103,13 +3099,14 @@ async def test_list_flows_requests_published_only_for_non_editors(monkeypatch):
     )
 
     assert result["count"] == 1
+    assert result["has_more"] is False
     assert len(result["items"]) == 1
     assert result["items"][0].id == visible_flow.id
     flow_service.list_flows.assert_awaited_once_with(
         space_id=space_id,
         sparse=True,
         published_only=True,
-        limit=50,
+        limit=51,
         offset=0,
     )
 
@@ -3294,7 +3291,7 @@ async def test_list_flows_requests_all_flows_for_editors(monkeypatch):
         space_id=space_id,
         sparse=True,
         published_only=False,
-        limit=50,
+        limit=51,
         offset=0,
     )
 
@@ -3486,6 +3483,7 @@ async def test_tenant_scoped_user_api_key_loads_space_membership_check(monkeypat
     )
 
     assert result["count"] == 1
+    assert result["has_more"] is False
     container.space_service.return_value.get_space.assert_awaited_once_with(
         flow.space_id
     )
@@ -3565,6 +3563,7 @@ async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
     )
 
     assert result["count"] == 1
+    assert result["has_more"] is False
     container.space_service.return_value.get_space.assert_awaited_once_with(
         flow.space_id
     )

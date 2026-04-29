@@ -391,8 +391,8 @@ def test_openapi_flow_pagination_response_shape_is_current(
     openapi_spec: dict,
 ) -> None:
     targets = {
-        "/api/v1/flows/": "PaginatedResponse_FlowSparsePublic_",
-        "/api/v1/flows/{id}/runs/": "PaginatedResponse_FlowRunPublic_",
+        "/api/v1/flows/": "OffsetPaginatedResponse_FlowSparsePublic_",
+        "/api/v1/flows/{id}/runs/": "OffsetPaginatedResponse_FlowRunPublic_",
     }
     schemas = openapi_spec.get("components", {}).get("schemas", {})
 
@@ -409,8 +409,19 @@ def test_openapi_flow_pagination_response_shape_is_current(
             f"#/components/schemas/{expected_component}"
         )
         component = schemas.get(expected_component, {})
-        assert set(component.get("properties", {})) == {"items", "count"}
-        assert set(component.get("required", [])) == {"items", "count"}
+        assert set(component.get("properties", {})) == {
+            "items",
+            "count",
+            "has_more",
+        }
+        assert set(component.get("required", [])) == {
+            "items",
+            "count",
+            "has_more",
+        }
+
+    assert "PaginatedResponse_FlowSparsePublic_" not in schemas
+    assert "PaginatedResponse_FlowRunPublic_" not in schemas
 
 
 def test_openapi_flow_input_policy_schema_contains_consumer_hints(
@@ -598,20 +609,25 @@ def test_openapi_flow_step_create_enum_values_match_contract(
 def test_openapi_flow_file_upload_multipart_schema_uses_upload_file_field(
     openapi_spec: dict,
 ) -> None:
-    request_schema = (
-        openapi_spec.get("paths", {})
-        .get("/api/v1/flows/{id}/files/", {})
-        .get("post", {})
-        .get("requestBody", {})
-        .get("content", {})
-        .get("multipart/form-data", {})
-        .get("schema", {})
+    targets = (
+        "/api/v1/flows/{id}/files/",
+        "/api/v1/flows/{id}/steps/{step_id}/runtime-files/",
     )
-    resolved = _resolve_component_ref(openapi_spec, request_schema)
-    properties = resolved.get("properties", {})
-    required = set(resolved.get("required", []))
-    assert "upload_file" in properties
-    assert "upload_file" in required
+    for path in targets:
+        request_schema = (
+            openapi_spec.get("paths", {})
+            .get(path, {})
+            .get("post", {})
+            .get("requestBody", {})
+            .get("content", {})
+            .get("multipart/form-data", {})
+            .get("schema", {})
+        )
+        resolved = _resolve_component_ref(openapi_spec, request_schema)
+        properties = resolved.get("properties", {})
+        required = set(resolved.get("required", []))
+        assert "upload_file" in properties
+        assert "upload_file" in required
 
 
 def test_openapi_flow_consumer_request_response_schemas(openapi_spec: dict) -> None:
@@ -639,23 +655,53 @@ def test_openapi_flow_consumer_request_response_schemas(openapi_spec: dict) -> N
     run_response_resolved = _resolve_component_ref(openapi_spec, run_response_schema)
     assert run_response_resolved.get("title") == "FlowRunPublic"
 
-    files_post = (
-        openapi_spec.get("paths", {})
-        .get("/api/v1/flows/{id}/files/", {})
-        .get("post", {})
+    upload_paths = (
+        "/api/v1/flows/{id}/files/",
+        "/api/v1/flows/{id}/steps/{step_id}/runtime-files/",
     )
-    files_request_schema = (
-        files_post.get("requestBody", {})
-        .get("content", {})
-        .get("multipart/form-data", {})
+    for upload_path in upload_paths:
+        files_post = (
+            openapi_spec.get("paths", {})
+            .get(upload_path, {})
+            .get("post", {})
+        )
+        files_request_schema = (
+            files_post.get("requestBody", {})
+            .get("content", {})
+            .get("multipart/form-data", {})
+            .get("schema", {})
+        )
+        files_request_resolved = _resolve_component_ref(
+            openapi_spec, files_request_schema
+        )
+        upload_file_schema = files_request_resolved.get("properties", {}).get(
+            "upload_file", {}
+        )
+        assert upload_file_schema.get("type") == "string"
+        assert upload_file_schema.get("format") == "binary"
+        assert "contentMediaType" not in upload_file_schema
+
+
+def test_openapi_flow_evidence_export_documents_json_attachment(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/evidence/export",
+        "get",
+    )
+    response = operation.get("responses", {}).get("200", {})
+    schema = (
+        response.get("content", {})
+        .get("application/json", {})
         .get("schema", {})
     )
-    files_request_resolved = _resolve_component_ref(openapi_spec, files_request_schema)
-    upload_file_schema = files_request_resolved.get("properties", {}).get(
-        "upload_file", {}
-    )
-    assert upload_file_schema.get("type") == "string"
-    assert upload_file_schema.get("format") == "binary"
+    resolved = _resolve_component_ref(openapi_spec, schema)
+    headers = response.get("headers", {})
+
+    assert resolved.get("title") == "FlowRunEvidenceExportResponse"
+    assert "Content-Disposition" in headers
+    assert "attachment" in str(headers["Content-Disposition"]).lower()
 
 
 def test_openapi_flow_error_responses_include_general_error_examples(
@@ -742,12 +788,14 @@ def test_openapi_create_flow_run_documents_idempotency_contract(
     assert "same key" in description.lower()
     assert "existing run" in description.lower()
     assert "flow_run_idempotency_conflict" in description
+    assert "retained" in description.lower()
 
     operation_description = str(operation.get("description", ""))
     assert (
         "Service-key principals may create published-flow runs in v1"
         in operation_description
     )
+    assert "matching run row is retained" in operation_description.lower()
 
     conflict_response = operation.get("responses", {}).get("400", {})
     assert "flow_run_idempotency_conflict" in str(
