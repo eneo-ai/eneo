@@ -32,7 +32,12 @@ def _make_server(name: str = "server") -> MCPServer:
 
 
 @pytest.mark.asyncio
-async def test_call_tool_evicts_dead_client_on_mcp_error():
+async def test_call_tool_marks_server_failed_but_keeps_client_for_close():
+    """On MCP error, the client must stay in _clients so close() can disconnect
+    it on the owner task. Dropping it would orphan the streamablehttp_client's
+    anyio TaskGroup (its HTTP read/write loops keep running until __aexit__
+    on the streams context). Subsequent calls should short-circuit via the
+    failed-server set."""
     server = _make_server()
     proxy = MCPProxySession([server])
 
@@ -44,6 +49,30 @@ async def test_call_tool_evicts_dead_client_on_mcp_error():
     with pytest.raises(MCPClientError):
         await proxy.call_tool("server__tool", {"q": "x"})
 
+    assert server.id in proxy._clients, (
+        "Client must remain cached so close() can disconnect it on the owner task"
+    )
+    assert server.id in proxy._failed_server_ids
+
+    # Subsequent call short-circuits without invoking the dead client again
+    result = await proxy.call_tool("server__tool", {"q": "x"})
+    assert result["is_error"] is True
+    assert dead_client.call_tool.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_call_tool_returns_error_when_no_client_cached():
+    """call_tool must NOT trigger a connect (it runs under asyncio.gather, on a
+    task other than the proxy's owner task). When no pre-connected client is
+    in the cache, return an error result."""
+    server = _make_server()
+    proxy = MCPProxySession([server])
+    # No pre-connect happened — _clients is empty.
+
+    result = await proxy.call_tool("server__tool", {"q": "x"})
+
+    assert result["is_error"] is True
+    assert server.id in proxy._failed_server_ids
     assert server.id not in proxy._clients
 
 

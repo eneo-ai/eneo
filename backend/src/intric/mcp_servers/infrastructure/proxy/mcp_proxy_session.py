@@ -64,6 +64,19 @@ class MCPProxySession:
         self._clients: dict[UUID, MCPClient] = {}
         self._connection_locks: dict[UUID, asyncio.Lock] = {}
 
+        # Servers that failed to connect or errored mid-session. Tracked instead
+        # of dropping clients from the cache: drops would leak the underlying
+        # streamablehttp_client whose anyio cancel scope can only be exited from
+        # its owner task.
+        self._failed_server_ids: set[UUID] = set()
+
+        # The asyncio.Task that opened the first MCP connection. All subsequent
+        # connect/disconnect calls must run on this task — the MCP SDK's
+        # streamablehttp_client uses anyio cancel scopes that raise RuntimeError
+        # if entered and exited from different tasks. Captured lazily on first
+        # connect because session construction is synchronous.
+        self._owner_task: asyncio.Task[Any] | None = None
+
         # Build tool registry from DB (no connections needed)
         self._tool_registry: dict[str, tuple[MCPServer, str]] = {}
         self._tools_for_llm: list[dict[str, Any]] = []
@@ -167,8 +180,15 @@ class MCPProxySession:
         async with _CIRCUIT_BREAKER_LOCK:
             _CIRCUIT_BREAKER_STATE.pop(server_id, None)
 
-    def _evict_client(self, server_id: UUID) -> None:
-        self._clients.pop(server_id, None)
+    def _mark_server_failed(self, server_id: UUID) -> None:
+        """Mark a server unusable for the rest of this session.
+
+        We do NOT drop the client from the cache — that would orphan the
+        streamablehttp_client's anyio TaskGroup (its read/write loops keep
+        running until __aexit__ is called on the streams context). close()
+        will disconnect every cached client at session end, on the owner task.
+        """
+        self._failed_server_ids.add(server_id)
 
     def _truncate_tool_result(self, result: dict[str, Any]) -> dict[str, Any]:
         max_chars = _settings.mcp_tool_output_max_chars
@@ -230,11 +250,36 @@ class MCPProxySession:
         server, original_tool_name = self._tool_registry[prefixed_tool_name]
         return (server.name, original_tool_name)
 
+    def _capture_owner_task(self) -> None:
+        """Bind this proxy session to the current asyncio.Task on first connect.
+
+        Any later connect or disconnect from a different task would create or
+        destroy anyio cancel scopes across task boundaries, which raises
+        RuntimeError inside the MCP SDK and silently leaks its TaskGroup
+        children (the persistent HTTP read/write loops).
+        """
+        current = asyncio.current_task()
+        if self._owner_task is None:
+            self._owner_task = current
+        elif current is not self._owner_task:
+            logger.error(
+                "[MCPProxy] MCP lifecycle call from non-owner task — this would "
+                "leak anyio cancel scopes. owner=%s current=%s. Refusing to "
+                "connect; the cached client (if any) will be cleaned up by close().",
+                self._owner_task,
+                current,
+            )
+            raise MCPClientError(
+                "MCP proxy session called from a task other than its owner; "
+                "refusing to connect to avoid anyio cancel-scope leak."
+            )
+
     async def _get_or_create_client(self, server: MCPServer) -> MCPClient:
         """
         Get existing client or create new connection (lazy).
 
-        Thread-safe via per-server locks.
+        Must run on the proxy session's owner task. Thread-safe via per-server
+        locks.
 
         Args:
             server: MCP server to connect to
@@ -243,9 +288,11 @@ class MCPProxySession:
             Connected MCPClient instance
 
         Raises:
-            MCPClientError: If connection fails
+            MCPClientError: If connection fails or called from a non-owner task
         """
         server_id = server.id
+
+        self._capture_owner_task()
 
         # Get or create lock for this server
         if server_id not in self._connection_locks:
@@ -317,8 +364,39 @@ class MCPProxySession:
                 "is_error": True,
             }
 
-        # Get or create connection (lazy)
-        client = await self._get_or_create_client(server)
+        if server.id in self._failed_server_ids:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "External tool service temporarily unavailable. Please retry later.",
+                    }
+                ],
+                "is_error": True,
+            }
+
+        # Use cached client only. Connecting here is unsafe: this method runs
+        # under asyncio.gather (see call_tools_parallel), which dispatches each
+        # call onto a separate Task. Entering streamablehttp_client's anyio
+        # cancel scope from that task would leak when close() runs from the
+        # owner task. Pre-connect happens sequentially in call_tools_parallel.
+        client = self._clients.get(server.id)
+        if client is None:
+            logger.warning(
+                "[MCPProxy] No connected client for '%s'; pre-connect did not run "
+                "or failed",
+                server.name,
+            )
+            self._mark_server_failed(server.id)
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "External tool service temporarily unavailable. Please retry later.",
+                    }
+                ],
+                "is_error": True,
+            }
 
         try:
             # Execute tool with timing
@@ -337,11 +415,11 @@ class MCPProxySession:
                 await self._record_success(server.id)
             return self._truncate_tool_result(result)
         except MCPClientError:
-            self._evict_client(server.id)
+            self._mark_server_failed(server.id)
             await self._record_failure(server.id)
             raise
         except Exception:
-            self._evict_client(server.id)
+            self._mark_server_failed(server.id)
             await self._record_failure(server.id)
             raise
 
@@ -375,12 +453,22 @@ class MCPProxySession:
                 server, _ = self._tool_registry[tool_name]
                 servers_needed[server.id] = server
 
-        # Connect to all needed servers in parallel (lazy - only if not already connected)
-        if servers_needed:
-            connect_tasks = [
-                self._get_or_create_client(server) for server in servers_needed.values()
-            ]
-            await asyncio.gather(*connect_tasks, return_exceptions=True)
+        # Pre-connect SEQUENTIALLY in this task. Sequential is required:
+        # streamablehttp_client uses anyio cancel scopes bound to the connecting
+        # task. asyncio.gather would dispatch each connect to its own gather
+        # task — close() later runs from the proxy session's owning task and
+        # anyio's task-boundary check would silently leak the underlying HTTP
+        # read/write loops, creeping CPU toward 100% over the worker's lifetime.
+        for server in servers_needed.values():
+            if server.id in self._clients or server.id in self._failed_server_ids:
+                continue
+            try:
+                await self._get_or_create_client(server)
+            except Exception as exc:
+                logger.warning(
+                    f"[MCPProxy] Failed to pre-connect to '{server.name}': {exc}"
+                )
+                self._mark_server_failed(server.id)
 
         # Execute all tool calls in parallel
         async def execute_single(
@@ -409,9 +497,27 @@ class MCPProxySession:
         return list(results)
 
     async def close(self):
-        """Close all connections."""
+        """Close all connections.
+
+        Must run on the owner task (the task that opened the connections).
+        Calling from a different task triggers anyio's task-boundary check
+        inside streamablehttp_client and silently leaks its TaskGroup
+        children. We log loudly when that happens so future regressions are
+        visible instead of masquerading as a slow CPU climb.
+        """
         if not self._clients:
+            self._failed_server_ids.clear()
             return
+
+        current = asyncio.current_task()
+        if self._owner_task is not None and current is not self._owner_task:
+            logger.error(
+                "[MCPProxy] close() called from non-owner task — anyio cancel "
+                "scopes inside streamablehttp_client will fail to exit and leak. "
+                "owner=%s current=%s",
+                self._owner_task,
+                current,
+            )
 
         for server_id, client in self._clients.items():
             try:
@@ -421,6 +527,7 @@ class MCPProxySession:
 
         connection_count = len(self._clients)
         self._clients.clear()
+        self._failed_server_ids.clear()
         logger.debug(
             f"[MCPProxy] Session closed, {connection_count} connection(s) cleaned up"
         )
