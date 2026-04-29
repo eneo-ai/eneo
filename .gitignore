@@ -87,3 +87,14 @@ scripts/gate-local/
 # Internal scratch directory — working documents and review artifacts
 # kept in-repo for stability across /tmp wipes but never committed.
 plan/
+
+# Local runtime and prompt scratch
+backend/celerybeat-schedule
+/prompt.md
+
+# Raw refactor execution artifacts stay local; curated plans, journals,
+# retrospectives, and reconciliations under docs/refactor are durable.
+docs/refactor/execution/batch-*/claude-attack-*.md
+docs/refactor/execution/batch-*/claude-packet-*.md
+docs/refactor/execution/batch-*/*transcript*.md
+docs/refactor/execution/batch-*/raw-*
