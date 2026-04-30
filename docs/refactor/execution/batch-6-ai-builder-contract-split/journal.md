@@ -1,5 +1,138 @@
 # Batch 6 - AI Builder Contract Split Journal
 
+## Iteration 5
+
+### Start Gate
+
+- HEAD verified as `ade08599`.
+- Latest commit verified as `docs: archive ai builder send-lock no-go iteration`.
+- `git diff --cached --name-only` returned no staged files.
+- Dirty files at start:
+  - `frontend/packages/ui/src/icons/types.d.ts`
+  - `scripts/run_codex_review.sh`
+  - `PRODUCT.md`
+- These dirty files are unrelated and must remain untouched.
+
+### Docker Status
+
+`docker ps --format '{{.Names}}'` was attempted before planning and was blocked
+by host execution policy:
+
+```text
+CreateProcess { message: "Rejected(\"approval required by policy, but AskForApproval is set to Never\")" }
+```
+
+Planned fallback: use local backend validation commands and record that Docker
+was unavailable in this thread.
+
+### Scope Decision
+
+This iteration is limited to AI Builder router/presenter thinning.
+
+Explicit non-goals:
+
+- planner/send-lock extraction
+- `ai_builder_planner.py`
+- `ai_builder_planner_turn.py`
+- proposal processor changes
+- edit proposal changes
+- repair changes
+- frontend protocol work
+- package or namespace rename
+- migrations/data model work
+- OpenAPI decorator metadata restructuring
+
+### Evidence Gathered
+
+- `backend/src/intric/flows/ai_builder/ai_builder_events.py` was read end to
+  end before any production edit. It currently owns SSE event names and event
+  builders at lines 22-165.
+- `ai_builder_router.py` inventory:
+  - `_coerce_event_stream`: lines 98-103
+  - `_current_usage_event`: lines 106-117
+  - `_resolve_litellm_params`: lines 120-124
+  - `_to_plan_response`: lines 222-233
+  - `_to_file_public`: lines 236-239
+  - `_to_session_response`: lines 242-265
+  - `_ai_builder_error_response`: lines 268-288
+  - `send_message` stream finalization: lines 531-578
+  - `send_message` error-to-done finalization: lines 579-615
+  - OpenAPI `responses=` decorator metadata: multiple endpoint decorators,
+    intentionally excluded from router-thinning success gates.
+- Focused happy-path stream baseline ran before production edits:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_router.py::TestSendMessageEndpoint::test_streams_usage_event_after_committed_message_event -q
+```
+
+Result: pass, 1 passed.
+
+Current happy-path SSE event order from that test:
+
+```text
+plan -> usage -> done
+```
+
+### Plan Status
+
+- Router/presenter thinning plan prepended to
+  `docs/refactor/execution/batch-6-ai-builder-contract-split/plan.md`.
+- Initial chosen path: Path A, extend the existing `ai_builder_events.py` owner.
+- Claude peer-loop plan review returned `VERDICT: changes_required`,
+  `GREEN_LIGHT: no`, and `MIN_SCORE: 6`.
+- Accepted findings were verified against source:
+  - `ai_builder_events.py` is currently a pure synchronous event-builder module
+    at lines 32-165.
+  - Moving stream finalization would move cross-event state from
+    `ai_builder_router.py:531-578`.
+  - Moving `_current_usage_event` would drag service/telemetry lookup from
+    `ai_builder_router.py:106-117` into event code or force a callback seam.
+  - Moving error-to-done finalization would move request/logging context from
+    `ai_builder_router.py:579-615` into event code or split the ownership.
+  - Existing router tests already own the observable SSE event-order contract at
+    `test_ai_builder_router.py:1135-1568`.
+- Revised chosen path: Path C no-go.
+- Path A is rejected because it would create hidden presenter debt inside
+  `ai_builder_events.py`.
+- Path B is rejected because the response-view helpers are small HTTP adapter
+  mappings and do not thin the SSE wrapper named by PRD-005.
+- Result: no production source/test changes will ship from this iteration.
+- PRD-005 router thinning remains open/carry-forward.
+- Claude peer-loop verification completed with `VERDICT: green`,
+  `GREEN_LIGHT: yes`, and `MIN_SCORE: 9`.
+- Non-blocking Claude notes were folded into the plan:
+  - clarified that the inventory's proposed owner column is historical from the
+    rejected path analysis
+  - explicitly recorded that PRD-005 acceptance criteria are not modified by
+    this no-go
+- Next action: run no-go validation, retrospective, and final Claude review.
+
+### Validation Results
+
+- `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_router.py::TestSendMessageEndpoint::test_streams_usage_event_after_committed_message_event -q`
+  - Result: pass, 1 passed. Event order remains `plan -> usage -> done`.
+- `git diff --check -- docs/refactor/execution/batch-6-ai-builder-contract-split`
+  - Result: pass.
+- `git diff --name-only -- backend/src backend/tests`
+  - Result: no output; no backend source/test changes.
+- `git diff --cached --name-only`
+  - Result: no output; nothing staged.
+- `rg -n "A\.[0-9]|P0\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|sectioned intake slice|router/presenter slice|Batch 6|6e" backend/src backend/tests docs/refactor/prd docs/refactor/ai-builder-prompt-contract.md`
+  - Result: pre-existing matches in unrelated worker watchdog Phase 0 tests/source
+    and one AI Builder fingerprint string. No touched source/test or
+    prompt-contract file changed in this no-go iteration, and no new committed
+    source/test planning vocabulary was introduced.
+
+### Claude Final Review
+
+- Claude peer-loop final review completed with `VERDICT: green`,
+  `GREEN_LIGHT: yes`, and `MIN_SCORE: 9`.
+- No accepted or partial findings remain.
+- Non-blocking presentation notes were folded into the plan and reconciliation:
+  - inventory rows now read as rejected/considered owners under the active
+    no-go decision
+  - the behavior-pins section explicitly says no tests are added by this slice
+
 ## Iteration 4
 
 ### Start Gate

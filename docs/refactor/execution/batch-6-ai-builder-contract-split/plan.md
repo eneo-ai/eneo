@@ -2,35 +2,311 @@
 
 ## TL;DR
 
-- Active scope: cleanup of the reverted send-lock extraction. No production
-  change ships from this pass.
-- Next candidate slice, not implemented here: router/presenter thinning, gated
-  on a measured inventory and numeric success gate.
-- The send-lock extraction attempt is archived under `## Archived No-Go
-  Iterations`; it is not the active implementation scope.
+- Active scope: AI Builder router/presenter thinning no-go decision.
+- Chosen path: Path C. No production source/test extraction ships from this
+  slice.
+- Path A is rejected because moving stream finalization to `ai_builder_events.py`
+  would turn a pure event-builder module into an async presenter with service,
+  request-context, logging, and error-finalization concerns.
+- Path B is rejected because the response-view helpers are small HTTP adapter
+  mappings and moving them would create a weak file split without thinning the
+  SSE wrapper that PRD-005 names.
 - The prompt/audit, repair retry, create/edit proposal, and send-lock no-go
   checkpoints are archived below; none of them is active implementation scope.
-- Docker validation is preferred, but `docker ps` remains blocked by host
-  execution policy in this session; local fallback validation is planned.
-- Send-lock draft result: the extraction gate failed. The draft reduced
-  `AIBuilderPlanner.send_message` by only 27 LOC and the proposed module was
-  163 LOC. Source/test changes were reverted. Do not retry this exact
-  extraction shape without a new plan.
 
-## Active Next Plan
+## Router/Presenter Thinning Plan
 
-Router/presenter thinning is the next candidate slice, but it must start with a
-measured pre-diff inventory and numeric success gate. Do not implement
-router/presenter thinning from this cleanup pass.
+### Start Gate
 
-Future router/presenter thinning must define, before production edits:
+| Check | Result |
+|---|---|
+| `git log -1 --oneline` | `ade08599 docs: archive ai builder send-lock no-go iteration` |
+| `git status --short --branch` | branch `feature/refactor-flows-flowai`; dirty files limited to `frontend/packages/ui/src/icons/types.d.ts`, `scripts/run_codex_review.sh`, and `PRODUCT.md` |
+| `git diff --cached --name-only` | no staged files |
+| Docker check | `docker ps --format '{{.Names}}'` blocked by host execution policy with `approval required by policy, but AskForApproval is set to Never`; local fallback validation planned |
 
-- every `ai_builder_router.py` helper/endpoint candidate with file:line and LOC
-- classification: keep in router / move to presenter / move to use case / leave
-- whether moving it reduces `AIBuilderPlanner.send_message`
-- numeric success gate: router shrinks by N LOC and presenter owns M LOC of
-  meaningful response/event shaping, or the slice records a no-go before source
-  edits
+Known unrelated dirty files remain out of scope and must not be touched:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+
+### Scope
+
+This slice thins only the AI Builder router/presenter surface. It may touch:
+
+- `backend/src/intric/flows/ai_builder/ai_builder_router.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_events.py`
+- AI Builder router/SSE behavior tests
+- this batch's process artifacts
+
+Optional file only if Path B is selected in a future plan:
+
+- `backend/src/intric/flows/ai_builder/ai_builder_response_views.py`
+
+Explicitly out of scope:
+
+- planner/send-lock extraction
+- `ai_builder_planner.py`
+- `ai_builder_planner_turn.py`
+- proposal processor changes
+- edit proposal changes
+- repair changes
+- frontend protocol work
+- package rename
+- `intric.*` to `eneo.*` namespace rename
+- migrations
+- data model changes
+- OpenAPI decorator metadata restructuring
+
+`backend/src/intric/flows/ai_builder/ai_builder_events.py` is the canonical SSE
+event construction owner for this slice. It was read end to end before any
+production edit. It already owns event names and builders at
+`backend/src/intric/flows/ai_builder/ai_builder_events.py:22-165`.
+
+### Pre-Edit Baseline
+
+Before any production edit, the focused happy-path router stream baseline ran:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_router.py::TestSendMessageEndpoint::test_streams_usage_event_after_committed_message_event -q
+```
+
+Result: pass, 1 passed.
+
+Current happy-path SSE event order from that test:
+
+```text
+plan -> usage -> done
+```
+
+The path must preserve that order. The existing router tests also pin:
+
+- usage emitted before done:
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:1135-1189`
+- late usage emitted before done:
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:1191-1253`
+- pre-existing usage not duplicated:
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:1255-1282`
+- generic stream error followed by done:
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:1500-1532`
+- `BadRequestException` followed by done:
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:1534-1568`
+
+### Measured Inventory
+
+The `proposed owner` column records the owner considered during the rejected
+Path A / Path B analysis. The active decision is Path C no-go, so no row moves
+in this iteration.
+
+| symbol / block | file:line | LOC estimate | responsibility | classification | proposed owner | does moving reduce AIBuilderPlanner.send_message? | reason |
+|---|---|---:|---|---|---|---|---|
+| `_coerce_event_stream` | `backend/src/intric/flows/ai_builder/ai_builder_router.py:98-103` | 6 | Normalize an async generator or awaitable stream returned by the service seam. | move to `ai_builder_events.py` | `ai_builder_events.py` | no | Honest pure-stream candidate, but too small alone to earn the slice. No move in Path C. |
+| `_current_usage_event` | `backend/src/intric/flows/ai_builder/ai_builder_router.py:106-117` | 12 | Read current session telemetry and build a usage event. | move to `ai_builder_events.py` | `ai_builder_events.py` | no | Rejected: moving it would drag service/telemetry lookup into event code or force a callback seam. |
+| `_resolve_litellm_params` | `backend/src/intric/flows/ai_builder/ai_builder_router.py:120-124` | 5 | Thin router-level planner parameter test seam. | keep in router | router | no | Explicit non-move. It is not presenter/view code and remains tied to request preparation. |
+| `_to_plan_response` | `backend/src/intric/flows/ai_builder/ai_builder_router.py:222-233` | 12 | Convert stored plan to public response while stripping reasoning. | leave for later | future `ai_builder_response_views.py` only if Path B is approved | no | Meaningful response mapping, but Path B is rejected until response-view duplication or a non-router caller appears. |
+| `_to_file_public` | `backend/src/intric/flows/ai_builder/ai_builder_router.py:236-239` | 4 | Normalize stored attachment file to public file response. | leave for later | internal helper only with `_to_session_response` in future Path B | no | Too small to export by itself; only moves if response views earn a module. |
+| `_to_session_response` | `backend/src/intric/flows/ai_builder/ai_builder_router.py:242-265` | 24 | Convert session domain object to public response with telemetry and attachment defaults. | leave for later | future `ai_builder_response_views.py` only if Path B is approved | no | Good Path B candidate only after a real response-view trigger. Existing tests pin defaults at `test_ai_builder_router.py:502-614`. |
+| `_ai_builder_error_response` | `backend/src/intric/flows/ai_builder/ai_builder_router.py:268-288` | 21 | Build OpenAPI JSON error response examples. | keep in router | router | no | Explicit non-move. It is decorator metadata, not runtime presenter code. |
+| OpenAPI `responses=` metadata | `backend/src/intric/flows/ai_builder/ai_builder_router.py:303-319`, `378-387`, `437-473`, `626-640`, `705-719`, `760-774`, `805-819`, `852-866`, `914-928`, `980-1010`, `1091-1105` | large but excluded from gate | Endpoint documentation and generated OpenAPI contract. | keep in router | router | no | Explicitly excluded from success gates and not part of runtime presenter behavior. |
+| `send_message` stream finalization loop | `backend/src/intric/flows/ai_builder/ai_builder_router.py:531-578` | 48 | Defers done, tracks committed/error/usage events, auto-emits usage, emits done last. | move to `ai_builder_events.py` | `ai_builder_events.py` | no | Rejected: it carries cross-event presenter state and couples to usage lookup. |
+| `send_message` error-to-done finalization | `backend/src/intric/flows/ai_builder/ai_builder_router.py:579-615` | 37 | Convert stream exceptions to SSE error followed by done. | move to `ai_builder_events.py` | `ai_builder_events.py` | no | Rejected: request correlation, logging context, and router error translation belong with the router. |
+| `send_message` request/auth/context setup | `backend/src/intric/flows/ai_builder/ai_builder_router.py:475-529` | 55 | HTTP request handling, auth, tenant/model/context preparation, service invocation. | keep in router | router | no | Router adapter responsibility. Moving this would start planner/service work. |
+| `create_session` inline response/audit shaping | `backend/src/intric/flows/ai_builder/ai_builder_router.py:320-369` | 50 | Create session, attachment response shaping, audit metadata. | keep in router | router | no | Audit and HTTP endpoint behavior stay in router; response mapping may be considered later under Path B. |
+| `list_sessions` permission filtering | `backend/src/intric/flows/ai_builder/ai_builder_router.py:389-426` | 38 | Visible-session filtering by scope and space edit permission. | keep in router | router | no | Authorization/filtering adapter behavior, not presenter code. |
+| `get_session` response mapping | `backend/src/intric/flows/ai_builder/ai_builder_router.py:643-669` | 27 | Load session/attachments and return session response. | leave for later | future `ai_builder_response_views.py` only if Path B is approved | no | Tied to `_to_session_response`; not moved in Path A. |
+| `get_plan` response mapping | `backend/src/intric/flows/ai_builder/ai_builder_router.py:777-796` | 20 | Load plan/session, authorize, return plan response. | leave for later | future `ai_builder_response_views.py` only if Path B is approved | no | Tied to `_to_plan_response`; not moved in Path A. |
+| `list_session_plans` response mapping | `backend/src/intric/flows/ai_builder/ai_builder_router.py:822-843` | 22 | Load session plans and map each to public response. | leave for later | future `ai_builder_response_views.py` only if Path B is approved | no | Response-view candidate, but Path A chosen. |
+| `approve_plan` inline audit/response | `backend/src/intric/flows/ai_builder/ai_builder_router.py:931-970` | 40 | Approve plan, audit metadata, response model. | keep in router | router | no | Audit stays in router. Response is small. |
+| `apply_plan` stale-revision JSON response and audit | `backend/src/intric/flows/ai_builder/ai_builder_router.py:1013-1079` | 67 | Apply plan, HTTP 409 envelope, audit metadata, response. | keep in router | router | no | HTTP error-envelope and audit behavior are explicit router responsibilities. |
+| `revise_plan` response mapping | `backend/src/intric/flows/ai_builder/ai_builder_router.py:1107-1134` | 28 | Revise plan and return public plan response. | leave for later | future `ai_builder_response_views.py` only if Path B is approved | no | Response-view candidate, but Path A chosen. |
+
+### Path Choice
+
+Chosen path: **Path C - no-go**.
+
+Path A was considered first because `ai_builder_events.py` is the existing SSE
+event construction owner. It is rejected after plan review for these reasons:
+
+- `ai_builder_events.py` is currently a pure synchronous event-builder module:
+  public functions build event dictionaries and do not orchestrate streams
+  (`backend/src/intric/flows/ai_builder/ai_builder_events.py:32-165`).
+- The proposed stream finalizer would own cross-event state from
+  `backend/src/intric/flows/ai_builder/ai_builder_router.py:531-578`, call
+  `service.get_session(...)` through `_current_usage_event` at
+  `ai_builder_router.py:106-117`, and map/log request-context exceptions from
+  `ai_builder_router.py:579-615`.
+- Moving those concerns would either import application service and telemetry
+  dependencies into `ai_builder_events.py`, introduce a callback/parameter-bag
+  seam, or split error finalization between modules. All three are weaker than
+  keeping the current router-owned SSE adapter behavior.
+- Moving only `_coerce_event_stream` is honest but too small to satisfy the
+  slice's value gate or PRD-005 router thinning intent.
+
+Path B was considered and rejected for this slice:
+
+- `_to_plan_response`, `_to_session_response`, and `_to_file_public` are small
+  HTTP response mapping helpers, totaling roughly 42 LOC.
+- They are legitimate HTTP adapter responsibilities. Moving them would create a
+  small response-view file without thinning the send-message SSE wrapper that
+  PRD-005 names.
+- Reopen response-view extraction only if a non-router caller appears or at
+  least three response mappers become duplicated across owners.
+
+Decision:
+
+- make no source changes
+- add no tests in this no-go slice because existing router tests already pin the
+  observable SSE order and error/done behavior
+- record the inventory, failed path choice, rationale, and PRD-005 carry-forward
+  in the journal
+- keep PRD-005 router thinning open/carry-forward
+
+PRD-005 acceptance criteria are not modified by this no-go. `Router SSE wrapper
+is thin` remains open/carry-forward.
+
+Carry-forward trigger:
+
+Reopen router/presenter thinning only when there is measured evidence that one
+of these is true:
+
+- the send-message SSE wrapper can shed a real lifecycle responsibility without
+  moving service/request/logging concerns into `ai_builder_events.py`, or
+- a named event-stream presenter module is explicitly approved with a dependency
+  budget, net-LOC gate, and full signature before implementation, or
+- response-view duplication appears outside the router and makes
+  `ai_builder_response_views.py` a real canonical owner rather than a small
+  file split.
+
+### Behavior Pins And Invariants
+
+This slice adds no tests; the list below documents the contract any future
+router-thinning slice must protect.
+
+- happy-path SSE event order: `plan -> usage -> done`
+- usage event emitted before done
+- done event deferred until usage has emitted
+- usage auto-emitted only when committed success occurred and no stream error
+  was seen
+- pre-existing usage event forwarded without duplicate
+- error event followed by done for `BadRequestException`
+- error event followed by done for generic exception path
+- `PlanResponse.envelope.reasoning` remains stripped to `None`
+- `_to_session_response` defaults remain stable:
+  - `attachments=[]`
+  - `attachment_warnings=[]`
+  - telemetry `None` passthrough
+- audit metadata remains unchanged
+- router auth/dependency behavior remains unchanged
+- prompt-contract artifact still passes
+- proposal/edit/repair behavior remains unchanged
+
+Testing strategy if this slice reopens:
+
+- Keep router endpoint behavior tests in `test_ai_builder_router.py`.
+- Keep router tests as the canonical SSE-order contract. If events tests are
+  added later, they should cover only behavior not reachable through router
+  tests, such as pure stream-shape normalization.
+- Do not create tests for a generic presenter object or implementation-detail
+  call order.
+
+### Expected Files To Change
+
+Expected source:
+
+- none
+
+Expected tests:
+
+- none
+
+Expected process docs:
+
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/plan.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/journal.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/retrospective-5.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/claude-reconciliation-5.md`
+
+Do not touch:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+- `backend/src/intric/flows/ai_builder/ai_builder_planner.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_repair.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py`
+- frontend files
+- migrations
+- OpenAPI decorator metadata structure
+
+### Validation Commands
+
+Implementation-order row for Batch 6 gives validation labels:
+
+- AI Builder integration tests
+- SSE event tests
+- frontend AI Builder tests
+
+For this no-go slice, exact validation commands are:
+
+Baseline stream order already run before no-go decision:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_router.py::TestSendMessageEndpoint::test_streams_usage_event_after_committed_message_event -q
+```
+
+Diff hygiene:
+
+```bash
+git diff --check -- \
+  docs/refactor/execution/batch-6-ai-builder-contract-split
+```
+
+Source/test cleanliness:
+
+```bash
+git diff --name-only -- backend/src backend/tests
+```
+
+Staged-file cleanliness:
+
+```bash
+git diff --cached --name-only
+```
+
+Anti-slippage guard:
+
+```bash
+rg -n "A\.[0-9]|P0\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|sectioned intake slice|router/presenter slice|Batch 6|6e" \
+  backend/src backend/tests docs/refactor/prd docs/refactor/ai-builder-prompt-contract.md
+```
+
+Expected: no matches.
+
+Frontend AI Builder tests are not run because this slice forbids frontend edits
+and does not change frontend protocol surfaces. If implementation reveals a
+frontend-facing contract risk, stop and ask for a scope decision.
+
+### Claude Plan Review
+
+Claude peer-loop challenged the initial Path A plan and returned
+`changes_required`, `GREEN_LIGHT: no`, and `MIN_SCORE: 6`. Accepted findings:
+
+- moving stream finalization to `ai_builder_events.py` would change that module
+  from pure event builders into an async presenter
+- `_current_usage_event` would drag `AIBuilderService` or callback-bag
+  dependency into event code
+- error-to-done finalization needs request/logging context that belongs in the
+  router
+- the Path A gate was too weak because it lacked net LOC, import-boundary, and
+  signature-width failure conditions
+- duplicate events tests would compete with existing router SSE contract tests
+
+This revised plan chooses Path C no-go. Run Claude peer-loop verification
+against this revision before ending the loop.
 
 ## Archived No-Go Iterations
 
