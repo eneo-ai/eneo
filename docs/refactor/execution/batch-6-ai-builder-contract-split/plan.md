@@ -2,13 +2,515 @@
 
 ## TL;DR
 
-- Active plan: continue after `fd5b725b flows: harden ai builder repair retry contract` with create/edit proposal processing separation only.
-- The prompt/audit checkpoint and repair retry checkpoint are archived below; neither is the active implementation scope.
-- The active plan starts at `## Create/Edit Proposal Processing Separation Plan`.
-- Docker validation is preferred, but `docker ps` remains blocked by host execution policy in this session; local fallback validation is planned.
-- This slice creates at most one production module: `backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py`.
+- Active scope: cleanup of the reverted send-lock extraction. No production
+  change ships from this pass.
+- Next candidate slice, not implemented here: router/presenter thinning, gated
+  on a measured inventory and numeric success gate.
+- The send-lock extraction attempt is archived under `## Archived No-Go
+  Iterations`; it is not the active implementation scope.
+- The prompt/audit, repair retry, create/edit proposal, and send-lock no-go
+  checkpoints are archived below; none of them is active implementation scope.
+- Docker validation is preferred, but `docker ps` remains blocked by host
+  execution policy in this session; local fallback validation is planned.
+- Send-lock draft result: the extraction gate failed. The draft reduced
+  `AIBuilderPlanner.send_message` by only 27 LOC and the proposed module was
+  163 LOC. Source/test changes were reverted. Do not retry this exact
+  extraction shape without a new plan.
 
-## Create/Edit Proposal Processing Separation Plan
+## Active Next Plan
+
+Router/presenter thinning is the next candidate slice, but it must start with a
+measured pre-diff inventory and numeric success gate. Do not implement
+router/presenter thinning from this cleanup pass.
+
+Future router/presenter thinning must define, before production edits:
+
+- every `ai_builder_router.py` helper/endpoint candidate with file:line and LOC
+- classification: keep in router / move to presenter / move to use case / leave
+- whether moving it reduces `AIBuilderPlanner.send_message`
+- numeric success gate: router shrinks by N LOC and presenter owns M LOC of
+  meaningful response/event shaping, or the slice records a no-go before source
+  edits
+
+## Archived No-Go Iterations
+
+### Planner send-lock lifecycle extraction
+
+Attempted goal: extract planner send-lock claim, refresh, lease-lost detection,
+and release behavior out of `AIBuilderPlanner.send_message` into one concrete
+async context manager without changing planner, SSE, chained-call, audit,
+repair, proposal, frontend, or persistence semantics.
+
+Extraction gate:
+
+- consolidate at least three send-lock/lease helpers
+- reduce `AIBuilderPlanner.send_message` by at least 80 LOC
+- keep `ai_builder_planner_send_lock.py` at or below 150 LOC
+- avoid net production LOC growth
+
+Measured result:
+
+| Measure | Result |
+|---|---:|
+| Baseline `AIBuilderPlanner.send_message` | 595 LOC |
+| Draft `AIBuilderPlanner.send_message` | 568 LOC |
+| Reduction | 27 LOC |
+| Required reduction | 80 LOC |
+| Draft `ai_builder_planner_send_lock.py` | 163 LOC |
+| Module cap | 150 LOC |
+
+Decision: no production source/test extraction ships from this iteration.
+
+Why: the proposed module did not earn its existence under the plan's own gate.
+The implementation preserved behavior, SSE/error mapping, chained-call, and
+refresh-task cleanup constraints, but those constraints left only 27 LOC
+removable from `send_message`; the new module also exceeded the 150 LOC cap.
+Shipping that shape would create a shallow lifecycle module rather than a
+clearer ownership boundary.
+
+The source/test draft was reverted. No production source/test changes from this
+iteration should remain in the working tree. `ai_builder_planner_turn.py`
+already exists and must not be recreated.
+
+PRD-005 planner-turn lifecycle ownership remains open/carry-forward.
+PRD-005 acceptance criteria are not modified by this cleanup pass.
+`Planner turn lifecycle has one owner` remains open/carry-forward unless a
+later human-approved PRD decision changes it.
+
+Reopen planner-flow/send-lock extraction only after router/presenter thinning
+has landed and there is measured evidence that either:
+
+- `AIBuilderPlanner.send_message` can be reduced by at least 80 LOC without
+  creating a pass-through lifecycle module, or
+- a broader planner-flow owner can absorb lock, chained server action, and
+  error/SSE boundary behavior as one real lifecycle concept.
+
+If later evidence shows this responsibility should intentionally remain in
+`AIBuilderPlanner`, PRD-005 must be updated in a separate human-approved PRD
+decision rather than silently treating this criterion as done.
+
+#### Start Gate
+
+| Check | Result |
+|---|---|
+| `git log --oneline --max-count=8` | latest commit is `af898af4 flows: separate ai builder edit proposal processing` |
+| `git status --short --branch` | branch `feature/refactor-flows-flowai`; dirty files limited to `frontend/packages/ui/src/icons/types.d.ts`, `scripts/run_codex_review.sh`, and `PRODUCT.md` before this plan update |
+| `git diff --cached --name-only` | no staged files |
+| Docker check | `docker ps --format '{{.Names}}'` blocked by host execution policy with `approval required by policy, but AskForApproval is set to Never`; local fallback validation planned |
+
+Known unrelated dirty files are out of scope and must remain untouched:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+
+#### Scope
+
+This slice extracts and hardens only the planner send-lock lifecycle around
+`AIBuilderPlanner.send_message`. It does not create a planner-turn module:
+`backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py` already owns
+the planner pipeline/dispatcher bridge.
+
+PRD-005 constraints that govern this slice:
+
+- "No fake one-method interfaces are introduced."
+- "no interface unless two real implementations exist."
+
+Default structural decision:
+
+- Add at most one production module:
+  `backend/src/intric/flows/ai_builder/ai_builder_planner_send_lock.py`.
+- Add one concrete async context manager:
+  `PlannerTurnSendLock`.
+- Keep `run_planner_turn`, `dispatch_planner_action`, `repo.commit_turn`,
+  prompt assembly, proposal processing, repair behavior, chained server actions,
+  SSE formatting, router behavior, audit behavior, and frontend behavior in
+  their current owners.
+- Do not create a Protocol, ABC, factory, compatibility wrapper, re-export,
+  generic lock helper, telemetry dataclass, migration, or namespace/package
+  rename.
+
+#### Required Pre-Diff Inventory Commands
+
+These commands ran before any production diff:
+
+```bash
+docker ps --format '{{.Names}}'
+```
+
+Result: blocked by host execution policy:
+
+```text
+CreateProcess { message: "Rejected(\"approval required by policy, but AskForApproval is set to Never\")" }
+```
+
+```bash
+git grep -n "claim_session_send\|refresh_session_send_lease\|release_session_send\|_send_lock_lease_seconds\|_next_send_lock_expiry\|_send_lock_refresh_interval_seconds\|_maintain_send_lock_lease\|_dispatch_chained_server_action_after_commit\|run_planner_turn\|commit_turn" -- backend/src backend/tests
+```
+
+Key result:
+
+- `AIBuilderPlanner` owns the send-lock helper cluster at
+  `backend/src/intric/flows/ai_builder/ai_builder_planner.py:337-397`.
+- `AIBuilderPlanner.send_message` claims the lock, creates refresh state/task,
+  and releases the lock at
+  `backend/src/intric/flows/ai_builder/ai_builder_planner.py:994-1019` and
+  `backend/src/intric/flows/ai_builder/ai_builder_planner.py:1519-1536`.
+- Lease-lost SSE mapping is duplicated in the caller at
+  `backend/src/intric/flows/ai_builder/ai_builder_planner.py:1327-1339` and
+  `backend/src/intric/flows/ai_builder/ai_builder_planner.py:1356-1367`.
+- The chained post-commit server action stays in
+  `backend/src/intric/flows/ai_builder/ai_builder_planner.py:775-896`.
+- `run_planner_turn` stays in
+  `backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py:134-152`.
+- `repo.commit_turn` remains the persistence/transaction boundary through
+  `backend/src/intric/flows/ai_builder/ai_builder_dispatcher.py:121-130` and
+  `backend/src/intric/flows/ai_builder/ai_builder_repo.py:973`.
+- Repository lock primitives stay in
+  `backend/src/intric/flows/ai_builder/ai_builder_repo.py:646-735`.
+- Existing unit pins for send-message outcomes live in
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py`.
+- Existing DB pins for claim/release/lease-lost commit behavior live in
+  `backend/tests/integration/flows/test_ai_builder_session_api_regressions.py:419-528`
+  and `backend/tests/integration/flows/test_ai_builder_session_api_regressions.py:1191-1236`.
+
+#### Extraction Gate
+
+Proceed with production extraction only if both gates remain true after the
+first implementation draft:
+
+| Gate | Planned proof |
+|---|---|
+| Consolidates at least 3 send-lock/lease helpers | Move `_send_lock_lease_seconds`, `_next_send_lock_expiry`, `_send_lock_refresh_interval_seconds`, and `_maintain_send_lock_lease` into `PlannerTurnSendLock`. |
+| Reduces `AIBuilderPlanner.send_message` by at least 80 LOC | Replace the claim/task/finally lifecycle block with `async with PlannerTurnSendLock(...)`, remove duplicated lease-lost event construction by using a local caller-owned event builder inside `send_message`, and remove the moved helper cluster from `AIBuilderPlanner`. |
+
+If either gate fails after formatting, stop, revert the production draft, and
+record a no-production-change result in this journal instead of shipping a weak
+module.
+
+Current measured baseline:
+
+- `AIBuilderPlanner.send_message`: 595 LOC.
+- Candidate displaced lock/lease spans:
+  - send-lock helper cluster: 61 LOC
+  - claim block: 26 LOC
+  - `BadRequestException(code="session_send_lease_lost")` SSE block: 13 LOC
+  - lease-lost poll SSE block: 12 LOC
+  - final release block: 18 LOC
+  - total candidate displacement: 130 LOC
+
+Post-change proof must record the new `send_message` LOC and the new module
+LOC in the journal before the implementation is accepted.
+
+#### Implementation Gate Result
+
+The first implementation draft failed the extraction gate:
+
+| Gate | Result |
+|---|---|
+| Consolidates at least 3 helpers | Would have passed: the draft moved `_send_lock_lease_seconds`, `_next_send_lock_expiry`, `_send_lock_refresh_interval_seconds`, and `_maintain_send_lock_lease`. |
+| Reduces `AIBuilderPlanner.send_message` by at least 80 LOC | Failed: baseline was 595 LOC; the draft left `send_message` at 568 LOC, a 27 LOC reduction. |
+| New module <=150 LOC | Failed: the draft `ai_builder_planner_send_lock.py` was 163 LOC. |
+| Net production LOC must not increase | Failed risk: the module cap failed before net LOC was accepted. |
+
+Per the gate, the source/test draft was reverted. This slice should not ship a
+weak lock module. The next attempt needs a smaller, cleaner plan, likely either:
+
+- a no-production-change decision that leaves send-lock lifecycle in the planner
+  until router/presenter thinning creates a clearer boundary, or
+- a broader, explicitly approved planner-flow extraction that reduces
+  `send_message` by moving a real lifecycle responsibility rather than only
+  moving lock plumbing.
+
+#### Inventory And Movement Decisions
+
+| name | file:line | responsibility | current owner | decision (stays / moves to ai_builder_planner_send_lock.py) | reason |
+|---|---|---|---|---|---|
+| `_send_lock_lease_seconds` | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:337-339` | compute configured lease seconds with lower bound | `AIBuilderPlanner` | moves | It is send-lock lifecycle policy, not prompt/planner behavior. |
+| `_next_send_lock_expiry` | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:341-345` | compute next lease expiry timestamp | `AIBuilderPlanner` | moves | It belongs with claim/refresh lease ownership. |
+| `_send_lock_refresh_interval_seconds` | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:347-349` | compute refresh cadence from lease length | `AIBuilderPlanner` | moves | It is refresh-loop policy and should live with the background lease task. |
+| `_maintain_send_lock_lease` | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:351-397` | background lease refresh and lease-lost detection | `AIBuilderPlanner` | moves | This is the largest send-lock lifecycle helper and uses only repo, tenant/request/session, token, stop, and lost-event state. |
+| claim path | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:994-1019` | request/lock token creation, DB claim, refresh task start | `AIBuilderPlanner.send_message` | moves | `PlannerTurnSendLock.__aenter__` should claim the lock and start refresh only after a successful claim. |
+| refresh path | `backend/src/intric/flows/ai_builder/ai_builder_repo.py:685-712` | DB lease refresh with matching request/token | `AIBuilderRepository` | stays | Repository remains the persistence owner; lock context manager only calls it. |
+| release path | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:1519-1536`, `backend/src/intric/flows/ai_builder/ai_builder_repo.py:714-735` | stop refresh task and release matching request/token | planner caller plus repository | moves from planner caller / repository stays | Context manager owns idempotent release and task cleanup; repository remains DB owner. |
+| lease expiry calculation | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:337-349` | minimum lease and refresh timing policy | `AIBuilderPlanner` | moves | Co-locate with send-lock lifecycle state. |
+| background lease task | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:1011-1019`, `backend/src/intric/flows/ai_builder/ai_builder_planner.py:1519-1530` | start, stop, await, and warn on refresh task | `AIBuilderPlanner.send_message` | moves | It is lifecycle plumbing and should be hidden behind the context manager. |
+| lease-lost detection | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:385-397`, `backend/src/intric/flows/ai_builder/ai_builder_planner.py:1356-1367` | signal lost lease and map to existing SSE error | mixed helper + caller | signal moves / SSE stays | `PlannerTurnSendLock.lease_lost_event` remains the signal; `send_message` keeps the event shape and `BadRequestException` mapping. |
+| `send_message` claim/task/finally behavior | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:994-1019`, `backend/src/intric/flows/ai_builder/ai_builder_planner.py:1519-1536` | lifecycle wrapper around one send turn | `AIBuilderPlanner.send_message` | moves | The caller should read as planner flow, not lock plumbing. |
+| duplicated lease-lost event block | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:1327-1339`, `backend/src/intric/flows/ai_builder/ai_builder_planner.py:1356-1367` | caller-owned SSE error formatting | `AIBuilderPlanner.send_message` | stays in caller via local function | The prompt requires SSE formatting to stay with the caller; local function removes duplication and helps the send-message LOC gate without changing ownership. |
+| `_dispatch_chained_server_action_after_commit` | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:775-896` | deterministic post-commit `confirm_requirements` transition | `AIBuilderPlanner` | stays | Must keep chained server action sequencing and two-commit behavior intact. |
+| chained lease-loss mapping | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:1471-1485` | maps lease loss during chained `confirm_requirements` dispatch to SSE | currently missing explicit mapping | stays in caller with fix | Local verification shows the current `BadRequestException(code="session_send_lease_lost")` handler only wraps the first `run_planner_turn`; the chained call sits outside it. This slice will wrap/re-poll the chained path so lease loss still emits the same `session_send_lease_lost` SSE error. |
+| `repo.commit_turn` | `backend/src/intric/flows/ai_builder/ai_builder_repo.py:973`, `backend/src/intric/flows/ai_builder/ai_builder_dispatcher.py:121-130` | canonical persistence/transaction boundary | `AIBuilderRepository`/dispatcher | stays | Explicitly preserved; the lock context manager must not own commits. |
+| `run_planner_turn` | `backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py:134-152` | planner pipeline/dispatcher bridge | `ai_builder_planner_turn.py` | stays | The planner-turn owner already exists; this slice does not recreate or move it. |
+| `dispatch_planner_action` | `backend/src/intric/flows/ai_builder/ai_builder_dispatcher.py:121-130` | dispatch persistence via `commit_turn` | dispatcher | stays | Dispatch semantics and commit kwargs must remain unchanged. |
+
+#### `PlannerTurnSendLock` Design
+
+New module: `backend/src/intric/flows/ai_builder/ai_builder_planner_send_lock.py`.
+
+Concrete constructor:
+
+```python
+PlannerTurnSendLock(
+    *,
+    repo: AIBuilderRepository,
+    session_id: UUID,
+    tenant_id: UUID,
+    request_id: UUID,
+    lease_seconds_now: Callable[[], int] = configured_send_lock_lease_seconds,
+)
+```
+
+This intentionally differs from the starter prompt's `lease_seconds: int`
+default. The current helper reads
+`get_settings().ai_builder_send_lock_lease_seconds` every time lease seconds
+are needed. Passing an `int` would snapshot the setting at construction and
+silently change refresh-loop behavior. A callable preserves the current
+call-time settings behavior and gives tests a deterministic seam without a fake
+interface.
+`configured_send_lock_lease_seconds` is a module-level callable in
+`ai_builder_planner_send_lock.py`; only `PlannerTurnSendLock` calls it.
+
+Public attributes:
+
+- `lock_token: UUID`
+- `lease_lost_event: asyncio.Event`
+
+Private state:
+
+- `_claimed`
+- `_lease_lost`
+- `_released`
+- `_stop_event`
+- `_lease_task`
+
+Behavior:
+
+- `__aenter__` calls `repo.claim_session_send(...)`.
+- Failed claim raises `BadRequestException(code="session_message_in_progress")`
+  with the current message text.
+- Successful claim starts one background refresh task.
+- The refresh task calls `repo.refresh_session_send_lease(...)` at the current
+  refresh interval and sets `lease_lost_event` if refresh fails or returns
+  false.
+- `__aexit__` stops and awaits the refresh task, preserves caller
+  cancellation/body exceptions, logs unexpected refresh-task errors, and
+  releases through `repo.release_session_send(...)` only after a successful
+  claim.
+- If the body and refresh task both raise, the body exception wins and the
+  refresh task error is logged.
+- If `repo.release_session_send(...)` raises, that exception propagates just as
+  the current outer `finally` does.
+- The refresh task await must be cancellation-safe: `__aexit__` should stop the
+  task and await cleanup without swallowing the caller's `CancelledError`.
+- Release is idempotent and best-effort for a single context manager instance.
+- `lease_lost_event` is single-use for one planner turn; the object is not
+  reusable across turns.
+- Re-entering the same `PlannerTurnSendLock` instance must raise before a
+  second repository claim is attempted.
+- Lease seconds are read from `lease_seconds_now()` at each claim/refresh
+  operation. The default callable reads
+  `get_settings().ai_builder_send_lock_lease_seconds`, preserving the current
+  settings override behavior; do not cache settings across refresh ticks.
+
+Implementation constraints:
+
+- `ai_builder_planner_send_lock.py` stays at or below 150 LOC.
+- Net production LOC must not increase.
+- No `# noqa`, `type: ignore`, linter suppressions, Protocols, ABCs, factories,
+  re-exports, or compatibility wrappers.
+- `AIBuilderPlanner` must not retain delegating wrappers for moved helpers.
+
+#### Behavior Pins Before Production Extraction
+
+Add or update behavior tests before moving production code:
+
+- `test_planner_send_lock_claims_refreshes_and_releases_once`
+  - Protects claim, refresh, and release behavior on the new context manager.
+- `test_planner_send_lock_failed_claim_raises_message_in_progress`
+  - Protects concurrent send rejection through
+    `BadRequestException(code="session_message_in_progress")`.
+  - Also asserts `release_session_send` is not called when claim fails.
+- `test_planner_send_lock_cancellation_releases_and_reraises`
+  - Protects cancellation mid-pipeline: refresh task is stopped/awaited and
+    the original cancellation is not swallowed.
+- `test_planner_send_lock_body_exception_during_active_refresh_releases_and_reraises`
+  - Protects arbitrary body exceptions: refresh task is stopped/awaited,
+    release is called, and the original exception is re-raised unchanged.
+- `test_planner_send_lock_refresh_false_sets_lease_lost`
+  - Protects lease-lost state when refresh returns false.
+- `test_planner_send_lock_refresh_exception_sets_lease_lost`
+  - Protects lease-lost state when refresh raises.
+- `test_planner_send_lock_reenter_raises_before_claim`
+  - Protects the single-use context-manager invariant.
+- `test_send_message_maps_lease_lost_from_planner_turn_to_sse`
+  - Patch `run_planner_turn` to raise
+    `BadRequestException(code="session_send_lease_lost")`, representing a lease
+    CAS loss inside planner pipeline persistence or repair-loop persistence.
+    Expected behavior: emit the existing `session_send_lease_lost` error SSE
+    and `done`; do not leak the exception out of the generator.
+- Add a focused `send_message` test for lease loss during the chained
+  `architecture_committed` -> `confirm_requirements` call. This test must
+  exercise the repository CAS failure path by making the second
+  `repo.commit_turn(...)` call raise
+  `BadRequestException(code="session_send_lease_lost")`. Expected behavior:
+  emit `status` for `architecture_committed`, then emit the same
+  `session_send_lease_lost` error SSE and `done`; do not leak the
+  `BadRequestException` out of the generator.
+- Re-poll `PlannerTurnSendLock.lease_lost_event` after the chained call as well
+  as after the first planner turn. Expected behavior: if the lease is lost after
+  the chained commit returns but before the caller emits
+  `requirements_summary`, emit the existing `session_send_lease_lost` error SSE
+  and `done` instead of a stale summary.
+- Rename the body-exception pin to
+  `test_planner_send_lock_body_exception_during_active_refresh_releases_and_reraises`
+  and make the test exercise an active refresh task, not only an idle context.
+
+#### Preservation Requirements
+
+Do not change:
+
+- `backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py`
+- `run_planner_turn` semantics
+- `dispatch_planner_action` semantics
+- `repo.commit_turn` as canonical persistence/transaction boundary
+- prompt-contract anchors
+- proposal processing behavior
+- edit proposal behavior
+- repair retry behavior
+- router/SSE event names, order, or payload shape
+- audit metadata behavior
+- frontend behavior
+
+The chained post-commit server action must remain intact:
+
+`architecture_committed` -> chained `confirm_requirements` -> `requirements_summary`
+
+The chained path must still:
+
+- run under the same send lock / lease
+- pass the same outer `request_uuid` and `lock_token` into the chained
+  `run_planner_turn` call
+- call `commit_turn` twice where today it does
+- preserve monotonically increasing `planning_state_version`
+- emit the same expected `requirements_summary` SSE event exactly once
+- map lease loss during the chained dispatch to the same
+  `session_send_lease_lost` SSE error instead of propagating
+  `BadRequestException`
+- re-poll `lease_lost_event` after the chained call before emitting
+  `requirements_summary`
+
+#### Validation Commands
+
+Docker/container discovery:
+
+```bash
+docker ps --format '{{.Names}}'
+```
+
+Local fallback validation, because Docker is blocked in this session:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner_send_lock.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q
+```
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_dispatcher.py -q
+```
+
+```bash
+cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py tests/integration/flows/ai_builder/test_ai_builder_apply_to_draft.py tests/integration/flows/test_ai_builder_edit_apply_regressions.py -q
+```
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_repair.py tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py tests/unittests/flows/ai_builder/test_ai_builder_router.py -q
+```
+
+```bash
+cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_planner_send_lock.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_lock.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py
+```
+
+```bash
+cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_planner_send_lock.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_lock.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py
+```
+
+```bash
+cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_planner_send_lock.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_lock.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py
+```
+
+```bash
+cd backend && uv run lint-imports --no-cache
+```
+
+```bash
+git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_planner.py backend/src/intric/flows/ai_builder/ai_builder_planner_send_lock.py backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_lock.py backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py docs/refactor/execution/batch-6-ai-builder-contract-split
+```
+
+Committed-text hygiene guard:
+
+```bash
+rg -n "A\.0|A\.6|P0\.|Phase 0-G|§A\.|plan §|/tmp/ai_builder_|plan/phases|sectioned intake slice|planner send-lock slice|Batch 6|6d" \
+  backend/src backend/tests docs/refactor/prd docs/refactor/ai-builder-prompt-contract.md
+```
+
+Expected: no matches in committed source/tests/prompt-contract docs. Process
+artifact references under this batch directory are allowed.
+
+#### Expected Files To Change
+
+Source:
+
+- `backend/src/intric/flows/ai_builder/ai_builder_planner.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_planner_send_lock.py`
+
+Tests:
+
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_lock.py`
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py`
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py` only if
+  import/path adjustments are required by the extraction
+
+Docs/process:
+
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/plan.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/journal.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/retrospective-4.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/claude-reconciliation-4.md`
+
+Do not touch:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+- `backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_repair.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_router.py`
+- frontend files
+- migrations
+
+#### Carry-Forward Risks
+
+- Router/presenter thinning remains a later Batch 6 slice.
+- Frontend AI Builder protocol alias work remains a later Batch 6 slice.
+- `ai_builder_models.py` star-barrel migration remains deferred until AI Builder
+  owners are clearer.
+- Package and namespace renames remain out of scope.
+
+## Archive - Create/Edit Proposal Processing Separation (Committed At af898af4)
+
+Outcome: shipped in `af898af4 flows: separate ai builder edit proposal
+processing`. Edit argument processing, description repair, edit retry config,
+and provenance parsing moved into `ai_builder_edit_proposal.py`; create
+processing and shared proposal orchestration stayed in
+`ai_builder_proposal_processor.py`.
+
+Carry-forward from that checkpoint: `_handle_edit_flow` deliberately stayed in
+the processor spine because event streaming and self-correction retry
+orchestration are shared. This remains part of the broader PRD-005
+create/edit/repair separation status, not a compatibility path.
 
 ### Start Gate
 
@@ -432,8 +934,6 @@ and description provenance into a stateless edit module is cleaner than moving
 Do not implement until the plan has green light or a documented,
 evidence-backed disagreement.
 
-## Archive - Repair Contract Hardening Plan (Committed At fd5b725b)
-
 ## Archive - Prompt/Audit Contract Checkpoint (Committed At 4cd874c7)
 
 ### Archived Start Gate
@@ -754,18 +1254,17 @@ cd frontend/apps/web && bun run check
 
 ### Archived Loop And Claude Review Plan
 
-1. Write this `/plan` and initial journal.
-2. Run Claude peer loop iteration 1 against the 6a plan.
-3. Verify Claude findings locally.
-4. Revise the plan where findings are valid.
-5. Run Claude peer loop iteration 2 with the same session and require green light, or document disagreement with evidence.
-6. Implement 6a tests/docs only.
-7. Run validation.
-8. Run retrospective.
-9. Run Claude implementation review and reconciliation.
-10. Stop at commit boundary and report staging list, do-not-stage list, validation, risks, suggested commit, and whether 6b is blocked.
+The prompt/audit checkpoint followed the standard loop protocol. See
+`docs/refactor/execution/loop-protocol.md` for the live process; do not copy this
+archived checklist forward as an active plan.
 
-## Repair Contract Hardening Plan
+## Archive - Repair Contract Hardening Plan (Committed At fd5b725b)
+
+Outcome: shipped in `fd5b725b flows: harden ai builder repair retry contract`.
+The repair checkpoint added missing `recoverable_parse` behavior pins and
+replaced a local primitive retry-state bundle with
+`_ProposalRepairRetryState`. No repair modules were split and no retry budgets,
+SSE events, audit behavior, planner behavior, or frontend behavior changed.
 
 ### Start Gate
 
@@ -1087,21 +1586,27 @@ whether this should be a no-production-change checkpoint. Resume the same
 session for verification after revisions. Do not implement until the plan has
 green light or a documented, evidence-backed disagreement.
 
-## Carry-Forward Risks From Batch 5
+## Active Carry-Forward (Post-Revert)
 
-| Risk | Status in repair slice | Reason |
+| Item | PRD-005 status | Evidence / next trigger |
 |---|---|---|
-| `FlowDocumentRenderLimits`, `FlowRunOutputPayload`, and related Flow runtime UI-owned projections | out of scope | These are Flow runtime UI projections, not AI Builder protocol types |
-| Frontend baseline/typecheck drift | out of scope unless frontend protocol touched | This repair slice is backend source/tests/docs only |
-| `@intric/intric-js` package naming | deferred | Batch 5 decision keeps package name for now; no rename in this slice |
-| AI Builder manual protocol drift | deferred | Frontend generated alias mapping remains a later AI Builder protocol-type slice |
-| Frontend SSE/open-flow protocol aliasing | deferred | Existing frontend tests pin driver behavior; generated alias mapping belongs to 6f and state ownership belongs to Batch 7 |
+| `_handle_edit_flow` remains in `AIBuilderProposalProcessor` | deferred within "Proposal create/edit/repair responsibilities are separated" | The edit proposal checkpoint moved edit-domain composition but left shared event streaming and self-correction retry orchestration in the processor spine. Reopen only with a measured boundary that moves real shared-spine responsibility without callback-heavy reach-back. |
+| Planner turn lifecycle single owner | open / partially owned by `ai_builder_planner_turn.py`; send-lock lifecycle remains in `AIBuilderPlanner.send_message` | The send-lock-only extraction reduced `AIBuilderPlanner.send_message` by 27 LOC against the required 80 LOC and created a 163 LOC module against the 150 LOC cap. Reopen only under the no-go re-entry trigger above. |
+| Chained-call lease-loss SSE mapping in `send_message` | open / behavior gap | `ai_builder_planner.py:1471-1485` chained `confirm_requirements` dispatch is not covered by the existing `session_send_lease_lost` handler. Add the lease-lost re-poll plus SSE mapping the next time `send_message` is touched, even if no extraction is performed. |
+| Router SSE wrapper is thin | open | Router/presenter thinning is the next candidate slice, but it must begin with a measured `ai_builder_router.py` inventory and numeric success gate before source edits. |
+| AI Builder generated/manual type drift | open / deferred | Frontend protocol aliasing remains a later Batch 6 slice. Do not start frontend protocol work from this cleanup pass. |
+| `ai_builder_models.py` star-barrel migration | deferred | Keep deferred until AI Builder owners are clearer; do not create compatibility re-exports. |
+| `@intric/intric-js` package naming | deferred | Batch 5 decision keeps the package name for now; no package rename in Batch 6 slices. |
+| Flow runtime UI-owned projections | out of scope | `FlowDocumentRenderLimits`, `FlowRunOutputPayload`, and related Flow runtime projections are not AI Builder protocol types. |
 
 ## Non-Goals
 
-- Do not start the create/edit proposal split.
-- Do not thin `ai_builder_router.py`.
-- Do not split `AIBuilderService` or planner modules.
+- Do not restart the rejected send-lock source extraction from this cleanup
+  pass.
+- Do not start router/presenter thinning from this cleanup pass.
+- Do not start frontend protocol work from this cleanup pass.
+- Do not modify PRD-005 in this cleanup pass.
+- Do not split `AIBuilderService` or planner modules from this cleanup pass.
 - Do not delete active repair behavior.
 - Do not preserve or add compatibility for imaginary users.
 - Do not touch frontend state ownership.

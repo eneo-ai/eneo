@@ -1,5 +1,197 @@
 # Batch 6 - AI Builder Contract Split Journal
 
+## Iteration 4
+
+### Start Gate
+
+- HEAD verified as `af898af4`.
+- Latest commit verified as `flows: separate ai builder edit proposal processing`.
+- `git diff --cached --name-only` returned no staged files.
+- Dirty files at start:
+  - `frontend/packages/ui/src/icons/types.d.ts`
+  - `scripts/run_codex_review.sh`
+  - `PRODUCT.md`
+- These dirty files are unrelated and must remain untouched.
+
+### Docker Status
+
+`docker ps --format '{{.Names}}'` was attempted before planning and was blocked
+by host execution policy:
+
+```text
+CreateProcess { message: "Rejected(\"approval required by policy, but AskForApproval is set to Never\")" }
+```
+
+Planned fallback: use local backend validation commands and record that Docker
+was unavailable in this thread.
+
+### Scope Decision
+
+This iteration is limited to planner send-lock lifecycle
+extraction/hardening. It must not create a planner-turn module because
+`backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py` already owns
+the pipeline/dispatcher bridge.
+
+The planned production extraction proceeds only if both gates stay true after
+the first implementation draft:
+
+- at least three send-lock/lease helpers are consolidated into
+  `PlannerTurnSendLock`
+- `AIBuilderPlanner.send_message` shrinks by at least 50 LOC
+
+If either gate fails after formatting, the production draft will be reverted and
+this iteration will become a documented no-production-change result.
+
+### Evidence Gathered
+
+- `ai_builder_planner.py`
+  - send-lock helper cluster: lines 337-397
+  - chained server action: lines 775-896
+  - send-message claim/task lifecycle: lines 994-1019
+  - lease-lost SSE mapping: lines 1327-1339 and 1356-1367
+  - release/finally lifecycle: lines 1519-1536
+- `ai_builder_repo.py`
+  - claim/refresh/release DB primitives: lines 646-735
+- `ai_builder_planner_turn.py`
+  - existing `run_planner_turn` owner: lines 134-152
+- `ai_builder_dispatcher.py`
+  - `repo.commit_turn` dispatch boundary: lines 121-130
+- `test_ai_builder_planner_send_message.py`
+  - send-message SSE/chained behavior pins, including chained
+    requirements summary and two-commit assertion: lines 884-989
+- `test_ai_builder_planner.py`
+  - existing in-progress and closed-session send-message pins:
+    lines 928-988
+- `test_ai_builder_session_api_regressions.py`
+  - repository claim/release and lease-lost commit behavior pins:
+    lines 419-528 and 1191-1236
+
+### Plan Status
+
+- Planner send-lock lifecycle plan prepended to
+  `docs/refactor/execution/batch-6-ai-builder-contract-split/plan.md`.
+- Claude peer-loop iteration 1 completed with `VERDICT: changes_required`,
+  `GREEN_LIGHT: no`, and `MIN_SCORE: 7`.
+- Accepted findings were verified locally:
+  - The current `BadRequestException(code="session_send_lease_lost")` mapping
+    only wraps the first `run_planner_turn`; the chained
+    `_dispatch_chained_server_action_after_commit(...)` call at lines 1471-1485
+    sits outside that handler.
+  - The four moved send-lock helpers are referenced only inside
+    `ai_builder_planner.py` and settings.
+  - Existing tests do not assert send-message `release_session_send` call count;
+    repository integration tests assert release CAS behavior separately.
+  - Candidate displaced lock/lease spans total 130 LOC; the plan gate was
+    tightened from 50 to 80 LOC reduction.
+- Plan revisions made after Claude review:
+  - added chained-call lease-loss mapping to the slice
+  - tightened `send_message` reduction gate to at least 80 LOC
+  - specified `__aexit__` body-exception, refresh-task-error, release-error,
+    cancellation, and re-entry semantics
+  - added failed-claim-no-release, body-exception, re-entry, and chained
+    lease-loss behavior pins
+  - recorded that lease seconds must read settings at call time and must not be
+    cached across refresh ticks
+- Next action: run Claude peer-loop verification against the revised plan before
+  production implementation.
+- Claude peer-loop verification still returned `changes_required`
+  (`GREEN_LIGHT: no`, `MIN_SCORE: 8`) because the plan conflicted on
+  `lease_seconds` caching and did not name the chained lease-loss failure path.
+- Second revision after verification:
+  - changed the context manager constructor from cached `lease_seconds: int` to
+    `lease_seconds_now: Callable[[], int]` so settings are read at call time
+  - made the first-turn lease-loss test explicit by patching
+    `run_planner_turn` to raise
+    `BadRequestException(code="session_send_lease_lost")`
+  - made the chained-call lease-loss test exercise the second
+    `repo.commit_turn(...)` CAS failure path
+  - required a post-chained-call `lease_lost_event` re-poll before emitting
+    `requirements_summary`
+  - renamed the body-exception pin to require an active refresh task during
+    cleanup
+- Next action: rerun Claude peer-loop verification against the tightened plan.
+- Claude peer-loop verification rerun completed with `VERDICT: green`,
+  `GREEN_LIGHT: yes`, and `MIN_SCORE: 9`.
+- Non-blocking Claude notes folded into the plan before implementation:
+  - replaced the stale body-exception test name with the active-refresh variant
+  - specified that `configured_send_lock_lease_seconds` is a module-level
+    callable in `ai_builder_planner_send_lock.py`
+
+### Implementation Gate Result
+
+- Added the planned behavior pins and implemented the first draft of
+  `PlannerTurnSendLock`.
+- Focused pre-source pin run failed as expected before the module existed:
+  `ModuleNotFoundError: No module named 'intric.flows.ai_builder.ai_builder_planner_send_lock'`.
+- After the draft source implementation, the focused lock and send-message
+  lease-loss tests passed: 9 passed.
+- The draft failed the extraction gate:
+  - `AIBuilderPlanner.send_message` baseline: 595 LOC.
+  - Draft `AIBuilderPlanner.send_message`: 568 LOC.
+  - Reduction: 27 LOC, below the required 80 LOC.
+  - Draft `ai_builder_planner_send_lock.py`: 163 LOC, above the 150 LOC cap.
+- Per the plan, the production/test draft was reverted rather than shipping a
+  weak module. The working tree now contains only the plan/journal changes for
+  this attempted slice plus the known unrelated dirty files.
+- Result: no production change is ready for this slice. A future attempt needs a
+  new plan that either accepts no production change or explicitly widens the
+  planner-flow boundary enough to reduce `send_message` by a real
+  responsibility, not only lock plumbing.
+
+### No-Go Archive Cleanup
+
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/plan.md` was
+  updated so planner send-lock extraction is no longer the active plan.
+- The failed send-lock plan now lives under `Archived No-Go Iterations` with the
+  gate, measured result, decision, re-entry trigger, and PRD-005 carry-forward
+  note.
+- The active next-plan marker now points future agents at router/presenter
+  thinning as a candidate slice only after a measured inventory and numeric
+  success gate. No router/presenter source work was started.
+- Frontend protocol work was not started.
+- PRD-005 was not modified.
+
+### Recoverability Check
+
+Bounded recovery commands were run for the reverted draft tests:
+
+- `git status --short`
+- `git stash list`
+- `git reflog --oneline --max-count=20`
+- `git fsck --lost-found`
+- `find . -path '*/test_ai_builder*send*lock*' -o -path '*/test_ai_builder*planner*lock*'`
+- `rg -n "test_planner_send_lock|chained_commit_lease_loss|PlannerTurnSendLock|session_send_lease_lost" .codex/artifacts docs/refactor/execution/batch-6-ai-builder-contract-split`
+
+Result:
+
+- No relevant working-tree source test file remained.
+- No relevant stash entry or reflog commit contained the reverted source/test
+  draft.
+- Local artifact search found only review text and process docs, not source
+  tests that could be safely ported.
+- Filesystem search found only
+  `backend/tests/unittests/flows/ai_builder/__pycache__/test_ai_builder_planner_send_lock.cpython-311-pytest-7.4.4.pyc`.
+- That stale pycache artifact was deleted with:
+  `find backend/tests/unittests/flows/ai_builder/__pycache__ -name 'test_ai_builder_planner_send_lock*.pyc' -delete`.
+- A follow-up `find backend/tests/unittests/flows/ai_builder/__pycache__ -name 'test_ai_builder_planner_send_lock*.pyc'`
+  returned no output.
+
+Reverted send-lock draft tests were not recoverable from working tree, stash,
+reflog, lost-found, or local artifact search. The chained-call lease-loss
+coverage gap remains a named carry-forward. No tests were recreated from memory,
+and no tests for the rejected `PlannerTurnSendLock` API were added.
+
+### Archive Validation
+
+- `git ls-files backend/src/intric/flows/ai_builder | grep send_lock || true`
+  - Result: no output; no `ai_builder_planner_send_lock.py` source file is tracked.
+- `git diff --name-only -- backend/src backend/tests`
+  - Result: no output; no backend source/test changes remain.
+- `git diff --cached --name-only`
+  - Result: no output; nothing is staged.
+- Dirty files remain limited to this batch's plan/journal docs plus known
+  unrelated dirty files until `retrospective-4.md` is created.
+
 ## Iteration 1
 
 ### Start Gate
