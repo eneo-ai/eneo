@@ -2,7 +2,6 @@ import { createClassContext } from "$lib/core/helpers/createClassContext";
 import type { Intric } from "@intric/intric-js";
 import type { StructuredQuestionAnswerMetadata } from "./structuredQuestionAnswer";
 import {
-  createInitialFlowAIBuilderState,
   FlowAIBuilderDriver,
   type AIBuilderClientTransport,
   type FlowAIBuilderState
@@ -25,104 +24,96 @@ import type {
 
 export class FlowAIBuilderService {
   #driver: FlowAIBuilderDriver;
-  #spaceId: string;
+  #stateVersion = $state(0);
 
-  #session = $state<AIBuilderSession | null>(null);
-  #messages = $state<ChatMessage[]>([]);
-  #currentPlan = $state<ProposedPlan | null>(null);
-  #isStreaming = $state(false);
-  #isInitializing = $state(false);
-  #error = $state<string | null>(null);
-  #applyError = $state<ApplyError | null>(null);
-  #applyResult = $state<ApplyResult | null>(null);
-  #isConflict = $state(false);
-  #statusMessage = $state<string | null>(null);
-  #availableModels = $state<AIBuilderModel[]>([]);
-  #selectedModelId = $state<string | null>(null);
-  #modelsLoaded = $state(false);
-  #draftSessions = $state<AIBuilderDraftSession[]>([]);
-
-  hasSession = $derived(this.#session !== null);
+  hasSession = $derived(this.#state.session !== null);
   canSendMessage = $derived(
     this.hasSession &&
-      !this.#isStreaming &&
-      (this.#session?.status === "chatting" || this.#session?.status === "awaiting_approval")
+      !this.#state.isStreaming &&
+      (this.#state.session?.status === "chatting" ||
+        this.#state.session?.status === "awaiting_approval")
   );
   canApprove = $derived(
-    this.#currentPlan?.status === "proposed" && this.#session?.status === "awaiting_approval"
+    this.#state.currentPlan?.status === "proposed" &&
+      this.#state.session?.status === "awaiting_approval"
   );
   canApply = $derived(
-    this.#currentPlan?.status === "approved" && this.#session?.status === "awaiting_approval"
+    this.#state.currentPlan?.status === "approved" &&
+      this.#state.session?.status === "awaiting_approval"
   );
-  isApplied = $derived(this.#session?.status === "applied");
+  isApplied = $derived(this.#state.session?.status === "applied");
   canContinueEditing = $derived(
-    this.#applyResult?.flow_id !== undefined ||
-      (this.#session?.status === "applied" && this.#session?.flow_id !== null)
+    this.#state.applyResult?.flow_id !== undefined ||
+      (this.#state.session?.status === "applied" && this.#state.session?.flow_id !== null)
   );
 
   constructor(intric: Intric, spaceId: string, flowId: string | null) {
-    this.#spaceId = spaceId;
     const transport = intric.client as unknown as AIBuilderClientTransport;
-    this.#driver = new FlowAIBuilderDriver(transport, spaceId, flowId, (state) => {
-      this.#applyState(state);
+    this.#driver = new FlowAIBuilderDriver(transport, spaceId, flowId, () => {
+      this.#stateVersion += 1;
     });
-    this.#applyState(createInitialFlowAIBuilderState());
+  }
+
+  get #state(): Readonly<FlowAIBuilderState> {
+    // Svelte tracks Driver updates through this read; Service getters must use this accessor.
+    void this.#stateVersion;
+    return this.#driver.state;
   }
 
   get session(): AIBuilderSession | null {
-    return this.#session;
+    return this.#state.session;
   }
 
   get messages(): ChatMessage[] {
-    return this.#messages;
+    return this.#state.messages;
   }
 
   get currentPlan(): ProposedPlan | null {
-    return this.#currentPlan;
+    return this.#state.currentPlan;
   }
 
   get isStreaming(): boolean {
-    return this.#isStreaming;
+    return this.#state.isStreaming;
   }
 
   get isInitializing(): boolean {
-    return this.#isInitializing;
+    return this.#state.isInitializing;
   }
 
   get error(): string | null {
-    return this.#error;
+    return this.#state.error;
   }
 
   get applyError(): ApplyError | null {
-    return this.#applyError;
+    return this.#state.applyError;
   }
 
   get applyResult(): ApplyResult | null {
-    return this.#applyResult;
+    return this.#state.applyResult;
   }
 
   get isConflict(): boolean {
-    return this.#isConflict;
+    return this.#state.isConflict;
   }
 
   get statusMessage(): string | null {
-    return this.#statusMessage;
+    return this.#state.statusMessage;
   }
 
   get availableModels(): AIBuilderModel[] {
-    return this.#availableModels;
+    return this.#state.availableModels;
   }
 
   get selectedModelId(): string | null {
-    return this.#selectedModelId;
+    return this.#state.selectedModelId;
   }
 
   get modelsLoaded(): boolean {
-    return this.#modelsLoaded;
+    return this.#state.modelsLoaded;
   }
 
   get draftSessions(): AIBuilderDraftSession[] {
-    return this.#draftSessions;
+    return this.#state.draftSessions;
   }
 
   get hasRecoverableCreateDraft(): boolean {
@@ -130,27 +121,16 @@ export class FlowAIBuilderService {
   }
 
   get recoverableCreateDrafts(): AIBuilderDraftSession[] {
-    return this.#draftSessions.filter(
-      (session) =>
-        session.space_id === this.#spaceId &&
-        session.target_kind === "create" &&
-        session.flow_id === null &&
-        session.status !== "applied" &&
-        session.status !== "cancelled"
-    );
+    void this.#state;
+    return this.#driver.getRecoverableCreateDrafts();
   }
 
   get sessionStatus(): SessionStatus | undefined {
-    return this.#session?.status;
+    return this.#state.session?.status;
   }
 
-  // Reactive phase: touch reactive state so Svelte recomputes on change.
-  // The driver holds the source-of-truth derivation logic.
   phase: AIBuilderPhase = $derived.by(() => {
-    void this.#currentPlan;
-    void this.#isStreaming;
-    void this.#statusMessage;
-    void this.#messages;
+    void this.#state;
     return this.#driver.derivePhase();
   });
 
@@ -261,23 +241,6 @@ export class FlowAIBuilderService {
 
   destroy(): void {
     this.abort();
-  }
-
-  #applyState(state: Readonly<FlowAIBuilderState>): void {
-    this.#session = state.session;
-    this.#messages = state.messages;
-    this.#currentPlan = state.currentPlan;
-    this.#isStreaming = state.isStreaming;
-    this.#isInitializing = state.isInitializing;
-    this.#error = state.error;
-    this.#applyError = state.applyError;
-    this.#applyResult = state.applyResult;
-    this.#isConflict = state.isConflict;
-    this.#statusMessage = state.statusMessage;
-    this.#availableModels = state.availableModels;
-    this.#selectedModelId = state.selectedModelId;
-    this.#modelsLoaded = state.modelsLoaded;
-    this.#draftSessions = state.draftSessions;
   }
 }
 
