@@ -17,16 +17,27 @@
     selectAudioRecordingOptions
   } from "./audioRecordingOptions";
   import { buildRecordedAudioFile } from "./recordedAudioFile";
+  import type { RecordingStopReason } from "./recordedAudioFile";
   import { downloadRecordedAudioFile } from "./downloadRecordedAudioFile";
-
-  type RecordingStopReason = "manual" | "limit" | "stall" | "error";
 
   export let onRecordingDone: (params: {
     blob: Blob;
     mimeType: string;
     reason: RecordingStopReason;
+    // Captured at finalize-time from the rAF tick clock; useful so callers
+    // can label resumed segments by length without having to read the blob.
+    durationMs: number;
   }) => void;
-  export let onRecordingStateChange: (isRecording: boolean) => void = () => {};
+  // The session needs to know whether `true` came from a user click or from
+  // its own retry path. Without this, the dialog had to infer intent by
+  // peeking at session phase + a side-channel flag, which raced with the
+  // queued retry timer. `meta.origin` makes intent explicit at the source.
+  export let onRecordingStateChange: (
+    isRecording: boolean,
+    meta?: { origin: "user" | "external" }
+  ) => void = () => {};
+
+  type RecordingStartOrigin = "user" | "external";
   export let maxBytes: number | null = null;
   export let resetToken: unknown = 0;
 
@@ -65,9 +76,28 @@
   let lastMeterUpdateAt = 0;
   let lastAudibleAt = 0;
   let showMicSilentHint = false;
+  let firstChunkSeen = false;
+  let hiddenSinceMs: number | null = null;
+  let stallIntervalId: ReturnType<typeof setInterval> | null = null;
+  let requestDataPendingAt: number | null = null;
+  let stopReasonLocked = false;
+  let visibilityHandler: (() => void) | null = null;
+  // Drives the inline "muted" / "reconnecting" hint below the volume meter.
+  // We surface these as live status so the user knows the recorder is still
+  // trying — silent failures are exactly what the previous version did.
+  let isMicMuted = false;
 
   const TIMESLICE_MS = 2000;
-  const STALL_TIMEOUT_MS = TIMESLICE_MS * 2;
+  // Two-phase stall detection. On slower devices the encoder can take up to
+  // ~10 s to emit the first chunk; once data is flowing a 5 s gap means the
+  // capture has actually stopped (tab freeze, device disconnect, OS denial).
+  // When the watchdog suspects a stall it first calls requestData() and
+  // waits 2 s — this catches Firefox queuing delays under load before we
+  // kill an otherwise-healthy session.
+  const STALL_PRE_FIRST_CHUNK_MS = 10_000;
+  const STALL_STEADY_STATE_MS = 5_000;
+  const STALL_REQUEST_DATA_GRACE_MS = 2_000;
+  const STALL_CHECK_INTERVAL_MS = 500;
   const METER_UPDATE_MS = 50;
   const MIC_ACTIVITY_THRESHOLD = 0.035;
   const MIC_SILENCE_HINT_MS = 6000;
@@ -83,8 +113,26 @@
     chunks: 0,
     totalBytes: 0,
     lastChunkTime: 0,
-    errors: [] as string[]
+    firstChunkSeenAt: 0,
+    recorderMimeType: "",
+    errors: [] as string[],
+    requestDataAttempts: [] as { at: number; outcome: string }[],
+    visibilityTransitions: [] as { at: number; state: string }[]
   };
+
+  function setStopReason(reason: RecordingStopReason) {
+    // Lock to the first non-default reason so a teardown sequence (e.g. a
+    // limit hit followed by a stall during cleanup) cannot relabel the
+    // original cause that the caller wants to surface.
+    if (stopReasonLocked) return;
+    stopReason = reason;
+    stopReasonLocked = true;
+  }
+
+  function resetStopReason() {
+    stopReason = "manual";
+    stopReasonLocked = false;
+  }
 
   let isLiveSizeEstimated = false;
   $: isLiveSizeEstimated =
@@ -114,6 +162,19 @@
 
   let recordingRateLabel = "";
   $: recordingRateLabel = formatMegabytes(estimateRecordingBytes(3600, activeAudioBitsPerSecond));
+
+  // The visible hint that explains *why* the meter is silent. Mute beats
+  // reconnecting because a known-muted track is the more specific signal,
+  // and reconnecting beats the existing silent-hint because the meter is
+  // about to come back from the watchdog rescue.
+  let micRecoveryHintKey: "muted" | "reconnecting" | null = null;
+  $: micRecoveryHintKey = !isRecording
+    ? null
+    : isMicMuted
+      ? "muted"
+      : requestDataPendingAt !== null
+        ? "reconnecting"
+        : null;
 
   const audioConstraints: MediaTrackConstraints = {
     channelCount: 1,
@@ -259,8 +320,16 @@
       chunks: 0,
       totalBytes: 0,
       lastChunkTime: 0,
-      errors: []
+      firstChunkSeenAt: 0,
+      recorderMimeType: "",
+      errors: [],
+      requestDataAttempts: [],
+      visibilityTransitions: []
     };
+    firstChunkSeen = false;
+    requestDataPendingAt = null;
+    hiddenSinceMs = null;
+    isMicMuted = false;
     elapsedSeconds = 0;
     elapsedTime = "";
     if (!isRecording && recordingState !== "preparing" && recordingState !== "processing") {
@@ -288,6 +357,8 @@
 
   function releaseMediaCapture() {
     stopMonitoringLoop();
+    stopStallChecker();
+    detachVisibilityHandler();
     mediaRecorder = null;
     mediaStreamNode?.disconnect();
     mediaStreamNode = null;
@@ -332,7 +403,7 @@
       const errorMsg = m.recording_device_disconnected();
       setRecordingErrorState(errorMsg);
       recordingStats.errors.push(errorMsg + " at " + new Date().toISOString());
-      stopReason = "error";
+      setStopReason("error");
       stopRecording();
     };
 
@@ -341,6 +412,19 @@
     mediaStream.addEventListener("inactive", streamEndedHandler);
     mediaStream.getAudioTracks().forEach((track) => {
       track.addEventListener("ended", streamEndedHandler);
+      // mute/unmute fire on iOS during Bluetooth route changes and on some
+      // platforms when the OS reclaims the mic briefly. Logging them helps
+      // us debug intermittent reports, but we deliberately do not stop
+      // recording here — the encoder keeps running and resumes producing
+      // chunks once the route stabilises.
+      track.addEventListener("mute", () => {
+        isMicMuted = true;
+        recordingStats.errors.push("Track muted at " + new Date().toISOString());
+      });
+      track.addEventListener("unmute", () => {
+        isMicMuted = false;
+        recordingStats.errors.push("Track unmuted at " + new Date().toISOString());
+      });
     });
 
     audioContext = new AudioContext();
@@ -355,7 +439,26 @@
     return mediaStream;
   }
 
-  async function startRecording() {
+  // The session controller can call startExternal in parallel with a user
+  // click on the record button (e.g. user manually presses record while a
+  // queued retry timer is firing). Without this guard, the second call would
+  // wipe `recordingBuffer` and tear down the in-flight MediaRecorder mid-
+  // capture. Coalescing on `startPromise` makes startRecording reentrant-safe.
+  let startPromise: Promise<void> | null = null;
+
+  async function startRecording(origin: RecordingStartOrigin = "user"): Promise<void> {
+    if (isRecording || recordingState === "recording" || recordingState === "preparing") {
+      return startPromise ?? Promise.resolve();
+    }
+    if (startPromise) return startPromise;
+
+    startPromise = doStartRecording(origin).finally(() => {
+      startPromise = null;
+    });
+    return startPromise;
+  }
+
+  async function doStartRecording(origin: RecordingStartOrigin): Promise<void> {
     try {
       recordingBuffer = [];
       recordedBlob = null;
@@ -363,16 +466,26 @@
       recordingError = null;
       recordingErrorHint = null;
       recordingState = "preparing";
-      stopReason = "manual";
+      resetStopReason();
       discardRecordingOnStop = false;
       clearAudioPreviewUrl();
 
       recordingStats = {
         chunks: 0,
         totalBytes: 0,
-        lastChunkTime: Date.now(),
-        errors: []
+        // lastChunkTime is set after recorder.start() once the encoder is
+        // actually running — initialising it here would charge the watchdog
+        // for the time spent awaiting getUserMedia.
+        lastChunkTime: 0,
+        firstChunkSeenAt: 0,
+        recorderMimeType: "",
+        errors: [],
+        requestDataAttempts: [],
+        visibilityTransitions: []
       };
+      firstChunkSeen = false;
+      requestDataPendingAt = null;
+      hiddenSinceMs = null;
 
       if (typeof MediaRecorder === "undefined") {
         throw new DOMException("MediaRecorder API is not available", "NotSupportedError");
@@ -393,35 +506,39 @@
 
         recorder.addEventListener("dataavailable", (event) => {
           if (event.data.size > 0) {
+            const now = performance.now();
             const maxBytesValue =
               typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
                 ? maxBytes
                 : null;
             const nextTotalBytes = recordingStats.totalBytes + event.data.size;
 
-            if (maxBytesValue && nextTotalBytes > maxBytesValue) {
-              recordingStats.errors.push(
-                "Recording stopped after reaching size limit at " + new Date().toISOString()
-              );
-              stopReason = "limit";
-              stopRecording();
-              return;
-            }
-
+            // Always retain the chunk before the size-limit stop. Dropping
+            // it would discard up to TIMESLICE_MS of audio that the user
+            // already produced; a few hundred bytes over the cap is the
+            // less-bad outcome.
             recordingBuffer.push(event.data);
-
             recordingStats.chunks++;
             recordingStats.totalBytes = nextTotalBytes;
-            recordingStats.lastChunkTime = Date.now();
+            recordingStats.lastChunkTime = now;
+            requestDataPendingAt = null;
+            if (!firstChunkSeen) {
+              firstChunkSeen = true;
+              recordingStats.firstChunkSeenAt = now;
+            }
 
             if (maxBytesValue && nextTotalBytes >= maxBytesValue) {
               recordingStats.errors.push(
                 "Recording stopped after reaching size limit at " + new Date().toISOString()
               );
-              stopReason = "limit";
+              setStopReason("limit");
               stopRecording();
             }
           } else {
+            // Empty chunks must NOT bump lastChunkTime: that would silently
+            // disarm the stall watchdog when the microphone is producing
+            // zero audio, which is exactly the failure we are trying to
+            // detect (Windows + Firefox produced only 287 B / 6.9 KB files).
             console.warn("Received empty data chunk");
             recordingStats.errors.push("Empty chunk received at " + new Date().toISOString());
           }
@@ -433,7 +550,7 @@
           setRecordingErrorState(errorMsg, event.error);
           recordingStats.errors.push(errorMsg);
           recordingState = "error";
-          stopReason = "error";
+          setStopReason("error");
           stopRecording();
         });
 
@@ -449,7 +566,7 @@
               setRecordingErrorState(errorMsg);
               recordingStats.errors.push(errorMsg);
               recordingState = "error";
-              stopReason = "error";
+              setStopReason("error");
               return;
             }
 
@@ -462,8 +579,17 @@
             recordedBlob = new Blob(recordingBuffer, { type: recordedMimeType });
             audioURL = URL.createObjectURL(recordedBlob);
             const reason = stopReason;
-            stopReason = "manual";
-            onRecordingDone({ blob: recordedBlob, mimeType: recordedMimeType, reason });
+            const durationMs = Math.max(
+              0,
+              completedRecordingAt.diff(startedRecordingAt, "millisecond")
+            );
+            resetStopReason();
+            onRecordingDone({
+              blob: recordedBlob,
+              mimeType: recordedMimeType,
+              reason,
+              durationMs
+            });
             recordingState = "complete";
           } catch (error) {
             const errorMsg =
@@ -473,23 +599,31 @@
             setRecordingErrorState(errorMsg, error);
             recordingStats.errors.push(errorMsg);
             recordingState = "error";
-            stopReason = "error";
+            setStopReason("error");
           } finally {
             releaseMediaCapture();
           }
         });
 
         recorder.start(TIMESLICE_MS);
+        // Initialise the watchdog AFTER recorder.start() so getUserMedia
+        // latency (especially on the very first permission grant) does not
+        // eat into the stall budget.
+        const startTimestamp = performance.now();
+        recordingStats.lastChunkTime = startTimestamp;
+        recordingStats.recorderMimeType = recorder.mimeType || initialMimeType;
         startedRecordingAt = dayjs();
         lastMeterUpdateAt = 0;
-        lastAudibleAt = Date.now();
+        lastAudibleAt = startTimestamp;
         showMicSilentHint = false;
         elapsedSeconds = 0;
         elapsedTime = "00:00";
         recordingState = "recording";
         isRecording = true;
-        onRecordingStateChange(true);
+        onRecordingStateChange(true, { origin });
         startMonitoringLoop();
+        startStallChecker();
+        attachVisibilityHandler();
 
         recorder.addEventListener("pause", () => {
           console.warn("MediaRecorder was paused unexpectedly");
@@ -524,6 +658,8 @@
   }
 
   function stopRecording() {
+    stopStallChecker();
+    detachVisibilityHandler();
     if (isRecording) {
       isRecording = false;
       onRecordingStateChange(false);
@@ -547,10 +683,25 @@
   function toggleRecording(e: Event) {
     e.preventDefault();
     if (!isRecording) {
-      void startRecording();
+      void startRecording("user");
     } else {
       stopRecording();
     }
+  }
+
+  // Imperative entry points for the session controller. The session needs
+  // to restart the recorder after a "track ended" event without the user
+  // clicking again, and the recorder must surface success/failure clearly
+  // because the session schedules its next retry off the result.
+  export async function startExternal(): Promise<void> {
+    await startRecording("external");
+    if (recordingState === "error") {
+      throw new Error(recordingErrorHint ?? recordingError ?? "Failed to start recording");
+    }
+  }
+
+  export function stopExternal(): void {
+    stopRecording();
   }
 
   const onAnimationFrame = () => {
@@ -562,7 +713,7 @@
       }
       const rms = Math.sqrt(sumSquares / levelBuffer.length);
       const nextVolumeLevel = Math.min(1, rms / 0.15);
-      const now = Date.now();
+      const now = performance.now();
       if (nextVolumeLevel > MIC_ACTIVITY_THRESHOLD) {
         lastAudibleAt = now;
       }
@@ -573,33 +724,7 @@
         lastMeterUpdateAt = now;
       }
     }
-
-    if (
-      isRecording &&
-      recordingStats.lastChunkTime > 0 &&
-      Date.now() - recordingStats.lastChunkTime > STALL_TIMEOUT_MS
-    ) {
-      recordingStats.errors.push(
-        "Recording stopped due to stalled data at " + new Date().toISOString()
-      );
-      stopReason = "stall";
-      stopRecording();
-    }
     elapsedSeconds = dayjs().diff(startedRecordingAt, "seconds");
-    const maxBytesValue =
-      typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : null;
-    if (
-      isRecording &&
-      maxBytesValue &&
-      recordingStats.chunks === 0 &&
-      estimateRecordingBytes(elapsedSeconds, activeAudioBitsPerSecond) >= maxBytesValue
-    ) {
-      recordingStats.errors.push(
-        "Recording stopped after estimated size reached limit at " + new Date().toISOString()
-      );
-      stopReason = "limit";
-      stopRecording();
-    }
     elapsedTime = formatElapsed(elapsedSeconds);
     animationFrameId = window.requestAnimationFrame(onAnimationFrame);
   };
@@ -607,6 +732,143 @@
   function startMonitoringLoop() {
     stopMonitoringLoop();
     animationFrameId = window.requestAnimationFrame(onAnimationFrame);
+  }
+
+  function startStallChecker() {
+    stopStallChecker();
+    // The stall watchdog runs on setInterval, not requestAnimationFrame:
+    // browsers throttle rAF to ~1 Hz on hidden tabs, which used to make
+    // any tab-switch look like an immediate stall. setInterval ticks
+    // through the throttle, and the visibility handler shifts the
+    // watchdog clock across the hidden interval so we do not fire on
+    // return either.
+    stallIntervalId = setInterval(checkStall, STALL_CHECK_INTERVAL_MS);
+  }
+
+  function stopStallChecker() {
+    if (stallIntervalId !== null) {
+      clearInterval(stallIntervalId);
+      stallIntervalId = null;
+    }
+    requestDataPendingAt = null;
+  }
+
+  function checkStall() {
+    if (!isRecording || !mediaRecorder || mediaRecorder.state !== "recording") return;
+    // Suspend stall decisions entirely while the tab is hidden. setInterval
+    // keeps ticking on hidden tabs (unlike rAF), so without this guard a
+    // user who switches tabs for >7 s sees the watchdog kill an otherwise-
+    // healthy recording. The visibility handler shifts the clock forward
+    // when the tab returns; this just stops us deciding while we cannot
+    // see what the encoder is doing.
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      return;
+    }
+
+    const now = performance.now();
+    const threshold = firstChunkSeen ? STALL_STEADY_STATE_MS : STALL_PRE_FIRST_CHUNK_MS;
+    const sinceLastChunk = now - recordingStats.lastChunkTime;
+
+    if (sinceLastChunk <= threshold) {
+      requestDataPendingAt = null;
+      return;
+    }
+
+    if (requestDataPendingAt === null) {
+      // Try to flush any buffered data before declaring a stall: some
+      // Firefox builds queue chunks past TIMESLICE_MS under load, and a
+      // healthy encoder will respond to requestData() within tens of ms.
+      let outcome = "ok";
+      try {
+        mediaRecorder.requestData();
+      } catch (error) {
+        outcome = error instanceof Error ? error.name : "threw";
+      }
+      requestDataPendingAt = now;
+      recordingStats.requestDataAttempts.push({ at: now, outcome });
+      return;
+    }
+
+    if (now - requestDataPendingAt < STALL_REQUEST_DATA_GRACE_MS) return;
+
+    recordingStats.errors.push(
+      "Recording stopped due to stalled data at " + new Date().toISOString()
+    );
+    setStopReason("stall");
+    stopRecording();
+  }
+
+  function attachVisibilityHandler() {
+    detachVisibilityHandler();
+    visibilityHandler = () => {
+      const at = performance.now();
+      if (document.visibilityState === "hidden") {
+        hiddenSinceMs = at;
+        // Drop any in-flight requestData rescue: it would otherwise be
+        // measured against a clock that's about to be shifted forward,
+        // and on return checkStall would compute `now - requestDataPendingAt`
+        // ≫ grace and fire an instant stall on a healthy recording.
+        requestDataPendingAt = null;
+        recordingStats.visibilityTransitions.push({ at, state: "hidden" });
+        return;
+      }
+      if (document.visibilityState === "visible") {
+        if (hiddenSinceMs !== null) {
+          const hiddenAt = hiddenSinceMs;
+          const shift = at - hiddenAt;
+          // Only shift timestamps that predate the hidden window. Some
+          // browsers (Firefox in particular) still deliver dataavailable
+          // while hidden — if a chunk arrived during hidden, lastChunkTime
+          // is already current and shifting it again would push it into
+          // the future and over-forgive future stalls by one hidden span.
+          if (recordingStats.lastChunkTime > 0 && recordingStats.lastChunkTime <= hiddenAt) {
+            recordingStats.lastChunkTime += shift;
+          }
+          if (lastAudibleAt > 0 && lastAudibleAt <= hiddenAt) {
+            lastAudibleAt += shift;
+          }
+        }
+        hiddenSinceMs = null;
+        requestDataPendingAt = null;
+        recordingStats.visibilityTransitions.push({ at, state: "visible" });
+      }
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
+  }
+
+  function detachVisibilityHandler() {
+    if (visibilityHandler) {
+      document.removeEventListener("visibilitychange", visibilityHandler);
+      visibilityHandler = null;
+    }
+    hiddenSinceMs = null;
+  }
+
+  async function copyDiagnostics() {
+    const payload = {
+      capturedAt: new Date().toISOString(),
+      state: recordingState,
+      isRecording,
+      elapsedSeconds,
+      activeAudioBitsPerSecond,
+      maxBytes,
+      error: recordingError,
+      hint: recordingErrorHint,
+      stats: recordingStats
+    };
+    const text = JSON.stringify(payload, null, 2);
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        console.warn("Recording diagnostics:", payload);
+        toast.info(m.diagnostics_logged_console());
+        return;
+      } catch (error) {
+        console.warn("Failed to copy diagnostics to clipboard", error);
+      }
+    }
+    console.warn("Recording diagnostics:", payload);
+    toast.info(m.diagnostics_logged_console());
   }
 
   const formatElapsed = (seconds: number) => {
@@ -738,7 +1000,13 @@
             <div class="mic-activity-fill" style="transform: scaleX({volumeLevel})"></div>
           </div>
         </div>
-        {#if showMicSilentHint}
+        {#if micRecoveryHintKey !== null}
+          <div class="recording-mic-recovery-hint" role="status" aria-live="polite">
+            {micRecoveryHintKey === "muted"
+              ? m.recording_mic_muted_hint()
+              : m.recording_mic_reconnecting_hint()}
+          </div>
+        {:else if showMicSilentHint}
           <div class="recording-mic-silent-hint" role="status" aria-live="polite">
             {m.recording_mic_silent_hint()}
           </div>
@@ -790,10 +1058,7 @@
         {:else}
           <button
             class="text-negative-default hover:text-negative-stronger cursor-pointer text-left text-xs font-medium underline underline-offset-2 transition-colors"
-            onclick={() => {
-              console.warn("Recording diagnostics:", recordingStats);
-              toast.info(m.diagnostics_logged_console());
-            }}
+            onclick={copyDiagnostics}
           >
             {m.view_diagnostics()}
           </button>
@@ -963,6 +1228,10 @@
 
   .recording-mic-silent-hint {
     @apply text-warning-stronger text-xs leading-relaxed;
+  }
+
+  .recording-mic-recovery-hint {
+    @apply text-negative-stronger text-xs leading-relaxed;
   }
 
   .size-row {

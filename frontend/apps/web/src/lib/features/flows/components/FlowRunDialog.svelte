@@ -21,6 +21,31 @@
   import { buildRecordedAudioFile } from "$lib/features/audio/recordedAudioFile";
   import { downloadRecordedAudioFile } from "$lib/features/audio/downloadRecordedAudioFile";
   import type { RecordingStopReason } from "$lib/features/audio/recordedAudioFile";
+  import {
+    buildSegmentFilenameBase,
+    RecordingSession,
+    type RecordingSessionDeps,
+    type SessionState
+  } from "$lib/features/audio/recordingSession";
+  import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
+  import {
+    bumpSegmentCountInState,
+    buildContractSnapshotFromStep,
+    clearStepSessionInState,
+    detachUploadedSegmentFromLedger,
+    emptyRecordingSessionState,
+    ensureSessionIdInState,
+    makeReuploadFileFromRecord,
+    markSegmentUploaded,
+    persistRecordingSegment,
+    purgeAllSessions,
+    purgeSession,
+    readSessionRecords,
+    scanRecoverableSessionsForSteps,
+    synthesizeUploadedFileFromRecord,
+    type RecordingSessionState
+  } from "$lib/features/audio/flowRunRecordingSession";
+  import { diffContractSnapshot } from "$lib/features/audio/recordingSession";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
   import {
     getFlowFormFieldRuntimeKey,
@@ -87,6 +112,22 @@
   let currentPageIndex = $state(0);
   let showCloseConfirmation = $state(false);
   let pageContentEl = $state<HTMLElement | null>(null);
+  let recordingSessionState = $state<RecordingSessionState>(emptyRecordingSessionState());
+  let resumeScannedForFlowId: string | null = null;
+
+  // The RecordingSession class owns the per-step state machine (idle →
+  // recording → reconnecting → paused-failed) and schedules getUserMedia
+  // retries when the browser ends a track mid-recording. The dialog still
+  // owns persistence and upload — the session only coordinates state and
+  // drives the recorder via the imperative startExternal/stopExternal API.
+  type RecorderImperativeRef = {
+    startExternal: () => Promise<void>;
+    stopExternal: () => void;
+  };
+  type RecordingSessionPhase = "idle" | "reconnecting" | "paused-failed";
+  const recordingSessionsByStepId: Record<string, RecordingSession | null> = {};
+  const recorderRefsByStepId: Record<string, RecorderImperativeRef | null> = {};
+  let sessionPhaseByStepId = $state<Record<string, RecordingSessionPhase>>({});
 
   const FLOW_UPLOAD_TIMEOUT_MS = 120_000;
   const AUDIO_ACCEPT_FILTER = "audio/*,video/webm,video/mp4";
@@ -273,7 +314,16 @@
 
   onDestroy(() => {
     window.removeEventListener("beforeunload", beforeUnloadHandler);
+    disposeAllRecordingSessions();
   });
+
+  function disposeAllRecordingSessions() {
+    for (const stepId of Object.keys(recordingSessionsByStepId)) {
+      recordingSessionsByStepId[stepId]?.dispose();
+      recordingSessionsByStepId[stepId] = null;
+    }
+    sessionPhaseByStepId = {};
+  }
 
   $effect(() => {
     if (wizardPages.length > 0 && currentPageIndex > wizardPages.length - 1) {
@@ -320,7 +370,37 @@
     draggingStepId = null;
     currentPageIndex = 0;
     showCloseConfirmation = false;
+    recordingSessionState = emptyRecordingSessionState();
+    resumeScannedForFlowId = null;
+    disposeAllRecordingSessions();
   }
+
+  async function refreshRecoverableSessions() {
+    if (!flow?.id || !runContract || resumeScannedForFlowId === flow.id) return;
+    resumeScannedForFlowId = flow.id;
+    const hints = await scanRecoverableSessionsForSteps({
+      flowId: flow.id,
+      steps: stepsRequiringInput
+    });
+    const firstWithHints = stepsRequiringInput.find((s) => hints[s.step_id]?.length);
+    recordingSessionState = {
+      ...recordingSessionState,
+      resumeHintsByStepId: hints,
+      resumePromptStepId: firstWithHints?.step_id ?? null
+    };
+  }
+
+  $effect(() => {
+    if (
+      open &&
+      flow?.id &&
+      runContract !== null &&
+      runContractLoadedForFlowId === flow.id &&
+      resumeScannedForFlowId !== flow.id
+    ) {
+      void refreshRecoverableSessions();
+    }
+  });
 
   function handleCancel() {
     if (isDirty && !isSubmitting) {
@@ -619,15 +699,171 @@
     };
     recordingNoticesByStepId = { ...recordingNoticesByStepId, [stepId]: null };
     skippedMessagesByStepId = { ...skippedMessagesByStepId, [stepId]: null };
+
+    // Drop any matching IDB record so resume cannot reattach the file
+    // we just removed. detach is best-effort: if no record matches (the
+    // file came from a non-recorded upload, or from a different
+    // session), the call silently no-ops.
+    const sessionId = recordingSessionState.sessionIdsByStepId[stepId];
+    if (flow?.id && sessionId) {
+      void detachUploadedSegmentFromLedger({
+        flowId: flow.id,
+        stepId,
+        sessionId,
+        uploadedFileId: fileId
+      });
+    }
   }
 
-  function setStepRecordingState(stepId: string, active: boolean) {
+  function setStepRecordingState(
+    stepId: string,
+    active: boolean,
+    meta: { origin: "user" | "external" } = { origin: "user" }
+  ) {
     const exists = recordingStepIds.includes(stepId);
     if (active && !exists) {
       recordingStepIds = [...recordingStepIds, stepId];
     } else if (!active && exists) {
       recordingStepIds = recordingStepIds.filter((id) => id !== stepId);
     }
+
+    if (!active) return;
+
+    // External (retry-driven) starts are owned by the session itself; we
+    // must NOT call ensureRecordingSessionForStep, otherwise we would
+    // create a fresh session on top of the one whose retry just succeeded.
+    if (meta.origin === "external") return;
+
+    // User-driven start: if there's a stale session sitting in reconnecting
+    // or paused-failed, hand it off to ensureRecordingSessionForStep, which
+    // handles dispose-and-recreate or pre-empt-retry. The previous
+    // implementation bailed early on "reconnecting" and left the queued
+    // retry timer alive — when it later fired, it tore down the recording
+    // the user had just started.
+    ensureRecordingSessionForStep(stepId);
+  }
+
+  function setSessionPhase(stepId: string, phase: RecordingSessionPhase) {
+    if (sessionPhaseByStepId[stepId] === phase) return;
+    sessionPhaseByStepId = { ...sessionPhaseByStepId, [stepId]: phase };
+  }
+
+  function clearSessionPhase(stepId: string) {
+    if (!(stepId in sessionPhaseByStepId)) return;
+    const next = { ...sessionPhaseByStepId };
+    delete next[stepId];
+    sessionPhaseByStepId = next;
+  }
+
+  function makeRecordingSessionDeps(stepId: string): RecordingSessionDeps {
+    return {
+      // Retry: the session calls this after a backoff. We delegate to
+      // the recorder's imperative startExternal which throws on failure
+      // — that's how the session learns whether to retry again or to
+      // give up and surface the paused-failed CTA.
+      startSegment: async () => {
+        const ref = recorderRefsByStepId[stepId];
+        if (!ref) return { ok: false, error: new Error("Recorder unmounted") };
+        try {
+          await ref.startExternal();
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, error };
+        }
+      },
+      stopSegment: () => {
+        recorderRefsByStepId[stepId]?.stopExternal();
+      },
+      // The dialog already owns persistence + upload via handleRecordedAudio,
+      // so the session-class deps for upload/delete are no-ops here. We
+      // never call session.onSegmentFinalized — only notifyHardFailure —
+      // so these branches don't run in practice but must satisfy the type.
+      uploadSegment: async () => ({ ok: true, fileId: "" }),
+      deleteUploadedSegment: async () => undefined
+    };
+  }
+
+  function ensureRecordingSessionForStep(stepId: string): RecordingSession | null {
+    if (!flow?.id) return null;
+    const step = stepsRequiringInput.find((s) => s.step_id === stepId);
+    if (!step) return null;
+    const contractSnapshot = buildContractSnapshotFromStep(
+      step,
+      runContract?.published_flow_version ?? null
+    );
+
+    const existing = recordingSessionsByStepId[stepId];
+    if (existing) {
+      const phase = existing.summary().state;
+      // The session knows how to take over a queued retry; let it cancel
+      // its own retry timer rather than disposing the session here.
+      if (phase === "reconnecting") {
+        existing.beginRecordingExternal({ flowId: flow.id, stepId, contractSnapshot });
+        return existing;
+      }
+      // Terminal states need a fresh session — beginRecordingExternal would
+      // refuse on a session that has already produced segments.
+      if (phase === "completed" || phase === "discarded" || phase === "paused-failed") {
+        existing.dispose();
+        recordingSessionsByStepId[stepId] = null;
+      } else {
+        return existing;
+      }
+    }
+
+    const session = new RecordingSession(makeRecordingSessionDeps(stepId), {
+      onStateChange: (state: SessionState) => {
+        if (state === "reconnecting") {
+          setSessionPhase(stepId, "reconnecting");
+        } else if (state === "paused-failed") {
+          setSessionPhase(stepId, "paused-failed");
+        } else if (state === "recording" || state === "preparing" || state === "rotating") {
+          clearSessionPhase(stepId);
+        } else if (state === "completed" || state === "idle" || state === "discarded") {
+          clearSessionPhase(stepId);
+        }
+      },
+      onAutoRecovered: () => {
+        toast.success(m.recording_session_auto_recovered());
+      },
+      onRetryFailed: () => {
+        // The session has already transitioned to paused-failed; the
+        // CTA in FlowRunDialogRuntimeStep takes it from here.
+      }
+    });
+    recordingSessionsByStepId[stepId] = session;
+    session.beginRecordingExternal({
+      flowId: flow.id,
+      stepId,
+      contractSnapshot
+    });
+    return session;
+  }
+
+  function disposeRecordingSession(stepId: string) {
+    const session = recordingSessionsByStepId[stepId];
+    if (session) {
+      session.dispose();
+      recordingSessionsByStepId[stepId] = null;
+    }
+    clearSessionPhase(stepId);
+  }
+
+  function handleRecorderRefChange(stepId: string, ref: RecorderImperativeRef | null) {
+    recorderRefsByStepId[stepId] = ref;
+  }
+
+  function retryRecordingSession(stepId: string) {
+    disposeRecordingSession(stepId);
+    const ref = recorderRefsByStepId[stepId];
+    if (!ref) return;
+    void ref.startExternal().catch((error) => {
+      console.warn("Manual retry failed", error);
+    });
+  }
+
+  function dismissSessionFailure(stepId: string) {
+    disposeRecordingSession(stepId);
   }
 
   function recordingNoticeForReason(reason: RecordingStopReason): string | null {
@@ -661,11 +897,19 @@
     };
   }
 
-  function discardRecordedFile(stepId: string) {
+  async function discardRecordedFile(stepId: string) {
     clearRecordedFileAndResetRecorder(stepId);
     uploadErrorsByStepId = { ...uploadErrorsByStepId, [stepId]: null };
     recordingNoticesByStepId = { ...recordingNoticesByStepId, [stepId]: null };
     skippedMessagesByStepId = { ...skippedMessagesByStepId, [stepId]: null };
+
+    const sessionId = recordingSessionState.sessionIdsByStepId[stepId];
+    if (flow?.id && sessionId) {
+      await purgeSession({ intric, flowId: flow.id, stepId, sessionId });
+    }
+    runtimeFilesByStepId = { ...runtimeFilesByStepId, [stepId]: [] };
+    recordingSessionState = clearStepSessionInState(recordingSessionState, stepId);
+    disposeRecordingSession(stepId);
   }
 
   async function downloadRecordedFile(step: FlowRunContractStepInput) {
@@ -699,14 +943,52 @@
 
   async function handleRecordedAudio(
     step: FlowRunContractStepInput,
-    params: { blob: Blob; mimeType: string; reason: RecordingStopReason }
+    params: { blob: Blob; mimeType: string; reason: RecordingStopReason; durationMs: number }
   ) {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    if (!flow?.id) return;
+    const ensured = ensureSessionIdInState(recordingSessionState.sessionIdsByStepId, step.step_id);
+    const bumped = bumpSegmentCountInState(
+      recordingSessionState.segmentCountsByStepId,
+      step.step_id
+    );
+    recordingSessionState = {
+      ...recordingSessionState,
+      sessionIdsByStepId: ensured.sessionIdsByStepId,
+      segmentCountsByStepId: bumped.segmentCountsByStepId
+    };
+    const capturedAt = Date.now();
+    const filenameBase = buildSegmentFilenameBase(
+      ensured.sessionId,
+      bumped.segmentIndex,
+      capturedAt
+    );
     const file = buildRecordedAudioFile({
       blob: params.blob,
       mimeType: params.mimeType,
-      fileNameBase: m.recording_filename_template({ datetime: timestamp })
+      fileNameBase: filenameBase
     });
+
+    // Persist before upload so a refresh during the upload still leaves
+    // the captured audio recoverable from IndexedDB.
+    const persistResult = await persistRecordingSegment({
+      flowId: flow.id,
+      stepId: step.step_id,
+      sessionId: ensured.sessionId,
+      segmentIndex: bumped.segmentIndex,
+      blob: params.blob,
+      mimeType: params.mimeType,
+      reason: params.reason,
+      durationMs: params.durationMs,
+      capturedAt,
+      contractSnapshot: buildContractSnapshotFromStep(
+        step,
+        runContract?.published_flow_version ?? null
+      )
+    });
+    if (persistResult.degraded) {
+      recordingSessionState = { ...recordingSessionState, storageDegraded: true };
+    }
+
     recordedFilesByStepId = {
       ...recordedFilesByStepId,
       [step.step_id]: file
@@ -715,9 +997,32 @@
       ...recordingNoticesByStepId,
       [step.step_id]: recordingNoticeForReason(params.reason)
     };
+    const beforeUploadCount = (runtimeFilesByStepId[step.step_id] ?? []).length;
     const result = await uploadFilesForStep(step, [file], { clearRecordingNotice: false });
     if (result.uploadedCount > 0 && !result.failed) {
+      const uploaded = (runtimeFilesByStepId[step.step_id] ?? [])[beforeUploadCount];
+      if (uploaded?.id) {
+        await markSegmentUploaded({
+          flowId: flow.id,
+          stepId: step.step_id,
+          sessionId: ensured.sessionId,
+          segmentIndex: bumped.segmentIndex,
+          uploadedFileId: uploaded.id
+        });
+      }
       clearRecordedFile(step.step_id);
+    }
+
+    // After persistence + upload settles, hand the reason to the session
+    // controller. error/stall trip the reconnect retry loop; manual/limit
+    // close out the session so the next user-click starts fresh.
+    const session = recordingSessionsByStepId[step.step_id];
+    if (session) {
+      if (params.reason === "error" || params.reason === "stall") {
+        session.notifyHardFailure();
+      } else {
+        disposeRecordingSession(step.step_id);
+      }
     }
   }
 
@@ -791,6 +1096,133 @@
     return undefined;
   }
 
+  async function continueResumedSession(stepId: string, hint: SessionRecoveryHint) {
+    if (!flow?.id || recordingSessionState.resumeBusyStepId !== null) return;
+    recordingSessionState = { ...recordingSessionState, resumeBusyStepId: stepId };
+    try {
+      const records = await readSessionRecords(flow.id, stepId, hint.sessionId);
+      if (records.length === 0) {
+        recordingSessionState = { ...recordingSessionState, resumePromptStepId: null };
+        return;
+      }
+
+      // Diff the stored contract against the live one BEFORE reattaching:
+      // a published-version bump, narrowed accepted MIMEs, smaller
+      // max-files cap, or a deleted step would otherwise re-upload audio
+      // that no longer matches the flow. Anything block-resume or
+      // block-submit aborts the reattach with a user-visible toast; the
+      // user keeps the option to download/discard from the prompt.
+      const step = stepsRequiringInput.find((s) => s.step_id === stepId);
+      const currentSnapshot = step
+        ? buildContractSnapshotFromStep(step, runContract?.published_flow_version ?? null)
+        : {
+            publishedFlowVersion: runContract?.published_flow_version ?? null,
+            maxFiles: null,
+            maxFileSizeBytes: null,
+            acceptedMimetypes: [],
+            inputFormat: null
+          };
+      const segmentMeta = records.map((r) => ({ mimeType: r.mimeType, bytes: r.blob.size }));
+      const issues = diffContractSnapshot(hint.contractSnapshot, currentSnapshot, segmentMeta);
+      const blocked =
+        !step || issues.some((i) => i.severity === "block-resume" || i.severity === "block-submit");
+      if (blocked) {
+        toast.error(m.recording_resume_diff_blocked());
+        recordingSessionState = { ...recordingSessionState, resumePromptStepId: null };
+        return;
+      }
+
+      recordingSessionState = {
+        ...recordingSessionState,
+        sessionIdsByStepId: {
+          ...recordingSessionState.sessionIdsByStepId,
+          [stepId]: hint.sessionId
+        },
+        segmentCountsByStepId: {
+          ...recordingSessionState.segmentCountsByStepId,
+          [stepId]: records.length
+        },
+        resumeHintsByStepId: {
+          ...recordingSessionState.resumeHintsByStepId,
+          [stepId]: []
+        },
+        resumePromptStepId: null
+      };
+      goToPageById(runtimeStepPageId(stepId));
+
+      // Process records in segment-index order so the per-segment
+      // transcription header (Del 1 / Del 2 / ...) matches the document
+      // order. Mixing reattach + re-upload would otherwise leave the
+      // re-uploaded segments at the tail of runtimeFilesByStepId.
+      for (const record of records) {
+        if (record.uploadedFileId) {
+          const synthesized = synthesizeUploadedFileFromRecord(record);
+          runtimeFilesByStepId = {
+            ...runtimeFilesByStepId,
+            [stepId]: [...(runtimeFilesByStepId[stepId] ?? []), synthesized]
+          };
+          continue;
+        }
+
+        const reuploadFile = makeReuploadFileFromRecord(record);
+        const before = (runtimeFilesByStepId[step.step_id] ?? []).length;
+        const result = await uploadFilesForStep(step, [reuploadFile], {
+          clearRecordingNotice: false
+        });
+        if (result.uploadedCount > 0 && !result.failed) {
+          const uploaded = (runtimeFilesByStepId[step.step_id] ?? [])[before];
+          if (uploaded?.id) {
+            await markSegmentUploaded({
+              flowId: flow.id,
+              stepId,
+              sessionId: hint.sessionId,
+              segmentIndex: record.segmentIndex,
+              uploadedFileId: uploaded.id
+            });
+          }
+        }
+      }
+    } finally {
+      recordingSessionState = { ...recordingSessionState, resumeBusyStepId: null };
+    }
+  }
+
+  async function discardResumedSession(stepId: string, hint: SessionRecoveryHint) {
+    if (!flow?.id || recordingSessionState.resumeBusyStepId !== null) return;
+    recordingSessionState = { ...recordingSessionState, resumeBusyStepId: stepId };
+    try {
+      await purgeSession({ intric, flowId: flow.id, stepId, sessionId: hint.sessionId });
+      recordingSessionState = {
+        ...recordingSessionState,
+        resumeHintsByStepId: {
+          ...recordingSessionState.resumeHintsByStepId,
+          [stepId]: []
+        },
+        resumePromptStepId: null
+      };
+    } finally {
+      recordingSessionState = { ...recordingSessionState, resumeBusyStepId: null };
+    }
+  }
+
+  function dismissResumePrompt() {
+    recordingSessionState = { ...recordingSessionState, resumePromptStepId: null };
+  }
+
+  function saveForLater() {
+    // The IDB ledger persists for 24 h regardless of the dialog state, so
+    // closing without resetting state is exactly the "save and continue
+    // later" semantics the user expects.
+    open = false;
+    if (recordingSessionState.storageDegraded) {
+      // In memory-only mode the ledger does not survive a page reload, so
+      // the success toast would lie. Tell the user the truth.
+      toast.warning(m.recording_session_storage_degraded());
+    } else {
+      toast.success(m.recording_save_for_later_toast());
+    }
+  }
+
   async function triggerRun() {
     if (!flow.id || !runContract || runBlockers.length > 0) return;
 
@@ -836,6 +1268,14 @@
 
       onRunCreated?.({ runId: createdRun.id });
       toast.success(m.flow_run_started_toast());
+
+      // Clear all persisted sessions for this flow on success — the run was
+      // accepted by the backend, so the local copy is no longer needed.
+      await purgeAllSessions({
+        flowId: flow.id,
+        sessionIdsByStepId: recordingSessionState.sessionIdsByStepId
+      });
+
       open = false;
       inputText = "";
       formValues = {};
@@ -845,6 +1285,7 @@
       uploadErrorsByStepId = {};
       recordingNoticesByStepId = {};
       skippedMessagesByStepId = {};
+      recordingSessionState = emptyRecordingSessionState();
     } catch (error) {
       toast.error(
         getFlowRuntimeErrorMessage(
@@ -1078,16 +1519,32 @@
             dragging={draggingStepId === currentRuntimeStep.step_id}
             {labels}
             {locale}
+            resumeHint={recordingSessionState.resumeHintsByStepId[
+              currentRuntimeStep.step_id
+            ]?.[0] ?? null}
+            showResumePrompt={recordingSessionState.resumePromptStepId ===
+              currentRuntimeStep.step_id}
+            resumeBusy={recordingSessionState.resumeBusyStepId === currentRuntimeStep.step_id}
+            storageDegraded={recordingSessionState.storageDegraded}
             onOpenFilePicker={() => openFilePicker(currentRuntimeStep)}
             onRemoveFile={(fileId) => removeFile(currentRuntimeStep.step_id, fileId)}
             onDownloadUploadedFile={(file) => void downloadUploadedFile(file)}
             onRetryUpload={() => retryUpload(currentRuntimeStep)}
             onDownloadRecordedAudio={() => void downloadRecordedFile(currentRuntimeStep)}
             onRetryRecordedAudio={() => void retryRecordedFileUpload(currentRuntimeStep)}
-            onDiscardRecordedAudio={() => discardRecordedFile(currentRuntimeStep.step_id)}
+            onDiscardRecordedAudio={() => void discardRecordedFile(currentRuntimeStep.step_id)}
+            onSaveForLater={saveForLater}
+            onContinueResume={(hint) =>
+              void continueResumedSession(currentRuntimeStep.step_id, hint)}
+            onDiscardResume={(hint) => void discardResumedSession(currentRuntimeStep.step_id, hint)}
+            onDismissResumePrompt={dismissResumePrompt}
+            sessionPhase={sessionPhaseByStepId[currentRuntimeStep.step_id] ?? "idle"}
             onRecordingDone={(params) => void handleRecordedAudio(currentRuntimeStep, params)}
-            onRecordingStateChange={(active) =>
-              setStepRecordingState(currentRuntimeStep.step_id, active)}
+            onRecordingStateChange={(active, meta) =>
+              setStepRecordingState(currentRuntimeStep.step_id, active, meta)}
+            onRecorderRef={handleRecorderRefChange}
+            onSessionRetry={() => retryRecordingSession(currentRuntimeStep.step_id)}
+            onSessionDismissFailure={() => dismissSessionFailure(currentRuntimeStep.step_id)}
             onDrop={(event) => handleDrop(currentRuntimeStep, event)}
             onDragOver={(event) => handleDragOver(currentRuntimeStep.step_id, event)}
             onDragLeave={(event) => handleDragLeave(currentRuntimeStep.step_id, event)}
