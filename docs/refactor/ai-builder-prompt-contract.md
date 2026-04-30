@@ -18,6 +18,7 @@
 | Edit proposal tool | `backend/src/intric/flows/ai_builder/ai_builder_edit_tool_schema.py` | `backend/tests/unittests/flows/ai_builder/test_ai_builder_knowledge_pack.py` |
 | Semantic and parse repair | `backend/src/intric/flows/ai_builder/ai_builder_repair.py` | `backend/tests/unittests/flows/ai_builder/test_ai_builder_repair.py` |
 | Proposal tool repair | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py` | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py` |
+| Edit description-only repair | `backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py` | `backend/tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py` |
 
 ## Prompt Inputs
 
@@ -61,6 +62,12 @@ Semantic and parse repair are separate contracts.
 - Parse repair says: Do NOT wrap the JSON in markdown code fences.
 - Parse repair says: Do NOT add prose before or after the JSON.
 - Proposal tool repair keeps tool-call grouping intact and uses the proposal repair retry budget.
+- Edit description-only repair is allowed only when the generated description is
+  builder-managed and structurally stale. It must ask for a constrained
+  description update, not a new flow proposal, and it must preserve all
+  non-description fields.
+- Edit description-only repair says: Generate ONLY a new flow_description.
+- Edit description-only repair says: Respond with ONLY the new description text.
 - Repair failure diagnostics must be typed and client-safe; raw prompt/body details belong in sanitized logs, not public API responses.
 
 ## Stable Test Anchors
@@ -76,5 +83,7 @@ The prompt-contract artifact test owns these stable anchors:
 | `architecture_commit: null` | yes | yes |
 | single raw JSON object | yes | yes |
 | Do NOT wrap | yes | yes |
+| Generate ONLY a new flow_description | yes | yes |
+| Respond with ONLY the new description text | yes | yes |
 
 Do not snapshot full prompts. Prompt text is allowed to improve, but these anchors are contractual.

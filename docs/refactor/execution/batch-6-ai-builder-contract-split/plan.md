@@ -2,11 +2,437 @@
 
 ## TL;DR
 
-- Active plan: continue after `4cd874c7 flows: pin ai builder prompt and audit contracts` with repair contract hardening only.
-- User approval to continue this next narrow repair slice is recorded in the 2026-04-30 prompt that starts from `4cd874c7`.
-- The prompt/audit contract checkpoint is archived below; it was committed at `4cd874c7` and is no longer the active implementation scope.
-- The active repair plan starts at `## Repair Contract Hardening Plan`.
+- Active plan: continue after `fd5b725b flows: harden ai builder repair retry contract` with create/edit proposal processing separation only.
+- The prompt/audit checkpoint and repair retry checkpoint are archived below; neither is the active implementation scope.
+- The active plan starts at `## Create/Edit Proposal Processing Separation Plan`.
 - Docker validation is preferred, but `docker ps` remains blocked by host execution policy in this session; local fallback validation is planned.
+- This slice creates at most one production module: `backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py`.
+
+## Create/Edit Proposal Processing Separation Plan
+
+### Start Gate
+
+| Check | Result |
+|---|---|
+| `git log --oneline --max-count=8` | latest commit is `fd5b725b flows: harden ai builder repair retry contract` |
+| `git status --short --branch` | branch `feature/refactor-flows-flowai`; dirty files limited to `frontend/packages/ui/src/icons/types.d.ts`, `scripts/run_codex_review.sh`, `PRODUCT.md` plus this plan draft |
+| `git diff --cached --name-only` | no staged files |
+| Docker check | `docker ps --format '{{.Names}}'` blocked by host execution policy; local fallback validation planned |
+
+Known unrelated dirty files are out of scope and must remain untouched:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+
+### Scope
+
+This narrow slice separates edit proposal processing from create proposal
+processing without changing proposal contracts, repair budgets, router behavior,
+SSE events, audit behavior, frontend state, or prompt anchors.
+
+PRD-005 constraints that govern this slice:
+
+- "No fake one-method interfaces are introduced."
+- "no interface unless two real implementations exist."
+
+Default structural decision:
+
+- Add one production module:
+  `backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py`.
+- Keep the module stateless and function-based.
+- Keep create behavior, shared submission orchestration, shared typed
+  contracts, usage tracking, retry orchestration, and dispatch in
+  `ai_builder_proposal_processor.py`.
+- Move only edit-specific processing functions when their dependency surface is
+  edit-domain or processor-owned state can be passed explicitly without hiding
+  required callback arguments inside retry `process_tool_kwargs`.
+- Do not create shared/base/common/types/contracts modules.
+- Do not create classes, Protocols, ABCs, adapters, inheritance, or
+  package-level re-exports.
+
+### Required Pre-Diff Inventory Command
+
+This command ran before any production diff:
+
+```bash
+git grep -n "AIBuilderProposalProcessor\|_process_edit_arguments\|_handle_edit_flow\|_attempt_description_repair\|_edit_flow_retry_config\|_handle_submission_tool_call\|_dispatch_known_tool_call\|EDIT_FLOW_TOOL_NAME" -- backend/src backend/tests
+```
+
+Key result:
+
+- `AIBuilderProposalProcessor` is owned by
+  `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:417`.
+- Edit tool dispatch currently enters `_handle_edit_flow` at
+  `ai_builder_proposal_processor.py:1089-1116`.
+- Shared submission orchestration is `_handle_submission_tool_call` at
+  `ai_builder_proposal_processor.py:1210-1316`.
+- Candidate edit-only methods live at
+  `ai_builder_proposal_processor.py:2054-2314`,
+  `ai_builder_proposal_processor.py:2386-2438`,
+  `ai_builder_proposal_processor.py:2440-2493`, and
+  `ai_builder_proposal_processor.py:2592-2609`.
+- Existing tests directly call or patch edit methods in
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py:1276-2029`
+  and `backend/tests/unit/test_ai_builder_plan_edit_context.py:561`.
+
+### Inventory And Movement Decisions
+
+| name | file:line | column (create-only / edit-only / shared spine) | decision (stays / moves to ai_builder_edit_proposal.py) | reason |
+|---|---|---|---|---|
+| `ToolProcessingResult` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:295-309` | shared spine | stays | Frozen contract named by the prompt; both create and edit processing return it. The edit module may import it function-locally only where constructing results. |
+| `ProposalUsageTracker` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:316-369` | shared spine | stays | Proposal-level telemetry spans create/edit and repair calls. Moving it would widen scope and create a false edit owner. |
+| `ProposalContext` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:372-395` | shared spine | stays | Dispatch context is shared by all tool handlers and explicitly frozen for this slice. |
+| `SubmissionToolHandlerConfig` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:398-406` | shared spine | stays | Shared submission handler owns parse/self-correction plumbing for outline submission. |
+| `ToolRetryConfig` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:409-414` | shared spine | stays | Shared retry orchestration consumes this contract. The edit module may import it function-locally only where constructing retry configs. |
+| `MAX_SELF_CORRECTION_RETRIES` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:172` | shared spine | stays | Numeric retry budget is frozen and must not move or change. |
+| `_format_quality_feedback` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:437-447` | shared spine | stays | Used by both create and edit paths. If moved across module boundaries, drop the underscore to make the processor-spine contract explicit instead of suppressing pyright. |
+| `_format_contextual_quality_feedback` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:449-464` | shared spine | stays | Used by both create and edit paths and depends on processor-owned warning policy. If moved across module boundaries, drop the underscore to make the processor-spine contract explicit. |
+| `_process_outline_arguments` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:466-564` | create-only | stays | Create behavior remains in the existing processor as required. |
+| `_process_create_draft` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:566-781` | create-only | stays | Create responsibility is not moved in this slice. |
+| `_mcp_clarification_events_if_needed` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:783-844` | shared spine | stays | Both create/edit processing need this policy and it persists backend questions through processor-owned repo/user state. If moved across module boundaries, drop the underscore to make the processor-spine contract explicit. |
+| `_build_self_correction_error_event` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:846-870` | shared spine | stays | Error-event mapping is retry/SSE behavior, not edit proposal compilation. |
+| `handle_tool_call` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:872-931` | shared spine | stays | Owns suppression of raw planner text and dispatch across all tool types. |
+| `propose_plan` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:933-1087` | shared spine | stays | Owns LLM proposal call and active tool selection. Planner-turn extraction is forbidden. |
+| `_dispatch_known_tool_call` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:1089-1116` | shared spine | stays | Shared dispatcher remains in the processor. It can delegate edit handling to the edit module without moving dispatch ownership. |
+| `_mcp_preflight_events_if_needed` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:1118-1169` | shared spine | stays | Preflight MCP question behavior is proposal-wide. |
+| `_resolve_submission_prerequisite_events` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:1171-1208` | shared spine | stays | Requirements/discovery gate applies before proposal submission and is not edit-specific. |
+| `_handle_submission_tool_call` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:1210-1316` | shared spine | stays | Existing outline submission wrapper stays. Moving it would mix create/edit separation with submission orchestration. |
+| `_build_submission_processing_kwargs` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:1318-1352` | shared spine | stays | Shared helper for submission processing arguments. |
+| `_handle_outline_flow_tool_call` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:1354-1376` | create-only | stays | Outline flow remains in create processor. |
+| `_call_repair_completion` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:1378` | shared spine | stays | Shared LLM repair completion boundary; moving it would start repair/planner extraction. If moved across module boundaries, drop the underscore to make the processor-spine contract explicit. |
+| `_process_confirm_requirements_arguments` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:1965` | shared spine | stays | Requirements confirmation is neither create nor edit proposal processing. |
+| `_process_edit_arguments` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:2054-2314` | edit-only | moves to ai_builder_edit_proposal.py | This is the largest edit-specific responsibility: parse edit draft, normalize/validate/compile edit operations, repair description, apply edit quality policy, and persist edit plan. Retry callables will bind `processor` with a typed local binding function so retry `process_tool_kwargs` keep the current shape. |
+| `_handle_confirm_requirements` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:2316-2384` | shared spine | stays | Confirmation flow is outside edit proposal processing. |
+| `_handle_edit_flow` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:2386-2438` | edit-only adapter | stays for this slice | It is edit-specific but tightly coupled to shared self-correction event streaming and `ProposalContext`. Moving it would require either a callback-heavy leaf or broader retry ownership changes. It will delegate edit argument processing to the new module. |
+| `_attempt_description_repair` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:2440-2493` | edit-only | moves to ai_builder_edit_proposal.py | Description-only repair is part of edit proposal processing and uses existing edit-domain invariance helpers. |
+| `emit_discovery_followup_if_needed` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:2495-2523` | shared spine | stays | Proposal-wide discovery follow-up adapter; moving would widen the slice. |
+| `_submission_retry_config` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:2525-2574` | shared spine | stays | Shared forced proposal retry config chooses create vs edit based on flow context. The edit branch will point at the edit module function. |
+| `_confirm_requirements_retry_config` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:2576-2590` | shared spine | stays | Confirmation retry config is unrelated to edit proposal processing. |
+| `_edit_flow_retry_config` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:2592-2609` | edit-only | moves to ai_builder_edit_proposal.py | Builds edit-specific retry config and can stay as a stateless leaf function with a function-local `ToolRetryConfig` import and a typed bound edit callable. |
+| `_extract_description_provenance` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:2612` | edit-only | moves to ai_builder_edit_proposal.py | Used only by edit description repair eligibility. Keep it private inside the new module because it is not a cross-module contract. |
+| `EDIT_FLOW_TOOL_NAME` | `backend/src/intric/flows/ai_builder/ai_builder_edit_tool_schema.py:28` | edit-only | stays in existing edit-domain module | Canonical tool-name owner already exists. No re-export or rename. |
+| `strip_malformed_edit_mechanics` | `backend/src/intric/flows/ai_builder/ai_builder_edit_normalizer.py:31-65` | edit-only | stays | Existing edit normalizer is the canonical owner. The new module imports it. |
+| `normalize_edit_draft_mechanics` | `backend/src/intric/flows/ai_builder/ai_builder_edit_normalizer.py:68-100` | edit-only | stays | Existing edit normalizer is the canonical owner. |
+| `validate_edit_draft` | `backend/src/intric/flows/ai_builder/ai_builder_edit_validator.py:36-80` | edit-only | stays | Existing edit validator is the canonical owner. |
+| `compile_edit_draft` | `backend/src/intric/flows/ai_builder/ai_builder_edit_compiler.py:65-105` | edit-only | stays | Existing edit compiler is the canonical owner. |
+| `should_attempt_description_repair` | `backend/src/intric/flows/ai_builder/ai_builder_edit_repair.py:18-44` | edit-only | stays | Existing repair eligibility owner. The new module imports it. |
+| `validate_repair_invariance` | `backend/src/intric/flows/ai_builder/ai_builder_edit_repair.py:47-57` | edit-only | stays | Existing repair invariant owner. The new module imports it. |
+
+### Edit Module Design
+
+`ai_builder_edit_proposal.py` will contain module-level functions only:
+
+- `process_edit_arguments`
+- `attempt_description_repair`
+- `_bind_process_edit_arguments`
+- `edit_flow_retry_config`
+- `_extract_description_provenance`
+
+Boundary rule: dispatch, event streaming, and retry orchestration stay in the
+processor spine; edit-domain composition moves to the edit proposal module.
+The processor may top-level import `process_edit_arguments` and
+`edit_flow_retry_config` because the edit module imports `AIBuilderProposalProcessor`
+only under `TYPE_CHECKING`.
+
+The module must:
+
+- use `from __future__ import annotations`
+- use `TYPE_CHECKING` imports for annotation-only types
+- import edit-domain modules at top level only from existing edit owners:
+  `ai_builder_edit_repair.py`, `ai_builder_edit_models.py`,
+  `ai_builder_edit_compiler.py`, `ai_builder_edit_normalizer.py`,
+  `ai_builder_edit_validator.py`, and `ai_builder_edit_tool_schema.py`
+- use function-local imports for frozen contracts from
+  `ai_builder_proposal_processor.py` only where those contracts are constructed
+- keep function-local frozen-contract imports in at most three leaf functions
+- avoid lint suppressions, `type: ignore`, `# noqa`, package re-exports, and
+  compatibility shims
+- bind `process_edit_arguments` with a tiny typed binding function when
+  constructing retry configs so `process_tool_kwargs` does not gain a hidden
+  required `processor` field and signature filtering still sees `flow` and
+  `assistant_metadata`
+- keep dispatchers/event streaming/retry orchestration in the processor spine
+  and move edit-domain composition only; this is the boundary rule for this
+  slice
+
+The main leaf signature will be keyword-only and stateless:
+
+```python
+async def process_edit_arguments(
+    *,
+    processor: AIBuilderProposalProcessor,
+    session_id: UUID,
+    conversation: list[ConversationMessage],
+    ...
+) -> ToolProcessingResult:
+    ...
+```
+
+`processor` is required because this slice deliberately keeps repo/user
+persistence, MCP clarification, quality feedback, and repair completion
+ownership in the existing processor instead of creating a new service/class.
+Direct callers must pass `processor=processor`. Retry callers must use a
+bound callable so `ai_builder_proposal_repair.py` signature filtering sees the
+same external callback shape as today's bound method.
+
+Cross-module calls to processor-spine operations must use explicit public
+internal methods, not private-method access or pyright suppressions. If the edit
+module begins needing more processor-spine methods, stop and re-plan instead of
+adding more reach-back.
+
+### Deferred Movement
+
+`_handle_edit_flow` stays in `ai_builder_proposal_processor.py` for now.
+Evidence:
+
+- it parses tool-call JSON and delegates shared self-correction through
+  `_request_tool_self_correction` at
+  `ai_builder_proposal_processor.py:2386-2438`
+- the self-correction retry path is shared across outline, confirmation, and
+  edit and is not an edit proposal compilation responsibility
+- moving it would force callback plumbing into the leaf module or move shared
+  retry ownership, which violates the maximum-one-module and narrow-slice
+  budget
+
+This is not a compatibility path. It is a boundary decision: event streaming and
+retry orchestration remain in the processor spine, while edit argument
+processing moves to the edit leaf.
+
+### Preserved Behavior Pins
+
+These pins must remain green:
+
+- prompt-contract artifact: `backend/tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py:12`
+- proposal repair retry tests:
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:162`
+- semantic/parse repair tests:
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_repair.py:93`
+  and `backend/tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py:207`
+- router SSE done/error order tests:
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:1185`,
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:1250`,
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:1281`,
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:1525`,
+  and `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:1562`
+- router audit metadata tests:
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:383`,
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:851`,
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:1620`,
+  and `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py:1715`
+- create/revise/approve/apply integration regressions:
+  `backend/tests/integration/flows/test_ai_builder_session_api_regressions.py:2424`
+- edit/apply integration regressions:
+  `backend/tests/integration/flows/ai_builder/test_ai_builder_apply_to_draft.py:88`
+  and `backend/tests/integration/flows/test_ai_builder_edit_apply_regressions.py:1`
+- edit processing unit pins:
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py:1276-2029`
+  and `backend/tests/unit/test_ai_builder_plan_edit_context.py:561`
+
+### Test Strategy
+
+Keep tests co-located in
+`backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`.
+There are direct edit-only tests, but moving them now would make the diff harder
+to review and would mostly protect file location rather than behavior. Update
+patch paths and calls so existing tests continue to protect:
+
+- contextual quality feedback
+- MCP clarification and policy feedback
+- edit metadata propagation into the validator
+- mechanical ref normalization before validation
+- text suppression around submission tool calls
+- typed edit retry config
+- parse failure self-correction behavior
+
+No tests should assert private helper calls merely to protect the refactor.
+
+Explicit test call-site updates:
+
+- `test_ai_builder_proposal_processor.py:1334`,
+  `test_ai_builder_proposal_processor.py:1421`,
+  `test_ai_builder_proposal_processor.py:1518`,
+  `test_ai_builder_proposal_processor.py:1616`, and
+  `test_ai_builder_proposal_processor.py:1716` switch from
+  `processor._process_edit_arguments(...)` to
+  `process_edit_arguments(processor=processor, ...)`.
+- `test_ai_builder_plan_edit_context.py:561` makes the same direct-call update.
+- `test_ai_builder_proposal_processor.py:1946` stops asserting callable
+  identity against a private bound method. It should assert behavior-level
+  retry-config shape, target tool name, forced prompt, unchanged
+  `process_tool_kwargs`, and, if needed, that the callable is invokable through
+  the public retry path.
+- Patch paths for edit compilation/validation/preparation/storage move from
+  `ai_builder_proposal_processor` to `ai_builder_edit_proposal` only when the
+  patched function moved.
+- Add or update a stable-substring pin for the description-only edit repair
+  prompt. This prompt is an LLM repair contract surface and must keep anchors
+  such as `Generate ONLY a new flow_description` and
+  `Respond with ONLY the new description text`. Both anchors must map to
+  `backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py` in the
+  prompt-contract artifact test.
+
+### Expected Files To Change
+
+Production:
+
+- `backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py`
+
+Tests:
+
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`
+- `backend/tests/unit/test_ai_builder_plan_edit_context.py`
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py`
+
+Process artifacts:
+
+- `docs/refactor/ai-builder-prompt-contract.md` only to add the description
+  repair contract paragraph and anchors, not to weaken existing anchors
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/plan.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/journal.md`
+- next numbered retrospective and Claude reconciliation files
+
+No frontend files, router files, planner files, prompt-contract docs, PRDs, or
+known unrelated dirty files are expected to change.
+
+### Validation Commands
+
+Targeted proposal processor and edit-context tests:
+
+```bash
+cd backend && uv run pytest \
+  tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py \
+  tests/unit/test_ai_builder_plan_edit_context.py \
+  -q
+```
+
+Prompt-contract artifact test:
+
+```bash
+cd backend && uv run pytest \
+  tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py \
+  -q
+```
+
+Repair and parse-repair tests:
+
+```bash
+cd backend && uv run pytest \
+  tests/unittests/flows/ai_builder/test_ai_builder_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py \
+  -q
+```
+
+Router SSE and audit tests:
+
+```bash
+cd backend && uv run pytest \
+  tests/unittests/flows/ai_builder/test_ai_builder_router.py \
+  -q
+```
+
+Create/revise/approve/apply integration regressions:
+
+```bash
+cd backend && uv run pytest \
+  tests/integration/flows/test_ai_builder_session_api_regressions.py \
+  -q
+```
+
+Edit/apply integration regressions:
+
+```bash
+cd backend && uv run pytest \
+  tests/integration/flows/ai_builder/test_ai_builder_apply_to_draft.py \
+  tests/integration/flows/test_ai_builder_edit_apply_regressions.py \
+  -q
+```
+
+Targeted pyright:
+
+```bash
+cd backend && uv run pyright \
+  src/intric/flows/ai_builder/ai_builder_edit_proposal.py \
+  src/intric/flows/ai_builder/ai_builder_proposal_processor.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py \
+  tests/unit/test_ai_builder_plan_edit_context.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py
+```
+
+Targeted ruff:
+
+```bash
+cd backend && uv run ruff check \
+  src/intric/flows/ai_builder/ai_builder_edit_proposal.py \
+  src/intric/flows/ai_builder/ai_builder_proposal_processor.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py \
+  tests/unit/test_ai_builder_plan_edit_context.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py
+```
+
+Targeted format check:
+
+```bash
+cd backend && uv run ruff format --check \
+  src/intric/flows/ai_builder/ai_builder_edit_proposal.py \
+  src/intric/flows/ai_builder/ai_builder_proposal_processor.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py \
+  tests/unit/test_ai_builder_plan_edit_context.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py
+```
+
+Import boundaries:
+
+```bash
+cd backend && uv run lint-imports --no-cache
+```
+
+Diff hygiene:
+
+```bash
+git diff --check -- \
+  backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py \
+  backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py \
+  backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py \
+  backend/tests/unit/test_ai_builder_plan_edit_context.py \
+  backend/tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py \
+  docs/refactor/ai-builder-prompt-contract.md \
+  docs/refactor/execution/batch-6-ai-builder-contract-split
+```
+
+Committed-text hygiene, excluding process artifacts:
+
+```bash
+rg -n "6c|Batch 6|create/edit split|proposal split|edit carve-out|leaf module" \
+  backend/src backend/tests docs/refactor/prd docs/refactor/ai-builder-prompt-contract.md
+```
+
+Expected: no matches.
+
+Frontend AI Builder tests are not run because this slice forbids frontend edits
+and does not touch frontend protocol/event surfaces. If validation or Claude
+finds a frontend-facing contract risk, stop and ask for a scope decision.
+
+### Claude Plan Review
+
+Before implementation, run Claude peer-loop against this plan and ask whether
+moving only edit argument processing, description repair, retry-config creation,
+and description provenance into a stateless edit module is cleaner than moving
+`_handle_edit_flow` too. Specific questions:
+
+- Does the proposed boundary improve ownership or merely move lines?
+- Is leaving `_handle_edit_flow` in the shared processor spine defensible?
+- Does the required `processor` parameter create a worse dependency than the
+  current method location?
+- Are there import-cycle or import-linter risks?
+- Are any tests overfitted to private helper location?
+
+Do not implement until the plan has green light or a documented,
+evidence-backed disagreement.
+
+## Archive - Repair Contract Hardening Plan (Committed At fd5b725b)
 
 ## Archive - Prompt/Audit Contract Checkpoint (Committed At 4cd874c7)
 

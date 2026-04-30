@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from inspect import signature
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -9,6 +10,7 @@ import pytest
 
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
+from intric.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
@@ -40,7 +42,7 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
     ToolProcessingResult,
     ToolRetryConfig,
     _active_submission_tool_schemas,
-    _terminal_output_type_for_conversation,
+    terminal_output_type_for_conversation,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
@@ -188,7 +190,7 @@ def test_plan_edit_output_intent_preserves_prior_document_terminal_type() -> Non
         target_plan_step_ref="step_a",
     )
 
-    output_type = _terminal_output_type_for_conversation(
+    output_type = terminal_output_type_for_conversation(
         [
             ConversationMessage(
                 role="user",
@@ -211,7 +213,7 @@ def test_plan_edit_output_intent_uses_latest_explicit_document_change() -> None:
         target_plan_step_ref="step_a",
     )
 
-    output_type = _terminal_output_type_for_conversation(
+    output_type = terminal_output_type_for_conversation(
         [
             ConversationMessage(
                 role="user",
@@ -324,7 +326,7 @@ async def test_request_non_question_continuation_uses_backend_followup_when_only
         ) as emit_followup,
         patch.object(
             processor,
-            "_call_repair_completion",
+            "call_repair_completion",
             new=AsyncMock(),
         ) as repair_completion,
     ):
@@ -410,7 +412,7 @@ async def test_request_non_question_continuation_recovers_with_requirements_summ
         ) as emit_followup,
         patch.object(
             processor,
-            "_call_repair_completion",
+            "call_repair_completion",
             new=AsyncMock(return_value=_make_response_with_tool_calls(summary_call)),
         ) as repair_completion,
         patch.object(
@@ -504,7 +506,7 @@ async def test_request_non_question_continuation_returns_typed_error_when_no_fol
         ),
         patch.object(
             processor,
-            "_call_repair_completion",
+            "call_repair_completion",
             new=AsyncMock(),
         ) as repair_completion,
     ):
@@ -605,7 +607,7 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
     with (
         patch.object(
             processor,
-            "_call_repair_completion",
+            "call_repair_completion",
             new=AsyncMock(return_value=_make_response_with_tool_calls(outline_call)),
         ) as call_completion,
         patch.object(
@@ -1273,7 +1275,7 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
 
 
 @pytest.mark.asyncio
-async def test_process_edit_arguments_retries_on_contextual_quality_feedback() -> None:
+async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
     processor = _make_processor()
     flow = MagicMock()
     flow.steps = []
@@ -1301,7 +1303,7 @@ async def test_process_edit_arguments_retries_on_contextual_quality_feedback() -
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
                 spec=edit_result.compiled_spec,
                 validation=compiled_validation,
@@ -1309,16 +1311,16 @@ async def test_process_edit_arguments_retries_on_contextual_quality_feedback() -
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
             return_value=edit_result,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ),
         patch.object(
             processor,
-            "_format_contextual_quality_feedback",
+            "format_contextual_quality_feedback",
             return_value=(
                 "Quality issues:\n"
                 "Konversationen efterfrågar genererad DOCX utan mall, men planen använder fortfarande "
@@ -1326,12 +1328,13 @@ async def test_process_edit_arguments_retries_on_contextual_quality_feedback() -
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
             new_callable=AsyncMock,
             return_value=(MagicMock(), MagicMock()),
         ) as store_plan,
     ):
-        result = await processor._process_edit_arguments(
+        result = await process_edit_arguments(
+            processor=processor,
             session_id=uuid4(),
             conversation=[],
             new_messages_start=0,
@@ -1356,7 +1359,7 @@ async def test_process_edit_arguments_retries_on_contextual_quality_feedback() -
 
 
 @pytest.mark.asyncio
-async def test_process_edit_arguments_asks_before_accepting_mcp_usage() -> None:
+async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
     processor = _make_processor()
     flow = MagicMock()
     flow.steps = []
@@ -1398,7 +1401,7 @@ async def test_process_edit_arguments_asks_before_accepting_mcp_usage() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
                 spec=compiled_spec,
                 validation=compiled_validation,
@@ -1406,19 +1409,20 @@ async def test_process_edit_arguments_asks_before_accepting_mcp_usage() -> None:
             ),
         ) as prepare_spec,
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
             return_value=edit_result,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
             new_callable=AsyncMock,
         ) as store_plan,
     ):
-        result = await processor._process_edit_arguments(
+        result = await process_edit_arguments(
+            processor=processor,
             session_id=uuid4(),
             conversation=[
                 ConversationMessage(
@@ -1453,7 +1457,7 @@ async def test_process_edit_arguments_asks_before_accepting_mcp_usage() -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_edit_arguments_enforces_without_mcp_selection() -> None:
+async def test_edit_proposal_enforces_without_mcp_selection() -> None:
     processor = _make_processor()
     flow = MagicMock()
     flow.steps = []
@@ -1495,7 +1499,7 @@ async def test_process_edit_arguments_enforces_without_mcp_selection() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
                 spec=compiled_spec,
                 validation=compiled_validation,
@@ -1503,19 +1507,20 @@ async def test_process_edit_arguments_enforces_without_mcp_selection() -> None:
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
             return_value=edit_result,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
             new_callable=AsyncMock,
         ) as store_plan,
     ):
-        result = await processor._process_edit_arguments(
+        result = await process_edit_arguments(
+            processor=processor,
             session_id=uuid4(),
             conversation=[
                 ConversationMessage(
@@ -1551,7 +1556,7 @@ async def test_process_edit_arguments_enforces_without_mcp_selection() -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_edit_arguments_passes_metadata_to_edit_validator() -> None:
+async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
     processor = _make_processor()
     flow = MagicMock()
     flow.steps = []
@@ -1583,7 +1588,7 @@ async def test_process_edit_arguments_passes_metadata_to_edit_validator() -> Non
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
                 spec=edit_result.compiled_spec,
                 validation=compiled_validation,
@@ -1591,29 +1596,30 @@ async def test_process_edit_arguments_passes_metadata_to_edit_validator() -> Non
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
             return_value=edit_result,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ) as validate_edit,
         patch.object(
             processor,
-            "_format_contextual_quality_feedback",
+            "format_contextual_quality_feedback",
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.build_plan_event",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.build_plan_event",
             return_value={"event": "plan", "data": "{}"},
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
             new_callable=AsyncMock,
             return_value=(MagicMock(), MagicMock()),
         ) as store_plan,
     ):
-        await processor._process_edit_arguments(
+        await process_edit_arguments(
+            processor=processor,
             session_id=uuid4(),
             conversation=[],
             new_messages_start=0,
@@ -1638,9 +1644,7 @@ async def test_process_edit_arguments_passes_metadata_to_edit_validator() -> Non
 
 
 @pytest.mark.asyncio
-async def test_process_edit_arguments_normalizes_mechanical_refs_before_validation() -> (
-    None
-):
+async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> None:
     processor = _make_processor()
     flow = MagicMock()
     flow.steps = [
@@ -1683,7 +1687,7 @@ async def test_process_edit_arguments_normalizes_mechanical_refs_before_validati
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.prepare_compiled_spec_for_session",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
                 spec=edit_result.compiled_spec,
                 validation=compiled_validation,
@@ -1691,29 +1695,30 @@ async def test_process_edit_arguments_normalizes_mechanical_refs_before_validati
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.compile_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
             return_value=edit_result,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.validate_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ) as validate_edit,
         patch.object(
             processor,
-            "_format_contextual_quality_feedback",
+            "format_contextual_quality_feedback",
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.build_plan_event",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.build_plan_event",
             return_value={"event": "plan", "data": "{}"},
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
             new_callable=AsyncMock,
             return_value=(MagicMock(), MagicMock()),
         ),
     ):
-        await processor._process_edit_arguments(
+        await process_edit_arguments(
+            processor=processor,
             session_id=uuid4(),
             conversation=[],
             new_messages_start=0,
@@ -1877,7 +1882,7 @@ async def test_request_self_correction_returns_typed_error_when_repair_completio
 
     with patch.object(
         processor,
-        "_call_repair_completion",
+        "call_repair_completion",
         new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
     ):
         events = [
@@ -1943,7 +1948,9 @@ async def test_submission_retry_config_returns_typed_edit_retry_config() -> None
 
     assert isinstance(config, ToolRetryConfig)
     assert config.target_tool_name == EDIT_FLOW_TOOL_NAME
-    assert config.process_tool_arguments == processor._process_edit_arguments
+    process_signature = signature(config.process_tool_arguments)
+    assert "processor" not in process_signature.parameters
+    assert "flow" in process_signature.parameters
     assert config.process_tool_kwargs == {
         "assistant_snapshots": assistant_snapshots,
         "litellm_model": "openai/gpt-5.4",

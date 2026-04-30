@@ -24,6 +24,10 @@ def test_prompt_contract_artifact_tracks_stable_prompt_anchors() -> None:
         "architecture_commit: null": AI_BUILDER_SOURCE_ROOT / "ai_builder_repair.py",
         "single raw JSON object": AI_BUILDER_SOURCE_ROOT / "ai_builder_repair.py",
         "Do NOT wrap": AI_BUILDER_SOURCE_ROOT / "ai_builder_repair.py",
+        "Generate ONLY a new flow_description": AI_BUILDER_SOURCE_ROOT
+        / "ai_builder_edit_proposal.py",
+        "Respond with ONLY the new description text": AI_BUILDER_SOURCE_ROOT
+        / "ai_builder_edit_proposal.py",
     }
 
     for anchor, owner_path in anchors.items():

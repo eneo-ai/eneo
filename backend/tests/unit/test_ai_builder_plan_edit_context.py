@@ -16,6 +16,7 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     CompiledEditResult,
     FlowEditDiff,
 )
+from intric.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     _DOWNSTREAM_INPUT_REPAIR_FIELDS,
     AIBuilderPlanEditContext,
@@ -24,7 +25,7 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
 )
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
-    _terminal_output_type_for_conversation,
+    terminal_output_type_for_conversation,
 )
 from intric.flows.domain.flow import FlowStep
 
@@ -344,7 +345,7 @@ def test_plan_revision_terminal_output_intent_uses_latest_user_message() -> None
     ]
 
     assert (
-        _terminal_output_type_for_conversation(
+        terminal_output_type_for_conversation(
             conversation,
             plan_edit_context=context,
         )
@@ -371,7 +372,7 @@ def test_plan_revision_terminal_output_intent_accepts_current_pdf_edit() -> None
     ]
 
     assert (
-        _terminal_output_type_for_conversation(
+        terminal_output_type_for_conversation(
             conversation,
             plan_edit_context=context,
         )
@@ -390,7 +391,7 @@ def test_initial_plan_terminal_output_intent_can_use_full_requirements() -> None
     ]
 
     assert (
-        _terminal_output_type_for_conversation(
+        terminal_output_type_for_conversation(
             conversation,
             plan_edit_context=None,
         )
@@ -452,10 +453,10 @@ async def test_create_path_validates_scoped_revision_after_terminal_artifact_fol
         "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
         fake_store_plan_and_update_conversation,
     )
-    monkeypatch.setattr(processor, "_format_quality_feedback", lambda validation: None)
+    monkeypatch.setattr(processor, "format_quality_feedback", lambda validation: None)
     monkeypatch.setattr(
         processor,
-        "_format_contextual_quality_feedback",
+        "format_contextual_quality_feedback",
         lambda **kwargs: None,
     )
 
@@ -554,11 +555,12 @@ async def test_edit_flow_path_enforces_scoped_revision_guard(monkeypatch) -> Non
         )
 
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.compile_edit_draft",
+        "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
         fake_compile_edit_draft,
     )
 
-    result = await processor._process_edit_arguments(
+    result = await process_edit_arguments(
+        processor=processor,
         session_id=uuid4(),
         conversation=[],
         new_messages_start=0,

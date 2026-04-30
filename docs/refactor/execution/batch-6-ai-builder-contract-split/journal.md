@@ -259,6 +259,258 @@ to `eneo.*` namespace rename.
 - `rg -n "6b|6c|Batch 6|repair extraction" backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py docs/refactor/ai-builder-prompt-contract.md`
   - Result: no matches.
 
+## Iteration 3
+
+### Start Gate
+
+- HEAD verified as `fd5b725b`.
+- Latest commit verified as `flows: harden ai builder repair retry contract`.
+- `git diff --cached --name-only` returned no staged files.
+- Dirty files at start:
+  - `frontend/packages/ui/src/icons/types.d.ts`
+  - `scripts/run_codex_review.sh`
+  - `PRODUCT.md`
+- The plan file became dirty only after starting this slice.
+- The known dirty files are unrelated and must remain untouched.
+
+### Docker Status
+
+`docker ps --format '{{.Names}}'` was attempted before planning and was blocked
+by host execution policy:
+
+```text
+CreateProcess { message: "Rejected(\"approval required by policy, but AskForApproval is set to Never\")" }
+```
+
+Planned fallback: use local backend validation commands and record that Docker
+was unavailable in this thread.
+
+### Scope Decision
+
+This iteration is limited to create/edit proposal processing separation.
+Create proposal behavior, shared retry orchestration, router/presenter work,
+planner-turn extraction, frontend protocol aliasing, audit behavior, SSE event
+shape/order, prompt anchors, package naming, and `intric.*` namespace migration
+are out of scope.
+
+The proposed production shape is one new edit leaf module:
+
+- `backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py`
+
+The module will be stateless and function-based. Shared proposal contracts and
+retry orchestration stay in `ai_builder_proposal_processor.py`.
+
+### Required Pre-Diff Inventory
+
+The required grep was run before any production diff:
+
+```bash
+git grep -n "AIBuilderProposalProcessor\|_process_edit_arguments\|_handle_edit_flow\|_attempt_description_repair\|_edit_flow_retry_config\|_handle_submission_tool_call\|_dispatch_known_tool_call\|EDIT_FLOW_TOOL_NAME" -- backend/src backend/tests
+```
+
+Evidence summary:
+
+- `AIBuilderProposalProcessor` is defined in `ai_builder_proposal_processor.py`.
+- `_dispatch_known_tool_call` and `_handle_submission_tool_call` are shared
+  dispatcher/submission spine methods and stay in the processor.
+- `_process_edit_arguments`, `_attempt_description_repair`,
+  `_edit_flow_retry_config`, and `_extract_description_provenance` are edit-only
+  candidates for the new module.
+- `_handle_edit_flow` is edit-specific but coupled to shared self-correction
+  event streaming; the plan keeps it in the processor and makes it delegate edit
+  argument processing to the new module.
+- Existing tests directly call or patch the edit methods in
+  `test_ai_builder_proposal_processor.py` and
+  `test_ai_builder_plan_edit_context.py`.
+
+### Plan Status
+
+- Active plan appended to
+  `docs/refactor/execution/batch-6-ai-builder-contract-split/plan.md`.
+- Repair contract hardening plan archived under committed checkpoint `fd5b725b`.
+- Claude peer-loop plan review completed with `GREEN_LIGHT: no`,
+  `VERDICT: changes_required`, and `MIN_SCORE: 5`.
+- Accepted findings were reconciled in
+  `docs/refactor/execution/batch-6-ai-builder-contract-split/claude-reconciliation-3.md`.
+- Plan revisions made after Claude review:
+  - bind `process_edit_arguments` for retry configs so `process_tool_kwargs`
+    does not gain a hidden `processor` field
+  - replace the private bound-method identity assertion with behavior-level
+    retry-config assertions
+  - enumerate six direct test calls that must switch to
+    `process_edit_arguments(processor=processor, ...)`
+  - make the boundary rule explicit: dispatch/event streaming/retry
+    orchestration stays in the processor spine; edit-domain composition moves
+  - add a stop/re-plan rule if the edit module begins reaching farther into
+    processor private methods
+  - add a prompt-contract artifact pin for the description-only edit repair
+    prompt anchors
+- Local verification confirmed the only current direct edit-processing test
+  calls are the six call sites named in the revised plan plus the retry-config
+  identity assertion.
+- Claude peer-loop plan verification completed with `GREEN_LIGHT: yes`,
+  `VERDICT: green`, and `MIN_SCORE: 6`.
+- Low-severity verification notes were folded into the plan before
+  implementation:
+  - processor top-level imports from the edit module are allowed because reverse
+    imports are `TYPE_CHECKING`-only
+  - description-repair prompt anchors map to `ai_builder_edit_proposal.py`
+  - the prompt-contract doc receives a real paragraph for the description-only
+    repair contract
+  - strict-pyright/signature fallback is a tiny typed binding function, not
+    type weakening
+  - `_extract_description_provenance` remains private in the new module
+- Next action: implement the approved edit proposal processing separation.
+
+### Implementation Notes
+
+- Added `backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py`.
+- Moved edit argument processing, edit description-only repair, edit retry
+  config construction, and description provenance parsing into the new edit
+  proposal module.
+- Kept `_handle_edit_flow`, dispatch, event streaming, and self-correction
+  orchestration in `AIBuilderProposalProcessor`.
+- Local signature verification showed keyword-bound `functools.partial` still
+  exposed `processor` to `inspect.signature`, so the implementation uses a tiny
+  typed binding function for retry callbacks instead.
+- Strict pyright rejected cross-module access to protected processor methods.
+  The shared processor-spine operations were therefore made explicit internal
+  public methods instead of using ignores:
+  - `format_quality_feedback`
+  - `format_contextual_quality_feedback`
+  - `mcp_clarification_events_if_needed`
+  - `call_repair_completion`
+- Added prompt-contract artifact coverage for the description-only edit repair
+  prompt anchors.
+- No router, planner, frontend, SSE, audit, retry-budget, prompt-anchor
+  weakening, package rename, or `intric.*` namespace work was started.
+
+### Focused Implementation Checks
+
+- `cd backend && uv run python -c "import intric.flows.ai_builder.ai_builder_edit_proposal; import intric.flows.ai_builder.ai_builder_proposal_processor; print('ok')"`
+  - Result: pass.
+- Bound edit retry callback signature check:
+  - Result: `processor` hidden, `flow` present, `assistant_metadata` present.
+
+### Claude Implementation Verification
+
+- Claude peer-loop final verification completed with body result
+  `GREEN_LIGHT: yes`, `VERDICT: green`, and `MIN_SCORE: 7`.
+- Artifact:
+  `.codex/artifacts/claude-peer-loop-batch-6-create-edit-proposal-final-verification-20260430T161735Z.md`.
+- The wrapper exited nonzero because the parser did not recognize Claude's
+  markdown-formatted green-light line; the review body explicitly green-lit the
+  implementation and reported no outstanding findings.
+- Claude verified:
+  - terminal-output derivation is owned by `process_edit_arguments`
+  - duplicated caller plumbing is removed
+  - typed retry callback binding is justified by local signature evidence
+  - processor-spine public methods are intentional
+  - prompt-contract anchors remain pinned
+  - no router, planner, frontend, SSE, audit, or retry-budget scope drift was
+    introduced
+  - no accepted or partial findings remain
+- `cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_edit_proposal.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unit/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py`
+  - First run failed on import order after adding a test import.
+  - Rerun after import ordering fix: pass.
+- `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unit/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py -q`
+  - First run failed because `functools.partial` did not hide `processor` from
+    `inspect.signature`.
+  - Rerun after typed binding function: pass, 52 passed.
+- `cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_edit_proposal.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unit/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py`
+  - First run failed on protected processor method access from the new module.
+  - Rerun after making the processor-spine methods explicit public internal
+    methods: pass, 0 errors.
+
+### Validation Results
+
+- `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unit/test_ai_builder_plan_edit_context.py -q`
+  - Result: pass, 51 passed.
+- `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py -q`
+  - Result: pass, 1 passed.
+- `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_repair.py tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q`
+  - Result: pass, 47 passed.
+- `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_router.py -q`
+  - Result: pass, 59 passed.
+- `cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py -q`
+  - Result: pass, 36 passed.
+- `cd backend && uv run pytest tests/integration/flows/ai_builder/test_ai_builder_apply_to_draft.py tests/integration/flows/test_ai_builder_edit_apply_regressions.py -q`
+  - Result: pass, 3 passed.
+- `cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_edit_proposal.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unit/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py`
+  - Result: pass, 0 errors.
+- `cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_edit_proposal.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unit/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py`
+  - Result: pass.
+- `cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_edit_proposal.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unit/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py`
+  - First run found formatting drift in three touched files.
+  - After `uv run ruff format ...`: pass, 5 files already formatted.
+- `cd backend && uv run lint-imports --no-cache`
+  - Result: pass, 3 contracts kept.
+- `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py backend/tests/unit/test_ai_builder_plan_edit_context.py backend/tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py docs/refactor/ai-builder-prompt-contract.md docs/refactor/execution/batch-6-ai-builder-contract-split`
+  - Result: pass.
+- `rg -n "6c|Batch 6|create/edit split|proposal split|edit carve-out|leaf module" backend/src backend/tests docs/refactor/prd docs/refactor/ai-builder-prompt-contract.md`
+  - Result: existing false positives only: hash substrings in baseline/API fixtures, a prompt hash string, one existing phrase in `question_catalog.py`, and an unrelated authentication test string. No new internal process label appears in touched source/test/prompt-contract files.
+- Import-cycle check:
+  - `cd backend && uv run python -c "import intric.flows.ai_builder.ai_builder_edit_proposal; import intric.flows.ai_builder.ai_builder_proposal_processor; print('ok')"`
+  - Result: pass.
+- Bound edit retry callback signature check:
+  - `processor` hidden: true.
+  - `flow` present: true.
+  - `assistant_metadata` present: true.
+
+### Claude Implementation Review
+
+- Claude peer-loop implementation review completed with `GREEN_LIGHT: no`,
+  `VERDICT: changes_required`, and `MIN_SCORE: 6`.
+- Accepted findings were reconciled in
+  `docs/refactor/execution/batch-6-ai-builder-contract-split/claude-reconciliation-3.md`.
+- Fixes made after Claude review:
+  - moved `terminal_output_type` derivation back inside
+    `process_edit_arguments`
+  - removed duplicated terminal-output derivation from processor callers and
+    retry config construction
+  - restored readability parentheses around the scoped-edit target-step
+    expression
+  - restored concise docstrings for the description-only repair invariant and
+    description provenance parsing
+  - kept the typed binding function because keyword-bound `functools.partial`
+    left `processor` visible to `inspect.signature`
+- Focused post-review checks:
+  - ruff check: pass
+  - pyright: pass, 0 errors
+  - proposal/edit/prompt artifact tests: pass, 52 passed
+- Next action: rerun the full validation set after the accepted fixes.
+
+### Post-Review Validation Rerun
+
+- `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unit/test_ai_builder_plan_edit_context.py -q`
+  - Result: pass, 51 passed.
+- `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py -q`
+  - Result: pass, 1 passed.
+- `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_repair.py tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q`
+  - Result: pass, 47 passed.
+- `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_router.py -q`
+  - Result: pass, 59 passed.
+- `cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py -q`
+  - Result: pass, 36 passed.
+- `cd backend && uv run pytest tests/integration/flows/ai_builder/test_ai_builder_apply_to_draft.py tests/integration/flows/test_ai_builder_edit_apply_regressions.py -q`
+  - Result: pass, 3 passed.
+- `cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_edit_proposal.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unit/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py`
+  - Result: pass, 0 errors.
+- `cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_edit_proposal.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unit/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py`
+  - Result: pass.
+- `cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_edit_proposal.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unit/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py`
+  - Result: pass, 5 files already formatted.
+- `cd backend && uv run lint-imports --no-cache`
+  - Result: pass, 3 contracts kept.
+- `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py backend/tests/unit/test_ai_builder_plan_edit_context.py backend/tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py docs/refactor/ai-builder-prompt-contract.md docs/refactor/execution/batch-6-ai-builder-contract-split`
+  - Result: pass.
+- `rg -n "6c|Batch 6|create/edit split|proposal split|edit carve-out|leaf module" backend/src backend/tests docs/refactor/prd docs/refactor/ai-builder-prompt-contract.md`
+  - Result: existing false positives only; no touched source/test/prompt-contract file contains new internal process labels.
+- Import-cycle check:
+  - Result: pass.
+- Bound edit retry callback signature check:
+  - Result: `processor` hidden, `flow` present, `assistant_metadata` present.
+
 ### Claude Implementation Review And Follow-Up
 
 - Claude peer-loop implementation review returned `VERDICT: changes_required`,
