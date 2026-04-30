@@ -1,7 +1,8 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, UniqueConstraint
+import sqlalchemy as sa
+from sqlalchemy import ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import BasePublic
@@ -24,5 +25,11 @@ class UserGroups(BasePublic):
     users: Mapped[list["Users"]] = relationship(secondary="usergroups_users")
 
     __table_args__ = (
-        UniqueConstraint("name", "tenant_id", name="user_groups_name_tenant_unique"),
+        Index(
+            "user_groups_name_tenant_unique",
+            "name",
+            "tenant_id",
+            unique=True,
+            postgresql_where=sa.text("state IS NULL OR state != 'deleted'"),
+        ),
     )

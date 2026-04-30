@@ -183,7 +183,7 @@ class SpaceFactory:
         group_members: dict[UUID, SpaceGroupMember] = {}
         for space_group in getattr(space_in_db, "group_members", []) or []:
             user_group = space_group.user_group
-            if user_group:
+            if user_group and user_group.state != "deleted":
                 users = cast(list[Users], user_group.users or [])
                 group_members[user_group.id] = SpaceGroupMember(
                     id=user_group.id,
