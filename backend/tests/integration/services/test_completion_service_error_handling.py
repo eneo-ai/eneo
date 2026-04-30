@@ -19,7 +19,6 @@ from uuid import uuid4
 import pytest
 
 from intric.ai_models.completion_models.completion_model import CompletionModel
-from intric.ai_models.model_enums import ModelOrg
 from intric.completion_models.infrastructure.completion_service import CompletionService
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
@@ -89,7 +88,7 @@ async def test_model_without_provider_id_raises_value_error(
         vision=False,
         family="openai",
         hosting="usa",
-        org=ModelOrg.OPENAI,
+        org="OpenAI",
         stability="stable",
         open_source=False,
         description="OpenAI GPT-4 model",
@@ -159,7 +158,7 @@ async def test_model_with_inactive_provider_raises_error(
             vision=False,
             family="openai",
             hosting="usa",
-            org=ModelOrg.OPENAI,
+            org="OpenAI",
             stability="stable",
             open_source=False,
             description="OpenAI GPT-4 model",
@@ -217,7 +216,7 @@ async def test_model_with_nonexistent_provider_raises_error(
             vision=False,
             family="openai",
             hosting="usa",
-            org=ModelOrg.OPENAI,
+            org="OpenAI",
             stability="stable",
             open_source=False,
             description="OpenAI GPT-4 model",
@@ -286,7 +285,7 @@ async def test_adapter_creation_succeeds_with_valid_provider(
             vision=False,
             family="openai",
             hosting="usa",
-            org=ModelOrg.OPENAI,
+            org="OpenAI",
             stability="stable",
             open_source=False,
             description="OpenAI GPT-4 model",
@@ -326,9 +325,9 @@ async def test_different_provider_types_create_correct_adapters(
     from unittest.mock import Mock
 
     provider_configs = [
-        ("openai", "openai", ModelOrg.OPENAI),
-        ("anthropic", "claude", ModelOrg.ANTHROPIC),
-        ("azure", "azure", ModelOrg.MICROSOFT),
+        ("openai", "openai", "OpenAI"),
+        ("anthropic", "claude", "Anthropic"),
+        ("azure", "azure", "Microsoft"),
     ]
 
     async with db_container() as container:
