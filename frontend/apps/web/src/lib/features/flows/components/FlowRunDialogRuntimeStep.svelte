@@ -108,6 +108,7 @@
   }
 
   const supportsAudioRecording = $derived(step.input_format === "audio");
+  const acceptedMimetypes = $derived(step.accepted_mimetypes ?? []);
 </script>
 
 <div class="flex flex-col gap-5">
@@ -230,13 +231,13 @@
       {/if}
     </div>
 
-    {#if step.accepted_mimetypes.length > 0}
+    {#if acceptedMimetypes.length > 0}
       <details class="border-default bg-secondary/5 mt-3 rounded-lg border px-3 py-2.5">
         <summary class="cursor-pointer text-sm font-medium">
           {labels.allowedTypesToggle}
         </summary>
         <p class="text-secondary mt-2 max-w-prose text-sm leading-relaxed">
-          {friendlyMimeNames(step.accepted_mimetypes).join(", ")}
+          {friendlyMimeNames(acceptedMimetypes).join(", ")}
         </p>
         <details class="mt-2">
           <summary class="text-muted cursor-pointer text-sm hover:underline">
@@ -244,9 +245,9 @@
           </summary>
           <p
             class="text-muted mt-1.5 max-w-prose text-xs leading-relaxed break-all"
-            title={step.accepted_mimetypes.join(", ")}
+            title={acceptedMimetypes.join(", ")}
           >
-            {step.accepted_mimetypes.join(", ")}
+            {acceptedMimetypes.join(", ")}
           </p>
         </details>
       </details>

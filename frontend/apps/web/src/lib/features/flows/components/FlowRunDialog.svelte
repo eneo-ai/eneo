@@ -118,7 +118,10 @@
   );
 
   const stepCount = $derived(flow.steps?.length ?? 0);
-  const stepsRequiringInput = $derived(runContract?.steps_requiring_input ?? []);
+  type DialogRuntimeStepInput = FlowRunContractStepInput & { accepted_mimetypes: string[] };
+  const stepsRequiringInput = $derived(
+    (runContract?.steps_requiring_input ?? []).map(normalizeRuntimeStepInput)
+  );
   const templateReadinessItems = $derived(
     normalizeTemplateReadiness(runContract?.template_readiness)
   );
@@ -457,14 +460,21 @@
     );
   }
 
-  function getStepAcceptFilter(step: FlowRunContractStepInput): string | undefined {
+  function normalizeRuntimeStepInput(step: FlowRunContractStepInput): DialogRuntimeStepInput {
+    return {
+      ...step,
+      accepted_mimetypes: step.accepted_mimetypes ?? []
+    };
+  }
+
+  function getStepAcceptFilter(step: DialogRuntimeStepInput): string | undefined {
     if (step.accepted_mimetypes.length > 0) {
       return step.accepted_mimetypes.join(",");
     }
     return step.input_format === "audio" ? AUDIO_ACCEPT_FILTER : undefined;
   }
 
-  function openFilePicker(step: FlowRunContractStepInput) {
+  function openFilePicker(step: DialogRuntimeStepInput) {
     const input = document.createElement("input");
     input.type = "file";
     input.multiple = true;
@@ -482,7 +492,7 @@
     input.click();
   }
 
-  function handleDrop(step: FlowRunContractStepInput, event: DragEvent) {
+  function handleDrop(step: DialogRuntimeStepInput, event: DragEvent) {
     event.preventDefault();
     draggingStepId = null;
     if (event.dataTransfer?.files) {
@@ -683,7 +693,7 @@
     }
   }
 
-  async function retryRecordedFileUpload(step: FlowRunContractStepInput) {
+  async function retryRecordedFileUpload(step: DialogRuntimeStepInput) {
     const file = recordedFilesByStepId[step.step_id];
     if (!file) {
       openFilePicker(step);
@@ -774,7 +784,7 @@
     focusPageHeading();
   }
 
-  function retryUpload(step: FlowRunContractStepInput) {
+  function retryUpload(step: DialogRuntimeStepInput) {
     uploadErrorsByStepId = { ...uploadErrorsByStepId, [step.step_id]: null };
     if (recordedFilesByStepId[step.step_id]) {
       void retryRecordedFileUpload(step);

@@ -53,30 +53,18 @@ export type UserGroup = components["schemas"]["UserGroupPublic"];
 export type User = components["schemas"]["UserAdminView"];
 export type UserSparse = components["schemas"]["UserSparse"];
 export type CurrentUser = components["schemas"]["UserPublic"];
-export type Permission =
-  | components["schemas"]["Permission"]
-  | "flows"
-  | "flows_view"
-  | "flows_run"
-  | "flows_manage"
-  | "flows_ai_builder";
-export type Role = Omit<components["schemas"]["RolePublic"], "permissions"> & {
-  permissions: Permission[];
-};
+export type Permission = components["schemas"]["Permission"];
+export type Role = components["schemas"]["RolePublic"];
 export type ResourcePermission = components["schemas"]["ResourcePermission"];
 export type CrawlRun = components["schemas"]["CrawlRunPublic"];
 export type Limits = components["schemas"]["Limits"];
 export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
 export type Settings = components["schemas"]["SettingsPublic"];
-export type FlowInputLimits = {
-  file_max_size_bytes: number;
-  audio_max_size_bytes: number;
-  max_files_per_run: number | null;
-  audio_max_files_per_run: number | null;
-};
+export type FlowInputLimits = components["schemas"]["FlowInputLimitsPublic"];
 export type FlowEvidencePolicy = components["schemas"]["FlowEvidencePolicyPublic"];
 export type FlowRetentionPolicy = components["schemas"]["FlowRetentionPolicyPublic"];
+// SEAM: tracked in batch-5 journal; delete when schema.d.ts includes FlowDocumentRenderLimitsPublic.
 export type FlowDocumentRenderLimits = {
   max_source_chars: number;
   max_blocks: number;
@@ -150,131 +138,18 @@ export type ConversationMessage = components["schemas"]["Message"];
 export type ConversationTools = components["schemas"]["UseTools"];
 export type GroupChat = components["schemas"]["GroupChatPublic"];
 
-// Flow types — manually defined until OpenAPI schema is generated
-export type FlowStep = {
-  id?: string | null;
-  assistant_id: string;
-  step_order: number;
-  user_description?: string | null;
-  input_source: "flow_input" | "previous_step" | "all_previous_steps" | "http_get" | "http_post";
-  input_type: "text" | "json" | "image" | "audio" | "document" | "file" | "any";
-  input_contract?: Record<string, unknown> | null;
-  output_mode: "pass_through" | "http_post" | "transcribe_only" | "template_fill";
-  output_type: "text" | "json" | "pdf" | "docx";
-  output_contract?: Record<string, unknown> | null;
-  input_bindings?: Record<string, unknown> | null;
-  output_classification_override?: number | null;
-  mcp_policy: "inherit" | "restricted";
-  input_config?: Record<string, unknown> | null;
-  output_config?: Record<string, unknown> | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
+export type FlowStep = components["schemas"]["FlowStepPublic"];
+export type FlowSparse = components["schemas"]["FlowSparsePublic"];
+export type Flow = components["schemas"]["FlowPublic"];
+export type FlowTemplatePlaceholder = components["schemas"]["FlowTemplatePlaceholderPublic"];
+export type FlowTemplateInspection = components["schemas"]["FlowTemplateInspectionPublic"];
+export type FlowTemplateAsset = components["schemas"]["FlowTemplateAssetPublic"];
+export type FlowRunContractStepInput = components["schemas"]["FlowRuntimeInputContractPublic"];
+export type FlowRunContractTemplateReadiness = components["schemas"]["FlowTemplateReadinessPublic"];
+export type FlowRunContract = components["schemas"]["FlowRunContractPublic"];
 
-export type FlowFormFieldType = "text" | "multiselect" | "number" | "date" | "select";
-
-export type FlowFormField = {
-  name: string;
-  type: FlowFormFieldType;
-  required?: boolean;
-  options?: string[];
-  order?: number;
-};
-
-export type FlowFormSchema = {
-  fields: FlowFormField[];
-};
-
-export type FlowSparse = {
-  id: string;
-  tenant_id: string;
-  space_id: string;
-  name: string;
-  description?: string | null;
-  created_by_user_id?: string | null;
-  owner_user_id?: string | null;
-  published_version?: number | null;
-  metadata_json?: Record<string, unknown> | null;
-  data_retention_days?: number | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
-
-export type Flow = FlowSparse & {
-  steps: FlowStep[];
-};
-
-export type FlowTemplatePlaceholder = {
-  name: string;
-  location: string;
-  preview?: string | null;
-};
-
-export type FlowTemplateInspection = {
-  asset_id?: string | null;
-  file_id: string;
-  file_name: string;
-  placeholders: FlowTemplatePlaceholder[];
-  extracted_text_preview?: string | null;
-  status?: "ready" | "needs_action" | "read_only" | "unavailable" | string;
-};
-
-export type FlowTemplateAsset = {
-  id: string;
-  flow_id?: string;
-  file_id?: string;
-  name: string;
-  checksum?: string | null;
-  mimetype?: string | null;
-  placeholders?: string[];
-  status?: "ready" | "needs_action" | "read_only" | "unavailable" | string;
-  last_updated_by?: string | null;
-  last_updated_by_name?: string | null;
-  updated_at?: string | null;
-  can_edit?: boolean;
-  can_download?: boolean;
-  can_select?: boolean;
-  can_inspect?: boolean;
-  created_at?: string | null;
-};
-
-export type FlowRunContractStepInput = {
-  step_id: string;
-  step_order: number;
-  label?: string | null;
-  description?: string | null;
-  required: boolean;
-  input_format: "document" | "audio" | "file" | string;
-  max_files?: number | null;
-  max_file_size_bytes?: number | null;
-  accepted_mimetypes: string[];
-};
-
-export type FlowRunContractTemplateReadiness = {
-  step_id: string;
-  status?: "ready" | "needs_action" | "read_only" | "unavailable" | string;
-  reason_code?: string | null;
-  message_code?: string | null;
-  message?: string | null;
-  action_text?: string | null;
-  can_run?: boolean;
-  can_edit?: boolean;
-  can_download?: boolean;
-  template_name?: string | null;
-  template_asset_id?: string | null;
-  template_file_id?: string | null;
-  checksum?: string | null;
-  published_flow_version?: number | null;
-};
-
-export type FlowRunContract = {
-  published_flow_version: number;
-  form_fields?: FlowFormField[];
-  steps_requiring_input: FlowRunContractStepInput[];
-  aggregate_max_files?: number | null;
-  template_readiness?: FlowRunContractTemplateReadiness[] | null;
-};
-
+// UI envelope for generated output_payload_json: { [key: string]: unknown }.
+// Remove when backend exposes a typed Flow run output payload schema.
 export type FlowRunArtifact = {
   file_id: string;
   name: string;
@@ -282,6 +157,8 @@ export type FlowRunArtifact = {
   size: number;
 };
 
+// UI-owned projection consumed by Flow run progress and evidence rendering.
+// Remove when backend exposes a typed Flow run output payload schema.
 export type FlowRunOutputPayload = {
   text?: string;
   structured?: Record<string, unknown> | unknown[];
@@ -292,253 +169,37 @@ export type FlowRunOutputPayload = {
   webhook_error?: string;
 };
 
-export type FlowRun = {
-  id: string;
-  flow_id: string;
-  flow_version: number;
-  user_id?: string | null;
-  tenant_id: string;
-  status: "queued" | "running" | "completed" | "failed" | "cancelled";
-  cancelled_at?: string | null;
-  started_at?: string | null;
-  finished_at?: string | null;
-  input_payload_json?: Record<string, unknown> | null;
+type WithTypedRunOutput<T extends { output_payload_json?: unknown }> = Omit<
+  T,
+  "output_payload_json"
+> & {
   output_payload_json?: FlowRunOutputPayload | null;
-  error_message?: string | null;
-  job_id?: string | null;
-  created_at: string;
-  updated_at: string;
 };
 
-export type FlowRunStepInputs = Record<string, { file_ids: string[] }>;
-
-export type FlowInputPolicy = {
-  flow_id: string;
-  input_type?: string | null;
-  input_source?: string | null;
-  accepts_file_upload: boolean;
-  accepted_mimetypes: string[];
-  max_file_size_bytes?: number | null;
-  max_files_per_run?: number | null;
-  recommended_run_payload?: Record<string, unknown> | null;
+export type FlowRun = WithTypedRunOutput<components["schemas"]["FlowRunPublic"]>;
+export type FlowRunStepInput = components["schemas"]["StepRunInput"] & { file_ids: string[] };
+export type FlowRunStepInputs = Record<string, FlowRunStepInput>;
+export type FlowInputPolicy = components["schemas"]["FlowInputPolicyPublic"];
+export type FlowRunStep = WithTypedRunOutput<components["schemas"]["FlowRunStepPublic"]>;
+export type FlowGraphNode = components["schemas"]["GraphNode"];
+export type FlowGraphEdge = components["schemas"]["GraphEdge"];
+export type FlowGraph = components["schemas"]["GraphResponse"];
+export type FlowRunDebugIoTypes = components["schemas"]["FlowRunDebugIoTypes"];
+export type FlowRunDebugInput = components["schemas"]["FlowRunDebugInput"];
+export type FlowRunDebugOutput = components["schemas"]["FlowRunDebugOutput"];
+export type FlowRunDebugMcp = components["schemas"]["FlowRunDebugMcp"];
+export type FlowRunDebugRagReferenceChunk = components["schemas"]["FlowRunDebugRagReferenceChunk"];
+export type FlowRunDebugRagReference = components["schemas"]["FlowRunDebugRagReference"];
+export type FlowRunDebugRag = components["schemas"]["FlowRunDebugRag"];
+export type FlowRunDebugStep = components["schemas"]["FlowRunDebugStep"];
+export type FlowRunDebugAttempt = components["schemas"]["FlowRunDebugAttempt"];
+export type FlowRunDebugExport = components["schemas"]["FlowRunDebugExport"];
+export type FlowRunEvidence = components["schemas"]["FlowRunEvidenceResponse"];
+export type FlowRunEvidenceWithTypedSteps = Omit<FlowRunEvidence, "step_results"> & {
+  step_results: FlowRunStep[];
 };
-
-export type FlowRunStepOutput = {
-  id?: string | null;
-  step_id?: string | null;
-  step_order: number;
-  assistant_id?: string | null;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
-  input_payload_json?: Record<string, unknown> | null;
-  output_payload_json?: FlowRunOutputPayload | null;
-  num_tokens_input?: number | null;
-  num_tokens_output?: number | null;
-  error_message?: string | null;
-  diagnostics?: Record<string, unknown>[];
-  started_at?: string | null;
-  finished_at?: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type FlowStepResult = {
-  id?: string | null;
-  flow_run_id: string;
-  flow_id: string;
-  tenant_id: string;
-  step_id?: string | null;
-  step_order: number;
-  assistant_id?: string | null;
-  input_payload_json?: Record<string, unknown> | null;
-  effective_prompt?: string | null;
-  output_payload_json?: FlowRunOutputPayload | null;
-  model_parameters_json?: Record<string, unknown> | null;
-  num_tokens_input?: number | null;
-  num_tokens_output?: number | null;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
-  error_message?: string | null;
-  flow_step_execution_hash?: string | null;
-  tool_calls_metadata?: unknown[] | Record<string, unknown> | null;
-  started_at?: string | null;
-  finished_at?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
-
-export type FlowGraphNode = {
-  id: string;
-  label: string;
-  type: "input" | "llm" | "output";
-  step_order?: number;
-  input_source?: string;
-  input_type?: string;
-  output_type?: string;
-  output_mode?: string;
-  mcp_policy?: string;
-  run_status?: string;
-  num_tokens_input?: number;
-  num_tokens_output?: number;
-  error_message?: string;
-};
-
-export type FlowGraphEdge = {
-  source: string;
-  target: string;
-};
-
-export type FlowGraph = {
-  nodes: FlowGraphNode[];
-  edges: FlowGraphEdge[];
-};
-
-export type FlowRunDebugIoTypes = {
-  input?: string | null;
-  output?: string | null;
-};
-
-export type FlowRunDebugInput = {
-  source?: string | null;
-  type?: string | null;
-  contract?: Record<string, unknown> | null;
-  bindings?: Record<string, unknown> | null;
-  config?: Record<string, unknown> | null;
-};
-
-export type FlowRunDebugOutput = {
-  mode?: string | null;
-  type?: string | null;
-  contract?: Record<string, unknown> | null;
-  classification?: number | null;
-  config?: Record<string, unknown> | null;
-};
-
-export type FlowRunDebugMcp = {
-  policy?: string | null;
-  tool_allowlist: string[];
-};
-
-export type FlowRunDebugRagReferenceChunk = {
-  chunk_no: number;
-  score: number;
-  snippet: string;
-};
-
-export type FlowRunDebugRagReference = {
-  id: string;
-  id_short: string;
-  title?: string | null;
-  display_title?: string | null;
-  source_display_name?: string | null;
-  source_url?: string | null;
-  source_kind?: string | null;
-  source_container_kind?: string | null;
-  source_container_name?: string | null;
-  source_container_display_name?: string | null;
-  source_container_label?: string | null;
-  source_container_id?: string | null;
-  usage_state?: string | null;
-  matched_chunk_count?: number | null;
-  best_score?: number | null;
-  chunks?: FlowRunDebugRagReferenceChunk[] | null;
-};
-
-export type FlowRunDebugRag = {
-  attempted?: boolean | null;
-  status?: string | null;
-  version?: number | null;
-  timeout_seconds?: number | null;
-  include_info_blobs?: boolean | null;
-  chunks_retrieved?: number | null;
-  raw_chunks_count?: number | null;
-  deduped_chunks_count?: number | null;
-  unique_sources?: number | null;
-  source_ids?: string[] | null;
-  source_ids_short?: string[] | null;
-  error_code?: string | null;
-  retrieval_duration_ms?: number | null;
-  retrieval_error_type?: string | null;
-  references?: FlowRunDebugRagReference[] | null;
-  references_truncated?: boolean | null;
-};
-
-export type FlowRunDebugStep = {
-  step_id?: string | null;
-  step_order?: number | null;
-  assistant_id?: string | null;
-  io_types: FlowRunDebugIoTypes;
-  input: FlowRunDebugInput;
-  output: FlowRunDebugOutput;
-  mcp: FlowRunDebugMcp;
-  rag?: FlowRunDebugRag | null;
-  attempts: FlowRunDebugAttempt[];
-};
-
-export type FlowRunDebugAttempt = {
-  attempt_no: number;
-  status?: string | null;
-  duration_ms?: number | null;
-  error_code?: string | null;
-  requested_model?: string | null;
-  response_model?: string | null;
-  provider?: string | null;
-  finish_reason?: string | null;
-  provider_response_id?: string | null;
-  num_tokens_input?: number | null;
-  num_tokens_output?: number | null;
-};
-
-export type FlowRunDebugExport = {
-  schema_version: string;
-  generated_at: string;
-  run: {
-    run_id: string;
-    flow_id: string;
-    flow_version: number;
-    trace_id?: string | null;
-    status: string;
-  };
-  definition: {
-    flow_id: string;
-    version: number;
-    checksum: string;
-    steps_count: number;
-  };
-  definition_snapshot: Record<string, unknown>;
-  steps: FlowRunDebugStep[];
-  security: {
-    redaction_applied: boolean;
-    classification_field: string;
-    mcp_policy_field: string;
-  };
-};
-
-export type FlowRunEvidence = {
-  run: Record<string, unknown>;
-  definition_snapshot: Record<string, unknown>;
-  step_results: FlowStepResult[];
-  step_attempts: Record<string, unknown>[];
-  debug_export: FlowRunDebugExport;
-};
-
-export type FlowRunEvidenceExport = {
-  schema_version: string;
-  generated_at: string;
-  content_hash: string;
-  bundle: FlowRunEvidence;
-};
-
-export type FlowRunRedispatchResult = {
-  run: FlowRun;
-  redispatched_count: number;
-};
-
-export type DryRunResult = {
-  step_order: number;
-  step_id: string;
-  valid: boolean;
-  resolved_bindings?: Record<string, string>;
-  errors?: string[];
-};
+export type FlowRunEvidenceExport = components["schemas"]["FlowRunEvidenceExportResponse"];
+export type FlowRunRedispatchResult = components["schemas"]["FlowRunRedispatchResponse"];
 export type GroupChatSparse = Omit<components["schemas"]["GroupChatSparse"], "user_id">;
 export type ChatPartner =
   | { id: string; type: "assistant" }

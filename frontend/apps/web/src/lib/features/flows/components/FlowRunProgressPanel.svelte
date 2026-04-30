@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FlowGraph, FlowRunStepOutput, Intric } from "@intric/intric-js";
+  import type { FlowGraph, FlowRunStep, Intric } from "@intric/intric-js";
   import { onMount, untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -50,13 +50,7 @@
     return await eneo.flows.runs.steps({ flowId, runId });
   }
 
-  function applySnapshot({
-    graph,
-    steps
-  }: {
-    graph: FlowGraph | null;
-    steps: FlowRunStepOutput[];
-  }) {
+  function applySnapshot({ graph, steps }: { graph: FlowGraph | null; steps: FlowRunStep[] }) {
     graphSnapshot = graph;
     snapshot = buildFlowRunProgressSnapshot(graphSnapshot, steps);
     onSnapshotUpdate?.(snapshot);

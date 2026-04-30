@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FlowStepResult, Intric } from "@intric/intric-js";
+  import type { FlowRunStep, Intric } from "@intric/intric-js";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { IconCopy } from "@intric/icons/copy";
   import { IconCheck } from "@intric/icons/check";
@@ -54,7 +54,7 @@
     formatBytes,
     getCacheStatusLabel
   }: {
-    result: FlowStepResult;
+    result: FlowRunStep;
     stepDef: Record<string, unknown> | undefined;
     duration: string | null;
     transcription: FlowRunTranscriptionTelemetry | null;

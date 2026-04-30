@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FlowRunDebugExport, Intric, FlowStepResult } from "@intric/intric-js";
+  import type { FlowRunEvidenceWithTypedSteps, FlowRunStep, Intric } from "@intric/intric-js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { onMount } from "svelte";
   import { toast } from "$lib/components/toast";
@@ -42,13 +42,7 @@
     fallbackSnapshot?: FlowRunProgressSnapshot | null;
   } = $props();
 
-  type EvidencePayload = {
-    run: Record<string, unknown>;
-    definition_snapshot: Record<string, unknown>;
-    step_results: FlowStepResult[];
-    step_attempts: Record<string, unknown>[];
-    debug_export: FlowRunDebugExport;
-  };
+  type EvidencePayload = FlowRunEvidenceWithTypedSteps;
 
   type FlowRunTranscriptionTelemetry = {
     transcript_bytes?: number;
@@ -216,7 +210,7 @@
     return debugStep?.rag ?? null;
   }
 
-  function getStepTranscription(result: FlowStepResult): FlowRunTranscriptionTelemetry | null {
+  function getStepTranscription(result: FlowRunStep): FlowRunTranscriptionTelemetry | null {
     const payload = result.input_payload_json;
     if (payload === null || payload === undefined || typeof payload !== "object") {
       return null;

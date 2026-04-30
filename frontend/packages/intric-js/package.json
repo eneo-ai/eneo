@@ -6,6 +6,7 @@
   "main": "index.js",
   "types": "index.d.ts",
   "scripts": {
+    "check": "tsc --noEmit -p tsconfig.type-smoke.json",
     "lint": "prettier --check . && eslint .",
     "format": "prettier --write .",
     "update": "node update.js"

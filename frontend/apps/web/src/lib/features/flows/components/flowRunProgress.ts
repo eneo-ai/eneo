@@ -2,7 +2,7 @@ import type {
   FlowGraph,
   FlowGraphNode,
   FlowRunOutputPayload,
-  FlowRunStepOutput
+  FlowRunStep
 } from "@intric/intric-js";
 
 export type FlowRunProgressStep = {
@@ -50,7 +50,7 @@ export function isFlowRunTerminal(status: string): boolean {
 
 export function buildFlowRunProgressSnapshot(
   graph: FlowGraph | null,
-  steps: FlowRunStepOutput[]
+  steps: FlowRunStep[]
 ): FlowRunProgressSnapshot {
   const stepsByOrder = new Map(steps.map((step) => [step.step_order, step] as const));
   const graphNodes = (graph?.nodes ?? [])

@@ -1,5 +1,13 @@
 import type { FlowRunDebugRagReference, FlowRunDebugRagReferenceChunk } from "@intric/intric-js";
 
+type DisplayableKnowledgeChunk = FlowRunDebugRagReferenceChunk & { snippet: string };
+
+// Historical evidence can contain null counts even though the generated schema
+// now defaults matched_chunk_count to a number.
+type RuntimeKnowledgeReference = Omit<FlowRunDebugRagReference, "matched_chunk_count"> & {
+  matched_chunk_count?: number | null;
+};
+
 export type KnowledgeReferenceCounts = {
   matchedCount: number;
   displayedCount: number;
@@ -8,14 +16,15 @@ export type KnowledgeReferenceCounts = {
 
 export function getDisplayableKnowledgeChunks(
   chunks: FlowRunDebugRagReferenceChunk[] | null | undefined
-): FlowRunDebugRagReferenceChunk[] {
+): DisplayableKnowledgeChunk[] {
   return (chunks ?? []).filter(
-    (chunk) => typeof chunk.snippet === "string" && chunk.snippet.trim().length > 0
+    (chunk): chunk is DisplayableKnowledgeChunk =>
+      typeof chunk.snippet === "string" && chunk.snippet.trim().length > 0
   );
 }
 
 export function getKnowledgeReferenceCounts(
-  reference: FlowRunDebugRagReference
+  reference: RuntimeKnowledgeReference
 ): KnowledgeReferenceCounts {
   const displayedCount = getDisplayableKnowledgeChunks(reference.chunks).length;
   // Matched chunks can be larger because evidence stores a capped display subset.

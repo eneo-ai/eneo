@@ -56,11 +56,7 @@ export function initFlows(client) {
     }
   };
 
-  const _reservedInputPayloadKeys = new Set([
-    "expected_flow_version",
-    "file_ids",
-    "step_inputs"
-  ]);
+  const _reservedInputPayloadKeys = new Set(["expected_flow_version", "file_ids", "step_inputs"]);
 
   const _rejectReservedInputPayloadKeys = (input_payload_json) => {
     if (
@@ -76,9 +72,7 @@ export function initFlows(client) {
     if (keys.length === 0) {
       return;
     }
-    const error = new Error(
-      "input_payload_json contains reserved Flow run orchestration keys."
-    );
+    const error = new Error("input_payload_json contains reserved Flow run orchestration keys.");
     error.code = "flow_run_reserved_input_payload_key";
     error.status = 400;
     error.keys = keys.sort();
@@ -146,11 +140,7 @@ export function initFlows(client) {
    *   step_inputs?: Record<string, {file_ids?: string[]}>
    * }}
    */
-  const _buildRunRequestBody = ({
-    expected_flow_version,
-    input_payload_json,
-    step_inputs
-  }) => {
+  const _buildRunRequestBody = ({ expected_flow_version, input_payload_json, step_inputs }) => {
     const normalizedStepInputs = _normalizeStepInputs(step_inputs);
     return {
       ...(expected_flow_version != null ? { expected_flow_version } : {}),
