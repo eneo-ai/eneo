@@ -351,14 +351,23 @@ class TestCreateSessionEndpoint:
     @pytest.mark.anyio
     async def test_logs_audit_event(self):
         container = _make_container()
+        user = container.user.return_value
+        space_id = uuid4()
+        flow_id = uuid4()
         _configure_space_with_planner_model(container)
-        session = _make_session_domain()
+        session = _make_session_domain(
+            space_id=space_id,
+            flow_id=flow_id,
+            target_kind=TargetKind.EDIT,
+            actor_user_id=user.id,
+        )
         service = container.ai_builder_service.return_value
         service.create_session.return_value = session
 
         body = CreateSessionRequest(
-            target_kind=TargetKind.CREATE,
-            space_id=uuid4(),
+            target_kind=TargetKind.EDIT,
+            space_id=space_id,
+            flow_id=flow_id,
         )
         await create_session(
             request=MagicMock(),
@@ -367,11 +376,21 @@ class TestCreateSessionEndpoint:
         )
 
         audit_service = container.audit_service.return_value
-        audit_service.log_async.assert_called_once()
-        call_kwargs = audit_service.log_async.call_args.kwargs
+        audit_service.log_async.assert_awaited_once()
+        call_kwargs = audit_service.log_async.await_args.kwargs
+        assert call_kwargs["tenant_id"] == user.tenant_id
+        assert call_kwargs["actor_id"] == user.id
         assert call_kwargs["action"] == ActionType.AI_BUILDER_SESSION_CREATED
         assert call_kwargs["entity_type"] == EntityType.AI_BUILDER_SESSION
         assert call_kwargs["entity_id"] == session.id
+        metadata = call_kwargs["metadata"]
+        assert metadata["actor"]["id"] == str(user.id)
+        assert metadata["target"]["id"] == str(session.id)
+        assert metadata["target"]["space_id"] == str(space_id)
+        assert metadata["extra"] == {
+            "target_kind": TargetKind.EDIT.value,
+            "flow_id": str(flow_id),
+        }
 
     @pytest.mark.anyio
     async def test_checks_flow_edit_permission(self):
@@ -797,11 +816,19 @@ class TestCancelSessionEndpoint:
     @pytest.mark.anyio
     async def test_cancels_session_and_logs_audit(self):
         container = _make_container()
-        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        user = container.user.return_value
+        flow_id = uuid4()
+        session = _make_session_domain(
+            actor_user_id=user.id,
+            flow_id=flow_id,
+            target_kind=TargetKind.EDIT,
+        )
         cancelled = _make_session_domain(
             session_id=session.id,
             space_id=session.space_id,
-            actor_user_id=container.user.return_value.id,
+            flow_id=flow_id,
+            target_kind=TargetKind.EDIT,
+            actor_user_id=user.id,
             status=SessionStatus.CANCELLED,
         )
         service = container.ai_builder_service.return_value
@@ -818,6 +845,17 @@ class TestCancelSessionEndpoint:
         service.cancel_session.assert_called_once_with(session.id)
         audit_service = container.audit_service.return_value
         audit_service.log_async.assert_awaited_once()
+        call_kwargs = audit_service.log_async.await_args.kwargs
+        assert call_kwargs["tenant_id"] == user.tenant_id
+        assert call_kwargs["actor_id"] == user.id
+        assert call_kwargs["action"] == ActionType.AI_BUILDER_SESSION_CANCELLED
+        assert call_kwargs["entity_type"] == EntityType.AI_BUILDER_SESSION
+        assert call_kwargs["entity_id"] == session.id
+        metadata = call_kwargs["metadata"]
+        assert metadata["actor"]["id"] == str(user.id)
+        assert metadata["target"]["id"] == str(session.id)
+        assert metadata["target"]["space_id"] == str(session.space_id)
+        assert metadata["extra"] == {"target_kind": TargetKind.EDIT.value}
 
     @pytest.mark.anyio
     async def test_rejects_non_creator_even_with_space_edit_permission(self):
@@ -1557,10 +1595,11 @@ class TestApprovePlanEndpoint:
     @pytest.mark.anyio
     async def test_logs_audit_event(self):
         container = _make_container()
+        user = container.user.return_value
         plan = _make_plan_domain(status=PlanStatus.APPROVED)
         session = _make_session_domain(
             session_id=plan.session_id,
-            actor_user_id=container.user.return_value.id,
+            actor_user_id=user.id,
         )
         service = container.ai_builder_service.return_value
         service.get_plan.return_value = plan
@@ -1574,11 +1613,17 @@ class TestApprovePlanEndpoint:
         )
 
         audit_service = container.audit_service.return_value
-        audit_service.log_async.assert_called_once()
-        call_kwargs = audit_service.log_async.call_args.kwargs
+        audit_service.log_async.assert_awaited_once()
+        call_kwargs = audit_service.log_async.await_args.kwargs
+        assert call_kwargs["tenant_id"] == user.tenant_id
+        assert call_kwargs["actor_id"] == user.id
         assert call_kwargs["action"] == ActionType.AI_BUILDER_PLAN_APPROVED
         assert call_kwargs["entity_type"] == EntityType.AI_BUILDER_SESSION
         assert call_kwargs["entity_id"] == plan.session_id
+        metadata = call_kwargs["metadata"]
+        assert metadata["actor"]["id"] == str(user.id)
+        assert metadata["target"]["id"] == str(plan.id)
+        assert metadata["extra"] == {"plan_id": str(plan.id)}
 
     @pytest.mark.anyio
     async def test_checks_flow_edit_permission(self):
@@ -1636,6 +1681,7 @@ class TestApplyPlanEndpoint:
     @pytest.mark.anyio
     async def test_logs_audit_event(self):
         container = _make_container()
+        user = container.user.return_value
         flow_id = uuid4()
         plan = _make_plan_domain(status=PlanStatus.APPROVED)
         session = _make_session_domain()
@@ -1662,11 +1708,23 @@ class TestApplyPlanEndpoint:
         )
 
         audit_service = container.audit_service.return_value
-        audit_service.log_async.assert_called_once()
-        call_kwargs = audit_service.log_async.call_args.kwargs
+        audit_service.log_async.assert_awaited_once()
+        call_kwargs = audit_service.log_async.await_args.kwargs
+        assert call_kwargs["tenant_id"] == user.tenant_id
+        assert call_kwargs["actor_id"] == user.id
         assert call_kwargs["action"] == ActionType.AI_BUILDER_FLOW_APPLIED
         assert call_kwargs["entity_type"] == EntityType.FLOW
         assert call_kwargs["entity_id"] == flow_id
+        metadata = call_kwargs["metadata"]
+        assert metadata["actor"]["id"] == str(user.id)
+        assert metadata["target"]["id"] == str(flow_id)
+        assert metadata["target"]["name"] == "Flow"
+        assert metadata["extra"] == {
+            "plan_id": str(plan.id),
+            "steps_created": 1,
+            "steps_updated": 2,
+            "steps_removed": 0,
+        }
 
     @pytest.mark.anyio
     async def test_checks_flow_edit_permission(self):

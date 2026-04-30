@@ -100,7 +100,7 @@ async def test_retry_forced_tool_after_text_does_not_inject_flow_into_processors
         flow=None,
     )
 
-    assert result == {"event": "plan", "data": "{}"}
+    assert result == ({"event": "plan", "data": "{}"},)
     assert processed_arguments["flow_name"] == "Test"
 
 
@@ -154,7 +154,7 @@ async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_t
         flow=None,
     )
 
-    assert result == {"event": "plan", "data": "{}"}
+    assert result == ({"event": "plan", "data": "{}"},)
     assert processed_arguments["flow_name"] == "Text JSON outline"
     call_repair_completion.assert_not_awaited()
 

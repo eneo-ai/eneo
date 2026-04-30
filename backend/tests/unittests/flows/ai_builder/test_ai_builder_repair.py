@@ -16,7 +16,9 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
 )
 from intric.flows.ai_builder.ai_builder_repair import (
     MAX_ORCHESTRATOR_REPAIR_RETRIES,
+    MAX_PARSE_REPAIR_RETRIES,
     RepairOutcome,
+    build_parse_repair_user_message,
     repair_planner_turn,
 )
 from intric.flows.ai_builder.planning_state import ArchitectureCommit, StepTriple
@@ -86,6 +88,22 @@ def _payload_for(kind: str) -> dict[str, Any]:
 def _llm_response(raw_json: str) -> MagicMock:
     message = MagicMock(content=raw_json, tool_calls=None)
     return MagicMock(choices=[MagicMock(message=message, finish_reason="stop")])
+
+
+def test_parse_repair_has_separate_single_retry_budget() -> None:
+    assert MAX_PARSE_REPAIR_RETRIES == 1
+
+
+def test_parse_repair_prompt_pins_raw_json_contract() -> None:
+    content = build_parse_repair_user_message(
+        parse_error_message="missing planner_action"
+    )
+
+    assert "single raw JSON object" in content
+    assert "Do NOT wrap" in content
+    assert "Do NOT add prose" in content
+    assert "`architecture_commit: null`" in content
+    assert "the server derives the architecture" in content
 
 
 @pytest.mark.asyncio

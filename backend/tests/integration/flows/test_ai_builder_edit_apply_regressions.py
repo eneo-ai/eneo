@@ -4,7 +4,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.model_enums import ModelFamily, ModelHostingLocation, ModelOrg, ModelStability
+from intric.ai_models.model_enums import (
+    ModelFamily,
+    ModelHostingLocation,
+    ModelOrg,
+    ModelStability,
+)
 from intric.database.tables.ai_models_table import TranscriptionModels
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.spaces_table import SpacesTranscriptionModels
@@ -16,12 +21,14 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepPatch,
     StepPlacement,
 )
-from intric.flows.ai_builder.ai_builder_materializer import compile_changeset, execute_changeset
+from intric.flows.ai_builder.ai_builder_materializer import (
+    compile_changeset,
+    execute_changeset,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     InputSource,
     InputType,
-    OutputMode,
     OutputType,
 )
 from intric.flows.flow import FlowStep
@@ -158,7 +165,9 @@ async def test_execute_changeset_clears_stale_runtime_input_after_transcription_
             operations=[
                 StepEditOperation(
                     op="add",
-                    placement=StepPlacement(position="before", anchor_ref="existing_step_1"),
+                    placement=StepPlacement(
+                        position="before", anchor_ref="existing_step_1"
+                    ),
                     add_payload=AddStepPayload(
                         name="Transkribera ljudfil",
                         assistant_spec=AssistantSpec(
@@ -166,7 +175,6 @@ async def test_execute_changeset_clears_stale_runtime_input_after_transcription_
                         ),
                         input_source=InputSource.FLOW_INPUT,
                         input_type=InputType.AUDIO,
-                        output_mode=OutputMode.TRANSCRIBE_ONLY,
                         output_type=OutputType.TEXT,
                     ),
                 ),
@@ -176,7 +184,9 @@ async def test_execute_changeset_clears_stale_runtime_input_after_transcription_
                     patch=StepPatch(
                         input_source=InputSource.PREVIOUS_STEP,
                         input_type=InputType.TEXT,
-                        assistant_spec=AssistantSpec(instructions="Analysera transkriberingen."),
+                        assistant_spec=AssistantSpec(
+                            instructions="Analysera transkriberingen."
+                        ),
                     ),
                 ),
             ],
