@@ -15,6 +15,10 @@ from intric.flows.runtime_input import (
 )
 from intric.main.exceptions import BadRequestException
 
+FLOW_RUN_ORCHESTRATION_INPUT_KEYS = frozenset(
+    {"expected_flow_version", "file_ids", "step_inputs"}
+)
+
 
 class _FileRepositoryProtocol(Protocol):
     async def get_list_by_id_and_user(
@@ -96,36 +100,9 @@ def normalize_step_inputs_payload(
                     "Each step_inputs.file_ids value must be a UUID.",
                     code="flow_run_invalid_step_inputs",
                 ) from exc
-        normalized[step_id] = normalized_ids
+        normalized[step_id] = sorted(set(normalized_ids), key=str)
 
-    return normalized
-
-
-def apply_legacy_step_one_adapter(
-    *,
-    steps: list[RuntimeStep],
-    specs: dict[UUID, RuntimeStepInputSpec],
-    normalized_step_inputs: dict[UUID, list[UUID]],
-    file_ids: list[UUID] | None,
-) -> dict[UUID, list[UUID]]:
-    if not file_ids:
-        return normalized_step_inputs
-
-    step_one = next((step for step in steps if step.step_order == 1), None)
-    if step_one is None or step_one.step_id not in specs:
-        raise BadRequestException(
-            "Top-level file_ids can only be used for a step-1 runtime input.",
-            code="flow_run_legacy_step_input_unsupported",
-        )
-    if step_one.step_id in normalized_step_inputs:
-        raise BadRequestException(
-            "Do not mix top-level file_ids with canonical step_inputs for step 1.",
-            code="flow_run_duplicate_step_input",
-        )
-
-    adapted = dict(normalized_step_inputs)
-    adapted[step_one.step_id] = list(file_ids)
-    return adapted
+    return dict(sorted(normalized.items(), key=lambda item: str(item[0])))
 
 
 async def validate_submitted_step_inputs(

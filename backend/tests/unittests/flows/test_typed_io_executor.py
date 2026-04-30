@@ -109,6 +109,10 @@ def _runtime_step(
     output_mode: str = "pass_through",
     output_config: dict | None = None,
 ) -> RuntimeStep:
+    if input_config is None and input_type in {"document", "file"}:
+        input_config = {"runtime_input": {"enabled": True, "input_format": "document"}}
+    if input_config is None and input_type == "audio":
+        input_config = {"runtime_input": {"enabled": True, "input_format": "audio"}}
     return RuntimeStep(
         step_id=uuid4(),
         step_order=step_order,
@@ -124,6 +128,18 @@ def _runtime_step(
         input_type=input_type,
         input_contract=input_contract,
     )
+
+
+def _runtime_file_payload(
+    *,
+    step_id,
+    file_ids: list[str],
+    text: str = "",
+) -> dict[str, object]:
+    return {
+        "text": text,
+        "step_inputs": {str(step_id): {"file_ids": file_ids}},
+    }
 
 
 def _completed_step_result(
@@ -318,10 +334,15 @@ async def test_resolve_step_input_document_loads_files(user):
     """When input_type=document with file_ids, files are loaded and text is extracted."""
     executor, _, _, _ = _build_executor(user)
     file_id = uuid4()
+    step = _runtime_step(input_type="document")
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={"text": "fallback", "file_ids": [str(file_id)]},
+        input_payload=_runtime_file_payload(
+            step_id=step.step_id,
+            file_ids=[str(file_id)],
+            text="fallback",
+        ),
     )
     fake_file = SimpleNamespace(
         id=file_id,
@@ -335,7 +356,6 @@ async def test_resolve_step_input_document_loads_files(user):
     )
     executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
 
-    step = _runtime_step(input_type="document")
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     resolved = await executor._resolve_step_input(
@@ -346,7 +366,7 @@ async def test_resolve_step_input_document_loads_files(user):
     )
 
     assert resolved.files == [fake_file]
-    assert resolved.text == "Extracted document text"
+    assert resolved.text == "Extracted document text\n\nfallback"
     assert resolved.runtime_input_metadata == {
         "text": "Extracted document text",
         "file_ids": [str(file_id)],
@@ -367,7 +387,7 @@ async def test_resolve_step_input_document_loads_files(user):
         "total_file_size": 128,
         "extracted_text_length": len("Extracted document text"),
         "input_format": "document",
-        "capture_mode": "flow_input_files",
+        "capture_mode": "runtime_input",
     }
 
 
@@ -376,15 +396,18 @@ async def test_resolve_step_input_document_rejects_extracted_text_over_inline_ca
     """Document extraction larger than max inline bytes should fail deterministically."""
     executor, _, _, _ = _build_executor(user, max_inline_text_bytes=8)
     file_id = uuid4()
+    step = _runtime_step(input_type="document")
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={"text": "", "file_ids": [str(file_id)]},
+        input_payload=_runtime_file_payload(
+            step_id=step.step_id,
+            file_ids=[str(file_id)],
+        ),
     )
     fake_file = SimpleNamespace(id=file_id, text="detta ar mycket langre an atta bytes")
     executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
 
-    step = _runtime_step(input_type="document")
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     with pytest.raises(TypedIOValidationException) as exc:
@@ -404,16 +427,20 @@ async def test_resolve_step_input_file_ids_full_match_enforcement(user):
     executor, _, _, _ = _build_executor(user)
     file_id_1 = uuid4()
     file_id_2 = uuid4()
+    step = _runtime_step(input_type="document")
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={"text": "x", "file_ids": [str(file_id_1), str(file_id_2)]},
+        input_payload=_runtime_file_payload(
+            step_id=step.step_id,
+            file_ids=[str(file_id_1), str(file_id_2)],
+            text="x",
+        ),
     )
     # Only return one of the two requested files
     fake_file = SimpleNamespace(id=file_id_1, text="doc")
     executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
 
-    step = _runtime_step(input_type="document")
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     with pytest.raises(TypedIOValidationException, match="not found or not accessible"):
@@ -429,12 +456,15 @@ async def test_resolve_step_input_file_ids_full_match_enforcement(user):
 async def test_resolve_step_input_invalid_file_ids_type_raises_typed_error(user):
     """Non-list file_ids should fail with typed_io_invalid_file_ids."""
     executor, _, _, _ = _build_executor(user)
+    step = _runtime_step(input_type="document")
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={"text": "x", "file_ids": "not-a-list"},
+        input_payload={
+            "text": "x",
+            "step_inputs": {str(step.step_id): {"file_ids": "not-a-list"}},
+        },
     )
-    step = _runtime_step(input_type="document")
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     with pytest.raises(TypedIOValidationException) as exc:
@@ -451,12 +481,15 @@ async def test_resolve_step_input_invalid_file_ids_type_raises_typed_error(user)
 async def test_resolve_step_input_invalid_file_id_value_raises_typed_error(user):
     """Malformed file ID values should fail with typed_io_invalid_file_ids."""
     executor, _, _, _ = _build_executor(user)
+    step = _runtime_step(input_type="document")
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={"text": "x", "file_ids": ["not-a-uuid"]},
+        input_payload={
+            "text": "x",
+            "step_inputs": {str(step.step_id): {"file_ids": ["not-a-uuid"]}},
+        },
     )
-    step = _runtime_step(input_type="document")
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     with pytest.raises(TypedIOValidationException) as exc:
@@ -1349,16 +1382,19 @@ async def test_empty_document_extraction_fails(user):
     """Document extraction producing empty text raises typed_io_empty_extraction."""
     executor, _, _, _ = _build_executor(user)
     file_id = uuid4()
+    step = _runtime_step(input_type="document")
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={"text": "", "file_ids": [str(file_id)]},
+        input_payload=_runtime_file_payload(
+            step_id=step.step_id,
+            file_ids=[str(file_id)],
+        ),
     )
     # File exists but has no extracted text
     fake_file = SimpleNamespace(id=file_id, text="")
     executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
 
-    step = _runtime_step(input_type="document")
     mock_assistant = MagicMock()
     mock_assistant.get_prompt_text.return_value = ""
     mock_assistant.completion_model_kwargs = MagicMock()
@@ -1380,14 +1416,18 @@ async def test_document_extraction_does_not_fallback_to_payload_text(user):
     """Document extraction must fail when files contain no text even if payload text exists."""
     executor, _, _, _ = _build_executor(user)
     file_id = uuid4()
+    step = _runtime_step(input_type="document")
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={"text": "fallback payload text", "file_ids": [str(file_id)]},
+        input_payload=_runtime_file_payload(
+            step_id=step.step_id,
+            file_ids=[str(file_id)],
+            text="fallback payload text",
+        ),
     )
     fake_file = SimpleNamespace(id=file_id, text="")
     executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
-    step = _runtime_step(input_type="document")
     executor._load_assistant = AsyncMock(
         return_value=_mock_assistant_for_execute_step()
     )
@@ -1403,14 +1443,17 @@ async def test_file_input_uses_extracted_file_text(user):
     """File input should use extracted file text and pass extraction guard."""
     executor, _, _, _ = _build_executor(user)
     file_id = uuid4()
+    step = _runtime_step(input_type="file")
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={"text": "", "file_ids": [str(file_id)]},
+        input_payload=_runtime_file_payload(
+            step_id=step.step_id,
+            file_ids=[str(file_id)],
+        ),
     )
     fake_file = SimpleNamespace(id=file_id, text="Extracted file text")
     executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
-    step = _runtime_step(input_type="file")
     executor._load_assistant = AsyncMock(
         return_value=_mock_assistant_for_execute_step()
     )
@@ -1461,13 +1504,17 @@ async def test_document_previous_step_rejected_with_specific_code(user):
 async def test_image_requires_valid_files(user):
     """Image input with no image files raises typed_io_missing_required_files."""
     executor, _, _, _ = _build_executor(user)
+    step = _runtime_step(input_type="image")
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={"text": "x", "file_ids": []},
+        input_payload=_runtime_file_payload(
+            step_id=step.step_id,
+            file_ids=[],
+            text="x",
+        ),
     )
 
-    step = _runtime_step(input_type="image")
     mock_assistant = MagicMock()
     mock_assistant.get_prompt_text.return_value = ""
     executor._load_assistant = AsyncMock(return_value=mock_assistant)
@@ -1483,7 +1530,7 @@ async def test_audio_step_does_not_forward_audio_files_to_llm(user):
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={"file_ids": [str(uuid4())]},
+        input_payload={},
     )
     step = _runtime_step(input_type="audio")
     assistant = _mock_assistant_for_execute_step()
@@ -1510,7 +1557,7 @@ async def test_audio_transcribe_only_skips_llm_and_rag(user):
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={"file_ids": [str(uuid4())]},
+        input_payload={},
     )
     step = _runtime_step(
         input_type="audio",

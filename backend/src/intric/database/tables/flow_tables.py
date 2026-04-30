@@ -46,6 +46,7 @@ FLOW_RUN_STATUS_VALUES = tuple(item.value for item in FlowRunStatus)
 FLOW_RUN_TERMINAL_SOURCE_VALUES = tuple(item.value for item in FlowRunTerminalSource)
 FLOW_STEP_RESULT_STATUS_VALUES = tuple(item.value for item in FlowStepResultStatus)
 FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(item.value for item in FlowStepAttemptStatus)
+FLOW_RUN_STEP_RESULT_FILE_SOURCE_VALUES = ("generated_output", "declared_artifact")
 MODULE_HEALTH_STATUS_VALUES = ("healthy", "unhealthy", "unknown")
 MODULE_COMPAT_STATUS_VALUES = ("compatible", "incompatible", "unknown")
 FLOW_TEMPLATE_ASSET_STATUS_VALUES = tuple(
@@ -601,6 +602,156 @@ class FlowStepAttempts(BasePublic):
             "flow_id",
             "step_id",
             "attempt_no",
+        ),
+    )
+
+
+class FlowRunStepInputFiles(BasePublic):
+    flow_run_id: Mapped[UUID] = mapped_column(
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    step_order: Mapped[int] = mapped_column(nullable=False)
+    attempt_no: Mapped[int] = mapped_column(nullable=False, server_default="1")
+    file_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Files.id, ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    ordinal: Mapped[int] = mapped_column(nullable=False)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_step_input_files_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_step_input_files_run_flow",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            "file_id",
+            name="uq_flow_run_step_input_files_run_step_attempt_file",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            "ordinal",
+            name="uq_flow_run_step_input_files_run_step_attempt_ordinal",
+        ),
+        Index(
+            "ix_flow_run_step_input_files_tenant_file",
+            "tenant_id",
+            "file_id",
+        ),
+        Index(
+            "ix_flow_run_step_input_files_run_step_attempt",
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+        ),
+        Index(
+            "ix_flow_run_step_input_files_flow_step",
+            "flow_id",
+            "step_id",
+        ),
+    )
+
+
+class FlowRunStepResultFiles(BasePublic):
+    flow_run_id: Mapped[UUID] = mapped_column(
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    step_result_id: Mapped[UUID] = mapped_column(
+        ForeignKey(FlowStepResults.id, ondelete="CASCADE"),
+        nullable=False,
+    )
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    step_order: Mapped[int] = mapped_column(nullable=False)
+    attempt_no: Mapped[int] = mapped_column(nullable=False, server_default="1")
+    file_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Files.id, ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    ordinal: Mapped[int] = mapped_column(nullable=False)
+    source: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"source IN ({_check_values(FLOW_RUN_STEP_RESULT_FILE_SOURCE_VALUES)})",
+            name="ck_flow_run_step_result_files_source",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_step_result_files_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_step_result_files_run_flow",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            "file_id",
+            name="uq_flow_run_step_result_files_run_step_attempt_file",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            "ordinal",
+            name="uq_flow_run_step_result_files_run_step_attempt_ordinal",
+        ),
+        Index(
+            "ix_flow_run_step_result_files_tenant_file",
+            "tenant_id",
+            "file_id",
+        ),
+        Index(
+            "ix_flow_run_step_result_files_run_step_attempt",
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+        ),
+        Index(
+            "ix_flow_run_step_result_files_step_result",
+            "step_result_id",
         ),
     )
 

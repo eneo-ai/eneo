@@ -1376,7 +1376,6 @@ def test_build_output_payload_includes_structured_and_artifacts():
     assert payload == {
         "text": "done",
         "generated_file_ids": [],
-        "file_ids": [],
         "webhook_delivered": False,
         "structured": {"ok": True},
         "artifacts": [{"file_id": "1", "name": "out.pdf"}],

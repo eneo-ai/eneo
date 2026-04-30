@@ -428,6 +428,8 @@ async def test_create_run_replays_existing_run_for_matching_idempotency_key(user
 
     payload = {"x": "y"}
     expected_fingerprint = service._build_idempotency_fingerprint(
+        tenant_id=user.tenant_id,
+        principal=service._principal(),
         flow_id=flow.id,
         flow_version=flow.published_version,
         input_payload_json={"x": "y", "expected_flow_version": 1},
@@ -543,6 +545,8 @@ async def test_create_run_replays_idempotent_run_before_concurrency_limit(user):
     )
     flow_repo.get.return_value = flow
     expected_fingerprint = service._build_idempotency_fingerprint(
+        tenant_id=user.tenant_id,
+        principal=service._principal(),
         flow_id=flow.id,
         flow_version=flow.published_version,
         input_payload_json={"x": "y", "expected_flow_version": 1},
@@ -935,6 +939,13 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
     assert payload["step_inputs"] == {
         str(runtime_step.id): {"file_ids": [str(file_id)]}
     }
+    assert flow_run_repo.create.await_args.kwargs["step_input_files"] == [
+        {
+            "step_id": runtime_step.id,
+            "step_order": 1,
+            "file_ids": [file_id],
+        }
+    ]
     flow_version_repo.get.assert_awaited_once_with(
         flow_id=flow.id,
         version=2,
@@ -1029,59 +1040,6 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
 
 
 @pytest.mark.asyncio
-async def test_create_run_rejects_duplicate_legacy_and_canonical_step_one_input(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow = _flow(user=user, published_version=1)
-    runtime_step = flow.steps[0].model_copy(
-        update={"input_config": {"runtime_input": {"enabled": True, "max_files": 2}}}
-    )
-    flow = flow.model_copy(update={"steps": [runtime_step, flow.steps[1]]})
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-    flow_repo.get.return_value = flow
-    flow_version_repo.get.return_value = FlowVersion(
-        flow_id=flow.id,
-        version=1,
-        tenant_id=user.tenant_id,
-        definition_checksum="checksum",
-        definition_json=_published_definition_json(
-            flow,
-            [
-                {
-                    "step_id": str(runtime_step.id),
-                    "step_order": 1,
-                    "assistant_id": str(runtime_step.assistant_id),
-                    "input_source": "flow_input",
-                    "input_type": "text",
-                    "input_config": runtime_step.input_config,
-                    "output_mode": "pass_through",
-                    "output_type": "json",
-                    "mcp_policy": "inherit",
-                }
-            ],
-        ),
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.create_run(
-            flow_id=flow.id,
-            input_payload_json={"x": "y"},
-            file_ids=[uuid4()],
-            step_inputs={runtime_step.id: {"file_ids": [uuid4()]}},
-        )
-
-    assert exc_info.value.code == "flow_run_duplicate_step_input"
-
-
 @pytest.mark.asyncio
 async def test_create_run_rejects_runtime_step_input_mimetype(user):
     flow_repo = _flow_repo()

@@ -275,7 +275,6 @@ def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "text": output.persisted_text,
         "generated_file_ids": [str(file_id) for file_id in output.generated_file_ids],
-        "file_ids": [str(file_id) for file_id in output.generated_file_ids],
         "webhook_delivered": False,
     }
     if output.structured_output is not None:

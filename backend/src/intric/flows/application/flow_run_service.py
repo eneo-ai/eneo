@@ -35,14 +35,18 @@ from intric.flows.flow_run_evidence_bundle import (
 from intric.flows.flow_run_export_json import render_evidence_json_export
 from intric.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
 from intric.flows.flow_run_step_inputs import (
-    apply_legacy_step_one_adapter,
+    FLOW_RUN_ORCHESTRATION_INPUT_KEYS,
     build_runtime_step_input_specs,
     normalize_step_inputs_payload,
     serialize_step_inputs_payload,
     validate_submitted_step_inputs,
 )
 from intric.flows.infrastructure.flow_repo import FlowRepository
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository, PreseedStep
+from intric.flows.infrastructure.flow_run_repo import (
+    FlowRunRepository,
+    PreseedStep,
+    StepInputFileProjection,
+)
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
 from intric.flows.published_definition import (
@@ -332,7 +336,6 @@ class FlowRunService:
         input_payload_json: dict[str, Any] | None,
         expected_flow_version: int | None = None,
         step_inputs: dict[UUID, dict[str, list[UUID]]] | None = None,
-        file_ids: list[UUID] | None = None,
         idempotency_key: str | None = None,
     ) -> FlowRun:
         idempotency_key = self._validate_idempotency_key(idempotency_key)
@@ -364,9 +367,11 @@ class FlowRunService:
             else None,
             payload=input_payload_json,
         )
+        self._reject_reserved_input_payload_keys(normalized_inline_payload)
         normalized_step_inputs: dict[UUID, list[UUID]] = {}
         runtime_version = None
-        if step_inputs is not None or file_ids:
+        step_input_file_projections: list[StepInputFileProjection] = []
+        if step_inputs is not None:
             flow_id = cast(UUID, flow.id)
             runtime_version = await self.flow_version_repo.get(
                 flow_id=flow_id,
@@ -385,12 +390,7 @@ class FlowRunService:
             runtime_specs = build_runtime_step_input_specs(
                 steps=runtime_steps, limits=limits
             )
-            normalized_step_inputs = apply_legacy_step_one_adapter(
-                steps=runtime_steps,
-                specs=runtime_specs,
-                normalized_step_inputs=normalize_step_inputs_payload(step_inputs),
-                file_ids=file_ids,
-            )
+            normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
             await validate_submitted_step_inputs(
                 steps=runtime_steps,
                 specs=runtime_specs,
@@ -399,16 +399,29 @@ class FlowRunService:
                 user_id=self.user.id,
                 principal=principal,
             )
+            step_order_by_id = {
+                runtime_step.step_id: runtime_step.step_order
+                for runtime_step in runtime_steps
+            }
+            step_input_file_projections = [
+                {
+                    "step_id": step_id,
+                    "step_order": step_order_by_id[step_id],
+                    "file_ids": file_ids,
+                }
+                for step_id, file_ids in normalized_step_inputs.items()
+                if file_ids
+            ]
         effective_payload = dict(normalized_inline_payload or {})
         effective_payload["expected_flow_version"] = flow.published_version
         if normalized_step_inputs:
             effective_payload["step_inputs"] = serialize_step_inputs_payload(
                 normalized_step_inputs
             )
-        if file_ids:
-            effective_payload["file_ids"] = [str(fid) for fid in file_ids]
         input_payload_json = effective_payload or None
         request_fingerprint = self._build_idempotency_fingerprint(
+            tenant_id=self.user.tenant_id,
+            principal=principal,
             flow_id=flow_id,
             flow_version=flow.published_version,
             input_payload_json=input_payload_json,
@@ -487,19 +500,52 @@ class FlowRunService:
                 definition_json=version.definition_json,
                 fallback_steps=flow.steps,
             ),
+            step_input_files=step_input_file_projections,
             idempotency_key=idempotency_key,
             request_fingerprint=request_fingerprint,
         )
         return created
 
+    @staticmethod
+    def _reject_reserved_input_payload_keys(
+        input_payload_json: dict[str, Any] | None,
+    ) -> None:
+        if input_payload_json is None:
+            return
+        reserved_keys = sorted(
+            set(input_payload_json) & FLOW_RUN_ORCHESTRATION_INPUT_KEYS
+        )
+        if not reserved_keys:
+            return
+        raise BadRequestException(
+            "Flow run input_payload_json contains reserved orchestration keys.",
+            code="flow_run_reserved_input_payload_key",
+            context={"keys": reserved_keys},
+        )
+
     def _build_idempotency_fingerprint(
         self,
         *,
+        tenant_id: UUID,
+        principal: FlowPrincipal,
         flow_id: UUID,
         flow_version: int,
         input_payload_json: dict[str, Any] | None,
     ) -> str:
         normalized = {
+            "request_fingerprint_algo_version": 1,
+            "tenant_id": str(tenant_id),
+            "principal_type": principal.principal_type.value,
+            "principal_user_id": (
+                str(principal.principal_user_id)
+                if principal.principal_user_id is not None
+                else None
+            ),
+            "principal_api_key_id": (
+                str(principal.principal_api_key_id)
+                if principal.principal_api_key_id is not None
+                else None
+            ),
             "flow_id": str(flow_id),
             "flow_version": flow_version,
             "input_payload_json": input_payload_json,

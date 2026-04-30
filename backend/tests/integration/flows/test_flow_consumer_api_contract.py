@@ -210,3 +210,25 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert len(steps) == 1
     assert steps[0]["status"] == "completed"
     assert steps[0]["output_payload_json"] == {"answer": "consumer-visible"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_create_rejects_removed_top_level_file_ids_before_body_shape_errors(
+    client,
+    admin_token,
+):
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
+
+    response = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/",
+        json={
+            "expected_flow_version": "not-an-int",
+            "file_ids": [str(uuid4())],
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "flow_run_top_level_file_ids_not_supported"

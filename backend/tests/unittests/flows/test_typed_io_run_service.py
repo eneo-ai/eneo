@@ -1,4 +1,4 @@
-"""TDD tests for file_ids support in FlowRunService — RED phase."""
+"""FlowRunService step input contract tests."""
 
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ from intric.flows.flow import (
     FlowStep,
     FlowVersion,
 )
+from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from intric.main.exceptions import BadRequestException
 
 
 def _flow_repo() -> AsyncMock:
@@ -65,6 +67,8 @@ def _version(user, flow: Flow) -> FlowVersion:
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
         definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
             "steps": [
                 {
                     "step_id": str(step.id),
@@ -86,8 +90,37 @@ def _version(user, flow: Flow) -> FlowVersion:
 
 
 @pytest.mark.asyncio
-async def test_create_run_stores_file_ids(user):
-    """file_ids should be merged into input_payload_json."""
+@pytest.mark.parametrize(
+    "reserved_key", ["expected_flow_version", "file_ids", "step_inputs"]
+)
+async def test_create_run_rejects_reserved_input_payload_keys(user, reserved_key: str):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user)
+    flow_repo.get = AsyncMock(return_value=flow)
+
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=10,
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_run(
+            flow_id=flow.id,
+            input_payload_json={reserved_key: "value"},
+        )
+
+    assert exc_info.value.code == "flow_run_reserved_input_payload_key"
+    assert exc_info.value.context == {"keys": [reserved_key]}
+    flow_run_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_run_stores_step_inputs_without_top_level_file_ids(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
@@ -129,23 +162,29 @@ async def test_create_run_stores_file_ids(user):
     await service.create_run(
         flow_id=flow.id,
         input_payload_json={"text": "hello"},
-        file_ids=[file_id_1, file_id_2],
+        step_inputs={flow.steps[0].id: {"file_ids": [file_id_2, file_id_1]}},
     )
 
-    # Verify file_ids were merged into the payload passed to repo.create
     create_kwargs = flow_run_repo.create.await_args.kwargs
     payload = create_kwargs["input_payload_json"]
-    assert payload["file_ids"] == [str(file_id_1), str(file_id_2)]
     assert payload["expected_flow_version"] == 1
     assert payload["step_inputs"] == {
-        str(flow.steps[0].id): {"file_ids": [str(file_id_1), str(file_id_2)]}
+        str(flow.steps[0].id): {
+            "file_ids": sorted([str(file_id_1), str(file_id_2)])
+        }
     }
     assert payload["text"] == "hello"
+    assert create_kwargs["step_input_files"] == [
+        {
+            "step_id": flow.steps[0].id,
+            "step_order": 1,
+            "file_ids": sorted([file_id_1, file_id_2], key=str),
+        }
+    ]
 
 
 @pytest.mark.asyncio
-async def test_create_run_no_file_ids(user):
-    """Works without file_ids — payload unchanged."""
+async def test_create_run_without_step_inputs_preserves_inline_payload(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()

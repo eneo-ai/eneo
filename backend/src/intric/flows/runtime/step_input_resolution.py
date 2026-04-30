@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable, cast
 
 from intric.flows.domain.flow import FlowRun, FlowStepResult
 from intric.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
+from intric.flows.flow_run_step_inputs import FLOW_RUN_ORCHESTRATION_INPUT_KEYS
 from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.input_files import (
     load_files_by_requested_ids,
@@ -211,104 +212,6 @@ async def resolve_step_input(
             legacy_prompt_binding_used = True
 
     if (
-        files is None
-        and step.input_source == "flow_input"
-        and step.input_type in ("document", "image", "file", "audio")
-    ):
-        raw_file_ids = (run.input_payload_json or {}).get("file_ids", [])
-        deps.logger.info(
-            "flow_executor.file_resolve run_id=%s step_order=%d input_type=%s file_ids=%s",
-            run.id,
-            step.step_order,
-            step.input_type,
-            raw_file_ids,
-        )
-        requested_ids = parse_requested_file_ids(raw_file_ids=raw_file_ids)
-        if (
-            requested_ids
-            and step.input_type != "audio"
-            and deps.max_generic_files is not None
-        ):
-            if len(requested_ids) > deps.max_generic_files:
-                raise TypedIOValidationException(
-                    f"Step {step.step_order}: too many files "
-                    f"({len(requested_ids)}, max {deps.max_generic_files}).",
-                    code="typed_io_too_many_files",
-                )
-        if requested_ids:
-            files = await _load_runtime_files(
-                requested_ids=requested_ids,
-                step_order=step.step_order,
-                state=state,
-                deps=deps,
-            )
-            deps.logger.info(
-                "flow_executor.file_resolve_result run_id=%s step_order=%d requested=%d returned=%d missing=%s",
-                run.id,
-                step.step_order,
-                len(requested_ids),
-                len(files),
-                [],
-            )
-        if step.input_type == "audio":
-            if deps.transcriber is None:
-                raise TypedIOValidationException(
-                    "Transcriber service is not available for audio input execution.",
-                    code="typed_io_transcription_failed",
-                )
-            audio_request = AudioRuntimeRequest(
-                run=run,
-                step=step,
-                context=context,
-                version_metadata=version_metadata,
-                files=files or [],
-                requested_ids=requested_ids,
-                max_audio_files=deps.max_audio_files or DEFAULT_MAX_AUDIO_FILES_PER_RUN,
-                max_inline_text_bytes=deps.max_inline_text_bytes,
-            )
-            audio_deps = AudioRuntimeDeps(
-                transcriber=deps.transcriber,
-                space_repo=deps.space_repo,
-                flow_run_repo=deps.flow_run_repo,
-                audit_service=deps.audit_service,
-                actor=deps.actor,
-            )
-            audio_resolution = await resolve_transcribe_and_attach_audio_input(
-                request=audio_request,
-                deps=audio_deps,
-            )
-            input_text = audio_resolution.text
-            transcription_metadata = audio_resolution.transcription_metadata
-            if audio_resolution.near_inline_limit_message is not None:
-                diagnostics.append(
-                    StepDiagnostic(
-                        code="typed_io_transcript_near_limit",
-                        message=audio_resolution.near_inline_limit_message,
-                        severity="info",
-                    )
-                )
-        elif step.input_type in ("document", "file") and files:
-            extracted_text = _extract_text_from_files(files)
-            deps.logger.info(
-                "flow_executor.document_text_extracted run_id=%s step_order=%d file_count=%d extracted_count=%d",
-                run.id,
-                step.step_order,
-                len(files),
-                1 if extracted_text else 0,
-            )
-            if extracted_text:
-                input_text = extracted_text
-                raw_extracted_text = input_text
-        if files:
-            runtime_input_metadata = _build_runtime_input_metadata(
-                text=input_text,
-                requested_ids=requested_ids,
-                input_format=_infer_file_input_format(step.input_type),
-                files=files,
-                capture_mode="flow_input_files",
-            )
-
-    if (
         runtime_input_config.enabled
         and runtime_input_metadata is not None
         and not used_question_binding
@@ -398,8 +301,6 @@ def _resolve_runtime_requested_ids(*, run: FlowRun, step: RuntimeStep) -> list[A
             return parse_requested_file_ids(
                 raw_file_ids=cast(dict[str, Any], raw_step_input).get("file_ids")
             )
-    if step.step_order == 1:
-        return parse_requested_file_ids(raw_file_ids=payload.get("file_ids"))
     return []
 
 
@@ -485,12 +386,6 @@ def _build_runtime_file_metadata(file: Any) -> dict[str, Any]:
             isinstance(transcription_value, str) and transcription_value.strip() != ""
         ),
     }
-
-
-def _infer_file_input_format(input_type: str) -> str:
-    if input_type in {"audio", "image", "document", "file"}:
-        return input_type
-    return "document"
 
 
 def _compose_runtime_and_chained_input(
@@ -611,7 +506,8 @@ def resolve_input_source_text(
 def _strip_runtime_orchestration_metadata(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    orchestration_keys = {"expected_flow_version", "step_inputs", "file_ids"}
     return {
-        key: value for key, value in payload.items() if key not in orchestration_keys
+        key: value
+        for key, value in payload.items()
+        if key not in FLOW_RUN_ORCHESTRATION_INPUT_KEYS
     }

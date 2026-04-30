@@ -15,6 +15,7 @@ from intric.authentication.principal_types import PrincipalType
 from intric.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRuns,
+    FlowRunStepInputFiles,
     FlowStepAttempts,
     FlowStepResults,
 )
@@ -42,6 +43,12 @@ class PreseedStep(TypedDict):
     step_id: UUID
     assistant_id: UUID
     step_order: int
+
+
+class StepInputFileProjection(TypedDict):
+    step_id: UUID
+    step_order: int
+    file_ids: Sequence[UUID]
 
 
 class FlowRunRepository:
@@ -73,6 +80,7 @@ class FlowRunRepository:
         tenant_id: UUID,
         input_payload_json: dict[str, Any] | None,
         preseed_steps: Sequence["PreseedStep"],
+        step_input_files: Sequence["StepInputFileProjection"] | None = None,
         idempotency_key: str | None = None,
         request_fingerprint: str | None = None,
     ) -> FlowRun:
@@ -113,6 +121,28 @@ class FlowRunRepository:
         ]
         if preseed_rows:
             await self.session.execute(sa.insert(FlowStepResults).values(preseed_rows))
+
+        step_input_file_rows = [
+            {
+                "flow_run_id": run_row.id,
+                "flow_id": flow_id,
+                "tenant_id": tenant_id,
+                "step_id": projection["step_id"],
+                "step_order": projection["step_order"],
+                "attempt_no": 1,
+                "file_id": file_id,
+                "ordinal": ordinal,
+            }
+            for projection in sorted(
+                step_input_files or (),
+                key=lambda item: (int(item["step_order"]), str(item["step_id"])),
+            )
+            for ordinal, file_id in enumerate(projection["file_ids"])
+        ]
+        if step_input_file_rows:
+            await self.session.execute(
+                sa.insert(FlowRunStepInputFiles).values(step_input_file_rows)
+            )
 
         return self.factory.from_flow_run_db(run_row)
 

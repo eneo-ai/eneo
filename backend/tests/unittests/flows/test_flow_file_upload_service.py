@@ -16,6 +16,7 @@ from intric.flows.flow_file_upload_service import (
     FlowFileUploadService,
 )
 from intric.flows.flow_input_limits import FlowInputLimits
+from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.main.exceptions import (
     BadRequestException,
     FileNotSupportedException,
@@ -109,7 +110,7 @@ async def test_policy_for_audio_includes_max_files_and_recommended_payload() -> 
     assert policy.max_file_size_bytes == 25_000_000
     assert policy.max_files_per_run == 10
     assert policy.recommended_run_payload == {
-        "file_ids": ["<file-id-uuid>"],
+        "step_inputs": {str(audio_step.id): {"file_ids": ["<file-id-uuid>"]}},
         "input_payload_json": {"text": "optional context for later prompt steps"},
     }
 
@@ -613,7 +614,9 @@ async def test_upload_rejects_when_policy_limit_is_missing(monkeypatch) -> None:
             accepted_mimetypes=["audio/mpeg"],
             max_file_size_bytes=None,
             max_files_per_run=10,
-            recommended_run_payload={"file_ids": ["<file-id-uuid>"]},
+            recommended_run_payload={
+                "step_inputs": {str(flow.steps[0].id): {"file_ids": ["<file-id-uuid>"]}}
+            },
         )
     )
     upload = UploadFile(
@@ -738,6 +741,8 @@ async def test_get_run_contract_returns_runtime_steps_and_template_readiness() -
     )
     flow_version_repo.get.return_value = SimpleNamespace(
         definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
             "steps": [
                 {
                     "step_id": str(runtime_step.id),
@@ -821,6 +826,8 @@ async def test_get_run_contract_caps_step_file_count_by_tenant_limit() -> None:
     )
     flow_version_repo.get.return_value = SimpleNamespace(
         definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
             "steps": [
                 {
                     "step_id": str(runtime_step.id),
@@ -884,6 +891,8 @@ async def test_get_run_contract_logs_template_lookup_failures(caplog) -> None:
     template_asset_repo.get.side_effect = RuntimeError("lookup failed")
     flow_version_repo.get.return_value = SimpleNamespace(
         definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
             "steps": [
                 {
                     "step_id": str(template_step.id),
@@ -936,6 +945,8 @@ async def test_upload_runtime_file_for_step_rejects_unknown_step_id() -> None:
     flow_service.get_flow.return_value = flow
     flow_version_repo.get.return_value = SimpleNamespace(
         definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
             "steps": [
                 {
                     "step_id": str(runtime_step.id),

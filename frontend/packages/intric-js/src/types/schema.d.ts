@@ -3918,8 +3918,8 @@ export interface paths {
      *            required runtime step inputs, and version pinning requirements.
      *         2. Upload any required files via `POST /api/v1/flows/{id}/files/` or the relevant
      *            `.../steps/{step_id}/runtime-files/` endpoint.
-     *         3. Submit the returned uploaded files as `file_ids`, together with any optional `step_inputs`
-     *            and structured `input_payload_json` fields in this run request.
+     *         3. Submit the returned uploaded files through `step_inputs[step_id].file_ids`,
+     *            together with any structured `input_payload_json` fields in this run request.
      *         4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs.
      *
      *         `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
@@ -11655,9 +11655,13 @@ export interface components {
      *       "max_file_size_bytes": 52428800,
      *       "max_files_per_run": 10,
      *       "recommended_run_payload": {
-     *         "file_ids": [
-     *           "00000000-0000-0000-0000-000000000002"
-     *         ]
+     *         "step_inputs": {
+     *           "00000000-0000-0000-0000-000000000003": {
+     *             "file_ids": [
+     *               "00000000-0000-0000-0000-000000000002"
+     *             ]
+     *           }
+     *         }
      *       }
      *     }
      */
@@ -11885,8 +11889,6 @@ export interface components {
       step_inputs?: {
         [key: string]: components["schemas"]["StepRunInput"];
       } | null;
-      /** File Ids */
-      file_ids?: string[] | null;
     };
     /**
      * FlowRunDebugAttempt

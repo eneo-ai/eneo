@@ -133,13 +133,12 @@ describe("flows templates endpoint", () => {
     });
   });
 
-  it("normalizes file id ordering before creating flow runs", async () => {
+  it("normalizes step input file id ordering before creating flow runs", async () => {
     const fetch = vi.fn(async () => ({ id: "run-1" }));
     const flows = initFlows({ fetch });
 
     await flows.runs.create({
       flow: { id: "flow-1" },
-      file_ids: ["file-3", "file-1", "file-2"],
       step_inputs: {
         "step-b": { file_ids: ["file-5", "file-4"] },
         "step-a": { file_ids: ["file-9"] }
@@ -147,7 +146,6 @@ describe("flows templates endpoint", () => {
     });
 
     expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
-      file_ids: ["file-1", "file-2", "file-3"],
       step_inputs: {
         "step-a": { file_ids: ["file-9"] },
         "step-b": { file_ids: ["file-4", "file-5"] }
@@ -162,7 +160,9 @@ describe("flows templates endpoint", () => {
     await flows.runs.create({
       flow: { id: "flow-1" },
       idempotencyKey: "flow-run:test-key",
-      file_ids: ["file-1"]
+      step_inputs: {
+        "step-1": { file_ids: ["file-1"] }
+      }
     });
 
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -181,8 +181,7 @@ describe("flows templates endpoint", () => {
       step_inputs: {
         "step-b": { file_ids: ["file-3", "file-2"] },
         "step-a": { file_ids: ["file-1"] }
-      },
-      file_ids: ["file-9", "file-4"]
+      }
     });
     const keyB = await flows.runs.deriveUploadIntentIdempotencyKey({
       flowId: "flow-1",
@@ -191,8 +190,7 @@ describe("flows templates endpoint", () => {
       step_inputs: {
         "step-a": { file_ids: ["file-1"] },
         "step-b": { file_ids: ["file-2", "file-3"] }
-      },
-      file_ids: ["file-4", "file-9"]
+      }
     });
 
     expect(keyA).toBe(keyB);
@@ -204,17 +202,81 @@ describe("flows templates endpoint", () => {
 
     const keyA = await flows.runs.deriveUploadIntentIdempotencyKey({
       flowId: "flow-1",
-      file_ids: ["file-1"]
+      step_inputs: { "step-1": { file_ids: ["file-1"] } }
     });
     const keyB = await flows.runs.deriveUploadIntentIdempotencyKey({
       flowId: "flow-1",
-      file_ids: ["file-2"]
+      step_inputs: { "step-1": { file_ids: ["file-2"] } }
     });
     const keyC = await flows.runs.deriveUploadIntentIdempotencyKey({
       flowId: "flow-2",
-      file_ids: ["file-1"]
+      step_inputs: { "step-1": { file_ids: ["file-1"] } }
     });
 
     expect(new Set([keyA, keyB, keyC]).size).toBe(3);
+  });
+
+  it("rejects top-level file_ids before creating a flow run", async () => {
+    const fetch = vi.fn(async () => ({ id: "run-1" }));
+    const flows = initFlows({ fetch });
+
+    await expect(
+      flows.runs.create({
+        flow: { id: "flow-1" },
+        file_ids: ["file-1"]
+      })
+    ).rejects.toMatchObject({
+      code: "flow_run_top_level_file_ids_not_supported",
+      status: 400
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects top-level file_ids before deriving upload-intent idempotency keys", async () => {
+    const flows = initFlows({ fetch: vi.fn() });
+
+    await expect(
+      flows.runs.deriveUploadIntentIdempotencyKey({
+        flowId: "flow-1",
+        file_ids: ["file-1"]
+      })
+    ).rejects.toMatchObject({
+      code: "flow_run_top_level_file_ids_not_supported",
+      status: 400
+    });
+  });
+
+  it("rejects reserved orchestration keys inside input payloads before creating a flow run", async () => {
+    const fetch = vi.fn(async () => ({ id: "run-1" }));
+    const flows = initFlows({ fetch });
+
+    await expect(
+      flows.runs.create({
+        flow: { id: "flow-1" },
+        input_payload_json: {
+          step_inputs: { "step-1": { file_ids: ["file-1"] } }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "flow_run_reserved_input_payload_key",
+      status: 400,
+      keys: ["step_inputs"]
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects reserved orchestration keys before deriving upload-intent idempotency keys", async () => {
+    const flows = initFlows({ fetch: vi.fn() });
+
+    await expect(
+      flows.runs.deriveUploadIntentIdempotencyKey({
+        flowId: "flow-1",
+        input_payload_json: { file_ids: ["file-1"] }
+      })
+    ).rejects.toMatchObject({
+      code: "flow_run_reserved_input_payload_key",
+      status: 400,
+      keys: ["file_ids"]
+    });
   });
 });

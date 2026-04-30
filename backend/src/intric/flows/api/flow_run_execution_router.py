@@ -58,8 +58,8 @@ _FLOW_RUN_CREATE_DESCRIPTION = """
        required runtime step inputs, and version pinning requirements.
     2. Upload any required files via `POST /api/v1/flows/{id}/files/` or the relevant
        `.../steps/{step_id}/runtime-files/` endpoint.
-    3. Submit the returned uploaded files as `file_ids`, together with any optional `step_inputs`
-       and structured `input_payload_json` fields in this run request.
+    3. Submit the returned uploaded files through `step_inputs[step_id].file_ids`,
+       together with any structured `input_payload_json` fields in this run request.
     4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs.
 
     `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
@@ -185,9 +185,7 @@ async def create_flow_run(
             if run_in.step_inputs is not None
             else None
         ),
-        file_ids=run_in.file_ids,
-        idempotency_key=idempotency_key
-        or getattr(request, "headers", {}).get("Idempotency-Key"),
+        idempotency_key=idempotency_key,
     )
 
     await container.audit_service().log_async(

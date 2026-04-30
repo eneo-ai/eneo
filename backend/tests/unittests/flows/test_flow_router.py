@@ -94,6 +94,7 @@ from intric.flows.flow import (
     FlowVersion,
 )
 from intric.flows.http_transport.test_action import HttpTestResult
+from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.main.exceptions import (
     BadRequestException,
     ErrorCodes,
@@ -261,7 +262,7 @@ def _user() -> SimpleNamespace:
 
 
 def _service_key() -> SimpleNamespace:
-    return SimpleNamespace(ownership="service")
+    return SimpleNamespace(id=uuid4(), ownership="service")
 
 
 @pytest.mark.asyncio
@@ -299,6 +300,8 @@ async def test_get_flow_graph_uses_run_version_snapshot_when_run_id_supplied():
         tenant_id=run.tenant_id,
         definition_checksum="checksum",
         definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow_id),
             "steps": [
                 {
                     "step_id": str(snapshot_step_id),
@@ -740,14 +743,13 @@ async def test_create_flow_run_schedules_background_dispatch():
         input_payload_json={"case_id": "123"},
         expected_flow_version=None,
         step_inputs=None,
-        file_ids=None,
         idempotency_key=None,
     )
     audit_service.log_async.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_create_flow_run_forwards_idempotency_key_header():
+async def test_create_flow_run_forwards_idempotency_key():
     container = MagicMock()
     flow_run_service = AsyncMock()
     audit_service = AsyncMock()
@@ -771,12 +773,10 @@ async def test_create_flow_run_forwards_idempotency_key_header():
 
     await create_flow_run(
         id=flow_id,
-        request=SimpleNamespace(
-            state=SimpleNamespace(),
-            headers={"Idempotency-Key": "idem-123"},
-        ),
+        request=SimpleNamespace(state=SimpleNamespace()),
         run_in=FlowRunCreateRequest(input_payload_json={"case_id": "123"}),
         background_tasks=BackgroundTasks(),
+        idempotency_key="idem-123",
         container=container,
     )
 
@@ -785,7 +785,6 @@ async def test_create_flow_run_forwards_idempotency_key_header():
         input_payload_json={"case_id": "123"},
         expected_flow_version=None,
         step_inputs=None,
-        file_ids=None,
         idempotency_key="idem-123",
     )
 
@@ -1114,6 +1113,7 @@ async def test_dispatch_flow_run_after_commit_marks_failed_on_dispatch_error(
     monkeypatch,
 ):
     run_repo = AsyncMock()
+    terminalizer = AsyncMock()
     backend = MagicMock()
     backend.dispatch = AsyncMock(side_effect=RuntimeError("broker down"))
 
@@ -1142,6 +1142,9 @@ async def test_dispatch_flow_run_after_commit_marks_failed_on_dispatch_error(
         def flow_run_repo(self):
             return run_repo
 
+        def flow_run_terminalizer(self):
+            return terminalizer
+
     monkeypatch.setattr(
         flow_dispatch_module.sessionmanager, "session", lambda: _SessionContext()
     )
@@ -1160,11 +1163,11 @@ async def test_dispatch_flow_run_after_commit_marks_failed_on_dispatch_error(
         user_id=uuid4(),
     )
 
-    run_repo.update_status.assert_awaited_once()
-    kwargs = run_repo.update_status.await_args.kwargs
+    terminalizer.terminalize_run.assert_awaited_once()
+    kwargs = terminalizer.terminalize_run.await_args.kwargs
     assert kwargs["run_id"] == run_id
     assert kwargs["tenant_id"] == tenant_id
-    assert kwargs["status"] == FlowRunStatus.FAILED
+    assert kwargs["target_status"] == FlowRunStatus.FAILED
     assert kwargs["error_message"] == (
         "flow_dispatch_failed: Flow dispatch failed before execution started. "
         "Retry creating a new run."
@@ -1176,6 +1179,7 @@ async def test_dispatch_flow_run_after_commit_dispatches_without_status_update_o
     monkeypatch,
 ):
     run_repo = AsyncMock()
+    terminalizer = AsyncMock()
     backend = MagicMock()
     backend.dispatch = AsyncMock()
     fake_session = MagicMock()
@@ -1193,6 +1197,9 @@ async def test_dispatch_flow_run_after_commit_dispatches_without_status_update_o
 
         def flow_run_repo(self):
             return run_repo
+
+        def flow_run_terminalizer(self):
+            return terminalizer
 
     monkeypatch.setattr(
         flow_dispatch_module.sessionmanager, "session", lambda: _SessionContext()
@@ -1220,6 +1227,7 @@ async def test_dispatch_flow_run_after_commit_dispatches_without_status_update_o
         user_id=user_id,
     )
     run_repo.update_status.assert_not_awaited()
+    terminalizer.terminalize_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1417,7 +1425,9 @@ async def test_get_flow_input_policy_for_audio_step_returns_audio_mime_and_limit
     assert policy.max_file_size_bytes == 25_000_000
     assert policy.max_files_per_run == 10
     assert policy.recommended_run_payload is not None
-    assert policy.recommended_run_payload["file_ids"] == ["<file-id-uuid>"]
+    assert policy.recommended_run_payload["step_inputs"] == {
+        str(step.id): {"file_ids": ["<file-id-uuid>"]}
+    }
     assert "audio/mpeg" in policy.accepted_mimetypes
 
 
@@ -1481,7 +1491,11 @@ async def test_get_flow_input_policy_tolerates_unexpected_input_source(monkeypat
                 accepted_mimetypes=["audio/mpeg"],
                 max_file_size_bytes=25_000_000,
                 max_files_per_run=10,
-                recommended_run_payload={"file_ids": ["<file-id-uuid>"]},
+                recommended_run_payload={
+                    "step_inputs": {
+                        "<step-id-uuid>": {"file_ids": ["<file-id-uuid>"]}
+                    }
+                },
             )
 
     monkeypatch.setattr(

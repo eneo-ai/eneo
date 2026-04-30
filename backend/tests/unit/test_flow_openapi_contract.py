@@ -513,7 +513,6 @@ def test_openapi_flow_run_create_example_shape_is_consumer_valid(
     )
     assert set(example.keys()) <= {
         "expected_flow_version",
-        "file_ids",
         "input_payload_json",
         "step_inputs",
     }
@@ -531,7 +530,7 @@ def test_openapi_flow_run_create_example_shape_is_consumer_valid(
     )
 
 
-def test_openapi_flow_run_create_schema_still_exposes_top_level_file_ids(
+def test_openapi_flow_run_create_schema_removes_top_level_file_ids(
     openapi_spec: dict,
 ) -> None:
     schema = (
@@ -540,16 +539,8 @@ def test_openapi_flow_run_create_schema_still_exposes_top_level_file_ids(
         .get("FlowRunCreateRequest", {})
     )
     properties = schema.get("properties", {})
-    file_ids = properties.get("file_ids", {})
-
-    assert "file_ids" in properties
-    assert file_ids.get("title") == "File Ids"
-    assert any(
-        option.get("type") == "array"
-        and option.get("items", {}).get("format") == "uuid"
-        for option in file_ids.get("anyOf", [])
-        if isinstance(option, dict)
-    )
+    assert "file_ids" not in properties
+    assert "step_inputs" in properties
 
 
 def test_openapi_flow_step_create_schema_exposes_enum_constraints(

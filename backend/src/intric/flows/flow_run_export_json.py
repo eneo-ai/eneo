@@ -458,9 +458,8 @@ def _collect_artifact_ids(payload: Any, artifact_ids: set[str]) -> None:
         file_id = artifact.get("file_id")
         if file_id is not None:
             artifact_ids.add(str(file_id))
-    for key in ("generated_file_ids", "file_ids"):
-        for file_id in _as_json_list(payload_dict.get(key)):
-            artifact_ids.add(str(file_id))
+    for file_id in _as_json_list(payload_dict.get("generated_file_ids")):
+        artifact_ids.add(str(file_id))
 
 
 def _collect_artifact_names_from_payload(
@@ -562,7 +561,6 @@ def _strip_artifact_wrapper_keys(payload: dict[str, Any]) -> dict[str, Any]:
             "structured",
             "artifacts",
             "generated_file_ids",
-            "file_ids",
             "webhook_delivered",
         }
     }

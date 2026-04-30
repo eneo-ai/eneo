@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -20,6 +20,7 @@ from intric.database.tables.assistant_table import (
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.flow_tables import (
     FlowRuns,
+    FlowRunStepResultFiles,
     Flows,
     FlowStepResults,
     FlowSteps,
@@ -518,6 +519,7 @@ class FlowRepository:
         result: FlowStepResult,
         tenant_id: UUID,
         session: AsyncSession | None = None,
+        attempt_no: int = 1,
     ) -> None:
         db_session = session or self.session
 
@@ -568,8 +570,83 @@ class FlowRepository:
                 constraint="uq_flow_step_results_run_step",
                 set_=payload,
             )
+            .returning(FlowStepResults)
         )
-        await db_session.execute(stmt)
+        saved = await db_session.scalar(stmt)
+        if saved is None:
+            return
+        await self._replace_step_result_file_rows(
+            db_session=db_session,
+            result_row=saved,
+            output_payload_json=result.output_payload_json,
+            attempt_no=attempt_no,
+        )
+
+    async def _replace_step_result_file_rows(
+        self,
+        *,
+        db_session: AsyncSession,
+        result_row: FlowStepResults,
+        output_payload_json: dict[str, Any] | None,
+        attempt_no: int,
+    ) -> None:
+        await db_session.execute(
+            sa.delete(FlowRunStepResultFiles)
+            .where(FlowRunStepResultFiles.step_result_id == result_row.id)
+            .where(FlowRunStepResultFiles.tenant_id == result_row.tenant_id)
+            .where(FlowRunStepResultFiles.attempt_no == attempt_no)
+        )
+        if result_row.step_id is None or not isinstance(output_payload_json, dict):
+            return
+
+        sources_by_file = self._result_file_sources(output_payload_json)
+        if not sources_by_file:
+            return
+
+        rows = [
+            {
+                "flow_run_id": result_row.flow_run_id,
+                "flow_id": result_row.flow_id,
+                "tenant_id": result_row.tenant_id,
+                "step_result_id": result_row.id,
+                "step_id": result_row.step_id,
+                "step_order": result_row.step_order,
+                "attempt_no": attempt_no,
+                "file_id": file_id,
+                "ordinal": ordinal,
+                "source": source,
+            }
+            for ordinal, (file_id, source) in enumerate(
+                sorted(sources_by_file.items(), key=lambda item: str(item[0]))
+            )
+        ]
+        await db_session.execute(sa.insert(FlowRunStepResultFiles).values(rows))
+
+    @staticmethod
+    def _result_file_sources(output_payload_json: dict[str, Any]) -> dict[UUID, str]:
+        sources_by_file: dict[UUID, str] = {}
+        generated_file_ids = output_payload_json.get("generated_file_ids")
+        if isinstance(generated_file_ids, list):
+            for raw_file_id in cast(list[object], generated_file_ids):
+                try:
+                    sources_by_file[UUID(str(raw_file_id))] = "generated_output"
+                except (TypeError, ValueError):
+                    continue
+
+        artifacts = output_payload_json.get("artifacts")
+        if isinstance(artifacts, list):
+            for artifact in cast(list[object], artifacts):
+                if not isinstance(artifact, dict):
+                    continue
+                artifact_dict = cast(dict[str, object], artifact)
+                raw_file_id = artifact_dict.get("file_id")
+                try:
+                    # Declared artifacts are the consumer-facing file contract when
+                    # they also appear in the generated output list.
+                    sources_by_file[UUID(str(raw_file_id))] = "declared_artifact"
+                except (TypeError, ValueError):
+                    continue
+        return sources_by_file
 
     async def _sync_flow_steps(
         self,

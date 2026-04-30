@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.enums import (
@@ -19,6 +20,7 @@ from intric.flows.enums import (
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
 )
+from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED, NotProvided, partial_model
 
 FLOW_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
@@ -431,7 +433,16 @@ class FlowRunCreateRequest(BaseModel):
     expected_flow_version: int | None = None
     input_payload_json: dict[str, Any] | None = None
     step_inputs: dict[UUID, StepRunInput] | None = None
-    file_ids: list[UUID] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_top_level_file_ids(cls, data: object) -> object:
+        if isinstance(data, Mapping) and "file_ids" in data:
+            raise BadRequestException(
+                "Top-level file_ids is no longer supported. Use step_inputs[step_id].file_ids.",
+                code="flow_run_top_level_file_ids_not_supported",
+            )
+        return cast(object, data)
 
 
 class FlowAssistantCreateRequest(BaseModel):
@@ -478,7 +489,11 @@ class FlowInputPolicyPublic(BaseModel):
                 "max_file_size_bytes": 52428800,
                 "max_files_per_run": 10,
                 "recommended_run_payload": {
-                    "file_ids": ["00000000-0000-0000-0000-000000000002"]
+                    "step_inputs": {
+                        "00000000-0000-0000-0000-000000000003": {
+                            "file_ids": ["00000000-0000-0000-0000-000000000002"]
+                        }
+                    }
                 },
             }
         }

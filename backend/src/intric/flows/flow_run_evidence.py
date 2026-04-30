@@ -296,11 +296,10 @@ def _collect_artifact_ids(payload: Any, artifact_ids: set[str]) -> None:
                 file_id = artifact_dict.get("file_id")
                 if file_id is not None:
                     artifact_ids.add(str(file_id))
-    for key in ("generated_file_ids", "file_ids"):
-        file_ids = payload_dict.get(key)
-        if isinstance(file_ids, list):
-            for file_id in cast(list[object], file_ids):
-                artifact_ids.add(str(file_id))
+    generated_file_ids = payload_dict.get("generated_file_ids")
+    if isinstance(generated_file_ids, list):
+        for file_id in cast(list[object], generated_file_ids):
+            artifact_ids.add(str(file_id))
 
 
 def _collect_models_used(step_attempts: list[FlowStepAttempt]) -> list[str]:

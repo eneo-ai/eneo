@@ -212,7 +212,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             input_payload_json={"question": "What happened?"},
             expected_flow_version=1,
             step_inputs=None,
-            file_ids=None,
             idempotency_key=run_correlation_id,
         )
 
@@ -264,7 +263,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert run_row.status == FlowRunStatus.COMPLETED.value
         assert run_row.output_payload_json == {
             "text": "The run completed.",
-            "file_ids": [],
             "generated_file_ids": [],
             "webhook_delivered": False,
         }
@@ -284,7 +282,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert step_result_rows[0].status == FlowStepResultStatus.COMPLETED.value
         assert step_result_rows[0].output_payload_json == {
             "text": "The run completed.",
-            "file_ids": [],
             "generated_file_ids": [],
             "webhook_delivered": False,
         }
@@ -308,7 +305,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert evidence["run"]["status"] == FlowRunStatus.COMPLETED.value
         assert evidence["step_results"][0]["output_payload_json"] == {
             "text": "The run completed.",
-            "file_ids": [],
             "generated_file_ids": [],
             "webhook_delivered": False,
         }

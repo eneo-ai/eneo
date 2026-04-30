@@ -181,9 +181,15 @@ def _recommended_run_payload_for_input_type(
     *,
     input_type: str,
     accepts_file_upload: bool,
+    step_id: UUID | None,
 ) -> dict[str, object]:
     if accepts_file_upload:
-        base: dict[str, object] = {"file_ids": ["<file-id-uuid>"]}
+        resolved_step_id = str(step_id) if step_id is not None else "<step-id-uuid>"
+        base: dict[str, object] = {
+            "step_inputs": {
+                resolved_step_id: {"file_ids": ["<file-id-uuid>"]},
+            }
+        }
         if input_type == "audio":
             base["input_payload_json"] = {
                 "text": "optional context for later prompt steps",
@@ -238,6 +244,7 @@ def _build_policy(flow: Flow, limits: FlowInputLimits) -> FlowFileInputPolicy:
         recommended_run_payload=_recommended_run_payload_for_input_type(
             input_type=input_type,
             accepts_file_upload=accepts_file_upload,
+            step_id=step.id,
         ),
     )
 

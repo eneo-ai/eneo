@@ -945,7 +945,12 @@ class FlowRunExecutor:
         step_result: FlowStepResult,
         attempt_no: int,
     ) -> None:
-        await self.flow_repo.save_step_result(run_id, step_result, tenant_id=tenant_id)
+        await self.flow_repo.save_step_result(
+            run_id,
+            step_result,
+            tenant_id=tenant_id,
+            attempt_no=attempt_no,
+        )
         logger.info(
             "flow_executor.step_completed run_id=%s step_order=%d",
             run_id,

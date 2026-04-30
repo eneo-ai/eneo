@@ -21,6 +21,7 @@ from intric.flows.api.flow_models import (
     StepRunInput,
 )
 from intric.flows.enums import FlowStepAttemptStatus
+from intric.main.exceptions import BadRequestException
 
 
 def _payload(**overrides: object) -> dict[str, object]:
@@ -86,6 +87,13 @@ def test_flow_run_create_request_parses_typed_step_inputs() -> None:
     assert request.step_inputs is not None
     assert isinstance(request.step_inputs[step_id], StepRunInput)
     assert request.step_inputs[step_id].file_ids == [file_id]
+
+
+def test_flow_run_create_request_rejects_removed_top_level_file_ids() -> None:
+    with pytest.raises(BadRequestException) as exc_info:
+        FlowRunCreateRequest.model_validate({"file_ids": [str(uuid4())]})
+
+    assert exc_info.value.code == "flow_run_top_level_file_ids_not_supported"
 
 
 def test_graph_response_parses_typed_nodes_and_edges() -> None:

@@ -41,6 +41,50 @@ export function initFlows(client) {
       .map((byte) => byte.toString(16).padStart(2, "0"))
       .join("");
 
+  const _removedTopLevelFileIdsError = () => {
+    const error = new Error(
+      "Top-level file_ids is no longer supported. Use step_inputs[stepId].file_ids."
+    );
+    error.code = "flow_run_top_level_file_ids_not_supported";
+    error.status = 400;
+    return error;
+  };
+
+  const _rejectTopLevelFileIds = (file_ids) => {
+    if (file_ids !== undefined) {
+      throw _removedTopLevelFileIdsError();
+    }
+  };
+
+  const _reservedInputPayloadKeys = new Set([
+    "expected_flow_version",
+    "file_ids",
+    "step_inputs"
+  ]);
+
+  const _rejectReservedInputPayloadKeys = (input_payload_json) => {
+    if (
+      !input_payload_json ||
+      Array.isArray(input_payload_json) ||
+      typeof input_payload_json !== "object"
+    ) {
+      return;
+    }
+    const keys = Object.keys(input_payload_json).filter((key) =>
+      _reservedInputPayloadKeys.has(key)
+    );
+    if (keys.length === 0) {
+      return;
+    }
+    const error = new Error(
+      "input_payload_json contains reserved Flow run orchestration keys."
+    );
+    error.code = "flow_run_reserved_input_payload_key";
+    error.status = 400;
+    error.keys = keys.sort();
+    throw error;
+  };
+
   /**
    * @param {Record<string, {file_ids?: string[]}> | undefined} step_inputs
    * @returns {Record<string, {file_ids?: string[]}> | undefined}
@@ -64,23 +108,20 @@ export function initFlows(client) {
    *   flowId: string,
    *   expectedFlowVersion?: number,
    *   input_payload_json?: any,
-   *   step_inputs?: Record<string, {file_ids?: string[]}>,
-   *   file_ids?: string[]
+   *   step_inputs?: Record<string, {file_ids?: string[]}>
    * }} params
    * @returns {{
    *   flow_id: string,
    *   expected_flow_version?: number,
    *   input_payload_json?: any,
-   *   step_inputs?: Record<string, {file_ids?: string[]}>,
-   *   file_ids?: string[]
+   *   step_inputs?: Record<string, {file_ids?: string[]}>
    * }}
    */
   const _normalizeRunIntent = ({
     flowId,
     expectedFlowVersion,
     input_payload_json,
-    step_inputs,
-    file_ids
+    step_inputs
   }) => {
     const normalizedStepInputs = _normalizeStepInputs(step_inputs);
     return {
@@ -89,8 +130,7 @@ export function initFlows(client) {
       ...(input_payload_json !== undefined
         ? { input_payload_json: _stableSortObjectKeys(input_payload_json) }
         : {}),
-      ...(normalizedStepInputs ? { step_inputs: normalizedStepInputs } : {}),
-      ...(file_ids?.length ? { file_ids: [...file_ids].sort() } : {})
+      ...(normalizedStepInputs ? { step_inputs: normalizedStepInputs } : {})
     };
   };
 
@@ -98,21 +138,18 @@ export function initFlows(client) {
    * @param {{
    *   expected_flow_version?: number,
    *   input_payload_json?: any,
-   *   step_inputs?: Record<string, {file_ids?: string[]}>,
-   *   file_ids?: string[]
+   *   step_inputs?: Record<string, {file_ids?: string[]}>
    * }} params
    * @returns {{
    *   expected_flow_version?: number,
    *   input_payload_json?: any,
-   *   step_inputs?: Record<string, {file_ids?: string[]}>,
-   *   file_ids?: string[]
+   *   step_inputs?: Record<string, {file_ids?: string[]}>
    * }}
    */
   const _buildRunRequestBody = ({
     expected_flow_version,
     input_payload_json,
-    step_inputs,
-    file_ids
+    step_inputs
   }) => {
     const normalizedStepInputs = _normalizeStepInputs(step_inputs);
     return {
@@ -120,8 +157,7 @@ export function initFlows(client) {
       ...(input_payload_json !== undefined
         ? { input_payload_json: _stableSortObjectKeys(input_payload_json) }
         : {}),
-      ...(normalizedStepInputs ? { step_inputs: normalizedStepInputs } : {}),
-      ...(file_ids?.length ? { file_ids: [...file_ids].sort() } : {})
+      ...(normalizedStepInputs ? { step_inputs: normalizedStepInputs } : {})
     };
   };
 
@@ -131,11 +167,13 @@ export function initFlows(client) {
    *   expectedFlowVersion?: number,
    *   input_payload_json?: any,
    *   step_inputs?: Record<string, {file_ids?: string[]}>,
-   *   file_ids?: string[]
+   *   file_ids?: never
    * }} params
    * @returns {Promise<string>}
    */
   const _deriveUploadIntentIdempotencyKey = async (params) => {
+    _rejectTopLevelFileIds(params.file_ids);
+    _rejectReservedInputPayloadKeys(params.input_payload_json);
     if (!globalThis.crypto?.subtle) {
       throw new Error("Web Crypto is required to derive Flow run idempotency keys.");
     }
@@ -460,7 +498,7 @@ export function initFlows(client) {
        *  idempotencyKey?: string,
        *  input_payload_json?: any,
        *  step_inputs?: Record<string, {file_ids: string[]}>,
-       *  file_ids?: string[]
+       *  file_ids?: never
        * }} params
        * @throws {IntricError}
        */
@@ -472,11 +510,12 @@ export function initFlows(client) {
         step_inputs,
         file_ids
       }) => {
+        _rejectTopLevelFileIds(file_ids);
+        _rejectReservedInputPayloadKeys(input_payload_json);
         const requestBody = _buildRunRequestBody({
           expected_flow_version,
           input_payload_json,
-          step_inputs,
-          file_ids
+          step_inputs
         });
         return _fetch(`/api/v1/flows/${flow.id}/runs/`, {
           method: "post",
