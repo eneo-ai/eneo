@@ -42,6 +42,8 @@ class CompletionModelAssembler:
             reasoning=completion_model.reasoning,
             supports_tool_calling=completion_model.supports_tool_calling,
             base_url=completion_model.base_url,
+            litellm_model_name=completion_model.litellm_model_name,
+            model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
             security_classification=SecurityClassificationPublic.from_domain(
                 completion_model.security_classification,
                 return_none_if_not_enabled=False,
@@ -83,6 +85,9 @@ class CompletionModelAssembler:
             reasoning=completion_model.reasoning,
             supports_tool_calling=completion_model.supports_tool_calling,
             base_url=completion_model.base_url,
+            litellm_model_name=completion_model.litellm_model_name,
+            model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
+            provider_type=completion_model.provider_type,
         )
 
     def from_completion_models_to_models(

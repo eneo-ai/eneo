@@ -1,18 +1,22 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
-  import SelectCompletionModel from "$lib/features/ai-models/components/SelectCompletionModel.svelte";
-  import { IntricError, type Service } from "@intric/intric-js";
+  import {
+    IntricError,
+    type CompletionModel,
+    type ModelKwargs,
+    type Service
+  } from "@intric/intric-js";
   import { Button, Input, Select } from "@intric/ui";
   import { makeEditable } from "$lib/core/editable";
   import { getIntric } from "$lib/core/Intric";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import SelectBehaviour from "$lib/features/ai-models/components/SelectBehaviour.svelte";
+  import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
+  import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
+  import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import {
-    getBehaviour,
-    getKwargs,
-    type ModelBehaviour
-  } from "$lib/features/ai-models/ModelBehaviours";
-  import SelectBehaviourCustom from "$lib/features/ai-models/components/SelectBehaviourCustom.svelte";
+    filterSupportedModelKwargs,
+    hasModelSpecificSettings
+  } from "$lib/features/ai-models/ModelKwargCapabilities";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
@@ -27,17 +31,8 @@
   let stringJsonSchema = editableService.json_schema
     ? JSON.stringify(editableService.json_schema)
     : "";
-
-  const completion_model_config: {
-    behaviour: ModelBehaviour;
-    custom_kwargs: { temperature: number; top_p: number };
-  } = {
-    behaviour: getBehaviour(service.completion_model_kwargs),
-    custom_kwargs: {
-      temperature: service.completion_model_kwargs?.temperature ?? 1,
-      top_p: service.completion_model_kwargs?.top_p ?? 1
-    }
-  };
+  let completionModel = service.completion_model as CompletionModel | null;
+  let completionModelKwargs: ModelKwargs = service.completion_model_kwargs ?? {};
 
   let updatingService = false;
   async function updateService() {
@@ -56,9 +51,14 @@
       update.json_schema = undefined;
     }
 
-    // Now overwrite custom settings
-    update.completion_model_kwargs =
-      getKwargs(completion_model_config.behaviour) ?? completion_model_config.custom_kwargs;
+    if (completionModel && completionModel.id !== service.completion_model?.id) {
+      update.completion_model = { id: completionModel.id };
+    }
+
+    update.completion_model_kwargs = filterSupportedModelKwargs(
+      completionModelKwargs,
+      completionModel
+    );
 
     try {
       await intric.services.update({
@@ -93,16 +93,23 @@
   ></Input.TextArea>
 
   <div class="flex">
-    <SelectCompletionModel
-      bind:value={editableService.completion_model}
-      selectableModels={$currentSpace.completion_models}
+    <SelectAIModelV2
+      bind:selectedModel={completionModel}
+      availableModels={$currentSpace.completion_models}
     />
 
-    <SelectBehaviour bind:value={completion_model_config.behaviour} />
+    <SelectBehaviourV2
+      bind:kwArgs={completionModelKwargs}
+      selectedModel={completionModel}
+      isDisabled={!completionModel}
+    />
   </div>
 
-  {#if completion_model_config.behaviour == "custom"}
-    <SelectBehaviourCustom bind:kwargs={completion_model_config.custom_kwargs} />
+  {#if hasModelSpecificSettings(completionModel)}
+    <SelectModelSpecificSettings
+      bind:kwArgs={completionModelKwargs}
+      selectedModel={completionModel}
+    />
   {/if}
 
   <Select.Simple

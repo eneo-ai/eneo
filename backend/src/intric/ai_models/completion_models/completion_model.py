@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, computed_field, model_validator
 
+from intric.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+    coerce_model_kwargs_capabilities,
+    resolve_supported_model_kwargs,
+)
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
 from intric.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, partial_model
@@ -114,12 +119,55 @@ class CompletionModelBase(BaseModel):
     supports_tool_calling: bool = False
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
+    model_kwargs_capabilities: Optional[SupportedModelKwargs] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_invalid_stored_model_kwargs_capabilities(cls, data: object) -> object:
+        if isinstance(data, dict):
+            return cast(dict[str, object], data)
+
+        raw_capabilities = getattr(data, "model_kwargs_capabilities", None)
+        if raw_capabilities is None:
+            return data
+
+        capabilities = coerce_model_kwargs_capabilities(
+            raw_capabilities,
+            completion_model_id=getattr(data, "id", None),
+            tenant_id=getattr(data, "tenant_id", None),
+        )
+        if capabilities is not None:
+            return data
+
+        values: dict[str, object] = {}
+        for field_name in cls.model_fields:
+            if hasattr(data, field_name):
+                values[field_name] = getattr(data, field_name)
+        values["model_kwargs_capabilities"] = None
+        return values
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def token_limit(self) -> int:
         """Backward-compat: exposed in JSON responses for frontend."""
         return self.max_input_tokens
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def supported_model_kwargs(self) -> SupportedModelKwargs:
+        return resolve_supported_model_kwargs(
+            model_kwargs_capabilities=self.model_kwargs_capabilities,
+            reasoning=self.reasoning,
+            provider_type=self._provider_type(),
+            litellm_model_name=self.litellm_model_name,
+            completion_model_id=getattr(self, "id", None),
+            tenant_id=getattr(self, "tenant_id", None),
+        )
+
+    def _provider_type(self) -> str | None:
+        # Keep provider_type out of create/update schemas; response projections
+        # that know the provider override this method.
+        return None
 
 
 class CompletionModelCreate(CompletionModelBase):
@@ -143,6 +191,10 @@ class CompletionModel(CompletionModelBase, InDB):
     # Tenant model fields (required for provider-based architecture)
     tenant_id: Optional[UUID] = None
     provider_id: Optional[UUID] = None
+    provider_type: Optional[str] = None
+
+    def _provider_type(self) -> str | None:
+        return self.provider_type
 
 
 class CompletionModelPublic(CompletionModel):
@@ -151,10 +203,7 @@ class CompletionModelPublic(CompletionModel):
     lock_reason: Optional[str] = None
     credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
-    # tenant_id and provider_id inherited from CompletionModel
-    # Provider info for grouped display in UI
     provider_name: Optional[str] = None
-    provider_type: Optional[str] = None
 
     @classmethod
     def from_domain(cls, completion_model: CompletionModelDomain):
@@ -181,6 +230,7 @@ class CompletionModelPublic(CompletionModel):
             supports_tool_calling=completion_model.supports_tool_calling,
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
+            model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
             can_access=completion_model.can_access,
@@ -260,4 +310,7 @@ class ModelKwargs(BaseModel):
 
 
 class CompletionModelSparse(CompletionModelBase, InDB):
-    pass
+    provider_type: Optional[str] = None
+
+    def _provider_type(self) -> str | None:
+        return self.provider_type
