@@ -101,6 +101,7 @@
   // Model info from capabilities API
   interface ModelInfo {
     name: string;
+    mode?: string;
     max_input_tokens?: number;
     max_output_tokens?: number;
     supports_vision?: boolean;
@@ -124,13 +125,16 @@
     return limit.toString();
   }
 
-  // Providers that need live model listing from their API (not LiteLLM static data)
-  const liveListProviders = new Set(["vllm"]);
+  // Providers that list models live via their own API rather than the static
+  // LiteLLM catalog. Live listing returns only models the user's API key can
+  // actually call, which avoids preview/deprecated names polluting the picker.
+  const liveListProviders = new Set(["vllm", "openai", "anthropic"]);
 
   // Providers where LiteLLM names don't match user input (e.g. Azure uses deployment names)
   const noSuggestionsProviders = new Set(["azure"]);
 
-  // Live models fetched from the provider's own API
+  // Live models fetched from the provider's own API, enriched server-side
+  // with capability metadata from litellm.model_cost.
   let liveModels: ModelInfo[] = [];
   let liveModelsLoaded = false;
   let liveModelsError = "";
@@ -150,11 +154,15 @@
         liveModelsError = (result[0] as Record<string, unknown>).error as string;
       } else if (result && Array.isArray(result)) {
         liveModels = result.map((item: Record<string, unknown>) => ({
-          name: item.model ? `${item.name} (${item.model})` : String(item.name),
-          max_input_tokens: undefined,
-          max_output_tokens: undefined,
-          supports_vision: false,
-          supports_reasoning: false
+          name: String(item.name),
+          mode: item.mode != null ? String(item.mode) : undefined,
+          max_input_tokens: item.max_input_tokens as number | undefined,
+          max_output_tokens: item.max_output_tokens as number | undefined,
+          supports_vision: (item.supports_vision as boolean | undefined) ?? false,
+          supports_function_calling:
+            (item.supports_function_calling as boolean | undefined) ?? false,
+          supports_reasoning: (item.supports_reasoning as boolean | undefined) ?? false,
+          output_vector_size: item.output_vector_size as number | undefined
         }));
       }
     } catch {
@@ -164,11 +172,12 @@
   }
   $: if (liveListProviders.has(providerType) && providerId) loadLiveModels();
 
-  // All models: live from provider API, static from LiteLLM, or none for Azure
+  // All models: live from provider API (filtered to current modelType),
+  // static from LiteLLM, or none for Azure.
   $: allModels = noSuggestionsProviders.has(providerType)
     ? []
     : liveListProviders.has(providerType)
-      ? liveModels
+      ? liveModels.filter((m) => m.mode === modeMap[modelType])
       : ((capabilityProviders[providerType]?.models?.[modeMap[modelType]] ?? []) as ModelInfo[]);
 
   // Top 4 as quick suggestions (leaving room for "Browse all" chip)
