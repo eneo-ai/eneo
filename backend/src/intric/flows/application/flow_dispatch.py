@@ -7,6 +7,7 @@ from dependency_injector import providers
 
 from intric.database.database import sessionmanager
 from intric.flows.domain.flow import FlowRunStatus
+from intric.flows.enums import FlowRunTerminalSource
 from intric.main.container.container import Container
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ async def dispatch_flow_run_after_commit(
     async with sessionmanager.session() as session:
         container = Container(session=providers.Object(session))
         backend = container.flow_execution_backend()
-        run_repo = container.flow_run_repo()
+        terminalizer = container.flow_run_terminalizer()
         try:
             if principal_type is None:
                 await backend.dispatch(
@@ -51,10 +52,12 @@ async def dispatch_flow_run_after_commit(
                 tenant_id,
             )
             async with session.begin():
-                await run_repo.update_status(
+                await terminalizer.terminalize_run(
                     run_id=run_id,
                     tenant_id=tenant_id,
-                    status=FlowRunStatus.FAILED,
+                    target_status=FlowRunStatus.FAILED,
+                    source=FlowRunTerminalSource.DISPATCH_FAILURE,
+                    error_code="flow_dispatch_failed",
                     error_message=(
                         "flow_dispatch_failed: "
                         "Flow dispatch failed before execution started. "

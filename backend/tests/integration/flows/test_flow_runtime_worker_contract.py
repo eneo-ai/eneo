@@ -8,14 +8,17 @@ import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
 
-from intric.audit.domain.action_types import ActionType
 from intric.database.database import sessionmanager
 from intric.database.tables.flow_tables import (
+    FlowRunAuditOutbox,
     FlowRuns,
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.flows.assistant_execution_snapshot import stable_hash
+from intric.flows.assistant_execution_snapshot import (
+    build_assistant_execution_snapshot,
+    stable_hash,
+)
 from intric.flows.domain.flow import (
     Flow,
     FlowRunStatus,
@@ -26,9 +29,53 @@ from intric.flows.domain.flow import (
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from intric.flows.published_definition import build_published_definition_json
 from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
-from intric.flows.runtime.tasks import _enable_autobegin_for_flow_task_session
+from intric.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from intric.main.container.container import Container
+
+
+class _ModelKwargs:
+    def __init__(self, **values):
+        self._values = values
+
+    def model_dump(self, *, exclude_none: bool = False, **_kwargs):
+        if exclude_none:
+            return {key: value for key, value in self._values.items() if value is not None}
+        return dict(self._values)
+
+    def model_copy(self, *, update):
+        values = dict(self._values)
+        values.update(update)
+        return _ModelKwargs(**values)
+
+
+class _RuntimeAssistant:
+    def __init__(self, *, assistant_id: UUID, model_id: UUID, model_name: str):
+        self.id = assistant_id
+        self.origin = "flow_managed"
+        self.prompt = SimpleNamespace(text="Answer the submitted question.")
+        self.completion_model = SimpleNamespace(
+            id=model_id,
+            name=model_name,
+            nickname=model_name,
+            litellm_model_name=model_name,
+            provider_type="openai",
+        )
+        self.completion_model_kwargs = _ModelKwargs(temperature=0.2)
+        self.collections = []
+        self.websites = []
+        self.integration_knowledge_list = []
+        self.mcp_servers = []
+
+    def get_prompt_text(self) -> str:
+        return self.prompt.text
+
+    def has_knowledge(self) -> bool:
+        return False
+
+    async def get_response(self, *, completion_service, **kwargs):
+        return await completion_service.get_response(**kwargs)
 
 
 def _build_flow(
@@ -88,7 +135,7 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
     assistant_factory,
 ):
     async with sessionmanager.session() as session:
-        _enable_autobegin_for_flow_task_session(session)
+        enable_autobegin_for_flow_task_session(session)
         container = Container(
             session=providers.Object(session),
             user=providers.Object(admin_user),
@@ -118,11 +165,25 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         )
         flow = flow.model_copy(update={"published_version": 1})
         flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
-        step = flow.steps[0]
         run_correlation_id = f"runtime-worker-contract-{uuid4()}"
+        runtime_assistant = _RuntimeAssistant(
+            assistant_id=assistant.id,
+            model_id=model.id,
+            model_name="gpt-4o-mini",
+        )
+        assistant_snapshot = build_assistant_execution_snapshot(
+            assistant=runtime_assistant,
+            mcp_server_entities=[],
+        )
+        assert assistant_snapshot is not None
 
-        definition_json = {
-            "steps": [
+        step = flow.steps[0]
+        definition_json = build_published_definition_json(
+            flow_id=flow.id,
+            name=flow.name,
+            description=flow.description,
+            metadata_json=flow.metadata_json,
+            steps=[
                 {
                     "step_id": str(step.id),
                     "assistant_id": str(step.assistant_id),
@@ -134,10 +195,10 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
                     "output_mode": step.output_mode,
                     "output_type": step.output_type,
                     "mcp_policy": step.mcp_policy,
+                    "assistant_snapshot": assistant_snapshot,
                 }
             ],
-            "metadata_json": flow.metadata_json,
-        }
+        )
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -169,6 +230,7 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             session=session,
             flow_repo=container.flow_repo(),
             flow_run_repo=container.flow_run_repo(),
+            flow_run_terminalizer=container.flow_run_terminalizer(),
             flow_version_repo=container.flow_version_repo(),
             space_repo=container.space_repo(),
             completion_service=completion_service,
@@ -185,6 +247,7 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
                 http_allow_private_networks=False,
             ),
         )
+        executor._load_assistant = AsyncMock(return_value=runtime_assistant)
 
         worker_result = await executor.execute(
             run_id=run.id,
@@ -250,13 +313,13 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             "webhook_delivered": False,
         }
 
-        audit_service.log_async.assert_awaited_once()
-        audit_kwargs = audit_service.log_async.await_args.kwargs
-        assert audit_kwargs["action"] == ActionType.FLOW_RUN_COMPLETED
-        assert audit_kwargs["entity_id"] == run.id
-        assert isinstance(audit_kwargs["metadata"], dict)
-        assert audit_kwargs["metadata"]["target"]["id"] == str(run.id)
-        assert audit_kwargs["metadata"]["extra"] == {
-            "status": FlowRunStatus.COMPLETED.value,
-            "error_message": None,
-        }
+        audit_service.log_async.assert_not_awaited()
+        outbox_row = await session.scalar(
+            sa.select(FlowRunAuditOutbox).where(FlowRunAuditOutbox.flow_run_id == run.id)
+        )
+        assert outbox_row is not None
+        assert outbox_row.action == "flow_run_completed"
+        assert outbox_row.source == "executor_completed"
+        assert outbox_row.target_status == FlowRunStatus.COMPLETED.value
+        assert outbox_row.entity_id == run.id
+        assert outbox_row.description == "flow_run_completed:executor_completed"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
@@ -11,14 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
 from intric.completion_models.infrastructure.completion_service import CompletionService
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.files.file_models import FileCreate, FileType
 from intric.files.file_repo import FileRepository
+from intric.flows.application.flow_run_terminalization import (
+    FlowRunTerminalizationResult,
+    FlowRunTerminalizer,
+)
 from intric.flows.assistant_execution_snapshot import (
     assistant_execution_surface_hash,
     build_assistant_execution_snapshot,
@@ -30,7 +32,9 @@ from intric.flows.domain.flow import (
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowVersion,
+    JsonObject,
 )
+from intric.flows.enums import FlowRunTerminalSource, is_terminal_flow_run_status
 from intric.flows.flow_run_provenance import (
     FlowAttemptProvenance,
     LlmProvenance,
@@ -237,12 +241,6 @@ def _build_attempt_provenance(
 class FlowRunExecutor:
     """Executes a version-pinned flow run sequentially with CAS step claims."""
 
-    _TERMINAL_STATUSES = {
-        FlowRunStatus.COMPLETED,
-        FlowRunStatus.FAILED,
-        FlowRunStatus.CANCELLED,
-    }
-
     def __init__(
         self,
         *,
@@ -258,12 +256,13 @@ class FlowRunExecutor:
         encryption_service: EncryptionService,
         max_inline_text_bytes: int | None = None,
         audit_service: AuditService | None = None,
+        flow_run_terminalizer: FlowRunTerminalizer | None = None,
         references_service: ReferencesService | None = None,
         transcriber: Transcriber | None = None,
         max_audio_files: int = 10,
         max_generic_files: int | None = None,
         config: FlowRunExecutorConfig | None = None,
-    ):
+    ) -> None:
         resolved_config = config
         if resolved_config is None:
             if max_inline_text_bytes is None:
@@ -281,6 +280,9 @@ class FlowRunExecutor:
         self.session = session
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
+        self.flow_run_terminalizer = flow_run_terminalizer or FlowRunTerminalizer(
+            flow_run_repo
+        )
         self.flow_version_repo = flow_version_repo
         self.space_repo = space_repo
         self.completion_service = completion_service
@@ -332,7 +334,7 @@ class FlowRunExecutor:
         run = await self.flow_run_repo.get(
             run_id=run_id, tenant_id=tenant_id, flow_id=flow_id
         )
-        if run.status in self._TERMINAL_STATUSES:
+        if is_terminal_flow_run_status(run.status):
             logger.info(
                 "flow_executor.skip run_id=%s reason=run_terminal status=%s",
                 run_id,
@@ -353,17 +355,13 @@ class FlowRunExecutor:
 
         if not await self._flow_is_active(flow_id=flow_id, tenant_id=tenant_id):
             reason = "Flow was deleted before execution started."
-            await self.flow_run_repo.mark_pending_steps_cancelled(
+            await self._terminalize_run(
                 run_id=run_id,
                 tenant_id=tenant_id,
+                target_status=FlowRunStatus.CANCELLED,
+                source=FlowRunTerminalSource.FLOW_DELETED,
+                error_code="flow_deleted",
                 error_message=reason,
-            )
-            await self.flow_run_repo.update_status(
-                run_id=run_id,
-                tenant_id=tenant_id,
-                status=FlowRunStatus.CANCELLED,
-                error_message=reason,
-                from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
             )
             await self._commit()
             return {"status": "cancelled", "reason": "flow_deleted"}
@@ -376,24 +374,26 @@ class FlowRunExecutor:
         try:
             self._validate_definition_checksum(version=version, run_id=run_id)
         except BadRequestException as exc:
-            await self.flow_run_repo.update_status(
+            await self._terminalize_run(
                 run_id=run_id,
                 tenant_id=tenant_id,
-                status=FlowRunStatus.FAILED,
+                target_status=FlowRunStatus.FAILED,
+                source=FlowRunTerminalSource.DEFINITION_CHECKSUM_MISMATCH,
+                error_code="definition_checksum_mismatch",
                 error_message=str(exc),
-                from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
             )
             await self._commit()
             return {"status": "failed", "error": "definition_checksum_mismatch"}
         try:
             steps = self._parse_published_runtime_steps(version.definition_json)
         except BadRequestException as exc:
-            await self.flow_run_repo.update_status(
+            await self._terminalize_run(
                 run_id=run_id,
                 tenant_id=tenant_id,
-                status=FlowRunStatus.FAILED,
+                target_status=FlowRunStatus.FAILED,
+                source=FlowRunTerminalSource.INVALID_FLOW_DEFINITION,
+                error_code="invalid_flow_definition",
                 error_message=str(exc),
-                from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
             )
             await self._commit()
             return {"status": "failed", "error": "invalid_flow_definition"}
@@ -415,12 +415,13 @@ class FlowRunExecutor:
                 ),
             )
         except BadRequestException as exc:
-            await self.flow_run_repo.update_status(
+            await self._terminalize_run(
                 run_id=run_id,
                 tenant_id=tenant_id,
-                status=FlowRunStatus.FAILED,
+                target_status=FlowRunStatus.FAILED,
+                source=FlowRunTerminalSource.ASSISTANT_SNAPSHOT_DRIFT,
+                error_code="assistant_snapshot_drift",
                 error_message=str(exc),
-                from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
             )
             await self._commit()
             return {"status": "failed", "error": "assistant_snapshot_drift"}
@@ -455,21 +456,13 @@ class FlowRunExecutor:
                     "reason": "unknown",
                 }
             if preclaim_decision.action == "cancel_flow_deleted":
-                await self.flow_run_repo.mark_pending_steps_cancelled(
+                await self._terminalize_run(
                     run_id=run_id,
                     tenant_id=tenant_id,
-                    error_message=preclaim_decision.run_error_message
-                    or "Flow was deleted during execution.",
-                )
-                await self.flow_run_repo.update_status(
-                    run_id=run_id,
-                    tenant_id=tenant_id,
-                    status=FlowRunStatus.CANCELLED,
+                    target_status=FlowRunStatus.CANCELLED,
+                    source=FlowRunTerminalSource.FLOW_DELETED,
+                    error_code="flow_deleted",
                     error_message=preclaim_decision.run_error_message,
-                    from_statuses=(
-                        FlowRunStatus.QUEUED.value,
-                        FlowRunStatus.RUNNING.value,
-                    ),
                 )
                 await self._commit()
                 return preclaim_decision.result or {
@@ -506,15 +499,13 @@ class FlowRunExecutor:
                         "reason": "unknown",
                     }
                 if postclaim_decision.action == "fail_step_missing":
-                    await self.flow_run_repo.update_status(
+                    await self._terminalize_run(
                         run_id=run_id,
                         tenant_id=tenant_id,
-                        status=FlowRunStatus.FAILED,
+                        target_status=FlowRunStatus.FAILED,
+                        source=FlowRunTerminalSource.STEP_MISSING,
+                        error_code="step_missing",
                         error_message=postclaim_decision.run_error_message,
-                        from_statuses=(
-                            FlowRunStatus.QUEUED.value,
-                            FlowRunStatus.RUNNING.value,
-                        ),
                     )
                     await self._commit()
                     return postclaim_decision.result or {
@@ -714,22 +705,21 @@ class FlowRunExecutor:
         if outcome.result_status == "skipped":
             return {"status": "skipped", "reason": outcome.reason}
 
-        updated_run = await self.flow_run_repo.update_status(
+        terminalization = await self._terminalize_run(
             run_id=run_id,
             tenant_id=tenant_id,
-            status=FlowRunStatus(outcome.flow_status),
+            target_status=FlowRunStatus(outcome.flow_status),
+            source=(
+                FlowRunTerminalSource.EXECUTOR_COMPLETED
+                if outcome.flow_status == FlowRunStatus.COMPLETED.value
+                else FlowRunTerminalSource.EXECUTOR_FAILED
+            ),
+            error_code=outcome.reason,
             error_message=outcome.error_message,
             output_payload_json=outcome.output_payload_json,
-            from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
         )
-        if updated_run.status == FlowRunStatus.COMPLETED:
-            await self._audit_run_terminal_state(
-                run=updated_run,
-                action=ActionType.FLOW_RUN_COMPLETED,
-                description=f"Completed flow run {updated_run.id}",
-            )
         await self._commit()
-        return {"status": outcome.result_status}
+        return {"status": terminalization.run.status.value}
 
     async def _execute_step(
         self,
@@ -857,9 +847,12 @@ class FlowRunExecutor:
         await self.flow_repo.save_step_result(
             run_id, failure_plan.failed_result, tenant_id=tenant_id
         )
-        await self._mark_run_failed(
+        await self._terminalize_run(
             run_id=run_id,
             tenant_id=tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunTerminalSource.EXECUTOR_FAILED,
+            error_code="step_attempt_start_failed",
             error_message=failure_plan.run_error_message,
         )
         return failure_plan.return_result
@@ -896,9 +889,12 @@ class FlowRunExecutor:
         await self.flow_repo.save_step_result(
             run_id, failure_plan.failed_result, tenant_id=tenant_id
         )
-        await self._mark_run_failed(
+        await self._terminalize_run(
             run_id=run_id,
             tenant_id=tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunTerminalSource.EXECUTOR_FAILED,
+            error_code=failure_plan.error_code,
             error_message=failure_plan.run_error_message,
         )
         return failure_plan.return_result
@@ -929,9 +925,12 @@ class FlowRunExecutor:
         await self.flow_repo.save_step_result(
             run_id, failure_plan.failed_result, tenant_id=tenant_id
         )
-        await self._mark_run_failed(
+        await self._terminalize_run(
             run_id=run_id,
             tenant_id=tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunTerminalSource.EXECUTOR_FAILED,
+            error_code=failure_plan.error_code,
             error_message=failure_plan.run_error_message,
         )
         return failure_plan.return_result
@@ -1021,9 +1020,12 @@ class FlowRunExecutor:
         await self.flow_repo.save_step_result(
             run_id, failed_result, tenant_id=tenant_id
         )
-        await self._mark_run_failed(
+        await self._terminalize_run(
             run_id=run_id,
             tenant_id=tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunTerminalSource.EXECUTOR_FAILED,
+            error_code="webhook_delivery_failed",
             error_message=f"Webhook delivery failed: {error}",
         )
         return {"status": "failed", "error": str(error)}
@@ -1044,72 +1046,6 @@ class FlowRunExecutor:
         )
         await self._commit()
         return delivered_result
-
-    async def _mark_run_failed(
-        self,
-        *,
-        run_id: UUID,
-        tenant_id: UUID,
-        error_message: str,
-    ) -> None:
-        updated_run = await self.flow_run_repo.update_status(
-            run_id=run_id,
-            tenant_id=tenant_id,
-            status=FlowRunStatus.FAILED,
-            error_message=error_message,
-            from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
-        )
-        if updated_run.status == FlowRunStatus.FAILED:
-            await self._audit_run_terminal_state(
-                run=updated_run,
-                action=ActionType.FLOW_RUN_FAILED,
-                description=f"Failed flow run {updated_run.id}",
-                error_message=error_message,
-            )
-        await self._commit()
-
-    async def _audit_run_terminal_state(
-        self,
-        *,
-        run: FlowRun,
-        action: ActionType,
-        description: str,
-        error_message: str | None = None,
-    ) -> None:
-        if self.audit_service is None:
-            return
-
-        metadata = AuditMetadata.standard(
-            actor=self.user,
-            target=run,
-            extra={
-                "status": run.status.value,
-                "error_message": error_message,
-            },
-        )
-        try:
-            actor_kwargs = self.principal.audit_actor_fields()
-            await self.audit_service.log_async(
-                tenant_id=self.user.tenant_id,
-                actor_id=actor_kwargs["actor_id"],
-                actor_type=actor_kwargs["actor_type"],
-                actor_api_key_id=actor_kwargs["actor_api_key_id"],
-                action=action,
-                entity_type=EntityType.FLOW_RUN,
-                entity_id=run.id,
-                description=description,
-                metadata=metadata,
-            )
-        except Exception as error:
-            logger.warning(
-                "Failed to audit flow run terminal state",
-                exc_info=error,
-                extra={
-                    "run_id": str(run.id),
-                    "tenant_id": str(self.user.tenant_id),
-                    "action": action.value,
-                },
-            )
 
     async def _resolve_step_input(
         self,
@@ -1455,6 +1391,30 @@ class FlowRunExecutor:
     def _requires_assistant_snapshots(definition_json: dict[str, Any]) -> bool:
         schema_version = definition_json.get("schema_version")
         return isinstance(schema_version, int) and schema_version >= 1
+
+    async def _terminalize_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        target_status: FlowRunStatus,
+        source: FlowRunTerminalSource,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        output_payload_json: JsonObject | None = None,
+        cancelled_at: datetime | None = None,
+    ) -> FlowRunTerminalizationResult:
+        return await self.flow_run_terminalizer.terminalize_run(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            target_status=target_status,
+            source=source,
+            error_code=error_code,
+            error_message=error_message,
+            output_payload_json=output_payload_json,
+            cancelled_at=cancelled_at,
+            principal=self.principal,
+        )
 
     async def _commit(self) -> None:
         await self.session.commit()

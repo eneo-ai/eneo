@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -17,6 +16,7 @@ from intric.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
     stable_hash,
 )
+from intric.flows.enums import FlowRunTerminalSource
 from intric.flows.flow import (
     FlowRun,
     FlowRunStatus,
@@ -27,6 +27,7 @@ from intric.flows.flow import (
 from intric.flows.flow import (
     FlowVersion as FlowVersionModel,
 )
+from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from intric.flows.runtime.executor import (
     FlowRunExecutor,
@@ -37,6 +38,9 @@ from intric.flows.runtime.executor import (
     StepInputValue,
 )
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
+
+_DEFAULT_SNAPSHOT_MODEL_ID = UUID("00000000-0000-0000-0000-000000000001")
+_DEFAULT_SNAPSHOT_PROMPT = "Execute this flow step."
 
 
 def _run(*, status: FlowRunStatus, user) -> FlowRun:
@@ -59,6 +63,43 @@ def _run(*, status: FlowRunStatus, user) -> FlowRun:
     )
 
 
+def _default_snapshot_assistant(assistant_id: UUID | str) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=UUID(str(assistant_id)),
+        origin="flow_managed",
+        prompt=SimpleNamespace(text=_DEFAULT_SNAPSHOT_PROMPT),
+        completion_model=SimpleNamespace(
+            id=_DEFAULT_SNAPSHOT_MODEL_ID,
+            name="gpt-5.4-nano",
+            nickname="Nano",
+            litellm_model_name="openai/gpt-5.4-nano",
+        ),
+        completion_model_kwargs={"temperature": 0.2},
+        collections=[],
+        websites=[],
+        integration_knowledge_list=[],
+        mcp_servers=[],
+    )
+
+
+def _definition_step_with_default_snapshot(step: object) -> object:
+    if not isinstance(step, dict):
+        return step
+    normalized = dict(step)
+    if "assistant_snapshot" in normalized:
+        return normalized
+    assistant_id = normalized.get("assistant_id")
+    if assistant_id is None:
+        return normalized
+    snapshot = build_assistant_execution_snapshot(
+        assistant=_default_snapshot_assistant(str(assistant_id)),
+        mcp_server_entities=[],
+    )
+    if snapshot is not None:
+        normalized["assistant_snapshot"] = snapshot
+    return normalized
+
+
 def FlowVersion(
     *,
     flow_id,
@@ -71,6 +112,23 @@ def FlowVersion(
 ) -> FlowVersionModel:
     """Build canonical versions unless a test intentionally passes a bad checksum."""
     if definition_checksum == "checksum":
+        if isinstance(definition_json.get("steps"), list):
+            schema_version_provided = "schema_version" in definition_json
+            steps = definition_json["steps"]
+            if not schema_version_provided:
+                steps = [
+                    _definition_step_with_default_snapshot(step) for step in steps
+                ]
+            definition_json = {
+                "schema_version": definition_json.get(
+                    "schema_version", FLOW_DEFINITION_SCHEMA_VERSION
+                ),
+                "flow_id": definition_json.get("flow_id", str(flow_id)),
+                "name": definition_json.get("name", "Test flow"),
+                "description": definition_json.get("description"),
+                "metadata_json": definition_json.get("metadata_json"),
+                "steps": steps,
+            }
         definition_checksum = stable_hash(definition_json)
     return FlowVersionModel(
         flow_id=flow_id,
@@ -131,10 +189,28 @@ def _build_executor(user):
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     space_repo = AsyncMock()
+
+    async def _get_space_by_assistant(*, assistant_id):
+        assistant = _default_snapshot_assistant(assistant_id)
+        return SimpleNamespace(get_assistant=lambda assistant_id: assistant)
+
+    space_repo.get_space_by_assistant = AsyncMock(side_effect=_get_space_by_assistant)
     completion_service = AsyncMock()
     file_repo = AsyncMock()
     template_asset_service = AsyncMock()
     encryption_service = AsyncMock()
+    flow_run_terminalizer = SimpleNamespace()
+
+    async def _terminalize_run(**kwargs):
+        return SimpleNamespace(
+            run=SimpleNamespace(status=kwargs["target_status"]),
+            did_transition=True,
+            target_status=kwargs["target_status"],
+            source=kwargs["source"],
+            audit_outbox_id=uuid4(),
+        )
+
+    flow_run_terminalizer.terminalize_run = AsyncMock(side_effect=_terminalize_run)
     executor = FlowRunExecutor(
         user=user,
         session=session,
@@ -146,6 +222,7 @@ def _build_executor(user):
         file_repo=file_repo,
         template_asset_service=template_asset_service,
         encryption_service=encryption_service,
+        flow_run_terminalizer=flow_run_terminalizer,
         max_inline_text_bytes=1024 * 1024,
     )
     return executor, flow_repo, flow_run_repo, flow_version_repo
@@ -271,7 +348,6 @@ async def test_webhook_failure_keeps_completed_step_evidence(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -365,7 +441,7 @@ async def test_webhook_failure_keeps_completed_step_evidence(user):
 
 
 @pytest.mark.asyncio
-async def test_webhook_failure_logs_exception_context(user, caplog):
+async def test_webhook_failure_logs_exception_context(user, monkeypatch):
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
     running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
@@ -389,7 +465,6 @@ async def test_webhook_failure_logs_exception_context(user, caplog):
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -432,19 +507,22 @@ async def test_webhook_failure_logs_exception_context(user, caplog):
     executor._deliver_webhook = AsyncMock(
         side_effect=RuntimeError("webhook unavailable")
     )
+    log_exception = MagicMock()
+    monkeypatch.setattr("intric.flows.runtime.executor.logger.exception", log_exception)
 
-    with caplog.at_level(logging.ERROR):
-        await executor.execute(
-            run_id=queued_run.id,
-            flow_id=queued_run.flow_id,
-            tenant_id=user.tenant_id,
-            celery_task_id="task-1",
-            retry_count=0,
-        )
+    await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
 
-    assert "flow_executor.webhook_delivery_failed" in caplog.text
-    assert str(queued_run.id) in caplog.text
-    assert str(step_id) in caplog.text
+    log_exception.assert_called_once()
+    log_args = log_exception.call_args.args
+    assert "flow_executor.webhook_delivery_failed" in log_args[0]
+    assert log_args[1] == queued_run.id
+    assert log_args[3] == step_id
 
 
 @pytest.mark.asyncio
@@ -467,7 +545,6 @@ async def test_webhook_success_persists_delivery_and_completes_run(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -532,13 +609,13 @@ async def test_webhook_success_persists_delivery_and_completes_run(user):
     assert second_saved.status == FlowStepResultStatus.COMPLETED
     assert second_saved.output_payload_json["webhook_delivered"] is True
     assert "webhook_error" not in second_saved.output_payload_json
-    flow_run_repo.update_status.assert_awaited()
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited()
     assert (
-        flow_run_repo.update_status.await_args_list[-1].kwargs["status"]
+        executor.flow_run_terminalizer.terminalize_run.await_args_list[-1].kwargs["target_status"]
         == FlowRunStatus.COMPLETED
     )
     assert (
-        flow_run_repo.update_status.await_args_list[-1].kwargs["output_payload_json"]
+        executor.flow_run_terminalizer.terminalize_run.await_args_list[-1].kwargs["output_payload_json"]
         == second_saved.output_payload_json
     )
 
@@ -574,7 +651,6 @@ async def test_execute_persists_distinct_model_parameters_for_each_step(user):
     )
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -941,7 +1017,6 @@ async def test_execute_short_circuits_terminal_run_without_lifecycle_writes(user
 
     flow_run_repo.get = AsyncMock(return_value=completed_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     flow_run_repo.claim_step_result = AsyncMock()
 
     result = await executor.execute(
@@ -955,7 +1030,7 @@ async def test_execute_short_circuits_terminal_run_without_lifecycle_writes(user
     assert result == {"status": "skipped", "reason": "run_terminal"}
     flow_run_repo.mark_running_if_claimable.assert_not_awaited()
     flow_run_repo.claim_step_result.assert_not_awaited()
-    flow_run_repo.update_status.assert_not_awaited()
+    executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -965,8 +1040,6 @@ async def test_execute_cancels_when_flow_deleted_before_step_execution(user):
 
     flow_run_repo.get = AsyncMock(return_value=queued_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
-    flow_run_repo.mark_pending_steps_cancelled = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     executor._flow_is_active = AsyncMock(return_value=False)
 
     result = await executor.execute(
@@ -978,8 +1051,11 @@ async def test_execute_cancels_when_flow_deleted_before_step_execution(user):
     )
 
     assert result == {"status": "cancelled", "reason": "flow_deleted"}
-    flow_run_repo.mark_pending_steps_cancelled.assert_awaited_once()
-    flow_run_repo.update_status.assert_awaited_once()
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
+    assert (
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["source"]
+        == FlowRunTerminalSource.FLOW_DELETED
+    )
 
 
 @pytest.mark.asyncio
@@ -1002,7 +1078,6 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -1042,8 +1117,8 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
     assert finish_kwargs["status"] == FlowStepAttemptStatus.FAILED
     assert finish_kwargs["error_code"] == "step_execution_failed"
     assert finish_kwargs["error_message"] == "Flow step 1 execution failed."
-    flow_run_repo.update_status.assert_awaited_once()
-    update_kwargs = flow_run_repo.update_status.await_args.kwargs
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
+    update_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
     assert update_kwargs["error_message"] == "Flow step 1 execution failed."
     saved_result = flow_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
@@ -1072,7 +1147,6 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
         side_effect=RuntimeError("db write failed")
     )
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -1110,7 +1184,7 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.error_message == "Flow step 1 execution failed."
     assert (
-        flow_run_repo.update_status.await_args.kwargs["status"] == FlowRunStatus.FAILED
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["target_status"] == FlowRunStatus.FAILED
     )
 
 
@@ -1134,7 +1208,6 @@ async def test_typed_validation_failure_persists_input_context_for_export(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -1215,7 +1288,6 @@ async def test_typed_validation_failure_without_attached_context_uses_fallback_p
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -1335,7 +1407,6 @@ async def test_execute_marks_run_completed_with_last_completed_output_payload(us
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
     flow_run_repo.get_step_result = AsyncMock(return_value=existing)
     flow_run_repo.list_step_results = AsyncMock(return_value=[existing])
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -1368,9 +1439,9 @@ async def test_execute_marks_run_completed_with_last_completed_output_payload(us
     )
 
     assert result == {"status": "completed"}
-    flow_run_repo.update_status.assert_awaited_once()
-    kwargs = flow_run_repo.update_status.await_args.kwargs
-    assert kwargs["status"] == FlowRunStatus.COMPLETED
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
+    kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
+    assert kwargs["target_status"] == FlowRunStatus.COMPLETED
     assert kwargs["output_payload_json"] == {"text": "final", "generated_file_ids": []}
 
 
@@ -1404,7 +1475,6 @@ async def test_execute_returns_cancelled_when_any_step_result_cancelled(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
     flow_run_repo.get_step_result = AsyncMock(return_value=existing)
     flow_run_repo.list_step_results = AsyncMock(return_value=[cancelled_result])
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -1437,9 +1507,9 @@ async def test_execute_returns_cancelled_when_any_step_result_cancelled(user):
     )
 
     assert result == {"status": "cancelled"}
-    flow_run_repo.update_status.assert_awaited_once()
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
-        flow_run_repo.update_status.await_args.kwargs["status"]
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["target_status"]
         == FlowRunStatus.CANCELLED
     )
 
@@ -1471,7 +1541,6 @@ async def test_execute_returns_run_in_progress_when_pending_results_exist(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
     flow_run_repo.get_step_result = AsyncMock(return_value=existing)
     flow_run_repo.list_step_results = AsyncMock(return_value=[pending_result])
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -1504,7 +1573,7 @@ async def test_execute_returns_run_in_progress_when_pending_results_exist(user):
     )
 
     assert result == {"status": "skipped", "reason": "run_in_progress"}
-    flow_run_repo.update_status.assert_not_awaited()
+    executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1535,7 +1604,6 @@ async def test_execute_uses_retry_count_plus_one_for_attempt_lifecycle(user):
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
     flow_run_repo.list_step_results = AsyncMock(side_effect=[[], [completed]])
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -1696,7 +1764,6 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -1752,7 +1819,7 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
         flow_run_repo.finish_attempt.await_args.kwargs["status"]
         == FlowStepAttemptStatus.CANCELLED
     )
-    flow_run_repo.update_status.assert_not_awaited()
+    executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1798,7 +1865,6 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
     flow_run_repo.get_step_result = AsyncMock(return_value=existing_completed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     flow_run_repo.list_step_results = AsyncMock(side_effect=[[], [completed_second]])
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
@@ -1891,8 +1957,6 @@ async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_comp
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed_first)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.mark_pending_steps_cancelled = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -1952,9 +2016,9 @@ async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_comp
     assert flow_repo.save_step_result.await_count >= 1
     first_saved = flow_repo.save_step_result.await_args_list[0].args[1]
     assert first_saved.status == FlowStepResultStatus.COMPLETED
-    flow_run_repo.mark_pending_steps_cancelled.assert_awaited_once()
-    update_kwargs = flow_run_repo.update_status.await_args.kwargs
-    assert update_kwargs["status"] == FlowRunStatus.CANCELLED
+    update_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
+    assert update_kwargs["target_status"] == FlowRunStatus.CANCELLED
+    assert update_kwargs["source"] == FlowRunTerminalSource.FLOW_DELETED
     assert update_kwargs["error_message"] == "Flow was deleted during execution."
 
 
@@ -2186,7 +2250,6 @@ async def test_execute_fails_run_when_claimed_step_result_missing(user):
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
     flow_run_repo.get_step_result = AsyncMock(return_value=None)
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -2219,9 +2282,9 @@ async def test_execute_fails_run_when_claimed_step_result_missing(user):
     )
 
     assert result == {"status": "failed", "error": "step_missing"}
-    flow_run_repo.update_status.assert_awaited_once()
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
-        flow_run_repo.update_status.await_args.kwargs["status"] == FlowRunStatus.FAILED
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["target_status"] == FlowRunStatus.FAILED
     )
 
 
@@ -2232,7 +2295,6 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
 
     flow_run_repo.get = AsyncMock(return_value=queued_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
-    flow_run_repo.update_status = AsyncMock()
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -2264,9 +2326,9 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
     )
 
     assert result == {"status": "failed", "error": "invalid_flow_definition"}
-    flow_run_repo.update_status.assert_awaited_once()
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
-        flow_run_repo.update_status.await_args.kwargs["status"] == FlowRunStatus.FAILED
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["target_status"] == FlowRunStatus.FAILED
     )
 
 
@@ -3027,7 +3089,6 @@ async def test_prior_results_bootstrap_once(user):
     flow_run_repo.claim_step_result = AsyncMock(side_effect=[claimed_1, claimed_2])
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock()
     # Bootstrap call returns empty (fresh run), final call returns all completed
     completed_1 = claimed_1.model_copy(
         update={
@@ -3134,7 +3195,6 @@ async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
 
     flow_run_repo.get = AsyncMock(return_value=queued_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
-    flow_run_repo.update_status = AsyncMock()
     flow_run_repo.list_step_results = AsyncMock(return_value=[])
     flow_run_repo.claim_step_result = AsyncMock()
     flow_version_repo.get = AsyncMock(
@@ -3172,9 +3232,9 @@ async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
 
     assert result == {"status": "failed", "error": "assistant_snapshot_drift"}
     flow_run_repo.claim_step_result.assert_not_awaited()
-    flow_run_repo.update_status.assert_awaited_once()
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
-        flow_run_repo.update_status.await_args.kwargs["status"] == FlowRunStatus.FAILED
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["target_status"] == FlowRunStatus.FAILED
     )
 
 
@@ -3187,7 +3247,6 @@ async def test_execute_fails_before_parse_when_definition_checksum_drifted(user)
 
     flow_run_repo.get = AsyncMock(return_value=queued_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
-    flow_run_repo.update_status = AsyncMock()
     flow_run_repo.list_step_results = AsyncMock()
     flow_run_repo.claim_step_result = AsyncMock()
     executor._parse_runtime_steps = MagicMock()
@@ -3226,7 +3285,7 @@ async def test_execute_fails_before_parse_when_definition_checksum_drifted(user)
     executor._parse_runtime_steps.assert_not_called()
     flow_run_repo.list_step_results.assert_not_awaited()
     flow_run_repo.claim_step_result.assert_not_awaited()
-    flow_run_repo.update_status.assert_awaited_once()
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -3238,7 +3297,6 @@ async def test_execute_fails_before_claim_when_schema_versioned_snapshot_missing
 
     flow_run_repo.get = AsyncMock(return_value=queued_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
-    flow_run_repo.update_status = AsyncMock()
     flow_run_repo.list_step_results = AsyncMock(return_value=[])
     flow_run_repo.claim_step_result = AsyncMock()
     executor._load_assistant = AsyncMock()
@@ -3277,7 +3335,7 @@ async def test_execute_fails_before_claim_when_schema_versioned_snapshot_missing
     assert result == {"status": "failed", "error": "assistant_snapshot_drift"}
     executor._load_assistant.assert_not_awaited()
     flow_run_repo.claim_step_result.assert_not_awaited()
-    flow_run_repo.update_status.assert_awaited_once()
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
 
 
 # --- File cache ---
@@ -3481,15 +3539,6 @@ async def test_execute_audits_completed_run_terminal_state(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock(
-        return_value=running_run.model_copy(
-            update={
-                "status": FlowRunStatus.COMPLETED,
-                "output_payload_json": {"text": "done", "generated_file_ids": []},
-            },
-            deep=True,
-        )
-    )
     flow_run_repo.list_step_results = AsyncMock(return_value=[completed_result])
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
@@ -3540,10 +3589,10 @@ async def test_execute_audits_completed_run_terminal_state(user):
     )
 
     assert result == {"status": "completed"}
-    audit_service.log_async.assert_awaited_once()
-    call_kwargs = audit_service.log_async.await_args.kwargs
-    assert call_kwargs["action"] == ActionType.FLOW_RUN_COMPLETED
-    assert call_kwargs["entity_id"] == queued_run.id
+    audit_service.log_async.assert_not_awaited()
+    terminal_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
+    assert terminal_kwargs["target_status"] == FlowRunStatus.COMPLETED
+    assert terminal_kwargs["source"] == FlowRunTerminalSource.EXECUTOR_COMPLETED
 
 
 @pytest.mark.asyncio
@@ -3568,14 +3617,6 @@ async def test_execute_audits_failed_run_terminal_state(user):
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.update_status = AsyncMock(
-        return_value=running_run.model_copy(
-            update={
-                "status": FlowRunStatus.FAILED,
-                "error_message": "Flow step 1 execution failed.",
-            }
-        )
-    )
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -3609,10 +3650,10 @@ async def test_execute_audits_failed_run_terminal_state(user):
     )
 
     assert result == {"status": "failed", "error": "step_execution_failed"}
-    audit_service.log_async.assert_awaited_once()
-    call_kwargs = audit_service.log_async.await_args.kwargs
-    assert call_kwargs["action"] == ActionType.FLOW_RUN_FAILED
-    assert call_kwargs["entity_id"] == queued_run.id
+    audit_service.log_async.assert_not_awaited()
+    terminal_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
+    assert terminal_kwargs["target_status"] == FlowRunStatus.FAILED
+    assert terminal_kwargs["source"] == FlowRunTerminalSource.EXECUTOR_FAILED
 
 
 # --- Encrypted header tests for webhook delivery ---

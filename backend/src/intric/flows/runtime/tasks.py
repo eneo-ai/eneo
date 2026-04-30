@@ -14,12 +14,12 @@ from intric.authentication.principal_types import PrincipalType
 from intric.authentication.service_key_user import build_service_key_user
 from intric.database.database import sessionmanager
 from intric.flows.domain.flow import FlowRunStatus
+from intric.flows.enums import FlowRunTerminalSource
 from intric.flows.flow_document_limits import resolve_flow_document_render_limits
 from intric.flows.flow_input_limits import (
     DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     resolve_flow_input_limits,
 )
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.runtime.celery_app import celery_app
 from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
 from intric.main.config import get_settings
@@ -59,7 +59,7 @@ def _get_flow_task_loop() -> asyncio.AbstractEventLoop:
         return _FLOW_TASK_LOOP
 
 
-def _enable_autobegin_for_flow_task_session(session: AsyncSession) -> None:
+def enable_autobegin_for_flow_task_session(session: AsyncSession) -> None:
     """Flow runtime uses commit-heavy repos; enable autobegin for this task session."""
     session.sync_session.autobegin = True
 
@@ -76,7 +76,7 @@ async def _execute_flow_run_async(
     retry_count: int,
 ) -> dict[str, str]:
     async with sessionmanager.session() as session:
-        _enable_autobegin_for_flow_task_session(session)
+        enable_autobegin_for_flow_task_session(session)
         container = Container(session=providers.Object(session))
         user_repo = UsersRepository(session=session)
         tenant = await container.tenant_repo().get(tenant_id)
@@ -118,6 +118,7 @@ async def _execute_flow_run_async(
             session=session,
             flow_repo=container.flow_repo(),
             flow_run_repo=container.flow_run_repo(),
+            flow_run_terminalizer=container.flow_run_terminalizer(),
             flow_version_repo=container.flow_version_repo(),
             space_repo=container.space_repo(),
             completion_service=container.completion_service(),
@@ -148,30 +149,25 @@ async def _execute_flow_run_async(
         return {key: str(value) for key, value in result.items()}
 
 
-async def _mark_run_failed(
+async def terminalize_flow_run_failure(
     *,
     run_id: UUID,
     tenant_id: UUID,
+    source: FlowRunTerminalSource,
+    error_code: str,
     error_message: str,
 ) -> None:
     async with sessionmanager.session() as session:
         async with session.begin():
             container = Container(session=providers.Object(session))
-            run_repo: FlowRunRepository = container.flow_run_repo()
-            await run_repo.mark_pending_steps_cancelled(
+            terminalizer = container.flow_run_terminalizer()
+            await terminalizer.terminalize_run(
                 run_id=run_id,
                 tenant_id=tenant_id,
+                target_status=FlowRunStatus.FAILED,
+                source=source,
+                error_code=error_code,
                 error_message=error_message,
-            )
-            await run_repo.update_status(
-                run_id=run_id,
-                tenant_id=tenant_id,
-                status=FlowRunStatus.FAILED,
-                error_message=error_message,
-                from_statuses=(
-                    FlowRunStatus.QUEUED.value,
-                    FlowRunStatus.RUNNING.value,
-                ),
             )
 
 
@@ -242,9 +238,11 @@ def _execute_flow_run_task(
     ):
         loop = _get_flow_task_loop()
         asyncio.run_coroutine_threadsafe(
-            _mark_run_failed(
+            terminalize_flow_run_failure(
                 run_id=run_id_uuid,
                 tenant_id=tenant_id_uuid,
+                source=FlowRunTerminalSource.MISSING_PRINCIPAL,
+                error_code="flow_missing_principal",
                 error_message=(
                     "flow_missing_principal: "
                     "Flow run execution skipped because run has no execution principal."
@@ -292,9 +290,11 @@ def _execute_flow_run_task(
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
         )
         asyncio.run_coroutine_threadsafe(
-            _mark_run_failed(
+            terminalize_flow_run_failure(
                 run_id=run_id_uuid,
                 tenant_id=tenant_id_uuid,
+                source=FlowRunTerminalSource.TASK_TIMEOUT,
+                error_code="flow_task_timeout",
                 error_message=error_message,
             ),
             loop,
@@ -309,9 +309,11 @@ def _execute_flow_run_task(
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
         )
         asyncio.run_coroutine_threadsafe(
-            _mark_run_failed(
+            terminalize_flow_run_failure(
                 run_id=run_id_uuid,
                 tenant_id=tenant_id_uuid,
+                source=FlowRunTerminalSource.TASK_FAILURE,
+                error_code="flow_task_failure",
                 error_message=error_message,
             ),
             loop,
@@ -328,7 +330,8 @@ async def _reconcile_stale_running_runs_all_tenants(
     reconciled = 0
     async with sessionmanager.session() as session:
         container = Container(session=providers.Object(session))
-        run_repo: FlowRunRepository = container.flow_run_repo()
+        run_repo = container.flow_run_repo()
+        terminalizer = container.flow_run_terminalizer()
         tenant_repo = container.tenant_repo()
         tenants = await tenant_repo.get_all_tenants()
         for tenant in tenants:
@@ -338,22 +341,16 @@ async def _reconcile_stale_running_runs_all_tenants(
                 limit=limit,
             )
             for run in stale_runs:
-                await run_repo.mark_pending_steps_cancelled(
+                result = await terminalizer.terminalize_stale_running_run(
                     run_id=run.id,
                     tenant_id=run.tenant_id,
-                    error_message=(
-                        "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
-                    ),
-                )
-                updated = await run_repo.fail_stale_running_run(
-                    run_id=run.id,
-                    tenant_id=run.tenant_id,
+                    error_code="flow_worker_stalled",
                     stale_before=stale_before,
                     error_message=(
                         "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
                     ),
                 )
-                if updated is not None:
+                if result.did_transition:
                     reconciled += 1
     return {"status": "ok", "reconciled": reconciled}
 

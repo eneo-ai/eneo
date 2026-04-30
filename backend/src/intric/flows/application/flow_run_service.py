@@ -7,6 +7,7 @@ from typing import Any, Literal, Protocol, TypedDict, cast
 from uuid import UUID
 
 from intric.files.file_repo import FileRepository
+from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
@@ -14,6 +15,7 @@ from intric.flows.domain.flow import (
     FlowStepResult,
     JsonObject,
 )
+from intric.flows.enums import FlowRunTerminalSource, is_terminal_flow_run_status
 from intric.flows.execution_backend import FlowExecutionBackend
 from intric.flows.flow_evidence_policy import (
     EvidenceCapabilityLevel,
@@ -88,18 +90,13 @@ class FlowRunDispatchRequest(TypedDict, total=False):
 class FlowRunService:
     """Tenant-scoped flow run lifecycle service."""
 
-    _TERMINAL_STATUSES = {
-        FlowRunStatus.COMPLETED,
-        FlowRunStatus.FAILED,
-        FlowRunStatus.CANCELLED,
-    }
-
     def __init__(
         self,
         user: UserInDB,
         flow_repo: FlowRepository,
         flow_run_repo: FlowRunRepository,
         flow_version_repo: FlowVersionRepository,
+        flow_run_terminalizer: FlowRunTerminalizer | None = None,
         file_repo: FileRepository | None = None,
         settings_service: SettingService | None = None,
         execution_backend: FlowExecutionBackend | None = None,
@@ -111,6 +108,9 @@ class FlowRunService:
         self.user = user
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
+        self.flow_run_terminalizer = flow_run_terminalizer or FlowRunTerminalizer(
+            flow_run_repo
+        )
         self.flow_version_repo = flow_version_repo
         self.file_repo = file_repo
         self.settings_service = settings_service
@@ -667,49 +667,32 @@ class FlowRunService:
         reconciled = 0
         error_message = "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
         for run in stale_runs:
-            updated = await self.flow_run_repo.fail_stale_running_run(
+            result = await self.flow_run_terminalizer.terminalize_stale_running_run(
                 run_id=run.id,
                 tenant_id=self.user.tenant_id,
-                stale_before=stale_before,
+                error_code="flow_worker_stalled",
                 error_message=error_message,
+                stale_before=stale_before,
             )
-            if updated is not None:
+            if result.did_transition:
                 reconciled += 1
         return reconciled
 
     async def cancel_run(self, *, run_id: UUID) -> FlowRun:
         run = await self.get_run(run_id=run_id, access_kind="cancel")
-        if run.status in self._TERMINAL_STATUSES:
+        if is_terminal_flow_run_status(run.status):
             return run
-        await self.flow_run_repo.mark_pending_steps_cancelled(
+        result = await self.flow_run_terminalizer.terminalize_run(
             run_id=run_id,
             tenant_id=self.user.tenant_id,
+            target_status=FlowRunStatus.CANCELLED,
+            source=FlowRunTerminalSource.USER_CANCEL,
+            error_code="user_cancelled",
             error_message="Run cancelled by user.",
+            cancelled_at=datetime.now(timezone.utc),
+            principal=self._principal(),
         )
-        return await self.flow_run_repo.cancel(
-            run_id=run_id, tenant_id=self.user.tenant_id
-        )
-
-    async def complete_run(
-        self,
-        *,
-        run_id: UUID,
-        output_payload_json: dict[str, Any] | None = None,
-    ) -> FlowRun:
-        return await self.flow_run_repo.update_status(
-            run_id=run_id,
-            tenant_id=self.user.tenant_id,
-            status=FlowRunStatus.COMPLETED,
-            output_payload_json=output_payload_json,
-        )
-
-    async def fail_run(self, *, run_id: UUID, error_message: str) -> FlowRun:
-        return await self.flow_run_repo.update_status(
-            run_id=run_id,
-            tenant_id=self.user.tenant_id,
-            status=FlowRunStatus.FAILED,
-            error_message=error_message,
-        )
+        return result.run
 
     async def get_run_artifact_file(
         self,

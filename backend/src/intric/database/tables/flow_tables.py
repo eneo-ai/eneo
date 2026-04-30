@@ -31,6 +31,7 @@ from intric.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
     FlowRunStatus,
+    FlowRunTerminalSource,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
@@ -42,6 +43,7 @@ FLOW_STEP_OUTPUT_MODE_VALUES = tuple(item.value for item in FlowOutputMode)
 FLOW_STEP_OUTPUT_TYPE_VALUES = tuple(item.value for item in FlowOutputType)
 FLOW_STEP_MCP_POLICY_VALUES = tuple(item.value for item in FlowMcpPolicy)
 FLOW_RUN_STATUS_VALUES = tuple(item.value for item in FlowRunStatus)
+FLOW_RUN_TERMINAL_SOURCE_VALUES = tuple(item.value for item in FlowRunTerminalSource)
 FLOW_STEP_RESULT_STATUS_VALUES = tuple(item.value for item in FlowStepResultStatus)
 FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(item.value for item in FlowStepAttemptStatus)
 MODULE_HEALTH_STATUS_VALUES = ("healthy", "unhealthy", "unknown")
@@ -49,6 +51,10 @@ MODULE_COMPAT_STATUS_VALUES = ("compatible", "incompatible", "unknown")
 FLOW_TEMPLATE_ASSET_STATUS_VALUES = tuple(
     item.value for item in FlowTemplateAssetStatus
 )
+
+
+def _check_values(values: tuple[str, ...]) -> str:
+    return ",".join(f"'{value}'" for value in values)
 
 
 class Flows(BasePublic):
@@ -596,6 +602,72 @@ class FlowStepAttempts(BasePublic):
             "step_id",
             "attempt_no",
         ),
+    )
+
+
+class FlowRunAuditOutbox(BasePublic):
+    __tablename__ = "flow_run_audit_outbox"  # type: ignore[assignment]
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(
+        nullable=False,
+        index=True,
+    )
+    description: Mapped[str] = mapped_column(nullable=False)
+    action: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    entity_type: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    entity_id: Mapped[UUID] = mapped_column(nullable=False)
+    actor_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    actor_type: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    actor_api_key_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("api_keys_v2.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    source: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    target_status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    error_code: Mapped[Optional[str]] = mapped_column(nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("flow_run_id", name="uq_flow_run_audit_outbox_run"),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_run_audit_outbox_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_run_audit_outbox_run_flow",
+        ),
+        CheckConstraint(
+            "target_status IN ('completed','failed','cancelled')",
+            name="ck_flow_run_audit_outbox_target_status",
+        ),
+        CheckConstraint(
+            "description = action || ':' || source",
+            name="ck_flow_run_audit_outbox_description",
+        ),
+        CheckConstraint(
+            f"source IN ({_check_values(FLOW_RUN_TERMINAL_SOURCE_VALUES)})",
+            name="ck_flow_run_audit_outbox_source",
+        ),
+        Index("ix_flow_run_audit_outbox_tenant_created", "tenant_id", "created_at"),
+        Index("ix_flow_run_audit_outbox_action", "action"),
     )
 
 

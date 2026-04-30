@@ -15,7 +15,11 @@ from intric.authentication.auth_models import (
     ResourcePermissions,
 )
 from intric.flows.application.flow_run_service import FlowRunService
-from intric.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
+from intric.flows.enums import (
+    FlowRunTerminalSource,
+    FlowStepAttemptStatus,
+    FlowStepResultStatus,
+)
 from intric.flows.flow import (
     Flow,
     FlowRun,
@@ -2285,11 +2289,15 @@ async def test_reconcile_stale_running_runs_marks_stale_runs_failed(user):
         update={"status": FlowRunStatus.RUNNING}
     )
     flow_run_repo.list_stale_running_runs.return_value = [stale_run]
-    flow_run_repo.fail_stale_running_run.return_value = stale_run
+    terminalizer = AsyncMock()
+    terminalizer.terminalize_stale_running_run.return_value = SimpleNamespace(
+        did_transition=True
+    )
     service = FlowRunService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_terminalizer=terminalizer,
         flow_version_repo=flow_version_repo,
         queued_redispatch_after_seconds=30,
     )
@@ -2298,10 +2306,11 @@ async def test_reconcile_stale_running_runs_marks_stale_runs_failed(user):
 
     assert count == 1
     flow_run_repo.list_stale_running_runs.assert_awaited_once()
-    flow_run_repo.fail_stale_running_run.assert_awaited_once()
-    assert (
-        flow_run_repo.fail_stale_running_run.await_args.kwargs["error_message"]
-        == "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
+    terminalizer.terminalize_stale_running_run.assert_awaited_once()
+    terminal_kwargs = terminalizer.terminalize_stale_running_run.await_args.kwargs
+    assert terminal_kwargs["error_code"] == "flow_worker_stalled"
+    assert terminal_kwargs["error_message"] == (
+        "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
     )
 
 
@@ -2315,18 +2324,22 @@ async def test_reconcile_stale_running_runs_skips_already_reconciled_runs(user):
         update={"status": FlowRunStatus.RUNNING}
     )
     flow_run_repo.list_stale_running_runs.return_value = [stale_run]
-    flow_run_repo.fail_stale_running_run.return_value = None
+    terminalizer = AsyncMock()
+    terminalizer.terminalize_stale_running_run.return_value = SimpleNamespace(
+        did_transition=False
+    )
     service = FlowRunService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_terminalizer=terminalizer,
         flow_version_repo=flow_version_repo,
     )
 
     count = await service.reconcile_stale_running_runs(limit=10)
 
     assert count == 0
-    flow_run_repo.fail_stale_running_run.assert_awaited_once()
+    terminalizer.terminalize_stale_running_run.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -2505,11 +2518,13 @@ async def test_cancel_run_marks_pending_steps_cancelled(user):
     )
     cancelled_run = run.model_copy(update={"status": FlowRunStatus.CANCELLED})
     flow_run_repo.get.return_value = run
-    flow_run_repo.cancel.return_value = cancelled_run
+    terminalizer = AsyncMock()
+    terminalizer.terminalize_run.return_value = SimpleNamespace(run=cancelled_run)
     service = FlowRunService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_terminalizer=terminalizer,
         flow_version_repo=flow_version_repo,
         max_concurrent_runs=5,
     )
@@ -2517,14 +2532,12 @@ async def test_cancel_run_marks_pending_steps_cancelled(user):
     result = await service.cancel_run(run_id=run.id)
 
     assert result.status == FlowRunStatus.CANCELLED
-    flow_run_repo.mark_pending_steps_cancelled.assert_awaited_once_with(
-        run_id=run.id,
-        tenant_id=user.tenant_id,
-        error_message="Run cancelled by user.",
-    )
-    flow_run_repo.cancel.assert_awaited_once_with(
-        run_id=run.id, tenant_id=user.tenant_id
-    )
+    terminalizer.terminalize_run.assert_awaited_once()
+    terminal_kwargs = terminalizer.terminalize_run.await_args.kwargs
+    assert terminal_kwargs["target_status"] == FlowRunStatus.CANCELLED
+    assert terminal_kwargs["source"] == FlowRunTerminalSource.USER_CANCEL
+    assert terminal_kwargs["error_code"] == "user_cancelled"
+    assert terminal_kwargs["error_message"] == "Run cancelled by user."
 
 
 @pytest.mark.asyncio
@@ -2542,10 +2555,12 @@ async def test_cancel_run_is_noop_for_terminal_status(user, status):
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(update={"status": status})
     flow_run_repo.get.return_value = run
+    terminalizer = AsyncMock()
     service = FlowRunService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_terminalizer=terminalizer,
         flow_version_repo=flow_version_repo,
         max_concurrent_runs=5,
     )
@@ -2553,8 +2568,7 @@ async def test_cancel_run_is_noop_for_terminal_status(user, status):
     result = await service.cancel_run(run_id=run.id)
 
     assert result.status == status
-    flow_run_repo.mark_pending_steps_cancelled.assert_not_awaited()
-    flow_run_repo.cancel.assert_not_awaited()
+    terminalizer.terminalize_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio

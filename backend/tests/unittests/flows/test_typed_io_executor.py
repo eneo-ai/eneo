@@ -67,6 +67,18 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
     file_repo = AsyncMock()
     template_asset_service = AsyncMock()
     encryption_service = AsyncMock()
+    flow_run_terminalizer = SimpleNamespace()
+
+    async def _terminalize_run(**kwargs):
+        return SimpleNamespace(
+            run=SimpleNamespace(status=kwargs["target_status"]),
+            did_transition=True,
+            target_status=kwargs["target_status"],
+            source=kwargs["source"],
+            audit_outbox_id=uuid4(),
+        )
+
+    flow_run_terminalizer.terminalize_run = AsyncMock(side_effect=_terminalize_run)
     executor = FlowRunExecutor(
         user=user,
         session=session,
@@ -78,6 +90,7 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
         file_repo=file_repo,
         template_asset_service=template_asset_service,
         encryption_service=encryption_service,
+        flow_run_terminalizer=flow_run_terminalizer,
         max_inline_text_bytes=max_inline_text_bytes,
     )
     return executor, flow_repo, flow_run_repo, flow_version_repo

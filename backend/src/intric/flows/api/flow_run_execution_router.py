@@ -347,23 +347,9 @@ async def cancel_flow_run_alias(
         required_access=common.FlowApiAction.RUN,
         allow_service_key_principals=True,
     )
-    user = container.user()
-    actor_kwargs = audit_actor_kwargs(user)
     run_service = _get_flow_run_service(container)
     await run_service.get_run(run_id=run_id, flow_id=id)
     run = await run_service.cancel_run(run_id=run_id)
-
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        actor_id=actor_kwargs["actor_id"],
-        actor_type=actor_kwargs["actor_type"],
-        actor_api_key_id=actor_kwargs["actor_api_key_id"],
-        action=ActionType.FLOW_RUN_CANCELLED,
-        entity_type=EntityType.FLOW_RUN,
-        entity_id=run.id,
-        description=f"Cancelled flow run {run.id}",
-        metadata=AuditMetadata.standard(actor=user, target=run),
-    )
     return FlowAssembler().to_run_public(run)
 
 

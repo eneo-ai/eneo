@@ -8,8 +8,12 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication.principal_types import PrincipalType
 from intric.database.tables.flow_tables import (
+    FlowRunAuditOutbox,
     FlowRuns,
     FlowStepAttempts,
     FlowStepResults,
@@ -22,6 +26,12 @@ from intric.flows.domain.flow import (
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowStepResultStatus,
+    JsonObject,
+)
+from intric.flows.enums import (
+    ACTIVE_FLOW_RUN_STATUSES,
+    TERMINAL_FLOW_RUN_STATUSES,
+    FlowRunTerminalSource,
 )
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.principal import FlowPrincipal
@@ -37,7 +47,15 @@ class PreseedStep(TypedDict):
 class FlowRunRepository:
     """Tenant-scoped repository for flow run lifecycle and run evidence."""
 
-    _ACTIVE_STATUSES = (FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value)
+    _ACTIVE_STATUSES = tuple(status.value for status in ACTIVE_FLOW_RUN_STATUSES)
+    _OPEN_ATTEMPT_STATUSES = (
+        FlowStepAttemptStatus.STARTED.value,
+        FlowStepAttemptStatus.RETRIED.value,
+    )
+    _ACTIVE_STEP_RESULT_STATUSES = (
+        FlowStepResultStatus.PENDING.value,
+        FlowStepResultStatus.RUNNING.value,
+    )
 
     def __init__(self, session: AsyncSession, factory: FlowFactory):
         self.session = session
@@ -265,82 +283,146 @@ class FlowRunRepository:
             return None
         return self.factory.from_flow_run_db(claimed)
 
-    async def fail_stale_running_run(
+    async def terminalize_run_status(
         self,
         *,
         run_id: UUID,
         tenant_id: UUID,
-        stale_before: datetime,
-        error_message: str,
-    ) -> FlowRun | None:
-        row = await self.session.scalar(
-            sa.update(FlowRuns)
-            .where(FlowRuns.id == run_id)
-            .where(FlowRuns.tenant_id == tenant_id)
-            .where(FlowRuns.status == FlowRunStatus.RUNNING.value)
-            .where(FlowRuns.updated_at <= stale_before)
-            .values(
-                status=FlowRunStatus.FAILED.value,
-                error_message=error_message,
-                finished_at=datetime.now(timezone.utc),
-            )
-            .returning(FlowRuns)
-        )
-        if row is None:
-            return None
-        return self.factory.from_flow_run_db(row)
-
-    async def update_status(
-        self,
-        *,
-        run_id: UUID,
-        tenant_id: UUID,
-        status: FlowRunStatus,
+        target_status: FlowRunStatus,
         error_message: str | None = None,
-        output_payload_json: dict[str, Any] | None = None,
+        output_payload_json: JsonObject | None = None,
         cancelled_at: datetime | None = None,
-        from_statuses: tuple[str, ...] | None = None,
-    ) -> FlowRun:
+        stale_before: datetime | None = None,
+    ) -> FlowRun | None:
+        if target_status not in TERMINAL_FLOW_RUN_STATUSES:
+            raise ValueError("target_status must be terminal")
+
         values: dict[str, Any] = {
-            "status": status.value,
+            "status": target_status.value,
             "error_message": error_message,
             "output_payload_json": output_payload_json,
+            "finished_at": datetime.now(timezone.utc),
         }
         if cancelled_at is not None:
             values["cancelled_at"] = cancelled_at
-
-        if status in (
-            FlowRunStatus.COMPLETED,
-            FlowRunStatus.FAILED,
-            FlowRunStatus.CANCELLED,
-        ):
-            values["finished_at"] = datetime.now(timezone.utc)
-
-        if from_statuses is None and status in (
-            FlowRunStatus.COMPLETED,
-            FlowRunStatus.FAILED,
-            FlowRunStatus.CANCELLED,
-        ):
-            from_statuses = (FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value)
 
         stmt = (
             sa.update(FlowRuns)
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status.in_(self._ACTIVE_STATUSES))
         )
-        if from_statuses is not None:
-            stmt = stmt.where(FlowRuns.status.in_(from_statuses))
+        if stale_before is not None:
+            stmt = stmt.where(FlowRuns.updated_at <= stale_before)
         run_row = await self.session.scalar(stmt.values(**values).returning(FlowRuns))
         if run_row is None:
-            existing = await self.session.scalar(
-                sa.select(FlowRuns)
-                .where(FlowRuns.id == run_id)
-                .where(FlowRuns.tenant_id == tenant_id)
-            )
-            if existing is None:
-                raise NotFoundException("Flow run not found.")
-            return self.factory.from_flow_run_db(existing)
+            return None
         return self.factory.from_flow_run_db(run_row)
+
+    async def count_active_step_results(
+        self, *, run_id: UUID, tenant_id: UUID
+    ) -> int:
+        count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(FlowStepResults.status.in_(self._ACTIVE_STEP_RESULT_STATUSES))
+        )
+        return int(count or 0)
+
+    async def count_open_step_attempts(self, *, run_id: UUID, tenant_id: UUID) -> int:
+        count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowStepAttempts.status.in_(self._OPEN_ATTEMPT_STATUSES))
+        )
+        return int(count or 0)
+
+    async def close_active_step_results_for_terminal_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        target_status: FlowStepResultStatus,
+        error_message: str | None = None,
+    ) -> int:
+        result = await self.session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(FlowStepResults.status.in_(self._ACTIVE_STEP_RESULT_STATUSES))
+            .values(
+                status=target_status.value,
+                error_message=error_message,
+                finished_at=datetime.now(timezone.utc),
+            )
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def close_open_step_attempts_for_terminal_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        target_status: FlowStepAttemptStatus,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> int:
+        result = await self.session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowStepAttempts.status.in_(self._OPEN_ATTEMPT_STATUSES))
+            .values(
+                status=target_status.value,
+                error_code=error_code,
+                error_message=error_message,
+                finished_at=datetime.now(timezone.utc),
+            )
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def insert_terminal_audit_outbox(
+        self,
+        *,
+        run: FlowRun,
+        description: str,
+        action: ActionType,
+        entity_type: EntityType,
+        actor_id: UUID | None,
+        actor_type: ActorType,
+        actor_api_key_id: UUID | None,
+        source: FlowRunTerminalSource,
+        target_status: FlowRunStatus,
+        error_code: str | None,
+        error_message: str | None,
+    ) -> UUID:
+        outbox_id = await self.session.scalar(
+            sa.insert(FlowRunAuditOutbox)
+            .values(
+                tenant_id=run.tenant_id,
+                flow_id=run.flow_id,
+                flow_run_id=run.id,
+                description=description,
+                action=action.value,
+                entity_type=entity_type.value,
+                entity_id=run.id,
+                actor_id=actor_id,
+                actor_type=actor_type.value,
+                actor_api_key_id=actor_api_key_id,
+                source=source.value,
+                target_status=target_status.value,
+                error_code=error_code,
+                error_message=error_message,
+            )
+            .returning(FlowRunAuditOutbox.id)
+        )
+        if outbox_id is None:
+            raise RuntimeError("Flow run audit outbox insert did not return an id.")
+        return outbox_id
 
     async def update_input_payload(
         self,
@@ -363,15 +445,6 @@ class FlowRunRepository:
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
             .values(input_payload_json=merged_payload)
-        )
-
-    async def cancel(self, *, run_id: UUID, tenant_id: UUID) -> FlowRun:
-        return await self.update_status(
-            run_id=run_id,
-            tenant_id=tenant_id,
-            status=FlowRunStatus.CANCELLED,
-            cancelled_at=datetime.now(timezone.utc),
-            from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
         )
 
     async def list_step_results(
@@ -479,32 +552,6 @@ class FlowRunRepository:
         if row is None:
             return None
         return self.factory.from_flow_step_result_db(row)
-
-    async def mark_pending_steps_cancelled(
-        self,
-        *,
-        run_id: UUID,
-        tenant_id: UUID,
-        error_message: str | None = None,
-    ) -> None:
-        await self.session.execute(
-            sa.update(FlowStepResults)
-            .where(FlowStepResults.flow_run_id == run_id)
-            .where(FlowStepResults.tenant_id == tenant_id)
-            .where(
-                FlowStepResults.status.in_(
-                    (
-                        FlowStepResultStatus.PENDING.value,
-                        FlowStepResultStatus.RUNNING.value,
-                    )
-                )
-            )
-            .values(
-                status=FlowStepResultStatus.CANCELLED.value,
-                error_message=error_message,
-                finished_at=datetime.now(timezone.utc),
-            )
-        )
 
     async def create_or_get_attempt_started(
         self,

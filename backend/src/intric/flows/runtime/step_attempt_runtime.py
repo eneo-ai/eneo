@@ -4,14 +4,18 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
 
-from intric.flows.domain.flow import FlowRunStatus, FlowStepAttemptStatus, FlowStepResult
+from intric.flows.domain.flow import (
+    FlowRunStatus,
+    FlowStepAttemptStatus,
+    FlowStepResult,
+)
+from intric.flows.enums import is_terminal_flow_run_status
 from intric.flows.runtime.claim_resolution import StepClaimResolution
 from intric.flows.runtime.models import RuntimeStep, StepExecutionOutput
 from intric.flows.runtime.step_result_builder import (
     build_completed_step_result,
     build_failed_step_result,
 )
-
 
 StepGateAction = Literal[
     "execute_attempt",
@@ -54,11 +58,7 @@ def build_step_gate_decision(
     claim_resolution: StepClaimResolution | None,
     step_id: UUID,
 ) -> StepGateDecision:
-    if latest_run_status in {
-        FlowRunStatus.COMPLETED,
-        FlowRunStatus.FAILED,
-        FlowRunStatus.CANCELLED,
-    }:
+    if is_terminal_flow_run_status(latest_run_status):
         return StepGateDecision(
             action="return",
             result={"status": "skipped", "reason": f"run_{latest_run_status.value}"},

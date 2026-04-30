@@ -1746,7 +1746,7 @@ async def test_flow_run_alias_viewer_cannot_read_unpublished_flow(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_flow_run_alias_cancel_logs_audit_entry(monkeypatch):
+async def test_flow_run_alias_cancel_uses_terminalizer_audit_only(monkeypatch):
     container = MagicMock()
     flow_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
@@ -1779,9 +1779,7 @@ async def test_flow_run_alias_cancel_logs_audit_entry(monkeypatch):
     assert response.id == cancelled_run.id
     run_service.get_run.assert_awaited_once_with(run_id=run.id, flow_id=flow_id)
     run_service.cancel_run.assert_awaited_once_with(run_id=run.id)
-    kwargs = container.audit_service.return_value.log_async.await_args.kwargs
-    assert kwargs["action"] == ActionType.FLOW_RUN_CANCELLED
-    assert kwargs["entity_id"] == cancelled_run.id
+    container.audit_service.return_value.log_async.assert_not_awaited()
 
 
 @pytest.mark.asyncio

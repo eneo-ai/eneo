@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.enums import FlowRunTerminalSource
 from intric.flows.runtime.celery_execution_backend import (
     FLOW_EXECUTE_TASK_NAME,
     CeleryFlowExecutionBackend,
@@ -155,8 +156,12 @@ def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
 
 def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
     tasks_module = importlib.import_module("intric.flows.runtime.tasks")
-    mark_run_failed = AsyncMock()
-    monkeypatch.setattr(tasks_module, "_mark_run_failed", mark_run_failed)
+    terminalize_failure = AsyncMock()
+    monkeypatch.setattr(
+        tasks_module,
+        "terminalize_flow_run_failure",
+        terminalize_failure,
+    )
     monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
 
     class _Future:
@@ -182,16 +187,26 @@ def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
     )
 
     assert result == {"status": "failed", "reason": "missing_principal"}
-    assert mark_run_failed.await_count == 1
-    assert mark_run_failed.await_args.kwargs["error_message"] == (
+    assert terminalize_failure.await_count == 1
+    assert terminalize_failure.await_args.kwargs["source"] == (
+        FlowRunTerminalSource.MISSING_PRINCIPAL
+    )
+    assert terminalize_failure.await_args.kwargs["error_code"] == (
+        "flow_missing_principal"
+    )
+    assert terminalize_failure.await_args.kwargs["error_message"] == (
         "flow_missing_principal: Flow run execution skipped because run has no execution principal."
     )
 
 
 def test_execute_flow_run_handles_timeout_and_marks_run_failed(monkeypatch):
     tasks_module = importlib.import_module("intric.flows.runtime.tasks")
-    mark_run_failed = AsyncMock()
-    monkeypatch.setattr(tasks_module, "_mark_run_failed", mark_run_failed)
+    terminalize_failure = AsyncMock()
+    monkeypatch.setattr(
+        tasks_module,
+        "terminalize_flow_run_failure",
+        terminalize_failure,
+    )
     monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
     monkeypatch.setattr(
         tasks_module,
@@ -239,16 +254,24 @@ def test_execute_flow_run_handles_timeout_and_marks_run_failed(monkeypatch):
     )
 
     assert result == {"status": "failed", "reason": "timeout"}
-    assert mark_run_failed.await_count == 1
-    assert mark_run_failed.await_args.kwargs["error_message"] == (
+    assert terminalize_failure.await_count == 1
+    assert terminalize_failure.await_args.kwargs["source"] == (
+        FlowRunTerminalSource.TASK_TIMEOUT
+    )
+    assert terminalize_failure.await_args.kwargs["error_code"] == "flow_task_timeout"
+    assert terminalize_failure.await_args.kwargs["error_message"] == (
         "flow_task_timeout: Flow execution timed out before task completion."
     )
 
 
 def test_execute_flow_run_handles_generic_exception(monkeypatch):
     tasks_module = importlib.import_module("intric.flows.runtime.tasks")
-    mark_run_failed = AsyncMock()
-    monkeypatch.setattr(tasks_module, "_mark_run_failed", mark_run_failed)
+    terminalize_failure = AsyncMock()
+    monkeypatch.setattr(
+        tasks_module,
+        "terminalize_flow_run_failure",
+        terminalize_failure,
+    )
     monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
     monkeypatch.setattr(
         tasks_module,
@@ -288,11 +311,15 @@ def test_execute_flow_run_handles_generic_exception(monkeypatch):
     )
 
     assert result == {"status": "failed", "reason": "task_failure"}
-    assert mark_run_failed.await_count == 1
-    assert mark_run_failed.await_args.kwargs["error_message"] == (
+    assert terminalize_failure.await_count == 1
+    assert terminalize_failure.await_args.kwargs["source"] == (
+        FlowRunTerminalSource.TASK_FAILURE
+    )
+    assert terminalize_failure.await_args.kwargs["error_code"] == "flow_task_failure"
+    assert terminalize_failure.await_args.kwargs["error_message"] == (
         "flow_task_failure: Flow execution task failed before run completion."
     )
-    assert "boom" not in mark_run_failed.await_args.kwargs["error_message"]
+    assert "boom" not in terminalize_failure.await_args.kwargs["error_message"]
 
 
 def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
@@ -308,8 +335,10 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
             [SimpleNamespace(id=uuid4(), tenant_id=tenant_two.id)],
         ]
     )
-    repo.fail_stale_running_run = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
-    repo.mark_pending_steps_cancelled = AsyncMock()
+    terminalizer = MagicMock()
+    terminalizer.terminalize_stale_running_run = AsyncMock(
+        return_value=SimpleNamespace(did_transition=True)
+    )
 
     class _Container:
         def __init__(self, session=None):
@@ -318,6 +347,9 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
 
         def flow_run_repo(self):
             return self._repo
+
+        def flow_run_terminalizer(self):
+            return terminalizer
 
         def tenant_repo(self):
             return self._tenant_repo
@@ -343,7 +375,11 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
 
     assert result["status"] == "ok"
     assert result["reconciled"] == 2
-    assert repo.fail_stale_running_run.await_count == 2
+    assert terminalizer.terminalize_stale_running_run.await_count == 2
+    assert {
+        call.kwargs["error_code"]
+        for call in terminalizer.terminalize_stale_running_run.await_args_list
+    } == {"flow_worker_stalled"}
 
 
 def test_flow_worker_process_init_initializes_db_and_http_client(monkeypatch):
@@ -380,6 +416,6 @@ def test_enable_autobegin_for_flow_task_session():
     sync_session = SimpleNamespace(autobegin=False)
     async_session = SimpleNamespace(sync_session=sync_session)
 
-    tasks_module._enable_autobegin_for_flow_task_session(async_session)
+    tasks_module.enable_autobegin_for_flow_task_session(async_session)
 
     assert sync_session.autobegin is True

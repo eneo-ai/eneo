@@ -104,6 +104,7 @@ from intric.flows import (
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_service import AIBuilderService
+from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.flow_template_asset_service import FlowTemplateAssetService
@@ -706,6 +707,10 @@ class Container(containers.DeclarativeContainer):
         session=session,
         factory=flow_factory,
     )
+    flow_run_terminalizer = providers.Factory(
+        FlowRunTerminalizer,
+        flow_run_repo=flow_run_repo,
+    )
     flow_celery_app = providers.Object(flow_celery_app)
     flow_execution_backend = providers.Factory(
         CeleryFlowExecutionBackend,
@@ -1129,6 +1134,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_terminalizer=flow_run_terminalizer,
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,
         settings_service=settings_service,
