@@ -14,6 +14,7 @@ class CompletionModelMigrationHistory(BasePublic):
 
     __tablename__ = "completion_model_migration_history"  # type: ignore[assignment]
 
+    migration_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
     tenant_id = Column(
         UUID(as_uuid=True),
         ForeignKey("tenants.id", ondelete="CASCADE"),

@@ -230,7 +230,7 @@ async def delete_tenant_completion_model(
     """Soft-delete a tenant-specific completion model."""
     validate_permission(user, Permission.ADMIN)
 
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     import sqlalchemy as sa
 
@@ -268,7 +268,7 @@ async def delete_tenant_completion_model(
 
     # Soft-delete: mark with deleted_at timestamp (model stays in DB
     # so historical question references and token usage remain intact)
-    model.deleted_at = datetime.utcnow()
+    model.deleted_at = datetime.now(timezone.utc)  # type: ignore[assignment]
     await session.commit()
 
     return {"success": True}

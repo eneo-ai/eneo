@@ -111,7 +111,9 @@ class CompletionModelMigrationHistoryService:
                 float | None, getattr(record, "duration_seconds", None)
             )
             error_message = cast(str | None, record.error_message)
-            stored_from_name = cast(str | None, getattr(record, "from_model_name", None))
+            stored_from_name = cast(
+                str | None, getattr(record, "from_model_name", None)
+            )
             stored_to_name = cast(str | None, getattr(record, "to_model_name", None))
             migration_details = cast(
                 dict[str, int] | None, getattr(record, "migration_details", None)
@@ -133,9 +135,9 @@ class CompletionModelMigrationHistoryService:
 
             public_model = ModelMigrationHistory(
                 id=record.id,
-                from_model_id=record.from_model_id,
+                from_model_id=from_model_id,
                 from_model_name=from_model_name,
-                to_model_id=record.to_model_id,
+                to_model_id=to_model_id,
                 to_model_name=to_model_name,
                 migrated_count=migrated_count,
                 status=status,

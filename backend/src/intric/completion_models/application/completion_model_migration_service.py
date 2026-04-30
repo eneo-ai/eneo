@@ -103,9 +103,7 @@ class CompletionModelMigrationService:
         if normalized_entity_types is not None:
             # Check for invalid entity types
             invalid_types = [
-                t
-                for t in normalized_entity_types
-                if t not in MIGRATABLE_ENTITY_TYPES
+                t for t in normalized_entity_types if t not in MIGRATABLE_ENTITY_TYPES
             ]
             if invalid_types:
                 raise ValidationException(
@@ -114,8 +112,8 @@ class CompletionModelMigrationService:
 
             self.logger.debug(f"Validated entity_types: {normalized_entity_types}")
 
-        final_entity_types: list[str] = (
-            normalized_entity_types or list(MIGRATABLE_ENTITY_TYPES)
+        final_entity_types: list[str] = normalized_entity_types or list(
+            MIGRATABLE_ENTITY_TYPES
         )
         self.logger.debug(f"Final entity_types for migration: {final_entity_types}")
 
@@ -261,10 +259,13 @@ class CompletionModelMigrationService:
             )
 
             # Security blockers cannot be overridden with confirm_migration
-            has_blockers = any(w.startswith("security_classification_insufficient") for w in validation_result.warning_codes)
+            has_blockers = any(
+                w.startswith("security_classification_insufficient")
+                for w in validation_result.warning_codes
+            )
 
             if has_blockers:
-                duration = (datetime.utcnow() - start_time).total_seconds()
+                duration = (datetime.now(timezone.utc) - start_time).total_seconds()
                 await self.migration_history_repo.update_migration_history(
                     migration_id=migration_id,
                     tenant_id=user.tenant_id,
@@ -272,7 +273,7 @@ class CompletionModelMigrationService:
                     migrated_count=0,
                     failed_count=0,
                     duration_seconds=duration,
-                    completed_at=datetime.utcnow(),
+                    completed_at=datetime.now(timezone.utc),
                     error_message=f"Migration blocked: {', '.join(validation_result.warnings)}",
                     warnings=validation_result.warnings,
                 )
@@ -535,8 +536,12 @@ class CompletionModelMigrationService:
 
         # Check model family compatibility
         if from_model.family != to_model.family:
-            issues.append(f"Different model families: {from_model.family} → {to_model.family}")
-            issue_codes.append(f"different_family:{from_model.family}:{to_model.family}")
+            issues.append(
+                f"Different model families: {from_model.family} → {to_model.family}"
+            )
+            issue_codes.append(
+                f"different_family:{from_model.family}:{to_model.family}"
+            )
 
         # Check vision support
         if from_model.vision and not to_model.vision:
@@ -571,7 +576,9 @@ class CompletionModelMigrationService:
             )
 
         # Kwargs reset is informational, not a compatibility issue
-        info_warnings = ["Assistant model parameters (kwargs) will be reset to defaults"]
+        info_warnings = [
+            "Assistant model parameters (kwargs) will be reset to defaults"
+        ]
         info_codes = ["kwargs_reset"]
 
         # Blockers prevent migration entirely (confirm cannot override)
@@ -594,8 +601,10 @@ class CompletionModelMigrationService:
         self, from_model_id: UUID, to_model: Any, tenant_id: UUID
     ) -> int:
         """Count spaces where target model doesn't meet the security classification requirement."""
+        from intric.database.tables.security_classifications_table import (
+            SecurityClassification as SecurityClassifications,
+        )
         from intric.database.tables.spaces_table import Spaces, SpacesCompletionModels
-        from intric.database.tables.security_classifications_table import SecurityClassification as SecurityClassifications
 
         # Get target model's security level (0 if no classification)
         target_level = (
