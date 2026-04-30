@@ -1,5 +1,134 @@
 # Batch 6 - AI Builder Contract Split Journal
 
+## Iteration 6
+
+### Start Gate
+
+- HEAD verified as `4230822e`.
+- Latest commit verified as `docs: record ai builder router thinning no-go`.
+- `git diff --cached --name-only` returned no staged files.
+- Dirty files at start:
+  - `frontend/packages/ui/src/icons/types.d.ts`
+  - `scripts/run_codex_review.sh`
+  - `PRODUCT.md`
+- These dirty files are unrelated and must remain untouched.
+
+### Scope Decision
+
+This iteration is limited to frontend AI Builder protocol generated aliases.
+
+Explicit non-goals:
+
+- Driver/Service state-owner refactor
+- component UI redesign
+- backend changes
+- generated schema regeneration
+- package rename from `@intric/intric-js`
+- `intric.*` to `eneo.*` namespace work
+- touching `frontend/packages/ui/src/icons/types.d.ts`,
+  `scripts/run_codex_review.sh`, or `PRODUCT.md`
+
+### Evidence Gathered
+
+- `frontend/apps/web/src/lib/features/flows/ai-builder/protocol.ts` exports
+  37 AI Builder protocol/view types.
+- Generated HTTP/API owners exist in
+  `frontend/packages/intric-js/src/types/schema.d.ts` for:
+  - `TargetKind`
+  - `SessionStatus`
+  - `PlanStatus`
+  - `ConversationMessage`
+  - `FilePublic`
+  - `SessionResponse`
+  - `SessionListItemResponse`
+  - `StepSpec`
+  - `FlowDraftSpecCore`
+  - `LintWarning`
+  - `PlannerPlanEnvelope`
+  - `PlanResponse`
+  - `RevisePlanRequest`
+  - `ApplyResultResponse`
+  - `SessionModelOption`
+  - `SessionTelemetrySummary`
+- Generated schemas are missing for:
+  - AI Builder SSE event payloads (`text`, `status`, `error`, `question`,
+    `requirements_summary`, and plan-event edit metadata)
+  - `AIBuilderPlanEditContext` inside generated `SendMessageRequest`
+  - edit diff/advisory/confidence/risk flag payloads
+- Consumer counts were gathered with `rg` across `frontend/apps/web/src`,
+  `frontend/packages/intric-js/src`, and `frontend/packages/ui/src` and
+  recorded in the plan's type mapping table.
+
+### Plan Status
+
+- Frontend protocol generated alias plan prepended to
+  `docs/refactor/execution/batch-6-ai-builder-contract-split/plan.md`.
+- Planned source changes:
+  - replace truthful HTTP/API protocol surfaces with generated aliases
+  - keep SSE-only and UI-only view models local
+  - update UI code where generated optional/defaulted fields require explicit
+    default handling
+- Next action: run Claude peer-loop plan review before source edits.
+- Claude peer-loop plan review returned `VERDICT: changes_required`,
+  `GREEN_LIGHT: no`, and `MIN_SCORE: 6`.
+- Accepted findings were verified locally:
+  - generated `StepSpec` and `PlannerPlanEnvelope` defaulted fields become
+    optional at UI call sites in `FlowAIBuilderStepCard.svelte` and
+    `FlowAIBuilderPlanPane.svelte`
+  - `AIBuilderDraftSession` must map to `SessionListItemResponse`, not extend
+    the full `SessionResponse`
+  - pure HTTP/API aliases should live in `resources.d.ts`, matching the
+    generated alias pattern established by Batch 5
+  - generated `ConversationMessage.role` is a wide `string`, so the frontend
+    should keep a narrowed projection until the backend schema is more precise
+  - `ProposedPlan` still bridges an HTTP/SSE asymmetry and needs an explicit
+    carry-forward trigger
+- Plan revisions made before source edits:
+  - added a consumer migration table for every generated optionality mitigation
+  - moved pure HTTP/API aliases to the planned `resources.d.ts` owner
+  - recorded the draft-session inheritance break
+  - kept conversation messages as a narrowed frontend projection
+  - added carry-forward triggers for `edit_context`, plan edit-result metadata,
+    and missing SSE event payload schemas
+- Pre-edit grep confirmed no `AIBuilderDraftSession` consumers read
+  full-session-only fields (`draft.attachments`, `draft.conversation`,
+  `draft.telemetry`, or `draft.attachment_warnings`).
+- Pre-edit anti-slippage grep found only SVG path-data false positives for
+  `A.75`; the plan guard was refined to `rg --pcre2` with
+  `A\.[0-9](?![0-9])` before implementation.
+- Claude peer-loop verification returned `VERDICT: changes_required`,
+  `GREEN_LIGHT: no`, and `MIN_SCORE: 7`.
+- Accepted follow-up findings were verified and folded into the plan:
+  - `ProposedPlan` needs an exact projection shape because SSE plan events do
+    not carry HTTP-only `session_id`/`spec_hash` fields
+  - `AIBuilderConversationMessage` should derive non-role fields from the
+    generated conversation message schema while keeping the frontend role union
+  - `Required<SessionTelemetrySummary>` should explicitly document that nullable
+    `last_*` fields stay nullable
+  - `flow_description` optionality should be listed in the migration table even
+    though current short-circuit usage is safe
+  - the protocol/resources alias ownership boundary should be stated directly
+- Claude peer-loop verification rerun returned `VERDICT: changes_required`,
+  `GREEN_LIGHT: no`, and `MIN_SCORE: 7`.
+- Accepted follow-up finding:
+  - `AIBuilderSession` must be a `protocol.ts` projection over raw generated
+    `SessionResponse` because the frontend intentionally narrows conversation
+    message roles and uses required telemetry counters
+- Non-blocking notes folded into the plan:
+  - removed redundant `status`/`envelope` re-pinning from the `ProposedPlan`
+    projection shape
+  - added migration-table rows for `plan_rationale`, `risk_acknowledgments`,
+    and `reasoning`
+  - recorded that the refined anti-slippage guard returned no pre-edit matches
+  - recorded that low-level local UI/SSE helpers are covered by broader
+    edit-context, edit-result, and SSE payload schema gaps
+- Additional grep evidence:
+  - `rg -n "draft\.(attachments|conversation|telemetry|attachment_warnings)" frontend/apps/web/src`
+    returned no matches
+  - `rg -n "envelope\.(assumptions|lint_warnings)" frontend/apps/web/src`
+    returned only `FlowAIBuilderPlanPane.svelte`
+- Next action: rerun Claude peer-loop verification against the tightened plan.
+
 ## Iteration 5
 
 ### Start Gate
@@ -870,3 +999,172 @@ Evidence summary:
 - Claude verification rerun after the documentation fix returned
   `VERDICT: green`, `GREEN_LIGHT: yes`, and `MIN_SCORE: 9`.
 - Artifact: `.codex/artifacts/claude-peer-loop-batch-6-repair-contract-hardening-implementation-verification-20260430T133448Z.md`.
+
+## Iteration 6 - Frontend AI Builder Protocol Generated Aliases
+
+### Start Gate
+
+- Started from commit `4230822e docs: record ai builder router thinning no-go`.
+- Branch state before source edits:
+  - `frontend/packages/ui/src/icons/types.d.ts` dirty, unrelated and untouched
+  - `scripts/run_codex_review.sh` dirty, unrelated and untouched
+  - `PRODUCT.md` untracked, unrelated and untouched
+  - no staged files
+- Scope limited to frontend AI Builder protocol/generated aliases, `intric-js`
+  resource aliases, frontend AI Builder rendering defaults, and curated batch
+  docs.
+- Backend source/tests, migrations, Celery/runtime behavior, package naming, and
+  `intric.*` namespace migration were not in scope.
+
+### Plan Evidence And Claude Review
+
+- Inventory added to `plan.md` under `Frontend AI Builder Protocol Generated
+  Alias Plan`.
+- Generated schema evidence came from
+  `frontend/packages/intric-js/src/types/schema.d.ts` for:
+  - `TargetKind`
+  - `SessionStatus`
+  - `PlanStatus`
+  - `ConversationMessage`
+  - `FilePublic`
+  - `SessionResponse`
+  - `SessionListItemResponse`
+  - `StepSpec`
+  - `FlowDraftSpecCore`
+  - `LintWarning`
+  - `PlannerPlanEnvelope`
+  - `PlanResponse`
+  - `RevisePlanRequest`
+  - `ApplyResultResponse`
+  - `SessionModelOption`
+  - `SessionTelemetrySummary`
+- Claude plan review required four passes:
+  - iteration 1: `VERDICT: changes_required`, `GREEN_LIGHT: no`,
+    `MIN_SCORE: 6`
+  - iteration 2: `VERDICT: changes_required`, `MIN_SCORE: 7`
+  - iteration 3: `VERDICT: changes_required`, `MIN_SCORE: 7`
+  - iteration 4: `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`
+- Accepted plan-review findings fixed before implementation:
+  - `AIBuilderDraftSession` maps to `SessionListItemResponse`, not a full
+    session extension.
+  - `AIBuilderSession` remains a protocol projection over generated
+    `SessionResponse` because conversation roles and telemetry are projected.
+  - `ProposedPlan` is a generated `PlanResponse` projection with optional HTTP
+    metadata and SSE-only edit metadata.
+  - pure generated AI Builder HTTP aliases live in
+    `frontend/packages/intric-js/src/types/resources.d.ts`.
+  - optional generated fields get explicit frontend defaulting at consumer
+    sites instead of weakening aliases.
+  - `SessionTelemetrySummary` uses `Required<>` only to remove `undefined` from
+    backend-defaulted counters; nullable `last_*` fields stay nullable.
+- Claude green-light artifact:
+  `.codex/artifacts/claude-peer-loop-batch-6-frontend-ai-builder-protocol-aliases-implementation-gate-20260430T222042Z.md`.
+- Low-severity Claude advisory recorded for later:
+  `getRecoverableCreateDrafts` filters `session.flow_id === null`; generated
+  `SessionListItemResponse.flow_id` also permits `undefined`. This slice keeps
+  current behavior because the backend currently emits explicit `null` for
+  create drafts without a flow.
+
+### Implementation Notes
+
+- Added generated AI Builder aliases to
+  `frontend/packages/intric-js/src/types/resources.d.ts`.
+- Replaced handwritten AI Builder HTTP/API protocol surfaces in
+  `frontend/apps/web/src/lib/features/flows/ai-builder/protocol.ts` with
+  generated-backed aliases/projections where backend schemas exist.
+- Kept frontend-owned types for:
+  - SSE event envelope and event-specific payloads that are not generated
+  - UI chat messages
+  - edit-diff metadata emitted on stream plan events but not represented in the
+    HTTP `PlanResponse` schema
+  - `ApplyError`, which is a frontend error-envelope projection
+- Updated `FlowAIBuilderDriver.ts` to use `IncomingProposedPlan` for stream
+  plan events where status may be omitted and normalized client-side.
+- Updated `FlowAIBuilderStepCard.svelte` to default generated-optional step
+  fields at the render edge:
+  - `input_type` defaults to `text`
+  - `output_type` defaults to `text`
+  - `output_mode` defaults to `pass_through`
+  - `assistant_spec.knowledge_refs` defaults to `[]`
+  - input/output contract `properties` are read through a local typed schema
+    projection
+- Updated `FlowAIBuilderPlanPane.svelte` to default generated-optional
+  `assumptions`, `lint_warnings`, and form-field `required` at the render edge.
+- No Driver/Service state-owner refactor, component UI redesign, backend change,
+  generated schema regeneration, package rename, or namespace migration was
+  started.
+
+### Validation Results
+
+- `cd frontend/packages/intric-js && bun run check`
+  - Result: pass.
+- `cd frontend/packages/intric-js && bun run lint`
+  - Result: pass.
+- `cd frontend/apps/web && bun run check`
+  - Result: failed with 43 errors and 7 warnings in 14 files. No pre-change
+    strict app baseline was captured for this slice, so this cannot be used as
+    a numeric ratchet. The failures are known broad frontend/generated-client
+    baseline categories, not touched AI Builder protocol files:
+    - existing `frontend/packages/intric-js/src/endpoints/*` generated schema
+      drift
+    - existing nullable space/default-assistant frontend state issues
+    - existing route resolver typing issues in Flow table links
+    - existing Svelte local-state warnings in AI Builder harness/host files
+- `cd frontend/apps/web && bun test src/lib/features/flows/ai-builder`
+  - Result: failed because Bun's test runner ignores Vitest jsdom environment
+    comments; component tests hit `ReferenceError: document is not defined`.
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/ai-builder`
+  - Result: failed because `jsdom` is not installed in the frontend workspace.
+    Non-jsdom AI Builder tests passed: 48 tests in 7 files. The two jsdom
+    component test files could not initialize the environment.
+- `cd frontend/apps/web && bunx prettier --check src/lib/features/flows/ai-builder/protocol.ts src/lib/features/flows/ai-builder/FlowAIBuilderDriver.ts src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.svelte src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte`
+  - First run found formatting drift in `protocol.ts`.
+  - After formatting `protocol.ts`: pass.
+- `cd frontend/apps/web && bunx eslint src/lib/features/flows/ai-builder/protocol.ts src/lib/features/flows/ai-builder/FlowAIBuilderDriver.ts src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.svelte src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte`
+  - Result: pass.
+- `git diff --check -- frontend/apps/web/src/lib/features/flows/ai-builder frontend/packages/intric-js docs/refactor/execution/batch-6-ai-builder-contract-split`
+  - Result: pass.
+- `rg --pcre2 -n "A\\.[0-9](?![0-9])|P0\\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|frontend protocol slice|Batch 6|6f|as any|@ts-ignore|@ts-expect-error" frontend/apps/web/src/lib/features/flows/ai-builder docs/refactor/prd docs/refactor/ai-builder-prompt-contract.md`
+  - Result: no matches.
+- `rg --pcre2 -n "step\\.(input_type|output_type|output_mode)(?!\\s*\\?\\?)|knowledge_refs\\.(length|join)|envelope\\.(assumptions|lint_warnings)" frontend/apps/web/src/lib/features/flows/ai-builder`
+  - Result: only the mitigated `planAssumptions` and `planLintWarnings`
+    derivations matched; no unmitigated `StepSpec` optional-field reads remain
+    under AI Builder frontend files.
+
+### Claude Implementation Verification
+
+- Claude peer-loop implementation verification returned body result
+  `VERDICT: green`, `GREEN_LIGHT: yes`, and `MIN_SCORE: 8`.
+- Artifact:
+  `.codex/artifacts/claude-peer-loop-batch-6-frontend-ai-builder-protocol-generated-aliases-implementation-20260430T223308Z.md`.
+- The wrapper exited nonzero because it did not parse Claude's markdown
+  `GREEN_LIGHT: yes` line; the review body explicitly green-lit the slice.
+- Claude verified:
+  - generated-schema integrity is preserved; `schema.d.ts` is untouched
+  - structural HTTP/API shapes now flow through generated-backed aliases
+  - the four frontend projections are justified by UI/SSE invariants
+  - no fake compatibility shim, namespace/package rename, state-owner refactor,
+    or UI redesign slipped in
+  - the `Required<>` telemetry comment explains a real nullability decision
+  - runtime risk is low because the type-only swap is erased at runtime and
+    generated-optional consumers have default derivations
+- Accepted non-blocking findings:
+  - broad app-check count needed to be recorded; updated above with the
+    post-change count and explicit note that no pre-change strict baseline was
+    captured
+  - jsdom component-test coverage remains blocked by missing workspace
+    dependency and should be fixed on the next jsdom-touching slice
+  - existing `flow_id === null`, `edit_context`, structured edit metadata, and
+    SSE payload schema gaps remain carry-forward items
+
+### Carry-Forward
+
+- Backend generated schema gap remains for AI Builder SSE event payloads.
+- Backend generated schema gap remains for `SendMessageRequest.edit_context`.
+- `PlanResponse.edit_result_json` is still too generic for streamed edit-diff
+  metadata; frontend keeps a narrow UI/SSE projection until backend schema
+  coverage exists.
+- AI Builder component tests require a jsdom-capable Vitest environment; current
+  workspace dependencies do not provide `jsdom`.
+- Driver/Service mirrored state ownership remains untouched and is the next
+  Batch 7 frontend state-owner slice.

@@ -34,6 +34,26 @@
   let showDetails = $state(false);
   let instructionsExpanded = $state(false);
 
+  type SchemaProperty = {
+    type?: string;
+    description?: string;
+  };
+
+  function schemaProperties(
+    contract: Record<string, unknown> | null | undefined
+  ): Record<string, SchemaProperty> {
+    const properties = contract?.properties;
+    if (!properties || typeof properties !== "object" || Array.isArray(properties)) return {};
+    return properties as Record<string, SchemaProperty>;
+  }
+
+  const inputType = $derived(step.input_type ?? "text");
+  const outputType = $derived(step.output_type ?? "text");
+  const outputMode = $derived(step.output_mode ?? "pass_through");
+  const knowledgeRefs = $derived(step.assistant_spec.knowledge_refs ?? []);
+  const inputContractProperties = $derived(schemaProperties(step.input_contract));
+  const outputContractProperties = $derived(schemaProperties(step.output_contract));
+
   const inputSourceLabel = $derived(
     (
       {
@@ -62,16 +82,10 @@
   const hasBindings = $derived(
     !!step.input_bindings && Object.keys(step.input_bindings).length > 0
   );
-  const hasInputContract = $derived(
-    !!step.input_contract?.properties &&
-      Object.keys(step.input_contract.properties as Record<string, unknown>).length > 0
-  );
-  const hasOutputContract = $derived(
-    !!step.output_contract?.properties &&
-      Object.keys(step.output_contract.properties as Record<string, unknown>).length > 0
-  );
+  const hasInputContract = $derived(Object.keys(inputContractProperties).length > 0);
+  const hasOutputContract = $derived(Object.keys(outputContractProperties).length > 0);
   const hasInstructions = $derived(!!step.assistant_spec.instructions?.trim());
-  const hasKnowledge = $derived(step.assistant_spec.knowledge_refs.length > 0);
+  const hasKnowledge = $derived(knowledgeRefs.length > 0);
   const mcpServerRefs = $derived(step.assistant_spec.mcp_server_refs ?? []);
   const mcpToolRefs = $derived(step.assistant_spec.mcp_tool_refs ?? []);
   const hasMcp = $derived(mcpServerRefs.length > 0 || mcpToolRefs.length > 0);
@@ -186,15 +200,15 @@
               <span aria-hidden="true">·</span>
               <span class="text-secondary">{inputSourceLabel}</span>
               <span aria-hidden="true" class="opacity-50">→</span>
-              <span class="text-secondary">{step.input_type}</span>
+              <span class="text-secondary">{inputType}</span>
             </span>
             <span aria-hidden="true" class="opacity-40">•</span>
             <span class="inline-flex items-center gap-1">
               <span class="font-medium">{m.ai_builder_step_output()}</span>
               <span aria-hidden="true">·</span>
-              <span class="text-secondary">{step.output_type}</span>
-              {#if step.output_mode !== "pass_through"}
-                <span class="opacity-60">({step.output_mode})</span>
+              <span class="text-secondary">{outputType}</span>
+              {#if outputMode !== "pass_through"}
+                <span class="opacity-60">({outputMode})</span>
               {/if}
             </span>
             {#if resolvedModel}
@@ -269,7 +283,7 @@
                         {m.ai_builder_step_knowledge()}
                       </h4>
                       <p class="text-secondary text-[13px] leading-snug">
-                        {step.assistant_spec.knowledge_refs.join(", ")}
+                        {knowledgeRefs.join(", ")}
                       </p>
                     </div>
                   {/if}
@@ -331,7 +345,7 @@
                   <dl
                     class="border-default divide-default divide-y overflow-hidden rounded-md border"
                   >
-                    {#each Object.entries(step.output_contract?.properties ?? {}) as [name, schema] (name)}
+                    {#each Object.entries(outputContractProperties) as [name, schema] (name)}
                       <div
                         class="bg-primary grid grid-cols-[auto_auto_1fr] items-baseline gap-x-3 px-3 py-2 text-[12.5px]"
                       >
@@ -356,7 +370,7 @@
                   <dl
                     class="border-default divide-default divide-y overflow-hidden rounded-md border"
                   >
-                    {#each Object.entries(step.input_contract?.properties ?? {}) as [name, schema] (name)}
+                    {#each Object.entries(inputContractProperties) as [name, schema] (name)}
                       <div
                         class="bg-primary grid grid-cols-[auto_auto_1fr] items-baseline gap-x-3 px-3 py-2 text-[12.5px]"
                       >

@@ -90,6 +90,8 @@
   const hasAttachments = $derived(attachments.length > 0);
 
   const stepCount = $derived(service.currentPlan?.envelope.spec.steps.length ?? 0);
+  const planAssumptions = $derived(service.currentPlan?.envelope.assumptions ?? []);
+  const planLintWarnings = $derived(service.currentPlan?.envelope.lint_warnings ?? []);
 
   // Latch: stays true once a plan has been seen during this session so the progress
   // copy can differentiate "Building your flow" from "Updating your plan". Using a
@@ -364,13 +366,13 @@
           {/if}
 
           <!-- Assumptions -->
-          {#if plan.envelope.assumptions.length > 0}
+          {#if planAssumptions.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6">
               <h3 class="text-muted mb-2 text-[11px] font-semibold tracking-[0.06em] uppercase">
                 {m.ai_builder_assumptions()}
               </h3>
               <ul class="text-secondary flex flex-col gap-1.5 text-[0.8125rem] leading-relaxed">
-                {#each plan.envelope.assumptions as assumption (assumption)}
+                {#each planAssumptions as assumption (assumption)}
                   <li class="flex items-start gap-2">
                     <span
                       class="bg-muted mt-[0.55em] block size-1 shrink-0 rounded-full opacity-60"
@@ -431,7 +433,7 @@
                       <span class="font-mono">{field.name}</span>
                       <span>·</span>
                       <span>
-                        {field.required
+                        {field.required === true
                           ? m.ai_builder_form_field_required()
                           : m.ai_builder_form_field_optional()}
                       </span>
@@ -454,7 +456,7 @@
           {/if}
 
           <!-- Lint warnings -->
-          {#if plan.envelope.lint_warnings.length > 0}
+          {#if planLintWarnings.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6">
               <h3
                 class="text-warning-stronger mb-2 flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.06em] uppercase"
@@ -475,7 +477,7 @@
                 {m.ai_builder_quality_warnings()}
               </h3>
               <ul class="flex flex-col gap-1.5">
-                {#each plan.envelope.lint_warnings as warning (`${warning.step_ref ?? "flow"}-${warning.code}-${warning.message}`)}
+                {#each planLintWarnings as warning (`${warning.step_ref ?? "flow"}-${warning.code}-${warning.message}`)}
                   <li
                     class="bg-warning-dimmer/60 text-warning-stronger rounded-md px-3 py-2 text-[0.8125rem] leading-relaxed"
                   >

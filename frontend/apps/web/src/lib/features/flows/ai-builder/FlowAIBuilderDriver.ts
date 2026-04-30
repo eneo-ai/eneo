@@ -20,8 +20,8 @@ import type {
   ApplyError,
   ApplyResult,
   ChatMessage,
+  IncomingProposedPlan,
   PlanRevisionType,
-  PlanStatus,
   ProposedPlan,
   RequirementsSummary,
   TargetKind
@@ -393,7 +393,7 @@ export class FlowAIBuilderDriver {
                 break;
               }
               case "plan": {
-                const data = this.#normalizePlan(JSON.parse(ev.data) as ProposedPlan);
+                const data = this.#normalizePlan(JSON.parse(ev.data) as IncomingProposedPlan);
                 this.#state.currentPlan = data;
                 this.#state.statusMessage = null;
                 this.#updateOrAddAssistantMessage(assistantText, data);
@@ -954,9 +954,7 @@ export class FlowAIBuilderDriver {
     return Number.isNaN(parsed) ? Date.now() : parsed;
   }
 
-  #normalizePlan(
-    plan: ProposedPlan | ({ status?: PlanStatus } & Omit<ProposedPlan, "status">)
-  ): ProposedPlan {
+  #normalizePlan(plan: IncomingProposedPlan): ProposedPlan {
     return {
       ...plan,
       status: plan.status ?? "proposed"

@@ -1,5 +1,289 @@
 # Batch 6 - AI Builder Contract Split
 
+## Frontend AI Builder Protocol Generated Alias Plan
+
+### TL;DR
+
+- Active scope: frontend AI Builder protocol type aliases only.
+- Generated OpenAPI schemas are canonical where they already exist in
+  `frontend/packages/intric-js/src/types/schema.d.ts`; pure HTTP/API aliases
+  move to `frontend/packages/intric-js/src/types/resources.d.ts`, matching the
+  existing generated-alias pattern.
+- Structural API shapes live in `resources.d.ts`; small feature-scoped
+  literal aliases may stay in `protocol.ts` when moving them would create
+  cross-package names with no current consumer outside AI Builder.
+- Frontend-owned SSE event payloads, edit-result projections, and chat view
+  models stay local because generated schemas are missing or the shape is UI
+  state rather than HTTP API contract.
+- No Driver/Service state-owner work, component UI refactor, backend change,
+  generated schema regeneration, package rename, or namespace rename is in
+  scope.
+
+### Start Gate
+
+| Check | Result |
+|---|---|
+| `git log --oneline --max-count=12` | latest commit `4230822e docs: record ai builder router thinning no-go` |
+| `git status --short --branch` | branch `feature/refactor-flows-flowai`; dirty files limited to `frontend/packages/ui/src/icons/types.d.ts`, `scripts/run_codex_review.sh`, and `PRODUCT.md` |
+| `git diff --cached --name-only` | no staged files |
+
+Known unrelated dirty files remain out of scope and must not be touched:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+
+### Scope
+
+Expected files to change:
+
+- `frontend/packages/intric-js/src/types/resources.d.ts`
+- `frontend/apps/web/src/lib/features/flows/ai-builder/protocol.ts`
+- `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.svelte`
+- `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte`
+- AI Builder frontend tests if generated optionality exposes a behavior pin gap
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/plan.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/journal.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/retrospective-6.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/claude-reconciliation-6.md`
+
+Explicitly out of scope:
+
+- Driver/Service state-owner refactor
+- component UI redesign
+- backend changes
+- generated schema regeneration
+- `frontend/packages/ui/src/icons/types.d.ts`
+- package rename from `@intric/intric-js`
+- `intric.*` to `eneo.*` namespace work
+
+### Exported Type Mapping
+
+Consumer counts were gathered with `rg` across
+`frontend/apps/web/src`, `frontend/packages/intric-js/src`, and
+`frontend/packages/ui/src`.
+
+| type | current owner | generated schema candidate | classification | action | reason | tests |
+|---|---|---|---|---|---|---|
+| `AIBuilderEventType` | `protocol.ts` | none; `send_ai_builder_message` stream response is generated as `text/event-stream: string` | SSE-only frontend contract | leave local | Event names are not generated as a typed schema. | Driver stream tests |
+| `AIBuilderStreamEvent` | `protocol.ts` | none | SSE-only frontend contract | leave local | Transport callback receives plain `{ event, data }` frames. | Driver stream tests |
+| `TargetKind` | `protocol.ts` | `components["schemas"]["TargetKind"]` | direct generated alias | replace with generated alias | Backend owns create/edit target kind. | typecheck, Driver tests |
+| `SessionStatus` | `protocol.ts` | `components["schemas"]["SessionStatus"]` | direct generated alias | replace with generated alias | Backend owns persisted AI Builder session lifecycle statuses. | typecheck, Driver tests |
+| `PlanStatus` | `protocol.ts` | `components["schemas"]["PlanStatus"]` | direct generated alias | replace with generated alias | Backend owns plan lifecycle statuses. | typecheck, Driver tests |
+| `AIBuilderPlanEditScope` | `protocol.ts` | missing from generated `SendMessageRequest` despite backend `edit_context` model | generated schema missing | leave local and record gap | Edit context is a request-body schema gap; do not invent generated coverage. | typecheck |
+| `AIBuilderPlanEditContext` | `protocol.ts` | missing from generated `SendMessageRequest` despite backend `AIBuilderPlanEditContext` | generated schema missing | leave local and record gap | Frontend sends edit context, but generated `SendMessageRequest` lacks the field. | Driver send-message tests |
+| `AIBuilderSuggestChangeIntent` | `protocol.ts` | none | UI-only view model | leave local | Focus/prefill intent is component state, not API contract. | component/typecheck |
+| `AIBuilderConversationToolCall` | `protocol.ts` | `components["schemas"]["ConversationMessage"]["tool_calls"][number]` is anonymous primitive JSON | UI/SSE-owned typed projection | leave local | Generated anonymous object does not provide a stable exported contract. | typecheck |
+| `AIBuilderConversationMessage` | `protocol.ts` | `components["schemas"]["ConversationMessage"]` has `role: string` | generated alias plus UI projection | keep local narrowed role while reusing generated fields | The UI handles only `user`, `assistant`, `tool`, and `system`; aliasing directly would lose exhaustiveness. | Driver hydration tests |
+| `AIBuilderAttachmentFile` | `protocol.ts` | `components["schemas"]["FilePublic"]` | direct generated alias | move API alias to `resources.d.ts`, re-export from `protocol.ts` | Backend owns attachment file response shape. | component/typecheck |
+| `AIBuilderSession` | `protocol.ts` | `components["schemas"]["SessionResponse"]` | generated alias plus UI projection | move raw `SessionResponse` alias to `resources.d.ts`; keep a `protocol.ts` projection overriding `conversation` and `telemetry` | Backend owns session response shape; frontend narrows conversation role and requires defaulted telemetry counters. | Driver tests |
+| `AIBuilderDraftSession` | `protocol.ts` | `components["schemas"]["SessionListItemResponse"]` | direct generated alias | move API alias to `resources.d.ts`, re-export from `protocol.ts` | Draft recovery list uses session-list item shape; it must not extend full `SessionResponse`. | Driver/draft recovery tests |
+| `StepSpec` | `protocol.ts` | `components["schemas"]["StepSpec"]` | direct generated alias | move API alias to `resources.d.ts`, re-export from `protocol.ts` | Backend owns step spec; UI must handle generated defaulted optional fields. | Step card and plan diff tests |
+| `FlowDraftSpecCore` | `protocol.ts` | `components["schemas"]["FlowDraftSpecCore"]` | direct generated alias | move API alias to `resources.d.ts`, re-export from `protocol.ts` | Backend owns portable draft spec. | typecheck, Driver tests |
+| `LintWarning` | `protocol.ts` | `components["schemas"]["LintWarning"]` | direct generated alias | move API alias to `resources.d.ts`, re-export from `protocol.ts` | Backend owns lint warning contract. | typecheck |
+| `PlannerPlanEnvelope` | `protocol.ts` | `components["schemas"]["PlannerPlanEnvelope"]` | direct generated alias | move API alias to `resources.d.ts`, re-export from `protocol.ts` | Backend owns plan envelope; UI must tolerate defaulted optional arrays. | Plan pane typecheck |
+| `StepChangeKind` | `protocol.ts` | none | UI-only view model | leave local | Edit result schema is not generated; used for UI diff rendering. | plan diff tests |
+| `StepChange` | `protocol.ts` | none | UI-only view model | leave local | Edit diff schema is currently SSE/UI projection only. | plan diff tests |
+| `FlowEditDiff` | `protocol.ts` | none; HTTP `PlanResponse` has generic `edit_result_json` | generated schema missing | leave local and record gap | Backend does not expose a generated edit diff schema. | plan diff tests |
+| `EditConfidence` | `protocol.ts` | none | generated schema missing | leave local and record gap | Edit result confidence is emitted in SSE plan events, not generated. | typecheck |
+| `EditAdvisory` | `protocol.ts` | none | generated schema missing | leave local and record gap | Edit advisories are SSE/UI plan metadata, not generated. | Plan pane typecheck |
+| `ProposedPlan` | `protocol.ts` | `components["schemas"]["PlanResponse"]` | generated alias plus UI projection | define from generated `PlanResponse` plus local SSE edit-result extensions | HTTP plan response is generated; SSE plan event lacks `session_id`/`spec_hash` and adds edit metadata not in OpenAPI. | Driver/plan pane tests |
+| `ApplyError` | `protocol.ts` | none | UI-only view model | leave local | Stale/apply conflict details are frontend error-view state. | typecheck |
+| `PlanRevisionType` | `protocol.ts` | `components["schemas"]["RevisePlanRequest"]["type"]` | direct generated alias | replace with generated alias | Backend owns revise request literal. | Driver revise tests |
+| `ApplyResult` | `protocol.ts` | `components["schemas"]["ApplyResultResponse"]` | direct generated alias | move API alias to `resources.d.ts`, re-export from `protocol.ts` | Backend owns apply result response. | Driver apply tests |
+| `KeyDecision` | `protocol.ts` | none; backend event payload schema is not generated | SSE-only frontend contract | leave local | Requirements summary events are not generated. | Driver summary tests |
+| `RequirementsSummary` | `protocol.ts` | none; backend `RequirementsSummaryPayload` is not generated | SSE-only frontend contract | leave local and record gap | Requirements summary is an SSE event payload. | Driver summary tests |
+| `AIBuilderPhase` | `protocol.ts` | none | UI-only view model | leave local | Derived frontend phase, not backend state. | phase indicator/typecheck |
+| `ChatMessage` | `protocol.ts` | none | UI-only view model | leave local | Frontend chat timeline combines text, plan, questions, summaries, and metadata. | Driver tests |
+| `AIBuilderModel` | `protocol.ts` | `components["schemas"]["SessionModelOption"]` | direct generated alias | move API alias to `resources.d.ts`, re-export from `protocol.ts` | Backend owns model option response shape. | Driver model tests |
+| `AIBuilderTextEventData` | `protocol.ts` | none | SSE-only frontend contract | leave local | AI Builder SSE payload schema is not generated. | Driver stream tests |
+| `AIBuilderStatusEventData` | `protocol.ts` | none | SSE-only frontend contract | leave local | AI Builder SSE payload schema is not generated. | Driver stream tests |
+| `AIBuilderErrorEventData` | `protocol.ts` | none | SSE-only frontend contract | leave local | AI Builder SSE payload schema is not generated. | Driver stream tests |
+| `AIBuilderQuestionEventData` | `protocol.ts` | none | SSE-only frontend contract | leave local | Structured question event schema is frontend-owned until generated. | Driver/question tests |
+| `AIBuilderTelemetrySummary` | `protocol.ts` | `components["schemas"]["SessionTelemetrySummary"]` | generated alias plus UI projection | move raw API alias to `resources.d.ts`; keep generated-backed `Required<>` projection in `protocol.ts` | UI currently expects backend defaulted counters to exist; fixture pins the full contract. | token usage tests |
+| `AIBuilderUsageEventData` | `protocol.ts` | `components["schemas"]["SessionTelemetrySummary"]` | generated alias plus UI projection | alias to `AIBuilderTelemetrySummary` | Usage event payload is the session telemetry contract. | token usage and Driver stream tests |
+
+### Exact Projection Shapes
+
+`AIBuilderConversationMessage` keeps the frontend role union while deriving
+every non-role field from the generated conversation message schema:
+
+```ts
+export type AIBuilderConversationMessage = Omit<
+  GeneratedAIBuilderConversationMessage,
+  "role" | "tool_calls"
+> & {
+  role: "user" | "assistant" | "tool" | "system";
+  tool_calls?: AIBuilderConversationToolCall[] | null;
+};
+```
+
+`ProposedPlan` encodes the current HTTP/SSE asymmetry instead of pretending SSE
+plan events carry HTTP-only fields:
+
+```ts
+type GeneratedPlanHttpFields = Pick<
+  GeneratedAIBuilderPlanResponse,
+  "session_id" | "spec_hash" | "created_at" | "updated_at" | "edit_result_json"
+>;
+
+export type ProposedPlan = Omit<GeneratedAIBuilderPlanResponse, keyof GeneratedPlanHttpFields> &
+  Partial<GeneratedPlanHttpFields> & {
+    edit_diff?: FlowEditDiff | null;
+    edit_confidence?: EditConfidence | null;
+    edit_warnings?: string[] | null;
+    edit_advisories?: EditAdvisory[] | null;
+    edit_risk_flags?: string[] | null;
+  };
+```
+
+`AIBuilderSession` uses the generated session response but overrides the two
+fields where the frontend intentionally projects the generated schema:
+
+```ts
+export type AIBuilderSession = Omit<
+  GeneratedAIBuilderSessionResponse,
+  "conversation" | "telemetry"
+> & {
+  conversation?: AIBuilderConversationMessage[];
+  telemetry?: AIBuilderTelemetrySummary | null;
+};
+```
+
+`AIBuilderTelemetrySummary` keeps the generated telemetry keys but requires
+backend-defaulted counters for the current UI fixture contract:
+
+```ts
+export type AIBuilderTelemetrySummary = Required<GeneratedAIBuilderTelemetrySummary>;
+```
+
+`Required<>` removes `undefined`; generated nullable `last_*` fields still
+remain `string | null`, so UI code must continue to use null-safe reads.
+
+### Consumer Migration Table
+
+| consumer | shape change | mitigation | test |
+|---|---|---|---|
+| `FlowAIBuilderStepCard.svelte` reads `step.assistant_spec.knowledge_refs.length` | generated `AssistantSpec.knowledge_refs?: string[]` | derive `knowledgeRefs = step.assistant_spec.knowledge_refs ?? []` | `FlowAIBuilderStepCard.test.ts` |
+| `FlowAIBuilderStepCard.svelte` renders `step.input_type` | generated `StepSpec.input_type?: AIBuilderInputType` with backend default `text` | derive `inputType = step.input_type ?? "text"` | `FlowAIBuilderStepCard.test.ts` |
+| `FlowAIBuilderStepCard.svelte` renders `step.output_type` | generated `StepSpec.output_type?: FlowOutputType` with backend default `text` | derive `outputType = step.output_type ?? "text"` | `FlowAIBuilderStepCard.test.ts` |
+| `FlowAIBuilderStepCard.svelte` compares `step.output_mode !== "pass_through"` | generated `StepSpec.output_mode?: AIBuilderOutputMode` with backend default `pass_through` | derive `outputMode = step.output_mode ?? "pass_through"` | `FlowAIBuilderStepCard.test.ts` |
+| `FlowAIBuilderPlanPane.svelte` reads `plan.envelope.assumptions.length` and iterates assumptions | generated `PlannerPlanEnvelope.assumptions?: string[]` | derive `planAssumptions = service.currentPlan?.envelope.assumptions ?? []` | app check |
+| `FlowAIBuilderPlanPane.svelte` reads and iterates `plan.envelope.lint_warnings` | generated `PlannerPlanEnvelope.lint_warnings?: LintWarning[]` | derive `planLintWarnings = service.currentPlan?.envelope.lint_warnings ?? []` | app check |
+| `FlowAIBuilderPlanPane.svelte` reads `spec.flow_description` | generated `FlowDraftSpecCore.flow_description?: string` | current short-circuit read is safe; no code change needed | app check |
+| `FlowAIBuilderPlanPane.svelte` reads `plan.envelope.plan_rationale` | generated `PlannerPlanEnvelope.plan_rationale?: string | null` | current short-circuit read is safe; no code change needed | app check |
+| `PlannerPlanEnvelope.risk_acknowledgments` | generated field is optional | no UI consumer; only existing test fixture supplies an empty array | typecheck |
+| `PlannerPlanEnvelope.reasoning` | generated field is optional and stripped from public responses | no UI consumer | typecheck |
+| `FlowAIBuilderPlanPane.svelte` renders `field.required` | generated `FormFieldSpec.required?: boolean` with backend default `false` | render `field.required === true` | app check |
+| `AIBuilderDraftSession` consumers | generated draft list item is not a full session response | alias to `SessionListItemResponse`; grep confirms no reads of `draft.attachments`, `draft.conversation`, `draft.telemetry`, or `draft.attachment_warnings` | Driver/draft recovery tests |
+| `AIBuilderSession` consumers | raw generated session has wide conversation roles and optional telemetry counters | keep a `protocol.ts` session projection overriding `conversation` and `telemetry` | Driver hydration and token usage tests |
+| `AIBuilderConversationMessage.role` consumers | generated role is `string`; local role union is narrower | keep local narrowed projection around generated message fields | Driver hydration tests |
+| `ProposedPlan` callers | HTTP `PlanResponse` and SSE plan event are not identical | keep a UI projection, record carry-forward trigger below | Driver/plan pane tests |
+
+Pre-edit grep evidence:
+
+```bash
+rg -n "draft\.(attachments|conversation|telemetry|attachment_warnings)" frontend/apps/web/src
+```
+
+Result: no matches.
+
+```bash
+rg -n "envelope\.(assumptions|lint_warnings)" frontend/apps/web/src
+```
+
+Result: only `FlowAIBuilderPlanPane.svelte` reads those fields.
+
+```text
+frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte:367
+frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte:373
+frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte:457
+frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte:478
+```
+
+```bash
+rg --pcre2 -n "A\.[0-9](?![0-9])|P0\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|frontend protocol slice|Batch 6|6f|as any|@ts-ignore|@ts-expect-error" \
+  frontend/apps/web/src/lib/features/flows/ai-builder \
+  docs/refactor/prd \
+  docs/refactor/ai-builder-prompt-contract.md
+```
+
+Result: no matches before source edits.
+
+### Carry-Forward Contract Gaps
+
+- `SendMessageRequest` generated schema lacks `edit_context`, even though the
+  backend request model accepts it. Batch 6 keeps `AIBuilderPlanEditContext`
+  local. Re-entry trigger: PRD-004/API-source cleanup should expose a generated
+  edit-context schema before the frontend deletes the local request contract.
+- `PlanResponse` generated schema exposes `edit_result_json`, while SSE plan
+  events emit structured `edit_diff`, `edit_confidence`, `edit_warnings`,
+  `edit_advisories`, and `edit_risk_flags`. This slice keeps a single UI
+  `ProposedPlan` projection because the Driver stores both HTTP and SSE plan
+  results in one state slot. Re-entry trigger: split HTTP plan response from SSE
+  plan-event projection or add generated structured edit fields before removing
+  the local edit-result types.
+- AI Builder SSE event payload schemas are not generated. Keep local SSE event
+  payload contracts until the backend/OpenAPI source exposes generated schemas
+  for `text`, `status`, `error`, `question`, `requirements_summary`, and plan
+  event payloads.
+- Lower-level local UI/SSE helpers such as `AIBuilderPlanEditScope`,
+  `StepChange`, `EditConfidence`, `EditAdvisory`, and `RequirementsSummary`
+  are intentionally not tracked as separate migration gaps; they are covered by
+  the broader edit-context, edit-result, and SSE payload schema gaps above.
+
+### Behavior Pins Before Implementation
+
+- `FlowAIBuilderDriver.test.ts` already pins session create/resume, stream
+  event handling, plan/apply/revise behavior, and draft recovery.
+- `flowAIBuilderPlanDiff.test.ts` pins edit diff behavior over `StepSpec`.
+- `FlowAIBuilderStepCard.test.ts` pins step rendering over `StepSpec`.
+- `flowAIBuilderTokenUsage.test.ts` pins telemetry key coverage against the
+  backend fixture.
+
+If generated optionality changes component behavior, update only behavior tests
+that exercise the visible behavior. Do not add tests that assert type aliases
+by private implementation details.
+
+### Validation Commands
+
+Batch 6 validation labels are AI Builder integration tests, SSE event tests,
+and frontend AI Builder tests. For this frontend-only slice the exact commands
+are:
+
+```bash
+cd frontend/packages/intric-js && bun run check
+```
+
+```bash
+cd frontend/packages/intric-js && bun run lint
+```
+
+```bash
+cd frontend/apps/web && bun test src/lib/features/flows/ai-builder
+```
+
+```bash
+cd frontend/apps/web && bun run check
+```
+
+```bash
+git diff --check -- frontend/apps/web/src/lib/features/flows/ai-builder frontend/packages/intric-js docs/refactor/execution/batch-6-ai-builder-contract-split
+```
+
+Anti-slippage guard:
+
+```bash
+rg --pcre2 -n "A\.[0-9](?![0-9])|P0\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|frontend protocol slice|Batch 6|6f|as any|@ts-ignore|@ts-expect-error" \
+  frontend/apps/web/src/lib/features/flows/ai-builder \
+  docs/refactor/prd \
+  docs/refactor/ai-builder-prompt-contract.md
+```
+
+Expected: no matches in touched source. The `A\.[0-9](?![0-9])` form avoids
+false positives from SVG path data such as `A.75`. Existing
+`docs/refactor/execution/*` process artifacts are excluded from the guard.
+
 ## TL;DR
 
 - Active scope: AI Builder router/presenter thinning no-go decision.
@@ -1870,7 +2154,7 @@ green light or a documented, evidence-backed disagreement.
 | Planner turn lifecycle single owner | open / partially owned by `ai_builder_planner_turn.py`; send-lock lifecycle remains in `AIBuilderPlanner.send_message` | The send-lock-only extraction reduced `AIBuilderPlanner.send_message` by 27 LOC against the required 80 LOC and created a 163 LOC module against the 150 LOC cap. Reopen only under the no-go re-entry trigger above. |
 | Chained-call lease-loss SSE mapping in `send_message` | open / behavior gap | `ai_builder_planner.py:1471-1485` chained `confirm_requirements` dispatch is not covered by the existing `session_send_lease_lost` handler. Add the lease-lost re-poll plus SSE mapping the next time `send_message` is touched, even if no extraction is performed. |
 | Router SSE wrapper is thin | open | Router/presenter thinning is the next candidate slice, but it must begin with a measured `ai_builder_router.py` inventory and numeric success gate before source edits. |
-| AI Builder generated/manual type drift | open / deferred | Frontend protocol aliasing remains a later Batch 6 slice. Do not start frontend protocol work from this cleanup pass. |
+| AI Builder generated/manual type drift | partially addressed | Frontend protocol aliasing now uses generated-backed aliases where schemas exist. Remaining gaps are backend-generated schema coverage for AI Builder SSE payloads, `SendMessageRequest.edit_context`, and structured edit-result metadata beyond generic `PlanResponse.edit_result_json`. |
 | `ai_builder_models.py` star-barrel migration | deferred | Keep deferred until AI Builder owners are clearer; do not create compatibility re-exports. |
 | `@intric/intric-js` package naming | deferred | Batch 5 decision keeps the package name for now; no package rename in Batch 6 slices. |
 | Flow runtime UI-owned projections | out of scope | `FlowDocumentRenderLimits`, `FlowRunOutputPayload`, and related Flow runtime projections are not AI Builder protocol types. |

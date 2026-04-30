@@ -1,4 +1,18 @@
-import type { components } from "@intric/intric-js";
+import type {
+  AIBuilderApplyResult as GeneratedAIBuilderApplyResult,
+  AIBuilderAttachmentFile as GeneratedAIBuilderAttachmentFile,
+  AIBuilderConversationMessage as GeneratedAIBuilderConversationMessage,
+  AIBuilderDraftSession as GeneratedAIBuilderDraftSession,
+  AIBuilderFlowDraftSpecCore as GeneratedAIBuilderFlowDraftSpecCore,
+  AIBuilderLintWarning as GeneratedAIBuilderLintWarning,
+  AIBuilderModel as GeneratedAIBuilderModel,
+  AIBuilderPlanResponse as GeneratedAIBuilderPlanResponse,
+  AIBuilderPlannerPlanEnvelope as GeneratedAIBuilderPlannerPlanEnvelope,
+  AIBuilderSessionResponse as GeneratedAIBuilderSessionResponse,
+  AIBuilderSessionTelemetrySummary as GeneratedAIBuilderSessionTelemetrySummary,
+  AIBuilderStepSpec as GeneratedAIBuilderStepSpec,
+  components
+} from "@intric/intric-js";
 import type { StructuredQuestion } from "./structuredQuestionAnswer";
 
 export type AIBuilderEventType =
@@ -16,11 +30,11 @@ export interface AIBuilderStreamEvent {
   data: string;
 }
 
-export type TargetKind = "create" | "edit";
+export type TargetKind = components["schemas"]["TargetKind"];
 
-export type SessionStatus = "chatting" | "awaiting_approval" | "applying" | "applied" | "cancelled";
+export type SessionStatus = components["schemas"]["SessionStatus"];
 
-export type PlanStatus = "proposed" | "approved" | "applied" | "rejected" | "superseded";
+export type PlanStatus = components["schemas"]["PlanStatus"];
 
 export type AIBuilderPlanEditScope = "whole_plan" | "step";
 
@@ -45,92 +59,33 @@ export interface AIBuilderConversationToolCall {
   arguments?: Record<string, unknown> | null;
 }
 
-export interface AIBuilderConversationMessage {
+export type AIBuilderConversationMessage = Omit<
+  GeneratedAIBuilderConversationMessage,
+  "role" | "tool_calls"
+> & {
   role: "user" | "assistant" | "tool" | "system";
-  content?: string | null;
-  timestamp?: string | null;
   tool_calls?: AIBuilderConversationToolCall[] | null;
-  tool_call_id?: string | null;
-  metadata?: Record<string, unknown> | null;
-}
+};
 
-export interface AIBuilderAttachmentFile {
-  id: string;
-  name: string;
-  mimetype: string;
-  size: number;
-  transcription?: string | null;
-  token_count?: number | null;
-}
+export type AIBuilderAttachmentFile = GeneratedAIBuilderAttachmentFile;
 
-export interface AIBuilderSession {
-  session_id: string;
-  status: SessionStatus;
-  target_kind: TargetKind;
-  flow_id: string | null;
-  latest_plan_id: string | null;
+export type AIBuilderSession = Omit<
+  GeneratedAIBuilderSessionResponse,
+  "conversation" | "telemetry"
+> & {
   telemetry?: AIBuilderTelemetrySummary | null;
   conversation?: AIBuilderConversationMessage[];
-  attachments?: AIBuilderAttachmentFile[];
-  attachment_warnings?: string[];
-  created_at?: string | null;
-  updated_at?: string | null;
-}
+};
 
-export interface AIBuilderDraftSession extends AIBuilderSession {
-  space_id: string;
-  draft_title: string | null;
-}
+export type AIBuilderDraftSession = GeneratedAIBuilderDraftSession;
 
-export interface StepSpec {
-  plan_step_ref: string;
-  existing_step_ref: string | null;
-  name: string;
-  assistant_spec: {
-    instructions: string;
-    model_ref: string | null;
-    knowledge_refs: string[];
-    mcp_server_refs?: string[];
-    mcp_tool_refs?: string[];
-  };
-  input_source: string;
-  input_type: string;
-  output_mode: string;
-  output_type: string;
-  input_bindings: Record<string, unknown> | null;
-  input_contract: Record<string, unknown> | null;
-  output_contract: Record<string, unknown> | null;
-  input_config: Record<string, unknown> | null;
-  output_config: Record<string, unknown> | null;
-}
+export type StepSpec = GeneratedAIBuilderStepSpec;
 
-export interface FlowDraftSpecCore {
-  flow_name: string;
-  flow_description: string;
-  steps: StepSpec[];
-  form_fields: Array<{
-    name: string;
-    type: string;
-    label: string;
-    required: boolean;
-    options: string[] | null;
-  }> | null;
-}
+export type FlowDraftSpecCore = GeneratedAIBuilderFlowDraftSpecCore;
 
-export interface LintWarning {
-  step_ref: string | null;
-  code: string;
-  message: string;
-  severity: "warning" | "info";
-}
+export type LintWarning = GeneratedAIBuilderLintWarning;
 
-export interface PlannerPlanEnvelope {
-  spec: FlowDraftSpecCore;
-  assumptions: string[];
-  lint_warnings: LintWarning[];
-  risk_acknowledgments: string[];
-  plan_rationale?: string | null;
-}
+export type PlannerPlanEnvelope = GeneratedAIBuilderPlannerPlanEnvelope;
 
 export type StepChangeKind = "added" | "modified" | "removed" | "unchanged";
 
@@ -157,16 +112,21 @@ export interface EditAdvisory {
   field: string | null;
 }
 
-export interface ProposedPlan {
-  plan_id: string;
-  status: PlanStatus;
-  envelope: PlannerPlanEnvelope;
-  edit_diff?: FlowEditDiff | null;
-  edit_confidence?: EditConfidence | null;
-  edit_warnings?: string[] | null;
-  edit_advisories?: EditAdvisory[] | null;
-  edit_risk_flags?: string[] | null;
-}
+type GeneratedPlanHttpFields = Pick<
+  GeneratedAIBuilderPlanResponse,
+  "session_id" | "spec_hash" | "created_at" | "updated_at" | "edit_result_json"
+>;
+
+export type ProposedPlan = Omit<GeneratedAIBuilderPlanResponse, keyof GeneratedPlanHttpFields> &
+  Partial<GeneratedPlanHttpFields> & {
+    edit_diff?: FlowEditDiff | null;
+    edit_confidence?: EditConfidence | null;
+    edit_warnings?: string[] | null;
+    edit_advisories?: EditAdvisory[] | null;
+    edit_risk_flags?: string[] | null;
+  };
+
+export type IncomingProposedPlan = Omit<ProposedPlan, "status"> & { status?: PlanStatus };
 
 export interface ApplyError {
   code: string;
@@ -174,15 +134,9 @@ export interface ApplyError {
   context: Record<string, unknown>;
 }
 
-export type PlanRevisionType = "keep_current_description";
+export type PlanRevisionType = components["schemas"]["RevisePlanRequest"]["type"];
 
-export interface ApplyResult {
-  flow_id: string;
-  flow_name: string;
-  steps_created: number;
-  steps_updated: number;
-  steps_removed: number;
-}
+export type ApplyResult = GeneratedAIBuilderApplyResult;
 
 export interface KeyDecision {
   topic: string;
@@ -211,11 +165,7 @@ export interface ChatMessage {
   timestamp: number;
 }
 
-export interface AIBuilderModel {
-  id: string;
-  name: string;
-  provider: string;
-}
+export type AIBuilderModel = GeneratedAIBuilderModel;
 
 export interface AIBuilderTextEventData {
   text: string;
@@ -235,6 +185,7 @@ export interface AIBuilderErrorEventData {
 
 export type AIBuilderQuestionEventData = StructuredQuestion;
 
-export type AIBuilderTelemetrySummary = Required<components["schemas"]["SessionTelemetrySummary"]>;
+// Required<> removes undefined from backend-defaulted counters; nullable last_* fields remain null-safe.
+export type AIBuilderTelemetrySummary = Required<GeneratedAIBuilderSessionTelemetrySummary>;
 
 export type AIBuilderUsageEventData = AIBuilderTelemetrySummary;
