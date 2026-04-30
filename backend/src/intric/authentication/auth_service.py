@@ -3,11 +3,12 @@ import hashlib
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import bcrypt
 import jwt
+import jwt.types
 import sqlalchemy as sa
 from pydantic import ValidationError
 
@@ -346,7 +347,7 @@ class AuthService:
                 key=key,
                 algorithms=signing_algos,
                 audience=client_id,
-                options=jwt_options or None,
+                options=cast(jwt.types.Options | None, jwt_options or None),
                 leeway=clock_leeway,
             )
 
