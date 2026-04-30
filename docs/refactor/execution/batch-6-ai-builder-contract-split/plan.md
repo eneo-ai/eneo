@@ -2,13 +2,15 @@
 
 ## TL;DR
 
-- This plan intentionally slices Batch 6 and implements only 6a in this session.
-- 6a is behavior pins and prompt-contract audit only: tests, docs, and batch audit artifacts.
-- No structural production refactor in `backend/src/intric/flows/ai_builder/*.py` is allowed in 6a.
-- Docker validation is preferred, but `docker ps` was blocked by host execution policy in this session; local fallback validation is planned.
-- Stop after 6a reaches the commit boundary. Do not continue to 6b without explicit user approval.
+- Active plan: continue after `4cd874c7 flows: pin ai builder prompt and audit contracts` with repair contract hardening only.
+- User approval to continue this next narrow repair slice is recorded in the 2026-04-30 prompt that starts from `4cd874c7`.
+- The prompt/audit contract checkpoint is archived below; it was committed at `4cd874c7` and is no longer the active implementation scope.
+- The active repair plan starts at `## Repair Contract Hardening Plan`.
+- Docker validation is preferred, but `docker ps` remains blocked by host execution policy in this session; local fallback validation is planned.
 
-## Start Gate
+## Archive - Prompt/Audit Contract Checkpoint (Committed At 4cd874c7)
+
+### Archived Start Gate
 
 | Check | Result |
 |---|---|
@@ -24,11 +26,11 @@ Known dirty files are out of scope and must remain untouched:
 - `scripts/run_codex_review.sh`
 - `PRODUCT.md`
 
-## Scope Decision
+### Archived Scope Decision
 
 Batch 6 is PRD-005 AI Builder contract split. This session implements only:
 
-### 6a - Behavior Pins And Prompt-Contract Audit
+#### 6a - Behavior Pins And Prompt-Contract Audit
 
 Allowed:
 
@@ -52,7 +54,7 @@ Forbidden in 6a:
 
 Stop after 6a reaches the commit boundary.
 
-## Source-Of-Truth Owners
+### Archived Source-Of-Truth Owners
 
 | Concept | Current owner | Evidence | 6a action |
 |---|---|---|---|
@@ -67,7 +69,7 @@ Stop after 6a reaches the commit boundary.
 | Generated frontend schema source | `frontend/packages/intric-js/src/types/schema.d.ts` | AI Builder paths at lines 4152-4369; schemas at lines 8730, 10399, 16334, 16349, 16685, 16920, 17162, 17226, 17332 | Planning evidence only in 6a |
 | Manual frontend protocol blocks | `frontend/apps/web/src/lib/features/flows/ai-builder/protocol.ts` and `structuredQuestionAnswer.ts` | manual event/session/plan/status types at `protocol.ts` lines 4-240; structured question types in `structuredQuestionAnswer.ts` | No frontend edits in 6a; map for 6f only |
 
-## AI Builder File Inventory
+### Archived AI Builder File Inventory
 
 6a uses the AI Builder package as read-only evidence and changes only tests/docs. Full ownership movement is intentionally deferred to the later slice that owns that code path.
 
@@ -81,7 +83,7 @@ Stop after 6a reaches the commit boundary.
 | Planner turn orchestration | `ai_builder_planner.py`, `ai_builder_planner_turn.py`, `ai_builder_orchestration_pipeline.py`, `ai_builder_dispatcher.py`, `planning_state*.py` | Read-only evidence | 6d |
 | Frontend protocol surface | `frontend/packages/intric-js/src/types/schema.d.ts`, `frontend/apps/web/src/lib/features/flows/ai-builder/protocol.ts`, `structuredQuestionAnswer.ts` | Inventory only; no edits | 6f |
 
-## Sliced Batch Plan
+### Archived Sliced Batch Plan
 
 | Slice | Goal | Production code edits? | Stop gate |
 |---|---|---:|---|
@@ -94,7 +96,7 @@ Stop after 6a reaches the commit boundary.
 
 If 6a cannot stay test/docs-only, stop and ask to split the batch further.
 
-## Behavior Pins Before Refactors
+### Archived Behavior Pins Before Refactors
 
 Existing coverage is already stronger than the initial 6a plan assumed. 6a therefore adds a bounded coverage delta instead of duplicating broad integration tests.
 
@@ -115,7 +117,7 @@ Audit metadata deltas should modify the existing router audit tests. Use a small
 | Create/approve/apply happy paths | `test_ai_builder_session_api_regressions.py:2424-2735` covers create, approve, apply, and edit-output-only apply behavior | Keep existing integration pins in validation; no audit assertions here because audit is injected at router seam |
 | Structured question and open-flow/resume flow | `test_ai_builder_session_api_regressions.py:2071-2418`, `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilder.test.ts:15-50`, and `FlowAIBuilderDriver.test.ts:102-411` cover structured-question and resume behavior | No 6a edits; frontend protocol aliasing is deferred to 6f |
 
-## Prompt Contract Artifact Plan
+### Archived Prompt Contract Artifact Plan
 
 Create `docs/refactor/ai-builder-prompt-contract.md` with:
 
@@ -159,7 +161,7 @@ Add one test linkage so the artifact is not decorative:
   - raw JSON parse repair instructions
 - Use exact substring matching for these anchors. The linkage must stay focused on stable contract anchors, not full prompt snapshots.
 
-## Repair Policy Inventory For 6b
+### Archived Repair Policy Inventory
 
 | Repair surface | Owner file | Active LLM boundary | Stale compatibility | Unknown | 6a action |
 |---|---|---:|---:|---:|---|
@@ -172,7 +174,7 @@ Add one test linkage so the artifact is not decorative:
 | Edit description-only repair | `ai_builder_edit_repair.py` | no direct LLM call in helper | no | no | inventory for 6b |
 | Planner output normalization | `ai_builder_planner_output_normalizer.py` | no direct LLM call | no | no | classify as active server-owned normalization before guardrail evaluation; do not delete in 6a |
 
-## Router Thinning Plan For Later
+### Archived Router Thinning Plan For Later
 
 | Router helper/endpoint | 6a action | Later owner candidate | Reason |
 |---|---|---|---|
@@ -184,7 +186,7 @@ Add one test linkage so the artifact is not decorative:
 | `approve_plan` and `apply_plan` audit | test only | possibly plan lifecycle/use case later | 6a pins current audit metadata before any move |
 | `revise_plan` | test only | proposal/edit use case later | 6c/6e can split after behavior pins |
 
-## Frontend Protocol Type Scope
+### Archived Frontend Protocol Type Scope
 
 6a does not edit frontend protocol types. 6f may later map these generated schemas:
 
@@ -209,7 +211,7 @@ Manual protocol blocks observed:
 
 No Driver/Service state-owner edits are allowed in Batch 6.
 
-## Expected Files To Change In 6a
+### Archived Expected Files Changed In Prompt/Audit Checkpoint
 
 Docs:
 
@@ -247,7 +249,7 @@ Production source files expected to change in 6a:
 
 - none
 
-## Validation Commands
+### Archived Validation Commands
 
 Docker was blocked by host policy when running `docker ps --format '{{.Names}}'`, so this plan uses local fallback validation. If Docker becomes available, run the same commands inside `eneo-41ae93-eneo-1`.
 
@@ -324,7 +326,7 @@ Frontend AI Builder protocol/type checks only if frontend protocol files are tou
 cd frontend/apps/web && bun run check
 ```
 
-## Loop And Claude Review Plan
+### Archived Loop And Claude Review Plan
 
 1. Write this `/plan` and initial journal.
 2. Run Claude peer loop iteration 1 against the 6a plan.
@@ -337,21 +339,343 @@ cd frontend/apps/web && bun run check
 9. Run Claude implementation review and reconciliation.
 10. Stop at commit boundary and report staging list, do-not-stage list, validation, risks, suggested commit, and whether 6b is blocked.
 
+## Repair Contract Hardening Plan
+
+### Start Gate
+
+| Check | Result |
+|---|---|
+| `git log --oneline --max-count=8` | latest commit is `4cd874c7 flows: pin ai builder prompt and audit contracts` |
+| `git status --short --branch` | branch `feature/refactor-flows-flowai`; dirty files limited to `frontend/packages/ui/src/icons/types.d.ts`, `scripts/run_codex_review.sh`, `PRODUCT.md` |
+| `git diff --cached --name-only` | no staged files |
+| Docker check | `docker ps --format '{{.Names}}'` blocked by host execution policy; local fallback validation planned |
+
+Known dirty files are unrelated and must remain untouched:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+
+### Scope
+
+This narrow slice covers AI Builder repair contract hardening only. It does not
+restart the prompt/audit contract checkpoint and does not start the create/edit
+proposal split.
+
+The previous repair inventory found active repair behavior, not stale
+compatibility to extract or delete. This slice therefore narrows the repair
+work to one behavior pin plus one possible local consolidation. It is not a
+module extraction slice, and it does not claim to finish the broader
+create/edit/repair separation acceptance criterion.
+
+PRD-005 constraints quoted for this slice:
+
+- "No fake one-method interfaces are introduced."
+- "no interface unless two real implementations exist."
+
+Relevant PRD-005 acceptance criteria:
+
+- "Proposal create/edit/repair responsibilities are separated."
+  - This slice only tightens the repair responsibility boundary. The create/edit
+    proposal split remains open after this slice.
+- "Tests cover create/revise/approve/apply and repair failures."
+  - This slice covers repair-failure tests and keeps existing
+    create/revise/approve/apply integration tests in validation. It does not add
+    new create/revise/approve/apply behavior.
+
+### Current Repair Contract Inventory
+
+| Repair surface | Current owner | Evidence | Contract state | Action |
+|---|---|---|---|---|
+| Semantic planner repair | `backend/src/intric/flows/ai_builder/ai_builder_repair.py` | retry constants and typed outcomes at lines 76-86 and 246-286; repair helper at lines 289-354 | Already has typed `RepairOutcome`, explicit retry constants, and behavior pins in `test_ai_builder_repair.py:93-307` | No production change planned |
+| Parse repair | `backend/src/intric/flows/ai_builder/ai_builder_repair.py` | typed `ParseRepairOutcome` at lines 357-379; repair helper at lines 406-470; prompt anchors at lines 382-403 | Already separated from semantic repair and pinned by `test_ai_builder_parse_repair.py:207-391` plus prompt artifact test | No production change planned |
+| Planner repair loop accounting | `backend/src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py` | loop accounting and parse-repair handling at lines 253-365 and 388-454 | Already owns planner-loop retry semantics and has behavior pins in `test_ai_builder_orchestration_pipeline.py:222-638` | Validation only |
+| Proposal tool repair | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py` | retry availability/consume helpers at lines 127-148; loop primitives initialized at lines 219-221; consume/update at lines 329-342 | Has a duplicated primitive concept: `attempts_remaining`, `extra_retry_available`, and `retry_count` travel together but are not one value | Candidate for a small local frozen value object |
+| Proposal JSON text fallback | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py` | direct JSON text handling at lines 391-430 and 505-581 | Active repair behavior, not compatibility. Pinned by `test_ai_builder_proposal_repair.py:107-159` | Preserve |
+| Proposal forced-tool retry | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py` | forced call path at lines 432-500 | Active repair behavior. Pinned by `test_ai_builder_proposal_repair.py:55-105` | Preserve |
+
+### Hardening Decision
+
+There is one concrete repair contract weakness worth planning:
+
+| Concept | Existing primitive locations | Problem | Canonical home | Planned fix |
+|---|---|---|---|---|
+| Proposal repair retry state | `_retry_budget_available` lines 127-135, `_consume_retry_budget` lines 138-148, loop state lines 219-221 and 329-342 | Three primitives represent one invariant: normal retry slots, one extra recoverable-parse slot, and human-facing retry ordinal. A future edit can update one without the others. | `ai_builder_proposal_repair.py`, local to proposal tool repair | Replace the primitive bundle with a small frozen `_ProposalRepairRetryState` value object that owns `can_retry`, `consume`, and next retry ordinal. Preserve numeric budgets and behavior exactly. |
+
+Why this is not a fake interface:
+
+- It is a value object, not a Protocol/ABC/adapter.
+- It has no second implementation and does not pretend to be extensible.
+- It removes duplicated primitive handling inside the current canonical owner.
+- It stays local to `ai_builder_proposal_repair.py`; no module split, symbol move, package rename, or new subpackage.
+- PRD-005 forbids fake one-method interfaces at
+  `docs/refactor/prd/PRD-005-ai-builder-architecture.md:70-72`. The proposed
+  object is a frozen local dataclass carrying state; it exposes no abstract
+  method and owns no behavior dispatch.
+
+If review identifies a smaller-cost, equal-benefit alternative, prefer it.
+The minimum outcome is now the missing recoverable-parse behavior pin; a
+no-production-change path still ships that test and the curated process
+artifacts.
+
+### Retry-State Transition Table
+
+The value object must preserve the current `_consume_retry_budget` semantics:
+
+| Current state | Failure kind | Expected transition |
+|---|---|---|
+| `attempts_remaining > 0`, extra retry available or unavailable | any failure kind, including `recoverable_parse` | decrement `attempts_remaining` by 1, preserve `extra_retry_available`, increment the human-facing retry ordinal |
+| `attempts_remaining == 0`, `extra_retry_available is True` | `recoverable_parse` | keep `attempts_remaining` at 0, set `extra_retry_available` to false, increment the human-facing retry ordinal |
+| `attempts_remaining == 0`, `extra_retry_available is False` | `recoverable_parse` | no retry is available; emit the existing typed self-correction error event |
+| `attempts_remaining == 0` | `parse`, `validation`, `quality`, or any non-extra failure kind | no retry is available; emit the existing typed self-correction error event |
+
+The retry ordinal must keep the current temperature and feedback behavior:
+
+- retry ordinal 0 uses `self_correction_temperature`
+- retry ordinal 1 and later use `self_correction_bumped_temperature`
+- feedback for ordinal 1 starts with `CORRECTION STILL INVALID:`
+- feedback for ordinal 2 and later starts with `FINAL CORRECTION ATTEMPT`
+
+Diff budget: the production change must stay at or below 60 net LOC. If the
+production diff exceeds that, stop and re-plan instead of widening the slice.
+
+### Prompt Contract Anchors That Must Stay Protected
+
+The existing artifact and test must not be weakened. These anchors must keep
+passing through `backend/tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py`:
+
+- `base_planning_state_version`
+- `outline_flow`
+- `edit_flow`
+- exact `ref` values
+- `architecture_commit: null`
+- single raw JSON object
+- no markdown/code-fence wrapping via `Do NOT wrap`
+
+`docs/refactor/ai-builder-prompt-contract.md` may be edited only to add anchors.
+No anchor removals, renames, or looser assertions are planned.
+
+### Behavior Pins Before Or With Production Hardening
+
+Existing behavior pins that must remain green:
+
+- `test_ai_builder_repair.py:93-107` pins parse-repair budget and raw JSON prompt obligations.
+- `test_ai_builder_repair.py:109-307` pins semantic repair eligibility, prompt detail/code behavior, drift blocking, preservation-by-absence, and retry count constants.
+- `test_ai_builder_parse_repair.py:207-391` pins parse-repair outcomes, diagnostics, single retry, and truncation behavior.
+- `test_ai_builder_orchestration_pipeline.py:222-638` pins planner repair-loop accounting, non-repairable short-circuit, drift handling, malformed semantic-repair parse repair, and budget exhaustion.
+- `test_ai_builder_proposal_repair.py:162-195` pins proposal self-correction retry budget and first/final correction prompt wording.
+- `test_ai_builder_proposal_repair.py:273-453` pins temperature bumping, conversational bail behavior, legitimate info-request text, and stronger prompt timing.
+
+Additional behavior pins planned regardless of whether the value object proceeds:
+
+- `test_recoverable_parse_grants_exactly_one_extra_retry_after_normal_budget_exhausted`
+  should exercise `request_self_correction` through the public repair helper and
+  prove the existing extra-retry path gets exactly one additional correction
+  after normal retries are exhausted.
+- Add the paired negative case: non-`recoverable_parse` failure kinds such as
+  `parse` or `validation` must not trigger an extra retry after normal retries
+  are exhausted.
+- Preserve the existing test that on normal retry slots the repair loop performs
+  exactly one initial correction plus three retries; if the value object
+  proceeds, the recoverable-parse case must prove the extra slot does not
+  consume or extend the normal `MAX_SELF_CORRECTION_RETRIES = 3` budget.
+- Prove the final event payload shape is unchanged: after the extra retry is
+  consumed, the next failed result emits the same typed self-correction error
+  event instead of another retry.
+
+No test will assert private helper calls merely to protect the refactor.
+
+### Forbidden Files And Actions
+
+Forbidden files for this slice:
+
+- `backend/src/intric/flows/ai_builder/ai_builder_repair_transport.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_edit_repair.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_router.py` except pre-existing repair test import updates, which are not expected
+- `backend/src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py`
+- `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py`
+- frontend files
+- migrations
+
+Forbidden actions:
+
+- no `RepairPolicy` Protocol, ABC, one-method interface, or one-implementation adapter
+- no new subpackages
+- no module renames
+- no symbol moves across files
+- no SSE event name, payload, or ordering changes
+- no audit behavior changes
+- no logging behavior changes
+- no numeric retry budget changes:
+  - `MAX_ORCHESTRATOR_REPAIR_RETRIES = 3`
+  - `MAX_PARSE_REPAIR_RETRIES = 1`
+  - `MAX_SELF_CORRECTION_RETRIES = 3` in `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:172`
+  - existing proposal self-correction retry semantics
+- do not share a proposal retry-state value object with semantic or parse
+  repair; the retry domains are different
+- no create/edit proposal split
+- no planner-turn extraction
+- no router/presenter thinning
+- no frontend protocol work
+- no package rename
+- no `intric.*` to `eneo.*` rename
+
+### Expected Files To Change
+
+Expected production file if the value-object hardening proceeds:
+
+- `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py`
+
+Expected tests:
+
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py`
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py` only as validation, not expected to change
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_repair.py` only as validation, not expected to change
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py` only as validation, not expected to change
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py` only as validation, not expected to change
+
+`test_ai_builder_proposal_processor.py` is expected because validation exposed
+stale retry-config expectations for the already-current nullable edit-context
+keys.
+
+Expected docs/process artifacts:
+
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/plan.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/journal.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/retrospective-2.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/claude-reconciliation-2.md`
+
+If no production change proceeds, expected files narrow to:
+
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/plan.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/journal.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/retrospective-2.md`
+- `docs/refactor/execution/batch-6-ai-builder-contract-split/claude-reconciliation-2.md`
+
+### Validation Commands
+
+Implementation-order row for Batch 6 gives validation labels:
+
+- AI Builder integration tests
+- SSE event tests
+- frontend AI Builder tests
+
+For this repair-only backend slice, exact validation commands are:
+
+AI Builder integration tests:
+
+```bash
+cd backend && uv run pytest \
+  tests/integration/flows/test_ai_builder_session_api_regressions.py \
+  tests/integration/flows/ai_builder/test_ai_builder_apply_to_draft.py \
+  tests/integration/flows/test_ai_builder_edit_apply_regressions.py \
+  -q
+```
+
+Repair, prompt-contract, parser, pipeline, and SSE/error unit tests:
+
+```bash
+cd backend && uv run pytest \
+  tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_router.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_failure_events.py \
+  -q
+```
+
+Targeted pyright:
+
+```bash
+cd backend && uv run pyright \
+  src/intric/flows/ai_builder/ai_builder_proposal_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py
+```
+
+Targeted ruff:
+
+```bash
+cd backend && uv run ruff check \
+  src/intric/flows/ai_builder/ai_builder_proposal_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py \
+  tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py
+```
+
+Import boundaries:
+
+```bash
+cd backend && uv run lint-imports --no-cache
+```
+
+Diff hygiene:
+
+```bash
+git diff --check -- \
+  backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py \
+  backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py \
+  backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py \
+  backend/tests/unittests/flows/ai_builder/test_ai_builder_prompt_contract_artifact.py \
+  backend/tests/unittests/flows/ai_builder/test_ai_builder_repair.py \
+  backend/tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py \
+  backend/tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py \
+  docs/refactor/execution/batch-6-ai-builder-contract-split
+```
+
+Committed-text hygiene:
+
+```bash
+rg -n "6b|6c|Batch 6|repair extraction" \
+  backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py \
+  backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py \
+  backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py \
+  docs/refactor/ai-builder-prompt-contract.md
+```
+
+Expected: no matches outside process artifacts. If the production file or test
+has an intentional ordinary word match, classify it before commit.
+
+Frontend AI Builder tests are not run because this slice forbids frontend edits
+and does not touch frontend protocol/event surfaces. If Claude identifies a
+frontend-facing repair payload risk with file:line evidence, stop and ask for a
+scope decision instead of expanding this slice.
+
+### Claude Plan Review
+
+Before implementation, run Claude peer-loop against this plan and ask whether
+the value-object hardening genuinely improves reliability/maintainability or
+whether this should be a no-production-change checkpoint. Resume the same
+session for verification after revisions. Do not implement until the plan has
+green light or a documented, evidence-backed disagreement.
+
 ## Carry-Forward Risks From Batch 5
 
-| Risk | Status in 6a | Reason |
+| Risk | Status in repair slice | Reason |
 |---|---|---|
 | `FlowDocumentRenderLimits`, `FlowRunOutputPayload`, and related Flow runtime UI-owned projections | out of scope | These are Flow runtime UI projections, not AI Builder protocol types |
-| Frontend baseline/typecheck drift | out of scope unless frontend protocol touched | 6a is backend test/docs only |
-| `@intric/intric-js` package naming | deferred | Batch 5 decision keeps package name for now; no rename in Batch 6 |
-| AI Builder manual protocol drift | inventory only | 6f owns generated alias mapping; 6a only records current generated/manual surfaces |
+| Frontend baseline/typecheck drift | out of scope unless frontend protocol touched | This repair slice is backend source/tests/docs only |
+| `@intric/intric-js` package naming | deferred | Batch 5 decision keeps package name for now; no rename in this slice |
+| AI Builder manual protocol drift | deferred | Frontend generated alias mapping remains a later AI Builder protocol-type slice |
 | Frontend SSE/open-flow protocol aliasing | deferred | Existing frontend tests pin driver behavior; generated alias mapping belongs to 6f and state ownership belongs to Batch 7 |
 
 ## Non-Goals
 
-- Do not start 6b.
-- Do not thin `ai_builder_router.py` in 6a.
-- Do not split `AIBuilderService` or planner modules in 6a.
+- Do not start the create/edit proposal split.
+- Do not thin `ai_builder_router.py`.
+- Do not split `AIBuilderService` or planner modules.
 - Do not delete active repair behavior.
 - Do not preserve or add compatibility for imaginary users.
 - Do not touch frontend state ownership.

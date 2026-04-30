@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -19,6 +20,45 @@ from intric.main.logging import get_logger
 logger = get_logger(__name__)
 _EXTRA_RETRY_FAILURE_KINDS = frozenset({"recoverable_parse"})
 EventBatch = tuple[dict[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ProposalRepairRetryState:
+    attempts_remaining: int
+    extra_retry_available: bool = True
+    retry_count: int = 0
+
+    @classmethod
+    def initial(cls, *, max_attempts: int) -> "_ProposalRepairRetryState":
+        return cls(attempts_remaining=max_attempts)
+
+    @property
+    def use_bumped_temperature(self) -> bool:
+        return self.retry_count >= 1
+
+    @property
+    def next_retry_count(self) -> int:
+        return self.retry_count + 1
+
+    def can_retry(self, *, failure_kind: str | None) -> bool:
+        return self.attempts_remaining > 0 or (
+            failure_kind in _EXTRA_RETRY_FAILURE_KINDS and self.extra_retry_available
+        )
+
+    def consume(self, *, failure_kind: str | None) -> "_ProposalRepairRetryState":
+        if self.attempts_remaining > 0:
+            return _ProposalRepairRetryState(
+                attempts_remaining=self.attempts_remaining - 1,
+                extra_retry_available=self.extra_retry_available,
+                retry_count=self.retry_count + 1,
+            )
+        if failure_kind in _EXTRA_RETRY_FAILURE_KINDS and self.extra_retry_available:
+            return _ProposalRepairRetryState(
+                attempts_remaining=self.attempts_remaining,
+                extra_retry_available=False,
+                retry_count=self.retry_count + 1,
+            )
+        return self
 
 
 def _invalid_tool_arguments_message(error: Exception) -> str:
@@ -124,30 +164,6 @@ def append_retry_feedback_turn(
     )
 
 
-def _retry_budget_available(
-    *,
-    attempts_remaining: int,
-    failure_kind: str | None,
-    extra_retry_available: bool,
-) -> bool:
-    return attempts_remaining > 0 or (
-        failure_kind in _EXTRA_RETRY_FAILURE_KINDS and extra_retry_available
-    )
-
-
-def _consume_retry_budget(
-    *,
-    attempts_remaining: int,
-    failure_kind: str | None,
-    extra_retry_available: bool,
-) -> tuple[int, bool]:
-    if attempts_remaining > 0:
-        return attempts_remaining - 1, extra_retry_available
-    if failure_kind in _EXTRA_RETRY_FAILURE_KINDS and extra_retry_available:
-        return attempts_remaining, False
-    return attempts_remaining, extra_retry_available
-
-
 def _build_retry_feedback(
     *,
     target_tool_name: str,
@@ -216,9 +232,9 @@ async def request_self_correction(
         ),
     )
 
-    attempts_remaining = max_self_correction_retries
-    extra_retry_available = True
-    retry_count = 0  # 0 = initial correction, 1 = first retry, 2 = second retry, …
+    retry_state = _ProposalRepairRetryState.initial(
+        max_attempts=max_self_correction_retries
+    )
     while True:
         try:
             response = await call_repair_completion(
@@ -229,7 +245,7 @@ async def request_self_correction(
                 max_output_tokens=max_output_tokens,
                 temperature=(
                     self_correction_bumped_temperature
-                    if retry_count >= 1
+                    if retry_state.use_bumped_temperature
                     else self_correction_temperature
                 ),
             )
@@ -254,18 +270,14 @@ async def request_self_correction(
                 try:
                     arguments = json.loads(correction_tool_call.function.arguments)
                 except Exception as error:
-                    if _retry_budget_available(
-                        attempts_remaining=attempts_remaining,
-                        failure_kind="parse",
-                        extra_retry_available=extra_retry_available,
-                    ):
+                    if retry_state.can_retry(failure_kind="parse"):
                         retry_feedback = (
                             correction_tool_call,
                             _build_retry_feedback(
                                 target_tool_name=target_tool_name,
                                 feedback=_invalid_tool_arguments_message(error),
                                 failure_kind="parse",
-                                retry_count=retry_count + 1,
+                                retry_count=retry_state.next_retry_count,
                             ),
                             "parse",
                         )
@@ -299,11 +311,7 @@ async def request_self_correction(
                     **invocation_kwargs,
                 )
                 if not _tool_result_has_events(tool_result):
-                    if _retry_budget_available(
-                        attempts_remaining=attempts_remaining,
-                        failure_kind=tool_result.failure_kind,
-                        extra_retry_available=extra_retry_available,
-                    ):
+                    if retry_state.can_retry(failure_kind=tool_result.failure_kind):
                         retry_feedback = (
                             correction_tool_call,
                             _build_retry_feedback(
@@ -311,7 +319,7 @@ async def request_self_correction(
                                 feedback=tool_result.feedback
                                 or "Invalid tool payload.",
                                 failure_kind=tool_result.failure_kind,
-                                retry_count=retry_count + 1,
+                                retry_count=retry_state.next_retry_count,
                             ),
                             tool_result.failure_kind,
                         )
@@ -328,12 +336,7 @@ async def request_self_correction(
 
             if retry_feedback is not None:
                 correction_tool_call, feedback, failure_kind = retry_feedback
-                attempts_remaining, extra_retry_available = _consume_retry_budget(
-                    attempts_remaining=attempts_remaining,
-                    failure_kind=failure_kind,
-                    extra_retry_available=extra_retry_available,
-                )
-                retry_count += 1
+                retry_state = retry_state.consume(failure_kind=failure_kind)
                 correction_messages = append_retry_feedback_turn(
                     llm_messages=correction_messages,
                     tool_call=correction_tool_call,

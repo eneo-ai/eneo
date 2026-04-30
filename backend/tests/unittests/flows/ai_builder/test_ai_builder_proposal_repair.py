@@ -198,6 +198,7 @@ def test_build_retry_feedback_keeps_stronger_preamble_on_third_retry() -> None:
 async def _run_repair_capturing(
     *,
     max_retries: int,
+    failure_kind: str = "validation",
     base_temperature: float = 0.35,
     bumped_temperature: float = 0.6,
 ) -> tuple[list[float], list[str], list[dict[str, str]]]:
@@ -233,7 +234,7 @@ async def _run_repair_capturing(
         **_,
     ) -> SimpleNamespace:
         return SimpleNamespace(
-            event=None, feedback="still bad", failure_kind="validation"
+            event=None, feedback="still bad", failure_kind=failure_kind
         )
 
     events: list[dict[str, str]] = []
@@ -291,6 +292,44 @@ async def test_request_self_correction_bumps_temperature_from_first_retry_onward
     # plus three retries before giving up, for four total LLM calls. Keep this
     # pinned so a future refactor cannot silently extend the budget.
     assert temps == [0.35, 0.6, 0.6, 0.6]
+
+
+@pytest.mark.asyncio
+async def test_request_self_correction_grants_one_extra_retry_for_recoverable_parse() -> (
+    None
+):
+    temps, retry_feedback, events = await _run_repair_capturing(
+        max_retries=3,
+        failure_kind="recoverable_parse",
+        base_temperature=0.35,
+        bumped_temperature=0.6,
+    )
+
+    assert temps == [0.35, 0.6, 0.6, 0.6, 0.6]
+    assert len(retry_feedback) == 5
+    assert retry_feedback[0].startswith("VALIDATION FAILED")
+    assert retry_feedback[1].startswith("CORRECTION STILL INVALID:")
+    assert retry_feedback[2].startswith("FINAL CORRECTION ATTEMPT")
+    assert retry_feedback[3].startswith("FINAL CORRECTION ATTEMPT")
+    assert retry_feedback[4].startswith("FINAL CORRECTION ATTEMPT")
+    assert events[-1] == {"event": "error", "data": "still bad"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["parse", "validation", "quality"])
+async def test_request_self_correction_rejects_non_extra_failure_after_normal_budget(
+    failure_kind: str,
+) -> None:
+    temps, retry_feedback, events = await _run_repair_capturing(
+        max_retries=3,
+        failure_kind=failure_kind,
+        base_temperature=0.35,
+        bumped_temperature=0.6,
+    )
+
+    assert temps == [0.35, 0.6, 0.6, 0.6]
+    assert len(retry_feedback) == 4
+    assert events[-1] == {"event": "error", "data": "still bad"}
 
 
 @pytest.mark.asyncio
