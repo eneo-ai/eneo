@@ -68,6 +68,26 @@ export function initModels(client) {
     },
 
     /**
+     * Validate migration compatibility without executing.
+     * @param {Object} params
+     * @param {string} params.fromId Source model ID
+     * @param {string} params.toId Target model ID
+     * @returns {Promise<import("../types/schema").components["schemas"]["ValidationResult"]>}
+     * @throws {IntricError}
+     * */
+    validateMigration: async ({ fromId, toId }) => {
+      const res = await client.fetch("/api/v1/completion-models/{model_id}/migration-validate", {
+        method: "get",
+        params: {
+          path: { model_id: fromId },
+          query: { to_model_id: toId }
+        }
+      });
+
+      return res;
+    },
+
+    /**
      * Migrate completion model usage to another model.
      * @param {Object} params
      * @param {string} params.fromId Source model ID
@@ -77,29 +97,6 @@ export function initModels(client) {
      * @returns {Promise<import("../types/schema").components["schemas"]["MigrationResult"]>}
      * @throws {IntricError}
      * */
-    /**
-     * Validate migration compatibility without executing.
-     * @param {Object} params
-     * @param {string} params.fromId Source model ID
-     * @param {string} params.toId Target model ID
-     * @returns {Promise<import("../types/schema").components["schemas"]["ValidationResult"]>}
-     * @throws {IntricError}
-     * */
-    validateMigration: async ({ fromId, toId }) => {
-      const res = await client.fetch(
-        "/api/v1/completion-models/{model_id}/migration-validate",
-        {
-          method: "get",
-          params: {
-            path: { model_id: fromId },
-            query: { to_model_id: toId }
-          }
-        }
-      );
-
-      return res;
-    },
-
     migrateCompletion: async ({ fromId, toId, entityTypes, confirmMigration }) => {
       const res = await client.fetch("/api/v1/completion-models/{model_id}/migrate", {
         method: "post",
@@ -124,13 +121,10 @@ export function initModels(client) {
      * @throws {IntricError}
      * */
     getUsageStats: async ({ modelId }) => {
-      const res = await client.fetch(
-        "/api/v1/completion-models/{model_id}/usage",
-        {
-          method: "get",
-          params: { path: { model_id: modelId } }
-        }
-      );
+      const res = await client.fetch("/api/v1/completion-models/{model_id}/usage", {
+        method: "get",
+        params: { path: { model_id: modelId } }
+      });
 
       return res;
     },
@@ -141,7 +135,7 @@ export function initModels(client) {
      * @param {string} params.modelId Model ID
      * @param {string} [params.entityType] Filter by entity type
      * @param {number} [params.limit=50] Number of results
-     * @returns {Promise<import("../types/schema").components["schemas"]["ModelUsagePaginatedResponse"]>}
+     * @returns {Promise<import("../types/schema").components["schemas"]["PaginatedResponse"]>}
      * @throws {IntricError}
      * */
     getUsageDetails: async ({ modelId, entityType, limit = 50 }) => {
@@ -149,16 +143,16 @@ export function initModels(client) {
       const query = { limit };
       if (entityType) query.entity_type = entityType;
 
-      const res = await client.fetch(
-        "/api/v1/completion-models/{model_id}/usage/details",
-        {
-          method: "get",
-          params: {
-            path: { model_id: modelId },
-            query
-          }
+      const res = await client.fetch("/api/v1/completion-models/{model_id}/usage/details", {
+        method: "get",
+        params: {
+          path: { model_id: modelId },
+          // Query params are read via a custom Depends() on the backend, so
+          // they don't appear in the OpenAPI schema's params type.
+          // @ts-expect-error see comment above
+          query
         }
-      );
+      });
 
       return res;
     },
@@ -173,13 +167,13 @@ export function initModels(client) {
      * @throws {IntricError}
      * */
     getMigrationHistory: async ({ modelId, limit = 50, offset = 0 }) => {
-      const res = await client.fetch(
-        "/api/v1/completion-models/{model_id}/migration-history",
-        {
-          method: "get",
-          params: { path: { model_id: modelId }, query: { limit, offset } }
-        }
-      );
+      const res = await client.fetch("/api/v1/completion-models/{model_id}/migration-history", {
+        method: "get",
+        // Query params are read via a custom Depends() on the backend, so
+        // they don't appear in the OpenAPI schema's params type.
+        // @ts-expect-error see comment above
+        params: { path: { model_id: modelId }, query: { limit, offset } }
+      });
 
       return res;
     },
@@ -195,6 +189,9 @@ export function initModels(client) {
     getAllMigrationHistory: async ({ limit = 50, offset = 0 } = {}) => {
       const res = await client.fetch("/api/v1/completion-models/migration-history", {
         method: "get",
+        // Query params are read via a custom Depends() on the backend, so
+        // they don't appear in the OpenAPI schema's params type.
+        // @ts-expect-error see comment above
         params: { query: { limit, offset } }
       });
 

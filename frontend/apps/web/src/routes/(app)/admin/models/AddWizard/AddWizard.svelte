@@ -14,7 +14,7 @@
   import StepProvider from "./StepProvider.svelte";
   import StepCredentials from "./StepCredentials.svelte";
   import StepModels from "./StepModels.svelte";
-  import type { ModelProviderPublic } from "@intric/intric-js";
+  import type { ModelProviderPublic, SecurityClassification } from "@intric/intric-js";
   import { onMount } from "svelte";
   import {
     getModelProviderCapabilities,
@@ -92,7 +92,7 @@
       dimensions?: number;
       maxInput?: number;
       hosting?: string;
-      securityClassification?: { id: string; name: string } | null;
+      securityClassification?: SecurityClassification | null;
     }>;
   }
 
@@ -304,7 +304,7 @@
           : "transcriptionModel";
 
     for (const model of modelsToCreate) {
-      let created: any;
+      let created: { id: string } | undefined;
       if (modelType === "completion") {
         created = await intric.tenantModels.createCompletion({
           provider_id: providerId,
@@ -346,7 +346,9 @@
         await intric.models.update({
           [modelTypeKey]: created,
           update: { security_classification: model.securityClassification }
-        } as any);
+          // The dynamic modelTypeKey makes the union narrow uneasily; the
+          // shape is correct at runtime.
+        } as Parameters<typeof intric.models.update>[0]);
       }
     }
 

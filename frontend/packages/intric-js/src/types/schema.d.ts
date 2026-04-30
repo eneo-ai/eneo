@@ -2997,6 +2997,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/completion-models/{model_id}/migration-validate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Validate Migration
+     * @description Validate migration compatibility without executing. Used for preflight checks.
+     */
+    get: operations["validate_migration_api_v1_completion_models__model_id__migration_validate_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/completion-models/{model_id}/migrate": {
     parameters: {
       query?: never;
@@ -3046,7 +3066,7 @@ export interface paths {
     };
     /**
      * Get Model Migration History
-     * @description Get migration history for a specific model (from or to this model)
+     * @description Get migration history for a specific live model (from or to this model)
      */
     get: operations["get_model_migration_history_api_v1_completion_models__model_id__migration_history_get"];
     put?: never;
@@ -3297,7 +3317,13 @@ export interface paths {
     };
     /**
      * List Provider Models
-     * @description List available models/deployments from the provider's API using its credentials.
+     * @description List available models from the provider's API using its credentials.
+     *
+     *     Each entry has at least ``name`` and ``mode``. Completion entries also
+     *     include ``max_input_tokens``, ``max_output_tokens`` and ``supports_*``
+     *     flags; embedding entries include ``max_input_tokens`` and
+     *     ``output_vector_size``. When ``mode`` is supplied the server returns
+     *     only matching entries — consumers don't need to filter client-side.
      */
     get: operations["list_provider_models_api_v1_admin_model_providers__provider_id__models__get"];
     put?: never;
@@ -3384,7 +3410,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Tenant Completion Model
-     * @description Delete a tenant-specific completion model.
+     * @description Soft-delete a tenant-specific completion model.
      */
     delete: operations["delete_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___delete"];
     options?: never;
@@ -6124,12 +6150,12 @@ export interface paths {
     post?: never;
     /**
      * Delete Completion Model
-     * @description Delete a completion model (system-wide operation).
+     * @description Soft-delete a completion model (system-wide operation).
      *
      *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
-     *     WARNING: Deletion affects all tenants. Use with caution.
-     *     Set force=true to delete even if model is in use (may break references).
+     *     WARNING: Affects all tenants. Use with caution.
+     *     Set force=true to hard-delete (may break references).
      */
     delete: operations["delete_completion_model_api_v1_sysadmin_completion_models__id__delete"];
     options?: never;
@@ -6905,6 +6931,7 @@ export interface components {
       | "integration_knowledge_deleted"
       | "integration_knowledge_synced"
       | "completion_model_updated"
+      | "completion_model_migrated"
       | "embedding_model_updated"
       | "transcription_model_updated"
       | "template_created"
@@ -8846,7 +8873,6 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
-      /** Model Kwargs Capabilities */
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /**
        * Is Org Enabled
@@ -8862,13 +8888,16 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
       /**
        * Token Limit
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
       readonly token_limit: number;
-      /** Supported Model Kwargs */
-      readonly supported_model_kwargs?: components["schemas"]["SupportedModelKwargs"];
+      readonly supported_model_kwargs: components["schemas"]["SupportedModelKwargs"];
     };
     /** CompletionModelCreate */
     CompletionModelCreate: {
@@ -8913,7 +8942,6 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
-      /** Model Kwargs Capabilities */
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
     };
     /** CompletionModelPublic */
@@ -8968,7 +8996,6 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
-      /** Model Kwargs Capabilities */
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /**
        * Is Org Enabled
@@ -8984,6 +9011,10 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
       /**
        * Can Access
        * @default false
@@ -9001,19 +9032,14 @@ export interface components {
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Provider Name */
       provider_name?: string | null;
-      /** Provider Type */
-      provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
-      /** Migrated To Model Id */
-      migrated_to_model_id?: string | null;
       /**
        * Token Limit
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
       readonly token_limit: number;
-      /** Supported Model Kwargs */
-      readonly supported_model_kwargs?: components["schemas"]["SupportedModelKwargs"];
+      readonly supported_model_kwargs: components["schemas"]["SupportedModelKwargs"];
     };
     /** CompletionModelPublicAppTemplate */
     CompletionModelPublicAppTemplate: {
@@ -9083,7 +9109,6 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
-      /** Model Kwargs Capabilities */
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /**
        * Is Org Enabled
@@ -9099,6 +9124,10 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
       /**
        * Can Access
        * @default false
@@ -9116,8 +9145,8 @@ export interface components {
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Provider Name */
       provider_name?: string | null;
-      /** Provider Type */
-      provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
       /**
@@ -9125,8 +9154,7 @@ export interface components {
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
       readonly token_limit: number;
-      /** Supported Model Kwargs */
-      readonly supported_model_kwargs?: components["schemas"]["SupportedModelKwargs"];
+      readonly supported_model_kwargs: components["schemas"]["SupportedModelKwargs"];
     };
     /** CompletionModelSparse */
     CompletionModelSparse: {
@@ -9180,7 +9208,6 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
-      /** Model Kwargs Capabilities */
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Provider Type */
       provider_type?: string | null;
@@ -9189,8 +9216,7 @@ export interface components {
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
       readonly token_limit: number;
-      /** Supported Model Kwargs */
-      readonly supported_model_kwargs?: components["schemas"]["SupportedModelKwargs"];
+      readonly supported_model_kwargs: components["schemas"]["SupportedModelKwargs"];
     };
     /** CompletionModelUpdateFlags */
     CompletionModelUpdateFlags: {
@@ -10181,6 +10207,8 @@ export interface components {
       provider_name?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -11713,7 +11741,7 @@ export interface components {
        */
       supported?: boolean;
       /** Control */
-      control?: "slider" | "select" | null;
+      control?: ("slider" | "select") | null;
       /** Minimum */
       minimum?: number | null;
       /** Maximum */
@@ -11722,23 +11750,6 @@ export interface components {
       step?: number | null;
       /** Options */
       options?: string[] | null;
-    };
-    /** SupportedModelKwargs */
-    SupportedModelKwargs: {
-      /** Temperature */
-      temperature?: components["schemas"]["ModelKwargCapability"];
-      /** Top P */
-      top_p?: components["schemas"]["ModelKwargCapability"];
-      /** Reasoning Effort */
-      reasoning_effort?: components["schemas"]["ModelKwargCapability"];
-      /** Verbosity */
-      verbosity?: components["schemas"]["ModelKwargCapability"];
-      /** Presence Penalty */
-      presence_penalty?: components["schemas"]["ModelKwargCapability"];
-      /** Frequency Penalty */
-      frequency_penalty?: components["schemas"]["ModelKwargCapability"];
-      /** Top K */
-      top_k?: components["schemas"]["ModelKwargCapability"];
     };
     /** ModelKwargs */
     ModelKwargs: {
@@ -11771,18 +11782,12 @@ export interface components {
        * Format: uuid
        */
       id: string;
-      /**
-       * From Model Id
-       * Format: uuid
-       */
-      from_model_id: string;
+      /** From Model Id */
+      from_model_id?: string | null;
       /** From Model Name */
       from_model_name: string;
-      /**
-       * To Model Id
-       * Format: uuid
-       */
-      to_model_id: string;
+      /** To Model Id */
+      to_model_id?: string | null;
       /** To Model Name */
       to_model_name: string;
       /** Migrated Count */
@@ -11804,6 +11809,12 @@ export interface components {
       duration?: number | null;
       /** Error Message */
       error_message?: string | null;
+      /** Migration Details */
+      migration_details?: {
+        [key: string]: number;
+      } | null;
+      /** Warnings */
+      warnings?: string[] | null;
     };
     /**
      * ModelMigrationRequest
@@ -12950,7 +12961,6 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
-      /** Model Kwargs Capabilities */
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Id */
       id?: string | null;
@@ -14296,6 +14306,16 @@ export interface components {
        */
       super_duper_api_key_using_legacy?: boolean;
     };
+    /** SupportedModelKwargs */
+    SupportedModelKwargs: {
+      temperature?: components["schemas"]["ModelKwargCapability"];
+      top_p?: components["schemas"]["ModelKwargCapability"];
+      reasoning_effort?: components["schemas"]["ModelKwargCapability"];
+      verbosity?: components["schemas"]["ModelKwargCapability"];
+      presence_penalty?: components["schemas"]["ModelKwargCapability"];
+      frequency_penalty?: components["schemas"]["ModelKwargCapability"];
+      top_k?: components["schemas"]["ModelKwargCapability"];
+    };
     /**
      * SyncLog
      * @description Detailed sync operation log.
@@ -15339,6 +15359,8 @@ export interface components {
       provider_name?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -16162,6 +16184,28 @@ export interface components {
       msg: string;
       /** Error Type */
       type: string;
+    };
+    /**
+     * ValidationResult
+     * @description Result of migration compatibility validation.
+     */
+    ValidationResult: {
+      /** Compatible */
+      compatible: boolean;
+      /** Warnings */
+      warnings: string[];
+      /**
+       * Warning Codes
+       * @default []
+       */
+      warning_codes?: string[];
+      /** Requires Confirmation */
+      requires_confirmation: boolean;
+      /**
+       * User Confirmed
+       * @default false
+       */
+      user_confirmed?: boolean;
     };
     /**
      * WatchdogMetrics
@@ -20392,6 +20436,7 @@ export interface operations {
                 base_url?: string | null;
                 /** Litellm Model Name */
                 litellm_model_name?: string | null;
+                model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
                 /**
                  * Is Org Enabled
                  * @default false
@@ -20406,6 +20451,10 @@ export interface operations {
                 tenant_id?: string | null;
                 /** Provider Id */
                 provider_id?: string | null;
+                /** Provider Type */
+                provider_type?: string | null;
+                /** Migrated To Model Id */
+                migrated_to_model_id?: string | null;
                 /**
                  * Can Access
                  * @default false
@@ -20425,8 +20474,8 @@ export interface operations {
                   | null;
                 /** Provider Name */
                 provider_name?: string | null;
-                /** Provider Type */
-                provider_type?: string | null;
+                /** Deprecation Date */
+                deprecation_date?: string | null;
               };
               /** FilePublic */
               FilePublic: {
@@ -20483,6 +20532,24 @@ export interface operations {
                 /** Size */
                 size: number;
               };
+              /** ModelKwargCapability */
+              ModelKwargCapability: {
+                /**
+                 * Supported
+                 * @default false
+                 */
+                supported?: boolean;
+                /** Control */
+                control?: ("slider" | "select") | null;
+                /** Minimum */
+                minimum?: number | null;
+                /** Maximum */
+                maximum?: number | null;
+                /** Step */
+                step?: number | null;
+                /** Options */
+                options?: string[] | null;
+              };
               /**
                * SecurityClassificationPublic
                * @description Basic security classification information.
@@ -20503,6 +20570,16 @@ export interface operations {
                 description: string | null;
                 /** Security Level */
                 security_level: number;
+              };
+              /** SupportedModelKwargs */
+              SupportedModelKwargs: {
+                temperature?: components["schemas"]["ModelKwargCapability"];
+                top_p?: components["schemas"]["ModelKwargCapability"];
+                reasoning_effort?: components["schemas"]["ModelKwargCapability"];
+                verbosity?: components["schemas"]["ModelKwargCapability"];
+                presence_penalty?: components["schemas"]["ModelKwargCapability"];
+                frequency_penalty?: components["schemas"]["ModelKwargCapability"];
+                top_k?: components["schemas"]["ModelKwargCapability"];
               };
               /** ToolAssistant */
               ToolAssistant: {
@@ -20712,6 +20789,7 @@ export interface operations {
                 base_url?: string | null;
                 /** Litellm Model Name */
                 litellm_model_name?: string | null;
+                model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
                 /**
                  * Is Org Enabled
                  * @default false
@@ -20726,6 +20804,10 @@ export interface operations {
                 tenant_id?: string | null;
                 /** Provider Id */
                 provider_id?: string | null;
+                /** Provider Type */
+                provider_type?: string | null;
+                /** Migrated To Model Id */
+                migrated_to_model_id?: string | null;
                 /**
                  * Can Access
                  * @default false
@@ -20745,8 +20827,8 @@ export interface operations {
                   | null;
                 /** Provider Name */
                 provider_name?: string | null;
-                /** Provider Type */
-                provider_type?: string | null;
+                /** Deprecation Date */
+                deprecation_date?: string | null;
               };
               /** FilePublic */
               FilePublic: {
@@ -20803,6 +20885,24 @@ export interface operations {
                 /** Size */
                 size: number;
               };
+              /** ModelKwargCapability */
+              ModelKwargCapability: {
+                /**
+                 * Supported
+                 * @default false
+                 */
+                supported?: boolean;
+                /** Control */
+                control?: ("slider" | "select") | null;
+                /** Minimum */
+                minimum?: number | null;
+                /** Maximum */
+                maximum?: number | null;
+                /** Step */
+                step?: number | null;
+                /** Options */
+                options?: string[] | null;
+              };
               /**
                * SecurityClassificationPublic
                * @description Basic security classification information.
@@ -20823,6 +20923,16 @@ export interface operations {
                 description: string | null;
                 /** Security Level */
                 security_level: number;
+              };
+              /** SupportedModelKwargs */
+              SupportedModelKwargs: {
+                temperature?: components["schemas"]["ModelKwargCapability"];
+                top_p?: components["schemas"]["ModelKwargCapability"];
+                reasoning_effort?: components["schemas"]["ModelKwargCapability"];
+                verbosity?: components["schemas"]["ModelKwargCapability"];
+                presence_penalty?: components["schemas"]["ModelKwargCapability"];
+                frequency_penalty?: components["schemas"]["ModelKwargCapability"];
+                top_k?: components["schemas"]["ModelKwargCapability"];
               };
               /** ToolAssistant */
               ToolAssistant: {
@@ -26733,6 +26843,58 @@ export interface operations {
       };
     };
   };
+  validate_migration_api_v1_completion_models__model_id__migration_validate_get: {
+    parameters: {
+      query: {
+        /** @description Target model ID */
+        to_model_id: string;
+      };
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ValidationResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   migrate_model_usage_api_v1_completion_models__model_id__migrate_post: {
     parameters: {
       query?: never;
@@ -27394,7 +27556,10 @@ export interface operations {
   };
   list_provider_models_api_v1_admin_model_providers__provider_id__models__get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Filter response to a single mode. */
+        mode?: ("completion" | "embedding" | "transcription") | null;
+      };
       header?: never;
       path: {
         provider_id: string;

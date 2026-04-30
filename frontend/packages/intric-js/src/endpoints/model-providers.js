@@ -115,9 +115,6 @@ export function initModelProviders(client) {
         method: "get",
         params: {
           path: { provider_id: id },
-          // @ts-expect-error — `mode` is a new optional query param; this
-          // typing relaxation can be removed once schema.d.ts is regenerated
-          // from the backend's openapi.json (run `node update.js`).
           query: mode ? { mode } : undefined
         }
       });
