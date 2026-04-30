@@ -55,6 +55,7 @@ _RUNTIME_METADATA_INTENT_TRIGGERS = (
 )
 _USER_FIELD_ACTION_PHRASES: tuple[str, ...] = (
     "ange",
+    "anger",
     "fylla i",
     "fyller i",
     "mata in",
@@ -177,10 +178,58 @@ _ABSENCE_PREDICATE_TOKENS = frozenset(
     {
         "behovs",
         "behövs",
+        "behov",
+        "behöva",
+        "behover",
+        "behöver",
         "kravs",
         "krävs",
+        "need",
+        "needs",
         "needed",
         "required",
+    }
+)
+_PRIMARY_INPUT_ONLY_PHRASES: tuple[str, ...] = (
+    "bara lämna ljudfilen",
+    "bara lamna ljudfilen",
+    "bara lämna in ljudfilen",
+    "bara lamna in ljudfilen",
+    "bara ladda upp ljudfilen",
+    "endast lämna ljudfilen",
+    "endast lamna ljudfilen",
+    "endast ladda upp ljudfilen",
+    "bara ljudfilen",
+    "endast ljudfilen",
+    "only upload the audio file",
+    "only provide the audio file",
+    "only submit the audio file",
+)
+_PRIMARY_INPUT_LABELS = {
+    "audio",
+    "audio file",
+    "file",
+    "input",
+    "ljud",
+    "ljudfil",
+    "ljudfilen",
+    "fil",
+    "filen",
+    "indata",
+    "underlag",
+}
+_SECONDARY_FIELD_REFERENCE_TOKENS = frozenset(
+    {
+        "metadata",
+        "moteskontext",
+        "möteskontext",
+        "rubriker",
+        "headings",
+        "inmatningsfalt",
+        "inmatningsfält",
+        "formularfalt",
+        "formulärfält",
+        "fields",
     }
 )
 
@@ -196,6 +245,10 @@ def runtime_input_fields_declared_absent(text: str) -> bool:
     tokens = normalize_discovery_text(text).split()
     if not tokens:
         return False
+    if contains_any_phrase(normalize_discovery_text(text), _PRIMARY_INPUT_ONLY_PHRASES):
+        return True
+    if _negated_user_field_action_declared_absent(tokens):
+        return True
 
     trigger_polarities: list[tuple[int, bool]] = []
     for trigger in _RUNTIME_METADATA_ABSENCE_TRIGGERS:
@@ -299,7 +352,13 @@ def _field_trigger_has_absence_polarity(
         return True
     if any(token in _OPTIONAL_SCOPE_TOKENS for token in before):
         return True
+    if any(token in {"eller", "or", "and"} for token in before):
+        return True
     if any(token in {"utan", "without"} for token in after):
+        return True
+    if after and after[0] in {"eller", "or", "and"}:
+        return True
+    if any(token in _SECONDARY_FIELD_REFERENCE_TOKENS for token in after):
         return True
     return any(token in _ABSENCE_PREDICATE_TOKENS for token in after)
 
@@ -342,6 +401,8 @@ def _user_field_action_end_char_indexes(text: str) -> tuple[int, ...]:
         if not phrase_tokens:
             continue
         for start_index in _find_token_sequence_indexes(tokens, phrase_tokens):
+            if _field_action_is_negated(tokens, start_index):
+                continue
             if not _has_user_actor_before_action(tokens, start_index):
                 continue
             end_index = start_index + len(phrase_tokens) - 1
@@ -365,6 +426,28 @@ def _has_user_actor_before_action(tokens: list[str], action_start_index: int) ->
         default=-1,
     )
     return last_actor_index > last_non_user_index
+
+
+def _negated_user_field_action_declared_absent(tokens: list[str]) -> bool:
+    for phrase in _USER_FIELD_ACTION_PHRASES:
+        phrase_tokens = normalize_discovery_text(phrase).split()
+        if not phrase_tokens:
+            continue
+        for start_index in _find_token_sequence_indexes(tokens, phrase_tokens):
+            if not _field_action_is_negated(tokens, start_index):
+                continue
+            after = tokens[start_index + len(phrase_tokens) : start_index + 14]
+            if any(token in _SECONDARY_FIELD_REFERENCE_TOKENS for token in after):
+                return True
+    return False
+
+
+def _field_action_is_negated(tokens: list[str], action_start_index: int) -> bool:
+    before = tokens[max(0, action_start_index - 5) : action_start_index]
+    return any(token in _NEGATION_TOKENS for token in before) and (
+        any(token in _ABSENCE_PREDICATE_TOKENS for token in before)
+        or any(token in {"nagon", "någon", "any"} for token in before)
+    )
 
 
 def _trigger_end_char_indexes(text: str) -> tuple[int, ...]:
@@ -482,6 +565,8 @@ def _is_useful_label(label: str) -> bool:
         return False
     normalized = normalize_discovery_text(label)
     if normalized in _GENERIC_FIELD_LABELS:
+        return False
+    if normalized in _PRIMARY_INPUT_LABELS:
         return False
     if normalized in _ABSENCE_PREDICATE_TOKENS:
         return False

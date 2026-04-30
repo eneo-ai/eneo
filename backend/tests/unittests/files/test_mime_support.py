@@ -123,6 +123,26 @@ class TestClassifyMime:
     def test_alias_audio_mp3_classified_supported(self):
         assert classify_mime("audio/mp3")[0] is MimeSupport.SUPPORTED
 
+    @pytest.mark.parametrize(
+        "browser_mime",
+        [
+            # MediaRecorder on Chrome/Firefox produces these codec-suffixed
+            # values for the same containers we accept canonically. The
+            # transcription pipeline calls AudioMimeTypes.has_value() AND
+            # classify_mime() at multiple stages — both must accept the
+            # codec suffix or the file is silently classified as text.
+            "audio/webm;codecs=opus",
+            "audio/ogg;codecs=opus",
+            "audio/mp4;codecs=mp4a.40.2",
+            "video/webm;codecs=opus",
+        ],
+    )
+    def test_codec_suffixed_browser_audio_mimes_are_supported(self, browser_mime: str):
+        # Both the canonical lookup and the enum-level lookup must accept
+        # the codec suffix, since different call sites use different paths.
+        assert classify_mime(browser_mime)[0] is MimeSupport.SUPPORTED
+        assert AudioMimeTypes.has_value(browser_mime) is True
+
 
 class TestIsSupported:
     def test_true_for_supported(self):

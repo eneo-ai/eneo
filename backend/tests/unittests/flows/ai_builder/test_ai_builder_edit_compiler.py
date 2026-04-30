@@ -555,6 +555,128 @@ class TestUntouchedStepsPreserved:
         validation = validate_spec(result.compiled_spec)
         assert validation.valid
 
+    def test_insert_before_modified_step_preserves_new_previous_source_with_form_fields(
+        self,
+    ):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Skriv rapport",
+                input_source="flow_input",
+                input_type="text",
+                output_type="text",
+            ),
+        ]
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(
+                        position="before", anchor_ref="existing_step_1"
+                    ),
+                    add_payload=_make_add_payload(
+                        name="Transkribera ljud",
+                        instructions="Transkribera ljudet.",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type=InputType.AUDIO,
+                        output_type=OutputType.TEXT,
+                    ),
+                ),
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.TEXT,
+                        uses_form_fields=["case_id"],
+                    ),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(
+            draft,
+            existing,
+            base_flow_revision=1,
+            current_metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {
+                            "name": "case_id",
+                            "type": "text",
+                            "label": "Case ID",
+                        }
+                    ]
+                }
+            },
+        )
+
+        modified_step = result.compiled_spec.steps[1]
+        assert modified_step.input_bindings == {
+            "question": "{{ step_a.output.text }}\n\ncase_id: {{ case_id }}"
+        }
+        validation = validate_spec(result.compiled_spec)
+        assert validation.valid
+
+    def test_modify_step_previous_field_ref_uses_edited_flow_order_not_old_order(self):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Skriv rapport",
+                input_source="flow_input",
+                input_type="text",
+                output_type="text",
+            ),
+        ]
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(
+                        position="before", anchor_ref="existing_step_1"
+                    ),
+                    add_payload=AddStepPayload(
+                        name="Extrahera JSON",
+                        instructions="Extrahera sammanfattning.",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type=InputType.TEXT,
+                        output_type=OutputType.JSON,
+                        output_fields=[
+                            {
+                                "name": "summary",
+                                "field_type": "string",
+                                "description": "Kort sammanfattning.",
+                            }
+                        ],
+                    ),
+                ),
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.TEXT,
+                        uses_previous_fields=[
+                            {
+                                "from_step": 1,
+                                "field_path": "summary",
+                                "label": "Sammanfattning",
+                            }
+                        ],
+                    ),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(draft, existing, base_flow_revision=1)
+
+        modified_step = result.compiled_spec.steps[1]
+        assert modified_step.input_bindings == {
+            "question": "Sammanfattning: {{ step_a.output.structured.summary }}"
+        }
+        validation = validate_spec(result.compiled_spec)
+        assert validation.valid
+
     def test_modify_all_previous_step_keeps_fan_in_implicit_and_adds_hints(self):
         existing = [
             _make_flow_step(

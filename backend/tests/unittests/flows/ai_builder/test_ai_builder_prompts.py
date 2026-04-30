@@ -824,6 +824,18 @@ class TestBuildClarificationHints:
         assert "form_fields" in hints
         assert "ett textfält per rubrik" in hints
 
+    def test_output_heading_hint_rejects_runtime_form_field_modeling(self) -> None:
+        hints = build_clarification_hints(
+            conversation=[],
+            latest_user_message=(
+                "Transkribera ljud och sammanfatta mötet. Jag vill ha rubrikerna "
+                "i varje steg för Sekreterare, Föregående protokoll, Diskussion och Beslut."
+            ),
+        )
+
+        assert hints is not None
+        assert "Modellera därför inte rubrikerna som `form_fields`" in hints
+
     def test_create_mode_hints_reference_outline_flow_instead_of_legacy_submission_tool(
         self,
     ) -> None:

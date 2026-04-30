@@ -1637,6 +1637,103 @@ def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> 
     assert validation.valid
 
 
+def test_compile_outline_flow_drops_form_fields_when_metadata_is_forbidden() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Mötesprotokoll från ljud",
+            "plan_rationale": "Transkribera ljud och skapa protokoll.",
+            "runtime_input": {"input_type": "audio", "required": True},
+            "final_output_type": "docx",
+            "input_fields": [
+                {
+                    "variable_name": "mote_kontext",
+                    "label": "Möteskontext",
+                    "field_type": "text",
+                    "required": False,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Transkribera ljudet",
+                    "task": "Transkribera ljudet till svensk text.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "transkript",
+                            "field_type": "string",
+                            "description": "Den svenska transkriptionen.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Strukturera protokollet",
+                    "task": "Fyll fasta protokollrubriker från transkriptionen.",
+                    "output_type": "json",
+                    "uses_input_fields": ["mote_kontext"],
+                    "output_fields": [
+                        {
+                            "name": "protokoll_delar",
+                            "field_type": "object",
+                            "description": "Strukturerade protokollrubriker.",
+                            "fields": [
+                                {
+                                    "name": "sammanfattning",
+                                    "field_type": "string",
+                                    "description": "Sammanfattning.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Skapa Word-dokument",
+                    "task": "Skapa ett Word-dokument från protokollrubrikerna.",
+                    "output_type": "docx",
+                    "uses_input_fields": ["mote_kontext"],
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="audio",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="docx_document",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value="no_extra_metadata",
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert draft.form_fields == []
+    assert [step.uses_form_fields for step in draft.steps] == [[], [], []]
+    assert [step.input_type.value for step in draft.steps] == ["audio", "text", "json"]
+    assert [step.output_type.value for step in draft.steps] == ["text", "json", "docx"]
+    assert compiled.form_fields is None
+    assert compiled.steps[1].input_bindings is None
+    assert compiled.steps[2].input_bindings is None
+    assert compiled.steps[2].input_contract == compiled.steps[1].output_contract
+    assert validation.valid
+
+
 def test_compile_outline_flow_folds_leading_zero_contract_text_step(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -1942,6 +2039,59 @@ def test_runtime_input_field_hints_parse_generic_field_declarations() -> None:
         ("malgrupp", "målgrupp"),
         ("rapportniva", "rapportnivå"),
     ]
+
+
+def test_compile_outline_deduplicates_semantically_equal_form_fields() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Kundrapport",
+            "plan_rationale": "Skriv rapport med runtime metadata.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "final_output_type": "text",
+            "input_fields": [
+                {
+                    "variable_name": "target_audience",
+                    "label": "Målgrupp",
+                    "field_type": "text",
+                },
+                {
+                    "variable_name": "malgrupp_for_dokumentet",
+                    "label": "Målgrupp för dokumentet",
+                    "field_type": "text",
+                },
+                {
+                    "variable_name": "detail_level",
+                    "label": "Önskad detaljnivå",
+                    "field_type": "select",
+                    "options": ["Kort", "Normal", "Detaljerad"],
+                },
+                {
+                    "variable_name": "onskad_detaljniva",
+                    "label": "Önskad detaljnivå",
+                    "field_type": "text",
+                },
+            ],
+            "steps": [
+                {
+                    "name": "Skriv rapport",
+                    "task": "Skriv rapporten.",
+                    "output_type": "text",
+                    "uses_input_fields": [
+                        "malgrupp_for_dokumentet",
+                        "onskad_detaljniva",
+                    ],
+                }
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+
+    assert [field.variable_name for field in draft.form_fields] == [
+        "target_audience",
+        "detail_level",
+    ]
+    assert draft.steps[0].uses_form_fields == ["target_audience", "detail_level"]
 
 
 def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() -> None:

@@ -106,6 +106,7 @@ from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
     adjudicate_pending_question_answer,
 )
 from intric.flows.ai_builder.ai_builder_server_actions import (
+    build_confirm_requirements_payload_from_state,
     build_server_planner_output,
 )
 from intric.flows.ai_builder.ai_builder_settings import (
@@ -195,6 +196,23 @@ def _compute_unresolved_core_slots(
     """
     resolved = frozenset(planning_state.resolved_slots.keys())
     return _CORE_ARCHITECTURAL_SLOTS - resolved
+
+
+def _confirm_requirements_payload_for_state(
+    *,
+    action: ConfirmRequirementsAction,
+    session_state: PlanningState,
+    ui_language: str | None,
+) -> RequirementsSummaryPayload:
+    if _CORE_ARCHITECTURAL_SLOTS <= frozenset(session_state.resolved_slots):
+        return RequirementsSummaryPayload.model_validate(
+            build_confirm_requirements_payload_from_state(
+                session_state,
+                ui_language,
+            ).model_dump()
+        )
+
+    return RequirementsSummaryPayload.model_validate(action.payload.model_dump())
 
 
 def _discovery_question_id_for_server_slot(slot_name: str) -> str:
@@ -1261,10 +1279,12 @@ class AIBuilderPlanner:
                 elif isinstance(action, CommitArchitectureAction):
                     return [*conversation[new_messages_start:]]
                 else:
-                    assistant_content = action.payload.summary
-                    requirements_payload = RequirementsSummaryPayload.model_validate(
-                        action.payload.model_dump()
+                    requirements_payload = _confirm_requirements_payload_for_state(
+                        action=action,
+                        session_state=session_state,
+                        ui_language=ui_language,
                     )
+                    assistant_content = requirements_payload.summary
                     base_metadata = {
                         "requirements_summary": requirements_payload.model_dump(
                             mode="json"
@@ -1506,8 +1526,10 @@ class AIBuilderPlanner:
                             )
                             yield build_requirements_summary_event(confirmed_data)
                 else:
-                    confirmed_payload = RequirementsSummaryPayload.model_validate(
-                        action.payload.model_dump()
+                    confirmed_payload = _confirm_requirements_payload_for_state(
+                        action=action,
+                        session_state=session_state,
+                        ui_language=ui_language,
                     )
                     confirmed_data = confirmed_payload.model_dump(mode="json")
                     confirmed_data["requirements_version"] = build_requirements_version(

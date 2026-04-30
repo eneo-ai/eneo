@@ -37,6 +37,14 @@ def test_runtime_input_field_extraction_understands_bare_metadata_absence() -> N
     assert infer_runtime_metadata_slot(text) == "no_extra_metadata"
 
 
+def test_runtime_input_field_extraction_understands_compound_absence() -> None:
+    text = "Skapa ett rapportflöde. Inga inmatningsfält eller metadata vid körning."
+
+    assert runtime_input_fields_declared_absent(text)
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) == "no_extra_metadata"
+
+
 def test_runtime_input_field_extraction_understands_english_bare_absence() -> None:
     text = "Create a simple customer reply flow. No input fields."
 
@@ -85,6 +93,22 @@ def test_runtime_input_field_extraction_understands_user_provided_metadata() -> 
         ("yrke", "yrke"),
         ("roll", "roll"),
         ("nuvarande_lon", "nuvarande lön"),
+    ]
+    assert infer_runtime_metadata_slot(text) == "detailed_case_metadata"
+
+
+def test_runtime_input_field_extraction_understands_user_anger_metadata() -> None:
+    text = (
+        "Användaren klistrar in text från ett kundmöte och anger kundnamn, "
+        "ansvarig säljare och tonläge."
+    )
+
+    hints = extract_runtime_input_field_hints(text)
+
+    assert [(hint.variable_name, hint.label) for hint in hints] == [
+        ("kundnamn", "kundnamn"),
+        ("ansvarig_saljare", "ansvarig säljare"),
+        ("tonlage", "tonläge"),
     ]
     assert infer_runtime_metadata_slot(text) == "detailed_case_metadata"
 
@@ -205,3 +229,44 @@ def test_runtime_metadata_policy_can_disable_free_text_hints() -> None:
     )
 
     assert hints == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Användaren ska bara lämna ljudfilen vid körning.",
+        "Användaren ska bara lämna in ljudfilen och få ett Word-dokument.",
+        "Only upload the audio file and return a DOCX report.",
+    ],
+)
+def test_runtime_input_field_extraction_ignores_primary_audio_file_only(
+    text: str,
+) -> None:
+    assert runtime_input_fields_declared_absent(text)
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) == "no_extra_metadata"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Användaren ska ladda upp dokumentet och få en sammanfattning.",
+        "Upload the PDF file and produce a text summary.",
+    ],
+)
+def test_runtime_input_field_extraction_does_not_make_primary_document_a_form_field(
+    text: str,
+) -> None:
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) is None
+
+
+def test_runtime_input_field_extraction_understands_negated_metadata_action() -> None:
+    text = (
+        "Användaren ska inte behöva ange någon möteskontext, rubriker eller "
+        "metadata vid körning. Enda indatat ska vara ljudfilen."
+    )
+
+    assert runtime_input_fields_declared_absent(text)
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) == "no_extra_metadata"

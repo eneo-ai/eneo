@@ -21,9 +21,17 @@ STRUCTURED_EXTRACTION_KEYWORDS: tuple[str, ...] = (
     "output contract",
     "output_contract",
     "extrahera viktiga fakta",
+    "rubriker",
+    "rubrikerna",
+    "sections",
+    "section headings",
+    "beslut",
+    "åtgärder",
     "risker",
     "möjligheter",
     "rekommendationer",
+    "decisions",
+    "action items",
     "key facts",
     "risks",
     "opportunities",
@@ -35,7 +43,12 @@ DOCX_TEMPLATE_MODE_MARKERS: tuple[str, ...] = (
     "template_fill",
     "template",
     "mall",
+    "fyll",
+    "fyller",
+    "fyll mallen",
     "fylla i",
+    "fill the template",
+    "fill template",
 )
 
 DOCX_GENERATED_MODE_MARKERS: tuple[str, ...] = (
@@ -45,9 +58,15 @@ DOCX_GENERATED_MODE_MARKERS: tuple[str, ...] = (
 
 DOCX_CONTEXT_MARKERS: tuple[str, ...] = (
     "docx",
+    "docx-mall",
+    "docx mall",
     "word",
     "word-dokument",
     "word document",
+    "word-mall",
+    "word mall",
+    "docx template",
+    "word template",
 )
 
 PDF_TEMPLATE_EXPECTATION_MARKERS: tuple[str, ...] = (

@@ -150,6 +150,15 @@ _AUDIO_STANDALONE_MARKERS: tuple[str, ...] = (
     "inspelning",
     "recording",
 )
+_EXISTING_TRANSCRIPT_MARKERS: tuple[str, ...] = (
+    "redan transkriberad",
+    "redan transkriberat",
+    "befintlig transkribering",
+    "befintligt transkript",
+    "already transcribed",
+    "existing transcript",
+    "existing transcription",
+)
 
 _FIELD_REUSE_MARKERS: tuple[str, ...] = (
     "specific fields",
@@ -206,6 +215,8 @@ def _terminal_step_is_human_readable_only(text: str, spec: FlowDraftSpecCore) ->
 
 
 def _conversation_mentions_audio(text: str) -> bool:
+    if any(marker in text for marker in _EXISTING_TRANSCRIPT_MARKERS):
+        return False
     return any(marker in text for marker in _AUDIO_STANDALONE_MARKERS)
 
 
@@ -299,7 +310,8 @@ def _non_terminal_steps_adopt_template_fill(context: CriticContext) -> bool:
 
 def _runtime_metadata_requires_form_fields_evidence(context: CriticContext) -> bool:
     return (
-        runtime_metadata_requested(context.answer_signals)
+        not _runtime_metadata_declared_absent(context)
+        and runtime_metadata_requested(context.answer_signals)
         and not context.spec.form_fields
     )
 
@@ -321,7 +333,11 @@ _RUNTIME_METADATA_REQUIRES_FORM_FIELDS = CriticInvariant(
 def _sectioned_form_intake_requires_form_fields_evidence(
     context: CriticContext,
 ) -> bool:
-    return mentions_sectioned_form_intake(context.text) and not context.spec.form_fields
+    return (
+        not _runtime_metadata_declared_absent(context)
+        and mentions_sectioned_form_intake(context.text)
+        and not context.spec.form_fields
+    )
 
 
 _SECTIONED_FORM_INTAKE_REQUIRES_FORM_FIELDS = CriticInvariant(
@@ -343,7 +359,8 @@ _SECTIONED_FORM_INTAKE_REQUIRES_FORM_FIELDS = CriticInvariant(
 def _rich_workflow_requires_form_fields_evidence(context: CriticContext) -> bool:
     patterns = context.planner_patterns
     return (
-        patterns.rich_document_workflow
+        not _runtime_metadata_declared_absent(context)
+        and patterns.rich_document_workflow
         and patterns.needs_form_fields
         and not context.spec.form_fields
     )
@@ -362,6 +379,17 @@ _RICH_WORKFLOW_REQUIRES_FORM_FIELDS = CriticInvariant(
         "stället för att gömma dem i instruktionstexten."
     ),
 )
+
+
+def _runtime_metadata_declared_absent(context: CriticContext) -> bool:
+    values = context.answer_signals.get("runtime_metadata_fields", set())
+    if "no_extra_metadata" in values:
+        return True
+    requirements_text = context.requirements_text.casefold()
+    return (
+        "metadata vid körning" in requirements_text
+        and "inga extra fält" in requirements_text
+    )
 
 
 def _rich_workflow_requires_json_contract_step_evidence(

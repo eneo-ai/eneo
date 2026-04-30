@@ -6,10 +6,32 @@ _PRIMARY_INPUT_FIELD_ALIASES: dict[InputType, frozenset[str]] = {
     InputType.TEXT: frozenset({"text", "input", "indata_text"}),
     InputType.JSON: frozenset({"json", "input_json", "indata_json"}),
     InputType.DOCUMENT: frozenset(
-        {"document", "documents", "input_document", "indata_document"}
+        {
+            "document",
+            "documents",
+            "dokument",
+            "dokumentet",
+            "fil",
+            "filen",
+            "pdf",
+            "docx",
+            "word",
+            "input_document",
+            "indata_document",
+        }
     ),
     InputType.FILE: frozenset({"file", "files", "input_file", "indata_file"}),
-    InputType.AUDIO: frozenset({"audio", "input_audio", "indata_audio"}),
+    InputType.AUDIO: frozenset(
+        {
+            "audio",
+            "ljud",
+            "ljudfil",
+            "ljudfilen",
+            "inspelning",
+            "input_audio",
+            "indata_audio",
+        }
+    ),
 }
 
 

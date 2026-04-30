@@ -114,3 +114,51 @@ def test_resolve_input_source_text_all_previous_steps_prefers_state_accumulator(
     )
 
     assert resolved == "<step_1_output>\nfrom-state\n</step_1_output>\n"
+
+
+def test_resolve_input_source_text_previous_step_falls_back_to_structured_output():
+    run = SimpleNamespace(id=uuid4(), input_payload_json=None)
+    prior_results = [
+        SimpleNamespace(
+            step_order=1,
+            output_payload_json={
+                "text": "",
+                "structured": {"summary": "Mötet behandlade budgeten."},
+            },
+        )
+    ]
+
+    resolved = resolve_input_source_text(
+        input_source="previous_step",
+        run=run,
+        step_order=2,
+        prior_results=prior_results,
+        state=None,
+        logger=MagicMock(),
+    )
+
+    assert resolved == '{"summary": "Mötet behandlade budgeten."}'
+
+
+def test_resolve_input_source_text_all_previous_steps_falls_back_to_structured_output():
+    run = SimpleNamespace(id=uuid4(), input_payload_json=None)
+    prior_results = [
+        SimpleNamespace(
+            step_order=1,
+            output_payload_json={
+                "text": "",
+                "structured": {"decision": "Återremiss"},
+            },
+        )
+    ]
+
+    resolved = resolve_input_source_text(
+        input_source="all_previous_steps",
+        run=run,
+        step_order=2,
+        prior_results=prior_results,
+        state=None,
+        logger=MagicMock(),
+    )
+
+    assert resolved == ('<step_1_output>\n{"decision": "Återremiss"}\n</step_1_output>')

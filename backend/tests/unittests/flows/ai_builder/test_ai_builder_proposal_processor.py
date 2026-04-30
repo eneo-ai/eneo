@@ -1265,7 +1265,11 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     retry_config = repair.call_args.kwargs["retry_config"]
-    assert retry_config.process_tool_kwargs == {"planning_state": None}
+    assert retry_config.process_tool_kwargs == {
+        "planning_state": None,
+        "plan_edit_context": None,
+        "prior_plan_for_revision": None,
+    }
 
 
 @pytest.mark.asyncio
@@ -1946,6 +1950,8 @@ async def test_submission_retry_config_returns_typed_edit_retry_config() -> None
         "litellm_kwargs": {"timeout": 30},
         "max_output_tokens": 2048,
         "resource_catalog": resource_catalog,
+        "plan_edit_context": None,
+        "prior_plan_for_revision": None,
     }
     assert "valid edit_flow tool call" in config.forced_tool_prompt
 

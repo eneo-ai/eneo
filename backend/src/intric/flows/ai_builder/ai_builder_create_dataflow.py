@@ -17,6 +17,12 @@ from intric.flows.ai_builder.ai_builder_structured_field_paths import (
 
 _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
+_TRANSCRIPT_FIELD_NAMES = {
+    "transcript",
+    "transcription",
+    "transkript",
+    "transkription",
+}
 
 
 def strip_malformed_previous_field_refs(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -76,7 +82,11 @@ def normalize_create_draft_mechanics(draft: FlowCreateDraft) -> FlowCreateDraft:
     mechanically_normalized_steps: list[NewStepDraft] = []
     changed = False
     for step_index, step in enumerate(draft.steps):
-        normalized_step = _normalize_step_mechanics(step, step_index=step_index)
+        normalized_step = _normalize_step_mechanics(
+            step,
+            step_index=step_index,
+            step_count=len(draft.steps),
+        )
         if normalized_step != step:
             changed = True
         mechanically_normalized_steps.append(normalized_step)
@@ -84,8 +94,16 @@ def normalize_create_draft_mechanics(draft: FlowCreateDraft) -> FlowCreateDraft:
     updated_steps: list[NewStepDraft] = []
     known_form_fields = {field.variable_name for field in draft.form_fields}
     for step_index, step in enumerate(mechanically_normalized_steps):
+        prior_step = updated_steps[-1] if updated_steps else None
+        source_step = step
+        step = _normalize_previous_step_input_type(
+            step,
+            prior_step=prior_step,
+        )
+        if step != source_step:
+            changed = True
         normalized_refs = _compile_safe_previous_field_refs(
-            steps=mechanically_normalized_steps,
+            steps=updated_steps,
             step_index=step_index,
             refs=step.uses_previous_fields,
         )
@@ -119,6 +137,7 @@ def _normalize_step_mechanics(
     step: NewStepDraft,
     *,
     step_index: int,
+    step_count: int,
 ) -> NewStepDraft:
     updates: dict[str, Any] = {}
     input_source = step.input_source
@@ -157,12 +176,64 @@ def _normalize_step_mechanics(
     ):
         updates["document_delivery_mode"] = "not_applicable"
 
+    if _is_leading_transcript_json_step(
+        step,
+        step_index=step_index,
+        step_count=step_count,
+        input_source=input_source,
+        input_type=input_type,
+        output_type=output_type,
+    ):
+        output_type = OutputType.TEXT
+        updates["output_type"] = output_type
+        updates["output_fields"] = None
+
     if step.citations_requested and (
         output_type != OutputType.TEXT or input_type == InputType.AUDIO
     ):
         updates["citations_requested"] = False
 
     return step.model_copy(update=updates) if updates else step
+
+
+def _normalize_previous_step_input_type(
+    step: NewStepDraft,
+    *,
+    prior_step: NewStepDraft | None,
+) -> NewStepDraft:
+    if prior_step is None:
+        return step
+    if step.input_source != InputSource.PREVIOUS_STEP:
+        return step
+    if step.input_type != InputType.JSON:
+        return step
+    if prior_step.output_type == OutputType.JSON:
+        return step
+    return step.model_copy(update={"input_type": InputType.TEXT})
+
+
+def _is_leading_transcript_json_step(
+    step: NewStepDraft,
+    *,
+    step_index: int,
+    step_count: int,
+    input_source: InputSource,
+    input_type: InputType,
+    output_type: OutputType,
+) -> bool:
+    if step_index != 0:
+        return False
+    if step_count < 2:
+        return False
+    if input_source != InputSource.FLOW_INPUT:
+        return False
+    if input_type != InputType.AUDIO or output_type != OutputType.JSON:
+        return False
+    return any(
+        field.field_type == "string"
+        and field.name.strip().lower() in _TRANSCRIPT_FIELD_NAMES
+        for field in step.output_fields or []
+    )
 
 
 def _compile_safe_previous_field_refs(

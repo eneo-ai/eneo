@@ -229,6 +229,7 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         retrieval_hints=(
             "extract fields form structured json schema",
             "input_type=text output_type=json output_mode=pass_through",
+            "input_type=text output_type=docx pdf via structured extraction",
         ),
         required_architectural_slots=(
             "primary_runtime_input",

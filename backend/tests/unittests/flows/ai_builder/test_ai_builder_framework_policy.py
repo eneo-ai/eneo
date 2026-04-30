@@ -108,6 +108,93 @@ def test_resolve_explicit_output_choice_accepts_json_as_final_artifact() -> None
     assert output == "structured_json"
 
 
+@pytest.mark.parametrize(
+    ("prompt", "expected_output"),
+    [
+        ("Ljudfil in och Word-dokument ut.", "docx_document"),
+        ("Skapa ett DOCX-protokoll från mötet.", "docx_document"),
+        ("Jag vill få en PDF-rapport.", "pdf_document"),
+        ("Ge mig en kort textsammanfattning.", "structured_text"),
+        (
+            "Bygg ett flöde där jag laddar upp ett mötesdokument och får en kort "
+            "svensk sammanfattning.",
+            "structured_text",
+        ),
+        (
+            "Användaren klistrar in text från kundmöte och anger kundnamn, "
+            "ansvarig säljare och tonläge. Skapa uppföljningsrapport.",
+            "structured_text",
+        ),
+        ("Skapa en strukturerad rapport med rubriker och beslut.", "structured_text"),
+        ("Slutresultatet ska vara JSON med title och decisions.", "structured_json"),
+        ("Returnera bara JSON.", "structured_json"),
+        (
+            "Användaren laddar upp fakturor eller kvitton. Slutresultatet ska "
+            "vara JSON, inte Word eller PDF.",
+            "structured_json",
+        ),
+        (
+            "Skapa ett flöde som tar en ljudfil från ett möte och returnerar JSON "
+            "med transkription, beslut, deltagare och åtgärdspunkter.",
+            "structured_json",
+        ),
+        (
+            "Använd gärna JSON-schema mellan stegen men slutresultatet ska vara DOCX.",
+            "docx_document",
+        ),
+        (
+            "Extrahera JSON innan slutrapporten och skriv sedan en Word-fil.",
+            "docx_document",
+        ),
+        ("Ta emot PDF och skapa DOCX.", "docx_document"),
+    ],
+)
+def test_resolve_output_intent_handles_json_and_artifact_phrasing(
+    prompt: str,
+    expected_output: str,
+) -> None:
+    signals = extract_answer_signals([{"role": "user", "content": prompt}])
+
+    intent = resolve_output_intent(prompt, signals)
+
+    assert intent.terminal_output == expected_output
+
+
+@pytest.mark.parametrize(
+    ("prompt", "terminal_output_type", "expected"),
+    [
+        (
+            "Transkribera ljud och skapa en DOCX med rubrikerna Beslut, "
+            "Diskussion och Övriga frågor.",
+            OutputType.DOCX,
+            True,
+        ),
+        ("Sammanfatta texten kort.", OutputType.TEXT, False),
+        ("Returnera JSON med namn och datum.", OutputType.JSON, False),
+        (
+            "Skapa en rapport med risker, datum, beslut och åtgärder som PDF.",
+            OutputType.PDF,
+            True,
+        ),
+    ],
+)
+def test_needs_structured_extraction_uses_json_only_as_intermediate_when_needed(
+    prompt: str,
+    terminal_output_type: OutputType,
+    expected: bool,
+) -> None:
+    signals = extract_answer_signals([{"role": "user", "content": prompt}])
+
+    result = needs_structured_extraction(
+        prompt,
+        signals,
+        step_count=3,
+        terminal_output_type=terminal_output_type,
+    )
+
+    assert result is expected
+
+
 def test_resolve_explicit_output_choice_does_not_detect_specialty_phrasings() -> None:
     """Lockdown for the framework_policy domain-vocabulary purge.
 
@@ -183,6 +270,22 @@ def test_resolve_output_intent_keeps_without_template_docx_prompt_on_docx_path()
 def test_resolve_output_intent_keeps_docx_template_prompt_on_docx_path() -> None:
     prompt = (
         "Bygg ett flöde som fyller en DOCX-mall med data från uppladdade PDF-dokument."
+    )
+
+    signals = extract_answer_signals([{"role": "user", "content": prompt}])
+    intent = resolve_output_intent(prompt, signals)
+
+    assert intent.terminal_output == "docx_document"
+    assert intent.docx_output_mode == "template_fill_docx"
+    assert intent.pdf_generation_mode is None
+
+
+def test_resolve_output_intent_detects_docx_template_fill_without_create_wording() -> (
+    None
+):
+    prompt = (
+        "Användaren laddar upp ett mötesdokument och en DOCX-mall. "
+        "Fyll mallen med sammanfattning, beslut och åtgärder."
     )
 
     signals = extract_answer_signals([{"role": "user", "content": prompt}])

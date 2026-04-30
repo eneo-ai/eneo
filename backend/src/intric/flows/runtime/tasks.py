@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 from uuid import UUID
 
+import sqlalchemy as sa
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -368,3 +369,102 @@ def reconcile_stale_running_runs() -> dict[str, int | str]:
         loop,
     )
     return future.result(timeout=30)
+
+
+# The multi-segment recorder uploads each segment immediately, so a user who
+# records for two hours and then closes the tab will leave behind segments
+# that are never attached to a flow_run. This task removes those orphans.
+#
+# The filter pins the deletion to filenames the recorder owns
+# (`recording-{uuid}-seg{NN}-...`). Anything else with a "recording" prefix
+# from another part of the product is unaffected, and any segment that *was*
+# attached to a flow run via step_inputs.file_ids is preserved.
+_ORPHAN_RECORDING_NAME_PATTERN = "recording-%-seg%"
+_ORPHAN_RECORDING_TTL_HOURS = 24
+
+_ORPHAN_CLEANUP_SQL = sa.text(
+    """
+    WITH referenced AS (
+        SELECT DISTINCT (val #>> '{}')::uuid AS file_id
+        FROM flow_runs fr
+        CROSS JOIN LATERAL jsonb_path_query(
+            fr.input_payload_json, '$.step_inputs.*.file_ids[*]'
+        ) AS val
+        WHERE fr.tenant_id = :tenant_id
+          AND fr.input_payload_json IS NOT NULL
+    )
+    DELETE FROM files
+    WHERE tenant_id = :tenant_id
+      AND name LIKE :name_pattern
+      AND created_at < :cutoff
+      AND id NOT IN (SELECT file_id FROM referenced)
+    """
+)
+
+
+async def _cleanup_orphan_runtime_files_all_tenants(
+    *, max_age_hours: int = _ORPHAN_RECORDING_TTL_HOURS
+) -> dict[str, int | str]:
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    deleted_total = 0
+    tenants_swept = 0
+
+    async with sessionmanager.session() as session:
+        async with session.begin():
+            container = Container(session=providers.Object(session))
+            tenant_repo = container.tenant_repo()
+            tenants = await tenant_repo.get_all_tenants()
+
+    # Sweep each tenant in its own transaction so a single tenant's failure
+    # (e.g. transient lock contention with the upload path) cannot stop the
+    # rest of the sweep — the next hourly tick will retry the failures.
+    for tenant in tenants:
+        try:
+            async with sessionmanager.session() as session:
+                async with session.begin():
+                    # session.execute() is typed as Result[Any]; the
+                    # underlying CursorResult is what carries rowcount for
+                    # DELETE/UPDATE. Casting keeps the strict type checker
+                    # happy without changing runtime behaviour.
+                    result = cast(
+                        sa.CursorResult[Any],
+                        await session.execute(
+                            _ORPHAN_CLEANUP_SQL,
+                            {
+                                "tenant_id": tenant.id,
+                                "cutoff": cutoff,
+                                "name_pattern": _ORPHAN_RECORDING_NAME_PATTERN,
+                            },
+                        ),
+                    )
+                    deleted_total += result.rowcount or 0
+        except Exception:
+            logger.exception(
+                "Orphan runtime-file cleanup failed for tenant",
+                extra={"tenant_id": str(tenant.id)},
+            )
+        tenants_swept += 1
+
+    if deleted_total > 0:
+        logger.info(
+            "Orphan runtime-file cleanup",
+            extra={"deleted": deleted_total, "tenants_swept": tenants_swept},
+        )
+
+    return {
+        "status": "ok",
+        "deleted": deleted_total,
+        "tenants_swept": tenants_swept,
+    }
+
+
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="flows.cleanup_orphan_runtime_files",
+)
+def cleanup_orphan_runtime_files() -> dict[str, int | str]:
+    loop = _get_flow_task_loop()
+    future = asyncio.run_coroutine_threadsafe(
+        _cleanup_orphan_runtime_files_all_tenants(),
+        loop,
+    )
+    return future.result(timeout=300)

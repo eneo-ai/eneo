@@ -27,6 +27,7 @@ from intric.flows.ai_builder.ai_builder_validation_quality import (
     lint_contract_instruction_alignment,
     lint_json_output_without_contract,
     lint_multi_goal_prompts,
+    lint_previous_step_binding_without_previous_source,
     lint_single_step_flow,
     lint_unfiltered_structured_interpolation,
     lint_unused_form_fields,
@@ -88,6 +89,7 @@ def validate_spec(
     _validate_template_fill(spec, result)
     _validate_contract_syntax(spec, result)
     _validate_contract_type_compat(spec, result)
+    _validate_previous_step_json_contracts(spec, result)
     _validate_model_refs(spec, result, available_model_refs)
     _validate_kb_refs(spec, result, available_kb_refs)
     validate_flow_service_parity(spec, result)
@@ -105,6 +107,7 @@ def validate_spec(
         lint_unused_form_fields(spec, result)
         lint_all_previous_with_specific_refs(spec, result)
         lint_unfiltered_structured_interpolation(spec, result)
+        lint_previous_step_binding_without_previous_source(spec, result)
 
     return result
 
@@ -357,6 +360,37 @@ def _validate_contract_type_compat(
                 code="output_contract_template_fill_incompatible",
                 message="output_contract is not supported for output_mode 'template_fill'.",
             )
+
+
+def _validate_previous_step_json_contracts(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
+    for index, step in enumerate(spec.steps):
+        if (
+            index == 0
+            or step.input_source != InputSource.PREVIOUS_STEP
+            or step.input_type != InputType.JSON
+        ):
+            continue
+
+        previous_step = spec.steps[index - 1]
+        expected_contract = (
+            previous_step.output_contract
+            if previous_step.output_type == OutputType.JSON
+            else None
+        )
+        if step.input_contract == expected_contract:
+            continue
+
+        result.add_error(
+            step_ref=step.plan_step_ref,
+            code="previous_step_json_contract_mismatch",
+            message=(
+                "previous_step JSON input_contract must match the previous "
+                "step output_contract because the runtime passes that exact "
+                "payload between steps."
+            ),
+        )
 
 
 def _chain_shapes(spec: FlowDraftSpecCore) -> list[_StepChainShape]:

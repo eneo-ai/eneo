@@ -1,3 +1,4 @@
+from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_draft_mechanics,
     strip_malformed_previous_field_refs,
@@ -133,11 +134,113 @@ def test_normalize_create_draft_mechanics_fixes_safe_step_invariants() -> None:
     assert normalized.steps[0].runtime_upload is True
     assert normalized.steps[0].runtime_required is True
     assert normalized.steps[1].input_source == "previous_step"
-    assert normalized.steps[1].input_type == "json"
+    assert normalized.steps[1].input_type == "text"
     assert normalized.steps[1].document_delivery_mode == "not_applicable"
     assert normalized.steps[2].input_type == "text"
     assert normalized.steps[2].citations_requested is False
     assert validate_create_draft(normalized).valid
+
+
+def test_normalize_create_draft_mechanics_keeps_audio_transcript_as_text() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Mötesprotokoll från ljud",
+        plan_rationale="Transkribera ljud och skriv protokoll.",
+        steps=[
+            {
+                "name": "Transkribera ljudet",
+                "instructions": "Transkribera ljudfilen till svensk text.",
+                "input_source": "flow_input",
+                "input_type": "audio",
+                "output_type": "json",
+                "runtime_upload": True,
+                "runtime_required": True,
+                "output_fields": [_field("transkript")],
+            },
+            {
+                "name": "Strukturera protokollet",
+                "instructions": "Analysera transkriptionen och strukturera protokollet.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [
+                    StructuredFieldDraft(
+                        name="protokoll_delar",
+                        field_type="object",
+                        description="Strukturerade protokolldelar.",
+                        fields=[_field("sammanfattning")],
+                    )
+                ],
+            },
+            {
+                "name": "Skapa Word-dokument",
+                "instructions": "Skriv protokollet som ett Word-dokument.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "docx",
+                "document_delivery_mode": "generated",
+            },
+        ],
+    )
+
+    assert validate_create_draft(draft).valid
+
+    normalized = normalize_create_draft_mechanics(draft)
+
+    assert normalized.steps[0].input_type == "audio"
+    assert normalized.steps[0].output_type == "text"
+    assert normalized.steps[0].output_fields is None
+    assert normalized.steps[1].input_type == "text"
+    assert normalized.steps[1].output_type == "json"
+    assert normalized.steps[2].input_type == "json"
+    assert validate_create_draft(normalized).valid
+
+    compiled = compile_create_draft(normalized)
+
+    assert compiled.steps[0].output_mode == "transcribe_only"
+    assert compiled.steps[0].output_contract is None
+    assert compiled.steps[1].input_bindings is None
+    assert compiled.steps[1].input_contract is None
+    assert compiled.steps[2].input_bindings is None
+    assert compiled.steps[2].input_contract == compiled.steps[1].output_contract
+
+
+def test_normalize_create_draft_mechanics_moves_audio_metadata_after_transcript() -> (
+    None
+):
+    draft = FlowCreateDraft(
+        flow_name="Mötesprotokoll från ljud",
+        plan_rationale="Transkribera ljud och extrahera mötesmetadata.",
+        steps=[
+            {
+                "name": "Transkribera och identifiera",
+                "instructions": "Transkribera ljudet och hitta mötestitel.",
+                "input_source": "flow_input",
+                "input_type": "audio",
+                "output_type": "json",
+                "runtime_upload": True,
+                "runtime_required": True,
+                "output_fields": [
+                    _field("transkription"),
+                    _field("mötestitel"),
+                    _field("organisationsnamn"),
+                ],
+            },
+            {
+                "name": "Strukturera protokollet",
+                "instructions": "Analysera transkriptionen och strukturera protokollet.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [_field("sammanfattning")],
+            },
+        ],
+    )
+
+    normalized = normalize_create_draft_mechanics(draft)
+
+    assert normalized.steps[0].output_type == "text"
+    assert normalized.steps[0].output_fields is None
+    assert normalized.steps[1].input_type == "text"
 
 
 def test_strip_malformed_previous_field_refs_removes_non_authorable_noise() -> None:

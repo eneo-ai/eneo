@@ -125,16 +125,25 @@ def _confirm_requirements_output(
     session_state: PlanningState,
     ui_language: str | None,
 ) -> PlannerOutput:
-    locale = _locale(ui_language)
     return PlannerOutput(
         planning_state_delta=PlanningStateDelta(
             base_planning_state_version=base_planning_state_version,
         ),
         planner_action=ConfirmRequirementsAction(
             kind="confirm_requirements",
-            payload=_confirm_requirements_payload(session_state, locale),
+            payload=build_confirm_requirements_payload_from_state(
+                session_state,
+                ui_language,
+            ),
         ),
     )
+
+
+def build_confirm_requirements_payload_from_state(
+    session_state: PlanningState,
+    ui_language: str | None,
+) -> ConfirmRequirementsPayload:
+    return _confirm_requirements_payload(session_state, _locale(ui_language))
 
 
 def _confirm_requirements_payload(

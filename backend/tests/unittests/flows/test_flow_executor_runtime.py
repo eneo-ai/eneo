@@ -2536,6 +2536,43 @@ def test_run_execution_state_append_completed():
     assert "hello" in state.all_previous_text
 
 
+def test_run_execution_state_append_completed_falls_back_to_structured_output():
+    now = datetime.now(timezone.utc)
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        all_previous_segments=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    result = FlowStepResult(
+        id=uuid4(),
+        flow_run_id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        input_payload_json={},
+        effective_prompt="",
+        output_payload_json={"text": "", "structured": {"summary": "klar"}},
+        model_parameters_json={},
+        num_tokens_input=1,
+        num_tokens_output=1,
+        status=FlowStepResultStatus.COMPLETED,
+        error_message=None,
+        flow_step_execution_hash="h",
+        tool_calls_metadata=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+    state.append_completed(result)
+
+    assert '{"summary": "klar"}' in state.all_previous_text
+
+
 def test_run_execution_state_all_previous_text_accumulates():
     """Multiple appends build up all_previous_text correctly."""
     now = datetime.now(timezone.utc)

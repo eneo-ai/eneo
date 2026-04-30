@@ -214,6 +214,46 @@ class TestPolicyDefaults:
         assert slot.value == "flexible_document_case"
         assert slot.source == "policy_default"
 
+    def test_audio_answer_to_document_scope_question_sets_audio_without_document_scope(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content="ljudfil som transkribering",
+                    metadata={
+                        "question_answer": {
+                            "question_id": "document_material_scope",
+                            "answer": "ljudfil som transkribering",
+                        }
+                    },
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["primary_runtime_input"]
+        assert slot.value == "audio"
+        assert "document_material_scope" not in state.resolved_slots
+
+    def test_audio_upload_prompt_does_not_create_document_scope_slot(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Bygg ett flöde där användaren laddar upp en ljudfil "
+                        "vid körning. Flödet ska transkribera ljudfilen till "
+                        "svensk text och skapa ett Word-dokument som slutresultat."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["primary_runtime_input"]
+        assert slot.value == "audio"
+        assert "document_material_scope" not in state.resolved_slots
+
     def test_document_input_defaults_to_no_extra_runtime_metadata(self) -> None:
         state = build_planning_state_from_conversation(
             [
@@ -230,6 +270,23 @@ class TestPolicyDefaults:
         slot = state.resolved_slots["runtime_metadata_fields"]
         assert slot.value == "no_extra_metadata"
         assert slot.source == "policy_default"
+
+    def test_audio_input_defaults_to_no_extra_runtime_metadata(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Bygg ett ljudflöde för mötesprotokoll i DOCX. "
+                        "Användaren ska bara lämna ljudfilen."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "no_extra_metadata"
+        assert slot.source == "heuristic"
 
     def test_runtime_input_fields_are_not_overwritten_by_no_metadata_default(
         self,

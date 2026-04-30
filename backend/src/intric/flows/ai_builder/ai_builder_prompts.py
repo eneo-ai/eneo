@@ -34,6 +34,7 @@ from intric.flows.ai_builder.ai_builder_flow_context import (
 )
 from intric.flows.ai_builder.ai_builder_form_intake_signals import (
     mentions_form_field_needs,
+    mentions_output_only_section_headings,
     mentions_sectioned_form_intake,
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
@@ -400,6 +401,13 @@ def build_clarification_hints(
             "per sektion ska detta modelleras som `form_fields` (ett textfält per rubrik) i stället för ett eget "
             "insamlingssteg per sektion. Låt senare steg använda dessa fält via `uses_form_fields` och skapa sedan "
             "den slutliga sammanställningen från de insamlade fälten."
+        )
+
+    if mentions_output_only_section_headings(text):
+        hints.append(
+            "- Designhint: användaren beskriver rubriker/sektioner som slutrapporten eller analysen ska producera, "
+            "inte fält som användaren ska fylla i vid körning. Modellera därför inte rubrikerna som `form_fields`; "
+            "låt ett JSON- eller dokumentsteg extrahera och strukturera innehållet från underlaget/transkriberingen."
         )
 
     if _mentions_structured_extraction(text):

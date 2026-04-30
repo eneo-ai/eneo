@@ -231,6 +231,139 @@ def validate_scoped_plan_revision(
     return None
 
 
+def constrain_scoped_plan_revision_to_target(
+    *,
+    context: AIBuilderPlanEditContext | None,
+    prior_spec: FlowDraftSpecCore | None,
+    proposed_spec: FlowDraftSpecCore,
+) -> FlowDraftSpecCore:
+    if context is None or context.scope != "step" or prior_spec is None:
+        return proposed_spec
+
+    prior_target = _find_target_step(prior_spec, context)
+    proposed_target = _find_target_step(proposed_spec, context)
+    if prior_target is None or proposed_target is None:
+        return proposed_spec
+
+    target_step_ref = prior_target.plan_step_ref
+    prior_refs = [step.plan_step_ref for step in prior_spec.steps]
+    proposed_refs = [step.plan_step_ref for step in proposed_spec.steps]
+    if _duplicate_refs(proposed_refs):
+        return proposed_spec
+
+    prior_steps = {step.plan_step_ref: step for step in prior_spec.steps}
+    proposed_steps = {step.plan_step_ref: step for step in proposed_spec.steps}
+    target_index = prior_refs.index(target_step_ref)
+    downstream_refs = set(prior_refs[target_index + 1 :])
+    proposed_refs, proposed_steps = _restore_downstream_replacement_refs(
+        prior_refs=prior_refs,
+        proposed_refs=proposed_refs,
+        prior_steps=prior_steps,
+        proposed_steps=proposed_steps,
+        target_step_ref=target_step_ref,
+        downstream_refs=downstream_refs,
+    )
+    if set(proposed_refs) != set(prior_refs):
+        return proposed_spec
+
+    constrained_steps: list[StepSpec] = []
+    changed = proposed_refs != prior_refs or proposed_target.model_dump(
+        mode="json"
+    ) != prior_target.model_dump(mode="json")
+    for ref in prior_refs:
+        prior_step = prior_steps[ref]
+        proposed_step = proposed_steps[ref]
+        if ref == target_step_ref:
+            constrained_steps.append(proposed_step)
+            continue
+        if ref in downstream_refs:
+            repaired_step = _copy_downstream_input_repair_fields(
+                prior_step=prior_step,
+                proposed_step=proposed_step,
+            )
+            constrained_steps.append(repaired_step)
+            changed = changed or repaired_step.model_dump(
+                mode="json"
+            ) != prior_step.model_dump(mode="json")
+            continue
+
+        constrained_steps.append(prior_step)
+        changed = changed or prior_step.model_dump(
+            mode="json"
+        ) != proposed_step.model_dump(mode="json")
+
+    if not changed and _runtime_form_fields_dump(
+        prior_spec
+    ) == _runtime_form_fields_dump(proposed_spec):
+        return proposed_spec
+
+    constrained_spec = proposed_spec.model_copy(
+        update={
+            "steps": constrained_steps,
+            "form_fields": prior_spec.form_fields,
+        }
+    )
+    from intric.flows.ai_builder.ai_builder_step_transition_policy import (
+        align_previous_step_input_contracts,
+    )
+
+    aligned_spec, _changes = align_previous_step_input_contracts(constrained_spec)
+    return aligned_spec
+
+
+def _restore_downstream_replacement_refs(
+    *,
+    prior_refs: list[str],
+    proposed_refs: list[str],
+    prior_steps: dict[str, StepSpec],
+    proposed_steps: dict[str, StepSpec],
+    target_step_ref: str,
+    downstream_refs: set[str],
+) -> tuple[list[str], dict[str, StepSpec]]:
+    prior_ref_set = set(prior_refs)
+    proposed_ref_set = set(proposed_refs)
+    if prior_ref_set == proposed_ref_set:
+        return proposed_refs, proposed_steps
+
+    missing_refs = [ref for ref in prior_refs if ref not in proposed_ref_set]
+    added_refs = [ref for ref in proposed_refs if ref not in prior_ref_set]
+    if (
+        target_step_ref in missing_refs
+        or len(missing_refs) != len(added_refs)
+        or not missing_refs
+        or not all(ref in downstream_refs for ref in missing_refs)
+    ):
+        return proposed_refs, proposed_steps
+
+    restored_refs = list(proposed_refs)
+    restored_steps = dict(proposed_steps)
+    for missing_ref, added_ref in zip(missing_refs, added_refs, strict=True):
+        added_step = restored_steps.pop(added_ref)
+        prior_step = prior_steps[missing_ref]
+        restored_steps[missing_ref] = added_step.model_copy(
+            update={
+                "plan_step_ref": missing_ref,
+                "existing_step_ref": prior_step.existing_step_ref,
+            }
+        )
+        restored_refs = [
+            missing_ref if ref == added_ref else ref for ref in restored_refs
+        ]
+    return restored_refs, restored_steps
+
+
+def _copy_downstream_input_repair_fields(
+    *,
+    prior_step: StepSpec,
+    proposed_step: StepSpec,
+) -> StepSpec:
+    updates = {
+        field: getattr(proposed_step, field)
+        for field in _DOWNSTREAM_INPUT_REPAIR_FIELDS
+    }
+    return prior_step.model_copy(update=updates)
+
+
 _DOWNSTREAM_INPUT_REPAIR_FIELDS = {
     "input_source",
     "input_type",

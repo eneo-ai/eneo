@@ -27,6 +27,7 @@ def create_flow_celery_app() -> Celery:
         task_routes={
             "flows.execute": {"queue": settings.flow_celery_queue},
             "flows.reconcile_running": {"queue": settings.flow_celery_queue},
+            "flows.cleanup_orphan_runtime_files": {"queue": settings.flow_celery_queue},
         },
     )
     app.conf.update(  # pyright: ignore[reportUnknownMemberType]
@@ -37,7 +38,15 @@ def create_flow_celery_app() -> Celery:
             "reconcile-stale-running": {
                 "task": "flows.reconcile_running",
                 "schedule": 60.0,
-            }
+            },
+            # Per-tenant sweep that removes audio segments uploaded by the
+            # multi-segment recorder when the user never submitted the run.
+            # The TTL matches the client-side recovery window so a refresh
+            # within 24 h can still re-attach the bytes.
+            "cleanup-orphan-runtime-files": {
+                "task": "flows.cleanup_orphan_runtime_files",
+                "schedule": 3600.0,
+            },
         },
     )
     return app

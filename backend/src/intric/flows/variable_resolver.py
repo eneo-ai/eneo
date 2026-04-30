@@ -200,20 +200,7 @@ class FlowVariableResolver:
 
     @staticmethod
     def _extract_step_text(result: FlowStepResult) -> str:
-        payload = result.output_payload_json or {}
-        text = payload.get("text")
-        if isinstance(text, str):
-            return text
-        if isinstance(text, (dict, list)):
-            return json.dumps(text, ensure_ascii=False)
-        if text is not None:
-            return str(text)
-        structured = payload.get("structured")
-        if isinstance(structured, (dict, list)):
-            return json.dumps(structured, ensure_ascii=False)
-        if structured is not None:
-            return str(structured)
-        return ""
+        return flow_step_result_output_text(result)
 
     @staticmethod
     def _extract_transcript_value(flow_input: dict[str, Any]) -> str | None:
@@ -245,6 +232,27 @@ def _scalar_to_prompt_string(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def flow_step_result_output_text(result: FlowStepResult) -> str:
+    return output_payload_to_prompt_text(result.output_payload_json or {})
+
+
+def output_payload_to_prompt_text(payload: dict[str, Any]) -> str:
+    text = payload.get("text")
+    if isinstance(text, str) and text.strip():
+        return text
+    if isinstance(text, (dict, list)):
+        return json.dumps(text, ensure_ascii=False)
+    if text is not None and str(text).strip():
+        return str(text)
+
+    structured = payload.get("structured")
+    if isinstance(structured, (dict, list)):
+        return json.dumps(structured, ensure_ascii=False)
+    if structured is not None:
+        return str(structured)
+    return ""
 
 
 def _format_missing_key_suggestion(*, token: str, available_keys: list[str]) -> str:

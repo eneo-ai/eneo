@@ -865,6 +865,59 @@ class TestTypeCompatibility:
         )
         assert result.valid
 
+    def test_previous_step_json_input_contract_must_match_previous_output_contract(
+        self,
+    ) -> None:
+        upstream_contract = {
+            "type": "object",
+            "required": ["main_topics"],
+            "properties": {
+                "main_topics": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["topic"],
+                        "properties": {"topic": {"type": "string"}},
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "additionalProperties": False,
+        }
+        stale_contract = {
+            "type": "object",
+            "required": ["main_topics"],
+            "properties": {
+                "main_topics": {"type": "array", "items": {"type": "string"}}
+            },
+            "additionalProperties": False,
+        }
+
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="A",
+                        output_type=OutputType.JSON,
+                        output_contract=upstream_contract,
+                    ),
+                    _step(
+                        ref="step_b",
+                        name="B",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.JSON,
+                        input_contract=stale_contract,
+                    ),
+                ]
+            )
+        )
+
+        assert not result.valid
+        assert any(
+            e.code == "previous_step_json_contract_mismatch" for e in result.errors
+        )
+
 
 # ---------------------------------------------------------------------------
 # Transcribe-only constraints
@@ -1145,6 +1198,75 @@ class TestQualityLint:
         )
         assert result.valid
         assert not any(w.code == "single_step_flow" for w in result.warnings)
+
+    def test_previous_step_binding_without_previous_source_warned(self) -> None:
+        result = validate_spec(
+            FlowDraftSpecCore(
+                flow_name="Mötesrapport",
+                form_fields=[
+                    FormFieldSpec(
+                        name="organisationsnamn",
+                        type="text",
+                        label="Organisationsnamn",
+                    )
+                ],
+                steps=[
+                    _step(
+                        ref="step_a", name="Strukturera", output_type=OutputType.JSON
+                    ),
+                    _step(
+                        ref="step_b",
+                        name="Skriv rapport",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_bindings={
+                            "question": "organisationsnamn: {{ organisationsnamn }}"
+                        },
+                    ),
+                ],
+            )
+        )
+
+        assert result.valid
+        assert any(
+            warning.code == "previous_step_binding_without_previous_source"
+            for warning in result.warnings
+        )
+
+    def test_previous_step_binding_with_previous_source_not_warned(self) -> None:
+        result = validate_spec(
+            FlowDraftSpecCore(
+                flow_name="Mötesrapport",
+                form_fields=[
+                    FormFieldSpec(
+                        name="organisationsnamn",
+                        type="text",
+                        label="Organisationsnamn",
+                    )
+                ],
+                steps=[
+                    _step(
+                        ref="step_a", name="Strukturera", output_type=OutputType.JSON
+                    ),
+                    _step(
+                        ref="step_b",
+                        name="Skriv rapport",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_bindings={
+                            "question": (
+                                "{{ step_a.output.structured }}\n\n"
+                                "organisationsnamn: {{ organisationsnamn }}"
+                            )
+                        },
+                    ),
+                ],
+            )
+        )
+
+        assert result.valid
+        assert not any(
+            warning.code == "previous_step_binding_without_previous_source"
+            for warning in result.warnings
+        )
 
     def test_lint_only_runs_on_valid_spec(self) -> None:
         """Lint should NOT run if hard validation fails."""

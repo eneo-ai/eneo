@@ -45,6 +45,8 @@ def prepare_compiled_spec_for_session(
     resource_catalog: AIBuilderResourceCatalog | None,
     valid_existing_step_refs: list[str] | None,
     terminal_output_type: OutputType | None = None,
+    scoped_target_plan_step_ref: str | None = None,
+    scoped_target_existing_step_ref: str | None = None,
 ) -> PreparedCompiledSpecResult:
     prepared_spec = normalize_compiled_spec_for_session(
         spec,
@@ -53,6 +55,8 @@ def prepare_compiled_spec_for_session(
     prepared_spec, normalization_changes = normalize_ai_builder_spec(
         prepared_spec,
         terminal_output_type=terminal_output_type,
+        scoped_target_plan_step_ref=scoped_target_plan_step_ref,
+        scoped_target_existing_step_ref=scoped_target_existing_step_ref,
     )
     artifact_tail_changes = [
         {

@@ -32,6 +32,9 @@ PrimaryRuntimeInput = Literal[
 _AUDIO_PREFIX_MARKERS: tuple[str, ...] = (
     "audio",
     "ljud",
+    "ljudflöde",
+    "ljudflode",
+    "audio flow",
     "inspelning",
     "recording",
     "samtal",
@@ -49,13 +52,50 @@ _DOCUMENT_INPUT_MARKERS: tuple[str, ...] = (
     "document",
     "documents",
     "dokument",
+    "mötesdokument",
+    "motesdokument",
+    "protokolldokument",
+    "underlagsdokument",
+    "ärendedokument",
+    "arendedokument",
+    "handling",
+    "handlingar",
     "bilaga",
     "bilagor",
     "attachment",
     "attachments",
+    "faktura",
+    "fakturor",
+    "kvitto",
+    "kvitton",
+    "invoice",
+    "invoices",
+    "receipt",
+    "receipts",
+    "avtal",
+    "avtalet",
+    "leverantörsavtal",
+    "leverantorsavtal",
+    "ramavtal",
+    "kontrakt",
+    "kontraktet",
+    "contract",
+    "contracts",
+    "agreement",
+    "agreements",
     "word file",
     "word files",
+    "word-dokument",
+    "word dokument",
     "docx",
+    "docx-fil",
+    "docx fil",
+    "pdf-fil",
+    "pdf fil",
+    "meeting document",
+    "meeting documents",
+    "case document",
+    "case documents",
     "uppladdat dokument",
     "uploaded document",
     "uppladdade dokument",
@@ -64,6 +104,7 @@ _DOCUMENT_INPUT_MARKERS: tuple[str, ...] = (
 
 _DOCUMENT_UPLOAD_MARKERS: tuple[str, ...] = (
     "ladda upp",
+    "laddar upp",
     "upload",
     "skicka in",
     "send in",
@@ -71,6 +112,8 @@ _DOCUMENT_UPLOAD_MARKERS: tuple[str, ...] = (
     "receive",
     "bifoga",
     "attach",
+    "lämna in",
+    "lämnar in",
     "som primär indata",
     "primary input",
     "primär uppladdning",
@@ -92,9 +135,20 @@ _DOCUMENT_REFERENCE_PREFIXES: tuple[str, ...] = (
     "file",
     "bilag",
     "attachment",
+    "handling",
+    "faktura",
+    "kvitto",
+    "invoice",
+    "receipt",
+    "avtal",
+    "leverantorsavtal",
+    "kontrakt",
+    "contract",
+    "agreement",
 )
 
 _RUNTIME_FILE_ACTION_PREFIXES: tuple[str, ...] = (
+    "ladd",
     "uppladd",
     "upload",
     "bifog",
@@ -104,12 +158,15 @@ _RUNTIME_FILE_ACTION_PREFIXES: tuple[str, ...] = (
 
 _RUNTIME_FILE_ACTION_PHRASES: tuple[str, ...] = (
     "ladda upp",
+    "laddar upp",
     "skicka in",
     "send in",
     "runtime input",
     "primary input",
     "vid körning",
     "lämna underlag",
+    "lämna in",
+    "lämnar in",
     "provide source material",
 )
 
@@ -117,6 +174,10 @@ _TEXT_INPUT_MARKERS: tuple[str, ...] = (
     "klistra in",
     "paste as text",
     "paste the material as text",
+    "skriver en fråga",
+    "skriv en fråga",
+    "write a question",
+    "writes a question",
     "textinput",
     "text input",
     "meeting notes",
@@ -397,6 +458,9 @@ def _resolve_primary_from_answers(
         return "documents"
     if "text" in input_modes:
         return "text"
+    document_scope_answers = answer_signals.get("document_material_scope", set())
+    if any(_audio_runtime_input_requested(value) for value in document_scope_answers):
+        return "audio"
     return "unknown"
 
 
@@ -429,7 +493,7 @@ def _infer_primary_runtime_input(text: str) -> PrimaryRuntimeInput:
     audio_requested = _audio_runtime_input_requested(text)
     document_requested = _document_runtime_input_requested(text)
 
-    if audio_requested and not document_requested and not text_requested:
+    if audio_requested and not document_requested:
         return "audio"
     if document_requested and text_requested and not audio_requested:
         return "text_and_documents"
@@ -450,6 +514,11 @@ def _audio_requested(
     if "audio_primary_input" in answer_signals.get("flow_input_architecture", set()):
         return True
     if "audio" in defaults.get("input_material_mode", set()):
+        return True
+    if any(
+        _audio_runtime_input_requested(value)
+        for value in answer_signals.get("document_material_scope", set())
+    ):
         return True
     return _audio_runtime_input_requested(text)
 
@@ -475,7 +544,11 @@ def _document_requested(
 
 
 def _audio_runtime_input_requested(text: str) -> bool:
-    if not text or _text_runtime_input_requested(text):
+    if not text:
+        return False
+    if _explicit_audio_file_input_requested(text):
+        return True
+    if _text_runtime_input_requested(text):
         return False
     has_transcription_semantics = contains_any_token_prefix(
         text,
@@ -483,16 +556,36 @@ def _audio_runtime_input_requested(text: str) -> bool:
     ) or _contains_any(text, ("speech to text", "tal till text"))
     if not has_transcription_semantics:
         return _contains_any(
-            text, ("ljudfil", "audio file", "upload audio", "ladda upp ljud")
+            text,
+            (
+                "ljudfil",
+                "ljudfil in",
+                "ljud in",
+                "audio file",
+                "audio in",
+                "upload audio",
+                "ladda upp ljud",
+                "inspelning",
+                "ljudinspelning",
+                "inspelat ljud",
+                "spela in",
+                "spelar in",
+                "inspela",
+                "mötesinspelning",
+                "recording",
+                "record meeting",
+                "recorded meeting",
+            ),
         )
-    return contains_any_token_prefix(text, _AUDIO_PREFIX_MARKERS) or _contains_any(
-        text,
-        ("one on one",),
-    )
+    return True
 
 
 def _document_runtime_input_requested(text: str) -> bool:
     if not text:
+        return False
+    if _explicit_audio_file_input_requested(
+        text
+    ) and not _explicit_document_file_input_requested(text):
         return False
     if _contains_any(
         text,
@@ -508,8 +601,6 @@ def _document_runtime_input_requested(text: str) -> bool:
         return True
     if _mentions_runtime_document_input(text):
         return True
-    if _mentions_source_material_underlag(text):
-        return True
     if "underlag" in text and _contains_any(
         text,
         (
@@ -524,17 +615,102 @@ def _document_runtime_input_requested(text: str) -> bool:
         ),
     ):
         return True
-    if _contains_any(text, _DOCUMENT_INPUT_MARKERS):
+    if _mentions_document_reference(text) and _contains_any(
+        text,
+        (
+            "inkommande underlag",
+            "incoming material",
+            "incoming source material",
+        ),
+    ):
         return True
     return _contains_any(text, _DOCUMENT_UPLOAD_MARKERS) and _contains_any(
         text,
+        _DOCUMENT_INPUT_MARKERS,
+    )
+
+
+def _explicit_audio_file_input_requested(text: str) -> bool:
+    if not _contains_any(
+        text,
         (
-            "pdf",
-            "docx",
-            "word",
-            "document",
-            "documents",
-            "dokument",
+            "ljudfil",
+            "ljudfilen",
+            "ljudinspelning",
+            "ljudfil in",
+            "ljud in",
+            "mötesinspelning",
+            "inspelning",
+            "inspelat ljud",
+            "spela in",
+            "spelar in",
+            "inspela",
+            "audio file",
+            "audio in",
+            "audio recording",
+            "recording",
+            "record meeting",
+            "recorded meeting",
+            "uploaded audio",
+            "upload audio",
+            "ladda upp ljud",
+        ),
+    ):
+        return False
+    if _contains_any(text, ("ljudfil in", "ljud in", "audio in")):
+        return True
+    if _contains_any(
+        text,
+        (
+            "lämna ljudfil",
+            "lämna ljudfilen",
+            "lamna ljudfil",
+            "lamna ljudfilen",
+            "lämna in ljudfil",
+            "lämna in ljudfilen",
+            "submit the audio file",
+            "provide the audio file",
+        ),
+    ):
+        return True
+    return (
+        contains_any_token_prefix(text, _RUNTIME_FILE_ACTION_PREFIXES)
+        or _contains_any(text, _RUNTIME_FILE_ACTION_PHRASES)
+        or contains_any_token_prefix(text, ("transkrib", "transcrib"))
+    )
+
+
+def _explicit_document_file_input_requested(text: str) -> bool:
+    return _contains_any(
+        text,
+        (
+            "ladda upp dokument",
+            "ladda upp ett dokument",
+            "ladda upp flera dokument",
+            "ladda upp pdf",
+            "ladda upp en pdf",
+            "laddar upp dokument",
+            "laddar upp ett dokument",
+            "laddar upp flera dokument",
+            "laddar upp pdf",
+            "laddar upp en pdf",
+            "och en pdf",
+            "and a pdf",
+            "pdf dokumentet",
+            "pdf document",
+            "upload document",
+            "upload documents",
+            "upload pdf",
+            "uploaded document",
+            "uploaded documents",
+            "uppladdat dokument",
+            "uppladdade dokument",
+            "bifoga dokument",
+            "attach document",
+            "documents as primary",
+            "dokument som primär",
+            "behåll dokument",
+            "keep documents",
         ),
     )
 
@@ -584,7 +760,3 @@ def _has_explicit_input_resolution(explicit_question_ids: set[str] | None) -> bo
             {"flow_input_architecture", "input_material_mode"}
         )
     )
-
-
-def _mentions_source_material_underlag(text: str) -> bool:
-    return contains_any_phrase(text, ("underlag",))

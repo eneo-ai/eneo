@@ -87,6 +87,46 @@ def test_prepare_compiled_spec_for_session_merges_session_validation_errors() ->
     assert any(error.code == "session_error" for error in validation.errors)
 
 
+def test_prepare_compiled_spec_for_session_passes_scoped_target_to_normalizer() -> None:
+    validation = SpecValidationResult()
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_compiled_spec_for_session",
+            side_effect=lambda spec, target_kind: spec,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
+            side_effect=lambda spec, **_kwargs: (spec, []),
+        ) as normalize_spec,
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            return_value=validation,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_compiled_spec_for_session",
+            return_value=MagicMock(errors=[]),
+        ),
+    ):
+        prepare_compiled_spec_for_session(
+            spec=_make_spec(),
+            target_kind=TargetKind.CREATE,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            valid_existing_step_refs=None,
+            terminal_output_type=OutputType.DOCX,
+            scoped_target_plan_step_ref="step_c",
+            scoped_target_existing_step_ref="existing_step_3",
+        )
+
+    assert normalize_spec.call_args.kwargs == {
+        "terminal_output_type": OutputType.DOCX,
+        "scoped_target_plan_step_ref": "step_c",
+        "scoped_target_existing_step_ref": "existing_step_3",
+    }
+
+
 def test_prepare_compiled_spec_for_session_returns_resource_failure_feedback() -> None:
     with (
         patch(

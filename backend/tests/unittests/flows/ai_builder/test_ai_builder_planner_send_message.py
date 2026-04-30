@@ -57,7 +57,7 @@ from intric.flows.ai_builder.ai_builder_server_actions import (
     build_server_planner_output,
 )
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
-from intric.flows.ai_builder.planning_state import PlanningState
+from intric.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 
 
 def _make_planner() -> AIBuilderPlanner:
@@ -137,6 +137,16 @@ def _planner_output(action_obj: Any) -> PlannerOutput:
     return PlannerOutput(
         planning_state_delta=PlanningStateDelta(base_planning_state_version=0),
         planner_action=action_obj,
+    )
+
+
+def _resolved_slot(name: str, value: str) -> ResolvedSlot:
+    return ResolvedSlot(
+        name=name,
+        value=value,
+        source="structured_answer",
+        evidence=(),
+        confidence="high",
     )
 
 
@@ -410,6 +420,86 @@ async def test_send_message_dispatched_confirm_requirements_emits_versioned_summ
     assert len(payload["key_decisions"]) == 2
     assert isinstance(payload["requirements_version"], str)
     assert len(payload["requirements_version"]) == 64
+
+
+@pytest.mark.asyncio
+async def test_send_message_confirm_requirements_uses_resolved_state_for_summary() -> (
+    None
+):
+    planner = _make_planner()
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _resolved_slot("primary_runtime_input", "audio"),
+        "terminal_output": _resolved_slot("terminal_output", "docx_document"),
+        "runtime_metadata_fields": _resolved_slot(
+            "runtime_metadata_fields", "no_extra_metadata"
+        ),
+    }
+    prepared = PlannerPreparedRequest(
+        requirements_state=SimpleNamespace(latest_summary=None, confirmed=False),
+        ui_language="sv",
+        discovery_block_message=None,
+        llm_messages=[{"role": "system", "content": "system"}],
+        should_emit_forced_followup=False,
+        rebuilt_planning_state=state,
+    )
+    action = ConfirmRequirementsAction(
+        kind="confirm_requirements",
+        payload=ConfirmRequirementsPayload(
+            summary=(
+                "Flödet ska ta emot Både text och dokument vid körning "
+                "och leverera DOCX-dokument."
+            ),
+            key_decisions=[
+                KeyDecisionPayload(
+                    topic="Indata vid körning",
+                    decision="Både text och dokument",
+                )
+            ],
+            input_description="Primär indata vid körning: Både text och dokument.",
+            output_description="Huvudsakligt slutresultat: DOCX-dokument.",
+            assumptions=[],
+            manual_setup_notes=[],
+        ),
+    )
+    output = _planner_output(action)
+    turn_result = _dispatched_result(
+        action_kind="confirm_requirements", planner_output=output
+    )
+
+    with (
+        patch.object(
+            planner,
+            "_resolve_message_metadata",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    metadata=None,
+                    is_requirements_confirmation=False,
+                    used_auxiliary_llm=False,
+                )
+            ),
+        ),
+        patch.object(
+            planner,
+            "_prepare_planner_request",
+            new=AsyncMock(return_value=prepared),
+        ),
+        _patched_send(turn_result),
+    ):
+        events = await _collect_events(planner, **_send_kwargs())
+
+    payload = json.loads(events[0]["data"])
+    assert payload["summary"] == (
+        "Flödet ska ta emot Ljud vid körning och leverera DOCX-dokument."
+    )
+    assert payload["input_description"] == "Primär indata vid körning: Ljud."
+    assert {
+        (decision["topic"], decision["decision"])
+        for decision in payload["key_decisions"]
+    } >= {
+        ("Indata vid körning", "Ljud"),
+        ("Slutresultat", "DOCX-dokument"),
+    }
 
 
 @pytest.mark.asyncio

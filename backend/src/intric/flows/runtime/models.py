@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from intric.flows.domain.flow import FlowStepResult
+from intric.flows.variable_resolver import flow_step_result_output_text
 
 
 def _empty_step_diagnostics() -> list["StepDiagnostic"]:
@@ -123,7 +124,7 @@ class RunExecutionState:
     def append_completed(self, result: FlowStepResult) -> None:
         self.completed_by_order[result.step_order] = result
         self.prior_results.append(result)
-        text = str((result.output_payload_json or {}).get("text", ""))
+        text = flow_step_result_output_text(result)
         self.all_previous_segments.append(
             f"<step_{result.step_order}_output>\n{text}\n</step_{result.step_order}_output>\n"
         )

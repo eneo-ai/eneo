@@ -233,7 +233,10 @@ def _resolve_slots(
         "text_and_documents",
     }:
         document_material_scope = "flexible_document_case"
-    if document_material_scope is not None:
+    if document_material_scope is not None and primary_runtime_input in {
+        "documents",
+        "text_and_documents",
+    }:
         slots["document_material_scope"] = _build_slot(
             name="document_material_scope",
             value=document_material_scope,
@@ -271,7 +274,7 @@ def _resolve_slots(
     )
     if (
         runtime_metadata_fields is None
-        and primary_runtime_input in {"documents", "text_and_documents"}
+        and primary_runtime_input != "unknown"
         and not mentions_runtime_metadata(freeform_text)
     ):
         runtime_metadata_fields = "no_extra_metadata"

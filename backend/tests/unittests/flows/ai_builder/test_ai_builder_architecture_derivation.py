@@ -42,6 +42,26 @@ def test_derives_text_to_text_architecture_from_resolved_slots() -> None:
     assert draft.required_capabilities == ["input_text", "output_mode_pass_through"]
 
 
+def test_derives_text_to_docx_architecture_from_resolved_slots() -> None:
+    draft = derive_architecture_commit_draft(
+        _state_with_slots(
+            primary_runtime_input="text",
+            terminal_output="docx_document",
+            docx_output_mode="generated_docx",
+        )
+    )
+
+    assert draft is not None
+    assert [triple.model_dump() for triple in draft.tuples_chain] == [
+        {
+            "input_type": "text",
+            "output_type": "docx",
+            "output_mode": "pass_through",
+        }
+    ]
+    assert draft.chosen_patterns == ["extract_structured_fields"]
+
+
 def test_derives_docx_template_architecture_from_resolved_slots() -> None:
     draft = derive_architecture_commit_draft(
         _state_with_slots(

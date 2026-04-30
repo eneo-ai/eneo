@@ -627,6 +627,8 @@ def resolve_explicit_output_choice(
 
     if _looks_like_text_analysis_output(normalized_text):
         return "structured_text"
+    if _looks_like_summary_output(normalized_text):
+        return "structured_text"
     if _infer_output_content_shape(normalized_text) == "structured_report":
         return "structured_text"
 
@@ -669,6 +671,8 @@ def _resolve_direct_output_choice(
         return "structured_json"
     if "structured_text" in output_values:
         return "structured_text"
+    if _looks_like_final_json_output(role_scoped_text or fallback_text):
+        return "structured_json"
     docx_index = _first_phrase_index(role_scoped_text, DOCX_CONTEXT_MARKERS)
     pdf_index = _first_phrase_index(role_scoped_text, PDF_OUTPUT_CONTEXT_MARKERS)
     if docx_index is not None and (pdf_index is None or docx_index <= pdf_index):
@@ -688,6 +692,14 @@ def _resolve_direct_output_choice(
         return "docx_document"
     if contains_phrase(explicit_output_role_text, "pdf"):
         return "pdf_document"
+    if contains_any_phrase(explicit_output_role_text, DOCX_TEMPLATE_MODE_MARKERS) and (
+        contains_any_phrase(fallback_text, DOCX_CONTEXT_MARKERS)
+    ):
+        return "docx_document"
+    if _looks_like_pdf_template_expectation(explicit_output_role_text) and (
+        contains_any_phrase(fallback_text, PDF_OUTPUT_CONTEXT_MARKERS)
+    ):
+        return "pdf_document"
     if contains_any_phrase(
         fallback_text,
         (
@@ -698,8 +710,6 @@ def _resolve_direct_output_choice(
         ),
     ):
         return "structured_text"
-    if _looks_like_final_json_output(role_scoped_text or fallback_text):
-        return "structured_json"
     if _looks_like_pdf_template_expectation(role_scoped_text or fallback_text):
         return "pdf_document"
     return None
@@ -752,7 +762,11 @@ def _looks_like_final_json_output(text: str) -> bool:
             "final output json",
             "final output should be json",
             "return json",
+            "return a json",
             "returnera json",
+            "returnerar json",
+            "returnera ett json",
+            "returnerar ett json",
             "respond with json",
             "svara med json",
             "only json",
@@ -789,6 +803,12 @@ def resolve_docx_output_mode(
 
     output_text = scoped_text.preferred_output_text()
     has_docx_context = contains_any_phrase(output_text, DOCX_CONTEXT_MARKERS)
+    if (
+        not has_docx_context
+        and contains_any_phrase(output_text, DOCX_TEMPLATE_MODE_MARKERS)
+        and contains_any_phrase(scoped_text.full_text, DOCX_CONTEXT_MARKERS)
+    ):
+        return "template_fill_docx"
     if not has_docx_context:
         return (
             "generated_docx"
@@ -926,6 +946,32 @@ def _looks_like_text_analysis_output(text: str) -> bool:
     )
 
 
+def _looks_like_summary_output(text: str) -> bool:
+    if contains_any_phrase(
+        text,
+        (
+            "docx",
+            "word",
+            "pdf",
+            "json",
+            "word-dokument",
+            "word document",
+        ),
+    ):
+        return False
+    return contains_any_phrase(
+        text,
+        (
+            "sammanfattning",
+            "sammanfatta",
+            "summary",
+            "summarize",
+            "kort svensk sammanfattning",
+            "short summary",
+        ),
+    )
+
+
 def _has_explicit_output_mode_text(
     text: str,
     *,
@@ -973,6 +1019,10 @@ def _infer_output_content_shape(text: str) -> str | None:
     report_markers = (
         "strukturerad rapport",
         "structured report",
+        "uppföljningsrapport",
+        "uppfoljningsrapport",
+        "follow-up report",
+        "follow up report",
         "rapport",
         "report",
         "memo",

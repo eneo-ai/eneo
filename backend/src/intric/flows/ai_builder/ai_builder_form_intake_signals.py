@@ -57,8 +57,13 @@ _OUTPUT_ONLY_SECTION_MARKERS: tuple[str, ...] = (
     "slutrapporten ska innehålla rubrikerna",
     "rapporten ska innehålla rubrikerna",
     "slutdokumentet ska innehålla rubrikerna",
+    "rubrikerna i varje steg",
+    "rubriker i varje steg",
+    "rubrikerna för varje steg",
     "the final report should contain the headings",
     "the final document should contain the headings",
+    "headings in each step",
+    "headings for each step",
 )
 
 _SECTIONED_FORM_INTAKE_SIGNAL = "sectioned_form_intake"
@@ -99,6 +104,15 @@ def mentions_form_field_needs(text: str) -> bool:
 
 def mentions_sectioned_form_intake(text: str) -> bool:
     return detect_form_intake_pattern(text).sectioned_form_intake
+
+
+def mentions_output_only_section_headings(text: str) -> bool:
+    normalized = text.casefold()
+    if not normalized:
+        return False
+    if any(token in normalized for token in _SECTION_INPUT_MARKERS):
+        return False
+    return any(token in normalized for token in _OUTPUT_ONLY_SECTION_MARKERS)
 
 
 def extract_form_intake_recipe_signals(text: str) -> set[str]:

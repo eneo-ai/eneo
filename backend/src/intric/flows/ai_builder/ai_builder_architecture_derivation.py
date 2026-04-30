@@ -189,6 +189,11 @@ def _primary_pattern_id(
         return "document_to_structured_report"
     if input_type is FlowInputType.TEXT and output_type is FlowOutputType.JSON:
         return "extract_structured_fields"
+    if input_type is FlowInputType.TEXT and output_type in {
+        FlowOutputType.DOCX,
+        FlowOutputType.PDF,
+    }:
+        return "extract_structured_fields"
     if input_type is FlowInputType.TEXT and output_type is FlowOutputType.TEXT:
         return "summarize_text"
     return None

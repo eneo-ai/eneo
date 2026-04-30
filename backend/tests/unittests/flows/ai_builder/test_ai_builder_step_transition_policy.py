@@ -20,15 +20,19 @@ def _step(
     ref: str,
     name: str,
     input_source: InputSource,
+    existing_step_ref: str | None = None,
     instructions: str | None = None,
     input_type: InputType = InputType.TEXT,
     output_type: OutputType = OutputType.TEXT,
     output_mode: OutputMode = OutputMode.PASS_THROUGH,
     input_bindings: dict[str, object] | None = None,
+    input_contract: dict[str, object] | None = None,
+    output_contract: dict[str, object] | None = None,
     output_config: dict[str, object] | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=ref,
+        existing_step_ref=existing_step_ref,
         name=name,
         assistant_spec=AssistantSpec(instructions=instructions or f"Run {name}."),
         input_source=input_source,
@@ -36,6 +40,8 @@ def _step(
         output_mode=output_mode,
         output_type=output_type,
         input_bindings=input_bindings,
+        input_contract=input_contract,
+        output_contract=output_contract,
         output_config=output_config,
     )
 
@@ -161,6 +167,60 @@ def test_normalize_ai_builder_spec_rewires_previous_only_binding() -> None:
     )
 
 
+def test_normalize_ai_builder_spec_aligns_previous_step_json_input_contract() -> None:
+    upstream_contract = {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["title"],
+                    "properties": {"title": {"type": "string"}},
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "additionalProperties": False,
+    }
+    stale_input_contract = {
+        "type": "object",
+        "required": ["items"],
+        "properties": {"items": {"type": "array", "items": {"type": "string"}}},
+        "additionalProperties": False,
+    }
+    spec = FlowDraftSpecCore(
+        flow_name="Contract repair",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Extract",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+                output_contract=upstream_contract,
+            ),
+            _step(
+                ref="step_b",
+                name="Summarize",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.TEXT,
+                input_contract=stale_input_contract,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+
+    assert normalized.steps[1].input_contract == upstream_contract
+    assert [
+        change.code
+        for _step_spec, change in changes
+        if change.code == "input_contract_aligned_to_previous_output"
+    ] == ["input_contract_aligned_to_previous_output"]
+
+
 def test_normalize_ai_builder_spec_promotes_trailing_text_after_requested_pdf() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Employee review",
@@ -224,6 +284,117 @@ def test_normalize_ai_builder_spec_promotes_trailing_text_after_requested_pdf() 
         for _step_spec, change in changes
         if change.code == "terminal_artifact_helper_folded"
     ] == ["terminal_artifact_helper_folded"]
+
+
+def test_normalize_ai_builder_spec_keeps_scoped_artifact_step_ref_when_folding_tail() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Meeting report",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Transcribe",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Structure protocol",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_c",
+                name="Write DOCX report",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.DOCX,
+            ),
+            _step(
+                ref="step_d",
+                name="Create final result",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.DOCX,
+        scoped_target_plan_step_ref="step_c",
+    )
+
+    assert [step.plan_step_ref for step in normalized.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    terminal = normalized.steps[-1]
+    assert terminal.name == "Write DOCX report"
+    assert terminal.output_type == OutputType.DOCX
+    assert [
+        change.code
+        for _step_spec, change in changes
+        if change.code == "terminal_artifact_helper_folded"
+    ] == ["terminal_artifact_helper_folded"]
+
+
+def test_normalize_ai_builder_spec_keeps_scoped_existing_step_ref_when_folding_tail() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Meeting report",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Transcribe",
+                input_source=InputSource.FLOW_INPUT,
+                existing_step_ref="existing_a",
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Structure protocol",
+                input_source=InputSource.PREVIOUS_STEP,
+                existing_step_ref="existing_b",
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_c",
+                name="Write DOCX report",
+                input_source=InputSource.PREVIOUS_STEP,
+                existing_step_ref="existing_c",
+                input_type=InputType.JSON,
+                output_type=OutputType.DOCX,
+            ),
+            _step(
+                ref="step_d",
+                name="Create final result",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    normalized, _changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.DOCX,
+        scoped_target_existing_step_ref="existing_c",
+    )
+
+    terminal = normalized.steps[-1]
+    assert [step.plan_step_ref for step in normalized.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert terminal.existing_step_ref == "existing_c"
+    assert terminal.name == "Write DOCX report"
+    assert terminal.output_type == OutputType.DOCX
 
 
 def test_normalize_ai_builder_spec_preserves_artifact_tail_without_output_intent() -> (

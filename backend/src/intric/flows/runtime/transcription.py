@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -14,6 +16,84 @@ from intric.flows.transcription_config import (
     to_provider_language,
 )
 from intric.main.exceptions import TypedIOValidationException
+
+# Filename pattern owned by the browser's multi-segment recorder. Anything
+# uploaded as a single file (Whisper-direct or another integration) won't
+# match — the transcript join then falls back to the unlabeled form.
+_SEGMENT_FILENAME_RE = re.compile(
+    r"^recording-(?P<session>[0-9a-fA-F-]+)-seg(?P<index>\d{2,4})-"
+    r"(?P<iso>\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}(?:-\d+)?Z)\.[A-Za-z0-9]+$"
+)
+
+
+def _parse_segment_iso(token: str) -> datetime | None:
+    # The filename ISO is `YYYY-MM-DDTHH-MM-SS-mmmZ` because the recorder
+    # replaces ':' and '.' with '-' to keep the value filesystem-safe.
+    # Reconstruct the canonical ISO so datetime.fromisoformat can read it.
+    if "T" not in token or not token.endswith("Z"):
+        return None
+    body = token[:-1]
+    date_part, _, time_part = body.partition("T")
+    if not date_part or not time_part:
+        return None
+    parts = time_part.split("-")
+    if len(parts) < 3:
+        return None
+    hh, mm, ss, *rest = parts
+    canonical = f"{date_part}T{hh}:{mm}:{ss}"
+    if rest:
+        canonical += "." + "".join(rest)
+    canonical += "+00:00"
+    try:
+        return datetime.fromisoformat(canonical)
+    except ValueError:
+        return None
+
+
+def _parse_segment_filename(name: str) -> tuple[str, int, datetime] | None:
+    match = _SEGMENT_FILENAME_RE.match(name or "")
+    if not match:
+        return None
+    try:
+        index = int(match.group("index"))
+    except ValueError:
+        return None
+    parsed = _parse_segment_iso(match.group("iso"))
+    if parsed is None:
+        return None
+    return match.group("session"), index, parsed
+
+
+def _join_transcription_blocks(
+    text_blocks: list[str],
+    block_segments: list[tuple[str, int, datetime] | None],
+) -> str:
+    # Per-segment headers help the LLM (and human readers of the audit
+    # trail) reason about a long recording that was paused — without them
+    # the join produced one undifferentiated wall of text. We only label
+    # when every block belongs to the same recording session and there is
+    # more than one block, otherwise a single-shot upload would get an
+    # unnecessary "## Del 1" header.
+    if len(text_blocks) < 2:
+        return "\n\n".join(text_blocks).strip()
+
+    if any(meta is None for meta in block_segments):
+        return "\n\n".join(text_blocks).strip()
+
+    session_ids = {meta[0] for meta in block_segments if meta is not None}
+    if len(session_ids) != 1:
+        return "\n\n".join(text_blocks).strip()
+
+    labelled: list[str] = []
+    for block_text, meta in zip(text_blocks, block_segments):
+        if meta is None:
+            labelled.append(block_text)
+            continue
+        _, index, captured_at = meta
+        time_str = captured_at.strftime("%H:%M:%S")
+        labelled.append(f"## Del {index + 1} — kl {time_str}\n\n{block_text}")
+    return "\n\n".join(labelled).strip()
+
 
 if TYPE_CHECKING:
     from intric.files.file_models import File
@@ -141,6 +221,7 @@ async def transcribe_audio_input(
     provider_language = to_provider_language(language)
     cache_eligible = provider_language is None
     text_blocks: list[str] = []
+    block_segments: list[tuple[str, int, datetime] | None] = []
     cached_files_count = 0
 
     for file in files:
@@ -171,8 +252,11 @@ async def transcribe_audio_input(
 
         if block_text.strip():
             text_blocks.append(block_text.strip())
+            block_segments.append(
+                _parse_segment_filename(str(getattr(file, "name", "") or ""))
+            )
 
-    combined = "\n\n".join(text_blocks).strip()
+    combined = _join_transcription_blocks(text_blocks, block_segments)
     if not combined:
         raise TypedIOValidationException(
             f"Step {step_order}: transcription produced empty text.",

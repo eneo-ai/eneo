@@ -28,6 +28,7 @@ from intric.flows.template_reference_analyzer import (
     analyze_template,
     consumes_runtime_input,
 )
+from intric.flows.variable_resolver import flow_step_result_output_text
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 
 
@@ -568,11 +569,11 @@ def resolve_input_source_text(
             (item for item in prior_results if item.step_order == step_order - 1), None
         )
         if previous and isinstance(previous.output_payload_json, dict):
-            text = str(previous.output_payload_json.get("text", ""))
+            text = flow_step_result_output_text(previous)
             if not text.strip():
                 logger.warning(
                     "flow_executor.empty_previous_step_input run_id=%s step_order=%d "
-                    "previous_step_order=%d reason=previous_output_text_empty",
+                    "previous_step_order=%d reason=previous_output_empty",
                     run.id,
                     step_order,
                     step_order - 1,
@@ -596,7 +597,7 @@ def resolve_input_source_text(
                 continue
             text = ""
             if isinstance(previous.output_payload_json, dict):
-                text = str(previous.output_payload_json.get("text", ""))
+                text = flow_step_result_output_text(previous)
             parts.append(
                 f"<step_{previous.step_order}_output>\n{text}\n</step_{previous.step_order}_output>"
             )

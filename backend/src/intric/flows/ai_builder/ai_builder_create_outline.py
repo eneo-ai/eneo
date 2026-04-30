@@ -20,6 +20,9 @@ from intric.flows.ai_builder.ai_builder_create_models import (
     CreateFormFieldDraft,
     FlowCreateDraft,
 )
+from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
+    normalize_discovery_text,
+)
 from intric.flows.ai_builder.ai_builder_flow_name import MAX_FLOW_NAME_LENGTH
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_input_type_values,
@@ -74,6 +77,27 @@ _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
 _COMPARISON_FAN_IN_PATTERN_IDS = frozenset({"comparison"})
 _IMPLICIT_TEMPLATE_FILL_PATTERN_ID = "document_to_docx_template"
+_FORM_FIELD_CANONICAL_STOPWORDS = frozenset(
+    {
+        "for",
+        "för",
+        "till",
+        "av",
+        "i",
+        "pa",
+        "på",
+        "vid",
+        "korning",
+        "körning",
+        "onskad",
+        "önskad",
+        "dokument",
+        "dokumentet",
+        "document",
+        "report",
+        "rapport",
+    }
+)
 _OUTLINE_STEP_BACKEND_OWNED_KEYS = frozenset(
     {
         "aggregate_prior_outputs",
@@ -123,6 +147,7 @@ class OutlineCompileContext:
     pattern_chain_steps: tuple[str, ...] = ()
     ui_language: str | None = None
     runtime_input_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
+    runtime_metadata_fields: str | None = None
     aggregation_intent: AggregationIntent = "linear"
 
 
@@ -500,6 +525,9 @@ def outline_compile_context_from_planning_state(
         pattern_chain_steps=_pattern_chain_steps_from_architecture(architecture),
         ui_language=ui_language,
         runtime_input_field_hints=runtime_input_field_hints,
+        runtime_metadata_fields=_runtime_metadata_fields_from_planning_state(
+            planning_state
+        ),
         aggregation_intent=_aggregation_intent_for_compile_context(
             planning_state,
             architecture,
@@ -522,10 +550,12 @@ def compile_outline_to_create_draft(
         if context is not None and context.final_output_type is not None
         else OutputType(outline.final_output_type)
     )
-    form_fields, dropped_primary_input_field_names = _compile_form_fields(
-        outline_fields=outline.input_fields,
-        context=context,
-        runtime_input_type=runtime_input_type,
+    form_fields, dropped_primary_input_field_names, field_aliases = (
+        _compile_form_fields(
+            outline_fields=outline.input_fields,
+            context=context,
+            runtime_input_type=runtime_input_type,
+        )
     )
     known_field_order = [field.variable_name for field in form_fields]
     known_field_names = set(known_field_order)
@@ -534,6 +564,10 @@ def compile_outline_to_create_draft(
         steps=list(outline.steps),
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
+    )
+    outline_steps = _normalize_leading_transcript_json_step(
+        steps=outline_steps,
+        runtime_input_type=runtime_input_type,
     )
     outline_steps = _apply_server_pattern_chain(
         steps=outline_steps,
@@ -544,15 +578,19 @@ def compile_outline_to_create_draft(
 
     steps: list[NewStepDraft] = []
     for index, outline_step in enumerate(outline_steps):
+        outline_uses_form_fields = [
+            field_aliases.get(field_name, field_name)
+            for field_name in outline_step.uses_input_fields
+        ]
         uses_form_fields = [
             field_name
-            for field_name in outline_step.uses_input_fields
+            for field_name in outline_uses_form_fields
             if field_name in known_field_names
         ]
         dropped_primary_input_field_names.extend(
             [
                 field_name
-                for field_name in outline_step.uses_input_fields
+                for field_name in outline_uses_form_fields
                 if field_name not in known_field_names
                 and is_primary_runtime_input_shadow_field(
                     variable_name=field_name,
@@ -749,6 +787,11 @@ def _runtime_input_type_from_planning_state(state: PlanningState) -> InputType |
         "text": InputType.TEXT,
         "text_and_documents": InputType.FILE,
     }.get(slot.value)
+
+
+def _runtime_metadata_fields_from_planning_state(state: PlanningState) -> str | None:
+    slot = state.resolved_slots.get("runtime_metadata_fields")
+    return slot.value if slot is not None else None
 
 
 def _architecture_envelope_from_planning_state(
@@ -1062,9 +1105,26 @@ def _compile_form_fields(
     outline_fields: list[OutlineInputField],
     context: OutlineCompileContext | None,
     runtime_input_type: InputType | None,
-) -> tuple[list[CreateFormFieldDraft], list[str]]:
+) -> tuple[list[CreateFormFieldDraft], list[str], dict[str, str]]:
+    if context is not None and context.runtime_metadata_fields == "no_extra_metadata":
+        return [], [], {}
+
     fields: list[CreateFormFieldDraft] = []
     dropped_primary_input_field_names: list[str] = []
+    canonical_names: dict[str, str] = {}
+    field_aliases: dict[str, str] = {}
+
+    def add_field(candidate: CreateFormFieldDraft) -> None:
+        keys = _canonical_form_field_keys(candidate)
+        for key in keys:
+            existing_variable_name = canonical_names.get(key)
+            if existing_variable_name is not None:
+                field_aliases[candidate.variable_name] = existing_variable_name
+                return
+        for key in keys:
+            canonical_names[key] = candidate.variable_name
+        fields.append(candidate)
+
     for field in outline_fields:
         if is_primary_runtime_input_shadow_field(
             variable_name=field.variable_name,
@@ -1073,7 +1133,7 @@ def _compile_form_fields(
         ):
             dropped_primary_input_field_names.append(field.variable_name)
             continue
-        fields.append(_compile_input_field(field))
+        add_field(_compile_input_field(field))
 
     seen = {field.variable_name for field in fields}
     for hint in context.runtime_input_field_hints if context is not None else ():
@@ -1086,7 +1146,7 @@ def _compile_form_fields(
             continue
         if hint.variable_name in seen:
             continue
-        fields.append(
+        add_field(
             CreateFormFieldDraft(
                 variable_name=hint.variable_name,
                 label=hint.label,
@@ -1095,8 +1155,36 @@ def _compile_form_fields(
                 options=list(hint.options),
             )
         )
-        seen.add(hint.variable_name)
-    return fields, dropped_primary_input_field_names
+        seen = {field.variable_name for field in fields}
+    return fields, dropped_primary_input_field_names, field_aliases
+
+
+def _canonical_form_field_keys(field: CreateFormFieldDraft) -> tuple[str, ...]:
+    keys: list[str] = []
+    for value in (field.variable_name, field.label):
+        key = _canonical_form_field_text(value)
+        if key and key not in keys:
+            keys.append(key)
+    return tuple(keys)
+
+
+def _canonical_form_field_text(value: str) -> str:
+    tokens = [
+        token
+        for token in normalize_discovery_text(value.replace("_", " ")).split()
+        if token not in _FORM_FIELD_CANONICAL_STOPWORDS
+    ]
+    normalized_tokens = [
+        {
+            "audience": "malgrupp",
+            "target": "",
+            "level": "niva",
+            "nivå": "niva",
+            "detaljnivå": "detaljniva",
+        }.get(token, token)
+        for token in tokens
+    ]
+    return "".join(token for token in normalized_tokens if token)
 
 
 def _log_dropped_primary_input_shadow_fields(
@@ -1157,6 +1245,37 @@ def _fold_leading_zero_contract_text_steps(
         },
     )
     return [merged, *steps[target_index + 1 :]]
+
+
+def _normalize_leading_transcript_json_step(
+    *,
+    steps: list["OutlineStep"],
+    runtime_input_type: InputType,
+) -> list["OutlineStep"]:
+    if runtime_input_type != InputType.AUDIO or not steps:
+        return steps
+    first_step = steps[0]
+    if _declared_output_type(first_step) != OutputType.JSON:
+        return steps
+    if not _is_transcript_only_contract(first_step.output_fields):
+        return steps
+    return [
+        first_step.model_copy(
+            update={"output_type": OutputType.TEXT.value, "output_fields": None}
+        ),
+        *steps[1:],
+    ]
+
+
+def _is_transcript_only_contract(
+    output_fields: list[StructuredFieldDraft] | None,
+) -> bool:
+    return any(
+        field.field_type == "string"
+        and field.name.strip().casefold()
+        in {"transcript", "transcription", "transkript", "transkription"}
+        for field in output_fields or []
+    )
 
 
 def _leading_fold_target_index(

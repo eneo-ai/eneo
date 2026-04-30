@@ -37,6 +37,9 @@ from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
     OUTLINE_FLOW_TOOL_NAME,
 )
+from intric.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
+)
 from intric.flows.flow import Flow, FlowStep
 
 # ---------------------------------------------------------------------------
@@ -167,6 +170,74 @@ class TestHandleConfirmRequirements:
         payload = json.loads(summary_event["data"])
         assert payload["summary"] == "A PDF analysis flow."
         assert len(payload["key_decisions"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_requirements_summary_uses_resolved_planning_state_over_llm_payload(
+        self,
+    ) -> None:
+        processor = _make_processor()
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde där användaren laddar upp en ljudfil vid "
+                    "körning. Transkribera ljudfilen och skapa ett Word-dokument."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+        planning_state = build_planning_state_from_conversation(conversation)
+        tool_call = _make_tool_call(
+            CONFIRM_REQUIREMENTS_TOOL_NAME,
+            {
+                "summary": (
+                    "Flödet ska ta emot Både text och dokument vid körning "
+                    "och leverera DOCX-dokument."
+                ),
+                "key_decisions": [
+                    {
+                        "topic": "Indata vid körning",
+                        "decision": "Både text och dokument",
+                    }
+                ],
+                "input_description": "Primär indata vid körning: Både text och dokument.",
+                "output_description": "Huvudsakligt slutresultat: DOCX-dokument.",
+            },
+        )
+
+        events: list[dict[str, str]] = []
+        async for event in processor.handle_tool_call(
+            session_id=uuid4(),
+            conversation=conversation,
+            new_messages_start=0,
+            tool_calls=[tool_call],
+            text_content=None,
+            llm_messages=[],
+            tool_schemas=[],
+            litellm_model="test-model",
+            litellm_kwargs={},
+            available_model_refs=None,
+            available_kb_refs=None,
+            max_output_tokens=8192,
+            request_id="req-1",
+            planning_state=planning_state,
+        ):
+            events.append(event)
+
+        summary_event = next(e for e in events if e["event"] == "requirements_summary")
+        payload = json.loads(summary_event["data"])
+
+        assert payload["summary"] == (
+            "Flödet ska ta emot Ljud vid körning och leverera DOCX-dokument."
+        )
+        assert payload["input_description"] == "Primär indata vid körning: Ljud."
+        assert {
+            (decision["topic"], decision["decision"])
+            for decision in payload["key_decisions"]
+        } >= {
+            ("Indata vid körning", "Ljud"),
+            ("Slutresultat", "DOCX-dokument"),
+        }
 
     @pytest.mark.asyncio
     async def test_appends_conversation_messages(self) -> None:

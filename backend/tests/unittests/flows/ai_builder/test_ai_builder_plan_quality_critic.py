@@ -829,6 +829,40 @@ def test_no_audio_warning_when_spec_has_transcription_step() -> None:
     assert build_conversation_aware_quality_feedback(conversation, spec) is None
 
 
+def test_no_audio_warning_for_existing_transcript_text_input() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Användaren klistrar in en redan transkriberad mötestext och "
+                "får ett Word-protokoll."
+            ),
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Mötesprotokoll",
+        steps=[
+            _step(
+                "step_a",
+                "Strukturera mötestext",
+                "Strukturera den transkriberade texten.",
+                input_type=InputType.TEXT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                "step_b",
+                "Skapa Word-protokoll",
+                "Skapa protokollet.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+
+    assert build_conversation_aware_quality_feedback(conversation, spec) is None
+
+
 def test_does_not_require_template_fill_after_conversation_shifts_to_pdf_summary() -> (
     None
 ):
@@ -1592,6 +1626,59 @@ class TestRichWorkflowInvariants:
             ],
         )
         context = self._context_with_signals(spec, needs_form_fields=True)
+
+        issues = render_critic_issues(context)
+
+        assert not any(
+            "formulärfält" in issue or "form_fields" in issue for issue in issues
+        )
+
+    def test_form_field_invariants_respect_no_extra_metadata_requirement(
+        self,
+    ) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Mötesprotokoll",
+            steps=[
+                _step(
+                    "step_a",
+                    "Transkribera ljud",
+                    "Transkribera mötet.",
+                    input_type=InputType.AUDIO,
+                    output_type=OutputType.TEXT,
+                    output_mode=OutputMode.TRANSCRIBE_ONLY,
+                ),
+                _step(
+                    "step_b",
+                    "Skapa protokoll",
+                    "Skapa ett DOCX-protokoll från transkriptionen.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        )
+        context = self._context_with_signals(spec, needs_form_fields=True)
+        context = CriticContext(
+            spec=context.spec,
+            flow=context.flow,
+            answer_signals={"runtime_metadata_fields": {"no_extra_metadata"}},
+            text=(
+                "Bygg ett flöde med fasta rubriker. Användaren ska bara "
+                "lämna in ljudfilen vid körning."
+            ),
+            requirements_text="Metadata vid körning: Inga extra fält",
+            signal_text=context.signal_text,
+            planner_patterns=context.planner_patterns,
+            output_intent=context.output_intent,
+            mixed_audio_doc_input=context.mixed_audio_doc_input,
+            aggregation_intent=context.aggregation_intent,
+            resource_catalog=context.resource_catalog,
+        )
 
         issues = render_critic_issues(context)
 

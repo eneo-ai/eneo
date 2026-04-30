@@ -104,6 +104,7 @@ from intric.flows.ai_builder.ai_builder_models import (
 )
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
+    constrain_scoped_plan_revision_to_target,
     validate_scoped_plan_revision,
 )
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
@@ -140,6 +141,9 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     extract_runtime_input_field_hints_for_metadata_state,
+)
+from intric.flows.ai_builder.ai_builder_server_actions import (
+    build_confirm_requirements_payload_from_state,
 )
 from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
@@ -625,6 +629,16 @@ class AIBuilderProposalProcessor:
                 plan_edit_context=plan_edit_context,
                 prior_plan=prior_plan_for_revision,
             ),
+            scoped_target_plan_step_ref=(
+                plan_edit_context.target_plan_step_ref
+                if plan_edit_context is not None
+                else None
+            ),
+            scoped_target_existing_step_ref=(
+                plan_edit_context.target_existing_step_ref
+                if plan_edit_context is not None
+                else None
+            ),
         )
         if prepared.failure_feedback is not None:
             return ToolProcessingResult(
@@ -635,6 +649,15 @@ class AIBuilderProposalProcessor:
         assert prepared.validation is not None
         spec = prepared.spec
         validation = prepared.validation
+        spec = constrain_scoped_plan_revision_to_target(
+            context=plan_edit_context,
+            prior_spec=(
+                prior_plan_for_revision.spec
+                if prior_plan_for_revision is not None
+                else None
+            ),
+            proposed_spec=spec,
+        )
 
         scoped_revision_feedback = validate_scoped_plan_revision(
             context=plan_edit_context,
@@ -1979,6 +2002,7 @@ class AIBuilderProposalProcessor:
         assistant_metadata: dict[str, Any] | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
+        planning_state: PlanningState | None = None,
     ) -> ToolProcessingResult:
         del assistant_content, available_model_refs, available_kb_refs
 
@@ -2014,7 +2038,34 @@ class AIBuilderProposalProcessor:
                 ]
             )
         )
+        manual_setup_notes = [
+            note
+            for note in requirements_data.get("manual_setup_notes", [])
+            if isinstance(note, str)
+        ]
         requirements_data["assumptions"] = merged_assumptions
+        if planning_state is not None:
+            canonical_payload = build_confirm_requirements_payload_from_state(
+                planning_state,
+                _resolve_ui_language(conversation),
+            )
+            requirements_data = canonical_payload.model_dump(mode="json")
+            requirements_data["assumptions"] = list(
+                dict.fromkeys(
+                    [
+                        *requirements_data.get("assumptions", []),
+                        *merged_assumptions,
+                    ]
+                )
+            )
+            requirements_data["manual_setup_notes"] = list(
+                dict.fromkeys(
+                    [
+                        *requirements_data.get("manual_setup_notes", []),
+                        *manual_setup_notes,
+                    ]
+                )
+            )
 
         requirements_payload_model = RequirementsSummaryPayload.model_validate(
             requirements_data
@@ -2152,6 +2203,16 @@ class AIBuilderProposalProcessor:
                 plan_edit_context=plan_edit_context,
                 prior_plan=prior_plan_for_revision,
             ),
+            scoped_target_plan_step_ref=(
+                plan_edit_context.target_plan_step_ref
+                if plan_edit_context is not None
+                else None
+            ),
+            scoped_target_existing_step_ref=(
+                plan_edit_context.target_existing_step_ref
+                if plan_edit_context is not None
+                else None
+            ),
         )
         if prepared.failure_feedback is not None:
             return ToolProcessingResult(
@@ -2162,6 +2223,15 @@ class AIBuilderProposalProcessor:
         assert prepared.validation is not None
         compiled_spec = prepared.spec
         validation = prepared.validation
+        compiled_spec = constrain_scoped_plan_revision_to_target(
+            context=plan_edit_context,
+            prior_spec=(
+                prior_plan_for_revision.spec
+                if prior_plan_for_revision is not None
+                else None
+            ),
+            proposed_spec=compiled_spec,
+        )
         if validation.errors:
             error_messages = [err.message for err in validation.errors]
             return ToolProcessingResult(
@@ -2349,6 +2419,7 @@ class AIBuilderProposalProcessor:
             flow=ctx.flow,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
+            planning_state=ctx.planning_state,
         )
         if confirm_result.event is None:
             if confirm_result.failure_kind == "validation":

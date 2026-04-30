@@ -13,6 +13,7 @@ from intric.flows.ai_builder.ai_builder_models import (
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.template_reference_analyzer import (
+    TemplateReference,
     TemplateReferenceKind,
     analyze_template,
     referenced_form_fields,
@@ -277,6 +278,44 @@ def lint_unfiltered_structured_interpolation(
                 ),
                 severity=LintSeverity.INFO,
             )
+
+
+def lint_previous_step_binding_without_previous_source(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
+    step_refs = {step.plan_step_ref: index + 1 for index, step in enumerate(spec.steps)}
+    form_fields = {
+        field.name.strip() for field in (spec.form_fields or []) if field.name.strip()
+    }
+    for step in spec.steps:
+        if step.input_source != InputSource.PREVIOUS_STEP:
+            continue
+        question = _question_binding(step.input_bindings)
+        if question is None:
+            continue
+        refs = analyze_template(
+            question, step_refs=step_refs, form_field_names=form_fields
+        )
+        if _references_previous_source(refs):
+            continue
+        result.add_warning(
+            step_ref=step.plan_step_ref,
+            code="previous_step_binding_without_previous_source",
+            message=(
+                "Step uses input_source 'previous_step' but its input_bindings.question "
+                "does not reference the previous step. Because input_bindings.question "
+                "replaces the implicit previous-step input at runtime, this can drop "
+                "the transcript or structured output from the prior step."
+            ),
+        )
+
+
+def _references_previous_source(references: list[TemplateReference]) -> bool:
+    return any(
+        reference.kind is TemplateReferenceKind.STEP
+        or reference.head == "föregående_steg"
+        for reference in references
+    )
 
 
 def _iter_step_templates(step: StepSpec) -> list[str]:

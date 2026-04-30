@@ -9,6 +9,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
+    InputType,
     OutputMode,
     OutputType,
     StepSpec,
@@ -40,10 +41,14 @@ def normalize_ai_builder_spec(
     spec: FlowDraftSpecCore,
     *,
     terminal_output_type: OutputType | None = None,
+    scoped_target_plan_step_ref: str | None = None,
+    scoped_target_existing_step_ref: str | None = None,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
     spec, topology_changes = normalize_ai_builder_step_topology(
         spec,
         terminal_output_type=terminal_output_type,
+        scoped_target_plan_step_ref=scoped_target_plan_step_ref,
+        scoped_target_existing_step_ref=scoped_target_existing_step_ref,
     )
     normalized_steps: list[StepSpec] = []
     changes: list[tuple[StepSpec, StepNormalizationChange]] = list(topology_changes)
@@ -64,6 +69,8 @@ def normalize_ai_builder_step_topology(
     spec: FlowDraftSpecCore,
     *,
     terminal_output_type: OutputType | None = None,
+    scoped_target_plan_step_ref: str | None = None,
+    scoped_target_existing_step_ref: str | None = None,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
     """Normalize redundant Flow graph mechanics before quality validation.
 
@@ -77,6 +84,8 @@ def normalize_ai_builder_step_topology(
     spec, artifact_tail_changes = _normalize_terminal_artifact_tail(
         spec,
         terminal_output_type=terminal_output_type,
+        scoped_target_plan_step_ref=scoped_target_plan_step_ref,
+        scoped_target_existing_step_ref=scoped_target_existing_step_ref,
     )
     step_refs = {step.plan_step_ref: index + 1 for index, step in enumerate(spec.steps)}
     form_fields = {
@@ -126,8 +135,60 @@ def normalize_ai_builder_step_topology(
             continue
         normalized_steps.append(step)
 
-    if not mutated:
+    prepared_spec = (
+        spec.model_copy(update={"steps": normalized_steps}) if mutated else spec
+    )
+    prepared_spec, contract_changes = align_previous_step_input_contracts(prepared_spec)
+    changes.extend(contract_changes)
+
+    if not mutated and not contract_changes:
         return spec, changes
+    return prepared_spec, changes
+
+
+def align_previous_step_input_contracts(
+    spec: FlowDraftSpecCore,
+) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
+    normalized_steps: list[StepSpec] = []
+    changes: list[tuple[StepSpec, StepNormalizationChange]] = []
+    mutated = False
+
+    for index, step in enumerate(spec.steps):
+        if (
+            index > 0
+            and step.input_source == InputSource.PREVIOUS_STEP
+            and step.input_type == InputType.JSON
+        ):
+            previous_step = normalized_steps[index - 1]
+            expected_contract = (
+                previous_step.output_contract
+                if previous_step.output_type == OutputType.JSON
+                else None
+            )
+            if step.input_contract != expected_contract:
+                normalized_step = step.model_copy(
+                    update={"input_contract": expected_contract}
+                )
+                normalized_steps.append(normalized_step)
+                mutated = True
+                changes.append(
+                    (
+                        normalized_step,
+                        StepNormalizationChange(
+                            code="input_contract_aligned_to_previous_output",
+                            field_suffix="input_contract",
+                            message=(
+                                "Aligned previous_step JSON input_contract with "
+                                "the previous step output_contract."
+                            ),
+                        ),
+                    )
+                )
+                continue
+        normalized_steps.append(step)
+
+    if not mutated:
+        return spec, []
     return spec.model_copy(update={"steps": normalized_steps}), changes
 
 
@@ -135,6 +196,8 @@ def _normalize_terminal_artifact_tail(
     spec: FlowDraftSpecCore,
     *,
     terminal_output_type: OutputType | None,
+    scoped_target_plan_step_ref: str | None,
+    scoped_target_existing_step_ref: str | None,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
     """Keep artifact-output plans terminal on the requested artifact.
 
@@ -175,8 +238,15 @@ def _normalize_terminal_artifact_tail(
     if folded_input_bindings is _UNFOLDABLE:
         return spec, []
 
+    identity_updates = _artifact_tail_identity_updates(
+        artifact_step=artifact_step,
+        terminal_step=terminal_step,
+        scoped_target_plan_step_ref=scoped_target_plan_step_ref,
+        scoped_target_existing_step_ref=scoped_target_existing_step_ref,
+    )
     promoted_terminal = terminal_step.model_copy(
         update={
+            **identity_updates,
             "assistant_spec": _fold_artifact_helper_assistant(
                 artifact_step=artifact_step,
                 terminal_step=terminal_step,
@@ -204,6 +274,36 @@ def _normalize_terminal_artifact_tail(
     return spec.model_copy(update={"steps": normalized_steps}), [
         (promoted_terminal, change)
     ]
+
+
+def _artifact_tail_identity_updates(
+    *,
+    artifact_step: StepSpec,
+    terminal_step: StepSpec,
+    scoped_target_plan_step_ref: str | None,
+    scoped_target_existing_step_ref: str | None,
+) -> dict[str, Any]:
+    artifact_is_scoped_target = (
+        scoped_target_plan_step_ref is not None
+        and artifact_step.plan_step_ref == scoped_target_plan_step_ref
+    ) or (
+        scoped_target_existing_step_ref is not None
+        and artifact_step.existing_step_ref == scoped_target_existing_step_ref
+    )
+    terminal_is_scoped_target = (
+        scoped_target_plan_step_ref is not None
+        and terminal_step.plan_step_ref == scoped_target_plan_step_ref
+    ) or (
+        scoped_target_existing_step_ref is not None
+        and terminal_step.existing_step_ref == scoped_target_existing_step_ref
+    )
+    if not artifact_is_scoped_target or terminal_is_scoped_target:
+        return {}
+    return {
+        "plan_step_ref": artifact_step.plan_step_ref,
+        "existing_step_ref": artifact_step.existing_step_ref,
+        "name": artifact_step.name,
+    }
 
 
 def _fold_artifact_helper_assistant(

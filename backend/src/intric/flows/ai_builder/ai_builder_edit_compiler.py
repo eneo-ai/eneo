@@ -132,6 +132,7 @@ def compile_edit_draft(
                     patch,
                     assistant_snapshots=assistant_snapshots,
                     current_steps=current_steps,
+                    prior_steps=compiled_steps,
                     primary_runtime_input_type=primary_runtime_input_type,
                 )
             )
@@ -299,6 +300,7 @@ def _flow_step_to_spec(
     *,
     assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     current_steps: list[FlowStep] | None = None,
+    prior_steps: list[StepSpec] | None = None,
     primary_runtime_input_type: InputType | None = None,
 ) -> StepSpec:
     """Convert an existing FlowStep to a StepSpec, applying patch if present."""
@@ -363,7 +365,7 @@ def _flow_step_to_spec(
                 target_step=target_step,
                 uses_previous_fields=patch.uses_previous_fields or [],
                 uses_form_fields=uses_form_fields,
-                current_steps=current_steps or [],
+                prior_steps=prior_steps or [],
             )
             updates["input_bindings"] = compiled_bindings
             if compiled_bindings is None:
@@ -430,12 +432,14 @@ def _resolve_existing_assistant_spec(
         else []
     )
     return AssistantSpec(
-        instructions=instructions_raw.strip()
-        if isinstance(instructions_raw, str)
-        else "",
-        model_ref=model_ref_raw
-        if isinstance(model_ref_raw, str) and model_ref_raw.strip()
-        else None,
+        instructions=(
+            instructions_raw.strip() if isinstance(instructions_raw, str) else ""
+        ),
+        model_ref=(
+            model_ref_raw
+            if isinstance(model_ref_raw, str) and model_ref_raw.strip()
+            else None
+        ),
         knowledge_refs=[str(ref).strip() for ref in knowledge_refs if str(ref).strip()],
         mcp_server_refs=[
             str(ref).strip() for ref in mcp_server_refs if str(ref).strip()
@@ -790,9 +794,11 @@ def _compile_form_fields(
             label=(
                 payload.label
                 if payload is not None and payload.label is not None
-                else existing_field.label
-                if existing_field is not None
-                else op.field_name
+                else (
+                    existing_field.label
+                    if existing_field is not None
+                    else op.field_name
+                )
             ),
             required=(
                 payload.required
@@ -804,9 +810,11 @@ def _compile_form_fields(
             options=(
                 deepcopy(payload.options)
                 if payload is not None and payload.options is not None
-                else deepcopy(existing_field.options)
-                if existing_field is not None
-                else None
+                else (
+                    deepcopy(existing_field.options)
+                    if existing_field is not None
+                    else None
+                )
             ),
         )
 
@@ -878,7 +886,7 @@ def _compile_patch_input_bindings(
     target_step: StepSpec,
     uses_previous_fields: list[Any],
     uses_form_fields: list[str],
-    current_steps: list[FlowStep],
+    prior_steps: list[StepSpec],
 ) -> dict[str, Any] | None:
     if target_step.input_source == InputSource.ALL_PREVIOUS_STEPS:
         return None
@@ -886,7 +894,7 @@ def _compile_patch_input_bindings(
     sections: list[str] = []
     source_reference = _patch_source_reference(
         target_step=target_step,
-        current_steps=current_steps,
+        prior_steps=prior_steps,
     )
     for field_ref in uses_previous_fields:
         from_step = getattr(field_ref, "from_step", None)
@@ -894,15 +902,16 @@ def _compile_patch_input_bindings(
         if (
             not isinstance(from_step, int)
             or from_step < 1
-            or from_step > len(current_steps)
+            or from_step > len(prior_steps)
             or not isinstance(field_path, str)
         ):
             continue
+        source_step = prior_steps[from_step - 1]
         label = getattr(field_ref, "label", None) or default_previous_field_label(
             field_path
         )
         sections.append(
-            f"{label}: {{{{ step_{from_step}.output.structured.{field_path} }}}}"
+            f"{label}: {{{{ {source_step.plan_step_ref}.output.structured.{field_path} }}}}"
         )
 
     if source_reference is not None and not (
@@ -926,7 +935,7 @@ def _compile_patch_input_bindings(
 def _patch_source_reference(
     *,
     target_step: StepSpec,
-    current_steps: list[FlowStep],
+    prior_steps: list[StepSpec],
 ) -> str | None:
     if target_step.input_source == InputSource.FLOW_INPUT:
         if target_step.input_type == InputType.JSON:
@@ -940,18 +949,14 @@ def _patch_source_reference(
         return "{{ indata_text }}"
 
     if target_step.input_source == InputSource.PREVIOUS_STEP:
-        order = _existing_step_order(target_step.existing_step_ref)
-        if order is None or order <= 1:
+        if not prior_steps:
             return None
-        previous = next(
-            (step for step in current_steps if step.step_order == order - 1),
-            None,
-        )
+        previous = prior_steps[-1]
         if target_step.input_type == InputType.JSON:
-            return f"{{{{ step_{order - 1}.output.structured }}}}"
-        if previous is not None and previous.output_type == OutputType.JSON.value:
-            return f"{{{{ step_{order - 1}.output.structured }}}}"
-        return f"{{{{ step_{order - 1}.output.text }}}}"
+            return f"{{{{ {previous.plan_step_ref}.output.structured }}}}"
+        if previous.output_type == OutputType.JSON:
+            return f"{{{{ {previous.plan_step_ref}.output.structured }}}}"
+        return f"{{{{ {previous.plan_step_ref}.output.text }}}}"
 
     return None
 

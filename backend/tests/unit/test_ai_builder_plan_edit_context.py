@@ -20,6 +20,7 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     _DOWNSTREAM_INPUT_REPAIR_FIELDS,
     AIBuilderPlanEditContext,
     build_plan_revision_prompt_block,
+    constrain_scoped_plan_revision_to_target,
     validate_scoped_plan_revision,
 )
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
@@ -109,6 +110,212 @@ def test_step_scoped_revision_rejects_unrelated_step_rewrite() -> None:
     assert feedback is not None
     assert "unrelated steps" in feedback
     assert "step_a" in feedback
+
+
+def test_scoped_revision_constraint_restores_unrelated_step_rewrite() -> None:
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_b",
+    )
+    prior = _spec(
+        [
+            _step("step_a", "Analyze input", output_type="json"),
+            _step("step_b", "Create final result", output_type="text"),
+            _step("step_c", "Format response", input_type="text", output_type="text"),
+        ]
+    )
+    proposed = _spec(
+        [
+            _step("step_a", "Rewrite unrelated input", output_type="json"),
+            _step("step_b", "Create structured result", output_type="json"),
+            _step("step_c", "Format response", input_type="json", output_type="text"),
+        ]
+    )
+
+    constrained = constrain_scoped_plan_revision_to_target(
+        context=context,
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+
+    assert [step.name for step in constrained.steps] == [
+        "Analyze input",
+        "Create structured result",
+        "Format response",
+    ]
+    assert constrained.steps[2].input_type == "json"
+    assert (
+        validate_scoped_plan_revision(
+            context=context,
+            prior_spec=prior,
+            proposed_spec=constrained,
+        )
+        is None
+    )
+
+
+def test_scoped_revision_constraint_restores_existing_step_order() -> None:
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_b",
+    )
+    prior = _spec(
+        [
+            _step("step_a", "Analyze input", output_type="json"),
+            _step("step_b", "Create final result", output_type="text"),
+            _step("step_c", "Format response", output_type="text"),
+        ]
+    )
+    proposed = _spec(
+        [
+            _step("step_c", "Format response", output_type="text"),
+            _step("step_b", "Create structured result", output_type="json"),
+            _step("step_a", "Analyze input", output_type="json"),
+        ]
+    )
+
+    constrained = constrain_scoped_plan_revision_to_target(
+        context=context,
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+
+    assert [step.plan_step_ref for step in constrained.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert constrained.steps[1].output_type == "json"
+    assert (
+        validate_scoped_plan_revision(
+            context=context,
+            prior_spec=prior,
+            proposed_spec=constrained,
+        )
+        is None
+    )
+
+
+def test_scoped_revision_constraint_restores_replaced_downstream_step_ref() -> None:
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_b",
+    )
+    prior = _spec(
+        [
+            _step("step_a", "Analyze input", output_type="json"),
+            _step("step_b", "Structure result", input_type="json", output_type="json"),
+            _step("step_c", "Write DOCX", input_type="json", output_type="docx"),
+        ]
+    )
+    proposed = _spec(
+        [
+            _step("step_a", "Analyze input", output_type="json"),
+            _step("step_b", "Write short draft", input_type="json", output_type="text"),
+            _step("step_d", "New final writer", input_type="text", output_type="docx"),
+        ]
+    )
+
+    constrained = constrain_scoped_plan_revision_to_target(
+        context=context,
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+
+    assert [step.plan_step_ref for step in constrained.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert constrained.steps[2].name == "Write DOCX"
+    assert constrained.steps[2].input_type == "text"
+    assert (
+        validate_scoped_plan_revision(
+            context=context,
+            prior_spec=prior,
+            proposed_spec=constrained,
+        )
+        is None
+    )
+
+
+def test_scoped_revision_constraint_realigns_target_input_contract_after_upstream_restore() -> (
+    None
+):
+    context = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_b",
+    )
+    upstream_contract = {
+        "type": "object",
+        "required": ["main_topics"],
+        "properties": {
+            "main_topics": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["topic"],
+                    "properties": {"topic": {"type": "string"}},
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "additionalProperties": False,
+    }
+    stale_contract = {
+        "type": "object",
+        "required": ["main_topics"],
+        "properties": {"main_topics": {"type": "array", "items": {"type": "string"}}},
+        "additionalProperties": False,
+    }
+    prior = _spec(
+        [
+            _step(
+                "step_a",
+                "Extract meeting topics",
+                output_type="json",
+                output_contract=upstream_contract,
+            ),
+            _step(
+                "step_b",
+                "Write draft",
+                input_type="json",
+                output_type="text",
+                input_contract=upstream_contract,
+            ),
+        ]
+    )
+    proposed = _spec(
+        [
+            _step(
+                "step_a",
+                "Rewrite unrelated extractor",
+                output_type="json",
+                output_contract=stale_contract,
+            ),
+            _step(
+                "step_b",
+                "Write shorter draft",
+                input_type="json",
+                output_type="text",
+                input_contract=stale_contract,
+            ),
+        ]
+    )
+
+    constrained = constrain_scoped_plan_revision_to_target(
+        context=context,
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+
+    assert constrained.steps[0].name == "Extract meeting topics"
+    assert constrained.steps[1].name == "Write shorter draft"
+    assert constrained.steps[1].input_contract == upstream_contract
 
 
 def test_step_scoped_revision_allows_direct_successor_input_repair() -> None:
@@ -499,6 +706,121 @@ async def test_create_path_validates_scoped_revision_after_terminal_artifact_fol
 
 
 @pytest.mark.asyncio
+async def test_create_path_keeps_scoped_artifact_ref_after_terminal_tail_fold(
+    monkeypatch,
+) -> None:
+    tenant_id = UUID("00000000-0000-0000-0000-0000000000aa")
+    plan_id = UUID("00000000-0000-0000-0000-000000000001")
+    processor = AIBuilderProposalProcessor(
+        user=SimpleNamespace(tenant_id=tenant_id),
+        repo=SimpleNamespace(),
+        litellm_client=SimpleNamespace(),
+        self_correction_temperature=0.0,
+        self_correction_bumped_temperature=0.0,
+        forced_proposal_temperature=0.0,
+        quality_retry_warning_codes=set(),
+    )
+    prior = _spec(
+        [
+            _step("step_a", "Transcribe meeting", output_type="json"),
+            _step(
+                "step_b",
+                "Structure protocol",
+                input_type="json",
+                output_type="json",
+            ),
+            _step("step_c", "Write report", input_type="json", output_type="text"),
+        ]
+    )
+    raw_proposal = _spec(
+        [
+            _step("step_a", "Rewrite unrelated transcription", output_type="json"),
+            _step(
+                "step_b",
+                "Structure protocol",
+                input_type="json",
+                output_type="json",
+            ),
+            _step("step_c", "Write DOCX report", input_type="json", output_type="docx"),
+            _step("step_d", "Create final result", output_type="text"),
+        ]
+    )
+    stored_specs: list[FlowDraftSpecCore] = []
+
+    async def fake_store_plan_and_update_conversation(**kwargs):
+        spec = kwargs["spec"]
+        stored_specs.append(spec)
+        return (
+            SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000099")),
+            PlannerPlanEnvelope(spec=spec),
+        )
+
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.normalize_create_draft_mechanics",
+        lambda draft: draft,
+    )
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.validate_create_draft",
+        lambda draft: SimpleNamespace(errors=[]),
+    )
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.compile_create_draft",
+        lambda draft: raw_proposal,
+    )
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+        fake_store_plan_and_update_conversation,
+    )
+    monkeypatch.setattr(processor, "_format_quality_feedback", lambda validation: None)
+    monkeypatch.setattr(
+        processor,
+        "_format_contextual_quality_feedback",
+        lambda **kwargs: None,
+    )
+
+    result = await processor._process_create_draft(
+        session_id=uuid4(),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Ändra sista steget så att output blir docx istället för text.",
+            )
+        ],
+        new_messages_start=0,
+        draft=SimpleNamespace(assumptions=[], plan_rationale="Change final output."),
+        arguments={},
+        assistant_content="Här är mitt förslag:",
+        assistant_metadata=None,
+        tool_call_id="call_outline",
+        tool_name="outline_flow",
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+        flow=None,
+        lease_request_id=None,
+        lease_lock_token=None,
+        plan_edit_context=AIBuilderPlanEditContext(
+            scope="step",
+            plan_id=plan_id,
+            target_plan_step_ref="step_c",
+        ),
+        prior_plan_for_revision=SimpleNamespace(spec=prior),
+    )
+
+    assert result.failure_kind is None
+    assert result.event is not None
+    assert stored_specs
+    assert [step.plan_step_ref for step in stored_specs[0].steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert stored_specs[0].steps[0].name == "Transcribe meeting"
+    assert stored_specs[0].steps[-1].name == "Write DOCX report"
+    assert stored_specs[0].steps[-1].output_type == OutputType.DOCX
+
+
+@pytest.mark.asyncio
 async def test_edit_flow_path_enforces_scoped_revision_guard(monkeypatch) -> None:
     tenant_id = UUID("00000000-0000-0000-0000-0000000000aa")
     plan_id = UUID("00000000-0000-0000-0000-000000000001")
@@ -553,9 +875,23 @@ async def test_edit_flow_path_enforces_scoped_revision_guard(monkeypatch) -> Non
             base_flow_revision=1,
         )
 
+    stored_specs: list[FlowDraftSpecCore] = []
+
+    async def fake_store_plan_and_update_conversation(**kwargs):
+        spec = kwargs["spec"]
+        stored_specs.append(spec)
+        return (
+            SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000099")),
+            PlannerPlanEnvelope(spec=spec),
+        )
+
     monkeypatch.setattr(
         "intric.flows.ai_builder.ai_builder_proposal_processor.compile_edit_draft",
         fake_compile_edit_draft,
+    )
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+        fake_store_plan_and_update_conversation,
     )
 
     result = await processor._process_edit_arguments(
@@ -598,11 +934,14 @@ async def test_edit_flow_path_enforces_scoped_revision_guard(monkeypatch) -> Non
         prior_plan_for_revision=SimpleNamespace(spec=prior),
     )
 
-    assert result.event is None
-    assert result.failure_kind == "quality"
-    assert result.feedback is not None
-    assert "downstream input wiring" in result.feedback
-    assert "step_b" in result.feedback
+    assert result.failure_kind is None
+    assert result.event is not None
+    assert stored_specs
+    assert [step.name for step in stored_specs[0].steps] == [
+        "Create final result",
+        "Notify reviewer",
+    ]
+    assert stored_specs[0].steps[0].output_type == OutputType.PDF
 
 
 def test_step_scoped_context_requires_a_stable_step_ref() -> None:
@@ -666,6 +1005,8 @@ def _step(
     input_type: str = "text",
     output_type: str,
     existing_step_ref: str | None = None,
+    input_contract: dict[str, object] | None = None,
+    output_contract: dict[str, object] | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=ref,
@@ -683,8 +1024,8 @@ def _step(
         output_mode="pass_through",
         output_type=output_type,
         input_bindings=None,
-        input_contract=None,
-        output_contract=None,
+        input_contract=input_contract,
+        output_contract=output_contract,
         input_config=None,
         output_config=None,
     )
