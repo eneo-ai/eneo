@@ -138,7 +138,7 @@ def completion_model_factory(admin_user):
             reasoning=reasoning,
             family=family,
             hosting=kwargs.get("hosting", "usa"),
-            org=org.value if org else None,
+            org=org,
             stability=kwargs.get("stability", "stable"),
             open_source=kwargs.get("open_source", False),
             description=kwargs.get("description"),
