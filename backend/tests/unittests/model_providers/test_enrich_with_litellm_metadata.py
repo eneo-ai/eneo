@@ -132,25 +132,17 @@ def test_filters_image_and_tts_modes() -> None:
         )
 
 
-def test_unknown_anthropic_model_defaults_to_completion() -> None:
-    """Anthropic's /v1/models only ever returns chat models, so unknown names
-    fall through as completion. This keeps newly-released models reachable."""
+def test_unknown_name_defaults_to_completion() -> None:
+    """Live-listed names that aren't in the cost map default to completion —
+    if the provider served it on /v1/models we trust it's a real text model."""
     with _patch_cost_map({}):
         result = model_provider_service._enrich_with_litellm_metadata(
-            "claude-opus-4-99", "anthropic"
+            "future-model-1", "openai"
         )
-    assert result == {"name": "claude-opus-4-99", "mode": "completion"}
+    assert result == {"name": "future-model-1", "mode": "completion"}
 
 
-def test_unknown_openai_gpt_model_defaults_to_completion() -> None:
-    with _patch_cost_map({}):
-        result = model_provider_service._enrich_with_litellm_metadata(
-            "gpt-9-future", "openai"
-        )
-    assert result == {"name": "gpt-9-future", "mode": "completion"}
-
-
-def test_unknown_openai_whisper_defaults_to_transcription() -> None:
+def test_unknown_whisper_inferred_as_transcription() -> None:
     with _patch_cost_map({}):
         result = model_provider_service._enrich_with_litellm_metadata(
             "whisper-2", "openai"
@@ -158,19 +150,17 @@ def test_unknown_openai_whisper_defaults_to_transcription() -> None:
     assert result == {"name": "whisper-2", "mode": "transcription"}
 
 
-def test_unknown_openai_image_model_dropped() -> None:
+def test_unknown_embedding_inferred_as_embedding() -> None:
+    with _patch_cost_map({}):
+        result = model_provider_service._enrich_with_litellm_metadata(
+            "future-embedding-1", "openai"
+        )
+    assert result == {"name": "future-embedding-1", "mode": "embedding"}
+
+
+def test_unknown_image_model_dropped() -> None:
     with _patch_cost_map({}):
         result = model_provider_service._enrich_with_litellm_metadata(
             "dall-e-99", "openai"
-        )
-    assert result is None
-
-
-def test_unknown_arbitrary_model_dropped() -> None:
-    """For unknown providers and arbitrary names, we don't guess — better to
-    drop than to pollute the wrong mode picker."""
-    with _patch_cost_map({}):
-        result = model_provider_service._enrich_with_litellm_metadata(
-            "mystery-model-xyz", "vllm"
         )
     assert result is None

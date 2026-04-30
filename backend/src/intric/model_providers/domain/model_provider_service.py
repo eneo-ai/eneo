@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID, uuid4
 
@@ -12,6 +13,104 @@ if TYPE_CHECKING:
     pass
 
 
+# Default base URLs for providers that don't ask the user for one.
+# Any provider configured with its own ``endpoint`` wins over the default.
+_DEFAULT_ENDPOINTS: dict[str, str] = {
+    "openai": "https://api.openai.com",
+    "anthropic": "https://api.anthropic.com",
+}
+
+
+def _auth_headers_for(provider_type: str, api_key: str) -> dict[str, str]:
+    """Auth header set per provider. Bearer for everyone except Anthropic,
+    which uses its own header pair."""
+    if provider_type == "anthropic":
+        return {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+    return {"Authorization": f"Bearer {api_key}"}
+
+
+def _normalize_endpoint_base(base: str) -> str:
+    """Strip a trailing slash and an optional ``/v1`` suffix so users can
+    paste either ``https://api.example.com`` or ``https://api.example.com/v1``
+    without us producing ``/v1/v1/models``."""
+    s = base.rstrip("/")
+    if s.endswith("/v1"):
+        s = s[:-3].rstrip("/")
+    return s
+
+
+def _coerce_to_epoch(value: Any) -> float:
+    """Best-effort parse of a created/release timestamp into epoch seconds.
+    Accepts an int/float (already epoch), an ISO 8601 string, or returns 0.0
+    for anything else so models without a timestamp sort last."""
+    if value is None or value == "":
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except (ValueError, AttributeError):
+        return 0.0
+
+
+def _extract_mode_hint(m: dict[str, Any]) -> str | None:
+    """Read mode classification from provider-supplied response metadata.
+
+    Some providers expose richer fields than just ``id`` — read them
+    opportunistically. When present, these are far more reliable than
+    name-based heuristics (``intfloat/multilingual-e5-large`` is an
+    embedding model whose name doesn't say so). Sources, in priority order:
+
+    1. ``model_type`` — coarse category. Values seen in the wild:
+       ``"embedding"``, ``"text"``, ``"audio"``/``"transcription"``.
+    2. ``capabilities.embeddings: true`` — fallback for providers that
+       use ``model_type: "text"`` for everything and rely on the flag.
+
+    Returns one of ``"completion"``, ``"embedding"``, ``"transcription"``,
+    or ``None`` when the response carries neither field and the caller
+    should fall back to name-based inference.
+    """
+    raw_capabilities: Any = m.get("capabilities")
+    embeddings_flag: bool = (
+        isinstance(raw_capabilities, dict)
+        and raw_capabilities.get("embeddings") is True  # type: ignore[reportUnknownMemberType]
+    )
+
+    model_type = m.get("model_type")
+    if model_type == "embedding":
+        return "embedding"
+    if model_type in ("audio", "transcription"):
+        return "transcription"
+    if model_type == "text":
+        # Could still be an embedding flagged via capabilities.
+        return "embedding" if embeddings_flag else "completion"
+
+    if embeddings_flag:
+        return "embedding"
+
+    return None
+
+
+def _normalize_live_model(m: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a single ``/v1/models`` entry across providers.
+
+    Pull each field with a fallback chain so any provider that follows the
+    same rough shape works without a code change. Field variants seen in
+    the wild: ``display_name``/``name`` for the friendly label;
+    ``created_at`` (ISO) / ``created`` (epoch) / ``release_date`` for
+    the timestamp; richer providers also include ``capabilities`` and
+    ``model_type`` which we read via ``_extract_mode_hint``.
+    """
+    return {
+        "id": m["id"],
+        "display_name": m.get("display_name") or m.get("name", ""),
+        "created_at": _coerce_to_epoch(
+            m.get("created_at") or m.get("created") or m.get("release_date")
+        ),
+        "mode_hint": _extract_mode_hint(m),
+    }
+
+
 # LiteLLM mode → our model_type. Anything else (image, tts, moderation) is filtered out.
 _LITELLM_MODE_TO_OUR_MODE: dict[str, str] = {
     "chat": "completion",
@@ -21,6 +120,11 @@ _LITELLM_MODE_TO_OUR_MODE: dict[str, str] = {
 }
 
 # Name substrings to drop — same set the static capabilities endpoint filters.
+# These run on every name regardless of whether it appears in litellm.model_cost,
+# i.e. they catch known-but-unwanted models (preview snapshots, audio variants).
+# This is intentionally kept separate from the keyword list inside
+# `_infer_mode_from_name`, which only runs on cache misses to *classify* an
+# unknown name's mode (e.g. "whisper-2" → transcription, "dall-e-99" → drop).
 _NAME_FILTER_SUBSTRINGS: tuple[str, ...] = (
     "realtime",
     "-audio-",
@@ -31,30 +135,28 @@ _NAME_FILTER_SUBSTRINGS: tuple[str, ...] = (
 )
 
 
-def _infer_mode_from_name(name: str, provider_type: str) -> str | None:
+def _infer_mode_from_name(name: str) -> str | None:
     """Best-effort mode inference for names not in litellm.model_cost.
 
-    Returns None when the name clearly maps to a non-text mode (image, tts,
-    moderation) so the entry is dropped. Returns "completion" by default for
-    Anthropic (their /v1/models only returns chat models). Returns None for
-    fully unknown names so we don't pollute mode-specific pickers.
+    This is only invoked for names that arrived via a live ``/v1/models``
+    response — i.e. the provider has already asserted they serve this
+    model. Image/audio/moderation names are still dropped from the picker;
+    everything else defaults to ``"completion"`` since the alternative
+    (returning None and dropping the entry) silently hides real models
+    from any provider whose names don't match a hardcoded prefix.
     """
     lower = name.lower()
-    if any(kw in lower for kw in ("dall-e", "image", "tts-", "moderation", "whisper")):
-        if "whisper" in lower:
-            return "transcription"
+    if any(kw in lower for kw in ("dall-e", "tts-", "moderation")):
         return None
+    if "whisper" in lower:
+        return "transcription"
     if "embedding" in lower:
         return "embedding"
-    if provider_type == "anthropic":
-        return "completion"
-    if lower.startswith(("gpt-", "o1", "o3", "o4", "chatgpt-")):
-        return "completion"
-    return None
+    return "completion"
 
 
 def _enrich_with_litellm_metadata(
-    name: str, provider_type: str
+    name: str, provider_type: str, mode_hint: str | None = None
 ) -> dict[str, Any] | None:
     """Look up `name` in litellm.model_cost (with prefix variants) and return
     an enriched capability dict, or None if the model should be hidden.
@@ -62,9 +164,10 @@ def _enrich_with_litellm_metadata(
     Returns None when the name matches a non-text filter substring or maps to
     a litellm mode we don't surface (image, tts, moderation, etc.).
 
-    For names not present in the cost map, falls back to mode inference from
-    the name so newly-released models still show up. Returns None if no mode
-    can be inferred (avoids polluting mode-specific pickers with unknowns).
+    When the name isn't in the cost map, ``mode_hint`` (read from the
+    provider's own response — see ``_extract_mode_hint``) wins over name
+    inference, so embedding models with non-obvious names like
+    ``intfloat/multilingual-e5-large`` get classified correctly.
     """
     import litellm
 
@@ -84,10 +187,10 @@ def _enrich_with_litellm_metadata(
             break
 
     if info is None:
-        inferred = _infer_mode_from_name(name, provider_type)
-        if inferred is None:
+        chosen = mode_hint or _infer_mode_from_name(name)
+        if chosen is None:
             return None
-        return {"name": name, "mode": inferred}
+        return {"name": name, "mode": chosen}
 
     litellm_mode = info.get("mode", "")
     mode = _LITELLM_MODE_TO_OUR_MODE.get(litellm_mode)
@@ -333,57 +436,57 @@ class ModelProviderService:
                 return {"success": False, "error": "Could not connect to API"}
             return {"success": False, "error": f"Validation failed: {str(e)}"}
 
-    async def _fetch_live_model_names(
+    async def _fetch_live_models(
         self, provider_type: str, api_key: str, endpoint: str
-    ) -> list[str]:
-        """Fetch the list of model names available on a provider via its own API."""
+    ) -> list[dict[str, Any]]:
+        """Fetch the live model list from a provider.
+
+        Most providers expose ``GET /v1/models`` returning
+        ``{"data": [{"id": ...}]}``. The two things that vary are the auth
+        header and the base URL — captured by ``_auth_headers_for`` and
+        ``_DEFAULT_ENDPOINTS``. Fields beyond ``id`` are pulled
+        opportunistically through fallback chains in ``_normalize_live_model``
+        so providers with richer responses get more metadata, while
+        minimal-shape providers still work.
+
+        Returns entries with ``id``, optional ``display_name``, a
+        ``created_at`` epoch-seconds value used to sort newest-first, and
+        an optional ``mode_hint`` from provider-supplied capability fields.
+        Azure is skipped — its ``/openai/models`` returns every model in
+        the region, not deployed ones.
+        """
         import httpx
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            if provider_type == "azure":
-                # Azure /openai/models returns all models in the region, not
-                # just deployed ones. Users enter their deployment name manually.
-                return []
-
-            if provider_type == "openai":
-                resp = await client.get(
-                    "https://api.openai.com/v1/models",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                )
-                resp.raise_for_status()
-                return [m["id"] for m in resp.json().get("data", [])]
-
-            if provider_type == "anthropic":
-                resp = await client.get(
-                    "https://api.anthropic.com/v1/models",
-                    headers={
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                    },
-                )
-                resp.raise_for_status()
-                return [m["id"] for m in resp.json().get("data", [])]
-
-            # OpenAI-compatible providers (vLLM, custom endpoints)
-            if endpoint:
-                resp = await client.get(
-                    f"{endpoint.rstrip('/')}/v1/models",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                )
-                resp.raise_for_status()
-                return [m["id"] for m in resp.json().get("data", [])]
-
+        if provider_type == "azure":
             return []
 
-    async def list_available_models(self, provider_id: UUID) -> list[dict[str, Any]]:
+        base = endpoint or _DEFAULT_ENDPOINTS.get(provider_type)
+        if not base:
+            return []
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{_normalize_endpoint_base(base)}/v1/models",
+                headers=_auth_headers_for(provider_type, api_key),
+            )
+            resp.raise_for_status()
+            return [_normalize_live_model(m) for m in resp.json().get("data", [])]
+
+    async def list_available_models(
+        self, provider_id: UUID, mode: str | None = None
+    ) -> list[dict[str, Any]]:
         """List models available on a provider using its credentials, enriched
         with capability metadata from litellm.model_cost.
 
         Each entry has at least ``name`` and ``mode`` (one of "completion",
-        "embedding", "transcription", or None for unknown). Completion entries
-        include ``max_input_tokens``, ``max_output_tokens``, and ``supports_*``
+        "embedding", "transcription"). Completion entries include
+        ``max_input_tokens``, ``max_output_tokens``, and ``supports_*``
         flags; embedding entries include ``max_input_tokens`` and
         ``output_vector_size``.
+
+        Pass ``mode`` to filter the response to a single category — keeps
+        consumers (frontend pickers, external API clients) from having to
+        filter client-side.
         """
         provider = await self.repository.get_by_id(provider_id)
         decrypted_creds = self._decrypt_credentials(provider.credentials)
@@ -392,19 +495,34 @@ class ModelProviderService:
         endpoint = provider.config.get("endpoint", "")
 
         try:
-            names = await self._fetch_live_model_names(provider_type, api_key, endpoint)
+            items = await self._fetch_live_models(provider_type, api_key, endpoint)
         except Exception as e:
             return [{"error": f"Failed to list models: {str(e)}"}]
 
+        # Sort newest-first by provider-supplied created_at, with id as a
+        # stable tiebreaker so models without a timestamp keep alphabetical order.
+        sorted_items = sorted(
+            items, key=lambda x: (-float(x.get("created_at", 0) or 0), x["id"])
+        )
+
         enriched: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for name in sorted(names):
+        for item in sorted_items:
+            name = item["id"]
             if name in seen:
                 continue
             seen.add(name)
-            entry = _enrich_with_litellm_metadata(name, provider_type)
-            if entry is not None:
-                enriched.append(entry)
+            entry = _enrich_with_litellm_metadata(
+                name, provider_type, mode_hint=item.get("mode_hint")
+            )
+            if entry is None:
+                continue
+            if mode is not None and entry.get("mode") != mode:
+                continue
+            display_name = item.get("display_name")
+            if display_name:
+                entry["display_name"] = display_name
+            enriched.append(entry)
         return enriched
 
     async def test_connection(self, provider_id: UUID) -> dict[str, Any]:
