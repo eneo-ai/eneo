@@ -1664,3 +1664,174 @@ Expected: no matches.
 - Flow authoring state ownership will not be complete until route step-array
   mutation paths are moved behind explicit `FlowEditor` commands or another
   approved authoring owner.
+
+## Iteration 7 - Flow Basic Settings Commands
+
+### Scope
+
+Continue Batch 7 frontend state-owner work with the smallest independent Flow
+authoring slice after metadata commands: scalar basic settings writes.
+
+In scope:
+
+- Flow name write
+- Flow description write
+- Flow data-retention write
+- `FlowEditor` command-boundary tests
+- route call-site replacement
+- Batch 7 journal/retrospective/Claude reconciliation docs
+
+Out of scope:
+
+- step-array mutation paths
+- builder-stage navigation state
+- form schema behavior
+- metadata behavior already committed
+- backend/runtime/migration/data-model work
+- generated schema changes
+- package/name/namespace migration
+
+### Inventory
+
+| state field | current route writer | current FlowEditor owner | readers | canonical owner | action |
+|---|---|---|---|---|---|
+| `name` | `+page.svelte` basic settings input assigns `$update.name` | `createResourceEditor` editable field only | route checklist, header, save flow update | `FlowEditor` command | Add `setName(name)` and call it from route input. |
+| `description` | `+page.svelte` textarea assigns `$update.description` | `createResourceEditor` editable field only | route form, save flow update | `FlowEditor` command | Add `setDescription(description)` and call it from route input. Keep empty string behavior; no real route caller sends `null`. |
+| `data_retention_days` | `+page.svelte` power-user number input assigns `$update.data_retention_days` | `createResourceEditor` editable field only | route form, save flow update | `FlowEditor` command | Add `setDataRetentionDays(days)` and normalize non-finite parsed values to `null`. |
+| `steps` | route callbacks assign `$update.steps[index]` and call `applyStepsWithSafeOrderRemap(...)` | mixed route and `FlowEditor` | step list/panel/graph | later step-command slice | Leave untouched in this scalar slice. |
+
+### Reuse-Before-Creating Decision
+
+Do not create a new settings controller or form store. `FlowEditor` already owns
+the editable resource store and authoring commands. This slice adds direct
+scalar commands to the existing owner.
+
+### Behavior Change
+
+`data_retention_days` will no longer be writable as `NaN`. The current route
+can produce `NaN` through `parseInt(...)` during invalid number input; the
+`FlowEditor` command normalizes non-finite values to `null`. No call site relies
+on `NaN` semantics.
+
+### Implementation Plan
+
+1. Add command helpers to `FlowEditor.ts`:
+
+   - `setName(name: string): void`
+   - `setDescription(description: string): void`
+   - `setDataRetentionDays(days: number | null): void`
+
+   Each command uses `editor.state.update.update(...)` and preserves the rest
+   of the resource object. `setName` intentionally allows the current empty
+   string behavior because publish readiness already blocks unnamed flows.
+   `setDescription` intentionally stores the current empty string behavior
+   rather than collapsing it to `null`. `setDataRetentionDays` converts
+   non-finite numbers to `null` so partial/invalid number input cannot write
+   `NaN` into the resource update store.
+
+2. Export the three commands from the frozen `flowEditor` object.
+
+3. Extend `FlowEditor.test.ts`:
+
+   - name command writes the string, marks the editor dirty, and preserves
+     description, metadata, steps, and data retention
+   - name command intentionally accepts the empty string and marks the editor
+     dirty, preserving current publish-readiness behavior
+   - description command writes the string and preserves name, metadata, steps,
+     and data retention
+   - description command intentionally accepts the empty string and marks the
+     editor dirty, preserving current route behavior
+   - data-retention command writes a number and preserves name, description,
+     metadata, and steps
+   - data-retention command preserves `0` as distinct from `null`
+   - data-retention command normalizes `NaN` to `null`
+
+4. Update the flow route basic settings inputs:
+
+   - `flowEditor.setName(event.currentTarget.value)`
+   - `flowEditor.setDescription(event.currentTarget.value)`
+   - `flowEditor.setDataRetentionDays(parsedValue)`
+
+5. Leave step-array writes unchanged and recorded as carry-forward.
+
+### Behavior Pins Before Deletion
+
+Extend `FlowEditor.test.ts` command-boundary coverage before replacing the
+route's direct scalar assignments.
+
+### Validation Commands
+
+Focused command tests:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/FlowEditor.test.ts
+```
+
+Relevant previous Batch 7 smoke:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- \
+  src/lib/features/flows/flowFormSchema.test.ts \
+  src/lib/features/flows/components/FlowRunLaunchInputState.test.ts \
+  src/lib/features/flows/components/FlowRunFileInputState.test.ts \
+  src/lib/features/flows/flowRunContract.test.ts \
+  src/lib/features/flows/flowRunWizard.test.ts
+```
+
+Broad app check, expected to retain known baseline failures:
+
+```bash
+cd frontend/apps/web && bun run check
+```
+
+Touched-file format/lint:
+
+```bash
+cd frontend/apps/web && bunx prettier --check \
+  src/lib/features/flows/FlowEditor.ts \
+  src/lib/features/flows/FlowEditor.test.ts \
+  'src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte'
+```
+
+```bash
+cd frontend/apps/web && bunx eslint \
+  src/lib/features/flows/FlowEditor.ts \
+  src/lib/features/flows/FlowEditor.test.ts \
+  'src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte'
+```
+
+Diff and text hygiene:
+
+```bash
+git diff --check -- \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.ts \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts \
+  'frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte' \
+  docs/refactor/execution/batch-7-frontend-state-owners
+```
+
+```bash
+rg --pcre2 -n "A\\.[0-9](?![0-9])|P0\\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|state-owner slice|Batch 7|as any|@ts-ignore|@ts-expect-error" \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.ts \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts \
+  'frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte' \
+  docs/refactor/prd \
+  docs/refactor/ai-builder-prompt-contract.md
+```
+
+Expected: no matches in touched frontend files.
+
+Positive disappearance check:
+
+```bash
+rg -n "\\$update\\.(name|description|data_retention_days)\\s*=" \
+  frontend/apps/web/src
+```
+
+Expected: no matches.
+
+### Carry-Forward
+
+- Step-array mutation remains the main open Flow authoring owner issue.
+- `editor.state.update` remains writable until step/name/description bindings
+  can be replaced or narrowed more broadly.

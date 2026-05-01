@@ -486,7 +486,7 @@
                           value={$update.name ?? ""}
                           disabled={$isPublished}
                           oninput={(event) => {
-                            $update.name = event.currentTarget.value;
+                            flowEditor.setName(event.currentTarget.value);
                           }}
                           placeholder={m.flow_flow_name()}
                         />
@@ -501,7 +501,7 @@
                           value={$update.description ?? ""}
                           disabled={$isPublished}
                           oninput={(event) => {
-                            $update.description = event.currentTarget.value;
+                            flowEditor.setDescription(event.currentTarget.value);
                           }}
                           placeholder={m.flow_description_placeholder()}
                         />
@@ -529,7 +529,7 @@
                                   const val = e.currentTarget.value
                                     ? parseInt(e.currentTarget.value, 10)
                                     : null;
-                                  $update.data_retention_days = val;
+                                  flowEditor.setDataRetentionDays(val);
                                 }}
                               />
                               <span class="text-secondary text-sm"

@@ -5,7 +5,7 @@ import type { Flow, Intric } from "@intric/intric-js";
 
 import { createFlowEditor } from "./FlowEditor";
 
-function makeFlow(metadataJson: Flow["metadata_json"] = null): Flow {
+function makeFlow(metadataJson: Flow["metadata_json"] = null, overrides: Partial<Flow> = {}): Flow {
   return {
     id: "00000000-0000-0000-0000-000000000001",
     tenant_id: "tenant-1",
@@ -17,7 +17,8 @@ function makeFlow(metadataJson: Flow["metadata_json"] = null): Flow {
     data_retention_days: null,
     created_at: null,
     updated_at: null,
-    steps: []
+    steps: [],
+    ...overrides
   };
 }
 
@@ -118,6 +119,101 @@ describe("FlowEditor metadata commands", () => {
   });
 });
 
+describe("FlowEditor basic settings commands", () => {
+  it("sets the name while preserving neighboring fields", () => {
+    const flow = makeFlow(
+      { owner: "metadata" },
+      { description: "Description", data_retention_days: 30 }
+    );
+    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    try {
+      const originalSteps = get(editor.state.update).steps;
+
+      editor.setName("Renamed flow");
+
+      const { update, hasUnsavedChanges } = readEditorState(editor);
+      expect(update.name).toBe("Renamed flow");
+      expect(update.description).toBe("Description");
+      expect(update.metadata_json).toEqual({ owner: "metadata" });
+      expect(update.steps).toBe(originalSteps);
+      expect(update.data_retention_days).toBe(30);
+      expect(hasUnsavedChanges).toBe(true);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("accepts an empty name while preserving publish-readiness behavior", () => {
+    const editor = createFlowEditor({ flow: makeFlow(), intric: makeIntric() });
+    try {
+      editor.setName("");
+
+      const { update, hasUnsavedChanges } = readEditorState(editor);
+      expect(update.name).toBe("");
+      expect(hasUnsavedChanges).toBe(true);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("sets the description string while preserving neighboring fields", () => {
+    const flow = makeFlow(
+      { owner: "metadata" },
+      { name: "Original name", description: "Original", data_retention_days: 14 }
+    );
+    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    try {
+      const originalSteps = get(editor.state.update).steps;
+
+      editor.setDescription("Updated description");
+
+      const { update, hasUnsavedChanges } = readEditorState(editor);
+      expect(update.name).toBe("Original name");
+      expect(update.description).toBe("Updated description");
+      expect(update.metadata_json).toEqual({ owner: "metadata" });
+      expect(update.steps).toBe(originalSteps);
+      expect(update.data_retention_days).toBe(14);
+      expect(hasUnsavedChanges).toBe(true);
+
+      editor.setDescription("");
+      expect(get(editor.state.update).description).toBe("");
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("sets data retention while preserving zero, null, and neighboring fields", () => {
+    const flow = makeFlow({ owner: "metadata" }, { name: "Flow", description: "Description" });
+    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    try {
+      const originalSteps = get(editor.state.update).steps;
+
+      editor.setDataRetentionDays(0);
+      expect(get(editor.state.update).data_retention_days).toBe(0);
+
+      editor.setDataRetentionDays(7);
+      let update = get(editor.state.update);
+      expect(update.data_retention_days).toBe(7);
+      expect(update.name).toBe("Flow");
+      expect(update.description).toBe("Description");
+      expect(update.metadata_json).toEqual({ owner: "metadata" });
+      expect(update.steps).toBe(originalSteps);
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(true);
+
+      editor.setDataRetentionDays(Number.NaN);
+      update = get(editor.state.update);
+      expect(update.data_retention_days).toBeNull();
+
+      editor.setDataRetentionDays(null);
+      const { update: finalUpdate, hasUnsavedChanges } = readEditorState(editor);
+      expect(finalUpdate.data_retention_days).toBeNull();
+      expect(hasUnsavedChanges).toBe(false);
+    } finally {
+      editor.destroy();
+    }
+  });
+});
+
 function renderEditorMetadata({
   flow,
   operation
@@ -148,4 +244,14 @@ function renderEditorMetadata({
   } finally {
     editor.destroy();
   }
+}
+
+function readEditorState(editor: ReturnType<typeof createFlowEditor>): {
+  update: Flow;
+  hasUnsavedChanges: boolean;
+} {
+  return {
+    update: get(editor.state.update),
+    hasUnsavedChanges: get(editor.state.currentChanges).hasUnsavedChanges
+  };
 }

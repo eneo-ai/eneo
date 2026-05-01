@@ -368,6 +368,27 @@ function createFlowEditor(data: FlowEditorInitData) {
     return "saved" as const;
   });
 
+  function setName(name: string): void {
+    editor.state.update.update((resource) => ({
+      ...resource,
+      name
+    }));
+  }
+
+  function setDescription(description: string): void {
+    editor.state.update.update((resource) => ({
+      ...resource,
+      description
+    }));
+  }
+
+  function setDataRetentionDays(days: number | null): void {
+    editor.state.update.update((resource) => ({
+      ...resource,
+      data_retention_days: Number.isFinite(days) ? days : null
+    }));
+  }
+
   function updateMetadataJson(buildNext: (metadata: FlowMetadataJson) => FlowMetadataJson) {
     editor.state.update.update((resource) => ({
       ...resource,
@@ -860,6 +881,9 @@ function createFlowEditor(data: FlowEditorInitData) {
     saveAssistant,
     updateAssistantImmediately,
     listAssistantPrompts,
+    setName,
+    setDescription,
+    setDataRetentionDays,
     replaceFormSchemaFields,
     setTranscriptionEnabled,
     setWizardMetadata,

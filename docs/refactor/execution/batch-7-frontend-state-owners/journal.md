@@ -765,3 +765,128 @@ Baseline/existing failures recorded:
 - Empty-state form-field examples still use domain-specific copy. This is UI
   copy cleanup, not state ownership.
 - Batch 8 step rerun has not started.
+
+## Iteration 7 - Flow Basic Settings Commands
+
+### Start Gate
+
+- Started from commit `8f21fd50 flows: centralize flow metadata authoring`.
+- Branch state before planning:
+  - `frontend/packages/ui/src/icons/types.d.ts` dirty, unrelated and untouched
+  - `scripts/run_codex_review.sh` dirty, unrelated and untouched
+  - `PRODUCT.md` untracked, unrelated and untouched
+  - no staged files
+- Scope limited to Flow basic settings scalar writes in the frontend route and
+  `FlowEditor`.
+- Backend runtime, migrations, Celery, data model, generated schemas, package
+  naming, namespace migration, Batch 8 rerun, and step-array mutation were not
+  in scope.
+
+### Plan Evidence
+
+- The route had the only direct writers for scalar basic settings:
+  - `$update.name = event.currentTarget.value`
+  - `$update.description = event.currentTarget.value`
+  - `$update.data_retention_days = val`
+- `FlowEditor.ts` already owned the resource update store and had just become
+  the owner for Flow metadata writes.
+- `rg -n '\$update\.(name|description|data_retention_days)\s*=' frontend/apps/web/src`
+  confirmed there were no other writers outside the route.
+
+### Claude Plan Review
+
+- First review returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, and
+  `MIN_SCORE: 6`.
+- Accepted findings:
+  - `setDescription(string | null)` was speculative because the route only
+    produces strings
+  - tests needed cross-field preservation pins rather than single-field setter
+    assertions
+  - the commands needed one real invariant to avoid cosmetic indirection
+  - `data_retention_days` needed explicit `0`/`null`/`NaN` behavior
+  - empty string behavior for name/description needed to be documented
+- The plan was revised so:
+  - `setDescription(description: string)` accepts only strings
+  - `setDataRetentionDays(days)` normalizes non-finite values to `null`
+  - tests pin preservation of neighboring fields
+  - tests pin empty-string name/description acceptance
+  - tests pin `0`, `null`, and `NaN` retention behavior
+- Plan verification returned `VERDICT: green`, `GREEN_LIGHT: yes`, and
+  `MIN_SCORE: 7`.
+
+### Implementation Result
+
+- `FlowEditor.ts` now exposes:
+  - `setName(name)`
+  - `setDescription(description)`
+  - `setDataRetentionDays(days)`
+- `setDataRetentionDays(...)` normalizes non-finite values to `null`, closing
+  the prior route path where invalid number input could write `NaN` into the
+  resource update store.
+- The route basic settings inputs now call `flowEditor` commands instead of
+  assigning `$update.name`, `$update.description`, or
+  `$update.data_retention_days` directly.
+- `FlowEditor.test.ts` now pins:
+  - neighboring fields survive each scalar command
+  - empty name and description strings remain valid draft values
+  - `0` is distinct from `null`
+  - `NaN` normalizes to `null`
+  - returning to the original `null` retention value clears dirty state through
+    existing `ResourceEditor` diff semantics
+
+### Validation
+
+Passed:
+
+- Baseline before source edits:
+  - `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/FlowEditor.test.ts`
+    - 1 file, 4 tests passed.
+  - `rg -n '\$update\.(name|description|data_retention_days)\s*=' frontend/apps/web/src`
+    - found the three planned route writers only.
+- Final focused tests:
+  - `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/FlowEditor.test.ts`
+    - 1 file, 8 tests passed.
+- Previous Batch 7 smoke:
+  - `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/components/FlowRunLaunchInputState.test.ts src/lib/features/flows/components/FlowRunFileInputState.test.ts src/lib/features/flows/flowRunContract.test.ts src/lib/features/flows/flowRunWizard.test.ts`
+    - 5 files, 41 tests passed.
+- `cd frontend/apps/web && bunx prettier --check ...` over touched frontend
+  files.
+- `cd frontend/apps/web && bunx eslint ...` over touched frontend files.
+- `git diff --check -- ...` over touched frontend/docs paths.
+- Anti-slippage grep over touched frontend files, PRDs, and the AI Builder
+  prompt contract returned no matches.
+- Positive disappearance grep over `frontend/apps/web/src` returned no
+  `$update.name =`, `$update.description =`, or
+  `$update.data_retention_days =` matches.
+
+Baseline/existing failures recorded:
+
+- `cd frontend/apps/web && bun run check` still fails with 43 errors and 7
+  warnings in 14 files. The errors are the known broad frontend baseline
+  categories in `frontend/packages/intric-js`, spaces/chat/dashboard route
+  typing, Flow route path typing, and existing AI Builder harness warnings. No
+  touched-file diagnostic appeared.
+
+### Claude Verification
+
+- Implementation review returned `VERDICT: green`, `GREEN_LIGHT: yes`, and
+  `MIN_SCORE: 8`.
+- Claude verified:
+  - the three route writers were removed
+  - preservation tests are stronger than existence-only setter tests
+  - `NaN` normalization is the real command invariant
+  - `0`, `null`, and dirty-state round-trip behavior are pinned
+- Accepted optional polish:
+  - simplified the finite-number guard in `setDataRetentionDays(...)`
+  - added a non-empty description assertion before the empty-string assertion
+
+### Carry-Forward
+
+- Step-array mutation remains the main open Flow authoring owner issue.
+- `editor.state.update` remains writable until the step-command slice can
+  replace or narrow direct step/name/description/data-retention writes more
+  structurally.
+- `createResourceEditor.editableFields` and explicit `FlowEditor` commands now
+  overlap as mutation allow-lists. Revisit this after step commands land and
+  the external store surface can be narrowed.
+- Batch 8 step rerun has not started.
