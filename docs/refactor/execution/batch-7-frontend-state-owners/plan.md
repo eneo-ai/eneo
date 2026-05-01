@@ -238,6 +238,7 @@ harness cast and is not touched by this slice.
 
 - Do not make Service the full mutation owner in this slice.
 - Do not move transport/SSE parsing out of Driver in this slice.
+
 - Do not change component state/read paths beyond the Service facade.
 - Do not add a new global state library.
 - Do not introduce helper/common/shared/store modules.
@@ -543,3 +544,319 @@ focused non-jsdom Service/Driver tests pass.
 - If this Service-owned latch pattern survives more slices, add a grep or lint
   guard that prevents direct Driver state reads outside the existing Service
   access/update boundary.
+
+## Iteration 3 - Flow Run File Input State Owner
+
+### TL;DR
+
+- Active scope: Flow run launch runtime file input state inside `FlowRunDialog.svelte`.
+- Canonical owner: a domain-specific `FlowRunFileInputState` Svelte state class.
+- The dialog remains the UI/orchestration adapter for browser events, API upload calls, toasts, and recorder refs.
+- `flowRunRecordingSession.ts` remains the persistence/resume helper owner; it does not gain Svelte mutable state.
+- No backend, generated schema, package naming, broad UI redesign, Flow authoring, evidence/status, Batch 8 runtime work, or unrelated dirty files are in scope.
+
+### Start Gate
+
+| Check | Result |
+|---|---|
+| `git log --oneline --max-count=8` | latest commit `6a35d3da flows: harden audio recording sessions` |
+| `git status --short --branch` | branch `feature/refactor-flows-flowai`; only known unrelated dirty files remain: `frontend/packages/ui/src/icons/types.d.ts`, `scripts/run_codex_review.sh`, `PRODUCT.md` |
+| `git diff --cached --name-only` | no staged files |
+
+Known unrelated dirty files remain out of scope and must not be touched:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+
+### Scope
+
+Expected files to change:
+
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte`
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts`
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.test.ts`
+- `docs/refactor/execution/batch-7-frontend-state-owners/plan.md`
+- `docs/refactor/execution/batch-7-frontend-state-owners/journal.md`
+- `docs/refactor/execution/batch-7-frontend-state-owners/retrospective-3.md`
+- `docs/refactor/execution/batch-7-frontend-state-owners/claude-reconciliation-3.md`
+
+Explicitly out of scope:
+
+- backend runtime, migrations, Celery, data model, and Batch 8 rerun work
+- Flow authoring editor state
+- evidence/status page state
+- generated schema changes
+- package rename from `@intric/intric-js`
+- `intric.*` to `eneo.*` namespace migration
+- broad Flow run dialog UI redesign
+- replacing `RecordingSession`, `recordingSessionStore`, or IndexedDB persistence
+- moving API upload calls, toast calls, DOM file picker creation, or recorder imperative refs into the state owner
+
+### Reuse-Before-Inventing Decision
+
+| Candidate | Existing responsibility | Why insufficient for this slice | Decision |
+|---|---|---|---|
+| `FlowRunDialog.svelte` | Full run launch UI, contract loading, wizard navigation, upload orchestration, recording session callbacks, submit orchestration | Currently owns every mutable runtime-file and recording state field directly, making the component the state owner and UI adapter at once | Move the cohesive runtime file input state cluster out of the component. |
+| `flowRunRecordingSession.ts` | Segment filename composition, IndexedDB persistence, recoverable-session scanning, session purge/detach helpers | Pure helper module; it should not gain Svelte `$state`, UI drag/upload flags, or component view state | Keep as persistence/resume helper owner. Reuse its `RecordingSessionState` and pure transition helpers inside the new state owner. |
+| `RecordingSession` | Per-step recorder lifecycle state machine and media retry lifecycle | Owns recorder lifecycle, not dialog upload files, errors, wizard blockers, resume prompt view state, or drag/upload flags | Keep unchanged and controlled by the dialog through existing callbacks. |
+| `flowRunWizard.ts` | Pure wizard pages, blockers, and review summary derivation | It consumes runtime file/upload/recording state but does not own mutable UI state | Keep unchanged. |
+| New `FlowRunFileInputState.svelte.ts` | One Svelte state owner for runtime file input view/session state | This is the missing canonical owner; it deletes the component's scattered `$state` fields instead of adding a parallel mirror | Create with a narrow domain-specific name and behavior-focused tests. |
+
+### State Inventory
+
+| state field | current owner | readers | writers | canonical owner | action |
+|---|---|---|---|---|---|
+| `runtimeFilesByStepId` | `FlowRunDialog.svelte:103` | blockers/review/current step/submission/resume | upload success, remove, discard, resume reattach, submit reset | `FlowRunFileInputState` | Move state and file list transitions into class. Dialog still calls upload API. |
+| `recordedFilesByStepId` | `FlowRunDialog.svelte:104` | dirty state/current step/retry/download/discard | recording done, upload success, discard, submit reset | `FlowRunFileInputState` | Move state and preserve-file/clear transitions into class. |
+| `recorderResetTokensByStepId` | `FlowRunDialog.svelte:105` | current runtime step prop | discard/reset | `FlowRunFileInputState` | Move with recorded-file reset invariant. |
+| `uploadErrorsByStepId` | `FlowRunDialog.svelte:106` | runtime step prop/retry | upload start/failure/discard/retry/reset | `FlowRunFileInputState` | Move with explicit clear/set methods. |
+| `recordingNoticesByStepId` | `FlowRunDialog.svelte:107` | runtime step prop | upload start/remove/discard/recording done/retry/reset | `FlowRunFileInputState` | Move with explicit clear/set methods. |
+| `skippedMessagesByStepId` | `FlowRunDialog.svelte:108` | runtime step prop | upload start/max-files/remove/discard/reset | `FlowRunFileInputState` | Move with explicit clear/set methods. |
+| `uploadingStepIds` | `FlowRunDialog.svelte:109` | blockers/current step | upload start/finally/reset | `FlowRunFileInputState` | Move with idempotent active flag method. |
+| `recordingStepIds` | `FlowRunDialog.svelte:110` | blockers/dirty/beforeunload | recorder state callback/reset | `FlowRunFileInputState` | Move with idempotent active flag method. |
+| `draggingStepId` | `FlowRunDialog.svelte:111` | runtime step prop | drag/drop/leave/reset | `FlowRunFileInputState` | Move as transient file-input UI state. |
+| `recordingSessionState` | `FlowRunDialog.svelte:115` | resume prompt/storage degraded/submission purge/recording counters | scan, record, resume, purge, discard, submit reset | `FlowRunFileInputState` | Move state and provide explicit transition methods while reusing `flowRunRecordingSession.ts` helpers. |
+| `sessionPhaseByStepId` | `FlowRunDialog.svelte:130` | runtime step prop | `RecordingSession` state callback/dispose/reset | `FlowRunFileInputState` | Move view phase state. |
+| `recordingSessionsByStepId` | `FlowRunDialog.svelte:128` | recorder lifecycle only | ensure/dispose/retry callbacks | `FlowRunDialog.svelte` | Keep in dialog because it stores imperative session objects bound to recorder component refs. |
+| `recorderRefsByStepId` | `FlowRunDialog.svelte:129` | session retry/start/stop callbacks | child ref effect | `FlowRunDialog.svelte` | Keep in dialog because it is an imperative component ref registry, not durable run-launch state. |
+| `formValues`, `inputText`, `currentPageIndex`, `runContract`, `isSubmitting` | `FlowRunDialog.svelte:96-112` | broader run launch wizard | broader wizard/submit flow | deferred | Leave for later run-launch slice; moving them with file inputs would exceed this narrow slice. |
+
+### Ownership Design
+
+Create `FlowRunFileInputState.svelte.ts` as the one mutable owner for runtime file input view state.
+
+It owns state, not side effects:
+
+- uploaded file lists
+- preserved recorded file per step
+- recorder reset tokens
+- upload/recording/skipped messages
+- uploading and recording active step ids
+- drag hover state
+- recoverable recording-session view state
+- session phase display state
+
+It does not own:
+
+- API calls through `intric`
+- toasts
+- DOM file input creation
+- recorder imperative refs
+- `RecordingSession` object lifecycle
+- run creation/idempotency
+- wizard page definitions or blocker rules
+
+Public surface must be domain-shaped, not a generic setter bag. The state owner
+will expose coarser operations that match the dialog's existing state clusters:
+
+- `getUploadedFiles(stepId)`
+- `beginStepUpload(stepId, { clearRecordingNotice })`
+- `recordUploadedFile(stepId, file)`
+- `recordUploadFailure(stepId, message)`
+- `recordSkippedFiles(stepId, message)`
+- `retryRequested(stepId)`
+- `finishStepUpload(stepId)`
+- `removeUploadedFile(stepId, fileId)` returning the current session id for
+  best-effort ledger detach
+- `dragEnteredStep(stepId)` / `dragLeftStep(stepId)` / `clearDrag()`
+- `recordingStarted(stepId)` / `recordingStopped(stepId)`
+- `prepareRecordedSegment(stepId)` returning `{ sessionId, segmentIndex }`
+- `recordSegmentPersistence({ stepId, file, notice, degraded })`
+- `clearPreservedRecording(stepId)`
+- `discardStepRecording(stepId)`
+- `beginResumeAction(stepId)` / `finishResumeAction()`
+- `applyResumeScan(hints, promptStepId)`
+- `attachRecoveredSession(stepId, sessionId, segmentCount)`
+- `discardRecoveredSession(stepId)`
+- `dismissResumePrompt()`
+- `syncSessionPhase(stepId, recordingState)`
+- `forgetSessionPhase(stepId)`
+- `resetForDialogClose()`
+- `resetAfterRunAccepted()`
+
+The class may expose read-only getters for derived values:
+
+- `localRecordingStepIds`
+- `hasLocalRecordedFiles`
+- `hasRuntimeFiles`
+- `hasActiveRecording`
+- `runtimeFilesSnapshot`
+- `uploadingStepIdsSnapshot`
+- `recordingStepIdsSnapshot`
+- `isStorageDegraded`
+
+It also exposes per-step read methods for component props:
+
+- `isStepUploading(stepId)`
+- `isStepRecording(stepId)`
+- `isDraggingStep(stepId)`
+- `getRecordedFile(stepId)`
+- `getRecorderResetToken(stepId)`
+- `getUploadError(stepId)`
+- `getRecordingNotice(stepId)`
+- `getSkippedMessage(stepId)`
+- `getResumeHint(stepId)`
+- `isResumePromptForStep(stepId)`
+- `isResumeBusyForStep(stepId)`
+- `getSessionPhase(stepId)`
+
+The dialog will consume these getters for blockers, dirty state, beforeunload,
+current-step props, and submission payload. `flowRunWizard.ts` and
+`buildStepInputsPayload` keep their current signatures in this slice; the
+dialog passes owner-provided snapshots into those existing pure helpers.
+
+`resetForDialogClose()` and `resetAfterRunAccepted()` reset in-memory dialog
+state only. They do not clear IndexedDB; persistence cleanup stays explicit in
+the dialog through `purgeSession`/`purgeAllSessions`.
+
+Instantiation is local to the dialog module instance:
+
+```ts
+const fileInputState = new FlowRunFileInputState();
+```
+
+It is not a singleton, context object, or global store. Dialog close and
+run-accepted paths must reset this local owner through one of the named reset
+methods instead of rebuilding per-field maps inline.
+
+`resetForDialogClose()` and `resetAfterRunAccepted()` clear the same in-memory
+fields. They are separate methods for call-site clarity, not behavioral
+divergence. In the run-accepted path, `resetAfterRunAccepted()` must run only
+after the dialog reads `sessionIdsByStepId` and calls `purgeAllSessions`.
+
+`FlowRunFileInputState` will continue to call these existing
+`flowRunRecordingSession.ts` transition helpers, so they remain load-bearing and
+are not duplicated:
+
+- `emptyRecordingSessionState`
+- `ensureSessionIdInState`
+- `bumpSegmentCountInState`
+- `clearStepSessionInState`
+
+`syncSessionPhase(stepId, recordingState)` accepts `SessionState` from
+`recordingSession.ts`; the new owner owns the `RecordingSession` lifecycle state
+to runtime-step view phase mapping.
+
+Implementation comments tied to moved state invariants move with the state.
+Comments tied to `RecordingSession` object lifecycle, API calls, DOM file input,
+or recorder imperative refs stay in `FlowRunDialog.svelte`.
+
+### Behavior Pins Before/With Refactor
+
+Use behavior-focused unit tests for `FlowRunFileInputState`, not
+component-private helper assertions. At least 40% of the new tests must pin
+multi-field invariants rather than one-field setters:
+
+- starts with empty runtime files, no preserved recordings, no active upload/recording, no resume prompt
+- appending/removing uploaded files keeps other steps untouched
+- upload start clears prior upload/skipped state and upload finish clears active uploading without changing files
+- preserving then clearing recorded files bumps the recorder reset token only for that step
+- `prepareRecordedSegment` reuses the same session id for subsequent segments and increments segment indices from `0`
+- `discardStepRecording` removes session ids, segment counts, hints, prompt, and busy state for the step without touching other steps
+- resume scan applies hints and first prompt step
+- recovered session attach records session id/count and clears the prompt for that step
+- discard recovered session clears the step hints, prompt, and busy state together
+- remove uploaded file clears recording notice and skipped message while returning the session id for ledger detach
+- discard step recording clears preserved file, reset token, upload error, recording notice, skipped message, runtime files, and in-memory session view together
+- storage degraded is sticky until a reset method is called
+- `resetForDialogClose()` clears file, upload, recording, drag, resume, and session-phase state
+- `resetAfterRunAccepted()` clears the same in-memory owner after the dialog explicitly purges persisted sessions
+- per-step getters return stable defaults for unknown steps: empty files, `null`
+  preserved file/error/notice/skipped/resume hint, `0` reset token, `false`
+  uploading/recording/drag/resume busy/prompt, and `"idle"` session phase
+- the state owner instance survives dialog open toggles; `resetForDialogClose()`
+  is the canonical clear path between opens
+- concurrent upload flags stay independent across steps, and finishing one step
+  does not clear another step's upload-in-progress state
+
+Post-implementation owner checks:
+
+```bash
+rg -n "uploadingStepIds|recordingStepIds|runtimeFilesByStepId|recordedFilesByStepId|uploadErrorsByStepId|recordingNoticesByStepId|skippedMessagesByStepId|draggingStepId|sessionPhaseByStepId|recorderResetTokensByStepId|recordingSessionState" \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte
+```
+
+Expected: no direct state-field matches outside `fileInputState.*` reads and
+method calls.
+
+```bash
+wc -l frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte
+```
+
+Target: reduce `FlowRunDialog.svelte` by at least 150 LOC from the current 1663
+LOC. If implementation cannot meet that without weakening behavior, stop and
+record a no-go rather than shipping a shallow relocation.
+
+Existing behavior pins that must keep passing:
+
+- `frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.test.ts`
+- `frontend/apps/web/src/lib/features/audio/recordingSession.test.ts`
+- `frontend/apps/web/src/lib/features/flows/flowRunWizard.test.ts`
+
+### Validation Commands
+
+Targeted state-owner tests:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- \
+  src/lib/features/flows/components/FlowRunFileInputState.test.ts \
+  src/lib/features/audio/flowRunRecordingSession.test.ts \
+  src/lib/features/audio/recordingSession.test.ts \
+  src/lib/features/flows/flowRunWizard.test.ts
+```
+
+Full audio targeted suite:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- src/lib/features/audio
+```
+
+Broad frontend check, expected to retain known baseline failures:
+
+```bash
+cd frontend/apps/web && bun run check
+```
+
+Touched-file lint/format:
+
+```bash
+cd frontend/apps/web && bunx prettier --check \
+  src/lib/features/flows/components/FlowRunDialog.svelte \
+  src/lib/features/flows/components/FlowRunFileInputState.svelte.ts \
+  src/lib/features/flows/components/FlowRunFileInputState.test.ts
+```
+
+```bash
+cd frontend/apps/web && bunx eslint \
+  src/lib/features/flows/components/FlowRunDialog.svelte \
+  src/lib/features/flows/components/FlowRunFileInputState.svelte.ts \
+  src/lib/features/flows/components/FlowRunFileInputState.test.ts
+```
+
+Diff and text hygiene:
+
+```bash
+git diff --check -- \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.test.ts \
+  docs/refactor/execution/batch-7-frontend-state-owners
+```
+
+```bash
+rg --pcre2 -n "A\\.[0-9](?![0-9])|P0\\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|state-owner slice|Batch 7|as any|@ts-ignore|@ts-expect-error" \
+  frontend/apps/web/src/lib/features/flows/components \
+  docs/refactor/prd \
+  docs/refactor/ai-builder-prompt-contract.md
+```
+
+Expected: no new matches.
+
+### Non-Goals
+
+- Do not extract the entire `FlowRunDialog` workflow in this slice.
+- Do not move upload side effects into the state owner.
+- Do not move `RecordingSession` object lifecycle or recorder refs into the state owner.
+- Do not change file upload behavior, resume behavior, translated copy, or UI layout.
+- Do not start Batch 8.

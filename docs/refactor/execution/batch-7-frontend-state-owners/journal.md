@@ -262,3 +262,109 @@ Baseline/environment failures recorded:
 - If the Service-owned latch pattern survives more frontend state-owner work,
   consider adding a static guard that bans direct Driver state reads outside the
   private `#state` accessor.
+
+## Iteration 3 - Flow Run File Input State Owner
+
+### Start Gate
+
+- Started from commit `6a35d3da flows: harden audio recording sessions`.
+- Branch state before planning:
+  - `frontend/packages/ui/src/icons/types.d.ts` dirty, unrelated and untouched
+  - `scripts/run_codex_review.sh` dirty, unrelated and untouched
+  - `PRODUCT.md` untracked, unrelated and untouched
+  - no staged files
+- Scope limited to Flow run launch runtime file input state inside
+  `FlowRunDialog.svelte`.
+- Backend runtime, migrations, Celery, data model, generated schemas, package
+  naming, Flow authoring, evidence/status state, and Batch 8 rerun work were
+  not in scope.
+
+### Plan Evidence
+
+- `FlowRunDialog.svelte` was 1663 LOC before this slice and owned runtime file
+  maps, upload flags, local recorded files, drag state, resume prompt state, and
+  recording session phase state directly.
+- `flowRunRecordingSession.ts` already owned segment filename composition,
+  IndexedDB persistence, recoverable-session scanning, session purge/detach
+  helpers, and pure `RecordingSessionState` transitions.
+- `RecordingSession` already owned the per-step recorder lifecycle and retry
+  state machine.
+- The planned owner boundary therefore became: move mutable runtime file input
+  view state into a Svelte state owner while keeping API calls, toasts, recorder
+  refs, `RecordingSession` objects, and IndexedDB helpers outside it.
+
+### Claude Plan Review
+
+- First Claude review returned `VERDICT: changes_required`,
+  `GREEN_LIGHT: no`, `MIN_SCORE: 6`.
+- Accepted findings:
+  - the initial method list was too close to a per-field setter bag
+  - the plan needed separate reset call sites for dialog close and accepted run
+  - tests needed multi-field invariants, not mostly single-field setter checks
+  - instantiation lifecycle and helper reuse needed to be explicit
+- Revised plan replaced field setters with domain operations such as
+  `beginStepUpload`, `removeUploadedFile`, `prepareRecordedSegment`,
+  `discardStepRecording`, `attachRecoveredSession`, and separate reset methods.
+- Second review still returned `changes_required`, with specification-level
+  gaps around read-surface getters and `SessionState` mapping ownership.
+- Final plan verification returned `VERDICT: green`, `GREEN_LIGHT: yes`,
+  `MIN_SCORE: 7`.
+- Final artifact:
+  `.codex/artifacts/claude-peer-loop-flow-run-file-input-state-owner-plan-verification-2-20260501T091802Z.md`.
+
+### Implementation Result
+
+- Added `FlowRunFileInputState.svelte.ts` as the canonical mutable owner for
+  runtime file input state: uploaded files, preserved recorded files, recorder
+  reset tokens, upload/recording notices, skipped messages, upload/recording
+  active steps, drag hover, recoverable-session view state, and session phase.
+- `FlowRunDialog.svelte` now reads file-input state through snapshots and
+  per-step getters and mutates it through domain operations.
+- `FlowRunDialog.svelte` still owns side effects and browser boundaries:
+  `intric` API calls, toasts, DOM file picker creation, recorder refs, and live
+  `RecordingSession` object lifecycle.
+- `flowRunRecordingSession.ts` remains the persistence/resume helper owner; the
+  new state class reuses its pure transition helpers instead of duplicating
+  them.
+- The accepted-run path now reads the session-id snapshot, purges persisted
+  sessions, then calls `resetAfterRunAccepted()`.
+- `FlowRunDialog.svelte` decreased from 1663 LOC to 1513 LOC, meeting the
+  planned 150-line reduction gate exactly.
+
+### Validation
+
+Passed:
+
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/components/FlowRunFileInputState.test.ts src/lib/features/audio/flowRunRecordingSession.test.ts src/lib/features/audio/recordingSession.test.ts src/lib/features/flows/flowRunWizard.test.ts`
+  - 4 files, 53 tests passed.
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/audio`
+  - 6 files, 54 tests passed.
+- `cd frontend/apps/web && bunx prettier --check src/lib/features/flows/components/FlowRunDialog.svelte src/lib/features/flows/components/FlowRunFileInputState.svelte.ts src/lib/features/flows/components/FlowRunFileInputState.test.ts`
+- `cd frontend/apps/web && bunx eslint src/lib/features/flows/components/FlowRunDialog.svelte src/lib/features/flows/components/FlowRunFileInputState.svelte.ts src/lib/features/flows/components/FlowRunFileInputState.test.ts`
+- `git diff --check -- frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.test.ts docs/refactor/execution/batch-7-frontend-state-owners`
+- Touched-file anti-slippage grep returned no matches.
+- `wc -l` confirmed `FlowRunDialog.svelte` at 1513 LOC and
+  `FlowRunFileInputState.svelte.ts` at 331 LOC.
+
+Baseline/existing failures recorded:
+
+- Broad `cd frontend/apps/web && bun run check` still fails with the known
+  baseline categories in `frontend/packages/intric-js`, spaces/chat/dashboard
+  route typing, Flow route links, and AI Builder harness Svelte warnings. No
+  touched `FlowRunDialog` or `FlowRunFileInputState` diagnostic appeared.
+- Broad anti-slippage grep over all Flow component files still finds existing
+  `as any` usage in HTTP config helpers/tests outside this slice. The same grep
+  over touched files returned no matches.
+
+### Carry-Forward
+
+- `FlowRunDialog.svelte` still owns broader run-launch workflow state:
+  form values, freeform text, current page, contract loading, idempotency, and
+  submit orchestration.
+- `FlowRunFileInputState` deliberately aggregates transient file-input state
+  and recoverable recording-session view state. If future resume work grows, a
+  separate recording-session view owner may become worthwhile.
+- Broad frontend check remains too noisy to use as the sole gate for small
+  frontend slices until the existing generated-client and route typing baseline
+  is resolved.
+- Batch 8 step rerun has not started.
