@@ -17,8 +17,11 @@
   } from "$lib/features/flows/flowRuntimeErrorMapping";
   import AudioRecorder from "$lib/features/audio/AudioRecorder.svelte";
   import type { RecordingStopReason } from "$lib/features/audio/recordedAudioFile";
+  import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
   import type { FlowRunBlocker } from "$lib/features/flows/flowRunWizard";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
+  import FlowRunResumePrompt from "./FlowRunResumePrompt.svelte";
+  import FlowRunStorageDegradedNotice from "./FlowRunStorageDegradedNotice.svelte";
 
   let {
     step,
@@ -35,6 +38,11 @@
     dragging,
     labels,
     locale,
+    resumeHint = null,
+    showResumePrompt = false,
+    resumeBusy = false,
+    storageDegraded = false,
+    sessionPhase = "idle",
     onOpenFilePicker,
     onRemoveFile,
     onDownloadUploadedFile,
@@ -42,8 +50,15 @@
     onDownloadRecordedAudio,
     onRetryRecordedAudio,
     onDiscardRecordedAudio,
+    onSaveForLater,
+    onContinueResume,
+    onDiscardResume,
+    onDismissResumePrompt,
     onRecordingDone,
     onRecordingStateChange,
+    onRecorderRef,
+    onSessionRetry,
+    onSessionDismissFailure,
     onDrop,
     onDragOver,
     onDragLeave
@@ -62,6 +77,14 @@
     dragging: boolean;
     labels: FlowRunDialogLabels;
     locale: "sv" | "en";
+    resumeHint?: SessionRecoveryHint | null;
+    showResumePrompt?: boolean;
+    resumeBusy?: boolean;
+    storageDegraded?: boolean;
+    // The session-level state surfaces a "trying to reconnect" hint and a
+    // paused-failed CTA right next to the recorder so the user knows the
+    // system is still working without scrolling.
+    sessionPhase?: "idle" | "reconnecting" | "paused-failed";
     onOpenFilePicker: () => void;
     onRemoveFile: (fileId: string) => void;
     onDownloadUploadedFile: (file: UploadedFile) => void;
@@ -69,12 +92,25 @@
     onDownloadRecordedAudio: () => void;
     onRetryRecordedAudio: () => void;
     onDiscardRecordedAudio: () => void;
+    onSaveForLater?: () => void;
+    onContinueResume?: (hint: SessionRecoveryHint) => void;
+    onDiscardResume?: (hint: SessionRecoveryHint) => void;
+    onDismissResumePrompt?: () => void;
     onRecordingDone: (params: {
       blob: Blob;
       mimeType: string;
       reason: RecordingStopReason;
+      durationMs: number;
     }) => void;
-    onRecordingStateChange?: (isRecording: boolean) => void;
+    onRecordingStateChange?: (isRecording: boolean, meta?: { origin: "user" | "external" }) => void;
+    // Lets the dialog grab an imperative handle on the recorder so the
+    // session controller can call startExternal/stopExternal during retries.
+    onRecorderRef?: (
+      stepId: string,
+      ref: { startExternal: () => Promise<void>; stopExternal: () => void } | null
+    ) => void;
+    onSessionRetry?: () => void;
+    onSessionDismissFailure?: () => void;
     onDrop: (event: DragEvent) => void;
     onDragOver: (event: DragEvent) => void;
     onDragLeave: (event: DragEvent) => void;
@@ -109,10 +145,39 @@
 
   const supportsAudioRecording = $derived(step.input_format === "audio");
   const acceptedMimetypes = $derived(step.accepted_mimetypes ?? []);
+
+  let recorderRef = $state<{
+    startExternal: () => Promise<void>;
+    stopExternal: () => void;
+  } | null>(null);
+
+  // Push the live ref up to the dialog every time it changes so the
+  // session controller (which lives in the dialog) can call back into
+  // this recorder. Returning a teardown clears the ref on unmount.
+  $effect(() => {
+    if (!supportsAudioRecording) return;
+    onRecorderRef?.(step.step_id, recorderRef);
+    return () => onRecorderRef?.(step.step_id, null);
+  });
 </script>
 
 <div class="flex flex-col gap-5">
   <div class="px-1">
+    {#if showResumePrompt && resumeHint && onContinueResume && onDiscardResume && onDismissResumePrompt}
+      <FlowRunResumePrompt
+        hint={resumeHint}
+        busy={resumeBusy}
+        {locale}
+        onContinue={onContinueResume}
+        onDiscard={onDiscardResume}
+        onDismiss={onDismissResumePrompt}
+      />
+    {/if}
+
+    {#if storageDegraded}
+      <FlowRunStorageDegradedNotice />
+    {/if}
+
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
@@ -287,11 +352,45 @@
         </div>
 
         <AudioRecorder
+          bind:this={recorderRef}
           maxBytes={step.max_file_size_bytes ?? null}
           resetToken={recorderResetToken}
           {onRecordingDone}
           onRecordingStateChange={onRecordingStateChange ?? (() => {})}
         />
+
+        {#if sessionPhase === "reconnecting"}
+          <div
+            class="border-warning-default/30 bg-warning-dimmer text-warning-stronger mt-3 flex items-center gap-2 rounded-md border px-3.5 py-2.5 text-sm"
+            role="status"
+            aria-live="polite"
+          >
+            <IconLoadingSpinner class="size-4 shrink-0 animate-spin" />
+            <span>{m.recording_session_reconnecting()}</span>
+          </div>
+        {:else if sessionPhase === "paused-failed"}
+          <Alert.Root
+            class="border-negative-default/30 bg-negative-dimmer/70 text-negative-stronger mt-3"
+          >
+            <Alert.Title>{m.recording_session_paused_title()}</Alert.Title>
+            <Alert.Description class="text-negative-stronger/90">
+              {m.recording_session_paused_body()}
+            </Alert.Description>
+            <div class="mt-3 flex flex-wrap gap-2">
+              {#if onSessionRetry}
+                <Button variant="outline" size="sm" onclick={onSessionRetry}>
+                  <IconRefresh data-icon="inline-start" />
+                  {m.recording_session_paused_retry()}
+                </Button>
+              {/if}
+              {#if onSessionDismissFailure}
+                <Button variant="ghost" size="sm" onclick={onSessionDismissFailure}>
+                  {m.recording_session_paused_dismiss()}
+                </Button>
+              {/if}
+            </div>
+          </Alert.Root>
+        {/if}
 
         {#if recordedFile && uploadError}
           <Alert.Root
@@ -310,6 +409,11 @@
                 <IconDownload data-icon="inline-start" />
                 {m.save_as_file()}
               </Button>
+              {#if onSaveForLater}
+                <Button variant="outline" size="sm" onclick={onSaveForLater}>
+                  {m.recording_save_for_later()}
+                </Button>
+              {/if}
               <Button variant="ghost" size="sm" onclick={onDiscardRecordedAudio}>
                 <IconTrash data-icon="inline-start" />
                 {m.discard()}
