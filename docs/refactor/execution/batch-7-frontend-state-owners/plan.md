@@ -860,3 +860,281 @@ Expected: no new matches.
 - Do not move `RecordingSession` object lifecycle or recorder refs into the state owner.
 - Do not change file upload behavior, resume behavior, translated copy, or UI layout.
 - Do not start Batch 8.
+
+## Iteration 4 - Flow Run Launch Input State Owner
+
+### TL;DR
+
+- Active scope: Flow run launch form/freeform input state inside `FlowRunDialog.svelte`.
+- Canonical owner: a domain-specific `FlowRunLaunchInputState` Svelte state class.
+- The dialog remains the UI/orchestration adapter for contract loading, wizard navigation, API calls, idempotency, toasts, file inputs, and recorder/session side effects.
+- `FlowRunDialogForm.svelte` remains a pure form renderer and receives field read/write functions from the state owner instead of duplicating form value normalization.
+- No backend, generated schema, package naming, broad UI redesign, Flow authoring, evidence/status, Batch 8 runtime work, or unrelated dirty files are in scope.
+
+### Start Gate
+
+| Check | Result |
+|---|---|
+| `git log --oneline --max-count=8` | latest commit `16f92c19 flows: centralize run file input state` |
+| `git status --short --branch` | branch `feature/refactor-flows-flowai`; only known unrelated dirty files remain: `frontend/packages/ui/src/icons/types.d.ts`, `scripts/run_codex_review.sh`, `PRODUCT.md` |
+| `git diff --cached --name-only` | no staged files |
+
+Known unrelated dirty files remain out of scope and must not be touched:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+
+### Scope
+
+Expected files to change:
+
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte`
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunDialogForm.svelte`
+- `frontend/apps/web/src/lib/features/flows/flowRunContract.ts`
+- `frontend/apps/web/src/lib/features/flows/flowRunContract.test.ts`
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunLaunchInputState.svelte.ts`
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunLaunchInputState.test.ts`
+- `docs/refactor/execution/batch-7-frontend-state-owners/plan.md`
+- `docs/refactor/execution/batch-7-frontend-state-owners/journal.md`
+- `docs/refactor/execution/batch-7-frontend-state-owners/retrospective-4.md`
+- `docs/refactor/execution/batch-7-frontend-state-owners/claude-reconciliation-4.md`
+
+Explicitly out of scope:
+
+- backend runtime, migrations, Celery, data model, and Batch 8 rerun work
+- Flow authoring editor state
+- evidence/status page state
+- generated schema changes
+- package rename from `@intric/intric-js`
+- `intric.*` to `eneo.*` namespace migration
+- broad Flow run dialog UI redesign
+- file input, upload, recorder, recording-session, or IndexedDB persistence ownership
+- moving API run creation, idempotency key derivation, toasts, DOM focus, or dialog open/close ownership into the input state owner
+
+### Reuse-Before-Inventing Decision
+
+| Candidate | Existing responsibility | Why insufficient for this slice | Decision |
+|---|---|---|---|
+| `FlowRunDialog.svelte` | Full run launch UI, contract loading, wizard navigation, file input state, freeform/form values, last-input reuse, payload build, submit orchestration | Still owns form/freeform state and payload logic directly after the file-input state owner landed | Move form/freeform input state and payload derivation into a narrow state owner. |
+| `FlowRunDialogForm.svelte` | Renders normalized form fields and emits field changes | Duplicates `getFieldValue` and `getFieldMultiValue` normalization from the dialog | Keep as renderer, but read form values through functions supplied by the state owner. |
+| `flowRunContract.ts` | Pure backend contract helpers: intent, step input payload, template readiness | It already owns run-contract/input-payload shaping and is the right home for pure field/payload transforms that do not require Svelte state | Extend with pure form/freeform input helpers; keep mutable Svelte state out of it. |
+| `FlowRunFileInputState.svelte.ts` | Runtime file input, upload/recording view state, recoverable session view state | Correct owner for files only; mixing text/form payload state into it would blur responsibilities | Keep unchanged and compose with the new input state owner in the dialog. |
+| New `FlowRunLaunchInputState.svelte.ts` | One Svelte state owner for freeform text and form values | This deletes the dialog's mutable input state without turning the class into a pure-helper bucket | Create with a narrow domain-specific name and behavior-focused tests. |
+
+### State Inventory
+
+| state/logic | current owner | readers | writers | canonical owner | action |
+|---|---|---|---|---|---|
+| `inputText` | `FlowRunDialog.svelte:92`, freeform textarea at `1365`, review at `1418`, payload at `1115` | freeform page, review page, dirty guard, submit payload | freeform textarea, last-input reuse, accepted-run reset | `FlowRunLaunchInputState` | Move to state owner as `freeformText` with explicit setter/reset. |
+| `formValues` | `FlowRunDialog.svelte:98`, required checks at `131-140`, form props at `1348-1355`, payload at `1100-1113` | required blockers, form component, review summaries, submit payload | form field changes, last-input reuse, accepted-run reset | `FlowRunLaunchInputState` | Move to state owner with field-level set/read methods. |
+| `missingRequiredFields` | `FlowRunDialog.svelte:131-140` | blockers and form errors | derived from `formValues` and contract form fields | `flowRunContract.ts` pure helper | Move required-field evaluation into pure helper fed by the state owner's snapshot. |
+| field value normalization | `FlowRunDialog.svelte:400-417` and duplicated in `FlowRunDialogForm.svelte:26-41` | form controls, payload, review | derived from `formValues` | `flowRunContract.ts` pure helper | Centralize as `readFlowRunFieldValue` and `readFlowRunFieldMultiValue`; use from dialog and form renderer. |
+| `setFieldValue` | `FlowRunDialog.svelte:419-425` | form renderer | user edits | `FlowRunLaunchInputState` | Move to owner method. |
+| last-input reuse | `FlowRunDialog.svelte:427-453` | reuse button | user clicks reuse | `flowRunContract.ts` pure helper plus `FlowRunLaunchInputState.applyReusedInput` | Pure helper computes the replacement values; state owner applies them. |
+| run input payload assembly | `FlowRunDialog.svelte:1100-1118` | submit orchestration | submit click | `flowRunContract.ts` pure helper | Pure helper builds input payload from the state owner's snapshot; dialog still builds run intent and calls API. |
+| review field values | `FlowRunDialog.svelte:1164-1169` | review summary | derived from form values | `flowRunContract.ts` pure helper | Move to pure helper. |
+
+### Ownership Decision
+
+`FlowRunLaunchInputState` owns only mutable user-provided run input state. Pure derivations that combine that state with contract form fields belong in `flowRunContract.ts`. The state owner does not load contracts, choose wizard pages, upload files, derive idempotency keys, create runs, display toasts, manage focus, or close the dialog.
+
+This keeps the separation of concerns explicit:
+
+- `FlowRunLaunchInputState` owns form/freeform values.
+- `flowRunContract.ts` owns pure field normalization, required-field checks, reuse-last-input computation, review field text, and input payload derivation.
+- `FlowRunFileInputState` owns runtime file input state.
+- `flowRunContract.ts` owns API intent/contract shaping.
+- `flowRunWizard.ts` owns pure page/blocker/review summary derivation.
+- `FlowRunDialog.svelte` remains the adapter that wires UI events to these owners and performs browser/API side effects.
+
+### Behavior Pins Before Deletion
+
+Add pure helper coverage to `flowRunContract.test.ts` and state-owner coverage to `FlowRunLaunchInputState.test.ts` before removing dialog-owned state:
+
+- defaults start empty and not dirty.
+- `setFieldValue` updates only the selected field key.
+- pure field readers preserve current scalar, multiselect-array, and comma-delimited string behavior.
+- pure required-field checks preserve current empty/null/undefined/blank and multiselect-empty behavior.
+- pure reuse-last-input computation preserves array multiselect payloads, comma-delimited multiselect string payloads, `null` multiselect payloads becoming `[]`, missing non-multiselect fields becoming `""`, and freeform fallback to `text` over JSON-stringified payload when both are present.
+- pure payload construction preserves number conversion for `"0"` and `"-3.14"`, whitespace-only number-as-empty-string behavior, multiselect arrays, and freeform text payload.
+- stale form values survive contract changes but helpers only iterate the current contract's fields.
+- `hasDirtyInput` is the current close-confirmation approximation: true when at least one form value produces a non-empty trimmed string or freeform text is non-empty after trim; filling and clearing a field returns it to false.
+- reset clears form/freeform state.
+
+Existing pins that must keep passing:
+
+- `FlowRunFileInputState.test.ts`
+- `flowRunWizard.test.ts`
+- `flowRunContract.test.ts`
+- focused audio recording tests touched by the previous run-input file slice
+
+### Implementation Plan
+
+1. Extend `flowRunContract.ts` with pure helpers:
+
+   - `readFlowRunFieldValue(formValues, field)`
+   - `readFlowRunFieldMultiValue(formValues, field)`
+   - `getMissingFlowRunRequiredFields(formValues, formFields)`
+   - `getFlowRunReviewFieldValue(formValues, field)`
+   - `computeReusedFlowRunInput({ currentFormValues, currentFreeformText, lastInputPayload, formFields, hasFormFields, showFreeformTextInput })`
+   - `buildFlowRunInputPayload({ formValues, freeformText, formFields, hasFormFields, showFreeformTextInput })`
+
+2. Create `FlowRunLaunchInputState.svelte.ts` with a single class:
+
+   - private `$state` fields for form values and freeform text only
+   - read-only `formValuesSnapshot`, `freeformText`, and `hasDirtyInput`
+   - `setFreeformText(value)`
+   - `setFieldValue(field, value)`
+   - `applyReusedInput({ formValues, freeformText })`
+   - `reset()`
+
+   `formValuesSnapshot` returns a fresh object copy typed as `Readonly<Record<string, unknown>>`; array values are copied so callers cannot mutate multiselect state through a returned snapshot.
+
+   `hasDirtyInput` returns true when at least one form value produces a non-empty trimmed string or `freeformText.trim().length > 0`. This preserves the current close-confirmation approximation, not a true diff against initial values.
+
+   The class has one public `reset()` method. Do not add duplicate `resetForDialogClose` or `resetAfterRunAccepted` wrappers unless a later slice introduces real behavioral divergence.
+
+   `applyReusedInput` accepts a fully prepared `{ formValues, freeformText }` object and replaces internal state with those values. It does not merge partial patches.
+
+3. Keep the class free of API clients, `toast`, DOM, file input, recording, wizard-page, contract-derived fields, and dialog-close behavior.
+
+4. Update `FlowRunDialog.svelte`:
+
+   - replace `inputText` and `formValues` `$state` fields with `const launchInputState = new FlowRunLaunchInputState()`
+   - derive missing required fields through `getMissingFlowRunRequiredFields(launchInputState.formValuesSnapshot, formFields)`
+   - derive dirty state from `launchInputState.hasDirtyInput` plus file-input state
+   - compute last-input reuse through `computeReusedFlowRunInput(...)`, passing the current form-values snapshot and freeform text, then apply it through `launchInputState.applyReusedInput(...)`
+   - call `buildFlowRunInputPayload(...)` before building the run intent
+   - call `launchInputState.reset()` on dialog reset and accepted-run reset
+   - replace the freeform textarea `bind:value` with explicit value and input handler so the class remains the write owner
+
+5. Update `FlowRunDialogForm.svelte`:
+
+   - remove duplicated local field normalization helpers
+   - remove the `formValues` prop
+   - receive `launchInputState: FlowRunLaunchInputState` directly and import `readFlowRunFieldValue` / `readFlowRunFieldMultiValue` from `flowRunContract.ts`
+   - call `launchInputState.setFieldValue(...)` for field writes; do not thread closure props from the dialog
+   - keep receiving `missingRequiredFields` as a prop from the dialog; the form must not recompute required-field arrays locally
+   - keep rendering and field error IDs unchanged
+
+6. `computeReusedFlowRunInput(...)` returns both `formValues` and `freeformText` for every branch. Inactive branches return the current values passed by the caller unchanged. Form-field reuse starts from the current form-values snapshot, overwrites every current form field according to existing behavior (`undefined` non-multiselect values become `""`; `null` or missing multiselect values become `[]`), and preserves stale keys that are not in the current contract. Freeform reuse preserves current form values and uses `lastInputPayload.text` before falling back to JSON-stringifying the payload.
+
+7. In `$derived.by` blocks that call multiple pure helpers with the same form values, read `launchInputState.formValuesSnapshot` once into a local `const` and pass that snapshot to each helper.
+
+8. Keep tests split by owner:
+
+   - `FlowRunLaunchInputState.test.ts` covers only default state, value mutation, `applyReusedInput` replacement semantics, `reset()`, and `hasDirtyInput` invariants.
+   - `flowRunContract.test.ts` covers field normalization, required-field detection, review values, reuse computation, and payload construction.
+
+9. Add a measured success gate before commit:
+
+   ```bash
+   wc -l frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte
+   ```
+
+   Target: reduce `FlowRunDialog.svelte` by at least 80 LOC from the current 1513 LOC. If implementation cannot meet that without weakening behavior, stop and record a no-go rather than shipping a shallow relocation.
+
+10. Do not introduce helper/common/shared/store modules. Do not add comments unless a test or name cannot carry the invariant.
+
+### Validation Commands
+
+Targeted launch/file/wizard tests:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- \
+  src/lib/features/flows/components/FlowRunLaunchInputState.test.ts \
+  src/lib/features/flows/components/FlowRunFileInputState.test.ts \
+  src/lib/features/flows/flowRunWizard.test.ts \
+  src/lib/features/flows/flowRunContract.test.ts
+```
+
+Focused audio suite to ensure the previous recorder file-input slice remains stable:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- src/lib/features/audio
+```
+
+Broad app check, expected to retain known baseline failures:
+
+```bash
+cd frontend/apps/web && bun run check
+```
+
+Touched-file lint/format:
+
+```bash
+cd frontend/apps/web && bunx prettier --check \
+  src/lib/features/flows/flowRunContract.ts \
+  src/lib/features/flows/flowRunContract.test.ts \
+  src/lib/features/flows/components/FlowRunDialog.svelte \
+  src/lib/features/flows/components/FlowRunDialogForm.svelte \
+  src/lib/features/flows/components/FlowRunLaunchInputState.svelte.ts \
+  src/lib/features/flows/components/FlowRunLaunchInputState.test.ts
+```
+
+```bash
+cd frontend/apps/web && bunx eslint \
+  src/lib/features/flows/flowRunContract.ts \
+  src/lib/features/flows/flowRunContract.test.ts \
+  src/lib/features/flows/components/FlowRunDialog.svelte \
+  src/lib/features/flows/components/FlowRunDialogForm.svelte \
+  src/lib/features/flows/components/FlowRunLaunchInputState.svelte.ts \
+  src/lib/features/flows/components/FlowRunLaunchInputState.test.ts
+```
+
+Diff and text hygiene:
+
+```bash
+git diff --check -- \
+  frontend/apps/web/src/lib/features/flows/flowRunContract.ts \
+  frontend/apps/web/src/lib/features/flows/flowRunContract.test.ts \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunDialogForm.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunLaunchInputState.svelte.ts \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunLaunchInputState.test.ts \
+  docs/refactor/execution/batch-7-frontend-state-owners
+```
+
+```bash
+rg --pcre2 -n "A\\.[0-9](?![0-9])|P0\\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|state-owner slice|Batch 7|as any|@ts-ignore|@ts-expect-error" \
+  frontend/apps/web/src/lib/features/flows/flowRunContract.ts \
+  frontend/apps/web/src/lib/features/flows/flowRunContract.test.ts \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunDialogForm.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunLaunchInputState.svelte.ts \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunLaunchInputState.test.ts \
+  docs/refactor/prd \
+  docs/refactor/ai-builder-prompt-contract.md
+```
+
+Expected: no matches in touched files. Existing `as any` usage in HTTP config helpers/tests outside this slice is baseline and remains untouched.
+
+Positive disappearance checks:
+
+```bash
+rg -n "let inputText|let formValues|function getFieldValue|function getFieldMultiValue|function setFieldValue|function reuseLastInput" \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte
+```
+
+Expected: no matches.
+
+```bash
+rg -n "function getFieldValue|function getFieldMultiValue|\\bformValues\\b" \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunDialogForm.svelte
+```
+
+Expected: no matches. `launchInputState.formValuesSnapshot` reads are allowed.
+
+### Non-Goals
+
+- Do not move run contract loading state in this slice.
+- Do not move wizard page navigation or focus management in this slice.
+- Do not move submit orchestration, idempotency key derivation, API calls, or toasts in this slice.
+- Do not touch runtime file input, recorder, or recoverable session state.
+- Do not fix broad `apps/web` check baseline failures.
+
+### Carry-Forward
+
+- `FlowRunDialog.svelte` will still own broader workflow orchestration after this slice: contract loading, page navigation/focus, submit side effects, and recording/file side effects.
+- A later run-launch session/controller may combine contract loading, navigation, and submit orchestration, but that would be a broader slice and should start with a fresh inventory and success gate.

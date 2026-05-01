@@ -1,46 +1,31 @@
 <script lang="ts">
   import type { NormalizedFlowFormField } from "$lib/features/flows/flowFormSchema";
-  import { getFlowFormFieldRuntimeKey } from "$lib/features/flows/flowFormSchema";
+  import {
+    readFlowRunFieldMultiValue,
+    readFlowRunFieldValue
+  } from "$lib/features/flows/flowRunContract";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
+  import type { FlowRunLaunchInputState } from "./FlowRunLaunchInputState.svelte";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
 
   let {
     formFields,
-    formValues,
+    launchInputState,
     missingRequiredFields,
     hasRequiredFormFields,
-    labels,
-    onFieldChange
+    labels
   }: {
     formFields: NormalizedFlowFormField[];
-    formValues: Record<string, unknown>;
+    launchInputState: FlowRunLaunchInputState;
     missingRequiredFields: NormalizedFlowFormField[];
     hasRequiredFormFields: boolean;
     labels: FlowRunDialogLabels;
-    onFieldChange: (field: NormalizedFlowFormField, value: unknown) => void;
   } = $props();
 
-  function getFieldValue(field: NormalizedFlowFormField): string {
-    const value = formValues[getFlowFormFieldRuntimeKey(field.name)];
-    if (Array.isArray(value)) return "";
-    if (value === null || value === undefined) return "";
-    return String(value);
-  }
-
-  function getFieldMultiValue(field: NormalizedFlowFormField): string[] {
-    const value = formValues[getFlowFormFieldRuntimeKey(field.name)];
-    if (Array.isArray(value)) return value.map((item) => String(item));
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value
-        .split(",")
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0);
-    }
-    return [];
-  }
+  const currentFormValues = $derived(launchInputState.formValuesSnapshot);
 
   function isFieldMissing(field: NormalizedFlowFormField): boolean {
     return missingRequiredFields.includes(field);
@@ -93,11 +78,14 @@
             const selected = Array.from(event.currentTarget.selectedOptions).map(
               (option) => option.value
             );
-            onFieldChange(field, selected);
+            launchInputState.setFieldValue(field, selected);
           }}
         >
           {#each field.options ?? [] as option (option)}
-            <option value={option} selected={getFieldMultiValue(field).includes(option)}>
+            <option
+              value={option}
+              selected={readFlowRunFieldMultiValue(currentFormValues, field).includes(option)}
+            >
               {option}
             </option>
           {/each}
@@ -105,8 +93,8 @@
       {:else if field.type === "select"}
         <Select.Root
           type="single"
-          value={getFieldValue(field)}
-          onValueChange={(value) => onFieldChange(field, value ?? "")}
+          value={readFlowRunFieldValue(currentFormValues, field)}
+          onValueChange={(value) => launchInputState.setFieldValue(field, value ?? "")}
         >
           <Select.Trigger
             id={inputId}
@@ -115,7 +103,7 @@
             aria-describedby={describedBy}
             class="w-full"
           >
-            {getFieldValue(field) || m.flow_select_placeholder()}
+            {readFlowRunFieldValue(currentFormValues, field) || m.flow_select_placeholder()}
           </Select.Trigger>
           <Select.Content>
             {#each field.options ?? [] as option (option)}
@@ -127,13 +115,13 @@
         <Input
           id={inputId}
           type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
-          value={getFieldValue(field)}
+          value={readFlowRunFieldValue(currentFormValues, field)}
           autocomplete="off"
           required={field.required}
           aria-required={field.required}
           aria-invalid={invalid}
           aria-describedby={describedBy}
-          oninput={(event) => onFieldChange(field, event.currentTarget.value)}
+          oninput={(event) => launchInputState.setFieldValue(field, event.currentTarget.value)}
         />
       {/if}
 

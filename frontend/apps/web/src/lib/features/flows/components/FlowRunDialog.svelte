@@ -42,15 +42,14 @@
   } from "$lib/features/audio/flowRunRecordingSession";
   import { diffContractSnapshot } from "$lib/features/audio/recordingSession";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
+  import { normalizeFlowFormFields, type FlowFormField } from "$lib/features/flows/flowFormSchema";
   import {
-    getFlowFormFieldRuntimeKey,
-    normalizeFlowFormFields,
-    type FlowFormField,
-    type NormalizedFlowFormField
-  } from "$lib/features/flows/flowFormSchema";
-  import {
+    buildFlowRunInputPayload,
     buildFlowRunIntent,
     buildStepInputsPayload,
+    computeReusedFlowRunInput,
+    getFlowRunReviewFieldValue,
+    getMissingFlowRunRequiredFields,
     normalizeTemplateReadiness
   } from "$lib/features/flows/flowRunContract";
   import {
@@ -71,6 +70,7 @@
   import FlowRunDialogRuntimeStep from "./FlowRunDialogRuntimeStep.svelte";
   import FlowRunDialogReview from "./FlowRunDialogReview.svelte";
   import { FlowRunFileInputState } from "./FlowRunFileInputState.svelte";
+  import { FlowRunLaunchInputState } from "./FlowRunLaunchInputState.svelte";
   import { onDestroy, onMount } from "svelte";
 
   let {
@@ -89,13 +89,12 @@
     onRunCreated?: (detail: { runId: string }) => void;
   } = $props();
 
-  let inputText = $state("");
   let isSubmitting = $state(false);
   let runContract = $state<FlowRunContract | null>(null);
   let runContractError = $state<string | null>(null);
   let runContractLoadedForFlowId = $state<string | null>(null);
 
-  let formValues = $state<Record<string, unknown>>({});
+  const launchInputState = new FlowRunLaunchInputState();
   const fileInputState = new FlowRunFileInputState();
   let currentPageIndex = $state(0);
   let showCloseConfirmation = $state(false);
@@ -129,15 +128,7 @@
   const hasFormFields = $derived(formFields.length > 0);
   const hasRequiredFormFields = $derived(formFields.some((field) => field.required));
   const missingRequiredFields = $derived.by(() =>
-    formFields.filter((field) => {
-      if (!field.required) return false;
-      const value = formValues[getFlowFormFieldRuntimeKey(field.name)];
-      if (field.type === "multiselect") {
-        return !Array.isArray(value) || value.length === 0;
-      }
-      if (value === null || value === undefined) return true;
-      return String(value).trim().length === 0;
-    })
+    getMissingFlowRunRequiredFields(launchInputState.formValuesSnapshot, formFields)
   );
   const missingRequiredFieldNames = $derived(
     missingRequiredFields.map((field) => field.name.trim()).filter((name) => name.length > 0)
@@ -198,7 +189,7 @@
     stepsRequiringInput
       .map((step) => ({
         step,
-        files: getUploadedFiles(step.step_id)
+        files: fileInputState.getUploadedFiles(step.step_id)
       }))
       .filter((group) => group.files.length > 0)
   );
@@ -208,14 +199,15 @@
   const templateReadyCount = $derived(
     templateReadinessItems.filter((item) => item.status === "ready").length
   );
-  const completedFormFieldSummaries = $derived.by(() =>
-    formFields
+  const completedFormFieldSummaries = $derived.by(() => {
+    const formValues = launchInputState.formValuesSnapshot;
+    return formFields
       .map((field) => ({
         field,
-        value: getReviewFieldValue(field)
+        value: getFlowRunReviewFieldValue(formValues, field)
       }))
-      .filter((item) => item.value.length > 0)
-  );
+      .filter((item) => item.value.length > 0);
+  });
   const reviewSummaryItems = $derived.by(() =>
     buildFlowRunReviewSummary({
       locale,
@@ -276,8 +268,7 @@
       fileInputState.hasActiveRecording ||
       fileInputState.hasLocalRecordedFiles ||
       fileInputState.hasRuntimeFiles ||
-      Object.entries(formValues).some(([_, v]) => v != null && String(v).trim() !== "") ||
-      inputText.trim() !== ""
+      launchInputState.hasDirtyInput
   );
   const closeBehavior = $derived<"close" | "ignore">(isDirty ? "ignore" : "close");
 
@@ -338,6 +329,7 @@
     runContractLoadedForFlowId = null;
     runContract = null;
     runContractError = null;
+    launchInputState.reset();
     fileInputState.resetForDialogClose();
     currentPageIndex = 0;
     showCloseConfirmation = false;
@@ -397,73 +389,17 @@
     }
   }
 
-  function getFieldValue(field: NormalizedFlowFormField): string {
-    const value = formValues[getFlowFormFieldRuntimeKey(field.name)];
-    if (Array.isArray(value)) return "";
-    if (value === null || value === undefined) return "";
-    return String(value);
-  }
-
-  function getFieldMultiValue(field: NormalizedFlowFormField): string[] {
-    const value = formValues[getFlowFormFieldRuntimeKey(field.name)];
-    if (Array.isArray(value)) return value.map((item) => String(item));
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value
-        .split(",")
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0);
-    }
-    return [];
-  }
-
-  function setFieldValue(field: NormalizedFlowFormField, value: unknown) {
-    const key = getFlowFormFieldRuntimeKey(field.name);
-    formValues = {
-      ...formValues,
-      [key]: value
-    };
-  }
-
-  function reuseLastInput() {
-    if (lastInputPayload) {
-      if (hasFormFields) {
-        const nextValues: Record<string, unknown> = { ...formValues };
-        for (const field of formFields) {
-          const key = getFlowFormFieldRuntimeKey(field.name);
-          const previous = lastInputPayload[key];
-          if (field.type === "multiselect") {
-            nextValues[key] = Array.isArray(previous)
-              ? previous.map((item) => String(item))
-              : typeof previous === "string"
-                ? previous
-                    .split(",")
-                    .map((item) => item.trim())
-                    .filter((item) => item.length > 0)
-                : [];
-          } else if (previous !== undefined) {
-            nextValues[key] = previous;
-          } else {
-            nextValues[key] = "";
-          }
-        }
-        formValues = nextValues;
-      } else if (showFreeformTextInput) {
-        inputText = String(lastInputPayload.text ?? JSON.stringify(lastInputPayload));
-      }
-    }
-  }
-
-  function getUploadedFiles(stepId: string): UploadedFile[] {
-    return fileInputState.getUploadedFiles(stepId);
-  }
-
-  function getStepFileCount(step: FlowRunContractStepInput): number {
-    return getUploadedFiles(step.step_id).length;
-  }
-
-  function getRemainingFileSlots(step: FlowRunContractStepInput): number {
-    if (step.max_files == null) return Infinity;
-    return step.max_files - getStepFileCount(step);
+  function applyLastRunInput() {
+    launchInputState.applyReusedInput(
+      computeReusedFlowRunInput({
+        currentFormValues: launchInputState.formValuesSnapshot,
+        currentFreeformText: launchInputState.freeformText,
+        lastInputPayload,
+        formFields,
+        hasFormFields,
+        showFreeformTextInput
+      })
+    );
   }
 
   function getTemplateStatusLabel(status: string | null | undefined): string {
@@ -605,7 +541,8 @@
     let failed = false;
 
     try {
-      const remainingSlots = getRemainingFileSlots(step);
+      const currentFileCount = fileInputState.getUploadedFiles(step.step_id).length;
+      const remainingSlots = step.max_files == null ? Infinity : step.max_files - currentFileCount;
       const toUpload =
         remainingSlots !== Infinity ? files.slice(0, Math.max(remainingSlots, 0)) : files;
 
@@ -1097,25 +1034,13 @@
 
     isSubmitting = true;
     try {
-      let payload: Record<string, unknown>;
-      if (hasFormFields) {
-        payload = {};
-        for (const field of formFields) {
-          const key = getFlowFormFieldRuntimeKey(field.name);
-          if (field.type === "multiselect") {
-            payload[key] = getFieldMultiValue(field);
-          } else if (field.type === "number") {
-            const raw = getFieldValue(field).trim();
-            payload[key] = raw.length > 0 ? Number(raw) : raw;
-          } else {
-            payload[key] = getFieldValue(field);
-          }
-        }
-      } else if (showFreeformTextInput) {
-        payload = { text: inputText };
-      } else {
-        payload = {};
-      }
+      const payload = buildFlowRunInputPayload({
+        formValues: launchInputState.formValuesSnapshot,
+        freeformText: launchInputState.freeformText,
+        formFields,
+        hasFormFields,
+        showFreeformTextInput
+      });
 
       const stepInputs = buildStepInputsPayload(fileInputState.runtimeFilesSnapshot);
       const runIntent = buildFlowRunIntent({
@@ -1146,8 +1071,7 @@
       });
 
       open = false;
-      inputText = "";
-      formValues = {};
+      launchInputState.reset();
       fileInputState.resetAfterRunAccepted();
     } catch (error) {
       toast.error(
@@ -1159,13 +1083,6 @@
     } finally {
       isSubmitting = false;
     }
-  }
-
-  function getReviewFieldValue(field: NormalizedFlowFormField): string {
-    if (field.type === "multiselect") {
-      return getFieldMultiValue(field).join(", ");
-    }
-    return getFieldValue(field).trim();
   }
 
   function formatBytes(bytes: number): string {
@@ -1347,11 +1264,10 @@
         {:else if currentPage.kind === "form"}
           <FlowRunDialogForm
             {formFields}
-            {formValues}
+            {launchInputState}
             {missingRequiredFields}
             {hasRequiredFormFields}
             {labels}
-            onFieldChange={setFieldValue}
           />
         {:else if currentPage.kind === "freeform"}
           <Field.Field>
@@ -1362,7 +1278,8 @@
             <Textarea
               id="flow-run-freeform-input"
               class="min-h-[14rem] font-mono text-[0.8125rem] leading-relaxed"
-              bind:value={inputText}
+              value={launchInputState.freeformText}
+              oninput={(event) => launchInputState.setFreeformText(event.currentTarget.value)}
               placeholder={m.flow_run_input_placeholder()}
             />
           </Field.Field>
@@ -1415,7 +1332,7 @@
             {reviewSummaryItems}
             {completedFormFieldSummaries}
             {careDataPolicy}
-            {inputText}
+            inputText={launchInputState.freeformText}
             {showFreeformTextInput}
             {reviewFileGroups}
             {labels}
@@ -1457,7 +1374,7 @@
         <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
           <div class="order-2 flex gap-2 sm:order-1">
             {#if lastInputPayload && (currentPage?.kind === "form" || currentPage?.kind === "freeform")}
-              <Button variant="outline" onclick={reuseLastInput} class="w-full sm:w-auto">
+              <Button variant="outline" onclick={applyLastRunInput} class="w-full sm:w-auto">
                 {m.flow_run_reuse_last_input()}
               </Button>
             {/if}

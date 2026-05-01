@@ -368,3 +368,133 @@ Baseline/existing failures recorded:
   frontend slices until the existing generated-client and route typing baseline
   is resolved.
 - Batch 8 step rerun has not started.
+
+## Iteration 4 - Flow Run Launch Input State Owner
+
+### Start Gate
+
+- Started from commit `16f92c19 flows: centralize run file input state`.
+- Branch state before planning:
+  - `frontend/packages/ui/src/icons/types.d.ts` dirty, unrelated and untouched
+  - `scripts/run_codex_review.sh` dirty, unrelated and untouched
+  - `PRODUCT.md` untracked, unrelated and untouched
+  - no staged files
+- Scope limited to Flow run launch form/freeform input state inside
+  `FlowRunDialog.svelte`.
+- Backend runtime, migrations, Celery, data model, generated schemas, package
+  naming, Flow authoring, evidence/status state, and Batch 8 rerun work were
+  not in scope.
+
+### Plan Evidence
+
+- `FlowRunDialog.svelte` still owned freeform text, form values,
+  required-field checks, last-input reuse, review field text, and input payload
+  construction after the file-input owner landed.
+- `FlowRunDialogForm.svelte` duplicated field value and multiselect
+  normalization.
+- `flowRunContract.ts` already owned pure run-contract shaping and was the
+  canonical home for pure form/freeform payload helpers.
+
+### Claude Plan Review
+
+- First Claude review returned `VERDICT: changes_required`,
+  `GREEN_LIGHT: no`, `MIN_SCORE: 7`.
+- Accepted findings:
+  - the initial state owner absorbed too many pure helpers
+  - dual reset wrappers should not be copied from the previous file-input owner
+  - closure-prop threading into `FlowRunDialogForm` was fragile
+  - the slice needed an explicit LOC gate and positive disappearance greps
+  - edge cases for number parsing, multiselect reuse, stale form values, and
+    freeform text precedence needed to be pinned
+- Revised plan moved pure helpers to `flowRunContract.ts`, kept
+  `FlowRunLaunchInputState` limited to mutable values, added a single `reset()`,
+  direct form owner prop, an 80 LOC gate, and positive greps.
+- Claude verification returned `VERDICT: green`, `GREEN_LIGHT: yes`,
+  `MIN_SCORE: 8`.
+- Accepted clarifications folded into the plan before implementation:
+  - `computeReusedFlowRunInput` returns full replacement values
+  - `applyReusedInput` replaces state instead of merging partial patches
+  - `hasDirtyInput` preserves the existing over-eager close-confirmation
+    approximation
+  - form receives `missingRequiredFields` from the dialog rather than
+    recomputing it
+  - owner and pure-helper tests have separate responsibilities
+
+### Implementation Result
+
+- Added `FlowRunLaunchInputState.svelte.ts` as the mutable owner for form values
+  and freeform text.
+- Added `FlowRunLaunchInputState.test.ts` for defaults, field/freeform writes,
+  replacement semantics, dirty semantics, defensive snapshots, and reset.
+- Extended `flowRunContract.ts` with pure helpers for field reading,
+  multiselect reading, required-field detection, review field text, last-input
+  reuse computation, and input payload construction.
+- Expanded `flowRunContract.test.ts` to pin the pure helper behavior, including
+  stale keys, multiselect `null`, comma-delimited multiselect strings, freeform
+  `text` precedence, number conversion for `"0"` and `"-3.14"`, and
+  whitespace-only number fields.
+- After Claude implementation review, tightened the slice further by making
+  state snapshots and applied reuse values copy array values, pinning
+  comma-string multiselect required-field behavior, and reading one derived
+  form-values snapshot in the form component.
+- Updated `FlowRunDialog.svelte` to compose the launch input state owner,
+  pure contract helpers, `FlowRunFileInputState`, and existing side effects.
+- Updated `FlowRunDialogForm.svelte` to render through `launchInputState` and
+  imported pure helpers instead of owning local normalization copies.
+- Removed the remaining trivial file-count pass-through wrappers from the
+  dialog while keeping file input ownership in `FlowRunFileInputState`.
+- `FlowRunDialog.svelte` decreased from 1513 LOC to 1430 LOC, passing the
+  80-line gate.
+
+### Validation
+
+Passed:
+
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/components/FlowRunLaunchInputState.test.ts src/lib/features/flows/components/FlowRunFileInputState.test.ts src/lib/features/flows/flowRunWizard.test.ts src/lib/features/flows/flowRunContract.test.ts`
+  - 4 files, 30 tests passed.
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/audio`
+  - 6 files, 54 tests passed. The expected stderr from the mocked
+    `purgeSession` delete failure remains part of a passing test.
+- `cd frontend/apps/web && bunx prettier --check ...` over touched frontend files.
+- `cd frontend/apps/web && bunx eslint ...` over touched frontend files.
+- `git diff --check -- ...` over touched frontend/docs paths.
+- Anti-slippage grep over touched frontend files, PRDs, and the AI Builder
+  prompt contract returned no matches.
+- Positive disappearance greps for old dialog/form ownership paths returned no
+  matches.
+- `wc -l frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte`
+  returned `1430`.
+
+### Claude Verification
+
+- Implementation review returned `VERDICT: green`, `GREEN_LIGHT: yes`,
+  `MIN_SCORE: 8`, with low-cost tightening findings.
+- Accepted findings were fixed:
+  - comma-string multiselect required-field behavior is explicitly pinned
+  - snapshots and applied reuse values copy arrays defensively
+  - `FlowRunDialogForm.svelte` reads a single derived form-values snapshot
+- Final verification returned `VERDICT: green`, `GREEN_LIGHT: yes`,
+  `MIN_SCORE: 8`.
+- Final artifact:
+  `.codex/artifacts/claude-peer-loop-flow-run-launch-input-state-owner-final-verification-20260501T101142Z.md`.
+
+Baseline/existing failures recorded:
+
+- `cd frontend/apps/web && bun run check` still fails with 43 errors and 7
+  warnings in 14 files. The errors are the known broad frontend baseline
+  categories in `frontend/packages/intric-js`, spaces/chat/dashboard route
+  typing, Flow route path typing, and existing AI Builder harness warnings. No
+  touched file diagnostic appeared.
+
+### Carry-Forward
+
+- `FlowRunDialog.svelte` still owns contract loading, page navigation/focus,
+  submit side effects, recorder side effects, and broader run-launch
+  orchestration.
+- A broader run-launch session/controller may be useful later, but it should
+  start with a fresh inventory and success gate rather than absorbing all
+  dialog behavior at once.
+- Broad frontend check remains too noisy to use as the sole gate for small
+  frontend slices until the existing generated-client and route typing baseline
+  is resolved.
+- Batch 8 step rerun has not started.
