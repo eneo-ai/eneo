@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -486,10 +488,31 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert response.headers["content-type"].startswith("application/json")
     assert "attachment;" in response.headers["content-disposition"]
     payload = response.json()
-    assert payload["schema_version"] == "flow-evidence-export.v2"
+    assert payload["schema_version"] == "flow-evidence-export.v3"
+    assert payload["manifest"]["schema_version"] == payload["schema_version"]
     assert payload["manifest"]["run_id"] == seeded["run_id"]
+    assert payload["manifest"]["tenant_id"] == str(admin_user.tenant_id)
     assert payload["manifest"]["trace_id"] == seeded["trace_id"]
+    assert payload["manifest"]["content_hash"] == payload["content_hash"]
+    assert payload["manifest"]["content_hash_input"] == "redacted"
+    assert payload["manifest"]["exported_at"] == payload["generated_at"]
+    assert payload["manifest"]["detail_mode"] == "redacted"
+    assert payload["manifest"]["export_reason"] == "support_debug"
+    assert payload["manifest"]["exported_by_user_id"] == str(admin_user.id)
     assert payload["manifest"]["redaction_applied"] is True
+    assert payload["manifest"]["retention_state_summary"]["tracking_state"] == (
+        "not_tracked"
+    )
+    assert payload["manifest"]["artifact_availability_summary"]["tracking_state"] == (
+        "payload_derived"
+    )
+    serialized_bundle = json.dumps(
+        payload["bundle"],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert payload["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
     assert payload["summary"]["status"] == "completed"
     assert payload["summary"]["steps_count"] == 1
     assert payload["summary"]["models_used"] == ["gpt-4o-mini"]

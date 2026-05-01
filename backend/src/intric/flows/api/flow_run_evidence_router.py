@@ -261,6 +261,7 @@ async def export_flow_run_evidence_alias(
         run_id=run_id,
         detail=detail,
         run=run,
+        export_reason=export_reason,
     )
     audit_failure = await log_flow_trace_audit_or_deny(
         container=container,

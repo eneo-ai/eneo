@@ -12448,13 +12448,35 @@ export interface components {
      *       "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
+     *         "artifact_availability_summary": {
+     *           "note": "Canonical file availability is not yet exposed; counts currently come from payload-derived artifact references.",
+     *           "payload_artifact_count": 1,
+     *           "tracking_state": "payload_derived"
+     *         },
      *         "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
+     *         "content_hash_input": "redacted",
+     *         "detail_mode": "redacted",
+     *         "export_reason": "support_debug",
+     *         "exported_at": "2026-03-31T12:00:00Z",
+     *         "exported_by_user_id": "00000000-0000-0000-0000-000000000030",
      *         "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
      *         "flow_version": 3,
      *         "masked_fields_count": 2,
+     *         "provenance_persisted_version_status": "not_tracked",
+     *         "provenance_schema_version_current": "flow-attempt-provenance.v1",
+     *         "provenance_schema_version_min": "flow-attempt-provenance.v1",
      *         "redaction_applied": true,
      *         "redaction_policy_version": "flow-evidence-redaction.v3",
+     *         "retention_state_summary": {
+     *           "note": "Tombstone tracking is not yet exposed; counts will populate when retention tombstones become trackable.",
+     *           "redacted_for_deletion_count": 0,
+     *           "retention_purged_count": 0,
+     *           "tombstone_count": 0,
+     *           "tracking_state": "not_tracked"
+     *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *         "schema_version": "flow-evidence-export.v3",
+     *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
      *       "redaction": {
@@ -12473,7 +12495,7 @@ export interface components {
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v2",
+     *       "schema_version": "flow-evidence-export.v3",
      *       "summary": {
      *         "artifact_details": [
      *           {
@@ -12692,6 +12714,71 @@ export interface components {
      *       }
      *     }
      */
+    EvidenceArtifactAvailabilitySummary: {
+      /** Tracking State */
+      tracking_state: "payload_derived";
+      /** Payload Artifact Count */
+      payload_artifact_count: number;
+      /** Note */
+      note: string;
+      [key: string]: unknown;
+    };
+    EvidenceExportManifest: {
+      /** Schema Version */
+      schema_version: "flow-evidence-export.v3";
+      /** Provenance Schema Version Min */
+      provenance_schema_version_min: string;
+      /** Provenance Schema Version Current */
+      provenance_schema_version_current: string;
+      /** Provenance Persisted Version Status */
+      provenance_persisted_version_status: "not_tracked" | "tracked" | "corrupt";
+      /** Content Hash */
+      content_hash: string;
+      /** Content Hash Input */
+      content_hash_input: "raw" | "redacted";
+      /**
+       * Exported At
+       * Format: date-time
+       */
+      exported_at: string;
+      /** Tenant Id */
+      tenant_id: string;
+      /** Run Id */
+      run_id: string;
+      /** Trace Id */
+      trace_id: string;
+      /** Flow Id */
+      flow_id: string;
+      /** Flow Version */
+      flow_version: number;
+      /** Exported By User Id */
+      exported_by_user_id: string | null;
+      /** Export Reason */
+      export_reason: string;
+      /** Detail Mode */
+      detail_mode: "raw" | "redacted";
+      /** Redaction Applied */
+      redaction_applied: boolean;
+      /** Masked Fields Count */
+      masked_fields_count: number;
+      /** Redaction Policy Version */
+      redaction_policy_version: string;
+      retention_state_summary: components["schemas"]["EvidenceRetentionStateSummary"];
+      artifact_availability_summary: components["schemas"]["EvidenceArtifactAvailabilitySummary"];
+    };
+    EvidenceRetentionStateSummary: {
+      /** Tracking State */
+      tracking_state: "not_tracked" | "tracked";
+      /** Tombstone Count */
+      tombstone_count: number;
+      /** Retention Purged Count */
+      retention_purged_count: number;
+      /** Redacted For Deletion Count */
+      redacted_for_deletion_count: number;
+      /** Note */
+      note: string;
+      [key: string]: unknown;
+    };
     FlowRunEvidenceExportResponse: {
       /** Schema Version */
       schema_version: string;
@@ -12702,10 +12789,7 @@ export interface components {
       generated_at: string;
       /** Content Hash */
       content_hash: string;
-      /** Manifest */
-      manifest: {
-        [key: string]: unknown;
-      };
+      manifest: components["schemas"]["EvidenceExportManifest"];
       /** Summary */
       summary: {
         [key: string]: unknown;
@@ -12714,7 +12798,10 @@ export interface components {
       redaction: {
         [key: string]: unknown;
       };
-      bundle: components["schemas"]["FlowRunEvidenceResponse"];
+      /** Bundle */
+      bundle: {
+        [key: string]: unknown;
+      };
     };
     /**
      * FlowRunEvidenceResponse

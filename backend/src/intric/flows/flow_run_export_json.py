@@ -15,7 +15,15 @@ from intric.flows.citation_sidecar import (
 )
 from intric.flows.domain.flow import JsonObject
 from intric.flows.flow_run_evidence_bundle import EvidenceBundle, RedactedEvidenceBundle
+from intric.flows.flow_run_evidence_export_manifest import (
+    EVIDENCE_EXPORT_SCHEMA_VERSION,
+    EvidenceArtifactAvailabilitySummary,
+    EvidenceExportContext,
+    EvidenceExportManifest,
+    EvidenceRetentionStateSummary,
+)
 from intric.flows.flow_run_provenance import (
+    FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     default_rag_tracking,
     normalize_text_preview,
 )
@@ -34,7 +42,14 @@ from intric.flows.template_reference_analyzer import (
     consumes_runtime_input,
 )
 
-EVIDENCE_EXPORT_SCHEMA_VERSION = "flow-evidence-export.v2"
+_RETENTION_NOT_TRACKED_NOTE = (
+    "Tombstone tracking is not yet exposed; counts will populate when retention "
+    "tombstones become trackable."
+)
+_ARTIFACT_PAYLOAD_DERIVED_NOTE = (
+    "Canonical file availability is not yet exposed; counts currently come from "
+    "payload-derived artifact references."
+)
 
 
 def _as_json_object(value: Any) -> JsonObject | None:
@@ -60,7 +75,8 @@ def _as_json_object_list(value: Any) -> list[JsonObject]:
 def render_evidence_json_export(
     *,
     bundle: EvidenceBundle | RedactedEvidenceBundle,
-) -> dict[str, object]:
+    context: EvidenceExportContext,
+) -> dict[str, Any]:
     bundle_payload = bundle.to_dict()
     debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
     security = _as_json_object_or_empty(debug_export.get("security"))
@@ -89,17 +105,24 @@ def render_evidence_json_export(
         masked_fields = []
         redaction_applied = False
 
+    exported_at = datetime.now(timezone.utc)
+    summary = _build_summary(bundle_payload)
     manifest = _build_manifest(
         bundle_payload,
         content_hash,
+        context=context,
+        exported_at=exported_at,
+        redaction_applied=redaction_applied,
         masked_fields_count=masked_fields_count,
+        summary=summary,
     )
+    manifest_payload = manifest.model_dump(mode="json")
     return {
-        "schema_version": EVIDENCE_EXPORT_SCHEMA_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "content_hash": content_hash,
-        "manifest": manifest,
-        "summary": _build_summary(bundle_payload),
+        "schema_version": manifest.schema_version,
+        "generated_at": manifest_payload["exported_at"],
+        "content_hash": manifest.content_hash,
+        "manifest": manifest_payload,
+        "summary": summary,
         "redaction": {
             "applied": redaction_applied,
             "policy_version": REDACTION_POLICY_VERSION,
@@ -115,21 +138,49 @@ def _build_manifest(
     bundle_payload: dict[str, Any],
     content_hash: str,
     *,
+    context: EvidenceExportContext,
+    exported_at: datetime,
+    redaction_applied: bool,
     masked_fields_count: int,
-) -> dict[str, Any]:
+    summary: dict[str, Any],
+) -> EvidenceExportManifest:
     run = _as_json_object_or_empty(bundle_payload.get("run"))
-    debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
-    security = _as_json_object_or_empty(debug_export.get("security"))
-    return {
-        "run_id": run.get("id"),
-        "flow_id": run.get("flow_id"),
-        "trace_id": run.get("trace_id"),
-        "flow_version": run.get("flow_version"),
-        "content_hash": content_hash,
-        "redaction_applied": bool(security.get("redaction_applied")),
-        "masked_fields_count": masked_fields_count,
-        "redaction_policy_version": REDACTION_POLICY_VERSION,
-    }
+    return EvidenceExportManifest(
+        schema_version=EVIDENCE_EXPORT_SCHEMA_VERSION,
+        provenance_schema_version_min=FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+        provenance_schema_version_current=FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+        provenance_persisted_version_status="not_tracked",
+        content_hash=content_hash,
+        content_hash_input=context.detail_mode,
+        exported_at=exported_at,
+        tenant_id=str(run["tenant_id"]),
+        run_id=str(run["id"]),
+        trace_id=str(run["trace_id"]),
+        flow_id=str(run["flow_id"]),
+        flow_version=cast(int, run["flow_version"]),
+        exported_by_user_id=context.exported_by_user_id,
+        export_reason=context.export_reason,
+        detail_mode=context.detail_mode,
+        redaction_applied=redaction_applied,
+        masked_fields_count=masked_fields_count,
+        redaction_policy_version=REDACTION_POLICY_VERSION,
+        retention_state_summary=EvidenceRetentionStateSummary(
+            tracking_state="not_tracked",
+            tombstone_count=0,
+            retention_purged_count=0,
+            redacted_for_deletion_count=0,
+            note=_RETENTION_NOT_TRACKED_NOTE,
+        ),
+        artifact_availability_summary=EvidenceArtifactAvailabilitySummary(
+            tracking_state="payload_derived",
+            payload_artifact_count=(
+                summary["artifacts_count"]
+                if isinstance(summary.get("artifacts_count"), int)
+                else 0
+            ),
+            note=_ARTIFACT_PAYLOAD_DERIVED_NOTE,
+        ),
+    )
 
 
 def _build_summary(bundle_payload: dict[str, Any]) -> dict[str, Any]:

@@ -29,6 +29,7 @@ source_modules =
     intric.flows.flow_retention_policy
     intric.flows.flow_run_evidence
     intric.flows.flow_run_evidence_bundle
+    intric.flows.flow_run_evidence_export_manifest
     intric.flows.flow_run_export_json
     intric.flows.flow_run_input_payload
     intric.flows.flow_run_provenance

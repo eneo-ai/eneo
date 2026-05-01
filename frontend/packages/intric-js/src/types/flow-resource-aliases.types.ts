@@ -128,46 +128,77 @@ const validFlowGraph: FlowGraph = {
   edges: []
 };
 
-const validFlowEvidenceExport: FlowRunEvidenceExport = {
-  schema_version: "flow-evidence-export.v2",
-  generated_at: isoTimestamp,
-  content_hash: "sha256:evidence",
-  manifest: {},
-  summary: {},
-  redaction: {},
-  bundle: {
-    run: validFlowRun,
+const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
+  run: validFlowRun,
+  definition_snapshot: { steps: [validFlowStep] },
+  step_results: [validFlowRunStep],
+  step_attempts: [],
+  debug_export: {
+    schema_version: "eneo.flow.debug-export.v2",
+    generated_at: isoTimestamp,
+    run: {
+      run_id: validFlowRun.id,
+      flow_id: flowId,
+      flow_version: validFlowRun.flow_version,
+      status: validFlowRun.status,
+      trace_id: validFlowRun.trace_id
+    },
+    definition: {
+      flow_id: flowId,
+      version: validFlowRun.flow_version,
+      checksum: "sha256:definition",
+      steps_count: 1
+    },
     definition_snapshot: { steps: [validFlowStep] },
-    step_results: [validFlowRunStep],
-    step_attempts: [],
-    debug_export: {
-      schema_version: "eneo.flow.debug-export.v2",
-      generated_at: isoTimestamp,
-      run: {
-        run_id: validFlowRun.id,
-        flow_id: flowId,
-        flow_version: validFlowRun.flow_version,
-        status: validFlowRun.status,
-        trace_id: validFlowRun.trace_id
-      },
-      definition: {
-        flow_id: flowId,
-        version: validFlowRun.flow_version,
-        checksum: "sha256:definition",
-        steps_count: 1
-      },
-      definition_snapshot: { steps: [validFlowStep] },
-      steps: [],
-      security: {
-        redaction_applied: false,
-        classification_field: "output_classification_override",
-        mcp_policy_field: "mcp_policy"
-      }
+    steps: [],
+    security: {
+      redaction_applied: false,
+      classification_field: "output_classification_override",
+      mcp_policy_field: "mcp_policy"
     }
   }
 };
 
-const validFlowEvidence: FlowRunEvidenceWithTypedSteps = validFlowEvidenceExport.bundle;
+const validFlowEvidenceExport: FlowRunEvidenceExport = {
+  schema_version: "flow-evidence-export.v3",
+  generated_at: isoTimestamp,
+  content_hash: "sha256:evidence",
+  manifest: {
+    schema_version: "flow-evidence-export.v3",
+    provenance_schema_version_min: "flow-attempt-provenance.v1",
+    provenance_schema_version_current: "flow-attempt-provenance.v1",
+    provenance_persisted_version_status: "not_tracked",
+    content_hash: "sha256:evidence",
+    content_hash_input: "redacted",
+    exported_at: isoTimestamp,
+    tenant_id: validFlowRun.tenant_id,
+    run_id: validFlowRun.id,
+    trace_id: validFlowRun.trace_id,
+    flow_id: flowId,
+    flow_version: validFlowRun.flow_version,
+    exported_by_user_id: null,
+    export_reason: "support_debug",
+    detail_mode: "redacted",
+    redaction_applied: false,
+    masked_fields_count: 0,
+    redaction_policy_version: "flow-evidence-redaction.v3",
+    retention_state_summary: {
+      tracking_state: "not_tracked",
+      tombstone_count: 0,
+      retention_purged_count: 0,
+      redacted_for_deletion_count: 0,
+      note: "Tombstone tracking is not yet exposed."
+    },
+    artifact_availability_summary: {
+      tracking_state: "payload_derived",
+      payload_artifact_count: 1,
+      note: "Canonical file availability is not yet exposed."
+    }
+  },
+  summary: {},
+  redaction: {},
+  bundle: validFlowEvidence
+};
 
 const invalidRunCreateRequest: FlowRunCreateRequest = {
   // @ts-expect-error top-level file_ids is not part of the generated create-run contract.

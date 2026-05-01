@@ -2358,7 +2358,7 @@ async def test_create_run_rejects_oversized_input_payload(user):
                         "step_id": str(uuid4()),
                         "assistant_id": str(uuid4()),
                     }
-                ]
+                ],
             },
             "Invalid flow version step order",
             "flow_version_invalid_step_order",
@@ -2374,7 +2374,7 @@ async def test_create_run_rejects_oversized_input_payload(user):
                         "step_id": str(uuid4()),
                         "assistant_id": str(uuid4()),
                     }
-                ]
+                ],
             },
             "Invalid flow version step order",
             "flow_version_invalid_step_order",
@@ -2390,7 +2390,7 @@ async def test_create_run_rejects_oversized_input_payload(user):
                         "step_id": str(uuid4()),
                         "assistant_id": str(uuid4()),
                     }
-                ]
+                ],
             },
             "Invalid flow version step order",
             "flow_version_invalid_step_order",
@@ -2406,7 +2406,7 @@ async def test_create_run_rejects_oversized_input_payload(user):
                         "step_id": "not-a-uuid",
                         "assistant_id": str(uuid4()),
                     }
-                ]
+                ],
             },
             "Invalid flow version step identifier",
             "flow_version_invalid_step_identifier",
@@ -2422,7 +2422,7 @@ async def test_create_run_rejects_oversized_input_payload(user):
                         "step_id": str(uuid4()),
                         "assistant_id": "bad-assistant-id",
                     }
-                ]
+                ],
             },
             "Invalid flow version step identifier",
             "flow_version_invalid_step_identifier",
@@ -2946,7 +2946,7 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
 
 
 @pytest.mark.asyncio
-async def test_export_evidence_json_returns_hashed_redacted_bundle(user):
+async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detail(user):
     user = _trace_user(user)
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -2974,17 +2974,44 @@ async def test_export_evidence_json_returns_hashed_redacted_bundle(user):
         max_concurrent_runs=5,
     )
 
-    export = await service.export_evidence_json(run_id=run.id)
+    redacted_export = await service.export_evidence_json(run_id=run.id)
+    raw_export = await service.export_evidence_json(
+        run_id=run.id,
+        detail="raw",
+        export_reason="government_audit_request",
+    )
 
-    assert export["schema_version"] == "flow-evidence-export.v2"
-    assert export["bundle"]["run"]["trace_id"] == str(run.trace_id)
-    serialized_bundle = json.dumps(
-        export["bundle"],
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    assert export["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
+    assert set(redacted_export) == set(raw_export)
+    assert set(redacted_export["manifest"]) == set(raw_export["manifest"])
+    for export, hash_input in (
+        (redacted_export, "redacted"),
+        (raw_export, "raw"),
+    ):
+        assert export["schema_version"] == "flow-evidence-export.v3"
+        assert export["manifest"]["schema_version"] == export["schema_version"]
+        assert export["manifest"]["content_hash"] == export["content_hash"]
+        assert export["manifest"]["content_hash_input"] == hash_input
+        assert export["manifest"]["exported_at"] == export["generated_at"]
+        assert export["manifest"]["run_id"] == str(run.id)
+        assert export["manifest"]["tenant_id"] == str(user.tenant_id)
+        assert export["manifest"]["trace_id"] == str(run.trace_id)
+        assert export["manifest"]["flow_id"] == str(flow.id)
+        assert export["manifest"]["exported_by_user_id"] == str(user.id)
+        assert export["manifest"]["redaction_applied"] == export["redaction"]["applied"]
+        assert (
+            export["manifest"]["masked_fields_count"]
+            == export["redaction"]["masked_fields_count"]
+        )
+        serialized_bundle = json.dumps(
+            export["bundle"],
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        assert export["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
+
+    assert redacted_export["manifest"]["export_reason"] == "support_debug"
+    assert raw_export["manifest"]["export_reason"] == "government_audit_request"
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from typing import Any, TypeVar, cast
+from typing import Any, Literal, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -19,6 +19,9 @@ TEXT_PREVIEW_MAX_BYTES = 16 * 1024
 JSON_PREVIEW_MAX_BYTES = 16 * 1024
 ModelT = TypeVar("ModelT", bound=BaseModel)
 DEFAULT_RAG_SELECTION_BASIS = "semantic_search_ranked_chunks_grouped_by_source"
+FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION: Literal["flow-attempt-provenance.v1"] = (
+    "flow-attempt-provenance.v1"
+)
 
 
 class PayloadPreview(BaseModel):
@@ -82,6 +85,9 @@ class CitationsProvenance(BaseModel):
 class FlowAttemptProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    schema_version: Literal["flow-attempt-provenance.v1"] = (
+        FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
+    )
     llm: LlmProvenance | None = None
     rag: RagProvenance | None = None
     http: HttpProvenance | None = None

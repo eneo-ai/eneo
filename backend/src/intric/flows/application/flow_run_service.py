@@ -32,6 +32,7 @@ from intric.flows.flow_run_evidence_bundle import (
     build_evidence_bundle,
     redact_evidence_bundle,
 )
+from intric.flows.flow_run_evidence_export_manifest import EvidenceExportContext
 from intric.flows.flow_run_export_json import render_evidence_json_export
 from intric.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
 from intric.flows.flow_run_step_inputs import (
@@ -378,7 +379,9 @@ class FlowRunService:
                 version=flow.published_version,
                 tenant_id=self.user.tenant_id,
             )
-            runtime_steps = parse_published_runtime_steps(runtime_version.definition_json)
+            runtime_steps = parse_published_runtime_steps(
+                runtime_version.definition_json
+            )
             settings_service = cast(
                 _SettingsServiceProtocol | None, self.settings_service
             )
@@ -805,6 +808,7 @@ class FlowRunService:
         run_id: UUID,
         detail: str = "redacted",
         run: FlowRun | None = None,
+        export_reason: str = "support_debug",
     ) -> dict[str, Any]:
         if detail == "raw":
             bundle = await self._get_evidence_bundle(
@@ -812,13 +816,27 @@ class FlowRunService:
                 access_kind="evidence_export_raw",
                 run=run,
             )
-            return cast(dict[str, Any], render_evidence_json_export(bundle=bundle))
+            return render_evidence_json_export(
+                bundle=bundle,
+                context=EvidenceExportContext(
+                    detail_mode="raw",
+                    export_reason=export_reason,
+                    exported_by_user_id=str(self.user.id),
+                ),
+            )
         bundle = await self._get_redacted_evidence_bundle(
             run_id=run_id,
             access_kind="evidence_export_redacted",
             run=run,
         )
-        return cast(dict[str, Any], render_evidence_json_export(bundle=bundle))
+        return render_evidence_json_export(
+            bundle=bundle,
+            context=EvidenceExportContext(
+                detail_mode="redacted",
+                export_reason=export_reason,
+                exported_by_user_id=str(self.user.id),
+            ),
+        )
 
     async def _get_redacted_evidence_bundle(
         self,

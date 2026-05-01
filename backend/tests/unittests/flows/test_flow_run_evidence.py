@@ -6,6 +6,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
+
 from intric.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
 from intric.flows.flow import (
     FlowRun,
@@ -23,11 +25,24 @@ from intric.flows.flow_run_evidence_bundle import (
     build_evidence_bundle,
     redact_evidence_bundle,
 )
+from intric.flows.flow_run_evidence_export_manifest import (
+    EVIDENCE_EXPORT_SCHEMA_VERSION,
+    EvidenceExportContext,
+    EvidenceExportManifest,
+)
 from intric.flows.flow_run_export_json import render_evidence_json_export
 from intric.flows.flow_run_provenance import (
     normalize_attempt_provenance,
     normalize_rag_payload,
 )
+
+
+def _redacted_export_context() -> EvidenceExportContext:
+    return EvidenceExportContext(
+        detail_mode="redacted",
+        export_reason="support_debug",
+        exported_by_user_id="00000000-0000-0000-0000-000000000030",
+    )
 
 
 def test_parse_step_order_handles_strings_and_bools():
@@ -388,28 +403,72 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
             step_attempts=[],
         )
     )
-    export = render_evidence_json_export(bundle=bundle)
+    export = render_evidence_json_export(
+        bundle=bundle, context=_redacted_export_context()
+    )
 
     assert set(export["manifest"]) == {
+        "schema_version",
+        "provenance_schema_version_min",
+        "provenance_schema_version_current",
+        "provenance_persisted_version_status",
         "run_id",
+        "tenant_id",
         "flow_id",
         "trace_id",
         "flow_version",
         "content_hash",
+        "content_hash_input",
+        "exported_at",
+        "exported_by_user_id",
+        "export_reason",
+        "detail_mode",
         "redaction_applied",
         "masked_fields_count",
         "redaction_policy_version",
+        "retention_state_summary",
+        "artifact_availability_summary",
     }
+    assert export["schema_version"] == EVIDENCE_EXPORT_SCHEMA_VERSION
+    assert export["manifest"]["schema_version"] == export["schema_version"]
     assert export["manifest"]["run_id"] == str(run.id)
+    assert export["manifest"]["tenant_id"] == str(run.tenant_id)
     assert export["manifest"]["flow_id"] == str(run.flow_id)
     assert export["manifest"]["trace_id"] == str(run.trace_id)
     assert export["manifest"]["flow_version"] == 1
+    assert export["manifest"]["content_hash_input"] == "redacted"
+    assert export["manifest"]["detail_mode"] == "redacted"
+    assert export["manifest"]["export_reason"] == "support_debug"
+    assert export["manifest"]["exported_at"] == export["generated_at"]
     assert export["manifest"]["content_hash"] == export["content_hash"]
     assert export["manifest"]["redaction_applied"] is True
     assert isinstance(export["manifest"]["masked_fields_count"], int)
     assert (
         export["manifest"]["redaction_policy_version"] == "flow-evidence-redaction.v3"
     )
+    assert export["manifest"]["redaction_applied"] == export["redaction"]["applied"]
+    assert (
+        export["manifest"]["masked_fields_count"]
+        == export["redaction"]["masked_fields_count"]
+    )
+    assert export["manifest"]["retention_state_summary"] == {
+        "tracking_state": "not_tracked",
+        "tombstone_count": 0,
+        "retention_purged_count": 0,
+        "redacted_for_deletion_count": 0,
+        "note": (
+            "Tombstone tracking is not yet exposed; counts will populate when "
+            "retention tombstones become trackable."
+        ),
+    }
+    assert export["manifest"]["artifact_availability_summary"] == {
+        "tracking_state": "payload_derived",
+        "payload_artifact_count": 0,
+        "note": (
+            "Canonical file availability is not yet exposed; counts currently come "
+            "from payload-derived artifact references."
+        ),
+    }
     assert export["summary"]["status"] == "completed"
     assert export["summary"]["steps_count"] == 0
     assert export["summary"]["artifacts_count"] == 0
@@ -432,6 +491,56 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
         separators=(",", ":"),
     ).encode("utf-8")
     assert export["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
+
+
+def test_evidence_export_manifest_rejects_unknown_fields() -> None:
+    payload = {
+        "schema_version": EVIDENCE_EXPORT_SCHEMA_VERSION,
+        "provenance_schema_version_min": "flow-attempt-provenance.v1",
+        "provenance_schema_version_current": "flow-attempt-provenance.v1",
+        "provenance_persisted_version_status": "not_tracked",
+        "content_hash": "abc123",
+        "content_hash_input": "redacted",
+        "exported_at": datetime.now(timezone.utc),
+        "tenant_id": str(uuid4()),
+        "run_id": str(uuid4()),
+        "trace_id": str(uuid4()),
+        "flow_id": str(uuid4()),
+        "flow_version": 1,
+        "exported_by_user_id": str(uuid4()),
+        "export_reason": "support_debug",
+        "detail_mode": "redacted",
+        "redaction_applied": True,
+        "masked_fields_count": 1,
+        "redaction_policy_version": "flow-evidence-redaction.v3",
+        "retention_state_summary": {
+            "tracking_state": "not_tracked",
+            "tombstone_count": 0,
+            "retention_purged_count": 0,
+            "redacted_for_deletion_count": 0,
+            "note": "Tombstone tracking is not yet exposed.",
+        },
+        "artifact_availability_summary": {
+            "tracking_state": "payload_derived",
+            "payload_artifact_count": 0,
+            "note": "Canonical file availability is not yet exposed.",
+        },
+        "unexpected": "blocked",
+    }
+
+    with pytest.raises(ValueError):
+        EvidenceExportManifest.model_validate(payload)
+
+
+def test_evidence_export_context_rejects_unknown_fields() -> None:
+    with pytest.raises(ValueError):
+        EvidenceExportContext.model_validate(
+            {
+                "detail_mode": "redacted",
+                "export_reason": "support_debug",
+                "unexpected": "blocked",
+            }
+        )
 
 
 def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summaries() -> (
@@ -513,7 +622,9 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
         ),
     )
 
-    export = render_evidence_json_export(bundle=bundle)
+    export = render_evidence_json_export(
+        bundle=bundle, context=_redacted_export_context()
+    )
 
     assert export["summary"]["artifact_names"] == ["beslut-underlag.pdf"]
     assert export["summary"]["rag_source_names"] == [
@@ -739,7 +850,9 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
         )
     )
 
-    export = render_evidence_json_export(bundle=bundle)
+    export = render_evidence_json_export(
+        bundle=bundle, context=_redacted_export_context()
+    )
 
     assert export["summary"]["final_output"]["kind"] == "mixed"
     assert export["summary"]["final_output"]["artifact_names"] == [
@@ -958,7 +1071,9 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
         )
     )
 
-    export = render_evidence_json_export(bundle=bundle)
+    export = render_evidence_json_export(
+        bundle=bundle, context=_redacted_export_context()
+    )
 
     lineage = export["summary"]["step_overview"][1]["input_lineage"]
     assert lineage["input_source"] == "previous_step"
@@ -1070,7 +1185,9 @@ def test_render_evidence_json_export_adds_fallback_container_display_name_and_mo
         )
     )
 
-    export = render_evidence_json_export(bundle=bundle)
+    export = render_evidence_json_export(
+        bundle=bundle, context=_redacted_export_context()
+    )
 
     assert export["summary"]["rag_sources"][0]["source_container_name"] is None
     assert (
@@ -1251,7 +1368,9 @@ def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_s
             step_attempts=[attempt],
         )
     )
-    export = render_evidence_json_export(bundle=bundle)
+    export = render_evidence_json_export(
+        bundle=bundle, context=_redacted_export_context()
+    )
 
     prompt_context_summary = export["summary"]["step_overview"][0][
         "knowledge_retrieval"
@@ -1439,7 +1558,9 @@ def test_render_evidence_json_export_uses_provenance_citation_compliance_and_run
             step_attempts=[attempt],
         )
     )
-    export = render_evidence_json_export(bundle=bundle)
+    export = render_evidence_json_export(
+        bundle=bundle, context=_redacted_export_context()
+    )
 
     assert export["summary"]["citations"]["tracking_mode"] == "inline_inref_required"
     assert export["summary"]["citations"]["citation_mode_requested"] is True
@@ -1597,7 +1718,9 @@ def test_render_evidence_json_export_surfaces_inherited_citation_context() -> No
             step_attempts=[attempt],
         )
     )
-    export = render_evidence_json_export(bundle=bundle)
+    export = render_evidence_json_export(
+        bundle=bundle, context=_redacted_export_context()
+    )
 
     assert export["summary"]["citations"]["citation_context_kind"] == "inherited"
     assert export["summary"]["citations"]["inherited_cited_source_ids"] == [source_one]

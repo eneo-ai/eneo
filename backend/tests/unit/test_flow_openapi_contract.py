@@ -685,6 +685,40 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     headers = response.get("headers", {})
 
     assert resolved.get("title") == "FlowRunEvidenceExportResponse"
+    manifest_schema = resolved.get("properties", {}).get("manifest", {})
+    manifest = _resolve_component_ref(openapi_spec, manifest_schema)
+    assert manifest.get("title") == "EvidenceExportManifest"
+    manifest_properties = manifest.get("properties", {})
+    assert manifest.get("additionalProperties") is False
+    assert set(manifest_properties) >= {
+        "schema_version",
+        "content_hash",
+        "content_hash_input",
+        "exported_at",
+        "tenant_id",
+        "run_id",
+        "trace_id",
+        "flow_id",
+        "export_reason",
+        "detail_mode",
+        "retention_state_summary",
+        "artifact_availability_summary",
+    }
+    assert _extract_enum_values(
+        openapi_spec, manifest_properties["schema_version"]
+    ) == {"flow-evidence-export.v3"}
+    assert _extract_enum_values(
+        openapi_spec, manifest_properties["content_hash_input"]
+    ) == {
+        "raw",
+        "redacted",
+    }
+    assert manifest_properties["flow_version"].get("type") == "integer"
+    assert "anyOf" not in manifest_properties["flow_version"]
+    assert not manifest_properties["flow_version"].get("nullable", False)
+    bundle_schema = resolved.get("properties", {}).get("bundle", {})
+    assert bundle_schema.get("type") == "object"
+    assert bundle_schema.get("additionalProperties") is True
     assert "Content-Disposition" in headers
     assert "attachment" in str(headers["Content-Disposition"]).lower()
     bad_request_example = (

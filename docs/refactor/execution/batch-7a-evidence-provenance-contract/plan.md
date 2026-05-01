@@ -2,9 +2,324 @@
 
 ## Active Next Plan
 
-The active implementation slice is **7A.1 — Evidence inventory, dead-code/dead-test cleanup, and behavior pins**.
+The active implementation slice is **7A.2 — Normalize raw/redacted export and typed manifest**.
 
-Official Batch 8 step rerun does not start until this inserted evidence/provenance foundation reaches a stable checkpoint. This plan is limited to the first slice: measured inventory, deletion/rewrite decisions for clearly dead evidence compatibility, and behavior pins for the current evidence API/export contract.
+Official Batch 8 step rerun does not start until this inserted evidence/provenance foundation reaches a stable checkpoint. 7A.1 is committed at `5563bb71` and established the behavior pins for raw reason validation, audit fail-closed export behavior, and the current loose manifest shape. 7A.2 now moves the export response toward an audit-grade typed manifest and one normalized raw/redacted export path.
+
+## Scope For 7A.2
+
+### Goals
+
+- Replace the loose export manifest `dict[str, Any]` with a typed export manifest model.
+- Keep `flow_run_export_json.py` as the canonical JSON export renderer and manifest-construction owner.
+- Preserve one normalized export path for raw and redacted bundles: serialize exactly the bundle that is returned, hash that normalized payload, and declare whether the hash input was `raw` or `redacted`.
+- Add explicit manifest fields for export schema version, provenance compatibility, content hash input, export timestamp, tenant/run/trace/flow identity, exported user id, export reason, detail mode, redaction policy version, retention state summary, artifact availability summary, and current provenance version marker.
+- Treat the manifest as the authoritative home for `schema_version` and `content_hash`; keep top-level `schema_version` and `content_hash` only as response-envelope mirrors with equality tests.
+- Update the API response model so OpenAPI/generated-client-sensitive schema stops exposing the manifest as an untyped bag. The export `bundle` remains an unmodified evidence object because response-model coercion must not alter the bytes covered by `content_hash`.
+- Keep the checked-in generated schema aligned with the OpenAPI contract touched in this slice.
+
+### Non-Goals
+
+- No new evidence ledger, migration, or table.
+- No raw prompt/completion retention.
+- No retention tombstone implementation; 7A.5 owns tombstone storage and deletion semantics.
+- No artifact/file ownership migration; 7A.6 owns `FlowRunStepResultFiles` + `Files` canonical export.
+- No strict provenance parser or corruption marker; 7A.3 owns parser behavior. 7A.2 may add only the explicit current provenance schema version constant required before an export-schema bump.
+- No `audit_event_id` field in this slice. The audit service does not currently return a durable audit row id, and shipping a permanent-null public field would create speculative API debt.
+- No frontend evidence UI/view-model rewrite; 7A.7 owns frontend evidence alignment if backend schema changes require it.
+- No Batch 8 rerun behavior, Batch 9 human review behavior, package rename, or `intric.*` namespace migration.
+
+### Canonical Owner Decisions
+
+| Concept | Current locations | Problem | Canonical home for 7A.2 | Decision |
+|---|---|---|---|---|
+| Export JSON rendering and hash calculation | `backend/src/intric/flows/flow_run_export_json.py:60`, `backend/src/intric/flows/flow_run_export_json.py:73` | Renderer computes a hash but does not declare whether raw or redacted payload was hashed. | `flow_run_export_json.py` | Keep and harden. Add typed export context and manifest construction here. |
+| Export manifest shape | `backend/src/intric/flows/flow_run_export_json.py:114`, `backend/src/intric/flows/api/flow_models.py:1313` | Runtime and OpenAPI expose a loose `dict[str, Any]`, making generated clients weak. | `flow_run_evidence_export_manifest.py` | Create one narrow leaf module for typed manifest/context models. It imports only typing/Pydantic/provenance constants and must be added to `.importlinter`'s Flow engine source list. |
+| Export bundle integrity | `backend/src/intric/flows/api/flow_run_evidence_router.py:277`, `backend/src/intric/flows/api/flow_models.py:1339` | Validating the attachment bundle through the read-model schema can drop export-only evidence fields and invalidate the content hash. | `FlowRunEvidenceExportResponse.bundle` | Keep the manifest typed and declare the export bundle as open JSON so the served attachment preserves the exact object that was hashed. |
+| Export reason | Router audit metadata in `backend/src/intric/flows/api/flow_run_evidence_router.py:265` | Reason is audit-visible but absent from the export manifest. | `FlowRunService.export_evidence_json` parameter passed to renderer | Add an optional/explicit export context. Router passes the already-validated reason. Service tests may use the redacted default when no reason is supplied. |
+| Audit event id | `audit_service.log_async` calls in evidence router | Current audit service call does not return a persisted audit row id. | Deferred to audit durability slice | Do not add an `audit_event_id` field until a real producer exists. |
+| Provenance schema compatibility | `backend/src/intric/flows/flow_run_provenance.py:82` | Attempt provenance has no explicit schema version today. | `flow_run_provenance.py` constant and `FlowAttemptProvenance` payload field if safe | Add the explicit current/min schema version only if required for export v3 and testable without strict parser work. Strict parser/corruption remains 7A.3. |
+| Retention/artifact summaries | Export summary derives from bundle payload JSON | Current export cannot prove tombstones or canonical file availability yet. | Typed manifest summary fields with truth-telling current states | Use explicit `not_tracked`/zero-count states where canonical data is not available. Do not imply content availability that is not tracked. |
+
+### Planned Shape
+
+Revised implementation after Claude plan review:
+
+1. Add a narrow typed manifest module with no persistence, HTTP, or framework ownership:
+   - `backend/src/intric/flows/flow_run_evidence_export_manifest.py`
+2. Define:
+   - `EVIDENCE_EXPORT_SCHEMA_VERSION: Literal["flow-evidence-export.v3"]`
+   - `EvidenceExportContentHashInput = Literal["raw", "redacted"]`
+   - `EvidenceExportDetailMode = Literal["raw", "redacted"]`
+   - `EvidenceExportContext`
+   - `EvidenceRetentionStateSummary`
+   - `EvidenceArtifactAvailabilitySummary`
+   - `EvidenceExportManifest`
+   - Summary models use `ConfigDict(extra="allow")` only for future additive fields from 7A.5/7A.6; the required fields listed below remain explicit and tested.
+   - `EvidenceExportManifest` and `EvidenceExportContext` use `ConfigDict(extra="forbid")`; tests must prove unknown manifest fields fail validation.
+3. Add a `FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION` constant in `flow_run_provenance.py`; use it in the manifest as the current/min provenance schema version. Do not implement strict historical parsing or corruption markers in this slice.
+4. Keep `render_evidence_json_export` returning the public export dict, but build the manifest through `EvidenceExportManifest.model_validate(...).model_dump(mode="json")`.
+5. Pass a single `EvidenceExportContext` from `FlowRunService.export_evidence_json` to the renderer. Do not widen the renderer with loose kwargs.
+6. Manifest is canonical for `schema_version` and `content_hash`. The top-level `schema_version` and `content_hash` mirror `manifest.schema_version` and `manifest.content_hash` and are tested for equality.
+7. Update `FlowRunEvidenceExportResponse.manifest` from `dict[str, Any]` to the typed manifest model. Keep `FlowRunEvidenceExportResponse.bundle` as open JSON to preserve the exact hashed export payload through HTTP response validation.
+8. Update `.importlinter` to include the new manifest module in the Flow engine no-AI-Builder source list.
+9. Update the OpenAPI contract tests and checked-in generated schema for manifest fields.
+
+No fallback location is planned. `rg "from intric\\.flows\\.flow_run_export_json|from intric\\.flows\\.api\\.flow_models" backend/src` shows `flow_run_export_json.py` is imported by the application service and the API layer imports `flow_models.py`; a leaf manifest module avoids both a renderer-to-API inversion and a heavy API import of the full renderer.
+
+### Manifest Field Shape
+
+`EvidenceExportManifest` fields:
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `schema_version` | `Literal["flow-evidence-export.v3"]` | Manifest module constant | Authoritative. Top-level `schema_version` mirrors this value. |
+| `provenance_schema_version_min` | `str` | `FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION` | Lowest persisted provenance schema version the export builder currently accepts as compatible. It equals current until 7A.3 introduces historical parsing. |
+| `provenance_schema_version_current` | `str` | `FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION` | Export builder current version, not a per-row parser verdict. |
+| `provenance_persisted_version_status` | `Literal["not_tracked", "tracked", "corrupt"]` | Current limitation | 7A.2 emits only `not_tracked`; 7A.3 may emit `tracked` or `corrupt` without an export-schema bump. |
+| `content_hash` | `str` | Normalized returned `bundle` payload | Authoritative. Top-level `content_hash` mirrors this value. |
+| `content_hash_input` | `Literal["raw", "redacted"]` | Export detail | Declares whether the raw or redacted returned bundle was hashed. |
+| `exported_at` | `datetime` | Renderer clock | Top-level `generated_at` mirrors this timestamp for compatibility. |
+| `tenant_id` | `str` | `bundle.run.tenant_id` | Required. |
+| `run_id` | `str` | `bundle.run.id` | Required. |
+| `trace_id` | `str` | `bundle.run.trace_id` | Required. |
+| `flow_id` | `str` | `bundle.run.flow_id` | Required. |
+| `flow_version` | `int` | `bundle.run.flow_version` | Required; Flow run persistence and domain models make this non-null. |
+| `exported_by_user_id` | `str | None` | `FlowRunService.user.id` | Explicitly user id only. Principal/service-key identity remains in audit metadata until a principal model is exposed to the service. |
+| `export_reason` | `str` | Router/service export context | Raw is explicit; redacted may use `support_debug` until a later UX/API decision. |
+| `detail_mode` | `Literal["raw", "redacted"]` | Export context | Mirrors hash input semantics. |
+| `redaction_applied` | `bool` | Redacted bundle/security state | Kept from the 7A.1 manifest pin. Mirrors `redaction.applied`; equality is tested. |
+| `masked_fields_count` | `int` | Redacted bundle/security state | Kept from the 7A.1 manifest pin. Mirrors `redaction.masked_fields_count`; equality is tested. |
+| `redaction_policy_version` | `str` | `REDACTION_POLICY_VERSION` | Redactor build-policy version. Always emitted; does not imply redaction was applied. |
+| `retention_state_summary` | `EvidenceRetentionStateSummary` | Current export limitation | Truthfully says retention tombstones are not tracked yet. |
+| `artifact_availability_summary` | `EvidenceArtifactAvailabilitySummary` | Current bundle payload scan | Truthfully says canonical artifact/file availability is not fully tracked yet. |
+
+This table is exhaustive for the 7A.2 manifest. `redaction_applied` and `masked_fields_count` intentionally remain in the manifest because 7A.1 pinned them as the migration target. The top-level `redaction` block remains the detailed redaction owner; manifest redaction fields are summary mirrors and must be tested for equality with the top-level block.
+
+`EvidenceRetentionStateSummary` fields:
+
+| Field | Type | Current value |
+|---|---|---|
+| `tracking_state` | `Literal["not_tracked", "tracked"]` | `not_tracked`; 7A.5 may emit `tracked` without a schema bump. |
+| `tombstone_count` | `int` | `0` |
+| `retention_purged_count` | `int` | `0` |
+| `redacted_for_deletion_count` | `int` | `0` |
+| `note` | `str` | Explains that 7A.5 owns tombstone tracking. |
+
+`EvidenceArtifactAvailabilitySummary` fields:
+
+| Field | Type | Current value |
+|---|---|---|
+| `tracking_state` | `Literal["payload_derived"]` | `payload_derived` |
+| `payload_artifact_count` | `int` | Count from current export summary artifact details. |
+| `note` | `str` | Explains that canonical file availability is not yet exposed and will be expanded when file-row availability becomes trackable. Runtime text must not reference 7A or internal plan labels. |
+
+7A.2 deliberately keeps artifact availability summary small. 7A.6 owns real canonical file-row availability counts and may extend this model under the v3 schema because the current shape declares only what is truthfully known today.
+
+### Source Verification For Required Manifest Identity Fields
+
+- `FlowRun.flow_version` is non-null in the domain model and database table: `backend/src/intric/flows/domain/flow.py:132`, `backend/src/intric/database/tables/flow_tables.py:334`.
+- `FlowRun.trace_id` is non-null in the domain model and database table: `backend/src/intric/flows/domain/flow.py:138`, `backend/src/intric/database/tables/flow_tables.py:357`.
+- `rg -n "trace_id\\s*[:=].*None|flow_version\\s*[:=].*None|trace_id:.*None|flow_version:.*None" backend/src/intric/flows backend/tests` found optional request/response fields and tests for expected-flow-version inputs, but no FlowRun persistence fixture that sets `trace_id` or `flow_version` to `None`.
+
+### Behavior Pins Before Implementation
+
+- Current redacted export hash pin from `backend/tests/unittests/flows/test_flow_run_service.py:2979` must be rewritten to assert:
+  - `content_hash` equals the normalized returned redacted bundle hash.
+  - `manifest.content_hash_input == "redacted"`.
+  - `manifest.content_hash == content_hash`.
+  - The exact re-serialization assertion over `json.dumps(export["bundle"], sort_keys=True, separators=(",", ":"))` remains, proving the hash is not over the whole envelope or a manifest-included variant.
+- Add a raw export counterpart proving:
+  - raw export hashes the raw returned bundle.
+  - `manifest.content_hash_input == "raw"`.
+  - raw/redacted exports share the same top-level shape and manifest field set.
+- Add an explicit set-equality test: `set(raw_export.keys()) == set(redacted_export.keys())` and `set(raw_export["manifest"]) == set(redacted_export["manifest"])`.
+- Add equality tests for manifest summary mirrors:
+  - `export["manifest"]["schema_version"] == export["schema_version"]`
+  - `export["manifest"]["content_hash"] == export["content_hash"]`
+  - `export["manifest"]["exported_at"] == export["generated_at"]`
+  - `export["manifest"]["redaction_applied"] == export["redaction"]["applied"]`
+  - `export["manifest"]["masked_fields_count"] == export["redaction"]["masked_fields_count"]`
+- Add a manifest validation test proving an unknown field raises instead of being accepted silently.
+- Strengthen `backend/tests/unittests/flows/test_flow_run_evidence.py:355` to assert the typed manifest field set and truth-telling defaults for retention state and artifact availability.
+- Strengthen `backend/tests/integration/flows/test_flow_evidence_api_contracts.py:489` to assert representative manifest v3 fields on the HTTP attachment path and re-hash the actual served `payload["bundle"]`.
+- Strengthen OpenAPI/generated-client contract tests so `manifest` is no longer an untyped free-form object.
+
+### Planned Source/Test Changes For 7A.2
+
+Expected source changes:
+
+- `backend/src/intric/flows/flow_run_export_json.py`
+- `backend/src/intric/flows/application/flow_run_service.py`
+- `backend/src/intric/flows/api/flow_run_evidence_router.py`
+- `backend/src/intric/flows/api/flow_models.py`
+- `backend/src/intric/flows/flow_run_provenance.py` only if the explicit provenance schema version constant/field is needed before export v3.
+- `backend/src/intric/flows/flow_run_evidence_export_manifest.py`
+- `backend/.importlinter`
+- `frontend/packages/intric-js/src/types/schema.d.ts` for the generated-client-sensitive schema surface touched by this slice.
+- `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts` for package-local type smoke coverage of the generated evidence export alias.
+
+Expected test changes:
+
+- `backend/tests/unittests/flows/test_flow_run_evidence.py`
+- `backend/tests/unittests/flows/test_flow_run_service.py`
+- `backend/tests/integration/flows/test_flow_evidence_api_contracts.py`
+- `backend/tests/unit/test_flow_openapi_contract.py`
+- `backend/tests/unit/test_server_startup_imports.py` only if the OpenAPI example path changes.
+- `backend/tests/unittests/flows/test_flow_router.py` only if router export reason/context assertions need updating.
+
+Expected docs changes:
+
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/plan.md`
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/journal.md`
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/retrospective-{N}.md`
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/claude-reconciliation-{N}.md`
+
+Do not touch:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+- frontend evidence UI files in 7A.2
+- migrations
+- Batch 8 or Batch 9 files
+
+### Acceptance Criteria For 7A.2
+
+- Raw and redacted evidence exports use the same top-level export shape and a single manifest builder.
+- Manifest is typed in runtime construction and OpenAPI response schema.
+- Manifest includes explicit `content_hash_input` with correct raw/redacted semantics.
+- Manifest includes `exported_at`, tenant/run/trace/flow identity, detail mode, export reason, exported user id where available, redaction policy version, retention summary, artifact availability summary, and provenance compatibility fields.
+- Export hash tests prove the hash is over the exact returned `bundle` payload, including the actual HTTP attachment payload after response validation.
+- OpenAPI/generated-client-sensitive schema shows a typed manifest instead of `dict[str, Any]`.
+- The journal records the `flow-evidence-export.v2` to `flow-evidence-export.v3` bump, the field-level manifest changes, and the pre-production/no-external-SDK-release rationale.
+- No raw payload retention, migration, evidence ledger, frontend UI rewrite, package rename, or namespace migration is introduced.
+
+### Validation Commands For 7A.2
+
+```bash
+cd backend && uv run pytest \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/unittests/flows/test_flow_run_service.py::test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detail \
+  -q
+```
+
+```bash
+cd backend && uv run pytest \
+  tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_returns_redacted_json_attachment \
+  tests/unit/test_flow_openapi_contract.py \
+  tests/unit/test_server_startup_imports.py \
+  -q
+```
+
+```bash
+cd backend && uv run pytest \
+  tests/unittests/flows/test_flow_router.py::test_flow_run_evidence_export_alias_returns_json_attachment \
+  tests/unittests/flows/test_flow_router.py::test_flow_run_evidence_export_alias_passes_raw_detail_and_reason \
+  tests/unittests/flows/test_flow_router.py::test_flow_run_evidence_export_alias_rejects_raw_invalid_reason \
+  -q
+```
+
+```bash
+cd backend && uv run pyright \
+  src/intric/flows/flow_run_evidence_export_manifest.py \
+  src/intric/flows/flow_run_export_json.py \
+  src/intric/flows/flow_run_provenance.py \
+  src/intric/flows/application/flow_run_service.py \
+  src/intric/flows/api/flow_run_evidence_router.py \
+  src/intric/flows/api/flow_models.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/unittests/flows/test_flow_run_service.py \
+  tests/integration/flows/test_flow_evidence_api_contracts.py \
+  tests/unit/test_flow_openapi_contract.py
+```
+
+```bash
+cd backend && uv run ruff check \
+  src/intric/flows/flow_run_evidence_export_manifest.py \
+  src/intric/flows/flow_run_export_json.py \
+  src/intric/flows/flow_run_provenance.py \
+  src/intric/flows/application/flow_run_service.py \
+  src/intric/flows/api/flow_run_evidence_router.py \
+  src/intric/flows/api/flow_models.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/unittests/flows/test_flow_run_service.py \
+  tests/integration/flows/test_flow_evidence_api_contracts.py \
+  tests/unit/test_flow_openapi_contract.py
+```
+
+```bash
+cd backend && uv run ruff format --check \
+  src/intric/flows/flow_run_evidence_export_manifest.py \
+  src/intric/flows/flow_run_export_json.py \
+  src/intric/flows/flow_run_provenance.py \
+  src/intric/flows/application/flow_run_service.py \
+  src/intric/flows/api/flow_run_evidence_router.py \
+  src/intric/flows/api/flow_models.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/unittests/flows/test_flow_run_service.py \
+  tests/integration/flows/test_flow_evidence_api_contracts.py \
+  tests/unit/test_flow_openapi_contract.py
+```
+
+```bash
+cd backend && uv run lint-imports --no-cache
+```
+
+```bash
+cd frontend/packages/intric-js && bun run check
+```
+
+```bash
+cd frontend/packages/intric-js && bun run lint
+```
+
+```bash
+rg -n "manifest: dict\\[str, Any\\]|flow-evidence-export\\.v2|Batch 7A|7A\\.|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)" \
+  backend/.importlinter \
+  backend/src/intric/flows/flow_run_evidence_export_manifest.py \
+  backend/src/intric/flows/flow_run_export_json.py \
+  backend/src/intric/flows/flow_run_provenance.py \
+  backend/src/intric/flows/api/flow_models.py \
+  backend/src/intric/flows/application/flow_run_service.py \
+  backend/src/intric/flows/api/flow_run_evidence_router.py \
+  backend/tests/unittests/flows/test_flow_run_evidence.py \
+  backend/tests/unittests/flows/test_flow_run_service.py \
+  backend/tests/integration/flows/test_flow_evidence_api_contracts.py \
+  backend/tests/unit/test_flow_openapi_contract.py \
+  frontend/packages/intric-js/src/types/schema.d.ts \
+  frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts
+```
+
+Expected: no committed source/test planning vocabulary. `flow-evidence-export.v2` should remain only in tests/docs if verifying migration away from v2, not as the new runtime schema version.
+
+```bash
+git diff --check -- \
+  backend/src/intric/flows/flow_run_export_json.py \
+  backend/src/intric/flows/flow_run_evidence_export_manifest.py \
+  backend/src/intric/flows/flow_run_provenance.py \
+  backend/src/intric/flows/application/flow_run_service.py \
+  backend/src/intric/flows/api/flow_run_evidence_router.py \
+  backend/src/intric/flows/api/flow_models.py \
+  backend/tests/unittests/flows/test_flow_run_evidence.py \
+  backend/tests/unittests/flows/test_flow_run_service.py \
+  backend/tests/integration/flows/test_flow_evidence_api_contracts.py \
+  backend/tests/unit/test_flow_openapi_contract.py \
+  frontend/packages/intric-js/src/types/schema.d.ts \
+  frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts \
+  backend/.importlinter \
+  docs/refactor/execution/batch-7a-evidence-provenance-contract
+```
+
+### Claude Plan Review Question For 7A.2
+
+Ask Claude:
+
+```text
+Attack this 7A.2 typed manifest plan. Does it put the export manifest in the right canonical owner, avoid a parallel evidence system, preserve raw/redacted hash semantics, and satisfy the hard gates without starting provenance parser, retention tombstone, artifact ownership, frontend, rerun, or review work too early? Should the typed manifest model live in a new narrow export-contract module, in flow_run_export_json.py, or in API flow_models.py?
+```
+
+Do not implement 7A.2 until Claude plan review returns green or Codex documents a source-backed disagreement.
 
 ## Scope For 7A.1
 

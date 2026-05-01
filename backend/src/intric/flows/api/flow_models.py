@@ -20,6 +20,7 @@ from intric.flows.enums import (
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
 )
+from intric.flows.flow_run_evidence_export_manifest import EvidenceExportManifest
 from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED, NotProvided, partial_model
 
@@ -1080,18 +1081,46 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v2",
+                "schema_version": "flow-evidence-export.v3",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
                 "manifest": {
+                    "schema_version": "flow-evidence-export.v3",
+                    "provenance_schema_version_min": "flow-attempt-provenance.v1",
+                    "provenance_schema_version_current": "flow-attempt-provenance.v1",
+                    "provenance_persisted_version_status": "not_tracked",
                     "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+                    "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
                     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
                     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
                     "flow_version": 3,
                     "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
+                    "content_hash_input": "redacted",
+                    "exported_at": "2026-03-31T12:00:00Z",
+                    "exported_by_user_id": "00000000-0000-0000-0000-000000000030",
+                    "export_reason": "support_debug",
+                    "detail_mode": "redacted",
                     "redaction_applied": True,
                     "masked_fields_count": 2,
                     "redaction_policy_version": "flow-evidence-redaction.v3",
+                    "retention_state_summary": {
+                        "tracking_state": "not_tracked",
+                        "tombstone_count": 0,
+                        "retention_purged_count": 0,
+                        "redacted_for_deletion_count": 0,
+                        "note": (
+                            "Tombstone tracking is not yet exposed; counts will "
+                            "populate when retention tombstones become trackable."
+                        ),
+                    },
+                    "artifact_availability_summary": {
+                        "tracking_state": "payload_derived",
+                        "payload_artifact_count": 1,
+                        "note": (
+                            "Canonical file availability is not yet exposed; counts "
+                            "currently come from payload-derived artifact references."
+                        ),
+                    },
                 },
                 "summary": {
                     "status": "completed",
@@ -1310,7 +1339,12 @@ class FlowRunEvidenceExportResponse(BaseModel):
     schema_version: str
     generated_at: datetime
     content_hash: str
-    manifest: dict[str, Any]
+    manifest: EvidenceExportManifest
     summary: dict[str, Any]
     redaction: dict[str, Any]
-    bundle: FlowRunEvidenceResponse
+    bundle: dict[str, Any] = Field(
+        description=(
+            "Open evidence object preserved exactly as hashed; use "
+            "FlowRunEvidenceResponse for the typed read-model endpoint."
+        )
+    )

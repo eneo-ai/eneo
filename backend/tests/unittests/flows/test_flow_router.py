@@ -162,18 +162,40 @@ def _evidence_export_payload(run: FlowRun) -> dict:
     generated_at = datetime.now(timezone.utc).isoformat()
     content_hash = "abc123"
     return {
-        "schema_version": "flow-evidence-export.v2",
+        "schema_version": "flow-evidence-export.v3",
         "generated_at": generated_at,
         "content_hash": content_hash,
         "manifest": {
+            "schema_version": "flow-evidence-export.v3",
+            "provenance_schema_version_min": "flow-attempt-provenance.v1",
+            "provenance_schema_version_current": "flow-attempt-provenance.v1",
+            "provenance_persisted_version_status": "not_tracked",
             "run_id": str(run.id),
+            "tenant_id": str(run.tenant_id),
             "flow_id": str(run.flow_id),
             "trace_id": str(run.trace_id),
             "flow_version": run.flow_version,
             "content_hash": content_hash,
+            "content_hash_input": "redacted",
+            "exported_at": generated_at,
+            "exported_by_user_id": str(run.user_id),
+            "export_reason": "support_debug",
+            "detail_mode": "redacted",
             "redaction_applied": True,
             "masked_fields_count": 0,
             "redaction_policy_version": "flow-evidence-redaction.v3",
+            "retention_state_summary": {
+                "tracking_state": "not_tracked",
+                "tombstone_count": 0,
+                "retention_purged_count": 0,
+                "redacted_for_deletion_count": 0,
+                "note": "Tombstone tracking is not yet exposed.",
+            },
+            "artifact_availability_summary": {
+                "tracking_state": "payload_derived",
+                "payload_artifact_count": 0,
+                "note": "Canonical file availability is not yet exposed.",
+            },
         },
         "summary": {
             "status": run.status.value,
@@ -2128,6 +2150,7 @@ async def test_flow_run_evidence_export_alias_returns_json_attachment(monkeypatc
         run_id=run.id,
         detail="redacted",
         run=run,
+        export_reason="support_debug",
     )
     container.audit_service.return_value.log_async.assert_awaited_once()
     assert (
@@ -2312,6 +2335,7 @@ async def test_flow_run_evidence_export_alias_passes_raw_detail_and_reason(monke
         run_id=run.id,
         detail="raw",
         run=run,
+        export_reason="government_audit_request",
     )
     assert container.audit_service.return_value.log_async.await_args.kwargs["metadata"][
         "extra"
