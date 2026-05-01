@@ -20,10 +20,12 @@ from intric.flows.flow_run_evidence_export_manifest import (
     EvidenceArtifactAvailabilitySummary,
     EvidenceExportContext,
     EvidenceExportManifest,
+    EvidenceProvenancePersistedVersionStatus,
     EvidenceRetentionStateSummary,
 )
 from intric.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+    FlowAttemptProvenanceParseResult,
     default_rag_tracking,
     normalize_text_preview,
 )
@@ -77,7 +79,8 @@ def render_evidence_json_export(
     bundle: EvidenceBundle | RedactedEvidenceBundle,
     context: EvidenceExportContext,
 ) -> dict[str, Any]:
-    bundle_payload = bundle.to_dict()
+    export_payload = bundle.to_export_payload()
+    bundle_payload = export_payload.payload
     debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
     security = _as_json_object_or_empty(debug_export.get("security"))
     serialized_bundle = json.dumps(
@@ -115,6 +118,7 @@ def render_evidence_json_export(
         redaction_applied=redaction_applied,
         masked_fields_count=masked_fields_count,
         summary=summary,
+        provenance_parse_results=export_payload.provenance_parse_results,
     )
     manifest_payload = manifest.model_dump(mode="json")
     return {
@@ -143,13 +147,16 @@ def _build_manifest(
     redaction_applied: bool,
     masked_fields_count: int,
     summary: dict[str, Any],
+    provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
 ) -> EvidenceExportManifest:
     run = _as_json_object_or_empty(bundle_payload.get("run"))
     return EvidenceExportManifest(
         schema_version=EVIDENCE_EXPORT_SCHEMA_VERSION,
         provenance_schema_version_min=FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
         provenance_schema_version_current=FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
-        provenance_persisted_version_status="not_tracked",
+        provenance_persisted_version_status=_provenance_persisted_version_status(
+            provenance_parse_results
+        ),
         content_hash=content_hash,
         content_hash_input=context.detail_mode,
         exported_at=exported_at,
@@ -181,6 +188,16 @@ def _build_manifest(
             note=_ARTIFACT_PAYLOAD_DERIVED_NOTE,
         ),
     )
+
+
+def _provenance_persisted_version_status(
+    parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
+) -> EvidenceProvenancePersistedVersionStatus:
+    if any(result.status == "corrupt" for result in parse_results):
+        return "corrupt"
+    if any(result.status == "tracked" for result in parse_results):
+        return "tracked"
+    return "not_tracked"
 
 
 def _build_summary(bundle_payload: dict[str, Any]) -> dict[str, Any]:

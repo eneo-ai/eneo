@@ -11,10 +11,18 @@ from intric.flows.domain.flow import (
 )
 from intric.flows.flow_run_evidence import build_debug_export
 from intric.flows.flow_run_provenance import (
-    normalize_attempt_provenance,
+    FlowAttemptProvenance,
+    FlowAttemptProvenanceParseResult,
     normalize_model_parameters_payload,
+    parse_attempt_provenance,
 )
 from intric.flows.flow_run_redaction import MaskedField, redact_payload_with_manifest
+
+
+@dataclass(frozen=True)
+class EvidenceBundlePayload:
+    payload: dict[str, Any]
+    provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...]
 
 
 @dataclass(frozen=True)
@@ -25,18 +33,28 @@ class EvidenceBundle:
     step_attempts: Sequence[FlowStepAttempt]
     debug_export: dict[str, Any]
 
+    def to_export_payload(self) -> EvidenceBundlePayload:
+        step_attempts: list[dict[str, Any]] = []
+        provenance_parse_results: list[FlowAttemptProvenanceParseResult] = []
+        for item in self.step_attempts:
+            dumped, parse_result = _dump_attempt_record(item)
+            step_attempts.append(dumped)
+            provenance_parse_results.append(parse_result)
+        return EvidenceBundlePayload(
+            payload={
+                "run": self.run.model_dump(mode="json"),
+                "definition_snapshot": self.version.definition_json,
+                "step_results": [
+                    _dump_result_record(item) for item in self.step_results
+                ],
+                "step_attempts": step_attempts,
+                "debug_export": dict(self.debug_export),
+            },
+            provenance_parse_results=tuple(provenance_parse_results),
+        )
+
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "run": self.run.model_dump(mode="json"),
-            "definition_snapshot": self.version.definition_json,
-            "step_results": [
-                item.model_dump(mode="json") for item in self.step_results
-            ],
-            "step_attempts": [
-                item.model_dump(mode="json") for item in self.step_attempts
-            ],
-            "debug_export": dict(self.debug_export),
-        }
+        return self.to_export_payload().payload
 
 
 @dataclass(frozen=True)
@@ -48,15 +66,22 @@ class RedactedEvidenceBundle:
     debug_export: dict[str, Any]
     masked_paths: tuple[str, ...]
     masked_fields: tuple[MaskedField, ...]
+    provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...] = ()
+
+    def to_export_payload(self) -> EvidenceBundlePayload:
+        return EvidenceBundlePayload(
+            payload={
+                "run": dict(self.run),
+                "definition_snapshot": dict(self.definition_snapshot),
+                "step_results": [dict(item) for item in self.step_results],
+                "step_attempts": [dict(item) for item in self.step_attempts],
+                "debug_export": dict(self.debug_export),
+            },
+            provenance_parse_results=self.provenance_parse_results,
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "run": dict(self.run),
-            "definition_snapshot": dict(self.definition_snapshot),
-            "step_results": [dict(item) for item in self.step_results],
-            "step_attempts": [dict(item) for item in self.step_attempts],
-            "debug_export": dict(self.debug_export),
-        }
+        return self.to_export_payload().payload
 
 
 def build_evidence_bundle(
@@ -94,19 +119,22 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
     step_result_payloads: list[dict[str, Any]] = []
     for index, item in enumerate(bundle.step_results):
         result = redact_payload_with_manifest(
-            _dump_json_record(item),
+            _dump_result_record(item),
             path=f"bundle.step_results[{index}]",
         )
         step_result_payloads.append(cast(dict[str, Any], result.value))
         masked_paths.extend(result.masked_paths)
         masked_fields.extend(result.masked_fields)
     step_attempt_payloads: list[dict[str, Any]] = []
+    provenance_parse_results: list[FlowAttemptProvenanceParseResult] = []
     for index, item in enumerate(bundle.step_attempts):
+        dumped_attempt, parse_result = _dump_attempt_record(item)
         result = redact_payload_with_manifest(
-            _dump_json_record(item),
+            dumped_attempt,
             path=f"bundle.step_attempts[{index}]",
         )
         step_attempt_payloads.append(cast(dict[str, Any], result.value))
+        provenance_parse_results.append(parse_result)
         masked_paths.extend(result.masked_paths)
         masked_fields.extend(result.masked_fields)
     debug_result = redact_payload_with_manifest(
@@ -144,41 +172,66 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
                 + tuple(debug_result.masked_fields)
             )
         ),
+        provenance_parse_results=tuple(provenance_parse_results),
     )
 
 
-def _dump_json_record(item: FlowStepResult | FlowStepAttempt) -> dict[str, Any]:
+def _dump_result_record(item: FlowStepResult) -> dict[str, Any]:
+    return item.model_dump(mode="json")
+
+
+def _dump_attempt_record(
+    item: FlowStepAttempt,
+) -> tuple[dict[str, Any], FlowAttemptProvenanceParseResult]:
     dumped = item.model_dump(mode="json")
-    if isinstance(item, FlowStepAttempt):
-        normalized_provenance = normalize_attempt_provenance(item.provenance_json)
-        if normalized_provenance is not None and normalized_provenance.llm is not None:
-            llm_payload = normalized_provenance.llm
-            model_parameters = llm_payload.model_parameters
-            if not isinstance(model_parameters, dict):
-                model_parameters = {}
-            model_parameters = {
-                **model_parameters,
-                "model_name": model_parameters.get("model_name")
-                or item.response_model
-                or item.requested_model,
-                "provider": model_parameters.get("provider") or item.provider,
-            }
-            llm_payload.model_parameters = normalize_model_parameters_payload(
-                model_parameters
-            )
-        dumped["provenance_json"] = (
-            normalized_provenance.to_payload()
-            if normalized_provenance is not None
+    parse_result = parse_attempt_provenance(item.provenance_json)
+    export_provenance = _enrich_attempt_provenance_for_export(
+        parse_result.provenance,
+        item,
+    )
+    dumped["provenance_json"] = (
+        export_provenance.to_payload()
+        if export_provenance is not None
+        else parse_result.to_export_payload()
+    )
+    if dumped.get("provider") is None and export_provenance is not None:
+        model_parameters = (
+            export_provenance.llm.model_parameters
+            if export_provenance.llm is not None
             else None
         )
-        if (
-            dumped.get("provider") is None
-            and normalized_provenance is not None
-            and normalized_provenance.llm is not None
-        ):
-            model_parameters = normalized_provenance.llm.model_parameters
-            if isinstance(model_parameters, dict):
-                raw_provider = model_parameters.get("provider")
-                if isinstance(raw_provider, str) and raw_provider.strip():
-                    dumped["provider"] = raw_provider.strip()
-    return {key: value for key, value in dumped.items()}
+        if isinstance(model_parameters, dict):
+            raw_provider = model_parameters.get("provider")
+            if isinstance(raw_provider, str) and raw_provider.strip():
+                dumped["provider"] = raw_provider.strip()
+    return dumped, parse_result
+
+
+def _enrich_attempt_provenance_for_export(
+    provenance: FlowAttemptProvenance | None,
+    item: FlowStepAttempt,
+) -> FlowAttemptProvenance | None:
+    if provenance is None or provenance.llm is None:
+        return provenance
+    llm_payload = provenance.llm
+    model_parameters = llm_payload.model_parameters
+    if not isinstance(model_parameters, dict):
+        model_parameters = {}
+    model_parameters = {
+        **model_parameters,
+        "model_name": model_parameters.get("model_name")
+        or item.response_model
+        or item.requested_model,
+        "provider": model_parameters.get("provider") or item.provider,
+    }
+    return provenance.model_copy(
+        update={
+            "llm": llm_payload.model_copy(
+                update={
+                    "model_parameters": normalize_model_parameters_payload(
+                        model_parameters
+                    )
+                }
+            )
+        }
+    )

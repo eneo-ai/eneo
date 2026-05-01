@@ -278,3 +278,138 @@ Iteration 3 verification returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCO
 - 7A.6 must replace payload-derived artifact availability with `FlowRunStepResultFiles` + `Files` canonical availability.
 - `audit_event_id` remains deferred until the audit layer can provide a real durable id; do not add a permanent-null API field.
 - The top-level export envelope still mirrors manifest `schema_version`, `generated_at`, and `content_hash` for response compatibility. Equality tests guard drift, but later cleanup may decide whether to remove these mirrors before publication.
+
+## Iteration 3 — 7A.3 Provenance Versioning
+
+### Plan
+
+Active slice: provenance schema version and corruption behavior.
+
+Planned source ownership:
+
+- `flow_run_provenance.py` owns attempt provenance schema/version parsing and corruption markers.
+- `flow_run_evidence_bundle.py` owns persisted attempt row normalization for raw and redacted evidence bundles.
+- `flow_run_export_json.py` owns the export-manifest summary of persisted provenance version status.
+
+No historical reader is planned because no persisted row-count proof is available in this environment and Flow/Flow AI Builder are pre-production on this branch. Unversioned branch-local fixtures are test data to update or explicit corruption-marker cases, not shipped compatibility evidence.
+
+### Claude Plan Review 1
+
+Claude returned `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`.
+
+Accepted plan changes:
+
+- Runtime writer must round-trip through `FlowAttemptProvenance` before persistence so new writer sections cannot drift from the strict reader.
+- Corruption marker schema is a strict Pydantic model with distinct literal `flow-attempt-provenance-marker.v1`.
+- Bundle normalization must produce typed provenance parse results that both the serialized bundle and manifest summary consume.
+- Raw and redacted bundles must share the same attempt normalization mechanism through `EvidenceBundlePayload`.
+- HTTP-level corrupt-manifest status coverage is required, not optional.
+- Mixed valid-v1 and no-provenance attempts report manifest status `tracked`; per-attempt payloads carry the precise state.
+
+### Claude Plan Review 2
+
+Claude returned `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 8`.
+
+Accepted plan fixes:
+
+- Removed the canonical corruption marker literal from the negative anti-slippage grep so the guard will not fail on the source constant it requires.
+- Pinned the marker landing surface: corruption markers replace `step_attempts[i].provenance_json` only inside the export bundle, while the typed evidence read-model contract remains unchanged in this slice.
+- Pinned the bundle plumbing: raw and redacted evidence bundles expose `to_export_payload()` returning `EvidenceBundlePayload`; `to_dict()` remains payload-only.
+
+Claude's remaining feedback was mechanical plan hygiene rather than a design change. No source implementation has started.
+
+### Claude Plan Review 3
+
+Claude returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+
+Implementation guardrails carried forward:
+
+- The writer round-trip test should cover every section that used to be appended after `FlowAttemptProvenance.to_payload()`.
+- Corruption marker fixtures should cover non-dict, missing schema, unsupported schema, and unknown top-level keys.
+- HTTP export corruption coverage should assert both manifest status and bundle marker.
+- `EvidenceBundlePayload` must be the in-process handoff; the manifest must not infer status by scanning serialized marker bytes.
+
+### Implementation Summary
+
+Changed source/tests:
+
+- `backend/src/intric/flows/flow_run_provenance.py`
+  - Added strict current-schema parsing around `flow-attempt-provenance.v1`.
+  - Added typed corruption markers with distinct marker schema `flow-attempt-provenance-marker.v1`.
+  - Kept `normalize_attempt_provenance` as the canonical current-provenance normalizer for callers that only accept valid current payloads.
+- `backend/src/intric/flows/flow_run_evidence_bundle.py`
+  - Added `EvidenceBundlePayload` as the raw/redacted export handoff carrying both serialized payload and typed provenance parse results.
+  - Routes raw and redacted attempt serialization through the same parser/marker path.
+- `backend/src/intric/flows/flow_run_export_json.py`
+  - Computes `provenance_persisted_version_status` from typed parse results instead of serialized marker scanning.
+- `backend/src/intric/flows/runtime/executor.py`
+  - Builds complete attempt provenance payloads before validating through `FlowAttemptProvenance`.
+  - Removes post-`to_payload()` mutation as a drift source.
+- `backend/tests/unittests/flows/test_flow_run_evidence.py`
+  - Pins valid current provenance parsing, corruption markers, raw/redacted marker parity, and manifest status rules.
+- `backend/tests/unittests/flows/test_step_attempt_runtime.py`
+  - Pins runtime writer round-trip behavior across LLM, RAG, runtime input, transcription, guards, template, artifacts, HTTP, and citations.
+- `backend/tests/integration/flows/test_flow_evidence_api_contracts.py`
+  - Pins HTTP evidence export status/marker behavior for corrupt persisted attempt provenance.
+
+No historical reader shipped. Unversioned branch-local fixtures were updated to v1 unless they intentionally exercise corruption behavior.
+
+### Validation Summary
+
+- `cd backend && uv run pytest tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_step_attempt_runtime.py -q`: 36 passed before the final invariant addition.
+- `cd backend && uv run pytest tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_returns_redacted_json_attachment tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_marks_corrupt_attempt_provenance -q`: 2 passed.
+- `cd backend && uv run pytest tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_flow_run_service.py::test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detail tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_returns_redacted_json_attachment tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_marks_corrupt_attempt_provenance tests/unit/test_flow_openapi_contract.py tests/unit/test_server_startup_imports.py -q`: 78 passed.
+- `cd backend && uv run pytest tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_returns_redacted_json_attachment tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_marks_corrupt_attempt_provenance -q`: 38 passed after adding parse-result invariants.
+- `cd backend && uv run pyright ...`: 0 errors.
+- `cd backend && uv run ruff check ...`: all checks passed.
+- `cd backend && uv run ruff format --check ...`: 7 files already formatted.
+- `cd backend && uv run lint-imports --no-cache`: 3 contracts kept, 0 broken.
+- Anti-slippage `rg` for stale provenance/version/internal planning vocabulary across touched source/test files: no matches.
+- `git diff --check -- ...`: passed.
+- `docker ps --format '{{.Names}}'`: blocked before Docker execution by the local Codex approval policy (`AskForApproval is set to Never`); local/testcontainers validation above passed.
+
+Warnings observed were existing deprecation warnings and not product regressions.
+
+### Carry-Forward Risks
+
+- 7A.4 still owns tool-call single-source normalization and RAG truthfulness states.
+- 7A.5 still owns retention tombstones, deletion semantics, and availability markers.
+- 7A.6 still owns artifact/file evidence ownership through `FlowRunStepResultFiles` + `Files`.
+- 7A.7 still owns frontend evidence generated aliases/view-model alignment if backend evidence schemas change.
+- No durable historical reader exists because no persisted historical row proof is available; if future data inspection proves historical rows, add a named reader with owner, row proof, deletion condition, and tests.
+
+### Claude Implementation Review 1
+
+Claude returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 7`, with non-blocking accepted cleanup findings.
+
+Fixes applied before verification:
+
+- Split persisted provenance parsing from export enrichment with `_enrich_attempt_provenance_for_export`.
+- Removed the no-op parse-result reassignment and stopped mutating the parse result's provenance object.
+- Returned the dumped attempt dict directly instead of rebuilding a shallow copy.
+- Reduced corruption marker noise by emitting `unknown_keys` and `raw_value_type` only when they add information.
+- Changed runtime writer assembly to pass `LlmProvenance` into the final `FlowAttemptProvenance` validation instead of dumping then re-validating that section.
+- Added a writer/parser handshake assertion: `_build_attempt_provenance` output must parse as `tracked`.
+- Added current-schema validation-failure coverage for malformed `llm.effective_prompt`.
+- Added a writer-side known-LLM-key assertion as the bounded guard for the deliberately additive nested provenance models.
+
+Deliberate carry-forward:
+
+- Nested provenance sections remain additive in 7A.3 because the plan explicitly keeps nested `extra="allow"` for forward-compatible metadata. 7A.4-7A.6 can tighten specific sections when tool-call, RAG, and artifact ownership become canonical.
+- Raw `EvidenceBundle.to_export_payload()` remains computed on demand. Current export rendering calls it once; caching parse results would add another state copy inside the bundle object without a measured need.
+
+### Claude Implementation Review 2-3
+
+- Iteration 2 returned a green textual verdict, but the wrapper did not parse the markdown-headed `GREEN_LIGHT` line and exited nonzero.
+- Iteration 3 reran the same session with the exact output contract and returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+- Claude confirmed no accepted or partial findings remain.
+
+### Final Validation Summary
+
+- `cd backend && uv run pytest tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_flow_run_service.py::test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detail tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_returns_redacted_json_attachment tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_marks_corrupt_attempt_provenance tests/unit/test_flow_openapi_contract.py tests/unit/test_server_startup_imports.py -q`: 79 passed.
+- `cd backend && uv run pyright ...`: 0 errors.
+- `cd backend && uv run ruff check ...`: all checks passed.
+- `cd backend && uv run ruff format --check ...`: 7 files already formatted.
+- `cd backend && uv run lint-imports --no-cache`: 3 contracts kept, 0 broken.
+- Anti-slippage `rg` across touched source/test files: no matches.
+- `git diff --check -- ...`: passed.

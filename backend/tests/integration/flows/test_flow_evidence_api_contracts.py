@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -22,6 +23,10 @@ from intric.flows import (
     FlowRepository,
     FlowStep,
     FlowVersionRepository,
+)
+from intric.flows.flow_run_provenance import (
+    FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
+    FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
 )
 from intric.main.container.container import Container
 from intric.roles.permissions import Permission
@@ -141,6 +146,7 @@ async def _seed_flow_run_contract_data(
     space_factory,
     assistant_factory,
     admin_user,
+    attempt_provenance_json: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     async with db_container() as container:
         session = container.session()
@@ -300,7 +306,9 @@ async def _seed_flow_run_contract_data(
                 provider_response_id="resp_123",
                 num_tokens_input=11,
                 num_tokens_output=7,
-                provenance_json={
+                provenance_json=attempt_provenance_json
+                or {
+                    "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
                     "llm": {
                         "prompt": "Authorization: Bearer super-secret",
                         "params": {"temperature": 0.2},
@@ -500,6 +508,7 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert payload["manifest"]["export_reason"] == "support_debug"
     assert payload["manifest"]["exported_by_user_id"] == str(admin_user.id)
     assert payload["manifest"]["redaction_applied"] is True
+    assert payload["manifest"]["provenance_persisted_version_status"] == "tracked"
     assert payload["manifest"]["retention_state_summary"]["tracking_state"] == (
         "not_tracked"
     )
@@ -611,6 +620,51 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
         ]["parameter_semantics"]["reasoning_effort"]["mode"]
         == "model_default"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_evidence_export_marks_corrupt_attempt_provenance(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded = await _seed_flow_run_contract_data(
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        attempt_provenance_json={"llm": {"prompt": "missing version"}},
+    )
+
+    async with db_container() as container:
+        auth_service = container.auth_service()
+        admin_token = auth_service.create_access_token_for_user(admin_user)
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export?format=json",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    serialized_bundle = json.dumps(
+        payload["bundle"],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert payload["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
+    assert payload["manifest"]["provenance_persisted_version_status"] == "corrupt"
+    marker = payload["bundle"]["step_attempts"][0]["provenance_json"]
+    assert marker["schema_version"] == FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION
+    assert marker["status"] == "corrupt"
+    assert marker["error_code"] == "flow_attempt_provenance_schema_version_missing"
 
 
 @pytest.mark.asyncio

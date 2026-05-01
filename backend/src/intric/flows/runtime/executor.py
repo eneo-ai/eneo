@@ -180,8 +180,8 @@ def _build_attempt_provenance(
     output: StepExecutionOutput,
     step_result: FlowStepResult,
 ) -> dict[str, Any]:
-    provenance = FlowAttemptProvenance(
-        llm=LlmProvenance(
+    provenance_payload: dict[str, Any] = {
+        "llm": LlmProvenance(
             effective_prompt=normalize_text_preview(output.effective_prompt),
             model_parameters=output.model_parameters_json,
             tool_calls=normalize_json_preview(output.tool_calls_metadata)
@@ -192,15 +192,15 @@ def _build_attempt_provenance(
             and output.raw_completion_text
             else None,
         )
-    ).to_payload()
+    }
     if output.rag_metadata is not None:
-        provenance["rag"] = output.rag_metadata
+        provenance_payload["rag"] = output.rag_metadata
     if output.runtime_input_metadata is not None:
-        provenance["runtime_input"] = output.runtime_input_metadata
+        provenance_payload["runtime_input"] = output.runtime_input_metadata
     if output.transcription_metadata is not None:
-        provenance["transcription"] = output.transcription_metadata
+        provenance_payload["transcription"] = output.transcription_metadata
     if output.contract_validation is not None or output.diagnostics:
-        provenance["guards"] = {
+        provenance_payload["guards"] = {
             "contract_validation": output.contract_validation,
             "diagnostics": [
                 {
@@ -214,28 +214,28 @@ def _build_attempt_provenance(
     output_payload = step_result.output_payload_json or {}
     template_provenance = output_payload.get("template_provenance")
     if isinstance(template_provenance, dict):
-        provenance["template"] = template_provenance
+        provenance_payload["template"] = template_provenance
     artifacts = output_payload.get("artifacts")
     if isinstance(artifacts, list):
-        provenance["artifacts"] = {
+        provenance_payload["artifacts"] = {
             "items": artifacts,
             "generated_file_ids": [
                 str(file_id) for file_id in output.generated_file_ids
             ],
         }
     if step.input_source in {"http_get", "http_post"}:
-        provenance["http"] = {
+        provenance_payload["http"] = {
             "input_source": step.input_source,
             "structured_input_present": output.source_text != "",
         }
     if step.output_mode == "http_post":
-        provenance["http"] = {
-            **cast(dict[str, Any], provenance.get("http", {})),
+        provenance_payload["http"] = {
+            **cast(dict[str, Any], provenance_payload.get("http", {})),
             "output_mode": step.output_mode,
         }
     if output.citation_sidecar is not None:
-        provenance["citations"] = output.citation_sidecar
-    return provenance
+        provenance_payload["citations"] = output.citation_sidecar
+    return FlowAttemptProvenance.model_validate(provenance_payload).to_payload()
 
 
 class FlowRunExecutor:

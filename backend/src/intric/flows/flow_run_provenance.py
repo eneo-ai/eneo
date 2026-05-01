@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from typing import Any, Literal, TypeVar, cast
+from dataclasses import dataclass
+from typing import Any, Literal, TypeAlias, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from intric.flows.domain.flow import JsonObject
 from intric.flows.source_display import (
@@ -22,6 +23,20 @@ DEFAULT_RAG_SELECTION_BASIS = "semantic_search_ranked_chunks_grouped_by_source"
 FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION: Literal["flow-attempt-provenance.v1"] = (
     "flow-attempt-provenance.v1"
 )
+FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION: Literal[
+    "flow-attempt-provenance-marker.v1"
+] = "flow-attempt-provenance-marker.v1"
+
+FlowAttemptProvenanceParseStatus: TypeAlias = Literal[
+    "not_tracked", "tracked", "corrupt"
+]
+FlowAttemptProvenanceCorruptionCode: TypeAlias = Literal[
+    "flow_attempt_provenance_invalid_type",
+    "flow_attempt_provenance_schema_version_missing",
+    "flow_attempt_provenance_schema_version_unsupported",
+    "flow_attempt_provenance_unknown_top_level_keys",
+    "flow_attempt_provenance_invalid_current_payload",
+]
 
 
 class PayloadPreview(BaseModel):
@@ -104,6 +119,67 @@ class FlowAttemptProvenance(BaseModel):
         return self.model_dump(mode="json", exclude_none=True)
 
 
+class FlowAttemptProvenanceCorruptionMarker(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["flow-attempt-provenance-marker.v1"] = (
+        FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION
+    )
+    status: Literal["corrupt"] = "corrupt"
+    error_code: FlowAttemptProvenanceCorruptionCode
+    message: str
+    raw_value_type: str | None = None
+    persisted_schema_version: str | None = None
+    unknown_keys: tuple[str, ...] | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        return self.model_dump(mode="json", exclude_none=True)
+
+
+@dataclass(frozen=True)
+class FlowAttemptProvenanceParseResult:
+    status: FlowAttemptProvenanceParseStatus
+    provenance: FlowAttemptProvenance | None = None
+    marker: FlowAttemptProvenanceCorruptionMarker | None = None
+
+    def __post_init__(self) -> None:
+        if self.status == "tracked" and (
+            self.provenance is None or self.marker is not None
+        ):
+            raise ValueError("Tracked attempt provenance requires a provenance value.")
+        if self.status == "corrupt" and (
+            self.marker is None or self.provenance is not None
+        ):
+            raise ValueError("Corrupt attempt provenance requires a marker value.")
+        if self.status == "not_tracked" and (
+            self.provenance is not None or self.marker is not None
+        ):
+            raise ValueError("Untracked attempt provenance cannot carry payload.")
+
+    @classmethod
+    def not_tracked(cls) -> "FlowAttemptProvenanceParseResult":
+        return cls(status="not_tracked")
+
+    @classmethod
+    def tracked(
+        cls, provenance: FlowAttemptProvenance
+    ) -> "FlowAttemptProvenanceParseResult":
+        return cls(status="tracked", provenance=provenance)
+
+    @classmethod
+    def corrupt(
+        cls, marker: FlowAttemptProvenanceCorruptionMarker
+    ) -> "FlowAttemptProvenanceParseResult":
+        return cls(status="corrupt", marker=marker)
+
+    def to_export_payload(self) -> dict[str, Any] | None:
+        if self.status == "tracked" and self.provenance is not None:
+            return self.provenance.to_payload()
+        if self.status == "corrupt" and self.marker is not None:
+            return self.marker.to_payload()
+        return None
+
+
 def default_rag_tracking() -> dict[str, Any]:
     return {
         "retrieval_tracked": True,
@@ -160,9 +236,92 @@ def normalize_json_preview(
 def normalize_attempt_provenance(
     raw: dict[str, Any] | None,
 ) -> FlowAttemptProvenance | None:
-    if not isinstance(raw, dict):
-        return None
+    parse_result = parse_attempt_provenance(raw)
+    return parse_result.provenance if parse_result.status == "tracked" else None
 
+
+def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
+    if raw is None:
+        return FlowAttemptProvenanceParseResult.not_tracked()
+    if not isinstance(raw, dict):
+        return FlowAttemptProvenanceParseResult.corrupt(
+            _corruption_marker(
+                error_code="flow_attempt_provenance_invalid_type",
+                message="Attempt provenance must be a JSON object.",
+                raw=raw,
+                include_raw_value_type=True,
+            )
+        )
+    raw_payload = cast(dict[str, Any], raw)
+
+    schema_version = raw_payload.get("schema_version")
+    if not isinstance(schema_version, str) or not schema_version.strip():
+        return FlowAttemptProvenanceParseResult.corrupt(
+            _corruption_marker(
+                error_code="flow_attempt_provenance_schema_version_missing",
+                message="Attempt provenance is missing schema_version.",
+                raw=raw_payload,
+            )
+        )
+    if schema_version != FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION:
+        return FlowAttemptProvenanceParseResult.corrupt(
+            _corruption_marker(
+                error_code="flow_attempt_provenance_schema_version_unsupported",
+                message="Attempt provenance schema_version is not supported.",
+                raw=raw_payload,
+                persisted_schema_version=schema_version,
+            )
+        )
+
+    allowed_keys = set(FlowAttemptProvenance.model_fields)
+    unknown_keys = tuple(sorted(set(raw_payload) - allowed_keys))
+    if unknown_keys:
+        return FlowAttemptProvenanceParseResult.corrupt(
+            _corruption_marker(
+                error_code="flow_attempt_provenance_unknown_top_level_keys",
+                message="Attempt provenance contains unknown top-level keys.",
+                raw=raw_payload,
+                persisted_schema_version=schema_version,
+                unknown_keys=unknown_keys,
+            )
+        )
+
+    invalid_section = next(
+        (
+            key
+            for key in raw_payload
+            if key != "schema_version"
+            and raw_payload.get(key) is not None
+            and not isinstance(raw_payload.get(key), dict)
+        ),
+        None,
+    )
+    if invalid_section is not None:
+        return FlowAttemptProvenanceParseResult.corrupt(
+            _corruption_marker(
+                error_code="flow_attempt_provenance_invalid_current_payload",
+                message=f"Attempt provenance section '{invalid_section}' is invalid.",
+                raw=raw_payload,
+                persisted_schema_version=schema_version,
+            )
+        )
+
+    try:
+        return FlowAttemptProvenanceParseResult.tracked(
+            _normalize_attempt_provenance_v1(raw_payload)
+        )
+    except (TypeError, ValueError, ValidationError):
+        return FlowAttemptProvenanceParseResult.corrupt(
+            _corruption_marker(
+                error_code="flow_attempt_provenance_invalid_current_payload",
+                message="Attempt provenance failed current schema validation.",
+                raw=raw_payload,
+                persisted_schema_version=schema_version,
+            )
+        )
+
+
+def _normalize_attempt_provenance_v1(raw: dict[str, Any]) -> FlowAttemptProvenance:
     llm_raw = raw.get("llm")
     llm: LlmProvenance | None = None
     if isinstance(llm_raw, dict):
@@ -186,6 +345,7 @@ def normalize_attempt_provenance(
         llm = LlmProvenance.model_validate(llm_payload)
 
     return FlowAttemptProvenance(
+        schema_version=FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
         llm=llm,
         rag=_normalize_rag_provenance(raw.get("rag")),
         http=_validate_extra_model(HttpProvenance, raw.get("http")),
@@ -201,6 +361,24 @@ def normalize_attempt_provenance(
         guards=_validate_extra_model(GuardsProvenance, raw.get("guards")),
         mcp=_validate_extra_model(McpProvenance, raw.get("mcp")),
         citations=_validate_extra_model(CitationsProvenance, raw.get("citations")),
+    )
+
+
+def _corruption_marker(
+    *,
+    error_code: FlowAttemptProvenanceCorruptionCode,
+    message: str,
+    raw: Any,
+    persisted_schema_version: str | None = None,
+    unknown_keys: tuple[str, ...] | None = None,
+    include_raw_value_type: bool = False,
+) -> FlowAttemptProvenanceCorruptionMarker:
+    return FlowAttemptProvenanceCorruptionMarker(
+        error_code=error_code,
+        message=message,
+        raw_value_type=type(raw).__name__ if include_raw_value_type else None,
+        persisted_schema_version=persisted_schema_version,
+        unknown_keys=unknown_keys,
     )
 
 

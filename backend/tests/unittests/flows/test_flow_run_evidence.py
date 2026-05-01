@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import replace
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -32,8 +33,11 @@ from intric.flows.flow_run_evidence_export_manifest import (
 )
 from intric.flows.flow_run_export_json import render_evidence_json_export
 from intric.flows.flow_run_provenance import (
+    FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
+    FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     normalize_attempt_provenance,
     normalize_rag_payload,
+    parse_attempt_provenance,
 )
 
 
@@ -42,6 +46,75 @@ def _redacted_export_context() -> EvidenceExportContext:
         detail_mode="redacted",
         export_reason="support_debug",
         exported_by_user_id="00000000-0000-0000-0000-000000000030",
+    )
+
+
+def _raw_export_context() -> EvidenceExportContext:
+    return EvidenceExportContext(
+        detail_mode="raw",
+        export_reason="regulatory_audit",
+        exported_by_user_id="00000000-0000-0000-0000-000000000030",
+    )
+
+
+def _evidence_run_and_version() -> tuple[FlowRun, FlowVersion]:
+    now = datetime.now(timezone.utc)
+    run = FlowRun(
+        id=uuid4(),
+        flow_id=uuid4(),
+        flow_version=1,
+        user_id=uuid4(),
+        tenant_id=uuid4(),
+        trace_id=uuid4(),
+        status=FlowRunStatus.COMPLETED,
+        cancelled_at=None,
+        input_payload_json=None,
+        output_payload_json={"text": "done"},
+        error_message=None,
+        job_id=None,
+        created_at=now,
+        updated_at=now,
+    )
+    version = FlowVersion(
+        flow_id=run.flow_id,
+        version=1,
+        tenant_id=run.tenant_id,
+        definition_checksum="checksum",
+        definition_json={"steps": []},
+        created_at=now,
+        updated_at=now,
+    )
+    return run, version
+
+
+def _attempt_with_provenance(
+    run: FlowRun, provenance_json: dict[str, Any] | None
+) -> FlowStepAttempt:
+    now = datetime.now(timezone.utc)
+    return FlowStepAttempt(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=uuid4(),
+        step_order=1,
+        attempt_no=1,
+        celery_task_id=None,
+        status=FlowStepAttemptStatus.COMPLETED,
+        error_code=None,
+        error_message=None,
+        requested_model="gpt-5.4-nano",
+        response_model="gpt-5.4-nano",
+        provider="openai",
+        finish_reason="stop",
+        provider_response_id=None,
+        num_tokens_input=1,
+        num_tokens_output=1,
+        provenance_json=provenance_json,
+        started_at=now,
+        finished_at=now,
+        created_at=now,
+        updated_at=now,
     )
 
 
@@ -187,12 +260,13 @@ def test_build_debug_export_handles_empty_steps():
 def test_normalize_attempt_provenance_truncates_large_text_and_json_payloads():
     normalized = normalize_attempt_provenance(
         {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
             "llm": {
                 "effective_prompt": "x" * 20000,
                 "tool_calls": {
                     "result": "y" * 20000,
                 },
-            }
+            },
         }
     )
 
@@ -205,6 +279,81 @@ def test_normalize_attempt_provenance_truncates_large_text_and_json_payloads():
     assert normalized.llm.tool_calls is not None
     assert normalized.llm.tool_calls.truncated is True
     assert normalized.llm.tool_calls.sha256 is not None
+
+
+def test_parse_attempt_provenance_returns_tracked_current_payload() -> None:
+    result = parse_attempt_provenance(
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "llm": {"effective_prompt": "Hello"},
+        }
+    )
+
+    assert result.status == "tracked"
+    assert result.provenance is not None
+    assert result.marker is None
+    payload = result.to_export_payload()
+    assert payload is not None
+    assert payload["schema_version"] == FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
+
+
+@pytest.mark.parametrize(
+    ("raw", "error_code"),
+    [
+        (["not", "an", "object"], "flow_attempt_provenance_invalid_type"),
+        ({"llm": {}}, "flow_attempt_provenance_schema_version_missing"),
+        (
+            {"schema_version": "flow-attempt-provenance." + "v0", "llm": {}},
+            "flow_attempt_provenance_schema_version_unsupported",
+        ),
+        (
+            {
+                "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+                "unexpected": {},
+            },
+            "flow_attempt_provenance_unknown_top_level_keys",
+        ),
+    ],
+)
+def test_parse_attempt_provenance_returns_typed_corruption_marker(
+    raw: Any, error_code: str
+) -> None:
+    result = parse_attempt_provenance(raw)
+
+    assert result.status == "corrupt"
+    assert result.provenance is None
+    assert result.marker is not None
+    assert result.marker.schema_version == FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION
+    assert result.marker.error_code == error_code
+    payload = result.to_export_payload()
+    assert payload is not None
+    assert payload["status"] == "corrupt"
+
+
+def test_parse_attempt_provenance_rejects_invalid_current_section() -> None:
+    result = parse_attempt_provenance(
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "llm": "bad",
+        }
+    )
+
+    assert result.status == "corrupt"
+    assert result.marker is not None
+    assert result.marker.error_code == "flow_attempt_provenance_invalid_current_payload"
+
+
+def test_parse_attempt_provenance_marks_current_schema_validation_failure() -> None:
+    result = parse_attempt_provenance(
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "llm": {"effective_prompt": {"preview": "missing required fields"}},
+        }
+    )
+
+    assert result.status == "corrupt"
+    assert result.marker is not None
+    assert result.marker.error_code == "flow_attempt_provenance_invalid_current_payload"
 
 
 def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
@@ -469,6 +618,7 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
             "from payload-derived artifact references."
         ),
     }
+    assert export["manifest"]["provenance_persisted_version_status"] == "not_tracked"
     assert export["summary"]["status"] == "completed"
     assert export["summary"]["steps_count"] == 0
     assert export["summary"]["artifacts_count"] == 0
@@ -491,6 +641,57 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
         separators=(",", ":"),
     ).encode("utf-8")
     assert export["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
+
+
+def test_evidence_export_marks_corrupt_attempt_provenance_raw_and_redacted() -> None:
+    run, version = _evidence_run_and_version()
+    attempt = _attempt_with_provenance(run, {"llm": {"effective_prompt": "Prompt"}})
+    raw_bundle = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[],
+        step_attempts=[attempt],
+    )
+    redacted_bundle = redact_evidence_bundle(raw_bundle)
+
+    for export in (
+        render_evidence_json_export(bundle=raw_bundle, context=_raw_export_context()),
+        render_evidence_json_export(
+            bundle=redacted_bundle, context=_redacted_export_context()
+        ),
+    ):
+        marker = export["bundle"]["step_attempts"][0]["provenance_json"]
+        assert export["manifest"]["provenance_persisted_version_status"] == "corrupt"
+        assert marker["schema_version"] == FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION
+        assert marker["status"] == "corrupt"
+        assert marker["error_code"] == "flow_attempt_provenance_schema_version_missing"
+
+
+def test_evidence_export_manifest_tracks_valid_and_absent_provenance() -> None:
+    run, version = _evidence_run_and_version()
+    tracked_attempt = _attempt_with_provenance(
+        run,
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "llm": {"effective_prompt": "Prompt"},
+        },
+    )
+    absent_attempt = _attempt_with_provenance(run, None)
+    bundle = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[],
+        step_attempts=[tracked_attempt, absent_attempt],
+    )
+
+    export = render_evidence_json_export(bundle=bundle, context=_raw_export_context())
+
+    assert export["manifest"]["provenance_persisted_version_status"] == "tracked"
+    assert (
+        export["bundle"]["step_attempts"][0]["provenance_json"]["schema_version"]
+        == FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
+    )
+    assert export["bundle"]["step_attempts"][1]["provenance_json"] is None
 
 
 def test_evidence_export_manifest_rejects_unknown_fields() -> None:
@@ -602,6 +803,7 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
         step_attempts=(
             {
                 "provenance_json": {
+                    "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
                     "rag": {
                         "references": [
                             {
@@ -616,7 +818,7 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
                         "source_names": [
                             "https://psykologi.se/psykologilexikon/affekt/"
                         ],
-                    }
+                    },
                 }
             },
         ),
@@ -776,6 +978,7 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
         num_tokens_input=12,
         num_tokens_output=8,
         provenance_json={
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
             "rag": {
                 "status": "success",
                 "tracking": {
@@ -833,7 +1036,7 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
                 "source_display_names": ["Beslut till underlag"],
                 "reference_metadata_status": "success",
                 "references_truncated": False,
-            }
+            },
         },
         started_at=started_at,
         finished_at=finished_at,
@@ -1138,6 +1341,7 @@ def test_render_evidence_json_export_adds_fallback_container_display_name_and_mo
         num_tokens_input=1,
         num_tokens_output=1,
         provenance_json={
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
             "llm": {
                 "model_parameters": {
                     "model_id": str(uuid4()),
@@ -1293,6 +1497,7 @@ def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_s
         num_tokens_input=10,
         num_tokens_output=12,
         provenance_json={
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
             "rag": {
                 "status": "success",
                 "tracking": {
@@ -1352,7 +1557,7 @@ def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_s
                         "chunks": [],
                     },
                 ],
-            }
+            },
         },
         started_at=now,
         finished_at=now,
@@ -1491,6 +1696,7 @@ def test_render_evidence_json_export_uses_provenance_citation_compliance_and_run
         num_tokens_input=10,
         num_tokens_output=12,
         provenance_json={
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
             "rag": {
                 "status": "success",
                 "tracking": {
@@ -1680,6 +1886,7 @@ def test_render_evidence_json_export_surfaces_inherited_citation_context() -> No
         num_tokens_input=10,
         num_tokens_output=12,
         provenance_json={
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
             "citations": {
                 "tracking_mode": "inline_inref_required",
                 "citation_tracked": True,

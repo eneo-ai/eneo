@@ -2,9 +2,244 @@
 
 ## Active Next Plan
 
-The active implementation slice is **7A.2 — Normalize raw/redacted export and typed manifest**.
+The active implementation slice is **7A.3 — Provenance schema version and corruption behavior**.
 
-Official Batch 8 step rerun does not start until this inserted evidence/provenance foundation reaches a stable checkpoint. 7A.1 is committed at `5563bb71` and established the behavior pins for raw reason validation, audit fail-closed export behavior, and the current loose manifest shape. 7A.2 now moves the export response toward an audit-grade typed manifest and one normalized raw/redacted export path.
+Official Batch 8 step rerun does not start until this inserted evidence/provenance foundation reaches a stable checkpoint. 7A.1 is committed at `5563bb71` and 7A.2 is committed at `d3228d83`. 7A.3 now makes attempt provenance parsing explicit: current provenance parses as `flow-attempt-provenance.v1`, missing/unknown/corrupt provenance produces visible export markers, and export manifests report whether persisted attempt provenance was tracked or corrupt.
+
+## Scope For 7A.3
+
+### Goals
+
+- Make `FlowAttemptProvenance` parsing schema-version-aware before later rerun/review lineage depends on attempt provenance.
+- Keep `flow_run_provenance.py` as the canonical owner for attempt provenance schemas, parser decisions, and corruption markers.
+- Keep `flow_run_evidence_bundle.py` as the owner that normalizes persisted attempt rows into exportable bundle records.
+- Keep `flow_run_export_json.py` as the export-manifest owner that summarizes persisted provenance version status.
+- Keep the runtime writer and parser in lockstep: runtime-emitted provenance must round-trip through `FlowAttemptProvenance.model_validate(...).model_dump(mode="json", exclude_none=True)` before persistence.
+- Do not add a historical reader without row-count proof or a concrete persisted-data reason.
+- Do not silently coerce corrupted or unversioned provenance into current provenance.
+- Keep exports available when one attempt has corrupt provenance; the corruption is visible in the affected attempt and in the manifest.
+
+### Non-Goals
+
+- No migration or data backfill.
+- No new evidence ledger, provenance table, or historical reader registry unless actual persisted rows prove a need.
+- No raw prompt/completion retention.
+- No tool-call single-source deletion; 7A.4 owns tool calls and RAG truthfulness.
+- No retention tombstones; 7A.5 owns tombstone storage and deletion semantics.
+- No artifact/file ownership migration; 7A.6 owns `FlowRunStepResultFiles` + `Files` canonical export.
+- No frontend evidence UI/view-model rewrite; 7A.7 owns frontend evidence alignment if backend schemas change.
+- No Batch 8 rerun behavior, Batch 9 human review behavior, package rename, or `intric.*` namespace migration.
+
+### Canonical Owner Decisions
+
+| Concept | Current locations | Problem | Canonical home for 7A.3 | Decision |
+|---|---|---|---|---|
+| Attempt provenance schema version | `backend/src/intric/flows/flow_run_provenance.py:22`, `backend/src/intric/flows/flow_run_provenance.py:85` | Current writer emits v1, but parser still accepts unversioned raw dicts through reconstruction. | `flow_run_provenance.py` | Harden parser around explicit v1. |
+| Persisted attempt provenance export shape | `backend/src/intric/flows/flow_run_evidence_bundle.py:153` | Redacted bundle normalizes attempts, raw bundle does not; corrupt/missing versions can leak or crash inconsistently. | `flow_run_evidence_bundle.py` | Route raw and redacted attempt export through the same provenance parser result. |
+| Manifest persisted provenance status | `backend/src/intric/flows/flow_run_export_json.py:150` | Manifest always says `not_tracked`, even after 7A.2 started writing schema versions. | `flow_run_export_json.py` | Compute `not_tracked` / `tracked` / `corrupt` from exported attempt provenance markers. |
+| Runtime provenance writer | `backend/src/intric/flows/runtime/executor.py:183` | Writer builds v1 then mutates the dict after `to_payload()`, making future top-level additions easy to forget in the parser model. | `FlowAttemptProvenance` model validation | Build the full payload first, validate through `FlowAttemptProvenance`, then dump. Add a writer round-trip regression test. |
+| Historical provenance reader | none | No row-count proof of historical shipped data. | none in this slice | Do not create a compatibility reader for unversioned branch-local data. Unversioned provenance is a corruption marker unless row proof changes this decision. |
+
+### Historical Reader Decision
+
+No historical reader ships in 7A.3.
+
+Evidence:
+
+- Flow/Flow AI Builder are pre-production on this branch.
+- `docker exec eneo-41ae93-eneo-1 ...` is blocked by the local Codex tool approval policy before Docker execution, so no persisted row-count proof is available from the devcontainer in this environment.
+- Current runtime writes provenance through `FlowAttemptProvenance(...).to_payload()` and therefore emits `schema_version`.
+- Existing tests that seed unversioned provenance are test fixtures, not proof of shipped persisted data; they should be updated to v1 unless they intentionally test the corruption marker.
+
+Re-entry trigger:
+
+- Add a named historical reader only if a later human-approved data inspection proves real persisted rows with a known older schema/version. That reader must document schema/version, owner, deletion condition, and tests.
+
+### Planned Shape
+
+1. Add explicit parser result types in `flow_run_provenance.py`:
+   - current/tracked result with `FlowAttemptProvenance`
+   - not-tracked result when persisted value is `None`
+   - corruption result with a typed marker payload
+2. Add a strict typed corruption marker payload:
+   - Pydantic `BaseModel` with `ConfigDict(extra="forbid")`
+   - marker schema version `flow-attempt-provenance-marker.v1`, intentionally distinct from `flow-attempt-provenance.v1`
+   - status `corrupt`
+   - stable error code
+   - short message
+   - raw value type where safe
+3. Treat these as corruption:
+   - non-dict provenance values
+   - missing `schema_version`
+   - unsupported `schema_version`
+   - unknown top-level keys for current v1 provenance
+   - Pydantic validation failure while normalizing current v1 provenance
+4. Keep nested provenance sections additive only where their existing nested models already allow `extra="allow"`; top-level provenance remains strict.
+5. Preserve `normalize_attempt_provenance(raw)` as the canonical persisted-row normalizer for callers that only need the current v1 model. It returns a provenance object only for valid current v1 payloads.
+6. Update `EvidenceBundle.to_dict()` and redaction path so both raw and redacted exports use the same parsed/marked attempt provenance. Chosen mechanism: add an `EvidenceBundlePayload` value object carrying both the serialized `payload` and the typed `provenance_parse_results`; `EvidenceBundle.to_export_payload()` and `RedactedEvidenceBundle.to_export_payload()` return that value object, while `to_dict()` remains a payload-only convenience wrapper.
+7. Make `render_evidence_json_export` consume the bundle's typed provenance parse results instead of re-scanning serialized marker bytes for manifest status.
+8. Update runtime `_build_attempt_provenance` so it builds the full payload, validates it through `FlowAttemptProvenance`, and only then persists/dumps it. Do not mutate after `to_payload()`.
+9. Update manifest construction so:
+   - no attempts with provenance yields `provenance_persisted_version_status="not_tracked"`
+   - any corruption marker yields `"corrupt"`
+   - at least one valid v1 provenance and no corrupt markers yields `"tracked"`
+   - a mix of valid v1 provenance and `None` also yields `"tracked"` because per-attempt `provenance_json` still carries the precise absence/corruption state; no public `partial` enum is needed for Batch 8/9 lineage.
+10. Do not add structured logs/metrics/audit rows yet. The export marker is the 7A.3 corruption surface. Batch 10 owns operational metrics/runbooks.
+11. The corruption marker replaces `step_attempts[i].provenance_json` only in the export bundle. The typed `FlowRunEvidenceResponse` read-model contract remains unchanged in 7A.3; frontend evidence handling stays deferred to 7A.7.
+
+### Behavior Pins Before And With Changes
+
+- Current valid v1 provenance parses normally and retains `schema_version`.
+- Missing schema version produces an explicit corruption marker and does not crash raw or redacted evidence export.
+- Unsupported schema version produces an explicit corruption marker.
+- Unknown top-level keys produce an explicit corruption marker instead of being silently dropped.
+- Invalid non-dict provenance produces an explicit corruption marker.
+- Manifest status is `tracked` for valid current provenance.
+- Manifest status is `corrupt` when any exported attempt has a corruption marker.
+- Manifest status remains `not_tracked` when attempts have no provenance.
+- Raw and redacted exports share the same corruption marker behavior.
+- Runtime writer output round-trips through the strict v1 model.
+- HTTP evidence export shows `provenance_persisted_version_status="corrupt"` for a run with a corrupt persisted attempt.
+
+### Expected Source/Test Changes For 7A.3
+
+Expected source:
+
+- `backend/src/intric/flows/flow_run_provenance.py`
+- `backend/src/intric/flows/flow_run_evidence_bundle.py`
+- `backend/src/intric/flows/flow_run_export_json.py`
+- `backend/src/intric/flows/runtime/executor.py`
+
+Expected tests:
+
+- `backend/tests/unittests/flows/test_flow_run_evidence.py`
+- `backend/tests/unittests/flows/test_step_attempt_runtime.py`
+- `backend/tests/unittests/flows/test_flow_run_service.py` only if service-level export status coverage needs a focused pin
+- `backend/tests/integration/flows/test_flow_evidence_api_contracts.py` for the public corrupt-manifest status pin
+- `backend/tests/unit/test_flow_openapi_contract.py` only if marker schema is exposed as an API component
+
+Expected docs:
+
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/plan.md`
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/journal.md`
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/retrospective-4.md`
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/claude-reconciliation-4.md`
+
+Do not touch:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+- migrations
+- frontend evidence UI
+- package names or `intric.*` namespace paths
+
+### Acceptance Criteria For 7A.3
+
+- Current `FlowAttemptProvenance` emits and parses explicit `flow-attempt-provenance.v1`.
+- Corrupt, missing-version, and unsupported-version provenance produce visible markers instead of silent coercion or export crashes.
+- Export manifest declares both export schema version and current/min provenance schema version.
+- Export manifest reports persisted provenance version status as `not_tracked`, `tracked`, or `corrupt` based on the exported attempts.
+- No historical reader is added without persisted row-count proof.
+- Raw/redacted evidence exports preserve the same provenance parser behavior.
+- No raw payload retention, migration, evidence ledger, frontend UI rewrite, package rename, or namespace migration is introduced.
+
+### Validation Commands For 7A.3
+
+```bash
+cd backend && uv run pytest \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/unittests/flows/test_step_attempt_runtime.py \
+  tests/unittests/flows/test_flow_run_service.py::test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detail \
+  -q
+```
+
+```bash
+cd backend && uv run pytest \
+  tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_marks_corrupt_attempt_provenance \
+  tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_returns_redacted_json_attachment \
+  tests/unit/test_flow_openapi_contract.py \
+  tests/unit/test_server_startup_imports.py \
+  -q
+```
+
+```bash
+cd backend && uv run pyright \
+  src/intric/flows/flow_run_provenance.py \
+  src/intric/flows/flow_run_evidence_bundle.py \
+  src/intric/flows/flow_run_export_json.py \
+  src/intric/flows/runtime/executor.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/unittests/flows/test_step_attempt_runtime.py
+```
+
+```bash
+cd backend && uv run ruff check \
+  src/intric/flows/flow_run_provenance.py \
+  src/intric/flows/flow_run_evidence_bundle.py \
+  src/intric/flows/flow_run_export_json.py \
+  src/intric/flows/runtime/executor.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/unittests/flows/test_step_attempt_runtime.py
+```
+
+```bash
+cd backend && uv run ruff format --check \
+  src/intric/flows/flow_run_provenance.py \
+  src/intric/flows/flow_run_evidence_bundle.py \
+  src/intric/flows/flow_run_export_json.py \
+  src/intric/flows/runtime/executor.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/unittests/flows/test_step_attempt_runtime.py
+```
+
+```bash
+cd backend && uv run lint-imports --no-cache
+```
+
+```bash
+rg -n "legacy provenance|historical reader|flow-attempt-provenance\\.v0|Batch 7A|7A\\.|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)" \
+  backend/src/intric/flows/flow_run_provenance.py \
+  backend/src/intric/flows/flow_run_evidence_bundle.py \
+  backend/src/intric/flows/flow_run_export_json.py \
+  backend/src/intric/flows/runtime/executor.py \
+  backend/tests/unittests/flows/test_flow_run_evidence.py \
+  backend/tests/unittests/flows/test_step_attempt_runtime.py
+```
+
+```bash
+git diff --check -- \
+  backend/src/intric/flows/flow_run_provenance.py \
+  backend/src/intric/flows/flow_run_evidence_bundle.py \
+  backend/src/intric/flows/flow_run_export_json.py \
+  backend/src/intric/flows/runtime/executor.py \
+  backend/tests/unittests/flows/test_flow_run_evidence.py \
+  backend/tests/unittests/flows/test_step_attempt_runtime.py \
+  docs/refactor/execution/batch-7a-evidence-provenance-contract/plan.md \
+  docs/refactor/execution/batch-7a-evidence-provenance-contract/journal.md \
+  docs/refactor/execution/batch-7a-evidence-provenance-contract/retrospective-4.md \
+  docs/refactor/execution/batch-7a-evidence-provenance-contract/claude-reconciliation-4.md
+```
+
+Docker/devcontainer validation:
+
+```bash
+docker exec eneo-41ae93-eneo-1 true
+```
+
+If the local tool policy rejects Docker before execution, record the exact rejection in the journal and use local/testcontainers validation.
+
+### Claude Plan Review Question For 7A.3
+
+Ask Claude:
+
+```text
+Attack this 7A.3 provenance version/corruption plan. Does it make attempt provenance schema-version-aware without adding fake historical compatibility, a parallel evidence ledger, or raw payload retention? Are the canonical owners right: flow_run_provenance.py for parser/marker, flow_run_evidence_bundle.py for persisted row normalization, and flow_run_export_json.py for manifest summary? Are the validation commands and behavior pins sufficient before Batch 8/9 lineage work?
+```
+
+Do not implement 7A.3 until Claude plan review returns green or Codex documents a source-backed disagreement.
+
+## Completed Slice 7A.2
 
 ## Scope For 7A.2
 
