@@ -498,3 +498,138 @@ Baseline/existing failures recorded:
   frontend slices until the existing generated-client and route typing baseline
   is resolved.
 - Batch 8 step rerun has not started.
+
+## Iteration 5 - Flow Run Evidence Status Presentation Owner
+
+### Start Gate
+
+- Started from commit `7fa76637 flows: centralize run launch input state`.
+- Branch state before planning:
+  - `frontend/packages/ui/src/icons/types.d.ts` dirty, unrelated and untouched
+  - `scripts/run_codex_review.sh` dirty, unrelated and untouched
+  - `PRODUCT.md` untracked, unrelated and untouched
+  - no staged files
+- Scope limited to Flow frontend status/evidence presentation ownership.
+- Backend runtime, migrations, Celery, data model, generated schemas, package
+  naming, namespace migration, Flow authoring, and Batch 8 rerun work were not
+  in scope.
+
+### Plan Evidence
+
+- `FlowRunEvidence.svelte` owned three status callback wrappers and passed them
+  into `FlowRunEvidenceStepCard.svelte`.
+- `FlowRunProgressStepCard.svelte` separately composed status label, text
+  color, dot color, and running-pulse behavior inline.
+- `FlowRunStatusBadge.svelte` already existed as the status visual owner used
+  by the runs table.
+- `FlowRunEvidence.svelte` owned `expandedInputSteps` and `toggleInputExpand`,
+  but `FlowRunEvidenceStepCard.svelte` ignored the corresponding props and
+  owned its own `inputOpen` state.
+
+### Claude Plan Review
+
+- First review returned `VERDICT: changes_required`, `GREEN_LIGHT: no`,
+  `MIN_SCORE: 6`.
+- Accepted findings:
+  - the initial plan did not pin exact badge `showDot`/`size` behavior by call
+    site
+  - rendered-output pins were too thin
+  - `FlowRunProgressStepCard.svelte` would have kept a second status-rendering
+    path
+  - the new status aggregate needed to become the canonical public API or be
+    skipped
+- The plan was revised to move both evidence and progress step-card status
+  rendering to `FlowRunStatusBadge`, add exact per-call-site badge contracts,
+  add `FlowRunStatusBadge.test.ts`, and make status primitives private after
+  migration.
+- Second review returned `VERDICT: changes_required`, `GREEN_LIGHT: no`,
+  `MIN_SCORE: 7` because the plan would have lost the current
+  running-expanded no-pulse behavior in `FlowRunProgressStepCard.svelte`.
+- The plan was revised again so `FlowRunStatusView` carries `pulseDot` as typed
+  data and `FlowRunStatusBadge` accepts `pulsing?: boolean`, with the progress
+  card passing `pulsing={isRunning && !expanded}`.
+- Final plan verification returned `VERDICT: green`, `GREEN_LIGHT: yes`,
+  `MIN_SCORE: 8`.
+
+### Implementation Result
+
+- `flowRunStatusPresentation.ts` now exposes `getFlowRunStatusView(...)` and a
+  typed `FlowRunStatusView` with `label`, `textClass`, `dotClass`, and
+  `pulseDot`.
+- Status color and dot helpers are now private implementation details.
+- `animate-pulse` is no longer embedded in the running dot class; the pulse is
+  modeled as `pulseDot`.
+- `FlowRunStatusBadge.svelte` now owns status rendering for:
+  - runs table rows
+  - evidence toolbar
+  - evidence summary
+  - evidence step cards
+  - progress step cards
+- Evidence toolbar and summary call the badge with `showDot={false}` and
+  `size="md"` to preserve their text-only status treatment.
+- Evidence and progress step cards call the badge with `size="xs"` to preserve
+  compact step-header status typography.
+- `FlowRunProgressStepCard.svelte` preserves the existing behavior where a
+  running expanded step does not pulse by passing
+  `pulsing={isRunning && !expanded}`.
+- `FlowRunEvidence.svelte` no longer owns the unused
+  `expandedInputSteps`/`toggleInputExpand` mirror.
+- `FlowRunEvidenceStepCard.svelte` keeps its local `inputOpen` state, matching
+  current user-visible behavior.
+- Removed the restating layout comment from `FlowRunEvidenceToolbar.svelte`.
+
+### Validation
+
+Passed:
+
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/components/flowRunStatusLabel.test.ts src/lib/features/flows/components/flowRunStatusPresentation.test.ts src/lib/features/flows/components/FlowRunStatusBadge.test.ts`
+  - 3 files, 15 tests passed.
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/components/FlowRunLaunchInputState.test.ts src/lib/features/flows/components/FlowRunFileInputState.test.ts src/lib/features/flows/flowRunContract.test.ts src/lib/features/flows/flowRunWizard.test.ts`
+  - 4 files, 30 tests passed.
+- `cd frontend/apps/web && bunx prettier --check ...` over touched frontend files.
+- `cd frontend/apps/web && bunx eslint ...` over touched frontend files.
+- `git diff --check -- ...` over touched frontend/docs paths.
+- Anti-slippage grep over touched frontend files, PRDs, and the AI Builder
+  prompt contract returned no matches.
+- Positive disappearance grep over the touched evidence/progress/status files
+  returned no matches for the deleted status wrappers, localized wrapper, and
+  ignored evidence input-expansion mirror.
+
+Baseline/existing failures recorded:
+
+- The first `FlowRunStatusBadge.test.ts` attempt used `@testing-library/svelte`
+  with `jsdom`, but this workspace does not currently resolve `jsdom` for that
+  package. The test was rewritten to use `svelte/server` rendering, which still
+  pins rendered markup and avoids a new environment dependency.
+- `cd frontend/apps/web && bun run check` still fails with the known broad
+  frontend baseline: generated-client issues in `frontend/packages/intric-js`,
+  spaces/chat/dashboard/flows route typing, and existing AI Builder harness
+  warnings. No touched-file diagnostic appeared.
+
+### Claude Verification
+
+- Implementation review returned `VERDICT: green`, `GREEN_LIGHT: yes`,
+  `MIN_SCORE: 8`.
+- Claude verified:
+  - `pulsing ?? view.pulseDot` preserves default running pulses and honors
+    explicit `false`
+  - progress step cards preserve the old running-expanded no-pulse behavior
+  - toolbar/summary keep text-only status rendering through
+    `showDot={false}`
+  - status primitives are private and visual rendering converges on
+    `FlowRunStatusBadge`
+  - evidence input-expansion dead props and parent mirror are gone
+- Accepted low-cost test tightening after review:
+  - non-running badge cases assert no `animate-pulse`
+  - no-dot badge rendering asserts no dot-specific class
+  - `class` forwarding is pinned for the progress-card `shrink-0` use case
+
+### Carry-Forward
+
+- `FlowRunEvidence.svelte` still owns evidence fetch/load/error state, step
+  expansion, copy timer state, step attempt grouping, RAG lookup, transcription
+  parsing, duration formatting, and copy/download side effects.
+- Evidence view-model extraction remains possible but should start as its own
+  inventory and success-gated slice.
+- Flow authoring state ownership remains the main open Batch 7 area.
+- Batch 8 step rerun has not started.

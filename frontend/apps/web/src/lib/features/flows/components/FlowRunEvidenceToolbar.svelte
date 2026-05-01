@@ -4,14 +4,14 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
 
   let {
     debugExport,
     evidence,
     copiedKey,
     sensitiveCareDataFlow = false,
-    runStatusLabel,
-    statusColorClass,
+    runStatus,
     traceId = null,
     onDownloadCanonicalEvidence,
     onCopyPayload,
@@ -21,8 +21,7 @@
     evidence: Record<string, unknown>;
     copiedKey: string | null;
     sensitiveCareDataFlow?: boolean;
-    runStatusLabel: string;
-    statusColorClass: string;
+    runStatus: string;
     traceId?: string | null;
     onDownloadCanonicalEvidence: () => Promise<void>;
     onCopyPayload: (key: string, payload: unknown, failureMessage: string) => Promise<void>;
@@ -33,19 +32,13 @@
   let hideExportActions = $derived(sensitiveCareDataFlow);
 </script>
 
-<!--
-  Flat toolbar for the evidence expansion. No grey wash, no nested card — it sits
-  directly on the evidence panel surface. Top row: status + meta badges (left),
-  primary download CTA (right). Bottom row: secondary actions in a compact
-  outline-button cluster. Keeps contrast crisp, matches Nordic calm rhythm.
--->
 <section
   class="border-default flex flex-col gap-3 border-b pb-4"
   aria-label={m.flow_run_debug_tools()}
 >
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div class="flex flex-wrap items-center gap-2">
-      <span class="{statusColorClass} text-sm font-medium">{runStatusLabel}</span>
+      <FlowRunStatusBadge status={runStatus} size="md" showDot={false} />
       {#if traceId}
         <Tooltip.Provider delayDuration={150}>
           <Tooltip.Root>

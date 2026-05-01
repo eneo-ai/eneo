@@ -1138,3 +1138,262 @@ Expected: no matches. `launchInputState.formValuesSnapshot` reads are allowed.
 
 - `FlowRunDialog.svelte` will still own broader workflow orchestration after this slice: contract loading, page navigation/focus, submit side effects, and recording/file side effects.
 - A later run-launch session/controller may combine contract loading, navigation, and submit orchestration, but that would be a broader slice and should start with a fresh inventory and success gate.
+
+## Iteration 5 Plan - Flow Run Evidence Status Presentation Owner
+
+### Start Gate
+
+- Current `HEAD`: `7fa76637 flows: centralize run launch input state`.
+- Nothing staged.
+- Known unrelated dirty files remain out of scope and must not be touched:
+  - `frontend/packages/ui/src/icons/types.d.ts`
+  - `scripts/run_codex_review.sh`
+  - `PRODUCT.md`
+- Scope is frontend-only. No backend runtime, migrations, Celery, data model,
+  generated schema, package naming, namespace migration, or Batch 8 rerun work.
+
+### Problem
+
+`FlowRunEvidence.svelte` still owns status-label/color pass-through functions
+and a parent-side input-expansion state that `FlowRunEvidenceStepCard.svelte`
+does not actually consume.
+
+Evidence:
+
+| concept | current locations | problem | canonical owner | action |
+|---|---|---|---|---|
+| run/step status label, text color, and dot color | `flowRunStatusPresentation.ts:3-42`, `FlowRunStatusBadge.svelte:1-37`, `FlowRunEvidence.svelte:106-122`, `FlowRunEvidenceStepCard.svelte:49-55`, `FlowRunProgressStepCard.svelte:19-22`, `FlowRunProgressStepCard.svelte:58-69` | Evidence and progress cards compose status visuals in two different places even though status presentation already has a shared owner. | `flowRunStatusPresentation.ts` for pure mapping; `FlowRunStatusBadge.svelte` for visual status rendering. | Add one pure status-view helper, use `FlowRunStatusBadge` in evidence summary/toolbar/evidence step/progress step, and delete inline status composition. |
+| evidence input expansion | `FlowRunEvidence.svelte:61-63`, `FlowRunEvidence.svelte:100-104`, `FlowRunEvidenceStepCard.svelte:41-46`, `FlowRunEvidenceStepCard.svelte:88`, `FlowRunEvidenceStepCard.svelte:226-263` | Parent owns `expandedInputSteps`, but the child renames those props to `_inputExpanded` / `_onToggleInput` and ignores them while owning `inputOpen` locally. This is parallel state with one unused path. | `FlowRunEvidenceStepCard.svelte` for the local input payload disclosure, matching current behavior. | Delete the unused parent state and props; keep child-local `inputOpen`. |
+| evidence toolbar layout comment | `FlowRunEvidenceToolbar.svelte:36-41` | Comment mostly narrates visible layout and design taste. It is not needed if the component remains readable. | Component markup and names. | Remove if the file is touched for status ownership. |
+
+### Reuse-Before-Creating Decision
+
+Do not create a new evidence presenter or status helper file. The existing
+owners are sufficient:
+
+- `flowRunStatusPresentation.ts` already owns pure status-to-label/class
+  mapping.
+- `FlowRunStatusBadge.svelte` already owns visual status rendering.
+- `FlowRunEvidenceStepCard.svelte` already owns the local input disclosure
+  behavior users see today.
+
+The target public API is `getFlowRunStatusView(...)` plus
+`FlowRunStatusBadge.svelte`. The existing primitive status color/dot/label
+wrappers should become file-private implementation details if all external
+callers move to the badge in this slice.
+
+### Expected Changes
+
+Frontend source/tests:
+
+- `frontend/apps/web/src/lib/features/flows/components/flowRunStatusPresentation.ts`
+- `frontend/apps/web/src/lib/features/flows/components/flowRunStatusPresentation.test.ts`
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunStatusBadge.svelte`
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunEvidence.svelte`
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceSummary.svelte`
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceToolbar.svelte`
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceStepCard.svelte`
+- `frontend/apps/web/src/lib/features/flows/components/FlowRunProgressStepCard.svelte`
+- `docs/refactor/execution/batch-7-frontend-state-owners/*`
+
+No `frontend/packages/ui/src/icons/types.d.ts`, `scripts/run_codex_review.sh`,
+or `PRODUCT.md` edits.
+
+### Implementation Plan
+
+1. Extend `flowRunStatusPresentation.ts` with:
+   - `FlowRunStatusView`
+   - `getFlowRunStatusView(status, translations)`
+
+   The helper returns the localized label, text color class, dot color class,
+   and `pulseDot` boolean. Do not bake `animate-pulse` into the dot class; the
+   old string-level `replace("animate-pulse", "")` in
+   `FlowRunProgressStepCard.svelte` must disappear behind typed status-view
+   data. After the progress card moves to `FlowRunStatusBadge`, delete
+   `getFlowRunLocalizedStatusLabel` and make the primitive color/dot helpers
+   private to this file if there are no remaining external imports.
+
+2. Update `FlowRunStatusBadge.svelte` to read from
+   `getFlowRunStatusView(...)`. Add:
+   - `showDot = true`
+   - `size: "xs" | "sm" | "md" = "sm"`
+   - `pulsing?: boolean`
+
+   Exact size contracts:
+   - `xs`: `text-[11px] gap-1.5`, used by evidence/progress step-card headers.
+   - `sm`: `text-xs gap-2`, default for the runs table.
+   - `md`: `text-sm gap-2`, used by evidence toolbar/summary.
+
+   Exact dot contracts:
+   - evidence toolbar: `showDot={false}` to preserve the current text-only
+     status treatment.
+   - evidence summary: `showDot={false}` to preserve the current text-only
+     status treatment.
+   - evidence step card: `showDot={true}` and `size="xs"`.
+   - progress step card: `showDot={true}`, `size="xs"`, and
+     `pulsing={isRunning && !expanded}` so a running step stops pulsing while
+     expanded exactly as it does today.
+   - when `pulsing` is omitted, the badge uses `pulsing ?? view.pulseDot`, so
+     existing table badges keep the running pulse by default.
+
+3. Update `FlowRunEvidenceToolbar.svelte` and `FlowRunEvidenceSummary.svelte`
+   to receive `runStatus` and render `FlowRunStatusBadge` instead of receiving
+   precomputed label/color strings.
+
+4. Update `FlowRunEvidenceStepCard.svelte` to render `FlowRunStatusBadge`
+   directly and delete the status callback props.
+
+5. Update `FlowRunProgressStepCard.svelte` to render `FlowRunStatusBadge`
+   directly instead of composing label/color/dot classes inline. Preserve the
+   current running-expanded behavior by passing
+   `pulsing={isRunning && !expanded}`. Keep its existing controlled input
+   expansion props untouched.
+
+6. Delete `expandedInputSteps`, `toggleInputExpand`, `inputExpanded`, and
+   `onToggleInput` from `FlowRunEvidence.svelte` / `FlowRunEvidenceStepCard`.
+   Keep `inputOpen` local in the step card because that is the current behavior
+   and it avoids inventing a broader evidence-state owner.
+
+7. Remove the restating toolbar layout comment if the file changes anyway.
+
+### Behavior Pins Before Deletion
+
+Add `flowRunStatusPresentation.test.ts` before deleting callback props:
+
+- known statuses return expected label, text class, and dot class.
+- `cancelled` returns warning text and dot classes.
+- `pending` reuses the queued translation and default muted classes.
+- unknown status falls back to the raw status and default muted classes.
+- `running` returns the accent dot class and `pulseDot: true` without embedding
+  `animate-pulse` in the dot class.
+
+Add `FlowRunStatusBadge.test.ts` before migrating component call sites:
+
+- default badge renders dot + `text-xs` + `gap-2`.
+- `showDot={false}` renders the label without a dot.
+- `size="xs"` renders `text-[11px]` + `gap-1.5`.
+- `size="md"` renders `text-sm` + `gap-2`.
+- `cancelled` uses the warning text class and dot class through the badge.
+- running default badge renders `animate-pulse`.
+- running badge with `pulsing={false}` does not render `animate-pulse`.
+- `showDot={false}` renders no dot element.
+
+Existing status-label tests must continue passing. Toolbar and summary keep
+text-only status by using the badge with explicit `showDot={false}`; step cards
+keep compact dotted status with explicit `size="xs"`.
+
+### Validation Commands
+
+Focused status tests:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- \
+  src/lib/features/flows/components/flowRunStatusLabel.test.ts \
+  src/lib/features/flows/components/flowRunStatusPresentation.test.ts \
+  src/lib/features/flows/components/FlowRunStatusBadge.test.ts
+```
+
+Broad Flow component smoke for touched state helpers and previous Batch 7
+owners:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- \
+  src/lib/features/flows/components/FlowRunLaunchInputState.test.ts \
+  src/lib/features/flows/components/FlowRunFileInputState.test.ts \
+  src/lib/features/flows/flowRunContract.test.ts \
+  src/lib/features/flows/flowRunWizard.test.ts
+```
+
+Broad app check, expected to retain known baseline failures:
+
+```bash
+cd frontend/apps/web && bun run check
+```
+
+Touched-file format/lint:
+
+```bash
+cd frontend/apps/web && bunx prettier --check \
+  src/lib/features/flows/components/flowRunStatusPresentation.ts \
+  src/lib/features/flows/components/flowRunStatusPresentation.test.ts \
+  src/lib/features/flows/components/FlowRunStatusBadge.svelte \
+  src/lib/features/flows/components/FlowRunEvidence.svelte \
+  src/lib/features/flows/components/FlowRunEvidenceSummary.svelte \
+  src/lib/features/flows/components/FlowRunEvidenceToolbar.svelte \
+  src/lib/features/flows/components/FlowRunEvidenceStepCard.svelte \
+  src/lib/features/flows/components/FlowRunProgressStepCard.svelte
+```
+
+```bash
+cd frontend/apps/web && bunx eslint \
+  src/lib/features/flows/components/flowRunStatusPresentation.ts \
+  src/lib/features/flows/components/flowRunStatusPresentation.test.ts \
+  src/lib/features/flows/components/FlowRunStatusBadge.svelte \
+  src/lib/features/flows/components/FlowRunEvidence.svelte \
+  src/lib/features/flows/components/FlowRunEvidenceSummary.svelte \
+  src/lib/features/flows/components/FlowRunEvidenceToolbar.svelte \
+  src/lib/features/flows/components/FlowRunEvidenceStepCard.svelte \
+  src/lib/features/flows/components/FlowRunProgressStepCard.svelte
+```
+
+Diff and text hygiene:
+
+```bash
+git diff --check -- \
+  frontend/apps/web/src/lib/features/flows/components/flowRunStatusPresentation.ts \
+  frontend/apps/web/src/lib/features/flows/components/flowRunStatusPresentation.test.ts \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunStatusBadge.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunEvidence.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceSummary.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceToolbar.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceStepCard.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunProgressStepCard.svelte \
+  docs/refactor/execution/batch-7-frontend-state-owners
+```
+
+```bash
+rg --pcre2 -n "A\\.[0-9](?![0-9])|P0\\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|state-owner slice|Batch 7|as any|@ts-ignore|@ts-expect-error" \
+  frontend/apps/web/src/lib/features/flows/components/flowRunStatusPresentation.ts \
+  frontend/apps/web/src/lib/features/flows/components/flowRunStatusPresentation.test.ts \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunStatusBadge.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunEvidence.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceSummary.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceToolbar.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceStepCard.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunProgressStepCard.svelte \
+  docs/refactor/prd \
+  docs/refactor/ai-builder-prompt-contract.md
+```
+
+Expected: no matches in touched frontend files.
+
+Positive disappearance checks:
+
+```bash
+rg -n "expandedInputSteps|toggleInputExpand|getStatusColor|getStatusDotColor|getStatusLabel" \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunEvidence.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceStepCard.svelte \
+  frontend/apps/web/src/lib/features/flows/components/FlowRunProgressStepCard.svelte
+```
+
+Expected: no matches.
+
+### Non-Goals
+
+- Do not move evidence fetch state in this slice.
+- Do not move copy/download side effects.
+- Do not move step attempt grouping, RAG lookup, transcription parsing, or
+  duration formatting.
+- Do not change `FlowRunProgressStepCard.svelte` beyond replacing inline status
+  rendering with `FlowRunStatusBadge`.
+- Do not introduce an evidence presenter/view-model file.
+- Do not start Flow authoring, Batch 8 rerun, or backend work.
+
+### Carry-Forward
+
+- `FlowRunEvidence.svelte` will still own evidence fetch/load/error state,
+  step expansion, copy timer state, step attempt grouping, RAG lookup,
+  transcription parsing, duration formatting, and download/copy side effects.
+- Evidence view-model extraction remains a possible later slice, but it needs a
+  fresh inventory and should not be inferred from this status-presentation
+  cleanup.

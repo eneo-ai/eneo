@@ -15,11 +15,7 @@
   import { m } from "$lib/paraglide/messages";
   import type { FlowRunProgressStep } from "./flowRunProgress";
   import { formatFlowRunStepDuration } from "./flowRunProgress";
-  import {
-    getFlowRunLocalizedStatusLabel,
-    getFlowRunStatusColor,
-    getFlowRunStatusDotColor
-  } from "./flowRunStatusPresentation";
+  import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
 
   let {
     step,
@@ -54,19 +50,6 @@
   const canExpand = $derived(isCompleted || isFailed || isRunning);
 
   const duration = $derived(formatFlowRunStepDuration(step));
-
-  const statusLabel = $derived(
-    getFlowRunLocalizedStatusLabel(step.status, {
-      completed: m.flow_run_status_completed,
-      failed: m.flow_run_status_failed,
-      queued: m.flow_run_status_queued,
-      running: m.flow_run_status_running,
-      cancelled: m.flow_run_status_cancelled
-    })
-  );
-
-  const statusColor = $derived(getFlowRunStatusColor(step.status));
-  const statusDotColor = $derived(getFlowRunStatusDotColor(step.status));
 
   const circleClass = $derived.by(() => {
     if (isRunning) return "bg-accent-dimmer text-accent-stronger";
@@ -114,16 +97,12 @@
       <div class="min-w-0 flex-1">
         <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <span class="truncate text-sm font-medium">{step.label}</span>
-          <span
-            class="{statusColor} inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium"
-          >
-            <span
-              class="{isRunning && expanded
-                ? statusDotColor.replace('animate-pulse', '')
-                : statusDotColor} size-1.5 shrink-0 rounded-full"
-            ></span>
-            {statusLabel}
-          </span>
+          <FlowRunStatusBadge
+            status={step.status}
+            size="xs"
+            class="shrink-0"
+            pulsing={isRunning && !expanded}
+          />
           {#if duration}
             <span class="text-secondary shrink-0 text-xs tabular-nums">{duration}</span>
           {/if}

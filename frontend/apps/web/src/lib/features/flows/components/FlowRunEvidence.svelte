@@ -20,11 +20,6 @@
   import FlowRunEvidenceSummary from "./FlowRunEvidenceSummary.svelte";
   import FlowRunEvidenceStepCard from "./FlowRunEvidenceStepCard.svelte";
   import type { FlowRunProgressSnapshot } from "./flowRunProgress";
-  import {
-    getFlowRunLocalizedStatusLabel,
-    getFlowRunStatusColor,
-    getFlowRunStatusDotColor
-  } from "./flowRunStatusPresentation";
 
   let {
     runId,
@@ -59,7 +54,6 @@
   let loading = $state(true);
   let loadError = $state(false);
   let expandedSteps: number[] = $state([]);
-  let expandedInputSteps: number[] = $state([]);
   let hasAutoExpanded = $state(false);
   let copiedKey: string | null = $state(null);
   let copiedTimer: ReturnType<typeof setTimeout> | null = $state(null);
@@ -95,30 +89,6 @@
     expandedSteps = expandedSteps.includes(order)
       ? expandedSteps.filter((item) => item !== order)
       : [...expandedSteps, order];
-  }
-
-  function toggleInputExpand(order: number) {
-    expandedInputSteps = expandedInputSteps.includes(order)
-      ? expandedInputSteps.filter((item) => item !== order)
-      : [...expandedInputSteps, order];
-  }
-
-  function getStatusColor(status: string): string {
-    return getFlowRunStatusColor(status);
-  }
-
-  function getStatusDotColor(status: string): string {
-    return getFlowRunStatusDotColor(status);
-  }
-
-  function getStatusLabel(status: string): string {
-    return getFlowRunLocalizedStatusLabel(status, {
-      completed: m.flow_run_status_completed,
-      failed: m.flow_run_status_failed,
-      queued: m.flow_run_status_queued,
-      running: m.flow_run_status_running,
-      cancelled: m.flow_run_status_cancelled
-    });
   }
 
   function setCopied(key: string) {
@@ -280,8 +250,7 @@
         {evidence}
         {copiedKey}
         {sensitiveCareDataFlow}
-        runStatusLabel={getStatusLabel(runStatus)}
-        statusColorClass={getStatusColor(runStatus)}
+        {runStatus}
         traceId={evidence.debug_export?.run?.trace_id ?? null}
         onDownloadCanonicalEvidence={downloadCanonicalEvidenceExport}
         onCopyPayload={copyPayload}
@@ -289,8 +258,7 @@
       />
     {:else}
       <FlowRunEvidenceSummary
-        runStatusLabel={getStatusLabel(runStatus)}
-        statusColorClass={getStatusColor(runStatus)}
+        {runStatus}
         traceId={evidence.debug_export?.run?.trace_id ?? null}
         redactionApplied={evidence.debug_export?.security?.redaction_applied === true}
       />
@@ -311,17 +279,12 @@
         stepAttempts={getStepAttempts(result.step_order)}
         {copiedKey}
         expanded={expandedSteps.includes(result.step_order)}
-        inputExpanded={expandedInputSteps.includes(result.step_order)}
         panelId={getStepPanelId(result.step_order)}
         isPowerUser={$mode === "power_user"}
         intric={eneo}
         onToggle={toggleStep}
-        onToggleInput={toggleInputExpand}
         onCopyPayload={copyPayload}
         onDownloadArtifact={downloadArtifact}
-        {getStatusColor}
-        {getStatusDotColor}
-        {getStatusLabel}
         {getRuntimeInputSummaryLabel}
         {formatElapsedMs}
         {formatBytes}

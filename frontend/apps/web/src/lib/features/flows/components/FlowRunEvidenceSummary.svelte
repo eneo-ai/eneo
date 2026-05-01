@@ -3,15 +3,14 @@
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
+  import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
 
   let {
-    runStatusLabel,
-    statusColorClass,
+    runStatus,
     traceId = null,
     redactionApplied = false
   }: {
-    runStatusLabel: string;
-    statusColorClass: string;
+    runStatus: string;
     traceId?: string | null;
     redactionApplied?: boolean;
   } = $props();
@@ -19,7 +18,7 @@
 
 <Card.Root>
   <Card.Content class="flex flex-wrap items-center gap-2 px-4 py-3">
-    <span class="{statusColorClass} text-sm font-medium">{runStatusLabel}</span>
+    <FlowRunStatusBadge status={runStatus} size="md" showDot={false} />
     {#if traceId}
       <Tooltip.Provider delayDuration={150}>
         <Tooltip.Root>

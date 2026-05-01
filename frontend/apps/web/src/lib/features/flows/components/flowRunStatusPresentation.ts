@@ -1,6 +1,13 @@
 import { getFlowRunStatusLabel, type FlowRunStatusTranslations } from "./flowRunStatusLabel";
 
-export function getFlowRunStatusColor(status: string): string {
+export type FlowRunStatusView = {
+  label: string;
+  textClass: string;
+  dotClass: string;
+  pulseDot: boolean;
+};
+
+function getFlowRunStatusColor(status: string): string {
   switch (status) {
     case "completed":
       return "text-positive-stronger";
@@ -17,14 +24,14 @@ export function getFlowRunStatusColor(status: string): string {
   }
 }
 
-export function getFlowRunStatusDotColor(status: string): string {
+function getFlowRunStatusDotColor(status: string): string {
   switch (status) {
     case "completed":
       return "bg-positive-default";
     case "failed":
       return "bg-negative-default";
     case "running":
-      return "bg-accent-default animate-pulse";
+      return "bg-accent-default";
     case "cancelled":
       return "bg-warning-default";
     case "queued":
@@ -34,9 +41,18 @@ export function getFlowRunStatusDotColor(status: string): string {
   }
 }
 
-export function getFlowRunLocalizedStatusLabel(
+function shouldPulseFlowRunStatusDot(status: string): boolean {
+  return status === "running";
+}
+
+export function getFlowRunStatusView(
   status: string,
   translations: FlowRunStatusTranslations
-): string {
-  return getFlowRunStatusLabel(status, translations);
+): FlowRunStatusView {
+  return {
+    label: getFlowRunStatusLabel(status, translations),
+    textClass: getFlowRunStatusColor(status),
+    dotClass: getFlowRunStatusDotColor(status),
+    pulseDot: shouldPulseFlowRunStatusDot(status)
+  };
 }

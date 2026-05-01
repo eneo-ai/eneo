@@ -11,6 +11,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import FlowRunKnowledgeTrace from "./FlowRunKnowledgeTrace.svelte";
+  import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import type {
     RuntimeInputSummary,
     TemplateProvenanceSummary
@@ -38,17 +39,12 @@
     stepAttempts,
     copiedKey,
     expanded,
-    inputExpanded: _inputExpanded,
     panelId,
     isPowerUser,
     intric,
     onToggle,
-    onToggleInput: _onToggleInput,
     onCopyPayload,
     onDownloadArtifact,
-    getStatusColor,
-    getStatusDotColor,
-    getStatusLabel,
     getRuntimeInputSummaryLabel,
     formatElapsedMs,
     formatBytes,
@@ -64,17 +60,12 @@
     stepAttempts: Record<string, unknown>[];
     copiedKey: string | null;
     expanded: boolean;
-    inputExpanded: boolean;
     panelId: string;
     isPowerUser: boolean;
     intric: Intric;
     onToggle: (stepOrder: number) => void;
-    onToggleInput: (stepOrder: number) => void;
     onCopyPayload: (key: string, payload: unknown, failureMessage: string) => Promise<void>;
     onDownloadArtifact: (fileId: string) => Promise<void>;
-    getStatusColor: (status: string) => string;
-    getStatusDotColor: (status: string) => string;
-    getStatusLabel: (status: string) => string;
     getRuntimeInputSummaryLabel: (fileCount: number) => string;
     formatElapsedMs: (value: number | undefined) => string;
     formatBytes: (value: number | undefined) => string;
@@ -105,14 +96,7 @@
         {stepDef?.user_description ??
           m.flow_step_fallback_label({ order: String(result.step_order) })}
       </span>
-      <span
-        class="{getStatusColor(
-          result.status
-        )} inline-flex items-center gap-1.5 text-[11px] font-medium"
-      >
-        <span class="{getStatusDotColor(result.status)} size-1.5 shrink-0 rounded-full"></span>
-        {getStatusLabel(result.status)}
-      </span>
+      <FlowRunStatusBadge status={result.status} size="xs" />
       {#if duration}
         <span class="text-secondary text-xs tabular-nums">{duration}</span>
       {/if}
