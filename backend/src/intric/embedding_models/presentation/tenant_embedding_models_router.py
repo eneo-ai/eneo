@@ -1,5 +1,6 @@
 # MIT License
 
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -20,6 +21,7 @@ from intric.embedding_models.presentation.embedding_model_models import (
 )
 from intric.main.exceptions import (
     BadRequestException,
+    ModelInUseException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -46,6 +48,13 @@ class TenantEmbeddingModelCreate(BaseModel):
     hosting: str = Field(default="swe", description="Hosting location (swe, eu, usa)")
     is_active: bool = Field(default=True, description="Enable in organization")
     is_default: bool = Field(default=False, description="Set as default model")
+    description: str | None = Field(default=None, description="Model description")
+    input_cost_per_token: Decimal | None = Field(
+        default=None, description="Indicative USD per input token"
+    )
+    output_cost_per_token: Decimal | None = Field(
+        default=None, description="Indicative USD per output token (usually 0)"
+    )
 
 
 class TenantEmbeddingModelUpdate(BaseModel):
@@ -58,6 +67,12 @@ class TenantEmbeddingModelUpdate(BaseModel):
     open_source: bool | None = Field(None, description="Is the model open source")
     stability: str | None = Field(
         None, description="Model stability (stable, experimental)"
+    )
+    input_cost_per_token: Decimal | None = Field(
+        None, description="Indicative USD per input token"
+    )
+    output_cost_per_token: Decimal | None = Field(
+        None, description="Indicative USD per output token"
     )
 
 
@@ -115,10 +130,12 @@ async def create_tenant_embedding_model(
             stability="stable",
             open_source=False,
             nickname=model_create.display_name,
-            description=None,
+            description=model_create.description,
             hf_link=None,
             is_deprecated=False,
             max_batch_size=None,
+            input_cost_per_token=model_create.input_cost_per_token,
+            output_cost_per_token=model_create.output_cost_per_token,
             # Settings (now directly on model)
             is_enabled=model_create.is_active,
             is_default=model_create.is_default,
@@ -187,6 +204,10 @@ async def update_tenant_embedding_model(
         model.open_source = model_update.open_source
     if model_update.stability is not None:
         model.stability = model_update.stability
+    if model_update.input_cost_per_token is not None:
+        model.input_cost_per_token = model_update.input_cost_per_token
+    if model_update.output_cost_per_token is not None:
+        model.output_cost_per_token = model_update.output_cost_per_token
 
     await session.flush()
 
@@ -250,7 +271,7 @@ async def delete_tenant_embedding_model(
     )
     row = usage_counts.one()
     if row.collections > 0 or row.websites > 0 or row.integrations > 0:
-        raise BadRequestException("MODEL_IN_USE")
+        raise ModelInUseException()
 
     # Delete the model (settings are now on the model itself)
     try:
@@ -258,6 +279,6 @@ async def delete_tenant_embedding_model(
         await session.commit()
     except sa.exc.IntegrityError:
         await session.rollback()
-        raise BadRequestException("MODEL_IN_USE")
+        raise ModelInUseException()
 
     return {"success": True}

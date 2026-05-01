@@ -10,14 +10,14 @@ from intric.ai_models.completion_models.completion_model import (
 )
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
+from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.app_table import Apps
+from intric.database.tables.app_template_table import AppTemplates
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.assistant_template_table import AssistantTemplates
-from intric.database.tables.ai_models_table import CompletionModels
-from intric.database.tables.app_template_table import AppTemplates
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.service_table import Services
-from intric.database.tables.spaces_table import Spaces, SpacesCompletionModels
+from intric.database.tables.spaces_table import SpacesCompletionModels
 from intric.database.tables.users_table import Users
 from intric.main.exceptions import UniqueException
 from intric.main.models import IdAndName
@@ -98,6 +98,16 @@ class CompletionModelsRepository:
         )
 
     async def delete_model(self, id: UUID) -> None:
+        # Spaces are containers — a model "enabled" on a space without any
+        # resource using it is configuration, not active usage. Drop the
+        # cross-reference rows first so the soft-deleted model doesn't
+        # dangle in space-aware reads (`Spaces.completion_models`).
+        await self.session.execute(
+            sa.delete(SpacesCompletionModels).where(
+                SpacesCompletionModels.completion_model_id == id
+            )
+        )
+
         stmt = (
             sa.update(CompletionModels)
             .where(CompletionModels.id == id)
@@ -156,6 +166,11 @@ class CompletionModelsRepository:
     async def has_active_references(
         self, model_id: UUID, tenant_id: UUID | None = None
     ) -> bool:
+        # Note: spaces are intentionally NOT counted here. Spaces are
+        # containers for resources (assistants, apps, services); a model
+        # "enabled" on a space without any resource using it is just
+        # configuration. The cross-reference rows are cleaned up in
+        # `delete_model`.
         assistant_stmt = (
             sa.select(sa.func.count())
             .select_from(Assistants)
@@ -170,12 +185,6 @@ class CompletionModelsRepository:
             sa.select(sa.func.count())
             .select_from(Apps)
             .where(Apps.completion_model_id == model_id)
-        )
-        spaces_stmt = (
-            sa.select(sa.func.count())
-            .select_from(SpacesCompletionModels)
-            .join(Spaces, SpacesCompletionModels.space_id == Spaces.id)
-            .where(SpacesCompletionModels.completion_model_id == model_id)
         )
         assistant_template_stmt = (
             sa.select(sa.func.count())
@@ -201,13 +210,11 @@ class CompletionModelsRepository:
             )
             service_stmt = service_stmt.where(Services.user_id.in_(tenant_user_ids))
             app_stmt = app_stmt.where(Apps.tenant_id == tenant_id)
-            spaces_stmt = spaces_stmt.where(Spaces.tenant_id == tenant_id)
 
         for stmt in (
             assistant_stmt,
             service_stmt,
             app_stmt,
-            spaces_stmt,
             assistant_template_stmt,
             app_template_stmt,
         ):

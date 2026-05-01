@@ -50,7 +50,7 @@ from intric.database.tables.integration_table import IntegrationKnowledge
 from intric.database.tables.websites_table import Websites
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import override_user
-from intric.main.exceptions import BadRequestException
+from intric.main.exceptions import BadRequestException, ModelInUseException
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
 from intric.observability.debug_toggle import DebugFlag, get_debug_flag, set_debug_flag
@@ -1297,17 +1297,15 @@ async def delete_completion_model(
         if force:
             # Hard-delete: will fail with IntegrityError if model has
             # question references (FK RESTRICT)
-            from intric.database.tables.ai_models_table import CompletionModels
             import sqlalchemy as sa
 
-            stmt = (
-                sa.delete(CompletionModels)
-                .where(CompletionModels.id == id)
-            )
+            from intric.database.tables.ai_models_table import CompletionModels
+
+            stmt = sa.delete(CompletionModels).where(CompletionModels.id == id)
             await session.execute(stmt)
         else:
             if await repo.has_active_references(id):
-                raise BadRequestException("MODEL_IN_USE")
+                raise ModelInUseException()
             await repo.delete_model(id)
 
     return {"success": True, "message": f"Model {id} deleted successfully"}
@@ -1407,7 +1405,7 @@ async def delete_embedding_model(
             )
             collections_count, websites_count, integrations_count = usage_counts.one()
             if collections_count > 0 or websites_count > 0 or integrations_count > 0:
-                raise BadRequestException("MODEL_IN_USE")
+                raise ModelInUseException()
 
         repo = AdminEmbeddingModelsService(session=session)
         await repo.delete_model(id)

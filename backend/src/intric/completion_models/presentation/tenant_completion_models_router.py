@@ -1,5 +1,6 @@
 # MIT License
 
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -31,6 +32,11 @@ class TenantCompletionModelCreate(BaseModel):
     family: str = "openai"
     is_active: bool = True
     is_default: bool = False
+    description: str | None = None
+    # Indicative USD per token. Pulled from LiteLLM by the wizard, or entered
+    # manually by the admin. NULL = not tracked.
+    input_cost_per_token: Decimal | None = None
+    output_cost_per_token: Decimal | None = None
 
 
 class TenantCompletionModelUpdate(BaseModel):
@@ -45,6 +51,8 @@ class TenantCompletionModelUpdate(BaseModel):
     hosting: str | None = None
     open_source: bool | None = None
     stability: str | None = None
+    input_cost_per_token: Decimal | None = None
+    output_cost_per_token: Decimal | None = None
 
 
 @router.post(
@@ -119,6 +127,11 @@ async def create_tenant_completion_model(
     new_model.is_deprecated = False
     new_model.deployment_name = None
     new_model.base_url = None
+    # Optional admin-supplied description and ratecard
+    if model_create.description is not None:
+        new_model.description = model_create.description
+    new_model.input_cost_per_token = model_create.input_cost_per_token
+    new_model.output_cost_per_token = model_create.output_cost_per_token
     # Settings (now directly on model)
     new_model.is_enabled = model_create.is_active
     new_model.is_default = model_create.is_default
@@ -202,6 +215,10 @@ async def update_tenant_completion_model(
         model.open_source = model_update.open_source
     if model_update.stability is not None:
         model.stability = model_update.stability
+    if model_update.input_cost_per_token is not None:
+        model.input_cost_per_token = model_update.input_cost_per_token
+    if model_update.output_cost_per_token is not None:
+        model.output_cost_per_token = model_update.output_cost_per_token
 
     await session.flush()
 
@@ -230,8 +247,6 @@ async def delete_tenant_completion_model(
     """Soft-delete a tenant-specific completion model."""
     validate_permission(user, Permission.ADMIN)
 
-    from datetime import datetime, timezone
-
     import sqlalchemy as sa
 
     from intric.ai_models.completion_models.completion_models_repo import (
@@ -239,7 +254,7 @@ async def delete_tenant_completion_model(
     )
     from intric.database.tables.ai_models_table import CompletionModels
     from intric.main.exceptions import (
-        BadRequestException,
+        ModelInUseException,
         NotFoundException,
         UnauthorizedException,
     )
@@ -264,11 +279,12 @@ async def delete_tenant_completion_model(
 
     repo = CompletionModelsRepository(session=session)
     if await repo.has_active_references(model_id, tenant_id=user.tenant_id):
-        raise BadRequestException("MODEL_IN_USE")
+        raise ModelInUseException()
 
-    # Soft-delete: mark with deleted_at timestamp (model stays in DB
-    # so historical question references and token usage remain intact)
-    model.deleted_at = datetime.now(timezone.utc)  # type: ignore[assignment]
+    # Soft-delete + clean up `SpacesCompletionModels` rows so the model
+    # doesn't dangle in space-aware reads. The model stays in DB so
+    # historical question references and token usage remain intact.
+    await repo.delete_model(model_id)
     await session.commit()
 
     return {"success": True}

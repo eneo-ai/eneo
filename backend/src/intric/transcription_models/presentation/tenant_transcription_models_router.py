@@ -1,5 +1,6 @@
 # MIT License
 
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -35,6 +36,10 @@ class TenantTranscriptionModelCreate(BaseModel):
     )
     is_active: bool = Field(default=True, description="Enable in organization")
     is_default: bool = Field(default=False, description="Set as default model")
+    description: str | None = Field(default=None, description="Model description")
+    cost_per_minute: Decimal | None = Field(
+        default=None, description="Indicative USD per minute of audio"
+    )
 
 
 class TenantTranscriptionModelUpdate(BaseModel):
@@ -44,6 +49,9 @@ class TenantTranscriptionModelUpdate(BaseModel):
     open_source: bool | None = Field(None, description="Is the model open source")
     stability: str | None = Field(
         None, description="Model stability (stable, experimental)"
+    )
+    cost_per_minute: Decimal | None = Field(
+        None, description="Indicative USD per minute of audio"
     )
 
 
@@ -104,10 +112,11 @@ async def create_tenant_transcription_model(
             org=None,
             stability="stable",
             open_source=False,
-            description=None,
+            description=model_create.description,
             hf_link=None,
             is_deprecated=False,
             base_url="",  # Will be set from provider config at runtime
+            cost_per_minute=model_create.cost_per_minute,
             # Settings (now directly on model)
             is_enabled=model_create.is_active,
             is_default=model_create.is_default,
@@ -179,6 +188,8 @@ async def update_tenant_transcription_model(
         model.open_source = model_update.open_source
     if model_update.stability is not None:
         model.stability = model_update.stability
+    if model_update.cost_per_minute is not None:
+        model.cost_per_minute = model_update.cost_per_minute
 
     await session.flush()
 
@@ -211,7 +222,7 @@ async def delete_tenant_transcription_model(
 
     from intric.database.tables.ai_models_table import TranscriptionModels
     from intric.main.exceptions import (
-        BadRequestException,
+        ModelInUseException,
         NotFoundException,
         UnauthorizedException,
     )
@@ -239,6 +250,6 @@ async def delete_tenant_transcription_model(
         await session.commit()
     except sa.exc.IntegrityError:
         await session.rollback()
-        raise BadRequestException("MODEL_IN_USE")
+        raise ModelInUseException()
 
     return {"success": True}
