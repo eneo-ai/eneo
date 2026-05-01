@@ -34023,7 +34023,7 @@ export interface operations {
         format?: "json";
         /** @description Export detail. `redacted` is the default support/compliance export; `raw` requests the full unredacted bundle. */
         detail?: "redacted" | "raw";
-        /** @description Reason or purpose for exporting evidence. */
+        /** @description Reason or purpose for exporting evidence. Raw exports require an explicit non-default reason. */
         reason?: string;
       };
       header?: never;
@@ -34048,7 +34048,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunEvidenceExportResponse"];
         };
       };
-      /** @description Requested evidence export format is not supported. */
+      /** @description Raw evidence export requires an explicit non-default reason. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -34056,13 +34056,12 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "Evidence export format is not supported.",
+           *       "message": "Raw evidence export requires an explicit non-default reason.",
            *       "intric_error_code": 9007,
-           *       "code": "flow_evidence_export_format_not_supported",
+           *       "code": "flow_evidence_export_reason_required",
            *       "context": {
-           *         "supported_formats": [
-           *           "json"
-           *         ]
+           *         "detail": "raw",
+           *         "default_reason": "support_debug"
            *       }
            *     }
            */

@@ -313,7 +313,7 @@ async def test_get_flow_graph_uses_run_version_snapshot_when_run_id_supplied():
                     "output_type": "json",
                     "mcp_policy": "inherit",
                 }
-            ]
+            ],
         },
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -1492,9 +1492,7 @@ async def test_get_flow_input_policy_tolerates_unexpected_input_source(monkeypat
                 max_file_size_bytes=25_000_000,
                 max_files_per_run=10,
                 recommended_run_payload={
-                    "step_inputs": {
-                        "<step-id-uuid>": {"file_ids": ["<file-id-uuid>"]}
-                    }
+                    "step_inputs": {"<step-id-uuid>": {"file_ids": ["<file-id-uuid>"]}}
                 },
             )
 
@@ -1927,7 +1925,7 @@ async def test_flow_run_alias_evidence_delegates_to_run_service(monkeypatch):
         "step_results": [],
         "step_attempts": [],
         "debug_export": {
-            "schema_version": "eneo.flow.debug-export.v1",
+            "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "run": {
                 "run_id": str(run.id),
@@ -2119,7 +2117,6 @@ async def test_flow_run_evidence_export_alias_returns_json_attachment(monkeypatc
         run_id=run.id,
         format="json",
         detail="redacted",
-        reason="support_debug",
         request=SimpleNamespace(state=SimpleNamespace()),
         container=container,
     )
@@ -2137,52 +2134,12 @@ async def test_flow_run_evidence_export_alias_returns_json_attachment(monkeypatc
         container.audit_service.return_value.log_async.await_args.kwargs["action"]
         == ActionType.FLOW_EVIDENCE_EXPORTED_JSON
     )
-
-
-@pytest.mark.asyncio
-async def test_flow_run_evidence_export_alias_rejects_unsupported_format_with_standard_error_payload(
-    monkeypatch,
-):
-    container = MagicMock()
-    flow_id = uuid4()
-    run = _run(flow_id=flow_id, tenant_id=uuid4())
-    run_service = AsyncMock()
-    run_service.get_run.return_value = run
-    container.flow_run_service.return_value = run_service
-    container.audit_service.return_value = AsyncMock()
-    flow_service = AsyncMock()
-    flow_service.get_flow.return_value = _flow(flow_id)
-    container.flow_service.return_value = flow_service
-
-    monkeypatch.setattr(
-        router_common_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-    _enable_space_access(
-        container,
-        user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
-    )
-
-    response = await export_flow_run_evidence_alias(
-        id=flow_id,
-        run_id=run.id,
-        format="pdf",
-        detail="redacted",
-        reason="support_debug",
-        request=SimpleNamespace(state=SimpleNamespace()),
-        container=container,
-    )
-
-    assert response.status_code == 400
-    assert json.loads(response.body.decode("utf-8")) == {
-        "message": "Evidence export format is not supported.",
-        "intric_error_code": int(ErrorCodes.BAD_REQUEST),
-        "code": "flow_evidence_export_format_not_supported",
-        "context": {"supported_formats": ["json"]},
+    assert container.audit_service.return_value.log_async.await_args.kwargs["metadata"][
+        "extra"
+    ] == {
+        "evidence_detail": "redacted",
+        "export_reason": "support_debug",
     }
-    run_service.export_evidence_json.assert_not_awaited()
-    container.audit_service.return_value.log_async.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2356,6 +2313,66 @@ async def test_flow_run_evidence_export_alias_passes_raw_detail_and_reason(monke
         detail="raw",
         run=run,
     )
+    assert container.audit_service.return_value.log_async.await_args.kwargs["metadata"][
+        "extra"
+    ] == {
+        "evidence_detail": "raw",
+        "export_reason": "government_audit_request",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reason", ["support_debug", "   "], ids=["default_sentinel", "whitespace_only"]
+)
+async def test_flow_run_evidence_export_alias_rejects_raw_invalid_reason(
+    monkeypatch,
+    reason,
+):
+    container = MagicMock()
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    container.flow_run_service.return_value = run_service
+    container.audit_service.return_value = AsyncMock()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    _enable_space_access(
+        container,
+        user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
+
+    response = await export_flow_run_evidence_alias(
+        id=flow_id,
+        run_id=run.id,
+        format="json",
+        detail="raw",
+        reason=reason,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response.status_code == 400
+    assert json.loads(response.body.decode("utf-8")) == {
+        "message": "Raw evidence export requires an explicit non-default reason.",
+        "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+        "code": "flow_evidence_export_reason_required",
+        "context": {
+            "detail": "raw",
+            "default_reason": "support_debug",
+        },
+    }
+    run_service.get_run.assert_not_awaited()
+    run_service.export_evidence_json.assert_not_awaited()
+    container.audit_service.return_value.log_async.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2372,7 +2389,7 @@ async def test_flow_run_alias_control_endpoints_reject_scope_mismatch(monkeypatc
         "step_results": [],
         "step_attempts": [],
         "debug_export": {
-            "schema_version": "eneo.flow.debug-export.v1",
+            "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "run": {
                 "run_id": str(run.id),

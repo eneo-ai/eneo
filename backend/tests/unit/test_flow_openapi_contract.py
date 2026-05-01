@@ -49,6 +49,8 @@ def _extract_enum_values(openapi_spec: dict, schema: dict) -> set[str]:
     resolved = _resolve_component_ref(openapi_spec, schema)
     if "enum" in resolved:
         return {str(item) for item in resolved["enum"]}
+    if "const" in resolved:
+        return {str(resolved["const"])}
 
     values: set[str] = set()
     for composition_key in ("anyOf", "oneOf", "allOf"):
@@ -651,11 +653,7 @@ def test_openapi_flow_consumer_request_response_schemas(openapi_spec: dict) -> N
         "/api/v1/flows/{id}/steps/{step_id}/runtime-files/",
     )
     for upload_path in upload_paths:
-        files_post = (
-            openapi_spec.get("paths", {})
-            .get(upload_path, {})
-            .get("post", {})
-        )
+        files_post = openapi_spec.get("paths", {}).get(upload_path, {}).get("post", {})
         files_request_schema = (
             files_post.get("requestBody", {})
             .get("content", {})
@@ -682,17 +680,21 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
         "get",
     )
     response = operation.get("responses", {}).get("200", {})
-    schema = (
-        response.get("content", {})
-        .get("application/json", {})
-        .get("schema", {})
-    )
+    schema = response.get("content", {}).get("application/json", {}).get("schema", {})
     resolved = _resolve_component_ref(openapi_spec, schema)
     headers = response.get("headers", {})
 
     assert resolved.get("title") == "FlowRunEvidenceExportResponse"
     assert "Content-Disposition" in headers
     assert "attachment" in str(headers["Content-Disposition"]).lower()
+    bad_request_example = (
+        operation.get("responses", {})
+        .get("400", {})
+        .get("content", {})
+        .get("application/json", {})
+        .get("example", {})
+    )
+    assert bad_request_example.get("code") == "flow_evidence_export_reason_required"
 
 
 def test_openapi_flow_error_responses_include_general_error_examples(
@@ -872,9 +874,16 @@ def test_openapi_evidence_export_query_params_are_documented(
         for param in operation.get("parameters", [])
         if isinstance(param, dict)
     }
+    format_schema = params["format"].get("schema", {})
     assert "detail" in params
+    assert "format" in params
     assert "reason" in params
+    assert _extract_enum_values(openapi_spec, format_schema) == {"json"}
+    assert format_schema.get("default") == "json"
     assert "redacted" in str(params["detail"].get("description", "")).lower()
+    reason_description = str(params["reason"].get("description", "")).lower()
+    assert "raw exports require" in reason_description
+    assert "explicit non-default reason" in reason_description
 
 
 def test_openapi_flow_authoring_docs_explain_owner_override_semantics(

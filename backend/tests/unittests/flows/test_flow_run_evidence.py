@@ -390,9 +390,26 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
     )
     export = render_evidence_json_export(bundle=bundle)
 
+    assert set(export["manifest"]) == {
+        "run_id",
+        "flow_id",
+        "trace_id",
+        "flow_version",
+        "content_hash",
+        "redaction_applied",
+        "masked_fields_count",
+        "redaction_policy_version",
+    }
     assert export["manifest"]["run_id"] == str(run.id)
+    assert export["manifest"]["flow_id"] == str(run.flow_id)
     assert export["manifest"]["trace_id"] == str(run.trace_id)
+    assert export["manifest"]["flow_version"] == 1
+    assert export["manifest"]["content_hash"] == export["content_hash"]
     assert export["manifest"]["redaction_applied"] is True
+    assert isinstance(export["manifest"]["masked_fields_count"], int)
+    assert (
+        export["manifest"]["redaction_policy_version"] == "flow-evidence-redaction.v3"
+    )
     assert export["summary"]["status"] == "completed"
     assert export["summary"]["steps_count"] == 0
     assert export["summary"]["artifacts_count"] == 0

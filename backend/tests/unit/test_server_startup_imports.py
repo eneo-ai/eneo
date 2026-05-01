@@ -290,7 +290,7 @@ def test_flow_and_ai_builder_openapi_documents_parameters_and_error_examples() -
         export_evidence_operation["responses"]["400"]["content"]["application/json"][
             "example"
         ]["code"]
-        == "flow_evidence_export_format_not_supported"
+        == "flow_evidence_export_reason_required"
     )
     assert (
         export_evidence_operation["responses"]["503"]["content"]["application/json"][

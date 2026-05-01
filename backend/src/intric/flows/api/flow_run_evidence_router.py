@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
@@ -56,6 +56,12 @@ Evidence export is policy-based and tiered:
 - service keys may export only their own-run evidence and only when explicit machine evidence
   capability allows it
     """
+
+_DEFAULT_EVIDENCE_EXPORT_REASON: Final[str] = "support_debug"
+_RAW_REASON_REQUIRED_CODE: Final[str] = "flow_evidence_export_reason_required"
+_RAW_REASON_REQUIRED_MESSAGE: Final[str] = (
+    "Raw evidence export requires an explicit non-default reason."
+)
 
 
 def _get_flow_run_service(container: Container) -> FlowRunService:
@@ -155,11 +161,14 @@ async def get_flow_run_evidence_alias(
             },
         },
         400: error_response(
-            description="Requested evidence export format is not supported.",
-            message="Evidence export format is not supported.",
+            description="Raw evidence export requires an explicit non-default reason.",
+            message=_RAW_REASON_REQUIRED_MESSAGE,
             intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="flow_evidence_export_format_not_supported",
-            context={"supported_formats": ["json"]},
+            code=_RAW_REASON_REQUIRED_CODE,
+            context={
+                "detail": "raw",
+                "default_reason": _DEFAULT_EVIDENCE_EXPORT_REASON,
+            },
         ),
         403: error_response(
             description=_FLOW_TRACE_FORBIDDEN_DESCRIPTION,
@@ -207,9 +216,12 @@ async def export_flow_run_evidence_alias(
         Query(
             min_length=3,
             max_length=500,
-            description="Reason or purpose for exporting evidence.",
+            description=(
+                "Reason or purpose for exporting evidence. Raw exports require an "
+                "explicit non-default reason."
+            ),
         ),
-    ] = "support_debug",
+    ] = _DEFAULT_EVIDENCE_EXPORT_REASON,
     container: Container = Depends(get_container(with_user=True)),
 ):
     await common.enforce_flow_scope_for_request(
@@ -219,26 +231,32 @@ async def export_flow_run_evidence_alias(
         required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    user = container.user()
-    run_service = _get_flow_run_service(container)
     access_kind = (
         "evidence_export_raw" if detail == "raw" else "evidence_export_redacted"
     )
+    export_reason = reason.strip()
+    if detail == "raw" and (
+        not export_reason or export_reason == _DEFAULT_EVIDENCE_EXPORT_REASON
+    ):
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=build_flow_trace_error_payload(
+                message=_RAW_REASON_REQUIRED_MESSAGE,
+                intric_error_code=ErrorCodes.BAD_REQUEST,
+                code=_RAW_REASON_REQUIRED_CODE,
+                context={
+                    "detail": "raw",
+                    "default_reason": _DEFAULT_EVIDENCE_EXPORT_REASON,
+                },
+            ),
+        )
+    user = container.user()
+    run_service = _get_flow_run_service(container)
     run = await run_service.get_run(
         run_id=run_id,
         flow_id=id,
         access_kind=access_kind,
     )
-    if format != "json":
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content=build_flow_trace_error_payload(
-                message="Evidence export format is not supported.",
-                intric_error_code=ErrorCodes.BAD_REQUEST,
-                code="flow_evidence_export_format_not_supported",
-                context={"supported_formats": ["json"]},
-            ),
-        )
     export_payload = await run_service.export_evidence_json(
         run_id=run_id,
         detail=detail,
@@ -250,7 +268,7 @@ async def export_flow_run_evidence_alias(
         run=run,
         action=ActionType.FLOW_EVIDENCE_EXPORTED_JSON,
         description=f"Exported evidence JSON for flow run {run.id}",
-        extra={"evidence_detail": detail, "export_reason": reason},
+        extra={"evidence_detail": detail, "export_reason": export_reason},
     )
     if audit_failure is not None:
         return audit_failure

@@ -632,3 +632,47 @@ async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
     payload = response.json()
     assert payload["code"] == "flow_evidence_audit_logging_failed"
     assert payload["context"]["audit_required"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_evidence_export_fails_closed_when_audit_logging_is_unavailable(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded = await _seed_flow_run_contract_data(
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    audit_service = type("FailingAuditService", (), {})()
+
+    async def _raise(*args, **kwargs):
+        raise RuntimeError("audit down")
+
+    audit_service.log_async = _raise
+
+    async with db_container() as container:
+        auth_service = container.auth_service()
+        admin_token = auth_service.create_access_token_for_user(admin_user)
+
+    Container.audit_service.override(providers.Object(audit_service))
+    try:
+        response = await client.get(
+            f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export?format=json",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    finally:
+        Container.audit_service.reset_last_overriding()
+
+    assert response.status_code == 503, response.text
+    payload = response.json()
+    assert payload["code"] == "flow_evidence_audit_logging_failed"
+    assert payload["context"]["audit_required"] is True
