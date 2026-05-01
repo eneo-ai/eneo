@@ -4,11 +4,11 @@
   import {
     flowFormFieldHasOptions,
     getFlowFormFieldVariableToken,
+    getFlowFormSchemaMetadata,
     getFlowFormStats,
     isFlowFormFieldNameUsableAsVariable,
     normalizeFlowFormFieldType,
     normalizeFlowFormFields,
-    toPersistedFlowFormFields,
     type FlowFormField,
     type NormalizedFlowFormField,
     type NormalizedFlowFormFieldType
@@ -49,9 +49,7 @@
     { value: "multiselect", label: () => m.flow_form_field_type_multiselect() }
   ];
 
-  const formSchema = $derived(
-    $update.metadata_json?.form_schema as { fields: FlowFormField[] } | undefined
-  );
+  const formSchema = $derived(getFlowFormSchemaMetadata($update.metadata_json));
 
   let localFields: LocalFormField[] = $state([]);
   let nameBeforeEditById: Record<string, string> = $state({});
@@ -73,19 +71,12 @@
     return normalizeFlowFormFields(fields).map((field) => ({ ...field, _localId: uid() }));
   }
 
-  function normalizeForPersist(fields: LocalFormField[]): FlowFormField[] {
-    return toPersistedFlowFormFields(fields);
-  }
-
   function hasCompleteFieldNames(fields: LocalFormField[]): boolean {
     return fields.every((field) => field.name.trim().length > 0);
   }
 
   function syncToStore(fields: LocalFormField[]) {
-    $update.metadata_json = {
-      ...($update.metadata_json ?? {}),
-      form_schema: { fields: normalizeForPersist(fields) }
-    };
+    flowEditor.replaceFormSchemaFields(fields);
   }
 
   function commitIfComplete(fields: LocalFormField[]) {

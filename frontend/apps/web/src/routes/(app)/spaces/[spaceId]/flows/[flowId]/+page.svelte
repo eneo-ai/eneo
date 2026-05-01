@@ -2,7 +2,7 @@
   import { Page } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getAppContext } from "$lib/core/AppContext";
-  import { initFlowEditor } from "$lib/features/flows/FlowEditor";
+  import { getFlowWizardMetadata, initFlowEditor } from "$lib/features/flows/FlowEditor";
   import { initFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import FlowStepList from "$lib/features/flows/components/FlowStepList.svelte";
   import FlowStepEditPanel from "$lib/features/flows/components/FlowStepEditPanel.svelte";
@@ -37,6 +37,10 @@
     resolveAIBuilderApplyNavigation,
     resolveApplyFocusedStepId
   } from "$lib/features/flows/ai-builder/flowAIBuilderApplyNavigation";
+  import {
+    getFlowFormSchemaFields,
+    getFlowFormSchemaMetadata
+  } from "$lib/features/flows/flowFormSchema";
 
   let { data } = $props();
   let publishLoading = $state(false);
@@ -48,12 +52,6 @@
   let hasStepJsonValidationErrors = $state(false);
   let stepJsonValidationFields = $state<string[]>([]);
   type BuilderStageId = 1 | 2 | 3 | 4 | 5;
-  type FlowMetadataJson = Record<string, unknown>;
-  type FlowWizardMetadata = {
-    transcription_enabled?: boolean;
-    transcription_model?: { id: string } | null;
-    transcription_language?: string;
-  };
   let builderStage = $state<BuilderStageId>(1);
 
   const {
@@ -133,10 +131,8 @@
       ? FLOW_BUILDER_STAGES[currentStageIndex + 1]
       : null
   );
-  const formSchemaFields = $derived(
-    ($update.metadata_json as { form_schema?: { fields?: { required?: boolean }[] } } | undefined)
-      ?.form_schema?.fields ?? []
-  );
+  const formSchemaMetadata = $derived(getFlowFormSchemaMetadata($update.metadata_json));
+  const formSchemaFields = $derived(getFlowFormSchemaFields($update.metadata_json));
   let formSchemaDraftStats = $state<{ definedCount: number; requiredCount: number } | null>(null);
   $effect(() => {
     if (builderStage !== 3 && formSchemaDraftStats !== null) {
@@ -146,11 +142,7 @@
   const hasAudioInputStep = $derived(
     ($update.steps ?? []).some((step) => step.input_type === "audio")
   );
-  const wizardMetadata = $derived(
-    ((($update.metadata_json as FlowMetadataJson | null | undefined) ?? {}).wizard as
-      | FlowWizardMetadata
-      | undefined) ?? {}
-  );
+  const wizardMetadata = $derived(getFlowWizardMetadata($update.metadata_json));
   const transcriptionEnabled = $derived(
     typeof wizardMetadata.transcription_enabled === "boolean"
       ? wizardMetadata.transcription_enabled
@@ -158,8 +150,8 @@
   );
   const isTranscriptionSkipped = $derived(!transcriptionEnabled);
   const transcriptionModelId = $derived(
-    typeof (wizardMetadata as FlowWizardMetadata).transcription_model?.id === "string"
-      ? (wizardMetadata as FlowWizardMetadata).transcription_model?.id
+    typeof wizardMetadata.transcription_model?.id === "string"
+      ? wizardMetadata.transcription_model.id
       : null
   );
   let transcriptionModel = $state<TranscriptionModel | null>(null);
@@ -178,9 +170,7 @@
   const transcriptionModelMissingInSpace = $derived(
     transcriptionModelId !== null && transcriptionModel === null
   );
-  const transcriptionLanguage = $derived(
-    (wizardMetadata as FlowWizardMetadata).transcription_language ?? "sv"
-  );
+  const transcriptionLanguage = $derived(wizardMetadata.transcription_language ?? "sv");
   const stepsCount = $derived($update.steps?.length ?? 0);
   const checklistHasName = $derived(($update.name ?? "").trim().length > 0);
   const checklistHasSteps = $derived(stepsCount > 0);
@@ -221,23 +211,6 @@
     } finally {
       stageNavigating = false;
     }
-  }
-
-  function setTranscriptionEnabled(enabled: boolean) {
-    const metadata = { ...(($update.metadata_json as FlowMetadataJson | null | undefined) ?? {}) };
-    const wizard = { ...((metadata.wizard as Record<string, unknown> | undefined) ?? {}) };
-    wizard.transcription_enabled = enabled;
-    metadata.wizard = wizard;
-    $update.metadata_json = metadata;
-  }
-
-  function setWizardMeta(patch: Partial<FlowWizardMetadata>) {
-    const metadata = { ...(($update.metadata_json as FlowMetadataJson | null | undefined) ?? {}) };
-    metadata.wizard = {
-      ...((metadata.wizard as Record<string, unknown> | undefined) ?? {}),
-      ...patch
-    };
-    $update.metadata_json = metadata;
   }
 
   function goToPreviousStage() {
@@ -734,7 +707,7 @@
                       id="transcription-toggle"
                       checked={transcriptionEnabled}
                       disabled={$isPublished}
-                      onCheckedChange={(checked) => setTranscriptionEnabled(checked)}
+                      onCheckedChange={(checked) => flowEditor.setTranscriptionEnabled(checked)}
                     />
                   </label>
                 </div>
@@ -759,7 +732,7 @@
                               const selected = event.detail.selectedModel;
                               const newId = selected?.id ?? null;
                               if (newId !== transcriptionModelId) {
-                                setWizardMeta({
+                                flowEditor.setWizardMetadata({
                                   transcription_model: newId ? { id: newId } : null
                                 });
                               }
@@ -781,7 +754,8 @@
                             value={transcriptionLanguage}
                             disabled={$isPublished}
                             onValueChange={(value) => {
-                              if (value) setWizardMeta({ transcription_language: value });
+                              if (value)
+                                flowEditor.setWizardMetadata({ transcription_language: value });
                             }}
                           >
                             <Select.Trigger id="flow-transcription-language" class="h-10 w-full">
@@ -907,17 +881,7 @@
                   transcriptionModelLabel={transcriptionModel?.nickname ??
                     transcriptionModel?.name ??
                     null}
-                  formSchema={$update.metadata_json?.form_schema as
-                    | {
-                        fields: {
-                          name: string;
-                          type: string;
-                          required?: boolean;
-                          options?: string[];
-                          order?: number;
-                        }[];
-                      }
-                    | undefined}
+                  formSchema={formSchemaMetadata}
                   onOpenTranscriptionSettings={() => void navigateToStage(2)}
                   onJsonValidationChanged={(detail) => {
                     hasStepJsonValidationErrors = detail.hasErrors;

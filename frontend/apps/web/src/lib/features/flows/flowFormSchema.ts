@@ -16,6 +16,10 @@ export type FlowFormField = {
   order?: number;
 };
 
+export type FlowFormSchemaMetadata = {
+  fields: FlowFormField[];
+};
+
 export type NormalizedFlowFormFieldType = "text" | "number" | "date" | "select" | "multiselect";
 
 export type NormalizedFlowFormField = {
@@ -35,17 +39,17 @@ const FLOW_FORM_RESERVED_VARIABLE_NAMES = new Set([
   "föregående_steg",
   "indata_text",
   "indata_json",
-  "indata_filer",
+  "indata_filer"
 ]);
 const FLOW_FORM_RESERVED_VARIABLE_NAMES_NORMALIZED = new Set(
-  [...FLOW_FORM_RESERVED_VARIABLE_NAMES].map((name) => name.toLowerCase()),
+  [...FLOW_FORM_RESERVED_VARIABLE_NAMES].map((name) => name.toLowerCase())
 );
 const FLOW_FORM_STEP_ALIAS_PATTERN = /^step_\d+($|[._])/i;
 
 export type FlowFormFieldNameIssue = "reserved" | "step_alias" | "dot";
 
 export function normalizeFlowFormFieldType(
-  type: FlowFormFieldType | string | undefined,
+  type: FlowFormFieldType | string | undefined
 ): NormalizedFlowFormFieldType {
   const normalized = (type ?? "text").trim().toLowerCase();
   if (LEGACY_TEXT_TYPES.has(normalized)) return "text";
@@ -56,9 +60,7 @@ export function normalizeFlowFormFieldType(
   return "text";
 }
 
-export function flowFormFieldHasOptions(
-  type: FlowFormFieldType | string | undefined,
-): boolean {
+export function flowFormFieldHasOptions(type: FlowFormFieldType | string | undefined): boolean {
   return OPTION_FIELD_TYPES.has(normalizeFlowFormFieldType(type));
 }
 
@@ -74,26 +76,20 @@ export function normalizeFlowFormFields(fields: FlowFormField[]): NormalizedFlow
             .map((option) => option.trim())
             .filter((option) => option.length > 0)
         : [],
-      order: typeof field.order === "number" ? field.order : index + 1,
+      order: typeof field.order === "number" ? field.order : index + 1
     }))
     .sort((left, right) => left.order - right.order)
     .map((field, index) => ({ ...field, order: index + 1 }));
 }
 
-export function toPersistedFlowFormFields(
-  fields: Array<
-    Pick<NormalizedFlowFormField, "name" | "type" | "required" | "options"> & {
-      type: FlowFormFieldType | string;
-    }
-  >,
-): FlowFormField[] {
+export function toPersistedFlowFormFields(fields: FlowFormField[]): FlowFormField[] {
   return fields.map((field, index) => {
     const type = normalizeFlowFormFieldType(field.type);
     const normalized: FlowFormField = {
       name: getFlowFormFieldRuntimeKey(field.name),
       type,
       required: Boolean(field.required),
-      order: index + 1,
+      order: index + 1
     };
     if (flowFormFieldHasOptions(type)) {
       normalized.options = (field.options ?? [])
@@ -104,12 +100,41 @@ export function toPersistedFlowFormFields(
   });
 }
 
-export function getFlowFormStats(
-  fields: Array<Pick<FlowFormField, "required">>,
-): { definedCount: number; requiredCount: number } {
+export function buildFlowFormSchemaMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+  fields: FlowFormField[]
+): Record<string, unknown> {
+  return {
+    ...(metadata ?? {}),
+    form_schema: { fields }
+  };
+}
+
+export function getFlowFormSchemaMetadata(
+  metadata: Record<string, unknown> | null | undefined
+): FlowFormSchemaMetadata | undefined {
+  const formSchema = metadata?.form_schema;
+  if (typeof formSchema !== "object" || formSchema === null) return undefined;
+
+  const fields = (formSchema as { fields?: unknown }).fields;
+  if (!Array.isArray(fields)) return undefined;
+
+  return { fields: fields as FlowFormField[] };
+}
+
+export function getFlowFormSchemaFields(
+  metadata: Record<string, unknown> | null | undefined
+): FlowFormField[] {
+  return getFlowFormSchemaMetadata(metadata)?.fields ?? [];
+}
+
+export function getFlowFormStats(fields: Array<Pick<FlowFormField, "required">>): {
+  definedCount: number;
+  requiredCount: number;
+} {
   return {
     definedCount: fields.length,
-    requiredCount: fields.filter((field) => Boolean(field.required)).length,
+    requiredCount: fields.filter((field) => Boolean(field.required)).length
   };
 }
 

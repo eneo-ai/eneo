@@ -1397,3 +1397,270 @@ Expected: no matches.
 - Evidence view-model extraction remains a possible later slice, but it needs a
   fresh inventory and should not be inferred from this status-presentation
   cleanup.
+
+## Iteration 6 Plan - Flow Metadata Authoring Commands
+
+### Start Gate
+
+- Current `HEAD`: `4c5bc9bc flows: centralize run status presentation`.
+- Nothing staged.
+- Known unrelated dirty files remain out of scope and must not be touched:
+  - `frontend/packages/ui/src/icons/types.d.ts`
+  - `scripts/run_codex_review.sh`
+  - `PRODUCT.md`
+- Scope is frontend-only Flow authoring state ownership.
+- No backend runtime, migrations, Celery, data model, generated schema,
+  package naming, namespace migration, broad route rewrite, or Batch 8 rerun
+  work.
+
+### Problem
+
+`FlowFormSchemaEditor.svelte` and the flow route directly mutate
+`$update.metadata_json` even though `FlowEditor` is already the route-scoped
+authoring session owner.
+
+Evidence:
+
+| state/command | current owner | readers | writers | canonical owner | action |
+|---|---|---|---|---|---|
+| form schema draft fields | `FlowFormSchemaEditor.svelte:56-59` | form schema editor UI | form schema editor UI | `FlowFormSchemaEditor.svelte` | Keep local draft state in the component; it is component-only editing state. |
+| persisted form schema metadata | `FlowFormSchemaEditor.svelte:84-89` writes `$update.metadata_json.form_schema` | route run preview, run dialog, FlowEditor resource editor | form schema editor direct store mutation | `FlowEditor` command, using pure `flowFormSchema.ts` metadata helper | Move persisted write behind `flowEditor.replaceFormSchemaFields(...)`. |
+| form schema normalization/persistence shape | `flowFormSchema.ts:65-105` | form schema editor, run-launch helpers | pure functions | `flowFormSchema.ts` | Extend with a pure metadata update helper so the command and tests share one shape. |
+| route wizard metadata | `+page.svelte:226-240` writes `$update.metadata_json.wizard` | route transcription stage controls, run contract consumers | route functions | `FlowEditor` commands | Move behind `flowEditor.setTranscriptionEnabled(...)` and `flowEditor.setWizardMetadata(...)` in this slice to avoid two metadata ownership patterns. |
+| step array mutations | `+page.svelte:928-937`, `FlowEditor.ts:398-682`, step components through `FlowEditor` | step list, graph, editor panels | route and FlowEditor | out of this slice | Leave for a separate step-command slice with its own inventory. |
+
+### Reuse-Before-Creating Decision
+
+Do not create a new authoring session file yet. `FlowEditor.ts` already exists
+as the authoring owner and exposes step/assistant commands. This slice deepens
+that existing owner with metadata commands instead of adding a parallel state
+owner.
+
+Do not create a generic metadata helper file. `flowFormSchema.ts` already owns
+form schema normalization and persistence shape, so the pure form-schema
+metadata update helper belongs there. Wizard metadata is local to
+`FlowEditor.ts` for this slice because no second caller exists.
+
+### Expected Changes
+
+Frontend source/tests:
+
+- `frontend/apps/web/src/lib/features/flows/FlowEditor.ts`
+- `frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts`
+- `frontend/apps/web/src/lib/features/flows/flowFormSchema.ts`
+- `frontend/apps/web/src/lib/features/flows/flowFormSchema.test.ts`
+- `frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte`
+- `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte`
+- `docs/refactor/execution/batch-7-frontend-state-owners/*`
+
+### Implementation Plan
+
+1. Add a pure helper to `flowFormSchema.ts`:
+
+   ```ts
+   buildFlowFormSchemaMetadata(
+     metadata: Record<string, unknown> | null | undefined,
+     fields: FlowFormField[],
+   ): Record<string, unknown>
+   ```
+
+   It must preserve unrelated metadata keys, replace only `form_schema`, and
+   persist `{ fields }`. Empty fields persist as `{ form_schema: { fields: [] } }`
+   rather than deleting `form_schema`, preserving the current explicit empty
+   schema shape.
+
+2. Add tests in `flowFormSchema.test.ts` before touching the component:
+
+   - preserves unrelated metadata keys
+   - replaces existing `form_schema`
+   - handles `null`/`undefined` metadata
+   - persists the exact field list supplied by the caller
+   - keeps `form_schema: { fields: [] }` for empty fields
+
+3. Add local metadata types/helpers in `FlowEditor.ts`:
+
+   - `type FlowMetadataJson = NonNullable<Flow["metadata_json"]>`
+   - `type FlowWizardMetadata`
+   - `updateMetadataJson(buildNext)`
+
+   `updateMetadataJson` must use the same mutation primitive as the other
+   authoring commands:
+
+   ```ts
+   editor.state.update.update((resource) => ({
+     ...resource,
+     metadata_json: buildNext((resource.metadata_json ?? {}) as FlowMetadataJson)
+   }));
+   ```
+
+4. Add metadata commands to `FlowEditor.ts`:
+
+   - `replaceFormSchemaFields(fields: FlowFormField[]): void`
+   - `setWizardMetadata(patch: Partial<FlowWizardMetadata>): void`
+   - `setTranscriptionEnabled(enabled: boolean): void`
+
+   `replaceFormSchemaFields` normalizes through `toPersistedFlowFormFields(...)`
+   inside the command, so callers cannot forget persistence normalization.
+   `setTranscriptionEnabled` delegates to `setWizardMetadata`.
+
+5. Export the three commands from the frozen `flowEditor` object.
+
+6. Update `FlowFormSchemaEditor.svelte`:
+
+   - keep local draft state, local dirty state, and stats in the component
+   - replace direct `$update.metadata_json = ...` with
+     `flowEditor.replaceFormSchemaFields(fields)`
+   - keep `$update.metadata_json` reads for incoming persisted form schema
+   - do not move rename-reference rewrite behavior
+
+7. Update the flow route:
+
+   - remove local `setTranscriptionEnabled(...)`
+   - remove local `setWizardMeta(...)`
+   - call `flowEditor.setTranscriptionEnabled(checked)`
+   - call `flowEditor.setWizardMetadata({ transcription_model: ... })`
+   - call `flowEditor.setWizardMetadata({ transcription_language: value })`
+
+8. Split editor construction from Svelte context registration:
+
+   - add `createFlowEditor(data)` as the concrete editor factory
+   - keep `initFlowEditor(data)` as the Svelte context initializer
+   - keep `getFlowEditor()` unchanged for components
+
+   This is not a new interface or parallel owner. It separates editor creation
+   from `setContext(...)` so the command boundary can be tested directly
+   without a component harness.
+
+9. Export and reuse metadata read helpers:
+
+   - `getFlowWizardMetadata(metadata)` in `FlowEditor.ts`
+   - `getFlowFormSchemaMetadata(metadata)` in `flowFormSchema.ts`
+   - `getFlowFormSchemaFields(metadata)` in `flowFormSchema.ts`
+
+   The route and form-schema editor should consume these helpers instead of
+   carrying local structural casts for `metadata_json.wizard` or
+   `metadata_json.form_schema`.
+
+10. Add `FlowEditor.test.ts` to pin the new command boundary:
+
+   - `replaceFormSchemaFields` updates `$update.metadata_json.form_schema.fields`
+     with persisted/normalized fields
+   - unrelated metadata keys survive
+   - `currentChanges.hasUnsavedChanges` flips to true
+   - `setWizardMetadata` preserves existing wizard keys and unrelated metadata
+   - `setTranscriptionEnabled` writes the boolean through wizard metadata
+
+11. Do not rename `FlowEditor` yet. PRD-006 explicitly defers renaming until it
+   clearly owns broader authoring session behavior.
+
+### Behavior Pins Before Deletion
+
+Add pure helper tests and `FlowEditor.test.ts` command-boundary tests before
+deleting component/route-level metadata writes. Existing `flowFormSchema.test.ts`
+pins normalization and persisted field shapes; this slice extends it to pin
+metadata replacement behavior.
+
+### Validation Commands
+
+Focused form schema tests:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/flowFormSchema.test.ts
+```
+
+FlowEditor command boundary:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/FlowEditor.test.ts
+```
+
+Relevant previous Batch 7 smoke:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- \
+  src/lib/features/flows/components/FlowRunLaunchInputState.test.ts \
+  src/lib/features/flows/components/FlowRunFileInputState.test.ts \
+  src/lib/features/flows/flowRunContract.test.ts \
+  src/lib/features/flows/flowRunWizard.test.ts
+```
+
+Broad app check, expected to retain known baseline failures:
+
+```bash
+cd frontend/apps/web && bun run check
+```
+
+Touched-file format/lint:
+
+```bash
+cd frontend/apps/web && bunx prettier --check \
+  src/lib/features/flows/FlowEditor.ts \
+  src/lib/features/flows/FlowEditor.test.ts \
+  src/lib/features/flows/flowFormSchema.ts \
+  src/lib/features/flows/flowFormSchema.test.ts \
+  src/lib/features/flows/components/FlowFormSchemaEditor.svelte \
+  'src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte'
+```
+
+```bash
+cd frontend/apps/web && bunx eslint \
+  src/lib/features/flows/FlowEditor.ts \
+  src/lib/features/flows/FlowEditor.test.ts \
+  src/lib/features/flows/flowFormSchema.ts \
+  src/lib/features/flows/flowFormSchema.test.ts \
+  src/lib/features/flows/components/FlowFormSchemaEditor.svelte \
+  'src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte'
+```
+
+Diff and text hygiene:
+
+```bash
+git diff --check -- \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.ts \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts \
+  frontend/apps/web/src/lib/features/flows/flowFormSchema.ts \
+  frontend/apps/web/src/lib/features/flows/flowFormSchema.test.ts \
+  frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte \
+  'frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte' \
+  docs/refactor/execution/batch-7-frontend-state-owners
+```
+
+```bash
+rg --pcre2 -n "A\\.[0-9](?![0-9])|P0\\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|state-owner slice|Batch 7|as any|@ts-ignore|@ts-expect-error" \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.ts \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts \
+  frontend/apps/web/src/lib/features/flows/flowFormSchema.ts \
+  frontend/apps/web/src/lib/features/flows/flowFormSchema.test.ts \
+  frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte \
+  'frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte' \
+  docs/refactor/prd \
+  docs/refactor/ai-builder-prompt-contract.md
+```
+
+Expected: no matches in touched frontend files.
+
+Positive disappearance check:
+
+```bash
+rg -n "\\$update\\.metadata_json\\s*=" \
+  frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte \
+  'frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte'
+```
+
+Expected: no matches.
+
+### Non-Goals
+
+- Do not move route step-array mutation paths.
+- Do not rename `FlowEditor`.
+- Do not introduce a new authoring session/controller file.
+- Do not change form schema UI layout or field behavior.
+- Do not change generated schemas or backend API contracts.
+
+### Carry-Forward
+
+- The route page still owns builder-stage navigation and some step mutation
+  wiring after this slice.
+- Flow authoring state ownership will not be complete until route step-array
+  mutation paths are moved behind explicit `FlowEditor` commands or another
+  approved authoring owner.

@@ -633,3 +633,135 @@ Baseline/existing failures recorded:
   inventory and success-gated slice.
 - Flow authoring state ownership remains the main open Batch 7 area.
 - Batch 8 step rerun has not started.
+
+## Iteration 6 - Flow Metadata Authoring Commands
+
+### Start Gate
+
+- Started from commit `4c5bc9bc flows: centralize run status presentation`.
+- Branch state before planning:
+  - `frontend/packages/ui/src/icons/types.d.ts` dirty, unrelated and untouched
+  - `scripts/run_codex_review.sh` dirty, unrelated and untouched
+  - `PRODUCT.md` untracked, unrelated and untouched
+  - no staged files
+- Scope limited to Flow frontend metadata authoring around the
+  `FlowEditor`/route/component boundary.
+- Backend runtime, migrations, Celery, data model, generated schemas, package
+  naming, namespace migration, Batch 8 rerun, and broad UI workflow redesign
+  were not in scope.
+
+### Plan Evidence
+
+- `FlowFormSchemaEditor.svelte` wrote
+  `$update.metadata_json.form_schema` directly while also owning local draft
+  form field state.
+- The flow route wrote wizard metadata directly through local
+  `setTranscriptionEnabled(...)` and `setWizardMeta(...)` functions.
+- `FlowEditor.ts` already owned Flow authoring commands for steps,
+  assistant saves, safe step order remapping, and variable reference rewrites.
+- `flowFormSchema.ts` already owned form-field normalization and persisted
+  field shape, so it was the correct home for pure form-schema metadata
+  helpers.
+
+### Claude Plan Review
+
+- First review returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, and
+  `MIN_SCORE: 6`.
+- Accepted findings:
+  - moving only `form_schema` writes would leave the route with a parallel
+    wizard metadata writer
+  - the plan needed to pin the exact `editor.state.update.update(...)`
+    primitive used by the new commands
+  - command-boundary tests should exercise `FlowEditor`, not only pure helpers
+  - the explicit empty form schema shape needed to be pinned
+  - command naming should make replacement semantics clear
+- The plan was revised to add `replaceFormSchemaFields(...)`,
+  `setWizardMetadata(...)`, and `setTranscriptionEnabled(...)` to
+  `FlowEditor`, with route and component direct metadata writes removed.
+- Plan verification returned `VERDICT: green`, `GREEN_LIGHT: yes`, and
+  `MIN_SCORE: 8`.
+
+### Implementation Result
+
+- `FlowEditor.ts` now exposes:
+  - `replaceFormSchemaFields(fields)`
+  - `setWizardMetadata(patch)`
+  - `setTranscriptionEnabled(enabled)`
+  - `createFlowEditor(data)` for behavior tests without Svelte context
+  - `getFlowWizardMetadata(metadata)` for canonical wizard metadata reads
+- `initFlowEditor(data)` remains the Svelte context initializer and delegates
+  to `createFlowEditor(data)`.
+- `FlowFormSchemaEditor.svelte` now calls
+  `flowEditor.replaceFormSchemaFields(fields)` instead of assigning
+  `$update.metadata_json`.
+- The flow route now calls `flowEditor.setTranscriptionEnabled(...)` and
+  `flowEditor.setWizardMetadata(...)` instead of local metadata writer
+  functions.
+- `flowFormSchema.ts` now owns:
+  - `buildFlowFormSchemaMetadata(...)`
+  - `getFlowFormSchemaMetadata(...)`
+  - `getFlowFormSchemaFields(...)`
+- Route and component form-schema reads now use the canonical
+  `flowFormSchema.ts` helpers instead of inline casts.
+- `FlowEditor.test.ts` pins metadata command behavior, including invalid
+  persisted wizard metadata.
+
+### Validation
+
+Passed:
+
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/FlowEditor.test.ts`
+  - 2 files, 15 tests passed.
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/components/FlowRunLaunchInputState.test.ts src/lib/features/flows/components/FlowRunFileInputState.test.ts src/lib/features/flows/flowRunContract.test.ts src/lib/features/flows/flowRunWizard.test.ts`
+  - 4 files, 30 tests passed.
+- `cd frontend/apps/web && bunx prettier --check ...` over touched frontend
+  files.
+- `cd frontend/apps/web && bunx eslint ...` over touched frontend files.
+- `git diff --check -- ...` over touched frontend/docs paths.
+- Anti-slippage grep over touched frontend files, PRDs, and the AI Builder
+  prompt contract returned no matches.
+- Positive disappearance grep over `FlowFormSchemaEditor.svelte` and the flow
+  route returned no `$update.metadata_json =` matches.
+
+Baseline/existing failures recorded:
+
+- `cd frontend/apps/web && bun run check` still fails with 43 errors and 7
+  warnings in 14 files. The errors are the known broad frontend baseline
+  categories in `frontend/packages/intric-js`, spaces/chat/dashboard route
+  typing, Flow route path typing, and existing AI Builder harness warnings. No
+  touched-file diagnostic appeared after the final revision.
+
+### Claude Verification
+
+- Implementation review returned `VERDICT: green`, `GREEN_LIGHT: yes`, and
+  `MIN_SCORE: 7`.
+- Accepted findings after green:
+  - duplicate wizard metadata type/read shapes should be centralized
+  - form-schema route reads should use a pure helper instead of an inline cast
+  - invalid persisted wizard metadata should be guarded and tested
+  - the dead echo implementation in the test client mock should be removed
+  - municipal/case-specific test fixture vocabulary should not be cemented in
+    new tests
+- The implementation was updated accordingly.
+- Final verification returned `VERDICT: green`, `GREEN_LIGHT: yes`, and
+  `MIN_SCORE: 8`.
+- Accepted final low-cost cleanup:
+  - `FlowFormSchemaEditor.svelte` was updated to use
+    `getFlowFormSchemaMetadata(...)` for its read path.
+
+### Carry-Forward
+
+- `FlowEditor.state.update` remains writable, so direct mutation is still
+  possible by convention. Closing that escape hatch belongs with the planned
+  step-array command slice because name/description/data-retention and step
+  edits still bind through the writable store.
+- Flow route step-array mutation paths remain open:
+  - direct step assignments in the route
+  - component callbacks that still pass raw step objects back to the route
+  - name/description/data-retention two-way bindings
+- `FlowFormFieldType | string` remains pre-existing weak typing in
+  `flowFormSchema.ts`; tightening it should start with a persisted/legacy input
+  audit.
+- Empty-state form-field examples still use domain-specific copy. This is UI
+  copy cleanup, not state ownership.
+- Batch 8 step rerun has not started.

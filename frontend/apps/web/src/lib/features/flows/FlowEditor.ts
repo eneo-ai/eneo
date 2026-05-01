@@ -17,14 +17,41 @@ import { derived, get, writable } from "svelte/store";
 import { uid } from "uid";
 import { shouldSaveAssistantImmediately } from "./assistantSavePolicy";
 import { AssistantSaveManager } from "./flowAssistantSaveManager";
+import {
+  buildFlowFormSchemaMetadata,
+  toPersistedFlowFormFields,
+  type FlowFormField
+} from "./flowFormSchema";
 import { remapStepOrderTemplateTokens, replaceExactTemplateToken } from "./flowVariableTokens";
 import { getFlowStepValidationIssues, mapOutputToInputType } from "./flowStepTypes";
 import { getTemplateFillOutputConfig } from "./templateFillConfig";
 
-const [getFlowEditor, setFlowEditor] =
-  createContext<ReturnType<typeof initFlowEditor>>("Edit a flow");
+type FlowEditorInitData = {
+  flow: Flow;
+  intric: Intric;
+  onUpdateDone?: (flow: Flow) => void;
+};
 
-function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow: Flow) => void }) {
+type FlowMetadataJson = NonNullable<Flow["metadata_json"]>;
+type FlowWizardMetadata = {
+  transcription_enabled?: boolean;
+  transcription_model?: { id: string } | null;
+  transcription_language?: string;
+};
+
+function getFlowWizardMetadata(
+  metadata: Flow["metadata_json"] | null | undefined
+): FlowWizardMetadata {
+  const wizard = metadata?.wizard;
+  if (typeof wizard === "object" && wizard !== null && !Array.isArray(wizard)) {
+    return wizard as FlowWizardMetadata;
+  }
+  return {};
+}
+
+const [getFlowEditor, setFlowEditor] = createContext<FlowEditor>("Edit a flow");
+
+function createFlowEditor(data: FlowEditorInitData) {
   type LoadedAssistant = Awaited<ReturnType<typeof data.intric.flows.assistants.get>>;
   const assistantRevision = writable(0);
   const editor = createResourceEditor({
@@ -340,6 +367,33 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
     if ($flow === "unsaved") return "unsaved" as const;
     return "saved" as const;
   });
+
+  function updateMetadataJson(buildNext: (metadata: FlowMetadataJson) => FlowMetadataJson) {
+    editor.state.update.update((resource) => ({
+      ...resource,
+      metadata_json: buildNext((resource.metadata_json ?? {}) as FlowMetadataJson)
+    }));
+  }
+
+  function replaceFormSchemaFields(fields: FlowFormField[]): void {
+    updateMetadataJson((metadata) =>
+      buildFlowFormSchemaMetadata(metadata, toPersistedFlowFormFields(fields))
+    );
+  }
+
+  function setWizardMetadata(patch: Partial<FlowWizardMetadata>): void {
+    updateMetadataJson((metadata) => ({
+      ...metadata,
+      wizard: {
+        ...getFlowWizardMetadata(metadata),
+        ...patch
+      }
+    }));
+  }
+
+  function setTranscriptionEnabled(enabled: boolean): void {
+    setWizardMetadata({ transcription_enabled: enabled });
+  }
 
   // Debounced auto-save (500ms)
   let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -806,6 +860,9 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
     saveAssistant,
     updateAssistantImmediately,
     listAssistantPrompts,
+    replaceFormSchemaFields,
+    setTranscriptionEnabled,
+    setWizardMetadata,
     applyStepsWithSafeOrderRemap,
     rewriteInputFieldVariableReferences,
     rewriteStepNameVariableReferences,
@@ -815,11 +872,16 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
   });
 
   void cleanupLegacyMirroredInputTemplates();
+  return flowEditor;
+}
+
+function initFlowEditor(data: FlowEditorInitData) {
+  const flowEditor = createFlowEditor(data);
   setFlowEditor(flowEditor);
   return flowEditor;
 }
 
-type FlowEditor = ReturnType<typeof initFlowEditor>;
+type FlowEditor = ReturnType<typeof createFlowEditor>;
 
-export { initFlowEditor, getFlowEditor };
-export type { FlowEditor };
+export { initFlowEditor, getFlowEditor, createFlowEditor, getFlowWizardMetadata };
+export type { FlowEditor, FlowMetadataJson, FlowWizardMetadata };

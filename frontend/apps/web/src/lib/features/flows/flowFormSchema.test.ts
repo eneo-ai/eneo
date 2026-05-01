@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildFlowFormSchemaMetadata,
   flowFormFieldHasOptions,
   getFlowFormFieldNameIssue,
   getFlowFormFieldRuntimeKey,
   getFlowFormFieldVariableToken,
+  getFlowFormSchemaFields,
+  getFlowFormSchemaMetadata,
   getFlowFormStats,
   isFlowFormFieldNameUsableAsVariable,
   normalizeFlowFormFieldType,
   normalizeFlowFormFields,
-  toPersistedFlowFormFields,
+  toPersistedFlowFormFields
 } from "./flowFormSchema";
 
 describe("flowFormSchema", () => {
@@ -29,31 +32,33 @@ describe("flowFormSchema", () => {
 
   it("normalizes options and field order for editing/runtime use", () => {
     const normalized = normalizeFlowFormFields([
-      { name: " second ", type: "multiselect", required: true, options: [" A ", "", "B"], order: 2 },
-      { name: "first", type: "email", options: [" ignored "], order: 1 },
+      {
+        name: " second ",
+        type: "multiselect",
+        required: true,
+        options: [" A ", "", "B"],
+        order: 2
+      },
+      { name: "first", type: "email", options: [" ignored "], order: 1 }
     ]);
 
     expect(normalized).toEqual([
       { name: "first", type: "text", required: false, options: ["ignored"], order: 1 },
-      { name: " second ", type: "multiselect", required: true, options: ["A", "B"], order: 2 },
+      { name: " second ", type: "multiselect", required: true, options: ["A", "B"], order: 2 }
     ]);
   });
 
   it("counts draft fields and required fields from the current editor state", () => {
-    expect(
-      getFlowFormStats([
-        { required: false },
-        { required: true },
-        { required: true },
-      ]),
-    ).toEqual({
-      definedCount: 3,
-      requiredCount: 2,
-    });
+    expect(getFlowFormStats([{ required: false }, { required: true }, { required: true }])).toEqual(
+      {
+        definedCount: 3,
+        requiredCount: 2
+      }
+    );
   });
 
   it("builds variable tokens only for named fields", () => {
-    expect(getFlowFormFieldVariableToken("ärendenummer")).toBe("{{ärendenummer}}");
+    expect(getFlowFormFieldVariableToken("titel")).toBe("{{titel}}");
     expect(getFlowFormFieldVariableToken("   ")).toBe("");
   });
 
@@ -75,11 +80,54 @@ describe("flowFormSchema", () => {
   it("persists and resolves runtime field keys using trimmed names", () => {
     expect(getFlowFormFieldRuntimeKey(" titel ")).toBe("titel");
     expect(
-      toPersistedFlowFormFields([
-        { name: " titel ", type: "text", required: true, options: [] },
-      ]),
-    ).toEqual([
-      { name: "titel", type: "text", required: true, order: 1 },
+      toPersistedFlowFormFields([{ name: " titel ", type: "text", required: true, options: [] }])
+    ).toEqual([{ name: "titel", type: "text", required: true, order: 1 }]);
+  });
+
+  it("builds metadata with explicit form schema fields while preserving unrelated keys", () => {
+    const fields = toPersistedFlowFormFields([
+      { name: " titel ", type: "email", required: true, options: ["ignored"] },
+      { name: "val", type: "select", required: false, options: [" A ", ""] }
     ]);
+
+    expect(
+      buildFlowFormSchemaMetadata(
+        {
+          wizard: { transcription_enabled: true },
+          form_schema: { fields: [{ name: "old", type: "text", order: 1 }] }
+        },
+        fields
+      )
+    ).toEqual({
+      wizard: { transcription_enabled: true },
+      form_schema: {
+        fields: [
+          { name: "titel", type: "text", required: true, order: 1 },
+          { name: "val", type: "select", required: false, order: 2, options: ["A"] }
+        ]
+      }
+    });
+  });
+
+  it("keeps an explicit empty form schema for empty fields", () => {
+    expect(buildFlowFormSchemaMetadata(null, [])).toEqual({
+      form_schema: { fields: [] }
+    });
+    expect(buildFlowFormSchemaMetadata(undefined, [])).toEqual({
+      form_schema: { fields: [] }
+    });
+  });
+
+  it("reads form schema metadata through one helper", () => {
+    const metadata = {
+      form_schema: {
+        fields: [{ name: "titel", type: "text", required: true, order: 1 }]
+      }
+    };
+
+    expect(getFlowFormSchemaMetadata(metadata)).toEqual(metadata.form_schema);
+    expect(getFlowFormSchemaFields(metadata)).toEqual(metadata.form_schema.fields);
+    expect(getFlowFormSchemaMetadata({ form_schema: { fields: "invalid" } })).toBeUndefined();
+    expect(getFlowFormSchemaFields(null)).toEqual([]);
   });
 });
