@@ -2034,3 +2034,198 @@ Expected: no route-level direct step assignment beyond `FlowEditor` ownership.
   route/component writes rely on the writable surface.
 - Broader Flow authoring file naming remains deferred; `FlowEditor` has earned
   more ownership but should be renamed only with a separate plan.
+
+## Iteration 9 - Flow Active Step Selection Commands
+
+### Scope
+
+Close the route-owned active-step selection writes that remain after step
+mutation commands.
+
+In scope:
+
+- direct route calls to `activeStepId.set(...)`
+- `FlowEditor` command-boundary tests for step selection
+- route call-site replacement
+- Batch 7 journal/retrospective/Claude reconciliation docs
+
+Out of scope:
+
+- changing builder-stage navigation ownership
+- changing active tab ownership
+- changing graph/list/panel UI behavior
+- narrowing `FlowEditor.state.update`
+- renaming `FlowEditor`
+- backend/runtime/migration/data-model work
+- generated schema changes
+- package/name/namespace migration
+- Batch 8 step rerun
+
+### Inventory
+
+| selection write | current route owner | current FlowEditor owner | readers | canonical owner | action |
+|---|---|---|---|---|---|
+| auto-select first step when entering editor stage | `+page.svelte:192-198` reads `$update.steps` and calls `activeStepId.set(firstStepId)` | `FlowEditor` owns `activeStepId` store and step collection | route, step list, edit panel, graph | `FlowEditor` command | Add `selectFirstStepIfUnselected()`; route keeps the stage effect and delegates selection. |
+| validation banner navigation | `+page.svelte:328-330` sets stage and calls `activeStepId.set(stepId)` | none beyond writable store | validation banner, edit panel, graph | `FlowEditor` command | Add `selectStep(stepId)`; route keeps stage change. |
+| step list selection after assistant save flush | `+page.svelte:845-855` flushes assistant saves and calls `activeStepId.set(stepId)` | `flushAssistantSaves` and active-step store are both on `FlowEditor` | step list, edit panel, graph | `FlowEditor` command | Add `selectStep(stepId)` and keep flush/error translation in route. |
+| graph node selection | `+page.svelte:911-914` calls `activeStepId.set(stepId)` | none beyond writable store | graph, edit panel, list | `FlowEditor` command | Add `selectStep(stepId)`. |
+| AI Builder apply focus | `+page.svelte:1086-1091` resolves focused step id and calls `activeStepId.set(focusedStepId)` | `setResource` and active-step store are both on `FlowEditor` | route, edit panel, graph | `FlowEditor` command | Add `selectStep(stepId)` after route resolves tab/stage navigation. |
+
+### Reuse-Before-Creating Decision
+
+Do not create a navigation or selection controller. `FlowEditor.ts` already
+owns `activeStepId`, step mutation commands, step creation/insertion fallback,
+and resource updates. This slice adds narrow selection commands to the existing
+authoring owner while keeping route-owned tab/stage navigation in the route.
+This is not a new data owner; it consolidates the external write surface and
+then narrows the exposed `activeStepId` store to a readable value so future
+route/component code cannot reintroduce direct writes by accident.
+
+### Implementation Plan
+
+1. Add selection commands to `FlowEditor.ts`:
+
+   - `selectStep(stepId: string): void`
+   - `selectFirstStepIfUnselected(): void`
+
+   Required behavior:
+
+   - `selectStep(...)` selects the step only when the current step collection
+     contains that id
+   - `selectStep(...)` no-ops for unknown/stale ids and preserves the previous
+     active selection
+   - `selectStep(...)` reads from the editable `update` store; this is safe for
+     AI Builder apply focus because `createResourceEditor.setResource(...)`
+     synchronously sets both `resource` and `update`
+   - `selectFirstStepIfUnselected()` is a no-op when a step is already selected
+   - `selectFirstStepIfUnselected()` is a no-op when there are no steps
+   - `selectFirstStepIfUnselected()` selects the first step id when no step is
+     active
+   - no validation or stage navigation is hidden in the selection commands
+
+2. Export both commands from the frozen `flowEditor` object.
+
+3. Narrow the exported `state.activeStepId` type to `Readable<string | null>`.
+   The internal `Writable` stays private to `FlowEditor` so existing internal
+   creation/removal/reconciliation paths can continue to set or clear active
+   selection without self-calling public commands.
+
+4. Extend `FlowEditor.test.ts`:
+
+   - `selectStep` selects a known step id
+   - `selectStep` ignores unknown/stale step ids and preserves the previous
+     active selection
+   - `selectFirstStepIfUnselected` selects the first step when selection is
+     empty
+   - `selectFirstStepIfUnselected` preserves an existing active step
+   - `selectFirstStepIfUnselected` is a no-op for empty step arrays
+   - `selectStep` can override the first-step auto-selection result, matching
+     the route order where explicit selection follows stage navigation
+   - `selectStep` works immediately after `setResource(...)` with a new step,
+     pinning the AI Builder apply-focus path
+
+5. Update route callbacks/effects:
+
+   - auto-select first step effect calls
+     `flowEditor.selectFirstStepIfUnselected()`
+   - validation banner navigation calls `flowEditor.selectStep(stepId)`
+   - step-list selection calls `flowEditor.selectStep(stepId)` after
+     successful assistant-save flush
+   - graph node click calls `flowEditor.selectStep(stepId)`
+   - AI Builder apply focus calls `flowEditor.selectStep(focusedStepId)`
+
+6. Keep route ownership for:
+
+   - `builderStage`
+   - `activeTab`
+   - `navigateToStage(...)`
+   - toast/error translation around assistant-save flush
+
+### Behavior Pins Before Deletion
+
+Add `FlowEditor.test.ts` command-boundary coverage before replacing route
+direct `activeStepId.set(...)` calls.
+
+Tests must arrange active selection through public commands after this slice.
+Existing arrange sites in `FlowEditor.test.ts` that call
+`editor.state.activeStepId.set(...)` must migrate. Internal `FlowEditor.ts`
+calls to `activeStepId.set(...)` remain internal implementation details and are
+not routed through public commands.
+
+### Validation Commands
+
+Focused command tests:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/FlowEditor.test.ts
+```
+
+Relevant previous Batch 7 smoke:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- \
+  src/lib/features/flows/flowFormSchema.test.ts \
+  src/lib/features/flows/components/FlowRunLaunchInputState.test.ts \
+  src/lib/features/flows/components/FlowRunFileInputState.test.ts \
+  src/lib/features/flows/flowRunContract.test.ts \
+  src/lib/features/flows/flowRunWizard.test.ts
+```
+
+Broad app check, expected to retain known baseline failures:
+
+```bash
+cd frontend/apps/web && bun run check
+```
+
+Touched-file format/lint:
+
+```bash
+cd frontend/apps/web && bunx prettier --check \
+  src/lib/features/flows/FlowEditor.ts \
+  src/lib/features/flows/FlowEditor.test.ts \
+  'src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte'
+```
+
+```bash
+cd frontend/apps/web && bunx eslint \
+  src/lib/features/flows/FlowEditor.ts \
+  src/lib/features/flows/FlowEditor.test.ts \
+  'src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte'
+```
+
+Diff and text hygiene:
+
+```bash
+git diff --check -- \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.ts \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts \
+  'frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte' \
+  docs/refactor/execution/batch-7-frontend-state-owners
+```
+
+```bash
+rg --pcre2 -n "A\\.[0-9](?![0-9])|P0\\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|state-owner slice|Batch 7|as any|@ts-ignore|@ts-expect-error" \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.ts \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts \
+  'frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte' \
+  docs/refactor/prd \
+  docs/refactor/ai-builder-prompt-contract.md
+```
+
+Expected: no matches in touched frontend files.
+
+Positive disappearance check:
+
+```bash
+rg -n "activeStepId\\.set\\(" \
+  'frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte'
+```
+
+Expected: no matches.
+
+### Carry-Forward
+
+- `FlowEditor.state.update` can be narrowed only after a separate audit proves
+  route/component consumers no longer rely on writable store methods.
+- Route-owned `builderStage` and `activeTab` remain intentionally outside this
+  Flow authoring owner slice.

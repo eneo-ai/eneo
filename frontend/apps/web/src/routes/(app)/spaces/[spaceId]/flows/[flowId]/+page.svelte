@@ -192,8 +192,7 @@
   // Auto-select first step when entering stage 4 with no selection
   $effect(() => {
     if (builderStage === 4 && $activeStepId === null && $update.steps.length > 0) {
-      const firstStepId = $update.steps[0]?.id;
-      if (firstStepId) activeStepId.set(firstStepId);
+      flowEditor.selectFirstStepIfUnselected();
     }
   });
 
@@ -327,7 +326,7 @@
         steps={$update.steps}
         onNavigateToStep={(stepId) => {
           builderStage = 4;
-          activeStepId.set(stepId);
+          flowEditor.selectStep(stepId);
         }}
         bind:isExpanded={validationBannerExpanded}
       />
@@ -852,7 +851,9 @@
                         : "Kunde inte spara stegets ändringar.";
                     toast.error(message);
                   }
-                  activeStepId.set(stepId);
+                  if (stepId) {
+                    flowEditor.selectStep(stepId);
+                  }
                 }}
                 onStepsChanged={async (updatedSteps) => {
                   try {
@@ -911,7 +912,7 @@
           <FlowGraphPanel
             flow={$update}
             activeStepId={$activeStepId}
-            onNodeClick={(stepId) => activeStepId.set(stepId)}
+            onNodeClick={(stepId) => flowEditor.selectStep(stepId)}
           />
         {:else}
           <div class="flex-1 overflow-y-auto p-4 sm:p-5 md:p-8">
@@ -1088,7 +1089,7 @@
                 navigation.focusStepIndex
               );
               if (focusedStepId) {
-                activeStepId.set(focusedStepId);
+                flowEditor.selectStep(focusedStepId);
               }
             } catch (err) {
               console.error("Failed to refresh flow after apply:", err);

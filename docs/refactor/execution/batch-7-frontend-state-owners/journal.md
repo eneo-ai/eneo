@@ -1023,3 +1023,136 @@ Baseline/existing failures recorded:
   downstream assistant-save failure. That is pre-existing behavior now
   documented and should not be changed without a separate transactional design.
 - Batch 8 step rerun has not started.
+
+## Iteration 9 - Flow Active Step Selection Commands
+
+### Starting State
+
+- Started from commit `7105a4e6 flows: centralize step mutation commands`.
+- Branch state before planning:
+  - `frontend/packages/ui/src/icons/types.d.ts` dirty, unrelated and untouched
+  - `scripts/run_codex_review.sh` dirty, unrelated and untouched
+  - `PRODUCT.md` untracked, unrelated and untouched
+  - no staged files
+- Scope limited to Flow active-step selection write ownership in `FlowEditor`,
+  the route call site, behavior tests, and Batch 7 docs.
+- Backend runtime, migrations, Celery, data model, generated schemas, package
+  naming, namespace migration, and Batch 8 step rerun were not in scope.
+
+### Plan Evidence
+
+- The route still owned five direct active-step writes:
+  - auto-select first step on editor-stage entry
+  - validation-banner navigation
+  - step-list selection after assistant-save flush
+  - graph node selection
+  - AI Builder apply focus
+- `FlowEditor.ts` already owned the `activeStepId` store and used it internally
+  for step creation, insertion, removal fallback, reconciliation, and AI
+  Builder starter insertion.
+- The real improvement was not moving the data owner; it was consolidating the
+  external write surface and then exposing `state.activeStepId` as readable so
+  route/component code cannot call `.set(...)` by type accident.
+
+### Claude Plan Review
+
+- First review returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, and
+  `MIN_SCORE: 7`.
+- Accepted findings:
+  - `selectStepById(stepId: string | null)` was speculative
+  - command names should match existing short `FlowEditor` command vocabulary
+  - `state.activeStepId` should be narrowed to readable in this slice rather
+    than left as a convention-only carry-forward
+  - unknown/stale step id behavior needed an explicit contract
+  - tests should migrate direct active-step arranges to public commands
+  - post-`setResource` AI Builder apply focus needed a behavior pin
+- The plan was revised so:
+  - `selectStep(stepId: string)` rejects unknown ids and preserves the previous
+    active step
+  - `selectFirstStepIfUnselected()` owns first-step fallback
+  - exported `state.activeStepId` is read-only/readable
+  - route keeps `builderStage`, `activeTab`, navigation, and toast ownership
+  - tests pin `setResource(...)` then immediate `selectStep(...)`
+- Plan verification returned `VERDICT: green`, `GREEN_LIGHT: yes`, and
+  `MIN_SCORE: 8`.
+
+### Implementation Result
+
+- `FlowEditor.ts` now exposes:
+  - `selectStep(stepId)`
+  - `selectFirstStepIfUnselected()`
+- `selectStep(...)` validates against the editable step collection and no-ops
+  for unknown/stale ids, preserving the previous active selection.
+- `selectFirstStepIfUnselected()` keeps the first-step fallback inside
+  `FlowEditor`.
+- `state.activeStepId` is exposed through `readonly(activeStepId)`, while the
+  internal writable remains private to `FlowEditor`.
+- The route now delegates all active-step writes to `FlowEditor` and still owns
+  tab/stage navigation plus toast/error translation.
+- `FlowEditor.test.ts` now pins:
+  - selecting a known step
+  - unknown ids preserve prior selection
+  - first-step selection when no step is active
+  - preserving an existing active step
+  - empty-step no-op behavior
+  - explicit selection overriding first-step auto selection
+  - immediate selection after `setResource(...)` with freshly applied steps
+
+### Validation
+
+Passed:
+
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/FlowEditor.test.ts`
+  - 1 file, 22 tests passed.
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/components/FlowRunLaunchInputState.test.ts src/lib/features/flows/components/FlowRunFileInputState.test.ts src/lib/features/flows/flowRunContract.test.ts src/lib/features/flows/flowRunWizard.test.ts`
+  - 5 files, 41 tests passed.
+- `cd frontend/apps/web && bunx prettier --check ...` over touched frontend
+  files.
+- `cd frontend/apps/web && bunx eslint ...` over touched frontend files.
+- `git diff --check -- ...` over touched frontend/docs paths.
+- Route-specific active-step disappearance grep returned no matches.
+- Whole-app external active-step writer grep returned no `.activeStepId.set(...)`
+  matches. Raw `activeStepId.set(...)` matches now exist only inside
+  `FlowEditor.ts`.
+- Anti-slippage grep over touched frontend files, PRDs, and the AI Builder
+  prompt contract returned no matches.
+
+Baseline/existing failures recorded:
+
+- `cd frontend/apps/web && bun run check` still fails with 43 errors and 7
+  warnings in 14 files after fixing the one touched-file type error found on
+  the first run. The remaining failures are the known broad frontend baseline
+  categories in `frontend/packages/intric-js`, spaces/chat/dashboard route
+  typing, Flow list route typing, and existing AI Builder harness warnings.
+- One intermediate focused test run failed because it was run in parallel with
+  `bun run check`, whose i18n compile temporarily rewrote ignored Paraglide
+  output. Re-running `bun run i18n:compile` and then the focused test
+  sequentially passed.
+
+### Claude Verification
+
+- Implementation review returned `VERDICT: green`, `GREEN_LIGHT: yes`, and
+  `MIN_SCORE: 8`.
+- Claude verified:
+  - `readonly(activeStepId)` makes external writes a type-check failure
+  - the five route call sites were replaced
+  - test arranges now use public commands
+  - the post-`setResource` apply-focus path is pinned
+  - no backend, generated schema, package rename, namespace migration, or Batch
+    8 work was introduced
+- Claude noted two non-blocking observations:
+  - the route auto-select effect keeps redundant guards, but they preserve the
+    existing reactive dependencies and were intentionally left in place
+  - command export grouping could be moved, but it is cosmetic
+
+### Carry-Forward
+
+- `FlowEditor.state.update` remains externally writable. This should be the
+  only remaining structural Flow authoring state-owner concern if Batch 7 is
+  extended further; otherwise it is a named review-gate item before Batch 8.
+- Route-owned `builderStage` and `activeTab` remain intentionally outside
+  `FlowEditor` because they are page navigation state, not Flow authoring
+  domain state.
+- Assistant prompt remap transactional behavior remains unchanged and
+  documented from iteration 8.
+- Batch 8 step rerun has not started.

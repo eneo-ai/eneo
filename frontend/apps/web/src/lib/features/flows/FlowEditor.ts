@@ -13,7 +13,7 @@ import {
   type Intric,
   type PromptSparse
 } from "@intric/intric-js";
-import { derived, get, writable } from "svelte/store";
+import { derived, get, readonly, writable } from "svelte/store";
 import { uid } from "uid";
 import { shouldSaveAssistantImmediately } from "./assistantSavePolicy";
 import { AssistantSaveManager } from "./flowAssistantSaveManager";
@@ -391,6 +391,22 @@ function createFlowEditor(data: FlowEditorInitData) {
 
   function isValidStepIndex(index: number, steps: FlowStep[]): boolean {
     return Number.isInteger(index) && index >= 0 && index < steps.length;
+  }
+
+  function selectStep(stepId: string): void {
+    const currentSteps = get(editor.state.update).steps ?? [];
+    if (currentSteps.some((step) => step.id === stepId)) {
+      activeStepId.set(stepId);
+    }
+  }
+
+  function selectFirstStepIfUnselected(): void {
+    if (get(activeStepId) !== null) return;
+
+    const firstStepId = get(editor.state.update).steps?.[0]?.id;
+    if (firstStepId) {
+      activeStepId.set(firstStepId);
+    }
   }
 
   function replaceStepAtIndex(index: number, step: FlowStep): void {
@@ -897,7 +913,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     ...editor,
     state: {
       ...editor.state,
-      activeStepId,
+      activeStepId: readonly(activeStepId),
       validationErrors,
       saveStatus: unifiedSaveStatus,
       isPublished
@@ -911,6 +927,8 @@ function createFlowEditor(data: FlowEditorInitData) {
     saveAssistant,
     updateAssistantImmediately,
     listAssistantPrompts,
+    selectStep,
+    selectFirstStepIfUnselected,
     setName,
     setDescription,
     setDataRetentionDays,

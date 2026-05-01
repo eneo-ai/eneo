@@ -287,7 +287,7 @@ describe("FlowEditor step mutation commands", () => {
       intric: makeIntric()
     });
     try {
-      editor.state.activeStepId.set("step-2");
+      editor.selectStep("step-2");
 
       await editor.removeStepAtIndex(1);
 
@@ -307,7 +307,7 @@ describe("FlowEditor step mutation commands", () => {
       intric: makeIntric()
     });
     try {
-      editor.state.activeStepId.set("step-2");
+      editor.selectStep("step-2");
 
       await editor.removeStepAtIndex(1);
 
@@ -324,7 +324,7 @@ describe("FlowEditor step mutation commands", () => {
       intric: makeIntric()
     });
     try {
-      editor.state.activeStepId.set("step-1");
+      editor.selectStep("step-1");
 
       await editor.removeStepAtIndex(0);
 
@@ -341,7 +341,7 @@ describe("FlowEditor step mutation commands", () => {
       intric: makeIntric()
     });
     try {
-      editor.state.activeStepId.set("step-1");
+      editor.selectStep("step-1");
       const originalSteps = get(editor.state.update).steps;
 
       for (const index of [-1, 1.5, Number.NaN, originalSteps.length]) {
@@ -376,12 +376,121 @@ describe("FlowEditor step mutation commands", () => {
       })
     });
     try {
-      editor.state.activeStepId.set("step-2");
+      editor.selectStep("step-2");
 
       await expect(editor.removeStepAtIndex(0)).rejects.toThrow("assistant update failed");
 
       expect(assistantUpdate).toHaveBeenCalled();
       expect(get(editor.state.activeStepId)).toBe("step-2");
+    } finally {
+      editor.destroy();
+    }
+  });
+});
+
+describe("FlowEditor active step selection commands", () => {
+  it("selects a known step id", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
+      intric: makeIntric()
+    });
+    try {
+      editor.selectStep("step-2");
+
+      expect(get(editor.state.activeStepId)).toBe("step-2");
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("ignores unknown step ids and preserves the previous active step", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
+      intric: makeIntric()
+    });
+    try {
+      editor.selectStep("step-1");
+      editor.selectStep("missing-step");
+
+      expect(get(editor.state.activeStepId)).toBe("step-1");
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("selects the first step when none is selected", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
+      intric: makeIntric()
+    });
+    try {
+      editor.selectFirstStepIfUnselected();
+
+      expect(get(editor.state.activeStepId)).toBe("step-1");
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("preserves an existing active step when selecting the first step if unselected", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
+      intric: makeIntric()
+    });
+    try {
+      editor.selectStep("step-2");
+      editor.selectFirstStepIfUnselected();
+
+      expect(get(editor.state.activeStepId)).toBe("step-2");
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("does not select anything when there are no steps", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [] }),
+      intric: makeIntric()
+    });
+    try {
+      editor.selectFirstStepIfUnselected();
+
+      expect(get(editor.state.activeStepId)).toBeNull();
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("lets explicit selection override first-step auto selection", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
+      intric: makeIntric()
+    });
+    try {
+      editor.selectFirstStepIfUnselected();
+      editor.selectStep("step-2");
+
+      expect(get(editor.state.activeStepId)).toBe("step-2");
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("selects a step from a freshly replaced resource", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      intric: makeIntric()
+    });
+    try {
+      editor.setResource(
+        makeFlow(null, {
+          steps: [makeStep(1), makeStep(2, { id: "applied-step" })]
+        })
+      );
+
+      editor.selectStep("applied-step");
+
+      expect(get(editor.state.activeStepId)).toBe("applied-step");
     } finally {
       editor.destroy();
     }
