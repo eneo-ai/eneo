@@ -7,6 +7,7 @@
   import { Label } from "@intric/ui";
   import { Loader2, ChevronDown, AlertTriangle } from "lucide-svelte";
   import { migrationHistoryRefreshVersion } from "./migrationHistoryRefresh";
+  import { translateMigrationWarning } from "./migrationWarnings";
 
   const intric = getIntric();
 
@@ -40,8 +41,8 @@
     try {
       const result = await intric.models.getAllMigrationHistory();
       history = result as MigrationRecord[];
-    } catch (e: any) {
-      error = e.message || "Failed to load migration history";
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : "Failed to load migration history";
     } finally {
       loading = false;
     }
@@ -81,85 +82,81 @@
 
   function statusColor(status: string): Label.LabelColor {
     switch (status) {
-      case "completed": return "green";
-      case "failed": return "red";
-      case "in_progress": return "yellow";
-      default: return "gray";
+      case "completed":
+        return "green";
+      case "failed":
+        return "red";
+      case "in_progress":
+        return "yellow";
+      default:
+        return "gray";
     }
   }
 
-  const detailLabels: Record<string, string> = {
-    assistants: "Assistenter",
-    apps: "Appar",
-    services: "Tjänster",
-    questions: "Frågor",
-    spaces: "Spaces",
-    assistant_templates: "Assistentmallar",
-    app_templates: "Appmallar"
-  };
-
-  function translateWarning(code: string): string {
-    if (code === "target_deprecated") return m.migration_warn_target_deprecated();
-    if (code.startsWith("lower_token_limit:")) return m.migration_warn_lower_token_limit({ limit: code.split(":")[1] });
-    if (code.startsWith("different_family:")) { const p = code.split(":"); return m.migration_warn_different_family({ from: p[1], to: p[2] }); }
-    if (code === "lacks_vision") return m.migration_warn_lacks_vision();
-    if (code === "lacks_reasoning") return m.migration_warn_lacks_reasoning();
-    if (code === "lacks_tool_calling") return m.migration_warn_lacks_tool_calling();
-    if (code === "kwargs_reset") return m.migration_warn_kwargs_reset();
-    if (code.startsWith("security_classification_insufficient:")) {
-      const p = code.split(":"); return m.migration_blocked_security({ count: p[1], classification: p[2] });
-    }
-    return code;
-  }
+  // Localised labels for the per-entity-type counts in the expanded row.
+  // Falls back to the raw key if a backend addition hasn't been translated yet.
+  const detailLabels = {
+    assistants: m.migration_detail_assistants(),
+    apps: m.migration_detail_apps(),
+    services: m.migration_detail_services(),
+    questions: m.migration_detail_questions(),
+    spaces: m.migration_detail_spaces(),
+    assistant_templates: m.migration_detail_assistant_templates(),
+    app_templates: m.migration_detail_app_templates()
+  } as Record<string, string>;
 </script>
 
 <div class="flex flex-col gap-4 p-4">
   {#if loading}
-    <div class="flex items-center justify-center py-12 text-muted">
-      <Loader2 class="h-5 w-5 animate-spin mr-2" />
+    <div class="text-muted flex items-center justify-center py-12">
+      <Loader2 class="mr-2 h-5 w-5 animate-spin" />
       <span>{m.loading()}</span>
     </div>
   {:else if error}
-    <div class="border-l-2 border-negative-default bg-negative-dimmer/50 px-4 py-3 text-sm text-negative-default">
+    <div
+      class="border-negative-default bg-negative-dimmer/50 text-negative-default border-l-2 px-4 py-3 text-sm"
+    >
       {error}
     </div>
   {:else if history.length === 0}
-    <div class="flex items-center justify-center py-12 text-muted">
+    <div class="text-muted flex items-center justify-center py-12">
       <span>{m.migration_history_empty()}</span>
     </div>
   {:else}
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b border-default text-left text-muted">
-            <th class="px-3 py-2 font-medium w-[1%]"></th>
+          <tr class="border-default text-muted border-b text-left">
+            <th class="w-[1%] px-3 py-2 font-medium"></th>
             <th class="px-3 py-2 font-medium">{m.migration_history_date()}</th>
             <th class="px-3 py-2 font-medium">{m.migration_history_from()}</th>
             <th class="px-3 py-2 font-medium">{m.migration_history_to()}</th>
-            <th class="px-3 py-2 font-medium text-right">{m.migration_history_count()}</th>
+            <th class="px-3 py-2 text-right font-medium">{m.migration_history_count()}</th>
             <th class="px-3 py-2 font-medium">{m.migration_history_by()}</th>
             <th class="px-3 py-2 font-medium">{m.migration_history_status()}</th>
           </tr>
         </thead>
         <tbody>
-          {#each history as record}
+          {#each history as record (record.id)}
             <tr
-              class="border-b border-dimmer hover:bg-hover-dimmer cursor-pointer transition-colors"
+              class="border-dimmer hover:bg-hover-dimmer cursor-pointer border-b transition-colors"
               on:click={() => toggleExpand(record.id)}
             >
               <td class="px-3 py-2">
                 <ChevronDown
                   size={14}
-                  class="text-muted transition-transform {expandedId === record.id ? 'rotate-0' : '-rotate-90'}"
+                  class="text-muted transition-transform {expandedId === record.id
+                    ? 'rotate-0'
+                    : '-rotate-90'}"
                 />
               </td>
-              <td class="px-3 py-2 text-muted whitespace-nowrap">
+              <td class="text-muted px-3 py-2 whitespace-nowrap">
                 {formatDate(record.completed_at ?? record.started_at)}
               </td>
               <td class="px-3 py-2">{record.from_model_name}</td>
               <td class="px-3 py-2">{record.to_model_name}</td>
               <td class="px-3 py-2 text-right tabular-nums">{record.migrated_count}</td>
-              <td class="px-3 py-2 text-muted">{record.initiated_by_name}</td>
+              <td class="text-muted px-3 py-2">{record.initiated_by_name}</td>
               <td class="px-3 py-2">
                 <Label.Single
                   item={{
@@ -174,17 +171,22 @@
             {#if expandedId === record.id}
               <tr>
                 <td colspan="8" class="px-0 py-0">
-                  <div class="bg-surface-dimmer/40 border-b border-dimmer px-8 py-4">
-                    <table class="text-sm w-full max-w-lg">
+                  <div class="bg-surface-dimmer/40 border-dimmer border-b px-8 py-4">
+                    <table class="w-full max-w-lg text-sm">
                       <tbody>
                         <tr>
-                          <td class="py-1.5 pr-6 text-muted whitespace-nowrap">{m.migration_history_duration()}</td>
-                          <td class="py-1.5 font-mono text-xs">{formatDuration(record.duration)}</td>
+                          <td class="text-muted py-1.5 pr-6 whitespace-nowrap"
+                            >{m.migration_history_duration()}</td
+                          >
+                          <td class="py-1.5 font-mono text-xs">{formatDuration(record.duration)}</td
+                          >
                         </tr>
                         {#if record.migration_details}
-                          {#each Object.entries(record.migration_details).filter(([k, v]) => k !== "total" && v > 0) as [type, count]}
+                          {#each Object.entries(record.migration_details).filter(([k, v]) => k !== "total" && v > 0) as [type, count] (type)}
                             <tr>
-                              <td class="py-1.5 pr-6 text-muted whitespace-nowrap">{detailLabels[type] ?? type}</td>
+                              <td class="text-muted py-1.5 pr-6 whitespace-nowrap"
+                                >{detailLabels[type] ?? type}</td
+                              >
                               <td class="py-1.5 tabular-nums">{count}</td>
                             </tr>
                           {/each}
@@ -193,21 +195,21 @@
                     </table>
 
                     {#if record.warnings && record.warnings.length > 0}
-                      <div class="mt-3 pt-3 border-t border-dimmer">
-                        <div class="flex items-center gap-1.5 text-sm text-muted mb-1.5">
+                      <div class="border-dimmer mt-3 border-t pt-3">
+                        <div class="text-muted mb-1.5 flex items-center gap-1.5 text-sm">
                           <AlertTriangle size={13} />
                           <span>{m.migration_history_warnings()}</span>
                         </div>
-                        <ul class="space-y-1 text-sm text-warning-stronger pl-5">
-                          {#each record.warnings as w}
-                            <li>{translateWarning(w)}</li>
+                        <ul class="text-warning-stronger space-y-1 pl-5 text-sm">
+                          {#each record.warnings as w, i (i)}
+                            <li>{translateMigrationWarning(w)}</li>
                           {/each}
                         </ul>
                       </div>
                     {/if}
 
                     {#if record.error_message}
-                      <div class="mt-3 pt-3 border-t border-dimmer text-sm text-negative-default">
+                      <div class="border-dimmer text-negative-default mt-3 border-t pt-3 text-sm">
                         {record.error_message}
                       </div>
                     {/if}

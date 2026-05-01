@@ -1,32 +1,88 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
+<!--
+  Visual status indicator for a provider connection. The badge can run a real
+  connectivity test (`modelProviders.test()`) on demand — clicking the badge
+  triggers the test and updates state. We deliberately do NOT auto-run the
+  test on mount: every badge in the table would fan-out a paid round-trip to
+  the upstream provider on each page load.
+
+  States:
+    - `inactive`            — provider has is_active=false
+    - `needs_credentials`   — no masked_api_key on record
+    - `unknown`             — credentials exist, never tested in this session
+    - `testing`             — test in flight
+    - `connected`           — test returned success
+    - `error`               — test returned a failure
+-->
+
 <script lang="ts">
   import type { ModelProviderPublic } from "@intric/intric-js";
-  import { Tooltip } from "@intric/ui";
-  import { CheckCircle2, AlertCircle, XCircle, CircleOff } from "lucide-svelte";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import {
+    CheckCircle2,
+    AlertCircle,
+    XCircle,
+    CircleOff,
+    HelpCircle,
+    Loader2
+  } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
+  import { getIntric } from "$lib/core/Intric";
 
-  export let provider: ModelProviderPublic;
+  type StatusType =
+    | "connected"
+    | "needs_credentials"
+    | "error"
+    | "inactive"
+    | "unknown"
+    | "testing";
 
-  // Determine status based on provider state
-  type StatusType = "connected" | "needs_credentials" | "error" | "inactive";
+  let { provider }: { provider: ModelProviderPublic } = $props();
 
-  function getStatus(p: ModelProviderPublic): StatusType {
-    if (!p.is_active) {
-      return "inactive";
-    }
-    // Check if credentials are present (masked_api_key exists and not empty)
-    if (!p.masked_api_key || p.masked_api_key === "") {
-      return "needs_credentials";
-    }
-    // For now, assume connected if active with credentials
-    // TODO: Integrate with modelProviders.test() for real status
-    return "connected";
-  }
+  const intric = getIntric();
 
-  $: status = getStatus(provider);
+  let testStatus = $state<"idle" | "testing" | "ok" | "failed">("idle");
+  let testError = $state<string | null>(null);
 
-  // Status label mapping - using translations
+  const baseStatus: StatusType = $derived.by(() => {
+    if (!provider.is_active) return "inactive";
+    if (!provider.masked_api_key || provider.masked_api_key === "") return "needs_credentials";
+    return "unknown";
+  });
+
+  const status: StatusType = $derived.by(() => {
+    if (testStatus === "testing") return "testing";
+    if (testStatus === "ok") return "connected";
+    if (testStatus === "failed") return "error";
+    return baseStatus;
+  });
+
+  const config: Record<
+    StatusType,
+    { variant: "default" | "secondary" | "destructive" | "outline"; icon: typeof CheckCircle2 }
+  > = {
+    connected: { variant: "outline", icon: CheckCircle2 },
+    needs_credentials: { variant: "outline", icon: AlertCircle },
+    error: { variant: "destructive", icon: XCircle },
+    inactive: { variant: "secondary", icon: CircleOff },
+    unknown: { variant: "outline", icon: HelpCircle },
+    testing: { variant: "outline", icon: Loader2 }
+  };
+
+  const colorOverride: Record<StatusType, string> = {
+    // shadcn Badge variants don't carry semantic colour beyond "destructive".
+    // We layer our eneo tokens on top so the status hues stay consistent with
+    // the rest of the admin surface (positive/warning/dimmer namespaces).
+    connected: "border-positive-default/30 bg-positive-dimmer/40 text-positive-stronger",
+    needs_credentials: "border-warning-default/30 bg-warning-dimmer/40 text-warning-stronger",
+    error: "",
+    inactive: "",
+    unknown: "border-dimmer bg-surface-dimmer text-muted",
+    testing: "border-accent-default/30 bg-accent-dimmer/40 text-accent-stronger"
+  };
+
   function getLabel(s: StatusType): string {
     switch (s) {
       case "connected":
@@ -37,80 +93,78 @@
         return m.provider_status_error();
       case "inactive":
         return m.provider_status_inactive();
-      default:
-        return "";
+      case "testing":
+        return m.testing();
+      case "unknown":
+        return m.provider_status_unknown();
     }
   }
 
-  // Status color mapping - WCAG 2.1 AA compliant (4.5:1 contrast for text)
-  // Light mode: text 35-45% L on 94-95% L bg
-  // Dark mode: text 75-82% L on 24-26% L bg
-  const colors: Record<StatusType, { text: string; bg: string; border: string }> = {
-    connected: {
-      text: "text-[oklch(35%_0.12_145)] dark:text-[oklch(80%_0.14_145)]",
-      bg: "bg-[oklch(95%_0.04_145)] dark:bg-[oklch(24%_0.06_145)]",
-      border: "border-[oklch(85%_0.08_145)] dark:border-[oklch(38%_0.10_145)]"
-    },
-    needs_credentials: {
-      text: "text-[oklch(38%_0.14_85)] dark:text-[oklch(82%_0.16_85)]",
-      bg: "bg-[oklch(94%_0.06_85)] dark:bg-[oklch(26%_0.07_85)]",
-      border: "border-[oklch(82%_0.12_85)] dark:border-[oklch(40%_0.12_85)]"
-    },
-    error: {
-      text: "text-[oklch(40%_0.16_25)] dark:text-[oklch(80%_0.18_25)]",
-      bg: "bg-[oklch(94%_0.05_25)] dark:bg-[oklch(24%_0.07_25)]",
-      border: "border-[oklch(82%_0.10_25)] dark:border-[oklch(38%_0.12_25)]"
-    },
-    inactive: {
-      text: "text-[oklch(45%_0.01_0)] dark:text-[oklch(75%_0.02_0)]",
-      bg: "bg-[oklch(95%_0.005_0)] dark:bg-[oklch(26%_0.01_0)]",
-      border: "border-[oklch(88%_0.01_0)] dark:border-[oklch(38%_0.02_0)]"
-    }
-  };
-
-  // Status icon mapping
-  const icons: Record<StatusType, typeof CheckCircle2> = {
-    connected: CheckCircle2,
-    needs_credentials: AlertCircle,
-    error: XCircle,
-    inactive: CircleOff
-  };
-
-  $: label = getLabel(status);
-  $: color = colors[status];
-  $: Icon = icons[status];
-
-  // Build tooltip content - using translations
-  $: tooltipContent = (() => {
-    switch (status) {
+  function getTooltip(s: StatusType): string {
+    switch (s) {
       case "connected":
         return m.provider_status_tooltip_connected({ maskedKey: provider.masked_api_key || "***" });
       case "needs_credentials":
         return m.provider_status_tooltip_needs_credentials();
       case "error":
-        return m.provider_status_tooltip_error();
+        return testError ?? m.provider_status_tooltip_error();
       case "inactive":
         return m.provider_status_tooltip_inactive();
-      default:
-        return "";
+      case "testing":
+        return m.testing();
+      case "unknown":
+        return m.provider_status_tooltip_unknown();
     }
-  })();
+  }
+
+  async function runTest(event: MouseEvent) {
+    event.stopPropagation();
+    if (testStatus === "testing") return;
+    if (baseStatus === "needs_credentials" || baseStatus === "inactive") return;
+
+    testStatus = "testing";
+    testError = null;
+    try {
+      const result = (await intric.modelProviders.test({ id: provider.id })) as {
+        success?: boolean;
+        error?: string;
+      };
+      if (result?.success) {
+        testStatus = "ok";
+      } else {
+        testStatus = "failed";
+        testError = result?.error ?? null;
+      }
+    } catch (e: unknown) {
+      testStatus = "failed";
+      testError = e instanceof Error ? e.message : null;
+    }
+  }
+
+  const Icon = $derived(config[status].icon);
+  const variant = $derived(config[status].variant);
+  const colorClass = $derived(colorOverride[status]);
+  const label = $derived(getLabel(status));
+  const tooltipText = $derived(getTooltip(status));
+  const canTest = $derived(baseStatus !== "needs_credentials" && baseStatus !== "inactive");
 </script>
 
-<Tooltip text={tooltipContent}>
-  <div
-    class="
-      inline-flex items-center gap-1.5
-      rounded-full px-2
-      py-1 text-xs
-      font-medium
-      {color.bg}
-      {color.border}
-      border
-      transition-colors duration-150
-    "
-  >
-    <svelte:component this={Icon} class="h-3.5 w-3.5 {color.text}" />
-    <span class={color.text}>{label}</span>
-  </div>
-</Tooltip>
+<Tooltip.Root>
+  <Tooltip.Trigger>
+    {#snippet child({ props })}
+      <Badge
+        {variant}
+        class={colorClass}
+        onclick={canTest ? runTest : undefined}
+        role={canTest ? "button" : undefined}
+        tabindex={canTest ? 0 : undefined}
+        aria-label={canTest ? `${label} — ${m.test_provider_connection()}` : label}
+        {...props}
+      >
+        <Icon class={status === "testing" ? "animate-spin" : ""} />
+        <span>{label}</span>
+      </Badge>
+    {/snippet}
+  </Tooltip.Trigger>
+  <Tooltip.Content>{tooltipText}</Tooltip.Content>
+</Tooltip.Root>

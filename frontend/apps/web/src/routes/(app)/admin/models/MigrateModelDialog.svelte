@@ -1,26 +1,68 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
+<!--
+  Migrate all usage of a soon-to-be-decommissioned completion model to a
+  replacement model. The dialog has three jobs:
+
+    1. Show what will be affected (assistants, apps, services, templates,
+       questions) before the user commits.
+    2. Validate compatibility against the chosen target server-side and
+       surface security blockers / warnings.
+    3. Hand off to `intric.models.migrateCompletion` and refresh the
+       migration history panel.
+-->
+
 <script lang="ts">
+  import { onMount, untrack } from "svelte";
   import type { CompletionModel } from "@intric/intric-js";
-  import { Button, Dialog, Select } from "@intric/ui";
+  import type { Writable } from "svelte/store";
   import { invalidate } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { Loader2, Bot, AppWindow, LayoutGrid, ChevronDown, AlertTriangle, ShieldAlert } from "lucide-svelte";
-  import type { Writable } from "svelte/store";
-  import { bumpModelMigrationHistoryVersion } from "./migrationHistoryRefresh";
+  import {
+    Loader2,
+    Bot,
+    AppWindow,
+    LayoutGrid,
+    ChevronDown,
+    AlertTriangle,
+    ShieldAlert
+  } from "lucide-svelte";
 
-  export let openController: Writable<boolean>;
-  export let sourceModel: CompletionModel;
-  export let models: CompletionModel[] = [];
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+
+  import { bumpModelMigrationHistoryVersion } from "./migrationHistoryRefresh";
+  import { isSecurityBlockerCode, translateMigrationWarning } from "./migrationWarnings";
+
+  let {
+    openController,
+    sourceModel,
+    models = []
+  }: {
+    openController: Writable<boolean>;
+    sourceModel: CompletionModel;
+    models?: CompletionModel[];
+  } = $props();
 
   const intric = getIntric();
 
-  let targetModelId = "";
-  let isSubmitting = false;
-  let isLoadingImpact = false;
-  let submitError: string | null = null;
+  // --- Open-state bridge -------------------------------------------------
+  let dialogOpen = $state(false);
+  onMount(() => openController.subscribe((value) => (dialogOpen = value)));
+  $effect(() => {
+    openController.set(dialogOpen);
+  });
+
+  // --- Form state --------------------------------------------------------
+  let targetModelId = $state("");
+  let isSubmitting = $state(false);
+  let isLoadingImpact = $state(false);
+  let submitError = $state<string | null>(null);
 
   type UsageDetail = {
     entity_id: string;
@@ -30,61 +72,67 @@
     owner_name: string | null;
   };
 
-  let impactTotal = 0;
-  let impactDetails: UsageDetail[] = [];
-  let spacesCount = 0;
-  let expandedSections: Record<string, boolean> = {};
+  let impactTotal = $state(0);
+  let impactDetails = $state<UsageDetail[]>([]);
+  let spacesCount = $state(0);
+  let expandedSections = $state<Record<string, boolean>>({});
 
-  // --- Target selection & compatibility ---
+  // --- Target eligibility -----------------------------------------------
+  const availableTargets = $derived(
+    models
+      .filter((mod) => mod.id !== sourceModel.id)
+      .filter((mod) => mod.provider_id != null)
+      .filter((mod) => mod.is_org_enabled)
+      .filter((mod) => !mod.migrated_to_model_id)
+  );
 
-  $: availableTargets = models
-    .filter((mod) => mod.id !== sourceModel.id)
-    .filter((mod) => mod.provider_id != null)
-    .filter((mod) => mod.is_org_enabled)
-    .filter((mod) => !mod.migrated_to_model_id);
-
-  $: targetOptions = availableTargets.map((mod) => ({
-    value: mod.id,
-    label: mod.nickname ? mod.nickname : mod.name
-  }));
-
-  // Server-side validation state
-  let compatWarnings: string[] = [];
-  let hasSecurityBlocker = false;
-  let isValidating = false;
-  let acknowledged = false;
-  let validationError = false;
-  $: hasWarnings = compatWarnings.length > 0;
-  $: canMigrate = targetModelId && !hasSecurityBlocker && !isValidating && !validationError && (!hasWarnings || acknowledged);
-
-  function translateWarningCode(code: string): string {
-    if (code === "target_deprecated") return m.migration_warn_target_deprecated();
-    if (code.startsWith("lower_token_limit:")) return m.migration_warn_lower_token_limit({ limit: code.split(":")[1] });
-    if (code.startsWith("different_family:")) { const p = code.split(":"); return m.migration_warn_different_family({ from: p[1], to: p[2] }); }
-    if (code === "lacks_vision") return m.migration_warn_lacks_vision();
-    if (code === "lacks_reasoning") return m.migration_warn_lacks_reasoning();
-    if (code === "lacks_tool_calling") return m.migration_warn_lacks_tool_calling();
-    if (code === "kwargs_reset") return m.migration_warn_kwargs_reset();
-    if (code.startsWith("security_classification_insufficient:")) {
-      const p = code.split(":"); return m.migration_blocked_security({ count: p[1], classification: p[2] });
-    }
-    return code;
+  function labelFor(mod: CompletionModel): string {
+    return mod.nickname ? mod.nickname : mod.name;
   }
 
-  // Track which target the current validation is for (prevents stale responses)
+  const selectedTargetLabel = $derived(
+    availableTargets.find((mod) => mod.id === targetModelId)
+      ? labelFor(availableTargets.find((mod) => mod.id === targetModelId)!)
+      : ""
+  );
+
+  // --- Validation -------------------------------------------------------
+  let compatWarnings = $state<string[]>([]);
+  let hasSecurityBlocker = $state(false);
+  let isValidating = $state(false);
+  let acknowledged = $state(false);
+  let validationError = $state(false);
+
+  const hasWarnings = $derived(compatWarnings.length > 0);
+  // Compatibility warnings (different_family, kwargs_reset, …) are about
+  // resource-level concerns (assistant prompts, kwargs). With zero
+  // resources to re-bind, the warnings are vacuous — even if the model is
+  // still enabled on spaces (those just get repointed). Only security
+  // blockers gate the action regardless of count.
+  const hasResourceImpact = $derived(impactTotal > 0);
+  const canMigrate = $derived(
+    !!targetModelId &&
+      !hasSecurityBlocker &&
+      !isValidating &&
+      !validationError &&
+      (!hasWarnings || acknowledged || !hasResourceImpact)
+  );
+
+  // Track which target the current validation is for to discard stale responses.
   let validatingForTarget = "";
 
-  // Run server-side validation when target changes
-  $: if (targetModelId) {
+  $effect(() => {
+    if (!targetModelId) {
+      compatWarnings = [];
+      hasSecurityBlocker = false;
+      validationError = false;
+      return;
+    }
     acknowledged = false;
     submitError = null;
     validationError = false;
-    runValidation(targetModelId);
-  } else {
-    compatWarnings = [];
-    hasSecurityBlocker = false;
-    validationError = false;
-  }
+    void runValidation(targetModelId);
+  });
 
   async function runValidation(toId: string) {
     validatingForTarget = toId;
@@ -93,70 +141,86 @@
     hasSecurityBlocker = false;
     validationError = false;
     try {
-      const result = await intric.models.validateMigration({
+      const result = (await intric.models.validateMigration({
         fromId: sourceModel.id,
         toId
-      });
-      // Discard stale response if target changed during request
+      })) as {
+        compatible: boolean;
+        warnings: string[];
+        warning_codes: string[];
+        requires_confirmation: boolean;
+      };
       if (validatingForTarget !== toId) return;
-      const validation = result as { compatible: boolean; warnings: string[]; warning_codes: string[]; requires_confirmation: boolean };
-      // Use warning_codes for translated display, fall back to warnings (human-readable) if no codes
-      const codes = validation.warning_codes ?? [];
-      compatWarnings = codes.length > 0 ? codes.map(translateWarningCode) : validation.warnings;
-      hasSecurityBlocker = codes.some((w: string) => w.startsWith("security_classification_insufficient"));
-    } catch (err: any) {
+      const codes = result.warning_codes ?? [];
+      compatWarnings = codes.length > 0 ? codes.map(translateMigrationWarning) : result.warnings;
+      hasSecurityBlocker = codes.some(isSecurityBlockerCode);
+    } catch (err: unknown) {
       if (validatingForTarget !== toId) return;
-      console.error("[MigrateModelDialog] Validation failed:", err?.message ?? err);
-      submitError = err?.message || m.migration_failed();
+      console.error("[MigrateModelDialog] Validation failed:", err);
+      submitError = err instanceof Error ? err.message : m.migration_failed();
       validationError = true;
     } finally {
       if (validatingForTarget === toId) isValidating = false;
     }
   }
 
-  // --- Impact loading ---
-
-  $: if ($openController) {
+  // --- Reset form when dialog opens -------------------------------------
+  // Tracks `dialogOpen` only — `loadImpact()` is wrapped in `untrack` so the
+  // read of `sourceModel.id` inside it doesn't pull this effect's deps wider.
+  $effect(() => {
+    if (!dialogOpen) return;
     submitError = null;
     acknowledged = false;
     expandedSections = {};
     impactTotal = 0;
     impactDetails = [];
     spacesCount = 0;
-    if (!targetOptions.find((opt) => opt.value === targetModelId)) {
+    targetModelId = "";
+    untrack(() => void loadImpact());
+  });
+
+  // --- Discard a stale target when the eligible list shifts -------------
+  // Runs whenever `availableTargets` recomputes (e.g. after an upstream
+  // invalidate of the model list). Only clears `targetModelId` if it has
+  // become invalid — does not touch any other form state, so it cannot
+  // wipe an in-progress edit.
+  $effect(() => {
+    if (!dialogOpen) return;
+    if (!targetModelId) return;
+    if (!availableTargets.find((mod) => mod.id === targetModelId)) {
       targetModelId = "";
     }
-    loadImpact();
-  }
+  });
 
   async function loadImpact() {
     isLoadingImpact = true;
     try {
-      const details = await intric.models.getUsageDetails({ modelId: sourceModel.id, limit: 100 });
-      const detailsResponse = details as any;
-      impactDetails = detailsResponse?.items ?? [];
-      // Use backend total (accounts for pagination), not just items.length
-      impactTotal = detailsResponse?.total ?? impactDetails.length;
-
+      const details = (await intric.models.getUsageDetails({
+        modelId: sourceModel.id,
+        limit: 100
+      })) as { items?: UsageDetail[]; total?: number };
+      impactDetails = details?.items ?? [];
+      // Use backend total (handles pagination), not just items.length
+      impactTotal = details?.total ?? impactDetails.length;
       try {
-        const stats = await intric.models.getUsageStats({ modelId: sourceModel.id });
-        spacesCount = (stats as any).spaces_count || 0;
+        const stats = (await intric.models.getUsageStats({ modelId: sourceModel.id })) as {
+          spaces_count?: number;
+        };
+        spacesCount = stats.spaces_count ?? 0;
       } catch {
         spacesCount = 0;
       }
-    } catch (err: any) {
-      console.error("[MigrateModelDialog] Failed to load impact:", err?.message ?? err);
+    } catch (err: unknown) {
+      console.error("[MigrateModelDialog] Failed to load impact:", err);
     } finally {
       isLoadingImpact = false;
     }
   }
 
-  // --- Migration execution ---
-
+  // --- Migrate ---------------------------------------------------------
   async function handleMigrate() {
     submitError = null;
     isSubmitting = true;
-
     try {
       await intric.models.migrateCompletion({
         fromId: sourceModel.id,
@@ -164,38 +228,33 @@
         // If user acknowledged warnings, send confirmMigration=true
         confirmMigration: acknowledged || !hasWarnings
       });
-
       toast.success(m.migration_success());
-
       bumpModelMigrationHistoryVersion();
       await invalidate("admin:model-providers:load");
-      openController.set(false);
-    } catch (e: any) {
-      bumpModelMigrationHistoryVersion();
-      submitError = e.message || m.migration_failed();
+      dialogOpen = false;
+    } catch (e: unknown) {
+      submitError = e instanceof Error ? e.message : m.migration_failed();
     } finally {
       isSubmitting = false;
     }
   }
 
-  // --- Grouped details ---
-
-  $: groupedDetails = groupByType(impactDetails);
-
-  function groupByType(details: UsageDetail[]): Record<string, UsageDetail[]> {
+  // --- Grouped impact ---------------------------------------------------
+  const groupedDetails = $derived.by(() => {
     const groups: Record<string, UsageDetail[]> = {};
-    for (const d of details) {
+    for (const d of impactDetails) {
       if (!groups[d.entity_type]) groups[d.entity_type] = [];
       groups[d.entity_type].push(d);
     }
     return groups;
-  }
+  });
 
   function toggleSection(type: string) {
     expandedSections = { ...expandedSections, [type]: !expandedSections[type] };
   }
 
-  const sectionConfig: Record<string, { label: () => string; icon: any }> = {
+  type SectionConfig = { label: () => string; icon: typeof Bot };
+  const sectionConfig: Record<string, SectionConfig> = {
     assistant: { label: () => m.migration_summary_assistants(), icon: Bot },
     app: { label: () => m.migration_summary_apps(), icon: AppWindow },
     service: { label: () => m.migration_summary_services(), icon: LayoutGrid },
@@ -204,14 +263,15 @@
   };
 </script>
 
-<Dialog.Root {openController}>
-  <Dialog.Content width="large" form>
-    <Dialog.Title>{m.migrate_model_title()}</Dialog.Title>
-    <Dialog.Section>
-      <div class="flex flex-col gap-5 p-5">
+<Dialog.Root bind:open={dialogOpen}>
+  <Dialog.Content class="flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-3xl">
+    <Dialog.Header class="px-6 pt-6 pb-2">
+      <Dialog.Title>{m.migrate_model_title()}</Dialog.Title>
+    </Dialog.Header>
 
-        <p class="text-sm text-muted">
-
+    <div class="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+      <div class="flex flex-col gap-5">
+        <p class="text-muted-foreground text-sm">
           {m.migrate_model_description({
             name: sourceModel.nickname ? sourceModel.nickname : sourceModel.name
           })}
@@ -219,49 +279,65 @@
 
         <!-- 1. Impact preview -->
         {#if isLoadingImpact}
-          <div class="flex items-center gap-2 text-sm text-muted py-3">
-            <Loader2 class="h-4 w-4 animate-spin" />
+          <div class="text-muted-foreground flex items-center gap-2 py-3 text-sm">
+            <Loader2 class="size-4 animate-spin" aria-hidden="true" />
             <span>{m.loading()}</span>
           </div>
         {:else if impactTotal > 0}
-          <div class="rounded-lg border border-default overflow-hidden">
-            <div class="flex items-center gap-4 bg-surface-dimmer px-4 py-3 border-b border-dimmer">
-              <span class="text-sm font-medium">{m.migration_impact_title({ count: impactTotal })}</span>
+          <div class="border-border overflow-hidden rounded-lg border">
+            <div class="border-border bg-muted/30 flex items-center gap-4 border-b px-4 py-3">
+              <span class="text-sm font-medium">
+                {m.migration_impact_title({ count: impactTotal })}
+              </span>
             </div>
-            <div class="divide-y divide-dimmer">
-              {#each Object.entries(groupedDetails) as [type, entities]}
+            <div class="divide-border divide-y">
+              {#each Object.entries(groupedDetails) as [type, entities] (type)}
                 {@const config = sectionConfig[type] ?? { label: () => type, icon: Bot }}
+                {@const Icon = config.icon}
                 <div>
                   <button
-                    class="flex items-center justify-between w-full px-4 py-2.5 text-sm hover:bg-hover-dimmer transition-colors text-left"
-                    on:click={() => toggleSection(type)}
+                    type="button"
+                    class="hover:bg-muted/40 flex w-full items-center justify-between px-4 py-2.5 text-left text-sm transition-colors"
+                    onclick={() => toggleSection(type)}
+                    aria-expanded={Boolean(expandedSections[type])}
                   >
                     <div class="flex items-center gap-2">
-                      <svelte:component this={config.icon} size={15} class="text-muted" />
+                      <Icon size={15} class="text-muted-foreground" aria-hidden="true" />
                       <span class="font-medium">{config.label()}</span>
-                      <span class="text-muted">({entities.length})</span>
+                      <span class="text-muted-foreground">({entities.length})</span>
                     </div>
                     <ChevronDown
                       size={16}
-                      class="text-muted transition-transform {expandedSections[type] ? 'rotate-0' : '-rotate-90'}"
+                      class="text-muted-foreground transition-transform {expandedSections[type]
+                        ? 'rotate-0'
+                        : '-rotate-90'}"
+                      aria-hidden="true"
                     />
                   </button>
                   {#if expandedSections[type]}
-                    <div class="border-t border-dimmer bg-surface-dimmer/30">
+                    <div class="border-border bg-muted/20 border-t">
                       <table class="w-full text-sm">
                         <thead>
-                          <tr class="text-xs text-muted uppercase tracking-wider">
+                          <tr class="text-muted-foreground text-xs tracking-wider uppercase">
                             <th class="px-4 py-2 text-left font-medium">{m.name()}</th>
-                            <th class="px-4 py-2 text-left font-medium">Space</th>
-                            <th class="px-4 py-2 text-left font-medium">{m.migration_impact_owner()}</th>
+                            <th class="px-4 py-2 text-left font-medium"
+                              >{m.migration_impact_space()}</th
+                            >
+                            <th class="px-4 py-2 text-left font-medium"
+                              >{m.migration_impact_owner()}</th
+                            >
                           </tr>
                         </thead>
-                        <tbody class="divide-y divide-dimmer">
-                          {#each entities as entity}
+                        <tbody class="divide-border divide-y">
+                          {#each entities as entity (entity.entity_id)}
                             <tr>
                               <td class="px-4 py-2">{entity.entity_name}</td>
-                              <td class="px-4 py-2 text-muted">{entity.space_name ?? "–"}</td>
-                              <td class="px-4 py-2 text-muted">{entity.owner_name ?? "–"}</td>
+                              <td class="text-muted-foreground px-4 py-2"
+                                >{entity.space_name ?? "–"}</td
+                              >
+                              <td class="text-muted-foreground px-4 py-2"
+                                >{entity.owner_name ?? "–"}</td
+                              >
                             </tr>
                           {/each}
                         </tbody>
@@ -271,96 +347,112 @@
                 </div>
               {/each}
               {#if spacesCount > 0}
-                <div class="flex items-center gap-2 px-4 py-3 text-sm text-muted bg-surface-dimmer/30">
-                  <LayoutGrid size={15} class="flex-shrink-0" />
+                <div
+                  class="text-muted-foreground bg-muted/20 flex items-center gap-2 px-4 py-3 text-sm"
+                >
+                  <LayoutGrid size={15} class="flex-shrink-0" aria-hidden="true" />
                   <span>{m.migration_spaces_info({ count: spacesCount })}</span>
                 </div>
               {/if}
             </div>
           </div>
-        {:else if !isLoadingImpact}
-          <div class="rounded-lg border border-dimmer px-4 py-3 text-sm text-muted">
+        {:else}
+          <div class="border-border text-muted-foreground rounded-lg border px-4 py-3 text-sm">
             {m.migration_no_impact()}
           </div>
         {/if}
 
         <!-- 2. Target model selection -->
-        <Select.Simple
-          options={targetOptions}
-          bind:value={targetModelId}
-          resourceName={m.resource_model()}
-          {...{ placeholder: m.migrate_model_target_placeholder() }}
-          fitViewport={true}
-          class="border-default hover:bg-hover-dimmer rounded-t-md border-b px-4 py-4"
-        >
-          {m.migrate_model_target_label()}
-        </Select.Simple>
-        {#if targetOptions.length === 0}
-          <p class="text-sm text-muted">{m.migrate_model_no_targets()}</p>
-        {/if}
+        <Field.Field>
+          <Field.Label for="migrate-target">{m.migrate_model_target_label()}</Field.Label>
+          <Select.Root
+            type="single"
+            bind:value={targetModelId}
+            disabled={availableTargets.length === 0}
+          >
+            <Select.Trigger id="migrate-target" class="w-full">
+              <span data-slot="select-value">
+                {selectedTargetLabel || m.migrate_model_target_placeholder()}
+              </span>
+            </Select.Trigger>
+            <Select.Content>
+              {#each availableTargets as target (target.id)}
+                <Select.Item value={target.id} label={labelFor(target)}>
+                  {labelFor(target)}
+                </Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+          {#if availableTargets.length === 0}
+            <Field.Description>{m.migrate_model_no_targets()}</Field.Description>
+          {/if}
+        </Field.Field>
 
-        <!-- 3. Validation results (server-side, shown on target selection) -->
+        <!-- 3. Validation results -->
         {#if isValidating}
-          <div class="flex items-center gap-2 text-sm text-muted py-2">
-            <Loader2 class="h-4 w-4 animate-spin" />
+          <div class="text-muted-foreground flex items-center gap-2 py-2 text-sm">
+            <Loader2 class="size-4 animate-spin" aria-hidden="true" />
             <span>{m.loading()}</span>
           </div>
         {:else if hasSecurityBlocker}
-          <div class="flex items-start gap-3 rounded-lg border border-negative-default/30 bg-negative-dimmer/40 px-4 py-3 text-sm text-negative-stronger">
-            <ShieldAlert size={18} class="flex-shrink-0 mt-0.5" />
+          <div
+            class="border-negative-default/30 bg-negative-dimmer/40 text-negative-stronger flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
+            role="alert"
+          >
+            <ShieldAlert size={18} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
             <div>
               <p class="font-medium">{m.migration_blocked_title()}</p>
-              {#each compatWarnings as w}
-                <p class="mt-1 text-negative-default">{w}</p>
+              {#each compatWarnings as w, i (i)}
+                <p class="text-negative-default mt-1">{w}</p>
               {/each}
             </div>
           </div>
-        {:else if hasWarnings}
-          <div class="rounded-lg border border-warning-default/30 bg-warning-dimmer/30 px-4 py-3 text-sm">
+        {:else if hasWarnings && hasResourceImpact}
+          <div
+            class="border-warning-default/30 bg-warning-dimmer/30 rounded-lg border px-4 py-3 text-sm"
+            role="alert"
+          >
             <ul class="space-y-1.5">
-              {#each compatWarnings as w}
-                <li class="flex items-start gap-2 text-warning-stronger">
-                  <AlertTriangle size={14} class="flex-shrink-0 mt-0.5" />
+              {#each compatWarnings as w, i (i)}
+                <li class="text-warning-stronger flex items-start gap-2">
+                  <AlertTriangle size={14} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
                   <span>{w}</span>
                 </li>
               {/each}
             </ul>
-            <label class="flex items-start gap-3 mt-3 pt-3 border-t border-warning-default/20 text-warning-stronger cursor-pointer">
-              <input
-                type="checkbox"
-                bind:checked={acknowledged}
-                class="mt-0.5 h-4 w-4 rounded accent-warning-default"
-              />
-              <span>{m.migrate_model_confirm_label()}</span>
-            </label>
+            <div class="border-warning-default/20 mt-3 border-t pt-3">
+              <Field.Field orientation="horizontal" class="text-warning-stronger w-fit">
+                <Checkbox id="migrate-acknowledge" bind:checked={acknowledged} />
+                <Field.Label for="migrate-acknowledge" class="text-warning-stronger cursor-pointer">
+                  {m.migrate_model_confirm_label()}
+                </Field.Label>
+              </Field.Field>
+            </div>
           </div>
         {/if}
 
-        <!-- 5. Submit error from backend (unexpected failures) -->
+        <!-- 4. Submit error -->
         {#if submitError}
-          <div class="border-negative-default bg-negative-dimmer/50 text-negative-stronger border-l-2 px-4 py-3 text-sm rounded-r-md">
+          <div
+            class="border-negative-default bg-negative-dimmer/50 text-negative-stronger rounded-r-md border-l-2 px-4 py-3 text-sm"
+            role="alert"
+          >
             {submitError}
           </div>
         {/if}
-
       </div>
-    </Dialog.Section>
-    <Dialog.Controls>
-      <Button variant="outlined" on:click={() => openController.set(false)}>
-        {m.cancel()}
-      </Button>
-      <Button
-        variant="outlined"
-        on:click={handleMigrate}
-        disabled={isSubmitting || !canMigrate}
-      >
+    </div>
+
+    <div class="border-border flex justify-end gap-2 border-t px-6 py-4">
+      <Button variant="outline" onclick={() => (dialogOpen = false)}>{m.cancel()}</Button>
+      <Button onclick={handleMigrate} disabled={isSubmitting || !canMigrate}>
         {#if isSubmitting}
-          <Loader2 class="h-4 w-4 animate-spin" />
+          <Loader2 class="size-4 animate-spin" aria-hidden="true" />
           {m.migrating()}
         {:else}
           {m.migrate_model_usage()}
         {/if}
       </Button>
-    </Dialog.Controls>
+    </div>
   </Dialog.Content>
 </Dialog.Root>

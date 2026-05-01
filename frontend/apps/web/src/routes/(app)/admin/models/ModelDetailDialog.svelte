@@ -1,217 +1,285 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
+<!--
+  Read-only detail view of a single model. Reached by clicking a model row
+  in the admin table. Edit + migrate actions hand off to dedicated dialogs.
+-->
+
 <script lang="ts">
+  import { onMount } from "svelte";
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
-  import { Button, Dialog } from "@intric/ui";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  import {
-    Pencil,
-    TriangleAlert,
-    Clock,
-    ArrowRight,
-    ExternalLink
-  } from "lucide-svelte";
+  import { Pencil, TriangleAlert, Clock, ArrowRight, ExternalLink } from "lucide-svelte";
+
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+
   import EditModelDialog from "./EditModelDialog.svelte";
   import MigrateModelDialog from "./MigrateModelDialog.svelte";
+  import { formatTokens, getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
+  import { findHostingLabel } from "$lib/features/ai-models/hosting/hostingOptions";
+  import ModelCostBadge from "$lib/features/ai-models/components/ModelCostBadge.svelte";
 
-  export let openController: Writable<boolean>;
-  export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
-  export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
-  export let completionModels: CompletionModel[] = [];
+  let {
+    openController,
+    model,
+    type,
+    completionModels = []
+  }: {
+    openController: Writable<boolean>;
+    model: CompletionModel | EmbeddingModel | TranscriptionModel;
+    type: "completionModel" | "embeddingModel" | "transcriptionModel";
+    completionModels?: CompletionModel[];
+  } = $props();
+
+  // Bridge the legacy Writable<boolean> contract to runes so shadcn Dialog's
+  // bind:open works. Same pattern as AddWizard / EditModelDialog.
+  let dialogOpen = $state(false);
+  onMount(() => openController.subscribe((value) => (dialogOpen = value)));
+  $effect(() => {
+    openController.set(dialogOpen);
+  });
 
   const showEditDialog = writable(false);
   const showMigrateDialog = writable(false);
 
-  $: isDeprecated =
-    "deprecation_date" in model &&
-    model.deprecation_date &&
-    model.deprecation_date <= new Date().toISOString().slice(0, 10);
+  const deprecation = $derived(
+    getDeprecationStatus("deprecation_date" in model ? model : { deprecation_date: null })
+  );
 
-  $: isRetiring =
-    "deprecation_date" in model &&
-    model.deprecation_date &&
-    model.deprecation_date > new Date().toISOString().slice(0, 10);
-
-  $: depDate = "deprecation_date" in model ? model.deprecation_date : null;
-
-  function formatTokens(tokens: number | undefined | null): string {
-    if (!tokens) return "–";
-    if (tokens >= 1_000_000) {
-      const val = tokens / 1_000_000;
-      return `${val % 1 === 0 ? val.toFixed(0) : val.toFixed(1)}M`;
-    }
-    if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`;
-    return tokens.toString();
+  function openEdit() {
+    dialogOpen = false;
+    showEditDialog.set(true);
   }
-
-  const hostingNames: Record<string, string> = {
-    usa: "USA", eu: "EU", swe: "Sweden", fra: "France", deu: "Germany",
-    gbr: "United Kingdom", chn: "China", can: "Canada", isr: "Israel",
-    kor: "South Korea", jpn: "Japan"
-  };
-
+  function openMigrate() {
+    dialogOpen = false;
+    showMigrateDialog.set(true);
+  }
 </script>
 
-<Dialog.Root {openController}>
-  <Dialog.Content width="large">
-    <Dialog.Title>
-      {model.nickname ?? model.name}
-    </Dialog.Title>
+<Dialog.Root bind:open={dialogOpen}>
+  <Dialog.Content class="flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-3xl">
+    <Dialog.Header class="px-6 pt-6 pb-2">
+      <Dialog.Title>{model.nickname ?? model.name}</Dialog.Title>
+    </Dialog.Header>
 
-    <Dialog.Section>
-      <div class="flex flex-col">
+    <div class="min-h-0 flex-1 overflow-y-auto">
+      <!-- Deprecation banner -->
+      {#if deprecation.kind === "deprecated"}
+        <div
+          class="border-negative-default/20 bg-negative-dimmer/40 text-negative-stronger flex items-center justify-between gap-6 border-b px-6 py-4"
+          role="alert"
+        >
+          <div class="flex items-center gap-3 text-base">
+            <TriangleAlert size={20} class="flex-shrink-0" aria-hidden="true" />
+            <span>{m.model_tooltip_deprecated({ date: deprecation.date })}</span>
+          </div>
+          {#if type === "completionModel"}
+            <button
+              type="button"
+              class="border-negative-default/30 text-negative-stronger hover:bg-negative-dimmer inline-flex flex-shrink-0 items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors"
+              onclick={openMigrate}
+            >
+              {m.migrate_model_usage()}
+              <ArrowRight size={15} aria-hidden="true" />
+            </button>
+          {/if}
+        </div>
+      {:else if deprecation.kind === "retiring"}
+        <div
+          class="border-warning-default/20 bg-warning-dimmer/40 text-warning-stronger flex items-center gap-3 border-b px-6 py-4 text-base"
+          role="alert"
+        >
+          <Clock size={20} class="flex-shrink-0" aria-hidden="true" />
+          <span>{m.model_tooltip_retiring({ date: deprecation.date })}</span>
+        </div>
+      {/if}
 
-        <!-- Deprecation banner -->
-        {#if isDeprecated && depDate}
-          <div class="flex items-center justify-between gap-6 bg-negative-dimmer/40 px-6 py-4 border-b border-negative-default/20">
-            <div class="flex items-center gap-3 text-base text-negative-stronger">
-              <TriangleAlert size={20} class="flex-shrink-0" />
-              <span>{m.model_tooltip_deprecated({ date: depDate })}</span>
-            </div>
-            {#if type === "completionModel"}
-              <button
-                class="flex-shrink-0 inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-negative-stronger border border-negative-default/30 hover:bg-negative-dimmer transition-colors"
-                on:click={() => { openController.set(false); showMigrateDialog.set(true); }}
+      <!-- Properties -->
+      <div class="px-6 py-5">
+        <table class="w-full">
+          <tbody class="text-[15px]">
+            <tr>
+              <td class="text-muted w-40 py-2.5 pr-8 align-top whitespace-nowrap"
+                >{m.display_name()}</td
               >
-                {m.migrate_model_usage()} <ArrowRight size={15} />
-              </button>
+              <td class="py-2.5">{model.nickname ?? model.name}</td>
+            </tr>
+            <tr>
+              <td class="text-muted w-40 py-2.5 pr-8 align-top whitespace-nowrap"
+                >{m.model_identifier()}</td
+              >
+              <td class="py-2.5">{model.name}</td>
+            </tr>
+
+            <!-- Context window -->
+            {#if "max_input_tokens" in model}
+              <tr>
+                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+                  >{m.model_context_label()}</td
+                >
+                <td class="py-2.5 font-mono text-sm">
+                  {m.model_context_value({
+                    input: formatTokens(model.max_input_tokens),
+                    output: formatTokens(model.max_output_tokens)
+                  })}
+                </td>
+              </tr>
             {/if}
-          </div>
-        {:else if isRetiring && depDate}
-          <div class="flex items-center gap-3 bg-warning-dimmer/40 px-6 py-4 border-b border-warning-default/20 text-base text-warning-stronger">
-            <Clock size={20} class="flex-shrink-0" />
-            <span>{m.model_tooltip_retiring({ date: depDate })}</span>
-          </div>
-        {/if}
 
-        <!-- Properties -->
-        <div class="px-6 py-5">
-          <table class="w-full">
-            <tbody class="text-[15px]">
-              <!-- Display name + model identifier -->
+            <!-- Capabilities -->
+            {#if "reasoning" in model}
               <tr>
-                <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap w-40">{m.display_name()}</td>
-                <td class="py-2.5">{model.nickname ?? model.name}</td>
-              </tr>
-              <tr>
-                <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap w-40">{m.model_identifier()}</td>
-                <td class="py-2.5">{model.name}</td>
-              </tr>
-
-              <!-- Context window -->
-              {#if "max_input_tokens" in model}
-                <tr>
-                  <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap">Context</td>
-                  <td class="py-2.5 font-mono text-sm">{formatTokens(model.max_input_tokens)} in · {formatTokens(model.max_output_tokens)} out</td>
-                </tr>
-              {/if}
-
-              <!-- Capabilities -->
-              {#if "reasoning" in model}
-                <tr>
-                  <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap">{m.capability_reasoning()}</td>
-                  <td class="py-2.5">{#if model.reasoning}<span class="text-positive-default text-lg">✓</span>{:else}<span class="text-muted/30">–</span>{/if}</td>
-                </tr>
-              {/if}
-              {#if "vision" in model}
-                <tr>
-                  <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap">{m.capability_vision()}</td>
-                  <td class="py-2.5">{#if model.vision}<span class="text-positive-default text-lg">✓</span>{:else}<span class="text-muted/30">–</span>{/if}</td>
-                </tr>
-              {/if}
-              {#if "supports_tool_calling" in model}
-                <tr>
-                  <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap">{m.capability_tools()}</td>
-                  <td class="py-2.5">{#if model.supports_tool_calling}<span class="text-positive-default text-lg">✓</span>{:else}<span class="text-muted/30">–</span>{/if}</td>
-                </tr>
-              {/if}
-
-              <!-- Divider -->
-              <tr><td colspan="2" class="py-2"><div class="border-t border-dimmer"></div></td></tr>
-
-              <!-- Hosting -->
-              {#if model.hosting}
-                <tr>
-                  <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap">Hosting</td>
-                  <td class="py-2.5">{hostingNames[model.hosting] ?? model.hosting.toUpperCase()}</td>
-                </tr>
-              {/if}
-
-              <!-- Security classification (read-only) -->
-              <tr>
-                <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap">{m.security()}</td>
+                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+                  >{m.capability_reasoning()}</td
+                >
                 <td class="py-2.5">
-                  {#if model.security_classification}
-                    {model.security_classification.name}
+                  {#if model.reasoning}
+                    <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
+                    <span class="sr-only">{m.yes()}</span>
                   {:else}
-                    <span class="text-muted/30">{m.no_classification()}</span>
+                    <span class="text-muted/30">–</span>
                   {/if}
                 </td>
               </tr>
+            {/if}
+            {#if "vision" in model}
+              <tr>
+                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+                  >{m.capability_vision()}</td
+                >
+                <td class="py-2.5">
+                  {#if model.vision}
+                    <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
+                    <span class="sr-only">{m.yes()}</span>
+                  {:else}
+                    <span class="text-muted/30">–</span>
+                  {/if}
+                </td>
+              </tr>
+            {/if}
+            {#if "supports_tool_calling" in model}
+              <tr>
+                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+                  >{m.capability_tools()}</td
+                >
+                <td class="py-2.5">
+                  {#if model.supports_tool_calling}
+                    <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
+                    <span class="sr-only">{m.yes()}</span>
+                  {:else}
+                    <span class="text-muted/30">–</span>
+                  {/if}
+                </td>
+              </tr>
+            {/if}
 
-              <!-- Open source -->
-              {#if model.open_source}
-                <tr>
-                  <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap">{m.model_label_open_source()}</td>
-                  <td class="py-2.5"><span class="text-positive-default text-lg">✓</span></td>
-                </tr>
-              {/if}
+            <tr>
+              <td colspan="2" class="py-2"><div class="border-dimmer border-t"></div></td>
+            </tr>
 
-              <!-- Divider -->
-              {#if model.family || model.org || model.description}
-                <tr><td colspan="2" class="py-2"><div class="border-t border-dimmer"></div></td></tr>
-              {/if}
+            <!-- Hosting -->
+            {#if model.hosting}
+              <tr>
+                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+                  >{m.hosting_region()}</td
+                >
+                <td class="py-2.5"
+                  >{findHostingLabel(model.hosting) || model.hosting.toUpperCase()}</td
+                >
+              </tr>
+            {/if}
 
-              <!-- Metadata -->
-              {#if model.family}
-                <tr>
-                  <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap">Family</td>
-                  <td class="py-2.5">{model.family}</td>
-                </tr>
-              {/if}
-              {#if model.org}
-                <tr>
-                  <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap">Provider</td>
-                  <td class="py-2.5">{model.org}</td>
-                </tr>
-              {/if}
-              {#if model.description}
-                <tr>
-                  <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap">Description</td>
-                  <td class="py-2.5 text-muted">{model.description}</td>
-                </tr>
-              {/if}
-            </tbody>
-          </table>
+            <!-- Indicative cost -->
+            <tr>
+              <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+                >{m.model_pricing_label()}</td
+              >
+              <td class="py-2.5">
+                <ModelCostBadge {model} />
+              </td>
+            </tr>
 
-          {#if model.hf_link}
-            <a
-              href={model.hf_link}
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-1.5 mt-4 text-sm text-accent-default hover:underline"
-            >
-              HuggingFace <ExternalLink size={13} />
-            </a>
-          {/if}
-        </div>
+            <!-- Security classification (read-only) -->
+            <tr>
+              <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.security()}</td>
+              <td class="py-2.5">
+                {#if model.security_classification}
+                  {model.security_classification.name}
+                {:else}
+                  <span class="text-muted/30">{m.no_classification()}</span>
+                {/if}
+              </td>
+            </tr>
+
+            <!-- Open source -->
+            {#if model.open_source}
+              <tr>
+                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+                  >{m.model_label_open_source()}</td
+                >
+                <td class="py-2.5">
+                  <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
+                  <span class="sr-only">{m.yes()}</span>
+                </td>
+              </tr>
+            {/if}
+
+            <!-- Metadata divider only if at least one of the metadata rows below renders -->
+            {#if model.family || model.org || model.description}
+              <tr>
+                <td colspan="2" class="py-2"><div class="border-dimmer border-t"></div></td>
+              </tr>
+            {/if}
+
+            {#if model.family}
+              <tr>
+                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+                  >{m.model_family()}</td
+                >
+                <td class="py-2.5">{model.family}</td>
+              </tr>
+            {/if}
+            {#if model.org}
+              <tr>
+                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.provider()}</td>
+                <td class="py-2.5">{model.org}</td>
+              </tr>
+            {/if}
+            {#if model.description}
+              <tr>
+                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.description()}</td
+                >
+                <td class="text-muted py-2.5">{model.description}</td>
+              </tr>
+            {/if}
+          </tbody>
+        </table>
+
+        {#if model.hf_link}
+          <!-- eslint-disable svelte/no-navigation-without-resolve -- external HuggingFace URL from model metadata -->
+          <a
+            href={model.hf_link}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent-default mt-4 inline-flex items-center gap-1.5 text-sm hover:underline"
+          >
+            HuggingFace
+            <ExternalLink size={13} aria-hidden="true" />
+          </a>
+          <!-- eslint-enable svelte/no-navigation-without-resolve -->
+        {/if}
       </div>
-    </Dialog.Section>
+    </div>
 
-    <Dialog.Controls>
-      <Button variant="outlined" on:click={() => openController.set(false)}>
-        {m.close()}
-      </Button>
-      <Button
-        variant="outlined"
-        padding="icon-leading"
-        on:click={() => { openController.set(false); showEditDialog.set(true); }}
-      >
-        <Pencil class="h-4 w-4" />
+    <div class="border-border flex justify-end gap-2 border-t px-6 py-4">
+      <Button variant="outline" onclick={() => (dialogOpen = false)}>{m.close()}</Button>
+      <Button variant="outline" onclick={openEdit}>
+        <Pencil class="size-4" aria-hidden="true" />
         {m.model_detail_edit()}
       </Button>
-    </Dialog.Controls>
+    </div>
   </Dialog.Content>
 </Dialog.Root>
 

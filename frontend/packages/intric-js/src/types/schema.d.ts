@@ -8874,6 +8874,10 @@ export interface components {
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -8943,6 +8947,10 @@ export interface components {
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: number | string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: number | string | null;
     };
     /** CompletionModelPublic */
     CompletionModelPublic: {
@@ -8997,6 +9005,10 @@ export interface components {
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -9110,6 +9122,10 @@ export interface components {
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -9209,6 +9225,10 @@ export interface components {
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /** Provider Type */
       provider_type?: string | null;
       /**
@@ -9975,6 +9995,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: number | string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: number | string | null;
     };
     /** EmbeddingModelLegacy */
     EmbeddingModelLegacy: {
@@ -10013,6 +10037,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -10056,6 +10084,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Can Access
        * @default false
@@ -10124,6 +10156,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -10179,6 +10215,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Can Access
        * @default false
@@ -10249,6 +10289,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
     };
     /** EmbeddingModelUpdate */
     EmbeddingModelUpdate: {
@@ -10340,7 +10384,8 @@ export interface components {
       | 9035
       | 9036
       | 9037
-      | 9038;
+      | 9038
+      | 9039;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -12962,6 +13007,10 @@ export interface components {
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: number | string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: number | string | null;
       /** Id */
       id?: string | null;
     };
@@ -12993,6 +13042,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: number | string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: number | string | null;
       /** Id */
       id?: string | null;
     };
@@ -14549,6 +14602,12 @@ export interface components {
        * @default false
        */
       is_default?: boolean;
+      /** Description */
+      description?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: number | string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: number | string | null;
     };
     /** TenantCompletionModelUpdate */
     TenantCompletionModelUpdate: {
@@ -14574,6 +14633,10 @@ export interface components {
       open_source?: boolean | null;
       /** Stability */
       stability?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: number | string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: number | string | null;
     };
     /** TenantEmbeddingModelCreate */
     TenantEmbeddingModelCreate: {
@@ -14627,6 +14690,21 @@ export interface components {
        * @default false
        */
       is_default?: boolean;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Input Cost Per Token
+       * @description Indicative USD per input token
+       */
+      input_cost_per_token?: number | string | null;
+      /**
+       * Output Cost Per Token
+       * @description Indicative USD per output token (usually 0)
+       */
+      output_cost_per_token?: number | string | null;
     };
     /** TenantEmbeddingModelUpdate */
     TenantEmbeddingModelUpdate: {
@@ -14670,6 +14748,16 @@ export interface components {
        * @description Model stability (stable, experimental)
        */
       stability?: string | null;
+      /**
+       * Input Cost Per Token
+       * @description Indicative USD per input token
+       */
+      input_cost_per_token?: number | string | null;
+      /**
+       * Output Cost Per Token
+       * @description Indicative USD per output token
+       */
+      output_cost_per_token?: number | string | null;
     };
     /** TenantInDB */
     TenantInDB: {
@@ -14968,6 +15056,16 @@ export interface components {
        * @default false
        */
       is_default?: boolean;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Cost Per Minute
+       * @description Indicative USD per minute of audio
+       */
+      cost_per_minute?: number | string | null;
     };
     /** TenantTranscriptionModelUpdate */
     TenantTranscriptionModelUpdate: {
@@ -14996,6 +15094,11 @@ export interface components {
        * @description Model stability (stable, experimental)
        */
       stability?: string | null;
+      /**
+       * Cost Per Minute
+       * @description Indicative USD per minute of audio
+       */
+      cost_per_minute?: number | string | null;
     };
     /** TenantUpdatePublic */
     TenantUpdatePublic: {
@@ -15263,6 +15366,8 @@ export interface components {
       hf_link?: string | null;
       /** Org */
       org?: string | null;
+      /** Cost Per Minute */
+      cost_per_minute?: string | null;
       /**
        * Can Access
        * @default false
@@ -15326,6 +15431,8 @@ export interface components {
       hf_link?: string | null;
       /** Org */
       org?: string | null;
+      /** Cost Per Minute */
+      cost_per_minute?: string | null;
       /**
        * Can Access
        * @default false
@@ -20437,6 +20544,10 @@ export interface operations {
                 /** Litellm Model Name */
                 litellm_model_name?: string | null;
                 model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+                /** Input Cost Per Token */
+                input_cost_per_token?: number | string | null;
+                /** Output Cost Per Token */
+                output_cost_per_token?: number | string | null;
                 /**
                  * Is Org Enabled
                  * @default false
@@ -20790,6 +20901,10 @@ export interface operations {
                 /** Litellm Model Name */
                 litellm_model_name?: string | null;
                 model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+                /** Input Cost Per Token */
+                input_cost_per_token?: number | string | null;
+                /** Output Cost Per Token */
+                output_cost_per_token?: number | string | null;
                 /**
                  * Is Org Enabled
                  * @default false

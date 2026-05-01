@@ -11,7 +11,9 @@
     ariaLabel: string;
   };
 
-  export function getStatusIcons(model: CompletionModel | EmbeddingModel | TranscriptionModel): StatusIcon[] {
+  export function getStatusIcons(
+    model: CompletionModel | EmbeddingModel | TranscriptionModel
+  ): StatusIcon[] {
     const icons: StatusIcon[] = [];
 
     if ("deprecation_date" in model && model.deprecation_date) {
@@ -67,8 +69,12 @@
 <script lang="ts">
   import { Tooltip } from "@intric/ui";
   import { TriangleAlert, Brain, Eye, Wrench, Clock } from "lucide-svelte";
+  import ModelCostBadge from "./ModelCostBadge.svelte";
 
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
+  /** Suppress the cost badge — used by surfaces where cost is shown elsewhere. */
+  export let showCost: boolean = true;
+
   $: icons = getStatusIcons(model);
 
   const iconComponents = {
@@ -80,8 +86,8 @@
   };
 </script>
 
-<div class="flex items-center gap-1.5" role="list" aria-label="Model capabilities">
-  {#each icons as icon}
+<div class="flex items-center gap-2" role="list" aria-label="Model capabilities">
+  {#each icons as icon (icon.icon)}
     <Tooltip text={icon.tooltip} asFragment let:trigger>
       {@const tooltipTrigger = trigger[0]}
       <span
@@ -95,4 +101,7 @@
       </span>
     </Tooltip>
   {/each}
+  {#if showCost}
+    <ModelCostBadge {model} dense />
+  {/if}
 </div>

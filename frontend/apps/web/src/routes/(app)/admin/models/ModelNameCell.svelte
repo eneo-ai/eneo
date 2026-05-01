@@ -8,6 +8,7 @@
   import ModelDetailDialog from "./ModelDetailDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { TriangleAlert, Clock } from "lucide-svelte";
+  import { getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
 
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
   export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
@@ -16,22 +17,18 @@
 
   const showDetailDialog = writable(false);
 
-  $: isDeprecated =
-    "deprecation_date" in model &&
-    model.deprecation_date &&
-    model.deprecation_date <= new Date().toISOString().slice(0, 10);
-
-  $: isRetiring =
-    "deprecation_date" in model &&
-    model.deprecation_date &&
-    model.deprecation_date > new Date().toISOString().slice(0, 10);
+  $: deprecation = getDeprecationStatus(
+    "deprecation_date" in model ? model : { deprecation_date: null }
+  );
+  $: isDeprecated = deprecation.kind === "deprecated";
+  $: isRetiring = deprecation.kind === "retiring";
 
   $: statusKey = isDeprecated ? "deprecated" : isRetiring ? "retiring" : "ok";
 
   $: statusLabel = isDeprecated
     ? m.model_label_deprecated()
-    : isRetiring
-      ? m.model_label_retiring({ date: ("deprecation_date" in model ? model.deprecation_date : "") ?? "" })
+    : isRetiring && deprecation.date
+      ? m.model_label_retiring({ date: deprecation.date })
       : !model.is_org_enabled
         ? m.model_status_disabled()
         : m.model_status_active();
@@ -40,16 +37,28 @@
 <div class="flex items-center gap-3">
   <Tooltip text={statusLabel}>
     {#if isDeprecated}
-      <span class="flex-shrink-0 text-negative-default" role="img" aria-label={statusLabel} data-status="deprecated">
+      <span
+        class="text-negative-default flex-shrink-0"
+        role="img"
+        aria-label={statusLabel}
+        data-status="deprecated"
+      >
         <TriangleAlert size={14} />
       </span>
     {:else if isRetiring}
-      <span class="flex-shrink-0 text-warning-default" role="img" aria-label={statusLabel} data-status="retiring">
+      <span
+        class="text-warning-default flex-shrink-0"
+        role="img"
+        aria-label={statusLabel}
+        data-status="retiring"
+      >
         <Clock size={14} />
       </span>
     {:else}
       <span
-        class="block h-2 w-2 rounded-full flex-shrink-0 {!model.is_org_enabled ? 'bg-negative-default' : 'bg-positive-default'}"
+        class="block h-2 w-2 flex-shrink-0 rounded-full {!model.is_org_enabled
+          ? 'bg-negative-default'
+          : 'bg-positive-default'}"
         role="img"
         aria-label={statusLabel}
         data-status={statusKey}
