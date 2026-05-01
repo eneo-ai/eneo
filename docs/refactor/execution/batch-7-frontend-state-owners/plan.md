@@ -1835,3 +1835,202 @@ Expected: no matches.
 - Step-array mutation remains the main open Flow authoring owner issue.
 - `editor.state.update` remains writable until step/name/description bindings
   can be replaced or narrowed more broadly.
+
+## Iteration 8 - Flow Step Mutation Commands
+
+### Scope
+
+Close the remaining route-owned Flow step-array mutation surface for Batch 7.
+
+In scope:
+
+- replacing one edited step by index
+- removing one step by index
+- preserving existing step-order remapping behavior
+- preserving current active-step fallback behavior after removal
+- `FlowEditor` command-boundary tests
+- route call-site replacement
+- Batch 7 journal/retrospective/Claude reconciliation docs
+
+Out of scope:
+
+- drag/drop step reordering already delegates to
+  `applyStepsWithSafeOrderRemap(...)`
+- adding/removing step creation behavior
+- changing prompt/assistant save behavior
+- changing graph/list/panel UI behavior
+- backend/runtime/migration/data-model work
+- generated schema changes
+- package/name/namespace migration
+- Batch 8 step rerun
+
+### Inventory
+
+| mutation | current route writer | current FlowEditor owner | readers | canonical owner | action |
+|---|---|---|---|---|---|
+| replace edited step | `+page.svelte` assigns `$update.steps[index] = step` and then `$update.steps = $update.steps` | none | edit panel, graph, list, validation, auto-save subscription | `FlowEditor` command | Add `replaceStepAtIndex(index, step)` that clones the array and replaces the target step. |
+| remove step | `+page.svelte` filters `$update.steps`, renumbers `step_order`, calls `applyStepsWithSafeOrderRemap(...)`, and sets `activeStepId` fallback | `applyStepsWithSafeOrderRemap(...)` owns safe remap and deleted-reference handling | edit panel, graph, list, validation, auto-save subscription | `FlowEditor` command | Add `removeStepAtIndex(index)` that builds/renumbers next steps, delegates to `applyStepsWithSafeOrderRemap(...)`, and updates `activeStepId`. |
+| reorder steps | `FlowStepList` calls route, route delegates to `applyStepsWithSafeOrderRemap(...)` | `FlowEditor.applyStepsWithSafeOrderRemap(...)` | list/graph/edit panel | already `FlowEditor` | Leave unchanged in this slice. |
+
+### Reuse-Before-Creating Decision
+
+Do not create a new step editor controller. `FlowEditor.ts` already owns step
+creation, insertion, order remapping, variable rewrites, assistant saves, and
+validation. This slice deepens that existing owner with the two route-owned
+step mutation commands.
+
+### Behavior Change
+
+Step removal will no longer renumber surviving step objects in place before
+`applyStepsWithSafeOrderRemap(...)` reads the previous step orders. The current
+route path can mutate the same step objects that remain in the editor store,
+which risks hiding deleted step orders from deleted-reference detection. The
+new command clones surviving steps before renumbering and then delegates to the
+existing remap owner.
+
+### Implementation Plan
+
+1. Add `replaceStepAtIndex(index: number, step: FlowStep): void` to
+   `FlowEditor.ts`.
+
+   Required behavior:
+
+   - valid indexes are finite integers in `[0, steps.length)`
+   - clone the current step array before replacement
+   - replace only the indexed step
+   - no-op on invalid indexes
+   - preserve the existing step's `step_order`; step reordering must continue
+     through `applyStepsWithSafeOrderRemap(...)`
+   - preserve other step object references
+   - let the existing `editor.state.update` subscription run validation and
+     auto-save scheduling
+
+2. Add `removeStepAtIndex(index: number): Promise<void>` to `FlowEditor.ts`.
+
+   Required behavior:
+
+   - valid indexes are finite integers in `[0, steps.length)`
+   - no-op on invalid indexes
+   - remove the indexed step
+   - renumber remaining `step_order` values from 1 using cloned step objects,
+     not in-place mutation of the current store objects
+   - delegate to `applyStepsWithSafeOrderRemap(...)`
+   - set `activeStepId` to the next step at the removed index, previous last
+     step, or `null` when no steps remain
+   - propagate `applyStepsWithSafeOrderRemap(...)` failures
+   - update `activeStepId` only after remapping succeeds
+   - preserve existing deleted-reference and assistant prompt remap behavior by
+     not duplicating that logic
+
+3. Export both commands from the frozen `flowEditor` object.
+
+4. Extend `FlowEditor.test.ts`:
+
+   - `replaceStepAtIndex` replaces one step and preserves neighbors
+   - `replaceStepAtIndex` preserves the existing `step_order` when a caller
+     supplies a changed `step_order`
+   - `replaceStepAtIndex` no-ops on invalid indexes, including negative,
+     non-integer, `NaN`, and `>= steps.length`
+   - `removeStepAtIndex` removes, renumbers, and sets the next active step
+   - `removeStepAtIndex` removing the last step falls back to the previous
+     step
+   - `removeStepAtIndex` sets active step to `null` when removing the only step
+   - `removeStepAtIndex` no-ops on invalid indexes
+   - `removeStepAtIndex` propagates remap/save failures without changing the
+     active step
+
+5. Update route callbacks:
+
+   - `onStepChanged` calls `flowEditor.replaceStepAtIndex(index, step)`
+   - `onRemoveStep` calls `await flowEditor.removeStepAtIndex(idx)`
+   - route keeps toast/error translation only
+
+### Behavior Pins Before Deletion
+
+Add `FlowEditor.test.ts` command-boundary coverage before deleting route direct
+step-array writes.
+
+### Validation Commands
+
+Focused command tests:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/FlowEditor.test.ts
+```
+
+Relevant previous Batch 7 smoke:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- \
+  src/lib/features/flows/flowFormSchema.test.ts \
+  src/lib/features/flows/components/FlowRunLaunchInputState.test.ts \
+  src/lib/features/flows/components/FlowRunFileInputState.test.ts \
+  src/lib/features/flows/flowRunContract.test.ts \
+  src/lib/features/flows/flowRunWizard.test.ts
+```
+
+Broad app check, expected to retain known baseline failures:
+
+```bash
+cd frontend/apps/web && bun run check
+```
+
+Touched-file format/lint:
+
+```bash
+cd frontend/apps/web && bunx prettier --check \
+  src/lib/features/flows/FlowEditor.ts \
+  src/lib/features/flows/FlowEditor.test.ts \
+  'src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte'
+```
+
+```bash
+cd frontend/apps/web && bunx eslint \
+  src/lib/features/flows/FlowEditor.ts \
+  src/lib/features/flows/FlowEditor.test.ts \
+  'src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte'
+```
+
+Diff and text hygiene:
+
+```bash
+git diff --check -- \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.ts \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts \
+  'frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte' \
+  docs/refactor/execution/batch-7-frontend-state-owners
+```
+
+```bash
+rg --pcre2 -n "A\\.[0-9](?![0-9])|P0\\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|state-owner slice|Batch 7|as any|@ts-ignore|@ts-expect-error" \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.ts \
+  frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts \
+  'frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte' \
+  docs/refactor/prd \
+  docs/refactor/ai-builder-prompt-contract.md
+```
+
+Expected: no matches in touched frontend files.
+
+Positive disappearance check:
+
+```bash
+rg -n "\\$update\\.steps(\\[[^\\]]+\\])?\\s*=" frontend/apps/web/src
+```
+
+Expected: no matches.
+
+Broader assignment guard:
+
+```bash
+rg -n "\\.steps\\s*=" frontend/apps/web/src/routes frontend/apps/web/src/lib/features/flows
+```
+
+Expected: no route-level direct step assignment beyond `FlowEditor` ownership.
+
+### Carry-Forward
+
+- `FlowEditor.state.update` can be narrowed only after confirming no remaining
+  route/component writes rely on the writable surface.
+- Broader Flow authoring file naming remains deferred; `FlowEditor` has earned
+  more ownership but should be renamed only with a separate plan.

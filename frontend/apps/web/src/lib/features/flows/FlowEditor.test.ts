@@ -1,7 +1,7 @@
 import { get } from "svelte/store";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Flow, Intric } from "@intric/intric-js";
+import type { Flow, FlowStep, Intric } from "@intric/intric-js";
 
 import { createFlowEditor } from "./FlowEditor";
 
@@ -22,7 +22,27 @@ function makeFlow(metadataJson: Flow["metadata_json"] = null, overrides: Partial
   };
 }
 
-function makeIntric(): Intric {
+function makeStep(stepOrder: number, overrides: Partial<FlowStep> = {}): FlowStep {
+  return {
+    id: `step-${stepOrder}`,
+    assistant_id: `assistant-${stepOrder}`,
+    step_order: stepOrder,
+    user_description: `Step ${stepOrder}`,
+    input_source: stepOrder === 1 ? "flow_input" : "previous_step",
+    input_type: "text",
+    output_mode: "pass_through",
+    output_type: "text",
+    mcp_policy: "inherit",
+    ...overrides
+  };
+}
+
+function makeIntric(
+  overrides: {
+    assistantGet?: (...args: unknown[]) => unknown;
+    assistantUpdate?: (...args: unknown[]) => unknown;
+  } = {}
+): Intric {
   return {
     files: {
       delete: vi.fn()
@@ -31,8 +51,8 @@ function makeIntric(): Intric {
       update: vi.fn(),
       assistants: {
         create: vi.fn(),
-        get: vi.fn(),
-        update: vi.fn()
+        get: overrides.assistantGet ?? vi.fn(),
+        update: overrides.assistantUpdate ?? vi.fn()
       }
     },
     assistants: {
@@ -208,6 +228,160 @@ describe("FlowEditor basic settings commands", () => {
       const { update: finalUpdate, hasUnsavedChanges } = readEditorState(editor);
       expect(finalUpdate.data_retention_days).toBeNull();
       expect(hasUnsavedChanges).toBe(false);
+    } finally {
+      editor.destroy();
+    }
+  });
+});
+
+describe("FlowEditor step mutation commands", () => {
+  it("replaces one step while preserving neighbors and step order", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
+      intric: makeIntric()
+    });
+    try {
+      const currentSteps = get(editor.state.update).steps;
+      const firstStep = currentSteps[0];
+      const secondStep = currentSteps[1];
+
+      editor.replaceStepAtIndex(1, {
+        ...secondStep,
+        step_order: 99,
+        user_description: "Updated"
+      });
+
+      const { update, hasUnsavedChanges } = readEditorState(editor);
+      expect(update.steps[0]).toBe(firstStep);
+      expect(update.steps[1]).not.toBe(secondStep);
+      expect(update.steps[1]?.user_description).toBe("Updated");
+      expect(update.steps[1]?.step_order).toBe(2);
+      expect(hasUnsavedChanges).toBe(true);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("ignores invalid replace indexes without changing the step array", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
+      intric: makeIntric()
+    });
+    try {
+      const originalSteps = get(editor.state.update).steps;
+      const replacement = makeStep(1, { user_description: "Invalid" });
+
+      for (const index of [-1, 1.5, Number.NaN, originalSteps.length]) {
+        editor.replaceStepAtIndex(index, replacement);
+        expect(get(editor.state.update).steps).toBe(originalSteps);
+      }
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("removes a step, renumbers survivors, and selects the next step", async () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2), makeStep(3)] }),
+      intric: makeIntric()
+    });
+    try {
+      editor.state.activeStepId.set("step-2");
+
+      await editor.removeStepAtIndex(1);
+
+      const update = get(editor.state.update);
+      expect(update.steps.map((step) => step.id)).toEqual(["step-1", "step-3"]);
+      expect(update.steps.map((step) => step.step_order)).toEqual([1, 2]);
+      expect(get(editor.state.activeStepId)).toBe("step-3");
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(true);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("falls back to the previous step when removing the last step", async () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
+      intric: makeIntric()
+    });
+    try {
+      editor.state.activeStepId.set("step-2");
+
+      await editor.removeStepAtIndex(1);
+
+      expect(get(editor.state.update).steps.map((step) => step.id)).toEqual(["step-1"]);
+      expect(get(editor.state.activeStepId)).toBe("step-1");
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("clears the active step when removing the only step", async () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      intric: makeIntric()
+    });
+    try {
+      editor.state.activeStepId.set("step-1");
+
+      await editor.removeStepAtIndex(0);
+
+      expect(get(editor.state.update).steps).toEqual([]);
+      expect(get(editor.state.activeStepId)).toBeNull();
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("ignores invalid remove indexes without changing steps or active step", async () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
+      intric: makeIntric()
+    });
+    try {
+      editor.state.activeStepId.set("step-1");
+      const originalSteps = get(editor.state.update).steps;
+
+      for (const index of [-1, 1.5, Number.NaN, originalSteps.length]) {
+        await editor.removeStepAtIndex(index);
+        expect(get(editor.state.update).steps).toBe(originalSteps);
+        expect(get(editor.state.activeStepId)).toBe("step-1");
+      }
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("propagates remap failures without changing the active step", async () => {
+    const assistantUpdate = vi.fn(async () => {
+      throw new Error("assistant update failed");
+    });
+    const editor = createFlowEditor({
+      flow: makeFlow(null, {
+        steps: [
+          makeStep(1),
+          makeStep(2, {
+            input_bindings: { question: "{{step_1.output.text}}" }
+          })
+        ]
+      }),
+      intric: makeIntric({
+        assistantGet: vi.fn(async () => ({
+          prompt: { text: "{{step_1.output.text}}", description: "" }
+        })),
+        assistantUpdate
+      })
+    });
+    try {
+      editor.state.activeStepId.set("step-2");
+
+      await expect(editor.removeStepAtIndex(0)).rejects.toThrow("assistant update failed");
+
+      expect(assistantUpdate).toHaveBeenCalled();
+      expect(get(editor.state.activeStepId)).toBe("step-2");
     } finally {
       editor.destroy();
     }

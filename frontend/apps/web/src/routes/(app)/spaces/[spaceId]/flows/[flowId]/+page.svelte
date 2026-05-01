@@ -889,16 +889,11 @@
                   }}
                   onStepChanged={(detail) => {
                     const { index, step } = detail;
-                    $update.steps[index] = step;
-                    $update.steps = $update.steps;
+                    flowEditor.replaceStepAtIndex(index, step);
                   }}
                   onRemoveStep={async (idx) => {
-                    const nextSteps = ($update.steps ?? []).filter((_, i) => i !== idx);
-                    nextSteps.forEach((s, i) => {
-                      s.step_order = i + 1;
-                    });
                     try {
-                      await flowEditor.applyStepsWithSafeOrderRemap(nextSteps);
+                      await flowEditor.removeStepAtIndex(idx);
                     } catch (error) {
                       const message =
                         error instanceof IntricError
@@ -907,8 +902,6 @@
                       toast.error(message);
                       return;
                     }
-                    const fallbackStep = nextSteps[Math.min(idx, nextSteps.length - 1)]?.id ?? null;
-                    activeStepId.set(fallbackStep);
                   }}
                 />
               </div>

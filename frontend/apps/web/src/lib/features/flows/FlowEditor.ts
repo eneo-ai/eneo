@@ -389,6 +389,36 @@ function createFlowEditor(data: FlowEditorInitData) {
     }));
   }
 
+  function isValidStepIndex(index: number, steps: FlowStep[]): boolean {
+    return Number.isInteger(index) && index >= 0 && index < steps.length;
+  }
+
+  function replaceStepAtIndex(index: number, step: FlowStep): void {
+    const currentSteps = get(editor.state.update).steps ?? [];
+    if (!isValidStepIndex(index, currentSteps)) return;
+
+    const existingStepOrder = currentSteps[index].step_order;
+    const nextSteps = [...currentSteps];
+    nextSteps[index] = { ...step, step_order: existingStepOrder };
+    editor.state.update.update((resource) => ({
+      ...resource,
+      steps: nextSteps
+    }));
+  }
+
+  async function removeStepAtIndex(index: number): Promise<void> {
+    const currentSteps = get(editor.state.update).steps ?? [];
+    if (!isValidStepIndex(index, currentSteps)) return;
+
+    const nextSteps = currentSteps
+      .filter((_, stepIndex) => stepIndex !== index)
+      .map((step, stepIndex) => ({ ...step, step_order: stepIndex + 1 }));
+
+    await applyStepsWithSafeOrderRemap(nextSteps);
+    const fallbackStepId = nextSteps[Math.min(index, nextSteps.length - 1)]?.id ?? null;
+    activeStepId.set(fallbackStepId);
+  }
+
   function updateMetadataJson(buildNext: (metadata: FlowMetadataJson) => FlowMetadataJson) {
     editor.state.update.update((resource) => ({
       ...resource,
@@ -884,6 +914,8 @@ function createFlowEditor(data: FlowEditorInitData) {
     setName,
     setDescription,
     setDataRetentionDays,
+    replaceStepAtIndex,
+    removeStepAtIndex,
     replaceFormSchemaFields,
     setTranscriptionEnabled,
     setWizardMetadata,

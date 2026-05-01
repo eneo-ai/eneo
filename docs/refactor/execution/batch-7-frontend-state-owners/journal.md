@@ -890,3 +890,136 @@ Baseline/existing failures recorded:
   overlap as mutation allow-lists. Revisit this after step commands land and
   the external store surface can be narrowed.
 - Batch 8 step rerun has not started.
+
+## Iteration 8 - Flow Step Mutation Commands
+
+### Starting State
+
+- Started from commit `6c982182 flows: centralize basic settings authoring`.
+- Branch state before planning:
+  - `frontend/packages/ui/src/icons/types.d.ts` dirty, unrelated and untouched
+  - `scripts/run_codex_review.sh` dirty, unrelated and untouched
+  - `PRODUCT.md` untracked, unrelated and untouched
+  - no staged files
+- Scope limited to Flow step replacement/removal commands in `FlowEditor`, the
+  route call site, behavior tests, and Batch 7 docs.
+- Backend runtime, migrations, Celery, data model, generated schemas, package
+  naming, namespace migration, and Batch 8 step rerun were not in scope.
+
+### Plan Evidence
+
+- The route still owned two step-array mutations:
+  - `onStepChanged` assigned `$update.steps[index] = step` and then
+    `$update.steps = $update.steps`
+  - `onRemoveStep` filtered `$update.steps`, renumbered `step_order` in place,
+    delegated to `applyStepsWithSafeOrderRemap(...)`, and set active-step
+    fallback directly
+- `FlowEditor.ts` already owned step creation, insertion, safe order remapping,
+  assistant prompt remapping, validation, save scheduling, and active-step
+  state.
+- The route removal path had a real ownership bug: it renumbered surviving step
+  objects in place before `applyStepsWithSafeOrderRemap(...)` could compare
+  previous orders, because the filtered array retained object references from
+  the editor store.
+
+### Claude Plan Review
+
+- First review returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, and
+  `MIN_SCORE: 6`.
+- Accepted findings:
+  - invalid index behavior needed exact semantics
+  - failure propagation and active-step timing needed to be explicit
+  - removal needed clone-before-renumber behavior to avoid mutating store
+    objects before deleted-reference detection
+  - tests needed last-step, only-step, invalid-index, and failure-path pins
+  - disappearance checks needed to cover direct route step writes and broader
+    `.steps =` assignments
+- The plan was revised so:
+  - valid indexes are finite integers in `[0, steps.length)`
+  - replacement preserves the existing step order
+  - removal clones surviving steps before renumbering
+  - `activeStepId` changes only after safe remap succeeds
+  - invalid replace/remove calls are no-ops
+  - failure propagation is pinned without adding a compatibility fallback
+- Plan verification returned `VERDICT: green`, `GREEN_LIGHT: yes`, and
+  `MIN_SCORE: 8`.
+
+### Implementation Result
+
+- `FlowEditor.ts` now exposes:
+  - `replaceStepAtIndex(index, step)`
+  - `removeStepAtIndex(index)`
+- `replaceStepAtIndex(...)` clones the step array, replaces one target step,
+  preserves the existing `step_order`, and leaves invalid indexes unchanged.
+- `removeStepAtIndex(...)` clones surviving steps before renumbering, delegates
+  to `applyStepsWithSafeOrderRemap(...)`, and updates active-step fallback only
+  after the remap succeeds.
+- The route now delegates step replacement/removal to `FlowEditor` and keeps
+  only event translation plus toast/error translation.
+- `FlowEditor.test.ts` now pins:
+  - replacement preserves neighboring step references and the existing order
+  - invalid replacement indexes are no-ops
+  - removal renumbers survivors and selects the next step
+  - removing the last step falls back to the previous step
+  - removing the only step clears the active step
+  - invalid removal indexes are no-ops
+  - remap/save failures propagate and leave active-step selection unchanged
+
+### Validation
+
+Passed:
+
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/FlowEditor.test.ts`
+  - 1 file, 15 tests passed.
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/components/FlowRunLaunchInputState.test.ts src/lib/features/flows/components/FlowRunFileInputState.test.ts src/lib/features/flows/flowRunContract.test.ts src/lib/features/flows/flowRunWizard.test.ts`
+  - 5 files, 41 tests passed.
+- `cd frontend/apps/web && bunx prettier --check ...` over touched frontend
+  files.
+- `cd frontend/apps/web && bunx eslint ...` over touched frontend files.
+- `git diff --check -- ...` over touched frontend/docs paths.
+- Anti-slippage grep over touched frontend files, PRDs, and the AI Builder
+  prompt contract returned no matches.
+- Positive disappearance grep over `frontend/apps/web/src` returned no
+  `$update.steps[...] =` or `$update.steps =` matches.
+- Broader `.steps =` assignment guard over routes and Flow feature code found
+  only `FlowEditor.ts:65`, the existing canonical API-call sanitizer in
+  `cleanChangesBeforeUpdate(...)`.
+
+Baseline/existing failures recorded:
+
+- `cd frontend/apps/web && bun run check` still fails with 43 errors and 7
+  warnings in 14 files. The errors are the known broad frontend baseline
+  categories in `frontend/packages/intric-js`, spaces/chat/dashboard route
+  typing, Flow route path typing, and existing AI Builder harness warnings. No
+  touched-file diagnostic appeared.
+
+### Claude Verification
+
+- Implementation review returned `VERDICT: green`, `GREEN_LIGHT: yes`, and
+  `MIN_SCORE: 8`.
+- Claude verified:
+  - the route no longer mutates `$update.steps` directly
+  - clone-before-renumber behavior fixes the identified route aliasing issue
+  - tests cover invalid index handling, step-order preservation, active-step
+    fallback, and failure propagation
+  - no compatibility shim, fake interface, frontend redesign, backend runtime
+    work, or Batch 8 behavior was introduced
+- Claude noted two non-blocking observations:
+  - fallback-step calculation is dense but covered by tests
+  - partial failure semantics remain inherited from
+    `applyStepsWithSafeOrderRemap(...)`; this slice pins active-step behavior
+    but does not redesign assistant-remap transactions
+
+### Carry-Forward
+
+- `FlowEditor.state.update` remains externally writable. After route step
+  writes are closed, a future review can decide whether to expose a narrower
+  read/update surface or leave the writable store as an intentional editor
+  draft boundary.
+- `createResourceEditor.editableFields` and explicit `FlowEditor` commands
+  still overlap as mutation allow-lists. Revisit only if narrowing the external
+  store surface becomes a dedicated frontend architecture slice.
+- Assistant prompt remap failure can still leave step edits applied before a
+  downstream assistant-save failure. That is pre-existing behavior now
+  documented and should not be changed without a separate transactional design.
+- Batch 8 step rerun has not started.
