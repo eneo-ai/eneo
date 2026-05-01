@@ -25,8 +25,10 @@ import type {
 export class FlowAIBuilderService {
   #driver: FlowAIBuilderDriver;
   #stateVersion = $state(0);
+  #hasSeenPlanInSession = $state(false);
 
   hasSession = $derived(this.#state.session !== null);
+  hasSeenPlanInSession = $derived(this.#hasSeenPlanInSession);
   canSendMessage = $derived(
     this.hasSession &&
       !this.#state.isStreaming &&
@@ -49,8 +51,9 @@ export class FlowAIBuilderService {
 
   constructor(intric: Intric, spaceId: string, flowId: string | null) {
     const transport = intric.client as unknown as AIBuilderClientTransport;
-    this.#driver = new FlowAIBuilderDriver(transport, spaceId, flowId, () => {
+    this.#driver = new FlowAIBuilderDriver(transport, spaceId, flowId, (state) => {
       this.#stateVersion += 1;
+      this.#updatePlanSeenLatch(state);
     });
   }
 
@@ -58,6 +61,17 @@ export class FlowAIBuilderService {
     // Svelte tracks Driver updates through this read; Service getters must use this accessor.
     void this.#stateVersion;
     return this.#driver.state;
+  }
+
+  // Keep "updating plan" copy stable while a re-plan stream briefly clears currentPlan.
+  #updatePlanSeenLatch(state: Readonly<FlowAIBuilderState>): void {
+    if (state.session === null) {
+      this.#hasSeenPlanInSession = false;
+      return;
+    }
+    if (state.currentPlan !== null) {
+      this.#hasSeenPlanInSession = true;
+    }
   }
 
   get session(): AIBuilderSession | null {

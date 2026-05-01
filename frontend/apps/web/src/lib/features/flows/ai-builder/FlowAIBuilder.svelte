@@ -23,23 +23,11 @@
   let chatRef = $state<FlowAIBuilderChat | undefined>();
   let wasAutoResumed = $state(false);
 
-  // Keep plan pane visible during streaming (plan rebuild) so it doesn't flash away
-  let hadPlanBefore = $state(false);
-
-  $effect(() => {
-    if (service.currentPlan !== null) {
-      hadPlanBefore = true;
-    }
-    if (!service.hasSession) {
-      hadPlanBefore = false;
-    }
-  });
-
   const hasPlanContent = $derived(
     service.currentPlan !== null ||
       service.isConflict ||
       service.statusMessage !== null ||
-      (hadPlanBefore && service.isStreaming)
+      (service.hasSeenPlanInSession && service.isStreaming)
   );
 
   // For single-draft: show draft page only when 2+ drafts

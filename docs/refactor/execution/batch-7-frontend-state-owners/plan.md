@@ -250,3 +250,296 @@ harness cast and is not touched by this slice.
 - Converting `FlowAIBuilderDriver` itself to a Svelte rune owner may be cleaner
   later, but would change test setup and listener semantics; defer until there
   is a separate human-approved frontend state slice.
+
+## Slice 2 - AI Builder Plan Visibility Latch
+
+### TL;DR
+
+- Active scope: Flow AI Builder component state readers around the
+  Service/Driver boundary.
+- Canonical owner: `FlowAIBuilderService` owns the UI workflow latch that says a
+  plan has been seen during the current AI Builder session.
+- Planned implementation: replace three component-local `hadPlanBefore` latches
+  with one Service-owned latch. Keep the root-only plan-pane visibility
+  aggregate local to `FlowAIBuilder.svelte`.
+- No backend, generated-schema, component redesign, package rename, authoring,
+  run-launch, evidence/status, or Batch 8/9 runtime work is in scope.
+
+### Start Gate
+
+| Check | Result |
+|---|---|
+| `git log --oneline --max-count=8` | latest commit `90e688a9 flows: remove ai builder service state mirror` |
+| `git status --short --branch` | branch `feature/refactor-flows-flowai`; only known unrelated dirty files remain: `frontend/packages/ui/src/icons/types.d.ts`, `scripts/run_codex_review.sh`, `PRODUCT.md` |
+| `git diff --cached --name-only` | no staged files |
+
+Known unrelated dirty files remain out of scope and must not be touched:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+
+### Scope
+
+Expected files to change:
+
+- `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderService.svelte.ts`
+- `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderService.test.ts`
+- `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilder.svelte`
+- `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderChat.svelte`
+- `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte`
+- `docs/refactor/execution/batch-7-frontend-state-owners/plan.md`
+- `docs/refactor/execution/batch-7-frontend-state-owners/journal.md`
+- `docs/refactor/execution/batch-7-frontend-state-owners/retrospective-2.md`
+- `docs/refactor/execution/batch-7-frontend-state-owners/claude-reconciliation-2.md`
+
+Explicitly out of scope:
+
+- `FlowAIBuilderDriver.ts` behavior changes
+- deleting `FlowAIBuilderService`
+- making Driver a Svelte rune owner
+- AI Builder protocol/generated type changes
+- component UI redesign or CSS/layout changes
+- Flow authoring, run launch, evidence, or status ownership
+- backend changes, migrations, Celery, runtime behavior, data model changes
+- package rename from `@intric/intric-js`
+- `intric.*` to `eneo.*` namespace work
+
+### State Reader Inventory
+
+| duplicated state/reader | current locations | readers | writers | canonical owner | action |
+|---|---|---|---|---|---|
+| `hadPlanBefore` / plan-seen latch | `FlowAIBuilder.svelte:26-43`, `FlowAIBuilderChat.svelte:52-59`, `FlowAIBuilderPlanPane.svelte:96-104` | root shell plan-pane visibility, chat generating/updating copy, plan pane progress copy | component `$effect` blocks watching `service.currentPlan` and `service.hasSession` | `FlowAIBuilderService` | Add one Service-owned `hasSeenPlanInSession` latch updated from Driver notifications; delete the three component-local latches. |
+| plan-pane visibility aggregate | `FlowAIBuilder.svelte:38-43` | root shell layout | root `$derived` from `service.currentPlan`, `service.isConflict`, `service.statusMessage`, `hadPlanBefore && service.isStreaming` | `FlowAIBuilder.svelte` | Keep local because this aggregate has one consumer; replace only the latch input with `service.hasSeenPlanInSession`. |
+| generating vs updating copy decision | `FlowAIBuilderChat.svelte:57-59`, `FlowAIBuilderPlanPane.svelte:695-698` | chat stream badge and plan pane progress copy | component-local `hadPlanBefore` latch | `FlowAIBuilderService` owns the latch; components own translation copy | Components use `service.hasSeenPlanInSession` and keep translation/rendering local. |
+
+### Ownership Decision
+
+`FlowAIBuilderService` remains the Svelte context/controller facade and is the
+right owner for this UI workflow latch because:
+
+- The value is not backend/domain state and does not belong in Driver's
+  canonical `FlowAIBuilderState`.
+- The value is not component-local once three components need the same latch.
+- The value is derived from Driver-owned state transitions and reset when the
+  Driver has no active session, so Service can update it at the Driver
+  notification boundary without adding a parallel state mirror.
+
+This slice deliberately does not move translations, layout, or component-only
+user intent state such as `userReferenceOpen`, `pendingEditContext`,
+`isApproving`, or `isApplying`.
+
+This slice also deliberately keeps `hasPlanContent` local to
+`FlowAIBuilder.svelte` because it is root-shell layout state with one consumer.
+Moving only the duplicated latch avoids turning Service into a generic view
+aggregate owner.
+
+### Behavior Pins Before Deletion
+
+Add or update `FlowAIBuilderService.test.ts` before deleting component latches:
+
+- `hasSeenPlanInSession` starts false.
+- seeding a `currentPlan` makes `hasSeenPlanInSession` true.
+- clearing `currentPlan` while the session remains active keeps
+  `hasSeenPlanInSession` true.
+- setting `session` to `null` resets `hasSeenPlanInSession` false.
+- the precedence case `currentPlan !== null` and `session === null` resets
+  `hasSeenPlanInSession` false.
+- `hasSeenPlanInSession` remains true while streaming after a plan was cleared
+  and while the root component's local aggregate sees
+  `currentPlan === null`.
+
+Existing pins that must keep passing:
+
+- `FlowAIBuilderService.test.ts`
+- `FlowAIBuilderDriver.test.ts`
+- `flowAIBuilderReset.test.ts`
+- `flowAIBuilderTokenUsage.test.ts`
+- `FlowAIBuilder.test.ts` where the environment can run jsdom
+
+### Implementation Plan
+
+1. Add Service-owned UI latch state:
+
+   ```ts
+   #hasSeenPlanInSession = $state(false);
+   ```
+
+2. Add a private latch update method that receives Driver state inside the
+   existing Driver notification boundary:
+
+   ```ts
+   #updatePlanSeenLatch(state: Readonly<FlowAIBuilderState>): void {
+     if (state.session === null) {
+       this.#hasSeenPlanInSession = false;
+       return;
+     }
+     if (state.currentPlan !== null) this.#hasSeenPlanInSession = true;
+   }
+   ```
+
+   The method updates only the latch, not mirrored copies of Driver fields. The
+   reset-before-set precedence is load-bearing and must be tested.
+
+3. Call `#updatePlanSeenLatch` from the Driver callback after incrementing
+   `#stateVersion`, using the state argument the Driver listener already
+   receives:
+
+   ```ts
+   this.#driver = new FlowAIBuilderDriver(transport, spaceId, flowId, (state) => {
+     this.#stateVersion += 1;
+     this.#updatePlanSeenLatch(state);
+   });
+   ```
+
+   `#updatePlanSeenLatch` reads only its `state` parameter; it must not read
+   `this.#driver.state` or `this.#state`.
+
+4. Add public read-only Service getter `hasSeenPlanInSession: boolean`. Do not
+   add a setter.
+
+5. Update `FlowAIBuilder.svelte`:
+
+   - delete local `hadPlanBefore` `$state`
+   - delete the related `$effect`
+   - keep the local `hasPlanContent` `$derived`
+   - replace `(hadPlanBefore && service.isStreaming)` with
+     `(service.hasSeenPlanInSession && service.isStreaming)`
+
+6. Update `FlowAIBuilderChat.svelte`:
+
+   - delete local `hadPlanBefore` `$state`
+   - delete the related `$effect`
+   - derive generating/updating text from `service.hasSeenPlanInSession`
+
+7. Update `FlowAIBuilderPlanPane.svelte`:
+
+   - delete local `hadPlanBefore` `$state`
+   - delete the related `$effect`
+   - use `service.hasSeenPlanInSession` for progress copy only
+
+8. Do not introduce helper/common/shared/store modules. Do not add new
+   comments unless the Service latch synchronization needs one short invariant
+   comment.
+
+### Validation Commands
+
+Targeted Service/Driver tests:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- \
+  src/lib/features/flows/ai-builder/FlowAIBuilderService.test.ts \
+  src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts \
+  src/lib/features/flows/ai-builder/flowAIBuilderReset.test.ts \
+  src/lib/features/flows/ai-builder/flowAIBuilderTokenUsage.test.ts
+```
+
+Component test from the Batch 7 row, with known `jsdom` caveat:
+
+```bash
+cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/ai-builder/FlowAIBuilder.test.ts
+```
+
+Broad app check from the Batch 7 row, expected to retain known baseline
+failures until the frontend baseline is fixed:
+
+```bash
+cd frontend/apps/web && bun run check
+```
+
+Touched-file lint/format:
+
+```bash
+cd frontend/apps/web && bunx prettier --check \
+  src/lib/features/flows/ai-builder/FlowAIBuilderService.svelte.ts \
+  src/lib/features/flows/ai-builder/FlowAIBuilderService.test.ts \
+  src/lib/features/flows/ai-builder/FlowAIBuilder.svelte \
+  src/lib/features/flows/ai-builder/FlowAIBuilderChat.svelte \
+  src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte
+```
+
+```bash
+cd frontend/apps/web && bunx eslint \
+  src/lib/features/flows/ai-builder/FlowAIBuilderService.svelte.ts \
+  src/lib/features/flows/ai-builder/FlowAIBuilderService.test.ts \
+  src/lib/features/flows/ai-builder/FlowAIBuilder.svelte \
+  src/lib/features/flows/ai-builder/FlowAIBuilderChat.svelte \
+  src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte
+```
+
+Diff and text hygiene:
+
+```bash
+git diff --check -- \
+  frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderService.svelte.ts \
+  frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderService.test.ts \
+  frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilder.svelte \
+  frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderChat.svelte \
+  frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte \
+  docs/refactor/execution/batch-7-frontend-state-owners
+```
+
+```bash
+rg --pcre2 -n "A\\.[0-9](?![0-9])|P0\\.|Phase [0A-G]|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)|state-owner slice|Batch 7|as any|@ts-ignore|@ts-expect-error" \
+  frontend/apps/web/src/lib/features/flows/ai-builder \
+  docs/refactor/prd \
+  docs/refactor/ai-builder-prompt-contract.md
+```
+
+```bash
+rg -n "hadPlanBefore" frontend/apps/web/src/lib/features/flows/ai-builder
+```
+
+Expected after implementation: no `hadPlanBefore` matches.
+
+### Component Test Caveat
+
+`FlowAIBuilder.test.ts` is still listed because Batch 7's validation row calls
+for frontend component tests. In this workspace it may fail for the known
+missing-`jsdom`/Paraglide environment baseline. That failure is acceptable only
+if the moved logic is fully pinned in `FlowAIBuilderService.test.ts` and the
+focused non-jsdom Service/Driver tests pass.
+
+### Claude Plan Review
+
+- Claude plan review returned `VERDICT: changes_required`, `GREEN_LIGHT: no`,
+  `MIN_SCORE: 7`.
+- Accepted changes:
+  - keep `hasPlanContent` local to `FlowAIBuilder.svelte` because it has only
+    one consumer
+  - rename the generic `#syncViewState` plan to `#updatePlanSeenLatch`
+  - make session-null reset precedence explicit
+  - add a precedence behavior pin for `currentPlan !== null` with
+    `session === null`
+  - document why component-test environment failure is acceptable only when the
+    moved latch behavior is pinned in Service tests
+- Claude resumed on the revised plan and returned `VERDICT: green`,
+  `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+- Accepted precision updates from the green review:
+  - write out the Driver listener closure and pass the callback `state` into
+    `#updatePlanSeenLatch`
+  - prevent `#updatePlanSeenLatch` from reading `this.#driver.state` or
+    `this.#state`
+  - document `hasSeenPlanInSession` as a read-only boolean getter with no setter
+  - name the streaming behavior pin around Service primitive inputs rather than
+    a nonexistent Service `hasPlanContent` aggregate
+
+### Non-Goals
+
+- Do not move draft auto-resume into Service in this slice.
+- Do not move pending edit context or input attachment state.
+- Do not move approve/apply in-flight flags.
+- Do not alter component markup or styling except replacing the state reads.
+- Do not fix broad `apps/web` check baseline failures.
+
+### Carry-Forward
+
+- Draft auto-resume orchestration remains in `FlowAIBuilder.svelte`; it can be
+  evaluated as a separate small controller slice if this slice lands cleanly.
+- Chat pending edit context remains component-owned because it is tied to input
+  focus and local user intent.
+- Plan pane approve/apply in-flight flags remain component-owned until a
+  dedicated action-state slice proves a better owner.
+- If this Service-owned latch pattern survives more slices, add a grep or lint
+  guard that prevents direct Driver state reads outside the existing Service
+  access/update boundary.

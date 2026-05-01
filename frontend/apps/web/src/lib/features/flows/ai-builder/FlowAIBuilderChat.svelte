@@ -49,13 +49,8 @@
   let inputRef = $state<FlowAIBuilderInput | undefined>();
   let pendingEditContext = $state<AIBuilderPlanEditContext | null>(null);
 
-  let hadPlanBefore = $state(false);
-  $effect(() => {
-    if (service.currentPlan !== null) hadPlanBefore = true;
-    if (!service.hasSession) hadPlanBefore = false;
-  });
   const generatingText = $derived(
-    hadPlanBefore ? m.ai_builder_updating_plan() : m.ai_builder_generating()
+    service.hasSeenPlanInSession ? m.ai_builder_updating_plan() : m.ai_builder_generating()
   );
 
   export function focusInput(intent?: string | AIBuilderSuggestChangeIntent) {

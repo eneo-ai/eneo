@@ -85,22 +85,20 @@ describe("FlowAIBuilderService", () => {
     const applyError: ApplyError = {
       code: "validation_error",
       message: "Plan changed",
-      revision: 2,
-      detail: null
+      context: {}
     };
     const applyResult: ApplyResult = {
       flow_id: "flow-1",
-      flow_version: 4,
-      warnings: [],
-      draft: null
+      flow_name: "Flow",
+      steps_created: 1,
+      steps_updated: 2,
+      steps_removed: 0
     };
     const availableModels: AIBuilderModel[] = [
       {
         id: "model-1",
         name: "Model",
-        family: "openai",
-        stability: "stable",
-        supports_tools: true
+        provider: "openai"
       }
     ];
     const draftSessions = [makeDraft({ session_id: "draft-2" })];
@@ -204,5 +202,52 @@ describe("FlowAIBuilderService", () => {
     service.seedState({ currentPlan: makePlan() });
 
     expect(service.phase).toBe("reviewing");
+  });
+
+  it("keeps the plan-seen latch for transient re-plan streams", () => {
+    const service = makeService();
+
+    expect(service.hasSeenPlanInSession).toBe(false);
+
+    service.seedState({
+      session: makeSession(),
+      currentPlan: makePlan()
+    });
+
+    expect(service.hasSeenPlanInSession).toBe(true);
+
+    service.seedState({
+      currentPlan: null,
+      isStreaming: true
+    });
+
+    expect(service.hasSeenPlanInSession).toBe(true);
+    expect(service.currentPlan).toBeNull();
+    expect(service.isStreaming).toBe(true);
+  });
+
+  it("resets and re-engages the plan-seen latch across sessions", () => {
+    const service = makeService();
+
+    service.seedState({
+      session: makeSession(),
+      currentPlan: makePlan()
+    });
+
+    expect(service.hasSeenPlanInSession).toBe(true);
+
+    service.seedState({
+      session: null,
+      currentPlan: makePlan()
+    });
+
+    expect(service.hasSeenPlanInSession).toBe(false);
+
+    service.seedState({
+      session: makeSession({ session_id: "session-2" }),
+      currentPlan: makePlan({ plan_id: "plan-2" })
+    });
+
+    expect(service.hasSeenPlanInSession).toBe(true);
   });
 });

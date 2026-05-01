@@ -93,16 +93,6 @@
   const planAssumptions = $derived(service.currentPlan?.envelope.assumptions ?? []);
   const planLintWarnings = $derived(service.currentPlan?.envelope.lint_warnings ?? []);
 
-  // Latch: stays true once a plan has been seen during this session so the progress
-  // copy can differentiate "Building your flow" from "Updating your plan". Using a
-  // reactive latch here is intentional — the value must persist across the brief
-  // window when `currentPlan` becomes null during a re-plan stream.
-  let hadPlanBefore = $state(false);
-  $effect(() => {
-    if (service.currentPlan) hadPlanBefore = true;
-    if (!service.hasSession) hadPlanBefore = false;
-  });
-
   // Reference material drawer — default-open when no plan, closed after plan arrives.
   // Keep an independent user-intent flag so explicit user toggles survive plan refresh.
   let userReferenceOpen = $state<boolean | null>(null);
@@ -692,7 +682,7 @@
           {m.ai_builder_status_repairing()}
         {:else if service.statusMessage === "finalizing_plan"}
           {m.ai_builder_status_finalizing_plan()}
-        {:else if hadPlanBefore}
+        {:else if service.hasSeenPlanInSession}
           {m.ai_builder_updating_plan()}
         {:else}
           {m.ai_builder_generating()}
