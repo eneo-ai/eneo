@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Optional, Union
 from uuid import UUID
 
@@ -22,6 +23,7 @@ class TranscriptionModelPublic(BaseModel):
     description: Optional[str] = None
     hf_link: Optional[str] = None
     org: Optional[str] = None
+    cost_per_minute: Optional[Decimal] = None
     can_access: bool = False
     is_locked: bool = True
     lock_reason: Optional[str] = None
@@ -61,6 +63,7 @@ class TranscriptionModelPublic(BaseModel):
             description=model.description,
             hf_link=model.hf_link,
             org=model.org,
+            cost_per_minute=getattr(model, "cost_per_minute", None),
             can_access=model.can_access,
             is_locked=model.is_locked,
             lock_reason=model.lock_reason,

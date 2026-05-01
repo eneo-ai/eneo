@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
 from intric.ai_models.ai_model import AIModel
@@ -35,6 +36,7 @@ class TranscriptionModel(AIModel):
         is_deprecated: bool,
         is_org_enabled: bool,
         is_org_default: bool,
+        cost_per_minute: Optional[Decimal] = None,
         security_classification: Optional["SecurityClassification"] = None,
         tenant_id: Optional["UUID"] = None,
         provider_id: Optional["UUID"] = None,
@@ -61,6 +63,7 @@ class TranscriptionModel(AIModel):
 
         self.base_url = base_url
         self.is_org_default = is_org_default
+        self.cost_per_minute = cost_per_minute
         self.security_classification = security_classification
         self.tenant_id = tenant_id
         self.provider_id = provider_id
@@ -103,6 +106,7 @@ class TranscriptionModel(AIModel):
             is_deprecated=transcription_model_db.is_deprecated,
             is_org_enabled=transcription_model_db.is_enabled,
             is_org_default=transcription_model_db.is_default,
+            cost_per_minute=transcription_model_db.cost_per_minute,
             security_classification=SecurityClassification.to_domain(
                 db_security_classification=transcription_model_db.security_classification
             ),

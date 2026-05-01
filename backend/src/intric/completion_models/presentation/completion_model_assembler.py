@@ -56,6 +56,12 @@ class CompletionModelAssembler:
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
             model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
+            input_cost_per_token=getattr(
+                completion_model, "input_cost_per_token", None
+            ),
+            output_cost_per_token=getattr(
+                completion_model, "output_cost_per_token", None
+            ),
             security_classification=SecurityClassificationPublic.from_domain(
                 completion_model.security_classification,
                 return_none_if_not_enabled=False,

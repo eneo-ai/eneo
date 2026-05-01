@@ -10,6 +10,7 @@ from intric.security_classifications.domain.entities.security_classification imp
 
 if TYPE_CHECKING:
     from datetime import datetime
+    from decimal import Decimal
     from uuid import UUID
 
     from intric.database.tables.ai_models_table import (
@@ -42,6 +43,8 @@ class EmbeddingModel(AIModel):
         security_classification: Optional[SecurityClassification],
         max_batch_size: Optional[int] = None,
         litellm_model_name: Optional[str] = None,
+        input_cost_per_token: Optional["Decimal"] = None,
+        output_cost_per_token: Optional["Decimal"] = None,
         tenant_id: Optional["UUID"] = None,
         provider_id: Optional["UUID"] = None,
         provider_name: Optional[str] = None,
@@ -70,6 +73,8 @@ class EmbeddingModel(AIModel):
         self.dimensions = dimensions
         self.max_batch_size = max_batch_size
         self.litellm_model_name = litellm_model_name
+        self.input_cost_per_token = input_cost_per_token
+        self.output_cost_per_token = output_cost_per_token
         self.tenant_id = tenant_id
         self.provider_id = provider_id
         self.provider_name = provider_name
@@ -118,6 +123,8 @@ class EmbeddingModel(AIModel):
                 db_security_classification=db_model.security_classification
             ),
             litellm_model_name=db_model.litellm_model_name,
+            input_cost_per_token=db_model.input_cost_per_token,
+            output_cost_per_token=db_model.output_cost_per_token,
             tenant_id=db_model.tenant_id,
             provider_id=db_model.provider_id,
             provider_name=provider_name,

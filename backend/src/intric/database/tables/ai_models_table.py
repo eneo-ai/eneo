@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -7,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Numeric,
     UniqueConstraint,
     func,
 )
@@ -46,6 +48,15 @@ class CompletionModels(BasePublic):
         JSONB, nullable=True
     )
 
+    # Indicative USD ratecard. NULL = unknown / not applicable. Stored at high
+    # precision because frontier-model prices live in the 1e-7 USD/token range.
+    input_cost_per_token: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 12), nullable=True
+    )
+    output_cost_per_token: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 12), nullable=True
+    )
+
     # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
     tenant_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=True, index=True
@@ -71,7 +82,13 @@ class CompletionModels(BasePublic):
         nullable=True,
         index=True,
     )
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True, index=True)
+    # Stored as TIMESTAMPTZ in Postgres; the column was created via TIMESTAMPTZ
+    # but the SQLAlchemy mapping forgot `timezone=True`, which generated
+    # `::TIMESTAMP WITHOUT TIME ZONE` casts on UPDATE and crashed asyncpg
+    # whenever a tz-aware UTC datetime was assigned (the soft-delete path).
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -93,6 +110,11 @@ class TranscriptionModels(BasePublic):
     description: Mapped[Optional[str]] = mapped_column()
     org: Mapped[Optional[str]] = mapped_column()
     base_url: Mapped[str] = mapped_column()
+
+    # USD per minute of audio processed. NULL = unknown / self-hosted.
+    cost_per_minute: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 6), nullable=True
+    )
 
     # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
     tenant_id: Mapped[Optional[UUID]] = mapped_column(
@@ -136,6 +158,15 @@ class EmbeddingModels(BasePublic):
     description: Mapped[Optional[str]] = mapped_column()
     org: Mapped[Optional[str]] = mapped_column()
     litellm_model_name: Mapped[Optional[str]] = mapped_column()
+
+    # Indicative USD ratecard. Output cost is almost always zero for embeddings
+    # but kept for shape parity with completion models.
+    input_cost_per_token: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 12), nullable=True
+    )
+    output_cost_per_token: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 12), nullable=True
+    )
 
     # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
     tenant_id: Mapped[Optional[UUID]] = mapped_column(

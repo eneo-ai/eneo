@@ -54,6 +54,12 @@ class ModelCostInfo(TypedDict, total=False):
     supports_vision: bool
     supports_function_calling: bool
     supports_reasoning: bool
+    # Cost fields. Token-based for chat/completion/embedding; per-second for
+    # most audio_transcription entries (Whisper et al.).
+    input_cost_per_token: float | None
+    output_cost_per_token: float | None
+    input_cost_per_second: float | None
+    output_cost_per_second: float | None
 
 
 class ModelCapabilityBase(TypedDict):
@@ -67,6 +73,13 @@ class ModelCapability(ModelCapabilityBase, total=False):
     supports_vision: bool
     supports_function_calling: bool
     supports_reasoning: bool
+    # Indicative pricing — surfaced so that picking a suggestion in the wizard
+    # populates the cost fields without a second `/model-defaults/` round-trip.
+    # Token-priced for completion + embedding; per-minute for transcription
+    # (derived from LiteLLM's per-second value × 60).
+    input_cost_per_token: float | None
+    output_cost_per_token: float | None
+    cost_per_minute: float | None
 
 
 class ProviderCapabilities(TypedDict):
@@ -211,9 +224,20 @@ async def get_provider_capabilities(
                     "supports_function_calling", False
                 )
                 model_info["supports_reasoning"] = info.get("supports_reasoning", False)
+                model_info["input_cost_per_token"] = info.get("input_cost_per_token")
+                model_info["output_cost_per_token"] = info.get("output_cost_per_token")
             elif mode == "embedding":
                 model_info["max_input_tokens"] = info.get("max_input_tokens")
                 model_info["output_vector_size"] = info.get("output_vector_size")
+                model_info["input_cost_per_token"] = info.get("input_cost_per_token")
+                model_info["output_cost_per_token"] = info.get("output_cost_per_token")
+            elif mode == "transcription":
+                # LiteLLM stores transcription rates per-second on most entries
+                # (Whisper, Deepgram). Expose per-minute so the form shows a
+                # human-readable number directly.
+                input_per_second = info.get("input_cost_per_second")
+                if isinstance(input_per_second, (int, float)):
+                    model_info["cost_per_minute"] = input_per_second * 60
             raw[provider][mode][model_key] = model_info
 
     # Build response sorted by release date (newest first)
@@ -304,6 +328,16 @@ async def get_model_defaults(
     if info is None:
         return {"found": False}
 
+    # Cost fields differ by mode. Frontend asks for both shapes; we surface
+    # whichever the model actually has so the wizard/edit dialog can write the
+    # right column. cost_per_minute is derived from per-second when present.
+    input_cost_per_token = info.get("input_cost_per_token")
+    output_cost_per_token = info.get("output_cost_per_token")
+    input_per_second = info.get("input_cost_per_second")
+    cost_per_minute = (
+        input_per_second * 60 if isinstance(input_per_second, (int, float)) else None
+    )
+
     return {
         "found": True,
         "max_input_tokens": info.get("max_input_tokens"),
@@ -311,6 +345,9 @@ async def get_model_defaults(
         "supports_vision": info.get("supports_vision", False),
         "supports_function_calling": info.get("supports_function_calling", False),
         "supports_reasoning": info.get("supports_reasoning", False),
+        "input_cost_per_token": input_cost_per_token,
+        "output_cost_per_token": output_cost_per_token,
+        "cost_per_minute": cost_per_minute,
     }
 
 

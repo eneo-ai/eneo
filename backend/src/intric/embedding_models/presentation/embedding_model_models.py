@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -24,6 +25,8 @@ class EmbeddingModelPublic(BaseResponse):
     description: Optional[str] = None
     org: Optional[str] = None
     litellm_model_name: Optional[str] = None
+    input_cost_per_token: Optional[Decimal] = None
+    output_cost_per_token: Optional[Decimal] = None
     can_access: bool = False
     is_locked: bool = True
     lock_reason: Optional[str] = None
@@ -73,6 +76,8 @@ class EmbeddingModelPublic(BaseResponse):
             description=model.description,
             org=model.org,
             litellm_model_name=model.litellm_model_name,
+            input_cost_per_token=getattr(model, "input_cost_per_token", None),
+            output_cost_per_token=getattr(model, "output_cost_per_token", None),
             dimensions=model.dimensions,
             can_access=model.can_access,
             is_locked=model.is_locked,

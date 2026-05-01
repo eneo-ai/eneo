@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union, cast
 from uuid import UUID
@@ -120,6 +121,9 @@ class CompletionModelBase(BaseModel):
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
     model_kwargs_capabilities: Optional[SupportedModelKwargs] = None
+    # Indicative USD ratecard. NULL = unknown / self-hosted.
+    input_cost_per_token: Optional[Decimal] = None
+    output_cost_per_token: Optional[Decimal] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -246,6 +250,12 @@ class CompletionModelPublic(CompletionModel):
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
             model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
+            input_cost_per_token=getattr(
+                completion_model, "input_cost_per_token", None
+            ),
+            output_cost_per_token=getattr(
+                completion_model, "output_cost_per_token", None
+            ),
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
             can_access=completion_model.can_access,
@@ -261,7 +271,9 @@ class CompletionModelPublic(CompletionModel):
             provider_name=completion_model.provider_name,
             provider_type=completion_model.provider_type,
             deprecation_date=dep_date,
-            migrated_to_model_id=getattr(completion_model, "migrated_to_model_id", None),
+            migrated_to_model_id=getattr(
+                completion_model, "migrated_to_model_id", None
+            ),
         )
 
 
