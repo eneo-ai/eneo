@@ -1,12 +1,12 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { Plus, Cpu, Sparkles } from "lucide-svelte";
   import { fly, fade } from "svelte/transition";
 
-  export let onAddProvider: () => void;
+  let { onAddProvider }: { onAddProvider: () => void } = $props();
 </script>
 
 <div class="flex flex-col items-center justify-center px-8 py-20" in:fade={{ duration: 300 }}>
@@ -45,8 +45,8 @@
 
   <!-- CTA Button -->
   <div class="mt-8" in:fly={{ y: 10, duration: 400, delay: 300 }}>
-    <Button variant="primary" on:click={onAddProvider} class="gap-2.5 px-6">
-      <Plus class="-ml-0.5 h-4 w-4" />
+    <Button onclick={onAddProvider} class="px-6">
+      <Plus />
       {m.add_first_provider()}
     </Button>
   </div>

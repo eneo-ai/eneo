@@ -193,16 +193,21 @@ class CompletionModelUsageService:
         """Count total entities of a type using a model (for accurate pagination totals)."""
         from sqlalchemy import func as sa_func
 
-        from intric.completion_models.constants import ENTITY_TABLE_MAP
+        from intric.completion_models.constants import get_entity_table
 
-        if entity_type not in ENTITY_TABLE_MAP:
+        table = get_entity_table(entity_type)
+        if table is None:
             return 0
 
-        table = ENTITY_TABLE_MAP[entity_type]
         stmt = (
             select(sa_func.count())
             .select_from(table)
-            .where(table.completion_model_id == model_id)
+            .where(
+                and_(
+                    table.completion_model_id == model_id,
+                    self._build_tenant_filter_condition(table, entity_type, tenant_id),
+                )
+            )
         )
         result = await self.session.execute(stmt)
         return result.scalar_one()
@@ -276,6 +281,10 @@ class CompletionModelUsageService:
         self, table: Any, entity_type: str, tenant_id: UUID
     ) -> ColumnElement[bool]:
         """Build appropriate tenant filtering condition based on entity type."""
+        from intric.completion_models.constants import singular_entity_type
+
+        entity_type = singular_entity_type(entity_type)
+
         if entity_type in {"app", "question"}:
             # Direct tenant_id field
             return table.tenant_id == tenant_id

@@ -95,6 +95,7 @@
       ? labelFor(availableTargets.find((mod) => mod.id === targetModelId)!)
       : ""
   );
+  const sourceAlreadyMigrated = $derived(!!sourceModel.migrated_to_model_id);
 
   // --- Validation -------------------------------------------------------
   let compatWarnings = $state<string[]>([]);
@@ -115,6 +116,7 @@
       !hasSecurityBlocker &&
       !isValidating &&
       !validationError &&
+      !sourceAlreadyMigrated &&
       (!hasWarnings || acknowledged || !hasResourceImpact)
   );
 
@@ -122,7 +124,7 @@
   let validatingForTarget = "";
 
   $effect(() => {
-    if (!targetModelId) {
+    if (!targetModelId || sourceAlreadyMigrated) {
       compatWarnings = [];
       hasSecurityBlocker = false;
       validationError = false;
@@ -176,6 +178,7 @@
     impactDetails = [];
     spacesCount = 0;
     targetModelId = "";
+    if (sourceAlreadyMigrated) return;
     untrack(() => void loadImpact());
   });
 
@@ -277,13 +280,22 @@
           })}
         </p>
 
+        {#if sourceAlreadyMigrated}
+          <div
+            class="border-negative-default bg-negative-dimmer/50 text-negative-stronger rounded-r-md border-l-2 px-4 py-3 text-sm"
+            role="alert"
+          >
+            {m.model_tooltip_migrated()}
+          </div>
+        {/if}
+
         <!-- 1. Impact preview -->
-        {#if isLoadingImpact}
+        {#if !sourceAlreadyMigrated && isLoadingImpact}
           <div class="text-muted-foreground flex items-center gap-2 py-3 text-sm">
             <Loader2 class="size-4 animate-spin" aria-hidden="true" />
             <span>{m.loading()}</span>
           </div>
-        {:else if impactTotal > 0}
+        {:else if !sourceAlreadyMigrated && impactTotal > 0}
           <div class="border-border overflow-hidden rounded-lg border">
             <div class="border-border bg-muted/30 flex items-center gap-4 border-b px-4 py-3">
               <span class="text-sm font-medium">
@@ -356,37 +368,39 @@
               {/if}
             </div>
           </div>
-        {:else}
+        {:else if !sourceAlreadyMigrated}
           <div class="border-border text-muted-foreground rounded-lg border px-4 py-3 text-sm">
             {m.migration_no_impact()}
           </div>
         {/if}
 
         <!-- 2. Target model selection -->
-        <Field.Field>
-          <Field.Label for="migrate-target">{m.migrate_model_target_label()}</Field.Label>
-          <Select.Root
-            type="single"
-            bind:value={targetModelId}
-            disabled={availableTargets.length === 0}
-          >
-            <Select.Trigger id="migrate-target" class="w-full">
-              <span data-slot="select-value">
-                {selectedTargetLabel || m.migrate_model_target_placeholder()}
-              </span>
-            </Select.Trigger>
-            <Select.Content>
-              {#each availableTargets as target (target.id)}
-                <Select.Item value={target.id} label={labelFor(target)}>
-                  {labelFor(target)}
-                </Select.Item>
-              {/each}
-            </Select.Content>
-          </Select.Root>
-          {#if availableTargets.length === 0}
-            <Field.Description>{m.migrate_model_no_targets()}</Field.Description>
-          {/if}
-        </Field.Field>
+        {#if !sourceAlreadyMigrated}
+          <Field.Field>
+            <Field.Label for="migrate-target">{m.migrate_model_target_label()}</Field.Label>
+            <Select.Root
+              type="single"
+              bind:value={targetModelId}
+              disabled={availableTargets.length === 0}
+            >
+              <Select.Trigger id="migrate-target" class="w-full">
+                <span data-slot="select-value">
+                  {selectedTargetLabel || m.migrate_model_target_placeholder()}
+                </span>
+              </Select.Trigger>
+              <Select.Content>
+                {#each availableTargets as target (target.id)}
+                  <Select.Item value={target.id} label={labelFor(target)}>
+                    {labelFor(target)}
+                  </Select.Item>
+                {/each}
+              </Select.Content>
+            </Select.Root>
+            {#if availableTargets.length === 0}
+              <Field.Description>{m.migrate_model_no_targets()}</Field.Description>
+            {/if}
+          </Field.Field>
+        {/if}
 
         <!-- 3. Validation results -->
         {#if isValidating}

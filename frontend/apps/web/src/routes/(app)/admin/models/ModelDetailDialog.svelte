@@ -47,6 +47,9 @@
   const deprecation = $derived(
     getDeprecationStatus("deprecation_date" in model ? model : { deprecation_date: null })
   );
+  const isMigratedCompletionModel = $derived(
+    type === "completionModel" && "migrated_to_model_id" in model && !!model.migrated_to_model_id
+  );
 
   function openEdit() {
     dialogOpen = false;
@@ -75,7 +78,7 @@
             <TriangleAlert size={20} class="flex-shrink-0" aria-hidden="true" />
             <span>{m.model_tooltip_deprecated({ date: deprecation.date })}</span>
           </div>
-          {#if type === "completionModel"}
+          {#if type === "completionModel" && !isMigratedCompletionModel}
             <button
               type="button"
               class="border-negative-default/30 text-negative-stronger hover:bg-negative-dimmer inline-flex flex-shrink-0 items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors"
@@ -285,7 +288,7 @@
 
 <EditModelDialog {model} {type} openController={showEditDialog} />
 
-{#if type === "completionModel"}
+{#if type === "completionModel" && !isMigratedCompletionModel}
   <MigrateModelDialog
     openController={showMigrateDialog}
     sourceModel={model as CompletionModel}

@@ -14,6 +14,7 @@ from intric.completion_models.application.completion_model_usage_service import 
 from intric.completion_models.constants import (
     ENTITY_TABLE_MAP,
     MIGRATABLE_ENTITY_TYPES,
+    singular_entity_type,
 )
 from intric.completion_models.domain.completion_model_migration_history_repo import (
     CompletionModelMigrationHistoryRepo,
@@ -758,6 +759,8 @@ class CompletionModelMigrationService:
     ) -> ColumnElement[bool]:
         """Build appropriate tenant filtering condition based on entity type."""
         from intric.database.tables.users_table import Users
+
+        entity_type = singular_entity_type(entity_type)
 
         if entity_type in {"app", "question"}:
             # Direct tenant_id field

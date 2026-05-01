@@ -2043,6 +2043,8 @@
   "migration_history_status": "Status",
   "migration_history_duration": "Varaktighet",
   "migration_history_warnings": "Varningar",
+  "migration_history_expand": "Visa detaljer",
+  "migration_history_collapse": "Dölj detaljer",
   "migration_detail_assistants": "Assistenter",
   "migration_detail_apps": "Appar",
   "migration_detail_services": "Tjänster",

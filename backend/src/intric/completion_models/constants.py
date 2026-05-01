@@ -18,6 +18,35 @@ ENTITY_TABLE_MAP = {
     "app_templates": AppTemplates,
 }
 
+ENTITY_TYPE_ALIASES = {
+    "assistant": "assistants",
+    "app": "apps",
+    "service": "services",
+    "question": "questions",
+    "assistant_template": "assistant_templates",
+    "app_template": "app_templates",
+}
+
+
+def normalize_entity_type(entity_type: str) -> str:
+    """Return the canonical plural entity type used by ENTITY_TABLE_MAP."""
+    return ENTITY_TYPE_ALIASES.get(entity_type, entity_type)
+
+
+def singular_entity_type(entity_type: str) -> str:
+    """Return the singular form used in API detail payloads and tenant filters."""
+    canonical = normalize_entity_type(entity_type)
+    for singular, plural in ENTITY_TYPE_ALIASES.items():
+        if plural == canonical:
+            return singular
+    return canonical
+
+
+def get_entity_table(entity_type: str):
+    """Resolve an entity table from either singular or plural entity type."""
+    return ENTITY_TABLE_MAP.get(normalize_entity_type(entity_type))
+
+
 # List of all entity types that use completion models
 ENTITY_TYPES = list(ENTITY_TABLE_MAP.keys())
 

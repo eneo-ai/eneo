@@ -4,23 +4,27 @@
   import { invalidate } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
-  import { Input, Tooltip } from "@intric/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
+
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
 
   type LockableModel = (CompletionModel | EmbeddingModel | TranscriptionModel) & {
     is_locked?: boolean | null | undefined;
     lock_reason?: string | null | undefined;
   };
 
+  // Rendered via svelte-headless-table's `createRender`, which requires the
+  // legacy `export let` API. Keep this file on Svelte 4 component syntax.
   export let model: LockableModel;
-  export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
+  export let type: ModelTypeKey;
 
   const intric = getIntric();
 
   // The `intric.models.update` endpoint takes a discriminated union keyed by
-  // model type. Branching here lets TypeScript narrow correctly, replacing the
-  // old @ts-expect-error hack on a dynamic-key payload.
+  // model type. Branching here lets TypeScript narrow correctly.
   async function persistEnabledFlag(next: boolean) {
     const update = { is_org_enabled: next };
     if (type === "completionModel") {
@@ -32,11 +36,10 @@
     return intric.models.update({ transcriptionModel: { id: model.id }, update });
   }
 
-  async function toggleEnabled() {
+  async function handleCheckedChange(next: boolean) {
     try {
-      const updated = await persistEnabledFlag(!model.is_org_enabled);
-      // The narrow API return types differ per branch; we keep the local
-      // record in sync without re-narrowing — the table re-fetches anyway.
+      const updated = await persistEnabledFlag(next);
+      // Different return types per branch; the table re-fetches anyway.
       model = updated as LockableModel;
       invalidate("admin:models:load");
     } catch (e) {
@@ -44,6 +47,7 @@
     }
   }
 
+  $: modelLabel = "nickname" in model && model.nickname ? model.nickname : model.name;
   $: isMigrated = "migrated_to_model_id" in model && !!model.migrated_to_model_id;
   $: isDisabled = (model.is_locked ?? false) || isMigrated;
   $: tooltip = isMigrated
@@ -56,8 +60,21 @@
 </script>
 
 <div class="-ml-3 flex items-center gap-4">
-  <Tooltip text={tooltip}>
-    <Input.Switch sideEffect={toggleEnabled} value={model.is_org_enabled} disabled={isDisabled}
-    ></Input.Switch>
-  </Tooltip>
+  <Tooltip.Provider delayDuration={150}>
+    <Tooltip.Root>
+      <Tooltip.Trigger>
+        {#snippet child({ props })}
+          <span {...props}>
+            <Switch
+              checked={model.is_org_enabled}
+              onCheckedChange={handleCheckedChange}
+              disabled={isDisabled}
+              aria-label={`${modelLabel} — ${tooltip}`}
+            />
+          </span>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content>{tooltip}</Tooltip.Content>
+    </Tooltip.Root>
+  </Tooltip.Provider>
 </div>

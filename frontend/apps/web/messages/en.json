@@ -2007,6 +2007,8 @@
   "migration_history_status": "Status",
   "migration_history_duration": "Duration",
   "migration_history_warnings": "Warnings",
+  "migration_history_expand": "Show details",
+  "migration_history_collapse": "Hide details",
   "migration_detail_assistants": "Assistants",
   "migration_detail_apps": "Apps",
   "migration_detail_services": "Services",

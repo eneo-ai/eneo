@@ -1,13 +1,13 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { Plus, Layers } from "lucide-svelte";
   import { fade } from "svelte/transition";
 
-  export let providerId: string;
-  export let onAddModel: (providerId: string) => void;
+  let { providerId, onAddModel }: { providerId: string; onAddModel: (providerId: string) => void } =
+    $props();
 </script>
 
 <div
@@ -29,13 +29,8 @@
     </p>
   </div>
 
-  <Button
-    variant="outlined"
-    padding="icon-leading"
-    class="h-8 flex-shrink-0 text-xs"
-    on:click={() => onAddModel(providerId)}
-  >
-    <Plus class="h-3.5 w-3.5" />
+  <Button variant="outline" size="sm" class="flex-shrink-0" onclick={() => onAddModel(providerId)}>
+    <Plus />
     {m.add_model()}
   </Button>
 </div>

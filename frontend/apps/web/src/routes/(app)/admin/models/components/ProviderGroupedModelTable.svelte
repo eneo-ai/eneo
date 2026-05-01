@@ -20,7 +20,8 @@
     ModelProviderPublic,
     TranscriptionModel
   } from "@intric/intric-js";
-  import { Table, Button } from "@intric/ui";
+  import { Table } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { createRender } from "svelte-headless-table";
   import { writable } from "svelte/store";
   import { Plus, TriangleAlert, Clock } from "lucide-svelte";
@@ -58,7 +59,11 @@
   export let favoriteProviders: string[] = [];
   export let modelType: ModelTypeKey;
 
-  $: tenantModels = models.filter((model) => model.provider_id != null);
+  function isMigratedModel(model: M): boolean {
+    return "migrated_to_model_id" in model && !!model.migrated_to_model_id;
+  }
+
+  $: tenantModels = models.filter((model) => model.provider_id != null && !isMigratedModel(model));
   $: wizardModelType = wizardModelTypeFor[modelType];
   $: showDeprecationBanner = modelType === "completionModel";
 
@@ -186,28 +191,33 @@
   <PageEmptyState onAddProvider={openAddProvider} />
 {:else}
   <div class="flex flex-col gap-4">
-    {#if deprecatedCount > 0 || retiringCount > 0}
+    {#if deprecatedCount > 0}
       <div
-        class="mx-3 mt-3 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm {deprecatedCount >
-        0
-          ? 'border-negative-default/20 bg-negative-dimmer/30 text-negative-stronger'
-          : 'border-warning-default/20 bg-warning-dimmer/30 text-warning-stronger'}"
+        class="border-negative-default/20 bg-negative-dimmer/30 text-negative-stronger mx-3 mt-3 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm"
+        role="alert"
       >
-        {#if deprecatedCount > 0}
-          <TriangleAlert size={16} class="flex-shrink-0" />
-          <span>
-            {deprecatedCount === 1
-              ? m.models_deprecated_banner_one({ count: deprecatedCount })
-              : m.models_deprecated_banner_other({ count: deprecatedCount })}
-          </span>
-        {:else}
-          <Clock size={16} class="flex-shrink-0" />
-          <span>
-            {retiringCount === 1
-              ? m.models_retiring_banner_one({ count: retiringCount })
-              : m.models_retiring_banner_other({ count: retiringCount })}
-          </span>
-        {/if}
+        <TriangleAlert size={16} class="flex-shrink-0" aria-hidden="true" />
+        <span>
+          {deprecatedCount === 1
+            ? m.models_deprecated_banner_one({ count: deprecatedCount })
+            : m.models_deprecated_banner_other({ count: deprecatedCount })}
+        </span>
+      </div>
+    {/if}
+    {#if retiringCount > 0}
+      <div
+        class="border-warning-default/20 bg-warning-dimmer/30 text-warning-stronger mx-3 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm {deprecatedCount >
+        0
+          ? ''
+          : 'mt-3'}"
+        role="alert"
+      >
+        <Clock size={16} class="flex-shrink-0" aria-hidden="true" />
+        <span>
+          {retiringCount === 1
+            ? m.models_retiring_banner_one({ count: retiringCount })
+            : m.models_retiring_banner_other({ count: retiringCount })}
+        </span>
       </div>
     {/if}
 
@@ -289,8 +299,8 @@
     </Table.Root>
 
     <div class="border-dimmer mt-4 flex justify-center border-t pt-8 pb-6">
-      <Button variant="outlined" on:click={openAddProvider}>
-        <Plus class="mr-2 h-4 w-4" />
+      <Button variant="outline" onclick={openAddProvider}>
+        <Plus />
         {m.add_provider()}
       </Button>
     </div>

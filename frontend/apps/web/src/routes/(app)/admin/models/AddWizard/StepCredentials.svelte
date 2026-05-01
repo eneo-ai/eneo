@@ -123,7 +123,7 @@
 </script>
 
 <div class="flex flex-col gap-6">
-  <div class="bg-muted/40 flex items-center gap-4 rounded-lg p-4">
+  <div class="border-border flex items-center gap-4 rounded-lg border p-4">
     <ProviderGlyph {providerType} size="lg" />
     <div>
       <h3 class="text-foreground font-medium">{formatProviderLabel(providerType)}</h3>
@@ -140,10 +140,7 @@
     </div>
   {/if}
 
-  <form
-    onsubmit={handleFormSubmit}
-    class="border-border bg-muted/20 flex flex-col gap-4 rounded-lg border p-4"
-  >
+  <form onsubmit={handleFormSubmit} class="flex flex-col gap-4">
     <Field.Field>
       <Field.Label for="cred-provider-name">{m.provider_name()}</Field.Label>
       <Input

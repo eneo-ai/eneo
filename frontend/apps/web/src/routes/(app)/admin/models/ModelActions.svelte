@@ -7,15 +7,21 @@
     type EmbeddingModel,
     type TranscriptionModel
   } from "@intric/intric-js";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { Button as LegacyButton, Dropdown } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
   import { invalidate } from "$app/navigation";
   import { writable } from "svelte/store";
-  import { Pencil, Trash2, AlertTriangle, Loader2, ArrowRight } from "lucide-svelte";
+  import {
+    Pencil,
+    Trash2,
+    AlertTriangle,
+    Loader2,
+    ArrowRight,
+    MoreHorizontal
+  } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors";
 
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
 
@@ -26,11 +32,14 @@
    *  Mirrors `ErrorCodes.MODEL_IN_USE` in `backend/src/intric/main/exceptions.py`. */
   const MODEL_IN_USE_CODE = 9039;
 
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel;
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
+
   // svelte-headless-table's `createRender` expects a class-based component,
-  // so we keep this file on the legacy `export let` API. The shadcn dialog
-  // below works just fine inside a non-runes parent.
-  export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
-  export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
+  // so we keep this file on the legacy `export let` API. Shadcn primitives
+  // below work just fine inside a non-runes parent.
+  export let model: AnyModel;
+  export let type: ModelTypeKey;
   export let completionModels: CompletionModel[] = [];
 
   const intric = getIntric();
@@ -48,6 +57,8 @@
 
   $: completionModelTargets = type === "completionModel" ? completionModels : [];
   $: modelLabel = "nickname" in model && model.nickname ? model.nickname : model.name;
+  $: isMigratedCompletionModel =
+    type === "completionModel" && "migrated_to_model_id" in model && !!model.migrated_to_model_id;
 
   function openDelete() {
     deleteError = null;
@@ -74,50 +85,52 @@
     } catch (e: unknown) {
       deleteError = getErrorMessage(e);
       showMigrateOption =
-        type === "completionModel" && e instanceof IntricError && e.code === MODEL_IN_USE_CODE;
+        type === "completionModel" &&
+        !isMigratedCompletionModel &&
+        e instanceof IntricError &&
+        e.code === MODEL_IN_USE_CODE;
     } finally {
       isDeleting = false;
     }
   }
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger let:trigger asFragment>
-    <LegacyButton variant="on-fill" is={trigger} disabled={false} padding="icon">
-      <IconEllipsis />
-    </LegacyButton>
-  </Dropdown.Trigger>
-  <Dropdown.Menu let:item>
-    <LegacyButton
-      is={item}
-      padding="icon-leading"
-      on:click={() => {
-        $showEditDialog = true;
-      }}
-    >
-      <Pencil class="h-4 w-4" />{m.edit_model()}
-    </LegacyButton>
-    {#if type === "completionModel"}
-      <LegacyButton
-        is={item}
-        padding="icon-leading"
-        on:click={() => {
-          $showMigrateDialog = true;
-        }}
-      >
-        <ArrowRight class="h-4 w-4" />{m.migrate_model_usage()}
-      </LegacyButton>
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+        <MoreHorizontal />
+      </Button>
+    {/snippet}
+  </DropdownMenu.Trigger>
+
+  <DropdownMenu.Content align="end">
+    <DropdownMenu.Item onclick={() => showEditDialog.set(true)}>
+      <Pencil />
+      {m.edit_model()}
+    </DropdownMenu.Item>
+
+    {#if type === "completionModel" && !isMigratedCompletionModel}
+      <DropdownMenu.Item onclick={() => showMigrateDialog.set(true)}>
+        <ArrowRight />
+        {m.migrate_model_usage()}
+      </DropdownMenu.Item>
     {/if}
-    <LegacyButton is={item} padding="icon-leading" variant="destructive" on:click={openDelete}>
-      <Trash2 class="h-4 w-4" />
+
+    <DropdownMenu.Separator />
+
+    <DropdownMenu.Item variant="destructive" onclick={openDelete}>
+      <Trash2 />
       {m.delete_model()}
-    </LegacyButton>
-  </Dropdown.Menu>
-</Dropdown.Root>
+    </DropdownMenu.Item>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
 
 <EditModelDialog {model} {type} openController={showEditDialog} />
 
-<!-- Delete confirm — shadcn -->
+<!-- Delete confirm. We use Dialog (not AlertDialog) here because the dialog
+     surface needs to remain interactive when the delete-error appears with a
+     "migrate instead" call to action that opens another dialog. -->
 <Dialog.Root bind:open={deleteOpen}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
@@ -183,7 +196,7 @@
   </Dialog.Content>
 </Dialog.Root>
 
-{#if type === "completionModel"}
+{#if type === "completionModel" && !isMigratedCompletionModel}
   <MigrateModelDialog
     openController={showMigrateDialog}
     sourceModel={model as CompletionModel}
