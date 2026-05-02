@@ -116,9 +116,7 @@ def FlowVersion(
             schema_version_provided = "schema_version" in definition_json
             steps = definition_json["steps"]
             if not schema_version_provided:
-                steps = [
-                    _definition_step_with_default_snapshot(step) for step in steps
-                ]
+                steps = [_definition_step_with_default_snapshot(step) for step in steps]
             definition_json = {
                 "schema_version": definition_json.get(
                     "schema_version", FLOW_DEFINITION_SCHEMA_VERSION
@@ -611,11 +609,15 @@ async def test_webhook_success_persists_delivery_and_completes_run(user):
     assert "webhook_error" not in second_saved.output_payload_json
     executor.flow_run_terminalizer.terminalize_run.assert_awaited()
     assert (
-        executor.flow_run_terminalizer.terminalize_run.await_args_list[-1].kwargs["target_status"]
+        executor.flow_run_terminalizer.terminalize_run.await_args_list[-1].kwargs[
+            "target_status"
+        ]
         == FlowRunStatus.COMPLETED
     )
     assert (
-        executor.flow_run_terminalizer.terminalize_run.await_args_list[-1].kwargs["output_payload_json"]
+        executor.flow_run_terminalizer.terminalize_run.await_args_list[-1].kwargs[
+            "output_payload_json"
+        ]
         == second_saved.output_payload_json
     )
 
@@ -1184,7 +1186,10 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.error_message == "Flow step 1 execution failed."
     assert (
-        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["target_status"] == FlowRunStatus.FAILED
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+            "target_status"
+        ]
+        == FlowRunStatus.FAILED
     )
 
 
@@ -1397,7 +1402,7 @@ async def test_execute_marks_run_completed_with_last_completed_output_payload(us
     ).model_copy(
         update={
             "status": FlowStepResultStatus.COMPLETED,
-            "output_payload_json": {"text": "final", "generated_file_ids": []},
+            "output_payload_json": {"text": "final"},
         },
         deep=True,
     )
@@ -1442,7 +1447,7 @@ async def test_execute_marks_run_completed_with_last_completed_output_payload(us
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
     assert kwargs["target_status"] == FlowRunStatus.COMPLETED
-    assert kwargs["output_payload_json"] == {"text": "final", "generated_file_ids": []}
+    assert kwargs["output_payload_json"] == {"text": "final"}
 
 
 @pytest.mark.asyncio
@@ -1509,7 +1514,9 @@ async def test_execute_returns_cancelled_when_any_step_result_cancelled(user):
     assert result == {"status": "cancelled"}
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
-        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["target_status"]
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+            "target_status"
+        ]
         == FlowRunStatus.CANCELLED
     )
 
@@ -1593,7 +1600,7 @@ async def test_execute_uses_retry_count_plus_one_for_attempt_lifecycle(user):
     completed = claimed.model_copy(
         update={
             "status": FlowStepResultStatus.COMPLETED,
-            "output_payload_json": {"text": "done", "generated_file_ids": []},
+            "output_payload_json": {"text": "done"},
         },
         deep=True,
     )
@@ -1839,7 +1846,7 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
     ).model_copy(
         update={
             "status": FlowStepResultStatus.COMPLETED,
-            "output_payload_json": {"text": "from-step-1", "generated_file_ids": []},
+            "output_payload_json": {"text": "from-step-1"},
         },
         deep=True,
     )
@@ -1854,7 +1861,7 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
         update={
             "step_order": 2,
             "status": FlowStepResultStatus.COMPLETED,
-            "output_payload_json": {"text": "from-step-2", "generated_file_ids": []},
+            "output_payload_json": {"text": "from-step-2"},
         },
         deep=True,
     )
@@ -2284,7 +2291,10 @@ async def test_execute_fails_run_when_claimed_step_result_missing(user):
     assert result == {"status": "failed", "error": "step_missing"}
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
-        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["target_status"] == FlowRunStatus.FAILED
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+            "target_status"
+        ]
+        == FlowRunStatus.FAILED
     )
 
 
@@ -2328,7 +2338,10 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
     assert result == {"status": "failed", "error": "invalid_flow_definition"}
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
-        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["target_status"] == FlowRunStatus.FAILED
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+            "target_status"
+        ]
+        == FlowRunStatus.FAILED
     )
 
 
@@ -3093,7 +3106,7 @@ async def test_prior_results_bootstrap_once(user):
     completed_1 = claimed_1.model_copy(
         update={
             "status": FlowStepResultStatus.COMPLETED,
-            "output_payload_json": {"text": "out1", "generated_file_ids": []},
+            "output_payload_json": {"text": "out1"},
         },
         deep=True,
     )
@@ -3101,7 +3114,7 @@ async def test_prior_results_bootstrap_once(user):
         update={
             "step_order": 2,
             "status": FlowStepResultStatus.COMPLETED,
-            "output_payload_json": {"text": "out2", "generated_file_ids": []},
+            "output_payload_json": {"text": "out2"},
         },
         deep=True,
     )
@@ -3234,7 +3247,10 @@ async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
     flow_run_repo.claim_step_result.assert_not_awaited()
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
-        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["target_status"] == FlowRunStatus.FAILED
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+            "target_status"
+        ]
+        == FlowRunStatus.FAILED
     )
 
 
@@ -3529,7 +3545,7 @@ async def test_execute_audits_completed_run_terminal_state(user):
     completed_result = claimed.model_copy(
         update={
             "status": FlowStepResultStatus.COMPLETED,
-            "output_payload_json": {"text": "done", "generated_file_ids": []},
+            "output_payload_json": {"text": "done"},
         },
         deep=True,
     )

@@ -549,6 +549,33 @@ class FlowRunRepository:
             for result_file_row, file_row in rows
         ]
 
+    async def list_result_files_for_runs(
+        self,
+        *,
+        run_ids: Sequence[UUID],
+        tenant_id: UUID,
+    ) -> list[FlowRunStepResultFile]:
+        unique_run_ids = list(dict.fromkeys(run_ids))
+        if not unique_run_ids:
+            return []
+        stmt = (
+            sa.select(FlowRunStepResultFiles, Files)
+            .join(Files, Files.id == FlowRunStepResultFiles.file_id)
+            .where(FlowRunStepResultFiles.flow_run_id.in_(unique_run_ids))
+            .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+            .order_by(
+                FlowRunStepResultFiles.flow_run_id.asc(),
+                FlowRunStepResultFiles.step_order.asc(),
+                FlowRunStepResultFiles.attempt_no.asc(),
+                FlowRunStepResultFiles.ordinal.asc(),
+            )
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            _result_file_from_rows(result_file_row, file_row)
+            for result_file_row, file_row in rows
+        ]
+
     async def get_result_file(
         self,
         *,

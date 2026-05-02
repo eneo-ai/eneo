@@ -274,13 +274,10 @@ def is_json_mode_rejection(exc: Exception) -> bool:
 def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "text": output.persisted_text,
-        "generated_file_ids": [str(file_id) for file_id in output.generated_file_ids],
         "webhook_delivered": False,
     }
     if output.structured_output is not None:
         payload["structured"] = output.structured_output
-    if output.artifacts:
-        payload["artifacts"] = output.artifacts
     if output.output_payload_extensions:
         payload.update(output.output_payload_extensions)
     return payload

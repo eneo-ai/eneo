@@ -21,6 +21,7 @@ from intric.flows import (
 )
 from intric.flows.domain.flow import FlowStepResult
 from intric.flows.flow import FlowStepResultStatus
+from intric.flows.flow_run_step_result_file import FlowStepResultFileReference
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 
@@ -330,10 +331,6 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
             effective_prompt="prompt",
             output_payload_json={
                 "text": "output",
-                "generated_file_ids": [str(generated_file_id), str(artifact_file_id)],
-                "artifacts": [
-                    {"file_id": str(artifact_file_id), "kind": "pdf"},
-                ],
             },
             model_parameters_json={},
             num_tokens_input=1,
@@ -350,12 +347,21 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
             result,
             tenant_id=admin_user.tenant_id,
             attempt_no=3,
+            result_file_references=[
+                FlowStepResultFileReference(
+                    file_id=artifact_file_id,
+                    source="declared_artifact",
+                ),
+                FlowStepResultFileReference(
+                    file_id=generated_file_id,
+                    source="generated_output",
+                ),
+            ],
         )
         retry_result = result.model_copy(
             update={
                 "output_payload_json": {
                     "text": "retry output",
-                    "generated_file_ids": [str(purged_file_id)],
                 },
             }
         )
@@ -364,6 +370,12 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
             retry_result,
             tenant_id=admin_user.tenant_id,
             attempt_no=4,
+            result_file_references=[
+                FlowStepResultFileReference(
+                    file_id=purged_file_id,
+                    source="generated_output",
+                )
+            ],
         )
         await session.flush()
 
@@ -386,6 +398,10 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
         ]
         listed_files = await run_repo.list_result_files(
             run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+        )
+        listed_files_for_runs = await run_repo.list_result_files_for_runs(
+            run_ids=[run.id, run.id],
             tenant_id=admin_user.tenant_id,
         )
         artifact_projection = await run_repo.get_result_file(
@@ -417,6 +433,9 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
         result_rows[0][0],
         result_rows[1][0],
         purged_file_id,
+    ]
+    assert [item.file_id for item in listed_files_for_runs] == [
+        item.file_id for item in listed_files
     ]
     assert artifact_projection is not None
     assert artifact_projection.availability == "available"

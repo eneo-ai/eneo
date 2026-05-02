@@ -1,9 +1,8 @@
 <script lang="ts">
-  import type { FlowRunStep, Intric } from "@intric/intric-js";
+  import type { FlowRunResultFile, FlowRunStep, Intric } from "@intric/intric-js";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { IconCopy } from "@intric/icons/copy";
   import { IconCheck } from "@intric/icons/check";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { Markdown } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -11,6 +10,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import FlowRunKnowledgeTrace from "./FlowRunKnowledgeTrace.svelte";
+  import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import type {
     RuntimeInputSummary,
@@ -30,6 +30,7 @@
 
   let {
     result,
+    resultFiles = [],
     stepDef,
     duration,
     transcription,
@@ -51,6 +52,7 @@
     getCacheStatusLabel
   }: {
     result: FlowRunStep;
+    resultFiles?: FlowRunResultFile[];
     stepDef: Record<string, unknown> | undefined;
     duration: string | null;
     transcription: FlowRunTranscriptionTelemetry | null;
@@ -77,6 +79,7 @@
   } = $props();
 
   let inputOpen = $state(false);
+  const hasResultFiles = $derived(resultFiles.length > 0);
 </script>
 
 <Card.Root class="overflow-hidden">
@@ -169,34 +172,22 @@
               </div>
             {/if}
 
-            {#if result.output_payload_json.artifacts?.length}
+            {#if hasResultFiles}
               <div class="mt-2">
                 <h4 class="text-muted text-xs font-semibold">{m.flow_run_files()}</h4>
                 <div class="mt-1.5 flex flex-wrap gap-2">
-                  {#each result.output_payload_json.artifacts as artifact (artifact.file_id)}
-                    {@const ext = artifact.name?.includes(".")
-                      ? artifact.name.split(".").pop()?.toLowerCase()
-                      : ""}
-                    <button
-                      class="group border-default bg-primary hover:border-stronger hover:bg-hover-dimmer focus-visible:ring-accent-default/30 inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                      onclick={() => void onDownloadArtifact(artifact.file_id)}
-                    >
-                      <IconArrowDownToLine class="text-muted group-hover:text-secondary size-4" />
-                      <span>{artifact.name}</span>
-                      {#if ext}
-                        <Badge class="bg-accent-dimmer text-accent-stronger">{ext}</Badge>
-                      {/if}
-                    </button>
+                  {#each resultFiles as artifact (artifact.file_id)}
+                    <FlowRunResultFileButton file={artifact} onDownload={onDownloadArtifact} />
                   {/each}
                 </div>
               </div>
             {/if}
 
-            {#if result.output_payload_json.text && !result.output_payload_json.structured && !result.output_payload_json.artifacts?.length}
+            {#if result.output_payload_json.text && !result.output_payload_json.structured && !hasResultFiles}
               <div class="bg-hover-dimmer mt-1 max-h-96 overflow-auto rounded-lg p-4">
                 <Markdown source={result.output_payload_json.text} class="text-sm" />
               </div>
-            {:else if !result.output_payload_json.structured && !result.output_payload_json.artifacts?.length}
+            {:else if !result.output_payload_json.structured && !hasResultFiles}
               <pre
                 class="bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
                   result.output_payload_json,

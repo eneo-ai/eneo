@@ -2,7 +2,6 @@
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { IconCopy } from "@intric/icons/copy";
   import { IconCheck } from "@intric/icons/check";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { Markdown } from "@intric/ui";
   import { slide, fade } from "svelte/transition";
@@ -15,6 +14,7 @@
   import { m } from "$lib/paraglide/messages";
   import type { FlowRunProgressStep } from "./flowRunProgress";
   import { formatFlowRunStepDuration } from "./flowRunProgress";
+  import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
 
   let {
@@ -61,11 +61,11 @@
   const hasStructuredOutput = $derived(
     step.outputPayload?.structured !== undefined && step.outputPayload?.structured !== null
   );
-  const hasArtifacts = $derived((step.outputPayload?.artifacts?.length ?? 0) > 0);
+  const hasResultFiles = $derived(step.resultFiles.length > 0);
   const hasTextOutput = $derived(
     typeof step.outputPayload?.text === "string" && step.outputPayload.text.length > 0
   );
-  const hasOutput = $derived(hasStructuredOutput || hasArtifacts || hasTextOutput);
+  const hasOutput = $derived(hasStructuredOutput || hasResultFiles || hasTextOutput);
   const hasInput = $derived(step.inputPayload != null);
   const hasTokens = $derived(step.numTokensInput != null || step.numTokensOutput != null);
 </script>
@@ -177,31 +177,18 @@
               </div>
             {/if}
 
-            {#if hasArtifacts}
+            {#if hasResultFiles}
               <div class="mt-2">
                 <h4 class="text-muted text-xs font-semibold">{m.flow_run_files()}</h4>
                 <div class="mt-1.5 flex flex-wrap gap-2">
-                  {#each step.outputPayload?.artifacts ?? [] as artifact (artifact.file_id)}
-                    {@const ext = artifact.name?.includes(".")
-                      ? artifact.name.split(".").pop()?.toLowerCase()
-                      : ""}
-                    <button
-                      type="button"
-                      class="group border-default bg-primary hover:border-stronger hover:bg-hover-dimmer focus-visible:ring-accent-default/30 inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                      onclick={() => void onDownloadArtifact(artifact.file_id)}
-                    >
-                      <IconArrowDownToLine class="text-muted group-hover:text-secondary size-4" />
-                      <span>{artifact.name}</span>
-                      {#if ext}
-                        <Badge class="bg-accent-dimmer text-accent-stronger">{ext}</Badge>
-                      {/if}
-                    </button>
+                  {#each step.resultFiles as artifact (artifact.file_id)}
+                    <FlowRunResultFileButton file={artifact} onDownload={onDownloadArtifact} />
                   {/each}
                 </div>
               </div>
             {/if}
 
-            {#if hasTextOutput && !hasStructuredOutput && !hasArtifacts}
+            {#if hasTextOutput && !hasStructuredOutput && !hasResultFiles}
               <div class="bg-hover-dimmer mt-1 max-h-96 overflow-auto rounded-lg p-4">
                 <Markdown source={step.outputPayload?.text ?? ""} class="text-sm" />
               </div>

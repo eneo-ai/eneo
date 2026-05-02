@@ -1,5 +1,10 @@
 <script lang="ts">
-  import type { FlowRunEvidenceWithTypedSteps, FlowRunStep, Intric } from "@intric/intric-js";
+  import type {
+    FlowRunEvidenceWithTypedSteps,
+    FlowRunResultFile,
+    FlowRunStep,
+    Intric
+  } from "@intric/intric-js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { onMount } from "svelte";
   import { toast } from "$lib/components/toast";
@@ -60,6 +65,12 @@
   const mode = getFlowUserMode();
   let stepAttemptsByOrder: Record<number, Record<string, unknown>[]> = $derived.by(() =>
     groupStepAttemptsByOrder(evidence?.step_attempts ?? [])
+  );
+  let resultFilesByStepResultId: Record<string, FlowRunResultFile[]> = $derived.by(() =>
+    groupResultFilesByStepResultId(evidence?.result_files ?? [])
+  );
+  let resultFilesByStepOrder: Record<number, FlowRunResultFile[]> = $derived.by(() =>
+    groupResultFilesByStepOrder(evidence?.result_files ?? [])
   );
 
   onMount(async () => {
@@ -132,6 +143,13 @@
     return stepAttemptsByOrder[stepOrder] ?? [];
   }
 
+  function getStepResultFiles(result: FlowRunStep): FlowRunResultFile[] {
+    if (result.id && resultFilesByStepResultId[result.id]) {
+      return resultFilesByStepResultId[result.id];
+    }
+    return resultFilesByStepOrder[result.step_order] ?? [];
+  }
+
   function groupStepAttemptsByOrder(
     attempts: Record<string, unknown>[]
   ): Record<number, Record<string, unknown>[]> {
@@ -140,6 +158,28 @@
       const stepOrder = Number((attempt as { step_order?: unknown }).step_order ?? 0);
       grouped[stepOrder] ??= [];
       grouped[stepOrder].push(attempt);
+    }
+    return grouped;
+  }
+
+  function groupResultFilesByStepResultId(
+    resultFiles: FlowRunResultFile[]
+  ): Record<string, FlowRunResultFile[]> {
+    const grouped: Record<string, FlowRunResultFile[]> = {};
+    for (const resultFile of resultFiles) {
+      grouped[resultFile.step_result_id] ??= [];
+      grouped[resultFile.step_result_id].push(resultFile);
+    }
+    return grouped;
+  }
+
+  function groupResultFilesByStepOrder(
+    resultFiles: FlowRunResultFile[]
+  ): Record<number, FlowRunResultFile[]> {
+    const grouped: Record<number, FlowRunResultFile[]> = {};
+    for (const resultFile of resultFiles) {
+      grouped[resultFile.step_order] ??= [];
+      grouped[resultFile.step_order].push(resultFile);
     }
     return grouped;
   }
@@ -270,6 +310,7 @@
       ).find((step) => step.step_order === result.step_order)}
       <FlowRunEvidenceStepCard
         {result}
+        resultFiles={getStepResultFiles(result)}
         {stepDef}
         duration={getStepDuration(result.step_order)}
         transcription={getStepTranscription(result)}

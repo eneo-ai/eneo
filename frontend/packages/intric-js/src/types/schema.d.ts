@@ -12449,9 +12449,13 @@ export interface components {
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "artifact_availability_summary": {
-     *           "note": "Canonical file availability is not yet exposed; counts currently come from payload-derived artifact references.",
-     *           "payload_artifact_count": 1,
-     *           "tracking_state": "payload_derived"
+     *           "artifact_count": 0,
+     *           "artifacts": [],
+     *           "available_count": 0,
+     *           "content_purged_count": 0,
+     *           "note": "Artifact availability is derived from result-file rows joined to file metadata.",
+     *           "total_size_bytes": 0,
+     *           "tracking_state": "tracked"
      *         },
      *         "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
      *         "content_hash_input": "redacted",
@@ -12715,13 +12719,63 @@ export interface components {
      *     }
      */
     EvidenceArtifactAvailabilitySummary: {
-      /** Tracking State */
-      tracking_state: "payload_derived";
-      /** Payload Artifact Count */
-      payload_artifact_count: number;
+      /**
+       * Tracking State
+       * @constant
+       */
+      tracking_state: "tracked";
+      /** Artifact Count */
+      artifact_count: number;
+      /** Available Count */
+      available_count: number;
+      /** Content Purged Count */
+      content_purged_count: number;
+      /** Total Size Bytes */
+      total_size_bytes: number;
+      /** Artifacts */
+      artifacts: components["schemas"]["EvidenceArtifactManifestItem"][];
       /** Note */
       note: string;
-      [key: string]: unknown;
+    };
+    EvidenceArtifactManifestItem: {
+      /** Flow Run Id */
+      flow_run_id: string;
+      /** Flow Id */
+      flow_id: string;
+      /** Tenant Id */
+      tenant_id: string;
+      /** File Id */
+      file_id: string;
+      /** Step Id */
+      step_id: string;
+      /** Step Result Id */
+      step_result_id: string;
+      /** Step Order */
+      step_order: number;
+      /** Attempt No */
+      attempt_no: number;
+      /** Ordinal */
+      ordinal: number;
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: "generated_output" | "declared_artifact";
+      /** Name */
+      name: string;
+      /** Checksum */
+      checksum: string;
+      /** Size */
+      size: number;
+      /** Mimetype */
+      mimetype: string | null;
+      /** File Type */
+      file_type: string;
+      /**
+       * Availability
+       * @enum {string}
+       */
+      availability: "available" | "content_purged";
     };
     EvidenceExportManifest: {
       /** Schema Version */
@@ -12731,7 +12785,11 @@ export interface components {
       /** Provenance Schema Version Current */
       provenance_schema_version_current: string;
       /** Provenance Persisted Version Status */
-      provenance_persisted_version_status: "not_tracked" | "tracked" | "corrupt";
+      provenance_persisted_version_status:
+        | "not_tracked"
+        | "tracked"
+        | "corrupt"
+        | "retention_purged";
       /** Content Hash */
       content_hash: string;
       /** Content Hash Input */
@@ -12773,6 +12831,8 @@ export interface components {
       tombstone_count: number;
       /** Retention Purged Count */
       retention_purged_count: number;
+      /** Artifact Content Purged Count */
+      artifact_content_purged_count: number;
       /** Redacted For Deletion Count */
       redacted_for_deletion_count: number;
       /** Note */
@@ -12847,6 +12907,7 @@ export interface components {
      *       "definition_snapshot": {
      *         "steps": []
      *       },
+     *       "result_files": [],
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
      *         "flow_id": "00000000-0000-0000-0000-000000000001",
@@ -12856,6 +12917,7 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "result_files": [],
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -12888,6 +12950,7 @@ export interface components {
      *           "output_payload_json": {
      *             "text": "Hello and welcome to the annual review..."
      *           },
+     *           "result_files": [],
      *           "started_at": "2026-03-17T10:05:05Z",
      *           "status": "completed",
      *           "step_id": "00000000-0000-0000-0000-000000000101",
@@ -12907,6 +12970,8 @@ export interface components {
       step_results: components["schemas"]["FlowRunStepPublic"][];
       /** Step Attempts */
       step_attempts: components["schemas"]["FlowStepAttemptPublic"][];
+      /** Result Files */
+      result_files: components["schemas"]["FlowRunStepResultFile"][];
       debug_export: components["schemas"]["FlowRunDebugExport"];
     };
     /**
@@ -12920,6 +12985,7 @@ export interface components {
      *         "employee_name": "Alex Example"
      *       },
      *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "result_files": [],
      *       "status": "queued",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -12968,6 +13034,8 @@ export interface components {
       output_payload_json?: {
         [key: string]: unknown;
       } | null;
+      /** Result Files */
+      result_files?: components["schemas"]["FlowRunStepResultFile"][];
       /** Error Message */
       error_message?: string | null;
       /** Job Id */
@@ -12996,6 +13064,7 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "result_files": [],
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -13040,6 +13109,7 @@ export interface components {
      *       "output_payload_json": {
      *         "text": "Hello and welcome to the annual review..."
      *       },
+     *       "result_files": [],
      *       "started_at": "2026-03-17T10:05:05Z",
      *       "status": "completed",
      *       "step_id": "00000000-0000-0000-0000-000000000101",
@@ -13071,6 +13141,8 @@ export interface components {
       output_payload_json?: {
         [key: string]: unknown;
       } | null;
+      /** Result Files */
+      result_files?: components["schemas"]["FlowRunStepResultFile"][];
       /** Effective Prompt */
       effective_prompt?: string | null;
       /** Model Parameters Json */
@@ -13085,15 +13157,6 @@ export interface components {
       error_message?: string | null;
       /** Flow Step Execution Hash */
       flow_step_execution_hash?: string | null;
-      /** Tool Calls Metadata */
-      tool_calls_metadata?:
-        | {
-            [key: string]: unknown;
-          }[]
-        | {
-            [key: string]: unknown;
-          }
-        | null;
       /** Diagnostics */
       diagnostics?: {
         [key: string]: unknown;
@@ -13112,6 +13175,63 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    FlowRunStepResultFile: {
+      /**
+       * Flow Run Id
+       * Format: uuid
+       */
+      flow_run_id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Step Result Id
+       * Format: uuid
+       */
+      step_result_id: string;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
+      /** Attempt No */
+      attempt_no: number;
+      /**
+       * File Id
+       * Format: uuid
+       */
+      file_id: string;
+      /** Ordinal */
+      ordinal: number;
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: "generated_output" | "declared_artifact";
+      /** Name */
+      name: string;
+      /** Checksum */
+      checksum: string;
+      /** Size */
+      size: number;
+      /** Mimetype */
+      mimetype: string | null;
+      file_type: components["schemas"]["FileType"];
+      /**
+       * Availability
+       * @enum {string}
+       */
+      availability: "available" | "content_purged";
     };
     /** FlowRuntimeInputContractPublic */
     FlowRuntimeInputContractPublic: {

@@ -3265,6 +3265,27 @@ def _artifact_service(user, file_repo=None, result_file=None, run=None):
 
 
 @pytest.mark.asyncio
+async def test_list_result_files_for_runs_rejects_foreign_tenant_run(user):
+    flow_run_repo = AsyncMock()
+    service = FlowRunService(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=AsyncMock(),
+    )
+    foreign_run = _run(user=user, flow_id=uuid4()).model_copy(
+        update={"tenant_id": uuid4()}
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await service.list_result_files_for_runs(runs=[foreign_run])
+
+    assert exc_info.value.code == "flow_run_access_denied"
+    assert exc_info.value.context == {"auth_layer": "flow_run_argument"}
+    flow_run_repo.list_result_files_for_runs.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_get_run_artifact_file_uses_result_file_row(user):
     file_id = uuid4()
     run = _run(user=user, flow_id=uuid4())

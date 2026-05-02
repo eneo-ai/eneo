@@ -159,26 +159,15 @@ export type AIBuilderPlanResponse = components["schemas"]["PlanResponse"];
 export type AIBuilderApplyResult = components["schemas"]["ApplyResultResponse"];
 export type AIBuilderModel = components["schemas"]["SessionModelOption"];
 export type AIBuilderSessionTelemetrySummary = components["schemas"]["SessionTelemetrySummary"];
+export type FlowRunResultFile = components["schemas"]["FlowRunStepResultFile"];
 
-// UI envelope for generated output_payload_json: { [key: string]: unknown }.
-// Remove when backend exposes a typed Flow run output payload schema.
-export type FlowRunArtifact = {
-  file_id: string;
-  name: string;
-  mimetype: string;
-  size: number;
-};
-
-// UI-owned projection consumed by Flow run progress and evidence rendering.
-// Remove when backend exposes a typed Flow run output payload schema.
 export type FlowRunOutputPayload = {
   text?: string;
   structured?: Record<string, unknown> | unknown[];
-  artifacts?: FlowRunArtifact[];
-  generated_file_ids?: string[];
-  file_ids?: string[];
   webhook_delivered?: boolean;
   webhook_error?: string;
+  template_fill_debug?: Record<string, unknown>;
+  template_provenance?: Record<string, unknown>;
 };
 
 type WithTypedRunOutput<T extends { output_payload_json?: unknown }> = Omit<

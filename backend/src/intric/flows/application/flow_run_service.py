@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, Protocol, TypedDict, cast
+from typing import Any, Literal, Protocol, Sequence, TypedDict, cast
 from uuid import UUID
 
 from intric.files.file_repo import FileRepository
@@ -42,6 +43,7 @@ from intric.flows.flow_run_step_inputs import (
     serialize_step_inputs_payload,
     validate_submitted_step_inputs,
 )
+from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import (
     FlowRunRepository,
@@ -77,6 +79,12 @@ FlowRunAccessKind = Literal[
     "evidence_export_redacted",
     "evidence_export_raw",
 ]
+
+
+@dataclass(frozen=True)
+class FlowRunStepResultsWithFiles:
+    step_results: Sequence[FlowStepResult]
+    result_files: Sequence[FlowRunStepResultFile]
 
 
 class _SettingsServiceProtocol(Protocol):
@@ -642,6 +650,41 @@ class FlowRunService:
         return await self.flow_run_repo.list_step_results(
             run_id=run.id,
             tenant_id=self.user.tenant_id,
+        )
+
+    async def list_result_files_for_runs(
+        self, *, runs: Sequence[FlowRun]
+    ) -> list[FlowRunStepResultFile]:
+        if not runs:
+            return []
+        run_ids: list[UUID] = []
+        for run in runs:
+            if run.tenant_id != self.user.tenant_id:
+                self._raise_run_access_denied(auth_layer="flow_run_argument")
+            run_ids.append(run.id)
+        return await self.flow_run_repo.list_result_files_for_runs(
+            run_ids=run_ids,
+            tenant_id=self.user.tenant_id,
+        )
+
+    async def list_step_results_with_files(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID | None = None,
+    ) -> FlowRunStepResultsWithFiles:
+        run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
+        step_results = await self.flow_run_repo.list_step_results(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+        )
+        result_files = await self.flow_run_repo.list_result_files(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+        )
+        return FlowRunStepResultsWithFiles(
+            step_results=tuple(step_results),
+            result_files=tuple(result_files),
         )
 
     async def redispatch_stale_queued_runs(

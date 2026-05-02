@@ -26,6 +26,7 @@ from intric.flows.api.flow_models import (
     FlowRunRedispatchResponse,
 )
 from intric.flows.application.flow_run_service import FlowRunService
+from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.main.models import OffsetPaginatedResponse
@@ -106,6 +107,15 @@ principals can cancel only their own runs.
 
 def _get_flow_run_service(container: Container) -> FlowRunService:
     return container.flow_run_service()
+
+
+def _result_files_by_run_id(
+    result_files: list[FlowRunStepResultFile],
+) -> dict[UUID, list[FlowRunStepResultFile]]:
+    grouped: dict[UUID, list[FlowRunStepResultFile]] = {}
+    for result_file in result_files:
+        grouped.setdefault(result_file.flow_run_id, []).append(result_file)
+    return grouped
 
 
 @router.post(
@@ -251,16 +261,26 @@ async def list_flow_runs_alias(
         require_flow_lookup_without_scope=True,
         allow_service_key_principals=True,
     )
-    runs = await _get_flow_run_service(container).list_runs(
+    run_service = _get_flow_run_service(container)
+    runs = await run_service.list_runs(
         flow_id=id,
         limit=limit + 1,
         offset=offset,
     )
     assembler = FlowAssembler()
     page_items = runs[:limit]
+    result_files_by_run_id = _result_files_by_run_id(
+        await run_service.list_result_files_for_runs(runs=page_items)
+    )
     return {
         "count": len(page_items),
-        "items": [assembler.to_run_public(item) for item in page_items],
+        "items": [
+            assembler.to_run_public(
+                item,
+                result_files=result_files_by_run_id.get(item.id, []),
+            )
+            for item in page_items
+        ],
         "has_more": len(runs) > limit,
     }
 
@@ -303,8 +323,10 @@ async def get_flow_run_alias(
         required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    run = await _get_flow_run_service(container).get_run(run_id=run_id, flow_id=id)
-    return FlowAssembler().to_run_public(run)
+    run_service = _get_flow_run_service(container)
+    run = await run_service.get_run(run_id=run_id, flow_id=id)
+    result_files = await run_service.list_result_files_for_runs(runs=[run])
+    return FlowAssembler().to_run_public(run, result_files=result_files)
 
 
 @router.post(

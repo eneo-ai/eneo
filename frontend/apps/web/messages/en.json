@@ -1781,6 +1781,8 @@
   "flow_run_debug_tools": "Technical tools",
   "flow_run_debug_tools_tooltip": "Tools for debugging and technical analysis.",
   "flow_run_artifacts_more": "{first} (+{extra} more files)",
+  "flow_run_artifact_content_purged": "File content has been purged: {name}",
+  "flow_run_artifact_purged_badge": "Purged",
   "flow_run_download_artifact": "Download {name}",
   "flow_run_download_artifact_failed": "Could not download file.",
   "flow_run_download_debug_export": "Download debug data",

@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from intric.flows.api.flow_models import (
     FlowPublic,
     FlowRunPublic,
+    FlowRunStepPublic,
     FlowRuntimePathsPublic,
     FlowRuntimePublic,
     FlowSparsePublic,
     FlowStepCreateRequest,
 )
-from intric.flows.domain.flow import Flow, FlowRun, FlowSparse, FlowStep
+from intric.flows.domain.flow import Flow, FlowRun, FlowSparse, FlowStep, FlowStepResult
+from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.http_transport import (
     HttpAuthoredConfig,
     is_authored_config,
@@ -82,8 +84,29 @@ class FlowAssembler:
             runtime_paths=runtime_paths,
         )
 
-    def to_run_public(self, run: FlowRun) -> FlowRunPublic:
-        return FlowRunPublic.model_validate(run)
+    def to_run_public(
+        self,
+        run: FlowRun,
+        *,
+        result_files: Sequence[FlowRunStepResultFile] = (),
+    ) -> FlowRunPublic:
+        return FlowRunPublic.model_validate(run).model_copy(
+            update={"result_files": list(result_files)}
+        )
+
+    def to_step_public(
+        self,
+        result: FlowStepResult,
+        *,
+        diagnostics: Sequence[dict[str, Any]] = (),
+        result_files: Sequence[FlowRunStepResultFile] = (),
+    ) -> FlowRunStepPublic:
+        return FlowRunStepPublic.model_validate(result).model_copy(
+            update={
+                "diagnostics": list(diagnostics),
+                "result_files": list(result_files),
+            }
+        )
 
     @staticmethod
     def _redact_step_configs(flow: Flow) -> Flow:

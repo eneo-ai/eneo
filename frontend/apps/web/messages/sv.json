@@ -1781,6 +1781,8 @@
   "flow_run_debug_tools": "Tekniska verktyg",
   "flow_run_debug_tools_tooltip": "Verktyg för felsökning och teknisk analys.",
   "flow_run_artifacts_more": "{first} (+{extra} fler filer)",
+  "flow_run_artifact_content_purged": "Filinnehållet har rensats: {name}",
+  "flow_run_artifact_purged_badge": "Rensad",
   "flow_run_download_artifact": "Ladda ner {name}",
   "flow_run_download_artifact_failed": "Kunde inte ladda ner filen.",
   "flow_run_download_debug_export": "Ladda ner felsökningsdata",

@@ -2,6 +2,7 @@ import type {
   FlowGraph,
   FlowGraphNode,
   FlowRunOutputPayload,
+  FlowRunResultFile,
   FlowRunStep
 } from "@intric/intric-js";
 
@@ -17,6 +18,7 @@ export type FlowRunProgressStep = {
   numTokensOutput?: number | null;
   inputPayload?: Record<string, unknown> | null;
   outputPayload?: FlowRunOutputPayload | null;
+  resultFiles: FlowRunResultFile[];
   startedAt?: string | null;
   finishedAt?: string | null;
   createdAt?: string | null;
@@ -77,6 +79,7 @@ export function buildFlowRunProgressSnapshot(
       numTokensOutput: live?.num_tokens_output ?? node.num_tokens_output ?? null,
       inputPayload: live?.input_payload_json ?? null,
       outputPayload: live?.output_payload_json ?? null,
+      resultFiles: live?.result_files ?? [],
       startedAt: live?.started_at ?? null,
       finishedAt: live?.finished_at ?? null,
       createdAt: live?.created_at ?? null,
@@ -95,6 +98,7 @@ export function buildFlowRunProgressSnapshot(
       numTokensOutput: live.num_tokens_output ?? null,
       inputPayload: live.input_payload_json ?? null,
       outputPayload: live.output_payload_json ?? null,
+      resultFiles: live.result_files ?? [],
       startedAt: live?.started_at ?? null,
       finishedAt: live?.finished_at ?? null,
       createdAt: live.created_at ?? null,

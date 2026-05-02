@@ -111,6 +111,7 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "finished_at": None,
     "input_payload_json": {"employee_name": "Alex Example"},
     "output_payload_json": None,
+    "result_files": [],
     "error_message": None,
     "job_id": "00000000-0000-0000-0000-000000000401",
     "created_at": "2026-03-17T10:05:00Z",
@@ -132,6 +133,7 @@ FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
         ]
     },
     "output_payload_json": {"text": "Hello and welcome to the annual review..."},
+    "result_files": [],
     "num_tokens_input": 0,
     "num_tokens_output": 0,
     "error_message": None,
@@ -473,6 +475,9 @@ class FlowRunPublic(BaseModel):
     finished_at: datetime | None = None
     input_payload_json: dict[str, Any] | None = None
     output_payload_json: dict[str, Any] | None = None
+    result_files: list[FlowRunStepResultFile] = Field(
+        default_factory=lambda: cast(list[FlowRunStepResultFile], [])
+    )
     error_message: str | None = None
     job_id: UUID | None = None
     created_at: datetime
@@ -528,6 +533,9 @@ class FlowRunStepPublic(BaseModel):
     status: FlowStepResultStatus
     input_payload_json: dict[str, Any] | None = None
     output_payload_json: dict[str, Any] | None = None
+    result_files: list[FlowRunStepResultFile] = Field(
+        default_factory=lambda: cast(list[FlowRunStepResultFile], [])
+    )
     effective_prompt: str | None = None
     model_parameters_json: dict[str, Any] | None = None
     num_tokens_input: int | None = None

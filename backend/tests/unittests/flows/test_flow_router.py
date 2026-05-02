@@ -19,6 +19,7 @@ from intric.assistants.api.assistant_models import AssistantUpdatePublic
 from intric.audit.domain.action_types import ActionType
 from intric.authentication.auth_dependencies import ScopeFilter
 from intric.authentication.signed_urls import verify_signed_token
+from intric.files.file_models import FileType
 from intric.flows.api import flow_router_common as router_common_module
 from intric.flows.api.flow_assistant_router import (
     create_flow_assistant,
@@ -93,6 +94,7 @@ from intric.flows.flow import (
     FlowTemplateAsset,
     FlowVersion,
 )
+from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.http_transport.test_action import HttpTestResult
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.main.exceptions import (
@@ -155,6 +157,27 @@ def _run(flow_id, tenant_id):
         job_id=None,
         created_at=now,
         updated_at=now,
+    )
+
+
+def _result_file(*, run: FlowRun, step_result_id=None) -> FlowRunStepResultFile:
+    return FlowRunStepResultFile(
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_result_id=step_result_id or uuid4(),
+        step_id=uuid4(),
+        step_order=1,
+        attempt_no=1,
+        file_id=uuid4(),
+        ordinal=0,
+        source="declared_artifact",
+        name="summary.pdf",
+        checksum="checksum",
+        size=14012,
+        mimetype="application/pdf",
+        file_type=FileType.DOCUMENT,
+        availability="available",
     )
 
 
@@ -1674,10 +1697,15 @@ async def test_flow_run_alias_endpoints_delegate_to_run_service(monkeypatch):
     container = MagicMock()
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
+    result_file = _result_file(run=run)
     run_service = AsyncMock()
     run_service.list_runs.return_value = [run]
     run_service.get_run.return_value = run
-    run_service.list_step_results.return_value = []
+    run_service.list_result_files_for_runs.return_value = [result_file]
+    run_service.list_step_results_with_files.return_value = SimpleNamespace(
+        step_results=[],
+        result_files=[],
+    )
     container.flow_run_service.return_value = run_service
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -1713,13 +1741,16 @@ async def test_flow_run_alias_endpoints_delegate_to_run_service(monkeypatch):
 
     assert list_response["count"] == 1
     assert list_response["has_more"] is False
+    assert list_response["items"][0].result_files == [result_file]
     assert get_response.id == run.id
+    assert get_response.result_files == [result_file]
     assert step_response == []
     # get_flow is called once per endpoint (3 total) via enforce_flow_scope space check
     assert flow_service.get_flow.await_count == 3
     run_service.list_runs.assert_awaited_once_with(flow_id=flow_id, limit=21, offset=2)
     run_service.get_run.assert_awaited_once_with(run_id=run.id, flow_id=flow_id)
-    run_service.list_step_results.assert_awaited_once_with(
+    assert run_service.list_result_files_for_runs.await_count == 2
+    run_service.list_step_results_with_files.assert_awaited_once_with(
         run_id=run.id, flow_id=flow_id
     )
 
@@ -2502,28 +2533,31 @@ async def test_flow_run_steps_alias_surfaces_diagnostics_dicts_only(monkeypatch)
     flow_id = uuid4()
     run_id = uuid4()
     run_service = AsyncMock()
-    run_service.list_step_results.return_value = [
-        SimpleNamespace(
-            id=uuid4(),
-            step_id=uuid4(),
-            step_order=1,
-            assistant_id=uuid4(),
-            status="completed",
-            input_payload_json={
-                "diagnostics": [
-                    {"code": "typed_io_transcript_near_limit", "severity": "info"},
-                    "ignore-me",
-                    {"code": "audio_transcribe_only_used", "severity": "info"},
-                ]
-            },
-            output_payload_json={"text": "ok"},
-            num_tokens_input=10,
-            num_tokens_output=20,
-            error_message=None,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-    ]
+    run_service.list_step_results_with_files.return_value = SimpleNamespace(
+        step_results=[
+            SimpleNamespace(
+                id=uuid4(),
+                step_id=uuid4(),
+                step_order=1,
+                assistant_id=uuid4(),
+                status="completed",
+                input_payload_json={
+                    "diagnostics": [
+                        {"code": "typed_io_transcript_near_limit", "severity": "info"},
+                        "ignore-me",
+                        {"code": "audio_transcribe_only_used", "severity": "info"},
+                    ]
+                },
+                output_payload_json={"text": "ok"},
+                num_tokens_input=10,
+                num_tokens_output=20,
+                error_message=None,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        ],
+        result_files=[],
+    )
     container.flow_run_service.return_value = run_service
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -2603,36 +2637,42 @@ async def test_flow_run_steps_alias_handles_non_list_diagnostics(monkeypatch):
     flow_id = uuid4()
     run_id = uuid4()
     run_service = AsyncMock()
-    run_service.list_step_results.return_value = [
-        SimpleNamespace(
-            id=uuid4(),
-            step_id=uuid4(),
-            step_order=1,
-            assistant_id=uuid4(),
-            status="completed",
-            input_payload_json={"diagnostics": {"code": "not-a-list"}},
-            output_payload_json={"text": "ok"},
-            num_tokens_input=10,
-            num_tokens_output=20,
-            error_message=None,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        ),
-        SimpleNamespace(
-            id=uuid4(),
-            step_id=uuid4(),
-            step_order=2,
-            assistant_id=uuid4(),
-            status="completed",
-            input_payload_json=None,
-            output_payload_json={"text": "ok"},
-            num_tokens_input=10,
-            num_tokens_output=20,
-            error_message=None,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        ),
-    ]
+    step_result_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    result_file = _result_file(run=run, step_result_id=step_result_id)
+    run_service.list_step_results_with_files.return_value = SimpleNamespace(
+        step_results=[
+            SimpleNamespace(
+                id=step_result_id,
+                step_id=uuid4(),
+                step_order=1,
+                assistant_id=uuid4(),
+                status="completed",
+                input_payload_json={"diagnostics": {"code": "not-a-list"}},
+                output_payload_json={"text": "ok"},
+                num_tokens_input=10,
+                num_tokens_output=20,
+                error_message=None,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+            SimpleNamespace(
+                id=uuid4(),
+                step_id=uuid4(),
+                step_order=2,
+                assistant_id=uuid4(),
+                status="completed",
+                input_payload_json=None,
+                output_payload_json={"text": "ok"},
+                num_tokens_input=10,
+                num_tokens_output=20,
+                error_message=None,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+        ],
+        result_files=[result_file],
+    )
     container.flow_run_service.return_value = run_service
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -2654,7 +2694,9 @@ async def test_flow_run_steps_alias_handles_non_list_diagnostics(monkeypatch):
 
     assert len(response) == 2
     assert response[0].diagnostics == []
+    assert response[0].result_files == [result_file]
     assert response[1].diagnostics == []
+    assert response[1].result_files == []
 
 
 # ---------------------------------------------------------------------------

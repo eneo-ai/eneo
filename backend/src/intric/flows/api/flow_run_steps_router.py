@@ -13,6 +13,7 @@ from intric.authentication.signed_urls import generate_signed_token
 from intric.files.file_models import SignedURLRequest, SignedURLResponse
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import audit_actor_kwargs, error_response
+from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_graph import (
     build_graph_from_steps,
     enrich_nodes_with_run_results,
@@ -20,6 +21,7 @@ from intric.flows.api.flow_graph import (
 from intric.flows.api.flow_models import FlowRunStepPublic, GraphResponse
 from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.application.flow_service import FlowService
+from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
 from intric.flows.published_definition import parse_published_definition
@@ -75,6 +77,15 @@ def _get_flow_version_repo(container: Container) -> FlowVersionRepository:
     return container.flow_version_repo()  # pyright: ignore[reportUnknownMemberType]
 
 
+def _result_files_by_step_result_id(
+    result_files: list[FlowRunStepResultFile],
+) -> dict[UUID, list[FlowRunStepResultFile]]:
+    grouped: dict[UUID, list[FlowRunStepResultFile]] = {}
+    for result_file in result_files:
+        grouped.setdefault(result_file.step_result_id, []).append(result_file)
+    return grouped
+
+
 @router.get(
     "/{id}/runs/{run_id}/steps/",
     response_model=list[FlowRunStepPublic],
@@ -116,12 +127,18 @@ async def list_flow_run_steps(
         required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    step_results = await _get_flow_run_service(container).list_step_results(
+    step_results_with_files = await _get_flow_run_service(
+        container
+    ).list_step_results_with_files(
         run_id=run_id,
         flow_id=id,
     )
+    result_files_by_step_result_id = _result_files_by_step_result_id(
+        list(step_results_with_files.result_files)
+    )
+    assembler = FlowAssembler()
     items: list[FlowRunStepPublic] = []
-    for result in step_results:
+    for result in step_results_with_files.step_results:
         diagnostics: list[dict[str, Any]] = []
         input_payload = result.input_payload_json
         if isinstance(input_payload, dict):
@@ -132,9 +149,16 @@ async def list_flow_run_steps(
                     for item in cast(list[object], raw_diagnostics)
                     if isinstance(item, dict)
                 ]
+        result_id = result.id
         items.append(
-            FlowRunStepPublic.model_validate(result).model_copy(
-                update={"diagnostics": diagnostics}
+            assembler.to_step_public(
+                result,
+                diagnostics=diagnostics,
+                result_files=(
+                    result_files_by_step_result_id.get(result_id, [])
+                    if result_id is not None
+                    else []
+                ),
             )
         )
     return items

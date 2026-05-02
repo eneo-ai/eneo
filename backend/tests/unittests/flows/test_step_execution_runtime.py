@@ -15,6 +15,7 @@ from intric.flows.flow import (
     FlowStepResult,
     FlowStepResultStatus,
 )
+from intric.flows.flow_run_step_result_file import build_step_result_file_references
 from intric.flows.runtime.models import (
     RunExecutionState,
     RuntimeStep,
@@ -1352,7 +1353,7 @@ def test_attach_typed_failure_context_preserves_existing_payload_and_prompt():
     assert updated.effective_prompt == "Keep prompt"
 
 
-def test_build_output_payload_includes_structured_and_artifacts():
+def test_build_output_payload_excludes_artifact_display_keys():
     payload = build_output_payload(
         StepExecutionOutput(
             input_text="hello",
@@ -1375,10 +1376,23 @@ def test_build_output_payload_includes_structured_and_artifacts():
 
     assert payload == {
         "text": "done",
-        "generated_file_ids": [],
         "webhook_delivered": False,
         "structured": {"ok": True},
-        "artifacts": [{"file_id": "1", "name": "out.pdf"}],
+    }
+
+
+def test_build_step_result_file_references_classifies_declared_artifacts():
+    generated_file_id = uuid4()
+    declared_file_id = uuid4()
+
+    references = build_step_result_file_references(
+        generated_file_ids=[generated_file_id, declared_file_id],
+        artifacts=[{"file_id": str(declared_file_id), "name": "out.pdf"}],
+    )
+
+    assert {item.file_id: item.source for item in references} == {
+        generated_file_id: "generated_output",
+        declared_file_id: "declared_artifact",
     }
 
 

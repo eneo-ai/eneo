@@ -92,7 +92,6 @@ async def _create_flow_runtime_fixture(
     flow_retention_days: int | None = None,
     flow_settings: dict | None = None,
     generated_file_has_content: bool = True,
-    include_payload_artifact_refs: bool = True,
 ):
     if flow_settings is not None:
         await async_session.execute(
@@ -201,16 +200,6 @@ async def _create_flow_runtime_fixture(
         "webhook_delivered": False,
         "template_fill_debug": {"rendered_docx_text_raw": "debug body"},
     }
-    if include_payload_artifact_refs:
-        output_payload_json.update(
-            {
-                "generated_file_ids": [str(generated_file.id)],
-                "file_ids": [str(generated_file.id)],
-                "artifacts": [
-                    {"file_id": str(generated_file.id), "name": generated_file.name}
-                ],
-            }
-        )
 
     step_result = FlowStepResults(
         flow_run_id=run.id,
@@ -389,7 +378,6 @@ async def test_cleanup_old_flow_runtime_data_uses_result_file_rows_without_paylo
                 "generated_artifact_days": 1,
             }
         },
-        include_payload_artifact_refs=False,
     )
 
     counts = await flow_retention_service.cleanup_old_flow_runtime_data()

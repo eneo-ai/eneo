@@ -806,3 +806,152 @@ Accepted non-blocking follow-ups:
 - 7A.7 must delete the JSON artifact display-cache path after frontend readers move to `result_files`.
 
 No blocker remains for commit.
+
+## 2026-05-02 — 7A.7 Frontend And Generated Evidence Alignment
+
+### Starting Evidence
+
+- 7A.6 is committed at `7ef1edfd`.
+- Dirty worktree entries are unrelated to this slice and must not be staged:
+  - `frontend/packages/ui/src/icons/types.d.ts`
+  - `scripts/run_codex_review.sh`
+  - `PRODUCT.md`
+  - `docs/refactor/goals.md`
+- Current frontend JSON artifact readers:
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunsTable.svelte:504`
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceStepCard.svelte:172`
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunProgressStepCard.svelte:64`
+- Current generated/type smoke drift:
+  - `frontend/packages/intric-js/src/types/schema.d.ts` has no `FlowRunEvidenceResponse.result_files` or `FlowRunStepResultFile` schema.
+  - `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts:87-196` still pins payload artifact keys and `tracking_state: "payload_derived"`.
+- Current backend display-key writers:
+  - `backend/src/intric/flows/runtime/step_execution_runtime.py:274-286` writes `generated_file_ids` and `artifacts` into output payload JSON.
+  - `backend/src/intric/flows/infrastructure/flow_repo.py:578-623` writes canonical `FlowRunStepResultFiles` rows from that payload.
+
+### Initial Plan
+
+1. Populate public run and step result-file rows from `FlowRunRepository` so frontend list, status, progress, and evidence views can use one artifact source.
+2. Move frontend artifact display to generated `FlowRunStepResultFile` rows.
+3. Regenerate `@intric/intric-js` schema and update type-smoke examples.
+4. Delete runtime JSON artifact display writing and retention payload pruning once row-backed readers are in place.
+5. Validate with focused backend tests, frontend type/lint checks, grep guards, Claude verification, and `git diff --check`.
+
+### Pre-Implementation Claude Review
+
+Session: `eneo-flow-7a7-frontend-evidence-alignment`.
+
+Iteration 1 returned:
+
+- `VERDICT: changes_required`
+- `GREEN_LIGHT: no`
+- `MIN_SCORE: 6`
+
+Accepted plan corrections:
+
+- Result-file row writing must use typed runtime artifact references, not output payload JSON keys.
+- Attempt provenance artifact evidence must use `StepExecutionOutput`, not the cleaned output payload.
+- The batch result-file lookup needs an explicit repository method and tests.
+- Frontend/type smoke must delete `FlowRunArtifact` and `FlowRunOutputPayload.artifacts`.
+- Grep guards must block reintroducing JSON artifact display readers/writers.
+- The unreleased-data assumption must be explicit: no JSON-only artifact compatibility path.
+
+Rejected with rationale:
+
+- The run and step public projections both stay because the run table and live progress endpoint are separate existing consumers. They use the same `FlowRunStepResultFile` schema, so this does not create a parallel artifact contract.
+- A slim run-list artifact summary is deferred because it would introduce a second artifact shape before there is measured payload pressure.
+
+Plan updated with these decisions before source changes.
+
+### Implementation Summary
+
+Changed source/tests:
+
+- `backend/src/intric/flows/flow_run_step_result_file.py`
+  - Added `FlowStepResultFileReference` and `build_step_result_file_references()` so runtime artifact row writes are typed before output payload JSON is cleaned.
+  - Declared artifact rows win over generated-output rows for the same file id.
+- `backend/src/intric/flows/infrastructure/flow_repo.py`
+  - `save_step_result()` now accepts explicit result-file references and no longer scans output payload JSON for artifact display keys.
+  - Passing `None` preserves existing rows for non-success updates; passing a sequence replaces the current attempt rows.
+- `backend/src/intric/flows/runtime/step_execution_runtime.py`
+  - Runtime output payloads no longer write `generated_file_ids` or `artifacts`.
+- `backend/src/intric/flows/runtime/executor.py`
+  - Attempt provenance artifact evidence and result-file row references are built from `StepExecutionOutput`, not persisted output payload keys.
+- `backend/src/intric/data_retention/infrastructure/data_retention_service.py`
+  - Deleted generated artifact payload pruning now that frontend/API display paths read result-file rows.
+- `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - Added `list_result_files_for_runs()` for run-list/get-run projections without per-run repository calls.
+- `backend/src/intric/flows/application/flow_run_service.py`
+  - Added `FlowRunStepResultsWithFiles`, `list_result_files_for_runs()`, and `list_step_results_with_files()` so routers can attach canonical row-backed result files after existing access checks.
+- `backend/src/intric/flows/api/flow_models.py`, `flow_assembler.py`, `flow_run_execution_router.py`, and `flow_run_steps_router.py`
+  - Public run and step projections now expose `result_files: list[FlowRunStepResultFile]`.
+  - List-run, get-run, and list-step endpoints attach result files from row-backed repository projections.
+- `frontend/packages/intric-js/src/types/resources.d.ts`
+  - Added `FlowRunResultFile`.
+  - Removed `FlowRunArtifact` and artifact fields from `FlowRunOutputPayload`.
+- `frontend/packages/intric-js/src/types/schema.d.ts`
+  - Synced the Flow evidence/result-file contract fields needed by 7A.7: `FlowRunStepResultFile`, `result_files` on run/step/evidence, row-backed artifact availability summary, retention artifact purge count, and absence of `FlowRunStepPublic.tool_calls_metadata`.
+  - A full local OpenAPI generation produced unrelated wider generated-schema drift, so the committed schema diff is constrained to the Flow evidence contract touched by this slice.
+- `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts`
+  - Type-smoke fixtures now use row-backed `result_files` and typed artifact availability summaries.
+- `frontend/apps/web/src/lib/features/flows/components`
+  - Added `FlowRunResultFileButton.svelte`.
+  - Run table, terminal evidence cards, and live progress cards now render/download artifacts from `result_files`.
+  - Progress snapshots carry `resultFiles` from `FlowRunStepPublic.result_files`.
+- `frontend/apps/web/messages/en.json` and `sv.json`
+  - Added labels for content-purged artifact rows.
+
+No JSON-only artifact compatibility path, migration, new artifact service/interface, Batch 8 rerun behavior, Batch 9 review behavior, or namespace/package rename was introduced.
+
+### Validation Summary
+
+- `cd backend && uv run pyright`: 0 errors, 0 warnings, 0 informations.
+- `cd backend && uv run ruff check <changed Python files>`: all checks passed.
+- `cd backend && uv run ruff format --check <changed Python files>`: passed.
+- `cd backend && uv run pytest tests/unittests/flows/test_step_execution_runtime.py::test_build_output_payload_excludes_artifact_display_keys tests/unittests/flows/test_step_execution_runtime.py::test_build_step_result_file_references_classifies_declared_artifacts tests/unittests/flows/test_step_execution_runtime.py::test_build_output_payload_merges_output_payload_extensions tests/unittests/flows/test_step_attempt_runtime.py::test_build_attempt_provenance_round_trips_all_runtime_sections tests/unittests/flows/test_step_attempt_runtime.py::test_runtime_tool_calls_land_in_attempt_provenance_not_step_result tests/unittests/flows/test_flow_router.py::test_flow_run_alias_endpoints_delegate_to_run_service tests/unittests/flows/test_flow_router.py::test_flow_run_steps_alias_surfaces_diagnostics_dicts_only tests/unittests/flows/test_flow_router.py::test_flow_run_steps_alias_handles_non_list_diagnostics tests/unit/test_flow_openapi_contract.py::test_openapi_flow_run_step_tool_calls_metadata_is_absent tests/unit/test_flow_openapi_contract.py::test_openapi_flow_public_run_and_step_expose_result_files`: 10 passed, 16 warnings.
+- `cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py::test_step_result_files_are_attempt_scoped_and_deduplicated tests/integration/test_flow_runtime_retention_cleanup.py::test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_generated_artifacts tests/integration/test_flow_runtime_retention_cleanup.py::test_cleanup_old_flow_runtime_data_uses_result_file_rows_without_payload_refs tests/integration/flows/test_flow_runtime_worker_contract.py::test_flow_run_created_by_service_executes_to_terminal_worker_state`: 4 passed, 16 warnings.
+- `cd frontend/packages/intric-js && bun run check`: passed.
+- `cd frontend/packages/intric-js && bun run lint`: passed.
+- `cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/components/flowRunProgress.test.ts`: 6 passed.
+- `cd frontend/apps/web && bun x prettier --check <touched Flow files/messages>`: passed.
+- `cd frontend/apps/web && bun x eslint <touched Flow files>`: passed.
+- `cd frontend/apps/web && bun run check`: failed on pre-existing broader generated-client/nullability issues outside this slice, including `frontend/packages/intric-js/src/endpoints/assistants.js`, `frontend/packages/intric-js/src/endpoints/settings.js`, `frontend/packages/intric-js/src/endpoints/flows.js`, `frontend/apps/web/src/lib/features/spaces/SpacesManager.ts`, chat/dashboard routes, and route typing in `FlowsTable.svelte`. No diagnostics were in the touched Flow evidence/progress components.
+- Guard `rg -n "output_payload_json\\.?artifacts|outputPayload\\?\\.artifacts|FlowRunArtifact|payload_derived|payload_artifact_count|_prune_generated_artifact_payload|_result_file_sources" backend/src backend/tests frontend/apps/web/src/lib/features/flows frontend/packages/intric-js/src/types`: no matches.
+- Added-source anti-slippage scan found no process comments, no JSON artifact display compatibility fallback, and no new deprecated/legacy/backwards-compatible Flow surface. The only broad regex hit was normal code using `self.session`.
+- `git diff --check`: passed.
+
+Observed warnings were existing deprecation warnings outside this evidence/result-file change.
+
+### Claude Verification
+
+Session: `eneo-flow-7a7-frontend-evidence-alignment`.
+
+Iteration 2 returned:
+
+- `VERDICT: green`
+- `GREEN_LIGHT: yes`
+- `MIN_SCORE: 7`
+
+Artifact:
+
+- `.codex/artifacts/claude-peer-loop-7a-7-frontend-evidence-alignment-verification-20260502T091243Z.md`
+
+Accepted low-severity follow-ups completed before commit:
+
+- Removed the unreachable `result.result_files` fallback from evidence step result-file grouping.
+- Added `test_list_result_files_for_runs_rejects_foreign_tenant_run` for the service-level tenant guard.
+- Added a short `FlowRepository.save_step_result()` contract docstring for `None` versus empty result-file reference semantics.
+- Tightened `build_step_result_file_references()` from `dict[str, Any]` to `Mapping[str, object]` because the helper only needs `file_id`.
+
+Additional validation after those follow-ups:
+
+- `cd backend && uv run ruff check src/intric/flows/flow_run_step_result_file.py src/intric/flows/infrastructure/flow_repo.py tests/unittests/flows/test_flow_run_service.py`: passed.
+- `cd backend && uv run ruff format --check src/intric/flows/flow_run_step_result_file.py src/intric/flows/infrastructure/flow_repo.py tests/unittests/flows/test_flow_run_service.py`: passed.
+- `cd backend && uv run pyright`: 0 errors, 0 warnings, 0 informations.
+- `cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py::test_list_result_files_for_runs_rejects_foreign_tenant_run tests/unittests/flows/test_step_execution_runtime.py::test_build_step_result_file_references_classifies_declared_artifacts -q`: 2 passed, 9 warnings.
+- `cd frontend/apps/web && bun x prettier --check src/lib/features/flows/components/FlowRunEvidence.svelte && bun x eslint src/lib/features/flows/components/FlowRunEvidence.svelte`: passed.
+
+Remaining Claude notes are not blockers:
+
+- A future production optimization can replace the three public `result_files` projections with a narrower measured contract if payload size becomes real pressure.
+- `EvidenceArtifactAvailabilityTrackingState = Literal["tracked"]` can be inlined if no second state appears.
+- `FlowRunStepResultsWithFiles` is accepted as a local named return object for router readability.

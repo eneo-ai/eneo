@@ -402,6 +402,26 @@ def test_openapi_flow_run_step_tool_calls_metadata_is_absent(
     assert "tool_calls_metadata" not in properties
 
 
+def test_openapi_flow_public_run_and_step_expose_result_files(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    for component_name in ("FlowRunPublic", "FlowRunStepPublic"):
+        properties = schemas.get(component_name, {}).get("properties", {})
+        result_files = _resolve_component_ref(
+            openapi_spec, properties.get("result_files", {})
+        )
+        items = _resolve_component_ref(openapi_spec, result_files.get("items", {}))
+
+        assert result_files.get("type") == "array"
+        assert items.get("title") == "FlowRunStepResultFile"
+
+    evidence_properties = schemas.get("FlowRunEvidenceResponse", {}).get(
+        "properties", {}
+    )
+    assert "result_files" in evidence_properties
+
+
 def test_openapi_flow_pagination_response_shape_is_current(
     openapi_spec: dict,
 ) -> None:

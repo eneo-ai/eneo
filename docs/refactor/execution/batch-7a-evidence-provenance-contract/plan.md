@@ -2,9 +2,122 @@
 
 ## Active Next Plan
 
-The active implementation slice is **7A.6 — Artifact/file evidence ownership**.
+The active implementation slice is **7A.7 — Frontend and generated evidence alignment**.
 
-Official Batch 8 step rerun does not start until this inserted evidence/provenance foundation reaches a stable checkpoint. 7A.1 is committed at `5563bb71`, 7A.2 is committed at `d3228d83`, 7A.3 is committed at `1cd68a2d`, 7A.4 is committed at `78506836`, and 7A.5 is committed at `1c5bc7c2`. 7A.6 makes `FlowRunStepResultFiles` plus `Files` the canonical artifact evidence owner for export, signed artifact access, and retention cleanup.
+Official Batch 8 step rerun does not start until this inserted evidence/provenance foundation reaches a stable checkpoint. 7A.1 is committed at `5563bb71`, 7A.2 is committed at `d3228d83`, 7A.3 is committed at `1cd68a2d`, 7A.4 is committed at `78506836`, 7A.5 is committed at `1c5bc7c2`, and 7A.6 is committed at `7ef1edfd`. 7A.7 finishes the artifact ownership transition by making generated TypeScript and frontend Flow displays read row-backed `result_files` instead of JSON artifact display keys.
+
+## Scope For 7A.7
+
+### Goals
+
+- Generated `@intric/intric-js` schemas and smoke contracts reflect the 7A.5 and 7A.6 evidence contract changes, including `FlowRunEvidenceResponse.result_files`, typed retention summaries, and typed row-backed artifact availability.
+- `FlowRunPublic` and `FlowRunStepPublic` expose `result_files` so the run table, run status view, and live progress view can render/download artifacts from the canonical result-file rows without scanning `output_payload_json.artifacts`.
+- Runtime result-file row writing consumes typed file references from the in-memory step output, not the JSON output payload. The JSON payload may be clean before persistence without losing `declared_artifact` versus `generated_output` classification.
+- Attempt provenance artifact evidence is sourced from the same in-memory step output, not from persisted output payload keys.
+- Frontend Flow artifact UI reads `result_files` only:
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunsTable.svelte:504` currently reads `run.output_payload_json?.artifacts`.
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceStepCard.svelte:172` currently reads `result.output_payload_json.artifacts`.
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunProgressStepCard.svelte:64` currently reads `step.outputPayload?.artifacts`.
+- Runtime output payloads stop writing Flow display artifact keys (`generated_file_ids` and `artifacts`) after typed runtime references feed `FlowRunStepResultFiles` and attempt provenance.
+- Retention deletes `_prune_generated_artifact_payload()` once no frontend/API display path depends on payload artifact keys.
+- No compatibility path is preserved for JSON-only artifact display; Flow/Flow AI Builder is unreleased.
+
+### Non-Goals
+
+- No Batch 8 step rerun lineage, Batch 9 human review, PRD-008 `tool_calls_metadata` deletion, or full frontend state-owner rewrite.
+- No `intric.*` package rename or parallel `eneo.*` Python package.
+- No new artifact service, port, or factory. The result-file association stays owned by `FlowRunRepository`, and file content retrieval stays owned by the existing file repositories/services.
+- No hand-written replacement for the generated OpenAPI schema beyond the normal local generation command and type-smoke updates.
+
+### Canonical Ownership Map
+
+| Concept | Current location | Problem | Canonical owner for 7A.7 | Delete/merge path |
+|---|---|---|---|---|
+| Artifact display evidence | `FlowRunStepResultFiles` rows are written in `backend/src/intric/flows/infrastructure/flow_repo.py:578-623`, but frontend displays still read JSON payload artifact keys. | Two artifact display sources can drift, and retention still prunes display JSON. | `FlowRunStepResultFiles` joined to `Files`, projected as `FlowRunStepResultFile`. | Add `result_files` to public run/step schemas, move frontend readers, then delete JSON display key writing/pruning. |
+| Artifact row write intent | `backend/src/intric/flows/infrastructure/flow_repo.py:602-649` reads JSON output payload keys to classify result files. | Deleting display keys would silently stop row writes or lose `declared_artifact` classification. | A typed `FlowStepResultFileReference` write-side contract built from `StepExecutionOutput.generated_file_ids` and `StepExecutionOutput.artifacts`. | Repository row replacement accepts typed references; payload scanners are deleted. |
+| Run-table artifact shortcut | `frontend/apps/web/src/lib/features/flows/components/FlowRunsTable.svelte:504-533` | Reads terminal run payload JSON, so list-runs cannot represent purged rows or row-only artifacts. | `FlowRunPublic.result_files` populated from row-backed batch lookup. | Remove `run.output_payload_json?.artifacts` usage. |
+| Live progress artifact display | `frontend/apps/web/src/lib/features/flows/components/flowRunProgress.ts:78-79` and `FlowRunProgressStepCard.svelte:64,184` | Progress view maps only `output_payload_json`, so artifacts disappear once runtime payload keys are deleted unless step rows carry files. | `FlowRunStepPublic.result_files`, copied into the progress view model. | Remove `FlowRunOutputPayload.artifacts` from display logic. |
+| Evidence step artifact display | `frontend/apps/web/src/lib/features/flows/components/FlowRunEvidence.svelte:267-292` and `FlowRunEvidenceStepCard.svelte:172-190` | Evidence response has top-level `result_files`, but the card still reads step payload JSON. | `FlowRunEvidenceResponse.result_files`, grouped by `step_result_id`/`step_order` and passed to the step card. | Remove `result.output_payload_json.artifacts` checks. |
+| Generated contract smoke | `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts:87-196` | Smoke data still pins payload-derived artifact availability and output payload artifact keys. | Generated OpenAPI schemas plus `FlowRunStepResultFile` aliases. | Update examples to row-backed `result_files` and typed manifest summary fields. |
+
+### Expected Source/Test Changes For 7A.7
+
+- Add `result_files: list[FlowRunStepResultFile]` to `FlowRunPublic` and `FlowRunStepPublic` with empty-list defaults and examples.
+- Add `FlowRunRepository.list_result_files_for_runs(run_ids: Sequence[UUID], tenant_id: UUID) -> list[FlowRunStepResultFile]` for run-list projection; routers group the returned rows by run id and step-result id.
+- Populate `result_files` in list-run, get-run, and list-step endpoints after the normal access checks.
+- Keep `FlowRunEvidenceResponse.result_files` as the top-level canonical evidence payload; frontend grouping can reuse top-level evidence files rather than duplicating them per evidence step when available.
+- Add a typed write-side reference builder for runtime artifacts:
+  - `generated_file_ids` become `generated_output` references.
+  - `artifacts[*].file_id` becomes `declared_artifact` and wins over a generated reference for the same file id.
+  - malformed artifact references fail as invalid runtime output instead of being silently ignored.
+- `FlowRepository.save_step_result()` passes typed result-file references to `_replace_step_result_file_rows()`; the repository no longer scans `output_payload_json` for artifact keys.
+- `_build_attempt_provenance()` writes artifact provenance from `StepExecutionOutput.artifacts` and `StepExecutionOutput.generated_file_ids`.
+- `build_output_payload()` no longer writes `generated_file_ids` or `artifacts`.
+- Delete retention pruning for generated artifact payload keys.
+- Regenerate `frontend/packages/intric-js/src/types/schema.d.ts` from local OpenAPI output.
+- Delete `FlowRunArtifact` and `FlowRunOutputPayload.artifacts` from `frontend/packages/intric-js/src/types/resources.d.ts`; keep `FlowRunOutputPayload` only for non-artifact output fields such as `text`, `structured`, and webhook/template metadata.
+- Add focused frontend tests for progress snapshot result-file flow-through in `flowRunProgress.test.ts`.
+
+### Required Tests
+
+- Backend API/OpenAPI:
+  - `FlowRunPublic`, `FlowRunStepPublic`, and `FlowRunEvidenceResponse` expose `result_files`.
+  - List-run and get-run responses include row-backed result files.
+  - List-step responses include only the files for each step result.
+- Backend runtime/retention:
+  - Step result row extraction still captures generated and declared artifacts.
+  - `declared_artifact` wins over `generated_output` for the same file id without reading payload JSON.
+  - Attempt provenance still includes artifact evidence after output payload artifact keys are deleted.
+  - Saved runtime output payload no longer contains `generated_file_ids` or `artifacts`.
+  - Retention cleanup no longer calls a payload artifact pruning helper.
+- Frontend/type smoke:
+  - Generated schema includes `FlowRunStepResultFile` and `result_files` on run, step, and evidence contracts.
+  - Flow type-smoke examples use `result_files` and row-backed artifact availability.
+  - Progress/evidence/run-table source contains no `output_payload_json.artifacts`, `outputPayload?.artifacts`, or `payload_derived` artifact availability references.
+- Grep guards:
+  - `rg -n "output_payload_json\\.?artifacts|outputPayload\\?\\.artifacts|FlowRunArtifact|payload_derived|_prune_generated_artifact_payload|_result_file_sources" backend/src backend/tests frontend/apps/web/src/lib/features/flows frontend/packages/intric-js/src/types`
+  - Expected matches after implementation: none, except generated OpenAPI prose/examples if the match is not a live reader/writer.
+- Unreleased-data acceptance:
+  - No migration or compatibility fallback handles Flow rows that only contain `output_payload_json.artifacts`; Flow/Flow AI Builder is unreleased, and freshly written runs use result-file rows.
+  - Any stale local dev/test rows with JSON-only artifacts are treated as invalid pre-7A.7 data, not a supported runtime path.
+- Validation commands:
+  - `cd backend && uv run pyright`
+  - changed-file `ruff check` and `ruff format --check`
+  - focused backend unit/integration/OpenAPI tests
+  - `cd frontend/packages/intric-js && bun run check && bun run lint`
+  - focused frontend flow progress/type tests where available
+  - `git diff --check`
+
+### Reviewability Pins
+
+- Keep behavior and generated-contract changes in one coherent 7A.7 slice because the source deletion depends on the frontend/generated readers moving first.
+- Avoid new comments in source unless they explain a non-obvious invariant; delete or rewrite existing comments that only describe now-removed JSON artifact display behavior.
+- Do not add Flow deprecated/legacy/backwards-compatible fields or fallbacks. If a JSON artifact display reader remains, document it as a blocker instead of preserving both sources.
+- `FlowRunPublic.result_files`, `FlowRunStepPublic.result_files`, and `FlowRunEvidenceResponse.result_files` intentionally share the same generated `FlowRunStepResultFile` shape. This keeps the row contract singular even though different API surfaces need the rows:
+  - run list/get for the run-table artifact action
+  - step list for live progress before terminal evidence has loaded
+  - evidence response for hashed/exportable run evidence
+
+### Claude Plan Review Reconciliation
+
+Claude iteration 1 returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`.
+
+Accepted before implementation:
+
+- Move result-file source classification out of `output_payload_json` and into a typed runtime write-side reference contract.
+- Preserve artifact attempt provenance by sourcing it from `StepExecutionOutput`, not from persisted output payload keys.
+- Specify the batch repository method signature for list-run projection and test that list-run projection does not loop per run.
+- Add explicit grep guards for JSON artifact display readers/writers, payload-derived artifact availability, and deleted payload scanner helpers.
+- Delete `FlowRunArtifact` and `FlowRunOutputPayload.artifacts` in `resources.d.ts`; keep the output payload type only for non-artifact fields.
+- Add a concrete `flowRunProgress.test.ts` case for result-file flow-through.
+- State the unreleased-data assumption as an acceptance criterion: no JSON-only artifact compatibility path.
+
+Rejected with rationale:
+
+- Do not collapse run-level and step-level public projections into one endpoint. The run table and live progress view are separate existing consumer surfaces; using the same `FlowRunStepResultFile` schema on both avoids a parallel artifact summary contract while preventing an extra endpoint call for progress.
+- Do not add a slim run-list artifact summary in this slice. It would create a second artifact schema for the same row data. The list endpoint is capped at 200 runs, Flow is pre-production, and this slice prioritizes one generated row shape over an optimization that can be measured later.
+
+Proceed only after implementation addresses the accepted findings and the same Claude session returns green light, or Codex documents any remaining disagreement with file:line evidence.
 
 ## Scope For 7A.6
 

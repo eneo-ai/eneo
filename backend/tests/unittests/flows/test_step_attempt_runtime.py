@@ -203,7 +203,6 @@ def test_build_step_success_plan_marks_webhook_delivery_requirement():
         output=output,
         output_payload_json={
             "text": "done",
-            "generated_file_ids": [],
             "webhook_delivered": False,
         },
         execution_hash="exec-hash",
@@ -213,7 +212,6 @@ def test_build_step_success_plan_marks_webhook_delivery_requirement():
     assert plan.step_result.status == FlowStepResultStatus.COMPLETED
     assert plan.step_result.output_payload_json == {
         "text": "done",
-        "generated_file_ids": [],
         "webhook_delivered": False,
     }
 
@@ -231,7 +229,6 @@ def test_build_step_success_plan_without_webhook_stays_false():
         output=_step_output(),
         output_payload_json={
             "text": "done",
-            "generated_file_ids": [],
             "webhook_delivered": False,
         },
         execution_hash="exec-hash",
@@ -246,6 +243,12 @@ def test_build_attempt_provenance_round_trips_all_runtime_sections() -> None:
     step = _runtime_step(input_source="http_post", output_mode="http_post")
     output = _step_output()
     output.generated_file_ids = [generated_file_id]
+    output.artifacts = [
+        {
+            "file_id": str(generated_file_id),
+            "file_name": "answer.docx",
+        }
+    ]
     output.tool_calls_metadata = [{"name": "lookup", "arguments": {"q": "case"}}]
     output.raw_completion_text = "raw completion"
     output.rag_metadata = {"status": "success"}
@@ -264,12 +267,6 @@ def test_build_attempt_provenance_round_trips_all_runtime_sections() -> None:
         update={
             "output_payload_json": {
                 "template_provenance": {"template_id": "template-1"},
-                "artifacts": [
-                    {
-                        "file_id": str(generated_file_id),
-                        "file_name": "answer.docx",
-                    }
-                ],
             }
         }
     )

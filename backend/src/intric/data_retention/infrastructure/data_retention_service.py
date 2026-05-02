@@ -619,13 +619,9 @@ class DataRetentionService:
                 object_id=object_id,
                 retention_state="artifact_content_purged",
             )
-            pruned_payload = _prune_generated_artifact_payload(
-                target.output_payload_json,
-                only_file_ids=target.file_ids,
-            )
             output_payload = (
                 append_retention_tombstone(
-                    pruned_payload,
+                    target.output_payload_json,
                     _build_retention_tombstone(
                         action=action,
                         data_class="generated_artifact",
@@ -638,7 +634,7 @@ class DataRetentionService:
                     ),
                 )
                 if not has_marker
-                else pruned_payload
+                else target.output_payload_json
             )
             if output_payload == target.output_payload_json:
                 file_ids_by_tenant[target.tenant_id].update(target.file_ids)
@@ -899,51 +895,3 @@ def _flow_runtime_policy_source(
     if space_default_days is not None:
         return "space.data_retention_days"
     return "tenant.flow_settings.retention_policy.shared_default_days"
-
-
-def _prune_generated_artifact_payload(
-    payload: Any,
-    *,
-    only_file_ids: set[UUID] | None = None,
-) -> Any:
-    if not isinstance(payload, dict):
-        return payload
-    payload_dict = cast(dict[str, Any], payload)
-
-    def should_remove(raw_file_id: Any) -> bool:
-        try:
-            file_id = UUID(str(raw_file_id))
-        except (TypeError, ValueError):
-            return False
-        return only_file_ids is None or file_id in only_file_ids
-
-    pruned: dict[str, Any] = dict(payload_dict)
-    artifacts = pruned.get("artifacts")
-    if isinstance(artifacts, list):
-        next_artifacts: list[Any] = []
-        for raw_artifact in cast(list[Any], artifacts):
-            if isinstance(raw_artifact, dict) and should_remove(
-                cast(dict[str, Any], raw_artifact).get("file_id")
-            ):
-                continue
-            next_artifacts.append(raw_artifact)
-        if next_artifacts:
-            pruned["artifacts"] = next_artifacts
-        else:
-            pruned.pop("artifacts", None)
-
-    for key in ("generated_file_ids", "file_ids"):
-        raw_ids = pruned.get(key)
-        if not isinstance(raw_ids, list):
-            continue
-        next_ids: list[Any] = []
-        for raw_file_id in cast(list[Any], raw_ids):
-            if should_remove(raw_file_id):
-                continue
-            next_ids.append(raw_file_id)
-        if next_ids:
-            pruned[key] = next_ids
-        else:
-            pruned.pop(key, None)
-
-    return pruned

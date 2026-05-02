@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any, Sequence
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -32,6 +32,7 @@ from intric.database.tables.users_table import Users
 from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, FlowStepResult
 from intric.flows.enums import FlowStepResultStatus
 from intric.flows.flow_factory import FlowFactory
+from intric.flows.flow_run_step_result_file import FlowStepResultFileReference
 from intric.main.exceptions import BadRequestException, NotFoundException
 
 
@@ -520,7 +521,13 @@ class FlowRepository:
         tenant_id: UUID,
         session: AsyncSession | None = None,
         attempt_no: int = 1,
+        result_file_references: Sequence[FlowStepResultFileReference] | None = None,
     ) -> None:
+        """Persist a step result and optionally replace this attempt's file rows.
+
+        `None` leaves file rows untouched for non-success updates; an empty sequence
+        intentionally clears them.
+        """
         db_session = session or self.session
 
         payload: dict[str, Any] = {
@@ -578,7 +585,7 @@ class FlowRepository:
         await self._replace_step_result_file_rows(
             db_session=db_session,
             result_row=saved,
-            output_payload_json=result.output_payload_json,
+            result_file_references=result_file_references,
             attempt_no=attempt_no,
         )
 
@@ -587,20 +594,18 @@ class FlowRepository:
         *,
         db_session: AsyncSession,
         result_row: FlowStepResults,
-        output_payload_json: dict[str, Any] | None,
+        result_file_references: Sequence[FlowStepResultFileReference] | None,
         attempt_no: int,
     ) -> None:
+        if result_file_references is None:
+            return
         await db_session.execute(
             sa.delete(FlowRunStepResultFiles)
             .where(FlowRunStepResultFiles.step_result_id == result_row.id)
             .where(FlowRunStepResultFiles.tenant_id == result_row.tenant_id)
             .where(FlowRunStepResultFiles.attempt_no == attempt_no)
         )
-        if result_row.step_id is None or not isinstance(output_payload_json, dict):
-            return
-
-        sources_by_file = self._result_file_sources(output_payload_json)
-        if not sources_by_file:
+        if result_row.step_id is None or not result_file_references:
             return
 
         rows = [
@@ -612,41 +617,13 @@ class FlowRepository:
                 "step_id": result_row.step_id,
                 "step_order": result_row.step_order,
                 "attempt_no": attempt_no,
-                "file_id": file_id,
+                "file_id": reference.file_id,
                 "ordinal": ordinal,
-                "source": source,
+                "source": reference.source,
             }
-            for ordinal, (file_id, source) in enumerate(
-                sorted(sources_by_file.items(), key=lambda item: str(item[0]))
-            )
+            for ordinal, reference in enumerate(result_file_references)
         ]
         await db_session.execute(sa.insert(FlowRunStepResultFiles).values(rows))
-
-    @staticmethod
-    def _result_file_sources(output_payload_json: dict[str, Any]) -> dict[UUID, str]:
-        sources_by_file: dict[UUID, str] = {}
-        generated_file_ids = output_payload_json.get("generated_file_ids")
-        if isinstance(generated_file_ids, list):
-            for raw_file_id in cast(list[object], generated_file_ids):
-                try:
-                    sources_by_file[UUID(str(raw_file_id))] = "generated_output"
-                except (TypeError, ValueError):
-                    continue
-
-        artifacts = output_payload_json.get("artifacts")
-        if isinstance(artifacts, list):
-            for artifact in cast(list[object], artifacts):
-                if not isinstance(artifact, dict):
-                    continue
-                artifact_dict = cast(dict[str, object], artifact)
-                raw_file_id = artifact_dict.get("file_id")
-                try:
-                    # Declared artifacts are the consumer-facing file contract when
-                    # they also appear in the generated output list.
-                    sources_by_file[UUID(str(raw_file_id))] = "declared_artifact"
-                except (TypeError, ValueError):
-                    continue
-        return sources_by_file
 
     async def _sync_flow_steps(
         self,

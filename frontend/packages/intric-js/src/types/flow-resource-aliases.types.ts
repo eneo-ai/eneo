@@ -6,6 +6,7 @@ import type {
   FlowRunContract,
   FlowRunEvidenceExport,
   FlowRunEvidenceWithTypedSteps,
+  FlowRunResultFile,
   FlowRunStep,
   FlowRunStepInputs,
   FlowStep,
@@ -17,6 +18,10 @@ type FlowRunCreateRequest = components["schemas"]["FlowRunCreateRequest"];
 const isoTimestamp = "2026-03-17T10:05:00Z";
 const flowId = "00000000-0000-0000-0000-000000000001";
 const stepId = "00000000-0000-0000-0000-000000000101";
+const tenantId = "00000000-0000-0000-0000-000000000010";
+const runId = "00000000-0000-0000-0000-000000000301";
+const stepResultId = "00000000-0000-0000-0000-000000000501";
+const resultFileId = "00000000-0000-0000-0000-000000000801";
 
 const validFlowStep: FlowStep = {
   id: stepId,
@@ -33,7 +38,7 @@ const validFlowStep: FlowStep = {
 
 const validFlow: Flow = {
   id: flowId,
-  tenant_id: "00000000-0000-0000-0000-000000000010",
+  tenant_id: tenantId,
   space_id: "00000000-0000-0000-0000-000000000020",
   name: "Contract smoke flow",
   description: null,
@@ -76,24 +81,43 @@ const validStepInputs: FlowRunStepInputs = {
   }
 };
 
+const validFlowRunResultFile: FlowRunResultFile = {
+  flow_run_id: runId,
+  flow_id: flowId,
+  tenant_id: tenantId,
+  step_result_id: stepResultId,
+  step_id: stepId,
+  step_order: 1,
+  attempt_no: 1,
+  file_id: resultFileId,
+  ordinal: 0,
+  source: "declared_artifact",
+  name: "summary.pdf",
+  checksum: "sha256:artifact",
+  size: 14012,
+  mimetype: "application/pdf",
+  file_type: "document",
+  availability: "available"
+};
+
 const validFlowRun: FlowRun = {
-  id: "00000000-0000-0000-0000-000000000301",
+  id: runId,
   flow_id: flowId,
   flow_version: 3,
-  tenant_id: "00000000-0000-0000-0000-000000000010",
+  tenant_id: tenantId,
   trace_id: "00000000-0000-0000-0000-000000000302",
   status: "completed",
   input_payload_json: { case_id: "CASE-1" },
   output_payload_json: {
-    text: "Decision support generated.",
-    generated_file_ids: ["00000000-0000-0000-0000-000000000801"]
+    text: "Decision support generated."
   },
+  result_files: [validFlowRunResultFile],
   created_at: isoTimestamp,
   updated_at: isoTimestamp
 };
 
 const validFlowRunStep: FlowRunStep = {
-  id: "00000000-0000-0000-0000-000000000501",
+  id: stepResultId,
   flow_run_id: validFlowRun.id,
   flow_id: flowId,
   tenant_id: validFlowRun.tenant_id,
@@ -102,16 +126,9 @@ const validFlowRunStep: FlowRunStep = {
   status: "completed",
   input_payload_json: { file_ids: validStepInputs[stepId].file_ids },
   output_payload_json: {
-    text: "Step output",
-    artifacts: [
-      {
-        file_id: "00000000-0000-0000-0000-000000000801",
-        name: "summary.pdf",
-        mimetype: "application/pdf",
-        size: 14012
-      }
-    ]
+    text: "Step output"
   },
+  result_files: [validFlowRunResultFile],
   created_at: isoTimestamp,
   updated_at: isoTimestamp
 };
@@ -133,6 +150,7 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
   definition_snapshot: { steps: [validFlowStep] },
   step_results: [validFlowRunStep],
   step_attempts: [],
+  result_files: [validFlowRunResultFile],
   debug_export: {
     schema_version: "eneo.flow.debug-export.v2",
     generated_at: isoTimestamp,
@@ -186,13 +204,18 @@ const validFlowEvidenceExport: FlowRunEvidenceExport = {
       tracking_state: "not_tracked",
       tombstone_count: 0,
       retention_purged_count: 0,
+      artifact_content_purged_count: 0,
       redacted_for_deletion_count: 0,
       note: "Tombstone tracking is not yet exposed."
     },
     artifact_availability_summary: {
-      tracking_state: "payload_derived",
-      payload_artifact_count: 1,
-      note: "Canonical file availability is not yet exposed."
+      tracking_state: "tracked",
+      artifact_count: 1,
+      available_count: 1,
+      content_purged_count: 0,
+      total_size_bytes: validFlowRunResultFile.size,
+      artifacts: [validFlowRunResultFile],
+      note: "Artifact availability is derived from flow_run_step_result_files."
     }
   },
   summary: {},

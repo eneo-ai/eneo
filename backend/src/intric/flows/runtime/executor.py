@@ -41,6 +41,7 @@ from intric.flows.flow_run_provenance import (
     normalize_json_preview,
     normalize_text_preview,
 )
+from intric.flows.flow_run_step_result_file import build_step_result_file_references
 from intric.flows.flow_security_classification import (
     evaluate_step_security_classification,
 )
@@ -215,10 +216,9 @@ def _build_attempt_provenance(
     template_provenance = output_payload.get("template_provenance")
     if isinstance(template_provenance, dict):
         provenance_payload["template"] = template_provenance
-    artifacts = output_payload.get("artifacts")
-    if isinstance(artifacts, list):
+    if output.artifacts or output.generated_file_ids:
         provenance_payload["artifacts"] = {
-            "items": artifacts,
+            "items": output.artifacts or [],
             "generated_file_ids": [
                 str(file_id) for file_id in output.generated_file_ids
             ],
@@ -950,6 +950,10 @@ class FlowRunExecutor:
             step_result,
             tenant_id=tenant_id,
             attempt_no=attempt_no,
+            result_file_references=build_step_result_file_references(
+                generated_file_ids=output.generated_file_ids,
+                artifacts=output.artifacts,
+            ),
         )
         logger.info(
             "flow_executor.step_completed run_id=%s step_order=%d",

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Flow, FlowRun, Intric } from "@intric/intric-js";
+  import type { Flow, FlowRun, FlowRunResultFile, Intric } from "@intric/intric-js";
   import { untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -7,10 +7,10 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import FlowRunEvidence from "./FlowRunEvidence.svelte";
   import FlowRunProgressPanel from "./FlowRunProgressPanel.svelte";
+  import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import { toast } from "$lib/components/toast";
   import { getRedispatchToastKind } from "./flowRunRedispatchFeedback";
@@ -291,6 +291,10 @@
       [runId]: snapshot
     };
   }
+
+  function getPrimaryResultFile(resultFiles: FlowRunResultFile[]): FlowRunResultFile | null {
+    return resultFiles.find((file) => file.availability === "available") ?? resultFiles[0] ?? null;
+  }
 </script>
 
 <section class="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6">
@@ -501,36 +505,17 @@
                   onclick={(e: MouseEvent) => e.stopPropagation()}
                 >
                   <div class="inline-flex items-center gap-1">
-                    {#if run.status === "completed" && run.output_payload_json?.artifacts?.length}
-                      {@const artifacts = run.output_payload_json.artifacts}
-                      {@const firstArtifact = artifacts[0]}
-                      {@const extra = artifacts.length - 1}
-                      <!--
-                      Plain `<button>` (not shadcn `<Button>` inside a Tooltip snippet):
-                      the bits-ui Tooltip.Trigger render snippet spreads its own onclick
-                      into `...props`, which silently overrides any onclick we pass on
-                      the Button. Using a styled button directly keeps the onclick wired
-                      to the download call. Tooltip-on-hover is handled via native
-                      `title` attribute so no Tooltip chrome is needed here.
-                    -->
-                      <button
-                        type="button"
-                        aria-label={firstArtifact.name}
-                        title={extra > 0 ? `${firstArtifact.name} (+${extra})` : firstArtifact.name}
-                        class="border-default bg-primary hover:border-stronger hover:bg-hover-dimmer focus-visible:ring-accent-default/30 inline-flex h-7 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                        onclick={() => downloadArtifact(run.id, firstArtifact.file_id)}
-                      >
-                        <IconArrowDownToLine class="size-3.5" aria-hidden="true" />
-                        <span class="max-w-[18ch] truncate">{firstArtifact.name}</span>
-                        {#if extra > 0}
-                          <Badge
-                            variant="secondary"
-                            class="ml-1 h-5 px-1.5 text-[10px] tabular-nums"
-                          >
-                            +{extra}
-                          </Badge>
-                        {/if}
-                      </button>
+                    {#if run.status === "completed"}
+                      {@const resultFiles = run.result_files ?? []}
+                      {@const primaryResultFile = getPrimaryResultFile(resultFiles)}
+                      {#if primaryResultFile}
+                        <FlowRunResultFileButton
+                          compact
+                          file={primaryResultFile}
+                          extraCount={Math.max(resultFiles.length - 1, 0)}
+                          onDownload={(fileId) => downloadArtifact(run.id, fileId)}
+                        />
+                      {/if}
                     {/if}
                     <Button
                       variant="outline"

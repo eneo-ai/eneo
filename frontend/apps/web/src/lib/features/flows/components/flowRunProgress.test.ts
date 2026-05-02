@@ -51,6 +51,26 @@ describe("flowRunProgress helpers", () => {
           error_message: null,
           num_tokens_input: 10,
           num_tokens_output: 20,
+          result_files: [
+            {
+              flow_run_id: "run-1",
+              flow_id: "flow-1",
+              tenant_id: "tenant-1",
+              step_result_id: "result-1",
+              step_id: "step-1",
+              step_order: 1,
+              attempt_no: 1,
+              file_id: "file-1",
+              ordinal: 0,
+              source: "declared_artifact",
+              name: "summary.pdf",
+              checksum: "checksum",
+              size: 14012,
+              mimetype: "application/pdf",
+              file_type: "document",
+              availability: "available"
+            }
+          ],
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-01T00:00:01Z"
         },
@@ -77,6 +97,26 @@ describe("flowRunProgress helpers", () => {
         numTokensOutput: 20,
         inputPayload: null,
         outputPayload: null,
+        resultFiles: [
+          {
+            flow_run_id: "run-1",
+            flow_id: "flow-1",
+            tenant_id: "tenant-1",
+            step_result_id: "result-1",
+            step_id: "step-1",
+            step_order: 1,
+            attempt_no: 1,
+            file_id: "file-1",
+            ordinal: 0,
+            source: "declared_artifact",
+            name: "summary.pdf",
+            checksum: "checksum",
+            size: 14012,
+            mimetype: "application/pdf",
+            file_type: "document",
+            availability: "available"
+          }
+        ],
         startedAt: null,
         finishedAt: null,
         createdAt: "2026-01-01T00:00:00Z",
@@ -94,6 +134,7 @@ describe("flowRunProgress helpers", () => {
         numTokensOutput: null,
         inputPayload: null,
         outputPayload: null,
+        resultFiles: [],
         startedAt: null,
         finishedAt: null,
         createdAt: "2026-01-01T00:00:01Z",
@@ -123,6 +164,7 @@ describe("flowRunProgress helpers", () => {
         numTokensOutput: null,
         inputPayload: null,
         outputPayload: null,
+        resultFiles: [],
         startedAt: null,
         finishedAt: null,
         createdAt: "2026-01-01T00:00:00Z",
@@ -135,9 +177,9 @@ describe("flowRunProgress helpers", () => {
     expect(
       getFlowRunFocusedStepOrder({
         steps: [
-          { stepOrder: 1, label: "Transcribe", status: "completed" },
-          { stepOrder: 2, label: "Structure", status: "running" },
-          { stepOrder: 3, label: "Summarize", status: "queued" }
+          { stepOrder: 1, label: "Transcribe", status: "completed", resultFiles: [] },
+          { stepOrder: 2, label: "Structure", status: "running", resultFiles: [] },
+          { stepOrder: 3, label: "Summarize", status: "queued", resultFiles: [] }
         ]
       })
     ).toBe(2);
@@ -147,9 +189,9 @@ describe("flowRunProgress helpers", () => {
     expect(
       getFlowRunFocusedStepOrder({
         steps: [
-          { stepOrder: 1, label: "Transcribe", status: "completed" },
-          { stepOrder: 2, label: "Structure", status: "completed" },
-          { stepOrder: 3, label: "Summarize", status: "queued" }
+          { stepOrder: 1, label: "Transcribe", status: "completed", resultFiles: [] },
+          { stepOrder: 2, label: "Structure", status: "completed", resultFiles: [] },
+          { stepOrder: 3, label: "Summarize", status: "queued", resultFiles: [] }
         ]
       })
     ).toBe(3);
@@ -159,9 +201,9 @@ describe("flowRunProgress helpers", () => {
     expect(
       getFlowRunFocusedStepOrder({
         steps: [
-          { stepOrder: 1, label: "Transcribe", status: "completed" },
-          { stepOrder: 2, label: "Structure", status: "failed" },
-          { stepOrder: 3, label: "Summarize", status: "queued" }
+          { stepOrder: 1, label: "Transcribe", status: "completed", resultFiles: [] },
+          { stepOrder: 2, label: "Structure", status: "failed", resultFiles: [] },
+          { stepOrder: 3, label: "Summarize", status: "queued", resultFiles: [] }
         ]
       })
     ).toBe(2);

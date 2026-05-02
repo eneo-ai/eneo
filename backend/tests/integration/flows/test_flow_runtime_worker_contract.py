@@ -41,7 +41,9 @@ class _ModelKwargs:
 
     def model_dump(self, *, exclude_none: bool = False, **_kwargs):
         if exclude_none:
-            return {key: value for key, value in self._values.items() if value is not None}
+            return {
+                key: value for key, value in self._values.items() if value is not None
+            }
         return dict(self._values)
 
     def model_copy(self, *, update):
@@ -263,7 +265,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert run_row.status == FlowRunStatus.COMPLETED.value
         assert run_row.output_payload_json == {
             "text": "The run completed.",
-            "generated_file_ids": [],
             "webhook_delivered": False,
         }
 
@@ -282,7 +283,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert step_result_rows[0].status == FlowStepResultStatus.COMPLETED.value
         assert step_result_rows[0].output_payload_json == {
             "text": "The run completed.",
-            "generated_file_ids": [],
             "webhook_delivered": False,
         }
 
@@ -305,13 +305,14 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert evidence["run"]["status"] == FlowRunStatus.COMPLETED.value
         assert evidence["step_results"][0]["output_payload_json"] == {
             "text": "The run completed.",
-            "generated_file_ids": [],
             "webhook_delivered": False,
         }
 
         audit_service.log_async.assert_not_awaited()
         outbox_row = await session.scalar(
-            sa.select(FlowRunAuditOutbox).where(FlowRunAuditOutbox.flow_run_id == run.id)
+            sa.select(FlowRunAuditOutbox).where(
+                FlowRunAuditOutbox.flow_run_id == run.id
+            )
         )
         assert outbox_row is not None
         assert outbox_row.action == "flow_run_completed"
