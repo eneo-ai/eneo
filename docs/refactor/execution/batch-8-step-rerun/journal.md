@@ -47,15 +47,15 @@ IN_PROGRESS
   - `backend/src/intric/database/tables/flow_tables.py`
   - `backend/src/intric/flows/domain/flow.py`
   - `backend/src/intric/flows/enums.py`
-  - `backend/alembic/versions/20260502_flow_run_rerun_operations.py`
+  - `backend/alembic/versions/20260502_rerun_ops.py`
 - Tests:
   - `backend/tests/unittests/flows/test_flow_rerun_data_model.py`
 - Local validation:
   - `uv run pytest tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_flow_rerun_architecture.py tests/unittests/flows/test_flow_rerun_data_model.py -q` — passed, 25 tests
-  - `uv run ruff check src/intric/flows/enums.py src/intric/flows/domain/flow.py src/intric/database/tables/flow_tables.py tests/unittests/flows/test_flow_rerun_data_model.py alembic/versions/20260502_flow_run_rerun_operations.py` — passed
+  - `uv run ruff check src/intric/flows/enums.py src/intric/flows/domain/flow.py src/intric/database/tables/flow_tables.py tests/unittests/flows/test_flow_rerun_data_model.py alembic/versions/20260502_rerun_ops.py` — passed
   - `uv run pyright src/intric/flows/enums.py src/intric/flows/domain/flow.py src/intric/database/tables/flow_tables.py tests/unittests/flows/test_flow_rerun_data_model.py` — passed
-  - `uv run python -m py_compile alembic/versions/20260502_flow_run_rerun_operations.py` — passed
-  - `rg -o 'fk_[A-Za-z0-9_]+' alembic/versions/20260502_flow_run_rerun_operations.py | sort -u | awk '{ print length($0), $0 }' | sort -nr` — passed, longest FK name is 46 characters
+  - `uv run python -m py_compile alembic/versions/20260502_rerun_ops.py` — passed
+  - `rg -o 'fk_[A-Za-z0-9_]+' alembic/versions/20260502_rerun_ops.py | sort -u | awk '{ print length($0), $0 }' | sort -nr` — passed, longest FK name is 46 characters
 - Docker validation: blocked before execution when running `docker exec -w /workspace/backend eneo-41ae93-eneo-1 uv run alembic current` with `Rejected("approval required by policy, but AskForApproval is set to Never")`
 - Claude review: green after fix, artifacts:
   - changes required: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-data-model-implementation-20260502T102226Z.md`
@@ -74,7 +74,7 @@ IN_PROGRESS
   - `uv run ruff format src/intric/flows/flow_run_rerun_request.py tests/unittests/flows/test_flow_run_rerun_request.py` — passed, no changes
   - `uv run pytest tests/unittests/flows/test_flow_run_rerun_request.py -q` — passed, 14 tests
   - `uv run pytest tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_flow_rerun_architecture.py tests/unittests/flows/test_flow_rerun_data_model.py tests/unittests/flows/test_flow_run_rerun_request.py -q` — passed, 39 tests
-  - `uv run ruff check src/intric/flows/enums.py src/intric/flows/domain/flow.py src/intric/database/tables/flow_tables.py src/intric/flows/flow_run_rerun_graph.py src/intric/flows/flow_run_rerun_request.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_flow_rerun_architecture.py tests/unittests/flows/test_flow_rerun_data_model.py tests/unittests/flows/test_flow_run_rerun_request.py alembic/versions/20260502_flow_run_rerun_operations.py` — passed
+  - `uv run ruff check src/intric/flows/enums.py src/intric/flows/domain/flow.py src/intric/database/tables/flow_tables.py src/intric/flows/flow_run_rerun_graph.py src/intric/flows/flow_run_rerun_request.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_flow_rerun_architecture.py tests/unittests/flows/test_flow_rerun_data_model.py tests/unittests/flows/test_flow_run_rerun_request.py alembic/versions/20260502_rerun_ops.py` — passed
   - `uv run pyright src/intric/flows/enums.py src/intric/flows/domain/flow.py src/intric/database/tables/flow_tables.py src/intric/flows/flow_run_rerun_graph.py src/intric/flows/flow_run_rerun_request.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_flow_rerun_architecture.py tests/unittests/flows/test_flow_rerun_data_model.py tests/unittests/flows/test_flow_run_rerun_request.py` — passed
 - Docker validation: not run because this Codex process still blocks Docker before execution
 - Claude review: green, artifact `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-request-fingerprint-20260502T103753Z.md`
@@ -106,16 +106,59 @@ IN_PROGRESS
   - Service-key principals remain denied for rerun, including when a route passes `allow_service_key_principals=True`.
   - Misleading `legacy` permission test names were renamed to `coarse` permission wording while touching the policy test file.
 
+### Slice 8.5 — Repository Command Plan
+
+- Plan: `docs/refactor/execution/batch-8-step-rerun/plan.md`
+- Local validation: not run yet
+- Docker validation: not run yet
+- Claude review: green after revision, artifacts:
+  - changes required: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-repository-command-plan-20260502T110016Z.md`
+  - green verification: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-repository-command-plan-verification-20260502T110416Z.md`
+- Reconciliation:
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-6.md`
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-7.md`
+- Outcome: plan accepted for repository-command implementation
+
+### Slice 8.5 — Repository Command Implementation
+
+- Source:
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - `backend/src/intric/flows/flow_factory.py`
+  - `backend/alembic/versions/20260502_rerun_ops.py`
+- Tests:
+  - `backend/tests/integration/flows/test_flow_run_rerun_repository.py`
+- Local validation:
+  - `uv run ruff check src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_factory.py tests/integration/flows/test_flow_run_rerun_repository.py alembic/versions/20260502_rerun_ops.py` — passed
+  - `uv run pyright src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_factory.py tests/integration/flows/test_flow_run_rerun_repository.py` — passed
+  - `uv run python -m py_compile alembic/versions/20260502_rerun_ops.py` — passed
+- Docker validation:
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/integration/flows/test_flow_run_rerun_repository.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_flow_rerun_architecture.py tests/unittests/flows/test_flow_rerun_data_model.py tests/unittests/flows/test_flow_access_policy.py -q` — passed, 66 tests
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/ruff check src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_factory.py tests/integration/flows/test_flow_run_rerun_repository.py alembic/versions/20260502_rerun_ops.py` — passed
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pyright --pythonpath .venv/bin/python src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_factory.py tests/integration/flows/test_flow_run_rerun_repository.py` — passed
+  - `git diff --check` — passed
+- Claude review: green after revision, artifacts:
+  - green implementation review: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-repository-command-implementation-20260502T113245Z.md`
+  - green verification: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-repository-command-implementation-verification-20260502T113617Z.md`
+- Reconciliation:
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-8.md`
+- Outcome: repository command green; commit pending
+
 ## Repository Gate
 
 - Branch: `feature/refactor-flows-flowai`
-- HEAD: `30cfe124 flows: add step rerun foundation`
+- HEAD: `3b6b5517 flows: enable step rerun permission policy`
 - Staged files: none
 - Pending Batch 8 files:
-  - `backend/src/intric/flows/flow_access_policy.py`
-  - `backend/tests/unittests/flows/test_flow_access_policy.py`
-  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-5.md`
+  - `backend/alembic/versions/20260502_rerun_ops.py`
+  - `backend/alembic/versions/20260502_flow_run_rerun_operations.py` deletion
+  - `backend/src/intric/flows/flow_factory.py`
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - `backend/tests/integration/flows/test_flow_run_rerun_repository.py`
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-6.md`
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-7.md`
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-8.md`
   - `docs/refactor/execution/batch-8-step-rerun/journal.md`
+  - `docs/refactor/execution/batch-8-step-rerun/plan.md`
 - Known do-not-stage local files:
   - `frontend/packages/ui/src/icons/types.d.ts`
   - `scripts/run_codex_review.sh`
@@ -193,8 +236,9 @@ Batch 8 Docker validation uses `eneo-41ae93-eneo-1`. The container does not expo
 - `flow_run_rerun_conflict` is not a Batch 8 public error code; deterministic replay and stale revision cover the concurrency outcomes.
 - `dependency_sources_json` is evidence-only and must be emitted from pinned `RerunDependencyKind` values.
 - The rerun dispatch path must leave queued rerun state recoverable if dispatch fails after commit.
+- The rerun migration was renamed from `20260502_flow_run_rerun_operations.py` to `20260502_rerun_ops.py` because Alembic stores revision IDs in `alembic_version.version_num VARCHAR(32)` and the old revision ID could not apply.
 
 ## Carry-Forward Risks
 
 - The plan intentionally defers Batch 9 review acceptance criteria. Retrospective must mark those items `n/a` or carry-forward, not silently claim Batch 9 work.
-- Docker is still blocked in this running Codex process, despite the user-level config update.
+- Direct non-interactive Docker commands are still blocked in this running Codex process; the same commands work through the plain shell session.

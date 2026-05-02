@@ -1,16 +1,20 @@
 from collections.abc import Sequence
 
 from intric.database.tables.flow_tables import (
+    FlowRunRerunInvalidatedSteps,
+    FlowRunRerunOperations,
     FlowRuns,
+    Flows,
     FlowStepAttempts,
     FlowStepResults,
     FlowSteps,
-    Flows,
     FlowVersions,
 )
 from intric.flows.domain.flow import (
     Flow,
     FlowRun,
+    FlowRunRerunInvalidatedStep,
+    FlowRunRerunOperation,
     FlowSparse,
     FlowStep,
     FlowStepAttempt,
@@ -41,5 +45,19 @@ class FlowFactory:
     def from_flow_step_result_db(self, result_in_db: FlowStepResults) -> FlowStepResult:
         return FlowStepResult.model_validate(result_in_db)
 
-    def from_flow_step_attempt_db(self, attempt_in_db: FlowStepAttempts) -> FlowStepAttempt:
+    def from_flow_step_attempt_db(
+        self, attempt_in_db: FlowStepAttempts
+    ) -> FlowStepAttempt:
         return FlowStepAttempt.model_validate(attempt_in_db)
+
+    def from_flow_run_rerun_operation_db(
+        self,
+        operation_in_db: FlowRunRerunOperations,
+    ) -> FlowRunRerunOperation:
+        return FlowRunRerunOperation.model_validate(operation_in_db)
+
+    def from_flow_run_rerun_invalidated_step_db(
+        self,
+        invalidated_step_in_db: FlowRunRerunInvalidatedSteps,
+    ) -> FlowRunRerunInvalidatedStep:
+        return FlowRunRerunInvalidatedStep.model_validate(invalidated_step_in_db)

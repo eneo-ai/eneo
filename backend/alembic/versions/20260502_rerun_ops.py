@@ -1,6 +1,6 @@
 """add flow run rerun operations
 
-Revision ID: 20260502_flow_run_rerun_operations
+Revision ID: 20260502_rerun_ops
 Revises: 20260430_flow_step_file_mappings
 Create Date: 2026-05-02 00:00:00.000000
 """
@@ -10,7 +10,7 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision = "20260502_flow_run_rerun_operations"
+revision = "20260502_rerun_ops"
 down_revision = "20260430_flow_step_file_mappings"
 branch_labels = None
 depends_on = None
@@ -35,9 +35,6 @@ def upgrade() -> None:
         sa.Column(
             "current_attempt_no", sa.Integer(), nullable=True, server_default="1"
         ),
-    )
-    op.execute(
-        "UPDATE flow_step_results SET current_attempt_no = 1 WHERE status = 'completed'"
     )
 
     op.create_table(

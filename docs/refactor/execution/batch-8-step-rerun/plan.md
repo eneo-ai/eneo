@@ -27,7 +27,7 @@ TL;DR:
 | Current result files are attached to the current step-result row. | `backend/src/intric/database/tables/flow_tables.py:526-528` keeps one `FlowStepResults` row per run/step, while `backend/src/intric/database/tables/flow_tables.py:695-697` attaches result files to that row. | Batch 8 must prevent old attempt files from rendering as current after a result row is reset. |
 | Run `updated_at` is not a stable compare-and-swap token. | `backend/src/intric/database/tables/base_class.py:35-39` sets `updated_at` with `onupdate=func.now()`. | Add a monotonic `FlowRuns.revision` lifecycle token and use `expected_run_revision` in rerun requests. |
 | Terminal audit outbox is one row per run. | `backend/src/intric/database/tables/flow_tables.py:759-821` defines `flow_run_audit_outbox` and `backend/src/intric/database/tables/flow_tables.py:795` enforces `UNIQUE(flow_run_id)`. | Rerun operation rows are the canonical rerun audit owner in Batch 8; do not widen the terminal outbox or add a shared audit action for rerun. |
-| Docker validation is still blocked in this Codex process. | `docker ps --format '{{.Names}}' \| sort` was rejected before execution with `approval required by policy, but AskForApproval is set to Never`. | Keep Docker as canonical validation in the plan, but record local fallback if the same blocker persists. |
+| Direct non-interactive Docker calls are blocked in this Codex process, but the plain shell session can run Docker. | `docker ps --format '{{.Names}}' \| sort` was rejected before execution through the direct tool path; the same Docker commands run through the plain shell session. | Keep Docker as canonical validation and record whether each command used the plain shell session. |
 
 ## Canonical Ownership Map
 
@@ -183,7 +183,7 @@ TL;DR:
 `FlowStepResults` remains the current projection, while attempts and file rows hold history.
 
 - Add nullable `current_attempt_no`.
-- Migration backfills completed rows with `current_attempt_no = 1`; if a non-production environment has no completed rows, the same SQL is still harmless.
+- The migration default makes existing current rows read as first-attempt rows without a separate table-wide backfill update.
 - Initial preseed rows use `1` for consistency with first-attempt input/result file rows.
 - Rerun invalidation sets `current_attempt_no = NULL` on root/downstream current rows while clearing current output, error, prompt, token, execution hash, and display artifact fields.
 - Successful step persistence sets `current_attempt_no = attempt_no`.
@@ -355,7 +355,7 @@ Error codes:
 - `flow_run_rerun_stale_revision` for stale `expected_run_revision`
 - `flow_run_rerun_invalid_transition` for queued/running/cancelled runs
 - `flow_run_rerun_step_not_found` for a step absent from the run's published snapshot
-- `flow_run_rerun_step_incomplete` when the root step has no completed current result
+- `flow_run_rerun_step_incomplete` when an invalidated current result row is missing or the root step has no completed current result
 - `flow_run_rerun_step_inputs_invalid` for step input payloads outside the rerun root
 - existing permission errors from the Flow access policy
 
@@ -384,6 +384,144 @@ Concurrent reruns do not get a second public conflict code in Batch 8. A same-fi
 15. If dispatch fails before execution starts, the run and operation stay queued so stale queued redispatch can recover them. The redispatch integration test must prove dispatch failure, queued operation recovery, active-operation reload, and single execution of the invalidated subgraph.
 16. Terminalization closes active rerun operations using the status rule defined above.
 17. Evidence bundle/export includes operations, invalidated steps, and attempt predecessor/supersession fields.
+
+## Slice 8.5 Repository Command Contract
+
+The repository command is the canonical writer for rerun operation acceptance. It runs inside the caller's existing unit-of-work session; operation insert, invalidated-step inserts, run reset, revision bump, and current-result resets commit together or roll back together. No operation row may commit without the matching run/result mutation.
+
+Fresh operation insertion uses the same idempotent insert pattern as `FlowRunRepository.create_or_get_attempt_started`: PostgreSQL `INSERT ... ON CONFLICT DO NOTHING` against `uq_flow_run_rerun_operations_request_fingerprint`, followed by a select fallback. Concurrent identical rerun requests must both observe the same operation row. Different requests after a revision bump return `flow_run_rerun_stale_revision`.
+
+Replay happens before state-transition checks. A same-fingerprint replay returns:
+
+- the current persisted operation row, including its current status
+- the latest persisted run row
+- all persisted invalidated-step rows for the operation
+
+The repository does not hide executor progress from callers; API assembly decides how to expose the latest operation/run state.
+
+### Rerun Versus Retry Boundary
+
+Batch 8 rerun replaces a previously completed step output and invalidates downstream outputs. Every invalidated step must already have a current-result row because rerun updates the current projection instead of creating a second current path. A root step whose current result is `failed`, `pending`, `running`, or `cancelled` is not eligible for rerun. Failed current steps require retry/recovery semantics, not rerun semantics, because they do not have a completed current output to supersede. The stable error code is `flow_run_rerun_step_incomplete`.
+
+### Operation Row Insert Values
+
+The command requires these caller inputs:
+
+| Input | Stored column / use |
+|---|---|
+| `tenant_id` | `flow_run_rerun_operations.tenant_id` and tenant-scoped queries |
+| `flow_id` | `flow_run_rerun_operations.flow_id` and flow-scoped queries |
+| `flow_run_id` | `flow_run_rerun_operations.flow_run_id` |
+| `rerun_step_id` | `flow_run_rerun_operations.rerun_step_id` |
+| `rerun_step_order` | `flow_run_rerun_operations.rerun_step_order` |
+| `request_fingerprint` | `flow_run_rerun_operations.request_fingerprint` idempotency key |
+| `expected_run_revision` | `flow_run_rerun_operations.expected_run_revision` |
+| `reason` | `flow_run_rerun_operations.reason`; required non-empty API input |
+| `input_payload_json` | `flow_run_rerun_operations.input_payload_json`; nullable |
+| `step_inputs_json` | `flow_run_rerun_operations.step_inputs_json`; nullable |
+| `requested_by_principal_type` | `flow_run_rerun_operations.requested_by_principal_type`; Batch 8 writes only `user` |
+| `requested_by_user_id` | `flow_run_rerun_operations.requested_by_user_id` |
+
+On fresh insert:
+
+| Column | Value |
+|---|---|
+| `status` | `queued` |
+| `started_at` | `NULL` |
+| `finished_at` | `NULL` |
+| `failure_code` | `NULL` |
+| `failure_message` | `NULL` |
+| `expected_run_revision` | requester-supplied CAS value |
+| `accepted_run_revision` | the run revision observed under lock; equal to `expected_run_revision` on the fresh path |
+| `root_attempt_no` | `max(flow_step_attempts.attempt_no for root step) + 1`, with `0 + 1` when no prior attempt row exists |
+| `root_attempt_id` | `NULL` until the executor creates the root attempt |
+
+The run row is locked before allocating `root_attempt_no`; `uq_flow_step_attempts_run_step_attempt` remains the structural backstop when the executor later creates the attempt row. The command does not pre-create `flow_step_attempts` rows.
+
+### Rejection Order And Error Codes
+
+After replay lookup misses, the fresh path rejects in this order:
+
+1. Lock run by `flow_run_id`, `flow_id`, and `tenant_id`; missing row surfaces as `not_found`.
+2. `expected_run_revision != FlowRuns.revision` returns `flow_run_rerun_stale_revision`.
+3. `FlowRuns.status` outside `completed` or `failed` returns `flow_run_rerun_invalid_transition`.
+4. `rerun_step_id` absent from the run's published runtime step list returns `flow_run_rerun_step_not_found`.
+5. Any invalidated step without a current `FlowStepResults` row returns `flow_run_rerun_step_incomplete`.
+6. Root current `FlowStepResults.status != completed` returns `flow_run_rerun_step_incomplete`.
+
+### Run Reset Values
+
+On fresh acceptance, update only these `FlowRuns` columns:
+
+| Column | New value |
+|---|---|
+| `status` | `queued` |
+| `revision` | `accepted_run_revision + 1` |
+| `output_payload_json` | `NULL` |
+| `error_message` | `NULL` |
+| `started_at` | `NULL` |
+| `finished_at` | `NULL` |
+| `cancelled_at` | `NULL` |
+
+Do not change `trace_id`, original create-run `idempotency_key`, original create-run `request_fingerprint`, principal columns, `flow_id`, `flow_version`, `input_payload_json`, or `job_id`.
+
+### Step Result Reset Values
+
+On fresh acceptance, reset the root and downstream current `FlowStepResults` rows using one canonical reset map:
+
+| Column | New value |
+|---|---|
+| `status` | `pending` |
+| `current_attempt_no` | `NULL` |
+| `input_payload_json` | `NULL` |
+| `output_payload_json` | `NULL` |
+| `effective_prompt` | `NULL` |
+| `model_parameters_json` | `NULL` |
+| `num_tokens_input` | `NULL` |
+| `num_tokens_output` | `NULL` |
+| `error_message` | `NULL` |
+| `flow_step_execution_hash` | `NULL` |
+| `tool_calls_metadata` | `NULL` |
+| `started_at` | `NULL` |
+| `finished_at` | `NULL` |
+
+Do not change row identity, run/flow/tenant IDs, `step_id`, `step_order`, `assistant_id`, or `created_at`.
+
+### Invalidated Step Rows
+
+`flow_run_rerun_invalidated_steps` rows are deterministic:
+
+- `invalidation_order` is contiguous, starts at `1`, and follows `step_order` ascending.
+- The root row uses `role = root` and `dependency_sources_json = []`.
+- Downstream rows use `role = downstream` and persist the graph's `RerunDependencyKind.value` strings from `RerunInvalidatedStep.dependency_kinds`.
+- `prior_step_result_id` links the current result row that was reset.
+- `prior_attempt_id` links the latest completed attempt for the step, if any.
+- `new_attempt_no` and `new_attempt_id` remain `NULL` until the executor claims that invalidated step.
+
+### Slice 8.5 Tests
+
+- Fresh operation acceptance writes operation, invalidated-step rows, run reset, revision bump, and step-result resets in one transaction.
+- Rolling back the caller transaction after command execution leaves no rerun operation or invalidated rows.
+- Same-fingerprint concurrent requests both observe one operation row through the `ON CONFLICT DO NOTHING` pattern.
+- Stale revision returns `flow_run_rerun_stale_revision` and does not mutate rows.
+- Cancelled/running/queued runs return `flow_run_rerun_invalid_transition`.
+- A failed root step result returns `flow_run_rerun_step_incomplete`; completed roots are eligible.
+- A missing current-result row for any invalidated step returns `flow_run_rerun_step_incomplete`.
+- A rerun step absent from the published definition snapshot returns `flow_run_rerun_step_not_found`.
+- Invalidated rows pin root/downstream roles, contiguous invalidation order, and `dependency_sources_json`, including the `föregående_steg` runtime-alias dependency from the graph.
+- Tenant filters are present on lock and mutation queries.
+
+### Slice 8.5 Validation Commands
+
+Run these for the repository-command slice before Claude implementation review:
+
+```bash
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/integration/flows/test_flow_run_rerun_repository.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_flow_rerun_architecture.py tests/unittests/flows/test_flow_access_policy.py -q
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/ruff check src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_factory.py tests/integration/flows/test_flow_run_rerun_repository.py
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pyright --pythonpath .venv/bin/python src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_factory.py tests/integration/flows/test_flow_run_rerun_repository.py
+```
+
+Local fallback commands use the same paths with `uv run pytest`, `uv run ruff check`, and `uv run pyright`.
 
 ## Validation Commands
 

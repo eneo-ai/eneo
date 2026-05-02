@@ -33,10 +33,10 @@ TL;DR:
 | Command | Result |
 |---|---|
 | `uv run pytest tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_flow_rerun_architecture.py tests/unittests/flows/test_flow_rerun_data_model.py -q` | Passed, 25 tests |
-| `uv run ruff check src/intric/flows/enums.py src/intric/flows/domain/flow.py src/intric/database/tables/flow_tables.py tests/unittests/flows/test_flow_rerun_data_model.py alembic/versions/20260502_flow_run_rerun_operations.py` | Passed |
+| `uv run ruff check src/intric/flows/enums.py src/intric/flows/domain/flow.py src/intric/database/tables/flow_tables.py tests/unittests/flows/test_flow_rerun_data_model.py alembic/versions/20260502_rerun_ops.py` | Passed |
 | `uv run pyright src/intric/flows/enums.py src/intric/flows/domain/flow.py src/intric/database/tables/flow_tables.py tests/unittests/flows/test_flow_rerun_data_model.py` | Passed |
-| `uv run python -m py_compile alembic/versions/20260502_flow_run_rerun_operations.py` | Passed |
-| `rg -o 'fk_[A-Za-z0-9_]+' alembic/versions/20260502_flow_run_rerun_operations.py \| sort -u \| awk '{ print length($0), $0 }' \| sort -nr` | Passed; longest FK name is 46 characters |
+| `uv run python -m py_compile alembic/versions/20260502_rerun_ops.py` | Passed |
+| `rg -o 'fk_[A-Za-z0-9_]+' alembic/versions/20260502_rerun_ops.py \| sort -u \| awk '{ print length($0), $0 }' \| sort -nr` | Passed; longest FK name is 46 characters |
 
 ## Confidence
 
