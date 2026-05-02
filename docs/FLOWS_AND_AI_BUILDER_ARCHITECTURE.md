@@ -1,6 +1,6 @@
 # Eneo Flows and Flow AI Builder Architecture
 
-Last reviewed: 2026-04-28
+Last reviewed: 2026-05-02
 
 This document gives a review-ready map of the current Flows and Flow AI Builder implementation. It is intentionally descriptive: it explains how the system is built now, where data lives, how execution moves through the codebase, and which areas are the most important review targets.
 
@@ -624,7 +624,6 @@ Columns:
 - `status`
 - `error_message`
 - `flow_step_execution_hash`
-- `tool_calls_metadata`
 - `started_at`
 - `finished_at`
 - `created_at`
@@ -642,7 +641,7 @@ Notes:
 
 - This table is what the UI polls for step progress/output.
 - Step result rows are preseeded when the run is created.
-- `tool_calls_metadata` is typed loosely in the domain model as either a dict or list.
+- LLM tool-call evidence is not persisted on step results. Runtime tool metadata is transient until it is stored in attempt provenance.
 
 #### `flow_step_attempts`
 
@@ -931,7 +930,6 @@ High-value JSONB fields:
 - `flow_step_results.input_payload_json`
 - `flow_step_results.output_payload_json`
 - `flow_step_results.model_parameters_json`
-- `flow_step_results.tool_calls_metadata`
 - `flow_step_attempts.provenance_json`
 - `builder_sessions.conversation`
 - `builder_sessions.planning_state_jsonb`

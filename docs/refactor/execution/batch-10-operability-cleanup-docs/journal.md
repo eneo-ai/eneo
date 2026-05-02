@@ -318,3 +318,105 @@ Post-cleanup validation:
 | `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean` |
 | `rg -n "tool_calls_metadata\|ToolCallMetadata" scripts backend/scripts` | Passed: no output |
 | `rg -n "from intric\\.flows\\.(flow\|domain\\.flow) import.*ToolCallMetadata\|ToolCallMetadata" backend/src/intric/flows backend/tests` | Passed: no output |
+
+### Iteration 8 — Slice 10.5 Plan Review
+
+- Chosen slice: delivered Flow audit outbox retention and docs cleanup.
+- Initial plan: delete delivered outbox rows by mirroring tenant audit retention cutoff on `FlowRunAuditOutbox.created_at`.
+- Claude artifact: `.codex/artifacts/claude-peer-loop-batch-10-flow-audit-outbox-retention-docs-plan-20260502T222409Z.md`
+- Claude verdict: `changes_required`
+- Claude green light: `no`
+- Claude minimum score: `6`
+
+Accepted findings:
+
+| Claude finding | Decision |
+|---|---|
+| Adding audit-outbox hard-delete counts to `FlowRuntimeCleanupCounts` would mix audit-retention cleanup with Flow debug/artifact tombstoning. | Keep `FlowRuntimeCleanupCounts` unchanged and add a sibling `DataRetentionService.delete_old_delivered_flow_audit_outbox_rows() -> int`. |
+| A created-at cutoff copies audit retention semantics and can drift from actual audit deletion. | Use an anti-join: delete delivered outbox rows only when the matching `audit_logs.id` row is already gone. |
+| Shared audit retention must not import Flow infrastructure. | Keep the cleanup in data retention / Flow-owned cleanup, not audit retention. |
+| Pending and dead-lettered rows should not be deleted to reduce row count. | Delete only `delivery_status='delivered'`; preserve pending rows for delivery and dead letters for incident visibility. |
+| Runbook health-contract docs are incomplete for existing audit outbox fields and flags. | Complete the `audit_outbox` field/flag table in `docs/runbooks/flows.md`. |
+| Architecture docs still reference deleted result-level `tool_calls_metadata`. | Update all current-architecture references and bump `Last reviewed`. |
+| Batch size should be one source of truth. | Reuse `RETENTION_BATCH_SIZE`; do not add another constant. |
+
+Revised implementation plan:
+
+- Add `flow_audit_outbox_delivered_rows` to `data_retention_worker.DeletedCounts`, totals, and summary logging.
+- Add a separate worker transaction after Flow runtime debug/artifact cleanup.
+- Add a batched anti-join delete method on `DataRetentionService`.
+- Add integration tests for delivered-without-audit deletion, delivered-with-audit preservation, pending/dead-letter preservation, idempotency, and multi-batch deletion with patched `RETENTION_BATCH_SIZE`.
+- Update runbook and architecture docs.
+
+Plan verification:
+
+- Claude plan verification artifact: `.codex/artifacts/claude-peer-loop-batch-10-flow-audit-outbox-retention-docs-plan-verification-20260502T222823Z.md`
+- Claude plan verification verdict: `green`
+- Claude green light: `yes`
+- Claude minimum score: `8`
+
+Accepted plan-verification refinements:
+
+| Claude note | Change |
+|---|---|
+| Pin the batched delete shape in the plan. | Plan now requires `DELETE ... WHERE id IN (SELECT id ... LIMIT RETENTION_BATCH_SIZE)` looped until `rowcount == 0`. |
+| Delivered-row scan may need an index after volume exists. | Added a Batch 10 follow-up to measure before adding a delivered-row partial index. |
+| Dead-letter cleanup needs a durable replay/ack item. | Added a Batch 10 follow-up for the dead-letter replay/ack contract. |
+
+Implementation may start from the revised anti-join plan.
+
+Implementation result:
+
+| Area | Change |
+|---|---|
+| Retention service | Added `DataRetentionService.delete_old_delivered_flow_audit_outbox_rows()`, which deletes only delivered `flow_run_audit_outbox` rows whose matching `audit_logs.id` row is already gone. The delete uses `RETENTION_BATCH_SIZE` and loops until `rowcount == 0`. |
+| Retention worker | Added `flow_audit_outbox_delivered_rows` to `DeletedCounts`, totals, and success logging. The cleanup runs after Flow runtime debug/artifact cleanup in a separate transaction. |
+| Tests | Added integration coverage for delivered orphan deletion, delivered-with-audit preservation, pending/dead-letter preservation, idempotency, and multi-batch deletion. Added worker unit coverage for the delivered outbox count, total, and separate transaction count. |
+| Runbook | Added the `audit_outbox` health fields, audit outbox status flags, and delivered-row retention policy. |
+| Architecture map | Removed current-architecture `flow_step_results.tool_calls_metadata` references and pointed tool-call evidence to attempt provenance. |
+
+Validation before Claude implementation review:
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run ruff check src/intric/data_retention/infrastructure/data_retention_service.py src/intric/data_retention/infrastructure/data_retention_worker.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/data_retention/test_data_retention_worker.py` | Passed |
+| `cd backend && uv run ruff format --check src/intric/data_retention/infrastructure/data_retention_service.py src/intric/data_retention/infrastructure/data_retention_worker.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/data_retention/test_data_retention_worker.py` | Passed: `4 files already formatted` |
+| `cd backend && uv run pyright src/intric/data_retention/infrastructure/data_retention_service.py src/intric/data_retention/infrastructure/data_retention_worker.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/data_retention/test_data_retention_worker.py` | Passed: `0 errors, 0 warnings, 0 informations` |
+| `cd backend && uv run pytest tests/unittests/data_retention/test_data_retention_worker.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_audit_outbox_delivery.py tests/unittests/flows/test_flow_runtime_health.py -q` | Passed: `28 passed, 16 warnings` |
+| `cd backend && uv run lint-imports --no-cache` | Passed: `3 kept, 0 broken` |
+| `git diff --check -- backend/src/intric/data_retention/infrastructure/data_retention_service.py backend/src/intric/data_retention/infrastructure/data_retention_worker.py backend/tests/integration/test_flow_runtime_retention_cleanup.py backend/tests/unittests/data_retention/test_data_retention_worker.py docs/runbooks/flows.md docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md docs/refactor/execution/batch-10-operability-cleanup-docs` | Passed |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean` |
+| `rg -n "created_at.*retention\|retention_days.*FlowRunAuditOutbox\|FlowRunAuditOutbox.*retention_days\|AuditRetentionPolicy.*FlowRunAuditOutbox" backend/src/intric/data_retention backend/src/intric/flows backend/tests` | Passed: no output |
+| `rg -n "tool_calls_metadata\|flow_step_results\\.tool_calls" docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md` | Passed: no output |
+
+Claude implementation review:
+
+- Claude artifact: `.codex/artifacts/claude-peer-loop-batch-10-flow-audit-outbox-retention-docs-implementation-verification-20260502T224452Z.md`
+- Claude verdict: `green`
+- Claude green light: `yes`
+- Claude minimum score: `9`
+
+Accepted optional cleanup:
+
+| Claude note | Change |
+|---|---|
+| The local `delete_outbox_rows` rebind in `data_retention_worker.py` was only a line-length workaround. | Inlined the method call so the worker block reads like the sibling retention blocks. |
+| `session.transaction_count == 5` was meaningful but unexplained. | Replaced the literal with `expected_independent_cleanup_transactions`. |
+
+Post-Claude cleanup validation:
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run ruff check src/intric/data_retention/infrastructure/data_retention_service.py src/intric/data_retention/infrastructure/data_retention_worker.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/data_retention/test_data_retention_worker.py` | Passed |
+| `cd backend && uv run ruff format --check src/intric/data_retention/infrastructure/data_retention_service.py src/intric/data_retention/infrastructure/data_retention_worker.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/data_retention/test_data_retention_worker.py` | Passed: `4 files already formatted` |
+| `cd backend && uv run pyright src/intric/data_retention/infrastructure/data_retention_service.py src/intric/data_retention/infrastructure/data_retention_worker.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/data_retention/test_data_retention_worker.py` | Passed: `0 errors, 0 warnings, 0 informations` |
+| `cd backend && uv run pytest tests/unittests/data_retention/test_data_retention_worker.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_audit_outbox_delivery.py tests/unittests/flows/test_flow_runtime_health.py -q` | Passed: `28 passed, 16 warnings` |
+| `cd backend && uv run lint-imports --no-cache` | Passed: `3 kept, 0 broken` |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean` |
+
+Strict final green:
+
+- Claude artifact: `.codex/artifacts/claude-peer-loop-batch-10-flow-audit-outbox-retention-docs-final-green-20260502T224714Z.md`
+- Claude verdict: `green`
+- Claude green light: `yes`
+- Claude minimum score: `9`

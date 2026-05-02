@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
 from intric.database.tables.assistant_table import Assistants
+from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
+    FlowRunAuditOutbox,
     FlowRuns,
     FlowRunStepResultFiles,
     Flows,
@@ -269,6 +271,74 @@ async def _create_flow_runtime_fixture(
     return run, step_result, step_attempt, generated_file
 
 
+async def _add_flow_audit_outbox_row(
+    async_session: AsyncSession,
+    *,
+    run: FlowRuns,
+    user_id: UUID,
+    delivery_status: str,
+    with_audit_log: bool,
+):
+    created_at = run.created_at
+    delivered_at = created_at if delivery_status == "delivered" else None
+    dead_lettered_at = created_at if delivery_status == "dead_lettered" else None
+    outbox = FlowRunAuditOutbox(
+        tenant_id=run.tenant_id,
+        flow_id=run.flow_id,
+        flow_run_id=run.id,
+        run_revision=run.revision,
+        review_checkpoint_id=None,
+        checkpoint_revision=None,
+        description="flow_run_completed:executor_completed",
+        action="flow_run_completed",
+        entity_type="flow_run",
+        entity_id=run.id,
+        actor_id=user_id,
+        actor_type="user",
+        actor_api_key_id=None,
+        source="executor_completed",
+        target_status="completed",
+        error_code=None,
+        error_message=None,
+        delivery_status=delivery_status,
+        delivery_attempts=1 if delivery_status != "pending" else 0,
+        next_delivery_at=None if delivery_status != "pending" else created_at,
+        delivered_at=delivered_at,
+        dead_lettered_at=dead_lettered_at,
+        delivery_last_error=(
+            "audit projection failed" if delivery_status == "dead_lettered" else None
+        ),
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    async_session.add(outbox)
+    await async_session.flush()
+
+    if with_audit_log:
+        async_session.add(
+            AuditLogTable(
+                id=outbox.id,
+                tenant_id=run.tenant_id,
+                actor_id=user_id,
+                actor_type="user",
+                actor_api_key_id=None,
+                action="flow_run_completed",
+                entity_type="flow_run",
+                entity_id=run.id,
+                timestamp=created_at,
+                description="Flow run completed by executor_completed.",
+                log_metadata={"flow_run_id": str(run.id)},
+                outcome="success",
+                error_message=None,
+                created_at=created_at,
+                updated_at=created_at,
+            )
+        )
+        await async_session.flush()
+
+    return outbox.id
+
+
 @pytest.mark.asyncio
 async def test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_generated_artifacts(
     async_session: AsyncSession,
@@ -408,3 +478,121 @@ async def test_cleanup_old_flow_runtime_data_uses_result_file_rows_without_paylo
     assert refreshed_file.blob is None
     assert refreshed_file.text is None
     assert refreshed_file.transcription is None
+
+
+@pytest.mark.asyncio
+async def test_delete_old_delivered_flow_audit_outbox_rows_follows_audit_log_lifetime(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: DataRetentionService,
+):
+    async def create_outbox_row(*, delivery_status: str, with_audit_log: bool):
+        run, _step_result, _attempt, _file = await _create_flow_runtime_fixture(
+            async_session,
+            tenant=test_tenant,
+            user=admin_user,
+            space=flow_retention_space,
+            assistant=flow_retention_assistant,
+            days_old=3,
+            generated_file_has_content=False,
+        )
+        return await _add_flow_audit_outbox_row(
+            async_session,
+            run=run,
+            user_id=admin_user.id,
+            delivery_status=delivery_status,
+            with_audit_log=with_audit_log,
+        )
+
+    orphaned_delivered_id = await create_outbox_row(
+        delivery_status="delivered",
+        with_audit_log=False,
+    )
+    delivered_with_audit_id = await create_outbox_row(
+        delivery_status="delivered",
+        with_audit_log=True,
+    )
+    pending_id = await create_outbox_row(
+        delivery_status="pending",
+        with_audit_log=False,
+    )
+    dead_lettered_id = await create_outbox_row(
+        delivery_status="dead_lettered",
+        with_audit_log=False,
+    )
+
+    deleted = await flow_retention_service.delete_old_delivered_flow_audit_outbox_rows()
+    await async_session.flush()
+
+    assert deleted == 1
+    assert await async_session.get(FlowRunAuditOutbox, orphaned_delivered_id) is None
+    assert await async_session.get(FlowRunAuditOutbox, delivered_with_audit_id)
+    assert await async_session.get(FlowRunAuditOutbox, pending_id)
+    assert await async_session.get(FlowRunAuditOutbox, dead_lettered_id)
+
+    second_deleted = (
+        await flow_retention_service.delete_old_delivered_flow_audit_outbox_rows()
+    )
+    assert second_deleted == 0
+
+    await async_session.execute(
+        delete(AuditLogTable).where(AuditLogTable.id == delivered_with_audit_id)
+    )
+    deleted_after_audit_retention = (
+        await flow_retention_service.delete_old_delivered_flow_audit_outbox_rows()
+    )
+    await async_session.flush()
+
+    assert deleted_after_audit_retention == 1
+    assert await async_session.get(FlowRunAuditOutbox, delivered_with_audit_id) is None
+    assert await async_session.get(FlowRunAuditOutbox, pending_id)
+    assert await async_session.get(FlowRunAuditOutbox, dead_lettered_id)
+
+
+@pytest.mark.asyncio
+async def test_delete_old_delivered_flow_audit_outbox_rows_uses_retention_batches(
+    monkeypatch: pytest.MonkeyPatch,
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: DataRetentionService,
+):
+    monkeypatch.setattr(
+        "intric.data_retention.infrastructure.data_retention_service.RETENTION_BATCH_SIZE",
+        2,
+    )
+    outbox_ids = []
+    for _ in range(3):
+        run, _step_result, _attempt, _file = await _create_flow_runtime_fixture(
+            async_session,
+            tenant=test_tenant,
+            user=admin_user,
+            space=flow_retention_space,
+            assistant=flow_retention_assistant,
+            days_old=3,
+            generated_file_has_content=False,
+        )
+        outbox_ids.append(
+            await _add_flow_audit_outbox_row(
+                async_session,
+                run=run,
+                user_id=admin_user.id,
+                delivery_status="delivered",
+                with_audit_log=False,
+            )
+        )
+
+    deleted = await flow_retention_service.delete_old_delivered_flow_audit_outbox_rows()
+    remaining = await async_session.scalar(
+        select(func.count())
+        .select_from(FlowRunAuditOutbox)
+        .where(FlowRunAuditOutbox.id.in_(outbox_ids))
+    )
+
+    assert deleted == 3
+    assert remaining == 0

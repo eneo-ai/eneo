@@ -26,6 +26,11 @@ Use `/api/healthz` for coarse backend/worker liveness. Use `/api/healthz/flows` 
 | `runs.stale_running_count` | Running runs older than the stale-running reconciliation threshold. |
 | `data_integrity.terminal_runs_with_open_attempts_count` | Recently terminal runs that still have open step attempts. |
 | `data_integrity.terminal_runs_with_active_step_results_count` | Recently terminal runs that still have pending/running step results. |
+| `audit_outbox.pending_count` | Flow audit outbox rows that still need delivery. |
+| `audit_outbox.delivery_backlog_count` | Pending outbox rows older than the audit outbox backlog grace threshold. |
+| `audit_outbox.dead_lettered_count` | Outbox rows that exhausted delivery or failed deterministic projection. |
+| `audit_outbox.oldest_delivery_backlog_age_seconds` | Age of the oldest pending row beyond the backlog grace threshold. |
+| `audit_outbox.oldest_dead_lettered_age_seconds` | Age of the oldest dead-lettered row. |
 
 Status flags are closed values:
 
@@ -36,6 +41,8 @@ Status flags are closed values:
 | `STALE_RUNNING_RECONCILER_LAG` | `UNHEALTHY` | A stale running run remained stale beyond the reconciler grace window. |
 | `TERMINAL_RUNS_WITH_OPEN_ATTEMPTS` | `UNHEALTHY` | Terminalization did not close all open attempts for a recent terminal run. |
 | `TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS` | `UNHEALTHY` | Terminalization did not close all active step-result projections for a recent terminal run. |
+| `AUDIT_OUTBOX_DELIVERY_BACKLOG` | `DEGRADED` | Pending audit outbox rows are older than the delivery backlog grace threshold. |
+| `AUDIT_OUTBOX_DEAD_LETTERS` | `UNHEALTHY` | At least one audit outbox row is dead-lettered. |
 
 ## Triage
 
@@ -156,6 +163,12 @@ Actions:
 4. Replay or repair only through a reviewed script that keeps `flow_run_audit_outbox.id` equal to the delivered `audit_logs.id`.
 
 Escalate to the Flow runtime owner. Manual SQL updates require a test fixture that reproduces the dead-letter shape before modifying production data.
+
+### Audit Outbox Retention
+
+Delivered outbox row lifetime follows `audit_logs` lifetime. The data retention worker deletes delivered Flow audit outbox rows only after audit retention has removed the matching `audit_logs.id` row.
+
+Pending rows remain until delivery succeeds or dead-letters. Dead-lettered rows remain visible until a reviewed replay or acknowledgement contract exists. A large delivered-outbox table usually means audit logs are still retained for the same period; investigate audit retention volume before adding an outbox-specific cleanup rule.
 
 ## Rollback
 

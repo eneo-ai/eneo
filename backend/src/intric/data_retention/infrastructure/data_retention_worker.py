@@ -21,6 +21,7 @@ class DeletedCounts(TypedDict):
     flow_artifact_rows: int
     flow_artifact_files: int
     flow_artifact_reconciliations: int
+    flow_audit_outbox_delivered_rows: int
     total: int
 
 
@@ -33,7 +34,7 @@ class CleanupResults(TypedDict):
     success: bool
 
 
-@worker.cron_job(hour=3, minute=0)  # Run daily at 3 AM
+@worker.cron_job(hour=3, minute=0)
 async def cleanup_old_data(container: Container) -> CleanupResults:
     """
     Daily cleanup of old data based on retention policies.
@@ -60,6 +61,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             "flow_artifact_rows": 0,
             "flow_artifact_files": 0,
             "flow_artifact_reconciliations": 0,
+            "flow_audit_outbox_delivered_rows": 0,
             "total": 0,
         },
         "errors": [],
@@ -74,14 +76,11 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
     async with sessionmanager.session() as session:
         container.session.override(providers.Object(session))  # pyright: ignore[reportUnknownMemberType]  # dependency_injector provider stubs have partially unknown override()
         try:
-            data_retention_service = container.data_retention_service()
+            retention_service = container.data_retention_service()
 
-            # Delete old questions
             try:
                 async with session.begin():
-                    questions_count = (
-                        await data_retention_service.delete_old_questions()
-                    )
+                    questions_count = await retention_service.delete_old_questions()
                     results["deleted"]["questions"] = questions_count
                     if questions_count > 0:
                         logger.info(
@@ -93,10 +92,9 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
                 results["errors"].append(error_msg)
                 results["success"] = False
 
-            # Delete old app runs
             try:
                 async with session.begin():
-                    app_runs_count = await data_retention_service.delete_old_app_runs()
+                    app_runs_count = await retention_service.delete_old_app_runs()
                     results["deleted"]["app_runs"] = app_runs_count
                     if app_runs_count > 0:
                         logger.info(
@@ -108,10 +106,9 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
                 results["errors"].append(error_msg)
                 results["success"] = False
 
-            # Delete old orphaned sessions
             try:
                 async with session.begin():
-                    sessions_count = await data_retention_service.delete_old_sessions()
+                    sessions_count = await retention_service.delete_old_sessions()
                     results["deleted"]["sessions"] = sessions_count
                     if sessions_count > 0:
                         logger.info(f"Deleted {sessions_count} orphaned sessions")
@@ -124,7 +121,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             try:
                 async with session.begin():
                     flow_runtime_counts = (
-                        await data_retention_service.cleanup_old_flow_runtime_data()
+                        await retention_service.cleanup_old_flow_runtime_data()
                     )
                     results["deleted"]["flow_debug_rows"] = flow_runtime_counts[
                         "debug_step_results"
@@ -146,11 +143,22 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
                 logger.error(error_msg, exc_info=True)
                 results["errors"].append(error_msg)
                 results["success"] = False
+
+            try:
+                async with session.begin():
+                    outbox_count = await retention_service.delete_old_delivered_flow_audit_outbox_rows()
+                    results["deleted"]["flow_audit_outbox_delivered_rows"] = (
+                        outbox_count
+                    )
+            except Exception as e:
+                error_msg = f"Failed to delete delivered Flow audit outbox rows: {e}"
+                logger.error(error_msg, exc_info=True)
+                results["errors"].append(error_msg)
+                results["success"] = False
         finally:
-            # Always reset override, even on exception
+            # Later worker calls must not inherit this job's scoped session.
             container.session.reset_override()
 
-    # Calculate total and duration
     end_time = datetime.now(timezone.utc)
     duration = (end_time - start_time).total_seconds()
 
@@ -165,9 +173,9 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         + results["deleted"]["flow_artifact_rows"]
         + results["deleted"]["flow_artifact_files"]
         + results["deleted"]["flow_artifact_reconciliations"]
+        + results["deleted"]["flow_audit_outbox_delivered_rows"]
     )
 
-    # Log summary
     if results["success"]:
         logger.info(
             f"Data retention cleanup completed successfully: "
@@ -179,7 +187,10 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             f"flow_attempt_provenance: {results['deleted']['flow_attempt_provenance']}, "
             f"flow_artifact_rows: {results['deleted']['flow_artifact_rows']}, "
             f"flow_artifact_files: {results['deleted']['flow_artifact_files']}, "
-            f"flow_artifact_reconciliations: {results['deleted']['flow_artifact_reconciliations']})"
+            f"flow_artifact_reconciliations: "
+            f"{results['deleted']['flow_artifact_reconciliations']}, "
+            f"flow_audit_outbox_delivered_rows: "
+            f"{results['deleted']['flow_audit_outbox_delivered_rows']})"
         )
     else:
         logger.warning(

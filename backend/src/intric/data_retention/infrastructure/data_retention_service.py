@@ -11,9 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from intric.data_retention.constants import ORPHANED_SESSION_CLEANUP_DAYS
 from intric.database.tables.app_table import AppRuns, Apps
 from intric.database.tables.assistant_table import Assistants
+from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 from intric.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
+    FlowRunAuditOutbox,
     FlowRuns,
     FlowRunStepResultFiles,
     Flows,
@@ -171,6 +173,54 @@ class DataRetentionService:
                     "generated_artifact_files"
                 ]
         return counts
+
+    async def delete_old_delivered_flow_audit_outbox_rows(self) -> int:
+        audit_log_exists = (
+            sa.select(sa.literal(1))
+            .select_from(AuditLogTable)
+            .where(AuditLogTable.id == FlowRunAuditOutbox.id)
+            .exists()
+        )
+        base_subquery = sa.select(FlowRunAuditOutbox.id).where(
+            sa.and_(
+                FlowRunAuditOutbox.delivery_status == "delivered",
+                sa.not_(audit_log_exists),
+            )
+        )
+
+        total_deleted = 0
+        while True:
+            batch_subquery = base_subquery.order_by(FlowRunAuditOutbox.id).limit(
+                RETENTION_BATCH_SIZE
+            )
+            # Audit logs own delivered audit lifetime; the outbox mirror is
+            # removed only after audit retention deletes the matching audit row.
+            result = await self.session.execute(
+                sa.delete(FlowRunAuditOutbox).where(
+                    FlowRunAuditOutbox.id.in_(batch_subquery)
+                )
+            )
+            batch_deleted = result.rowcount or 0
+            if batch_deleted == 0:
+                break
+            total_deleted += batch_deleted
+            logger.debug(
+                "Deleted batch of %s delivered Flow audit outbox rows "
+                "whose audit logs were already deleted by retention (total: %s)",
+                batch_deleted,
+                total_deleted,
+            )
+
+        if total_deleted > 0:
+            logger.info(
+                "Deleted %s delivered Flow audit outbox rows whose audit logs "
+                "were already deleted by retention",
+                total_deleted,
+            )
+        else:
+            logger.debug("No delivered Flow audit outbox rows ready for cleanup")
+
+        return total_deleted
 
     def _build_effective_retention_days(
         self,

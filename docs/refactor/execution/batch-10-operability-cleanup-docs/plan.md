@@ -733,12 +733,143 @@ rg -n "tool_calls_metadata|ToolCallMetadata" \
 
 Expected: no output.
 
+## Slice 10.5 — Delivered Audit Outbox Retention And Docs Cleanup
+
+### Problem
+
+Slice 10.3 made `flow_run_audit_outbox.id == audit_logs.id` the delivery idempotency key. After delivery, the platform audit log is the canonical audit record, but the delivered outbox row still contains the same audit facts. Audit retention hard-deletes old `audit_logs`; without a Flow-owned cleanup, delivered outbox rows can outlive their audit-log twins and become a hidden audit retention bypass.
+
+The runbook also describes audit outbox triage without listing the existing `audit_outbox` health fields and flags, and the architecture map still documents the deleted result-level `tool_calls_metadata` field.
+
+### Source Evidence
+
+| Concept | Evidence | Decision |
+|---|---|---|
+| Delivered audit identity | `backend/src/intric/flows/application/flow_run_audit_outbox_delivery.py:149-166` builds `AuditLog(id=row.id, timestamp=row.created_at, ...)`. | The audit log is the delivered audit record; the delivered outbox row is delivery staging state. |
+| Audit retention | `backend/src/intric/audit/infrastructure/audit_log_repo_impl.py:369-407` hard-deletes `audit_logs` older than tenant retention. | Delivered outbox cleanup should follow actual audit-log deletion, not duplicate tenant retention cutoff logic. |
+| Flow outbox table | `backend/src/intric/database/tables/flow_tables.py:1218-1377` stores delivery state and audit facts. | Delete only rows with `delivery_status='delivered'` and no `audit_logs` twin. |
+| Pending/dead-lettered rows | `backend/src/intric/flows/runtime/flow_runtime_health.py:42-49`, `:110-115`, `:287-294` expose backlog/dead-letter health. | Pending rows still need delivery; dead-lettered rows are unresolved audit incidents and must not be auto-deleted without replay/ack semantics. |
+| Data retention worker | `backend/src/intric/data_retention/infrastructure/data_retention_worker.py:16-24`, `:124-148` reports Flow runtime cleanup counts. | Add a sibling cleanup transaction and a separate `flow_audit_outbox_delivered_rows` count. |
+| Runbook drift | `docs/runbooks/flows.md:17-39` omits existing audit outbox health fields and flags. | Complete the health contract table before adding retention behavior. |
+| Architecture doc drift | `docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md:627`, `:645`, `:934` still mention result-level `tool_calls_metadata`. | Remove all current-architecture references and point tool-call evidence to attempt provenance. |
+
+### Canonical Owners
+
+| Concept | Canonical home | What not to do |
+|---|---|---|
+| Delivered audit record | `audit_logs` | Do not keep delivered outbox rows as a second audit log after the audit log is hard-deleted. |
+| Delivery staging state | `flow_run_audit_outbox` | Do not delete pending rows or unresolved dead letters. |
+| Delivered outbox retention cleanup | `DataRetentionService.delete_old_delivered_flow_audit_outbox_rows` | Do not make shared audit retention import Flow infrastructure. |
+| Data retention worker reporting | `data_retention_worker.DeletedCounts` | Do not mix audit-outbox hard deletes into `FlowRuntimeCleanupCounts`, which is for Flow debug/artifact tombstoning. |
+| Health/runbook operator contract | `docs/runbooks/flows.md` | Do not document partial fields while the endpoint already returns audit outbox fields. |
+
+### Revised Cleanup Policy
+
+Use an anti-join on the delivered audit log twin:
+
+```sql
+DELETE FROM flow_run_audit_outbox outbox
+WHERE outbox.delivery_status = 'delivered'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM audit_logs audit
+    WHERE audit.id = outbox.id
+  )
+```
+
+This keeps audit retention as the single source of truth. It is safe if cron order changes, if audit retention policy changes, or if a tenant's audit purge is skipped. The outbox row is deleted only after the audit row is gone.
+
+Implementation requirements:
+
+- Use `RETENTION_BATCH_SIZE` from `data_retention_service.py`; no new batching constant.
+- Use the existing batched delete shape: `DELETE ... WHERE id IN (SELECT id ... LIMIT RETENTION_BATCH_SIZE)`, looped until `rowcount == 0`.
+- Add `DataRetentionService.delete_old_delivered_flow_audit_outbox_rows() -> int`.
+- Run it from `cleanup_old_data` in its own transaction after `cleanup_old_flow_runtime_data`.
+- Report the count as `flow_audit_outbox_delivered_rows`.
+- Do not add a generic retention strategy/base class.
+- Do not import Flow infrastructure from audit retention.
+- Do not delete `pending` or `dead_lettered` outbox rows in this slice.
+- Record dead-letter retention as a future replay/ack contract, not a silent cleanup.
+
+### Tests Required
+
+- Old delivered outbox row without an `audit_logs` twin is deleted.
+- Delivered outbox row with an `audit_logs` twin stays.
+- Old pending row without an audit twin stays.
+- Old dead-lettered row without an audit twin stays.
+- Cleanup is idempotent.
+- Batching uses `RETENTION_BATCH_SIZE`; patch the module constant in a test and prove more than one batch is processed.
+- Data retention worker count and total include `flow_audit_outbox_delivered_rows`.
+
+### Docs Required
+
+- `docs/runbooks/flows.md` lists `audit_outbox.pending_count`, `delivery_backlog_count`, `dead_lettered_count`, and oldest-age fields.
+- `docs/runbooks/flows.md` lists `AUDIT_OUTBOX_DELIVERY_BACKLOG` and `AUDIT_OUTBOX_DEAD_LETTERS`.
+- `docs/runbooks/flows.md` states delivered outbox rows are removed only after the audit log twin is removed by audit retention.
+- `docs/runbooks/flows.md` states unresolved dead letters stay visible until a replay/ack contract exists.
+- `docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md` removes all current-architecture `flow_step_results.tool_calls_metadata` references and bumps `Last reviewed`.
+- Batch 10 plan, journal, reconciliation, and retrospective capture the accepted Claude findings.
+
+### Validation Commands
+
+```bash
+cd backend && uv run pytest \
+  tests/unittests/data_retention/test_data_retention_worker.py \
+  tests/integration/test_flow_runtime_retention_cleanup.py \
+  tests/unittests/flows/test_flow_audit_outbox_delivery.py \
+  tests/unittests/flows/test_flow_runtime_health.py \
+  -q
+```
+
+```bash
+cd backend && uv run pyright \
+  src/intric/data_retention/infrastructure/data_retention_service.py \
+  src/intric/data_retention/infrastructure/data_retention_worker.py \
+  tests/integration/test_flow_runtime_retention_cleanup.py \
+  tests/unittests/data_retention/test_data_retention_worker.py
+```
+
+```bash
+cd backend && uv run ruff check \
+  src/intric/data_retention/infrastructure/data_retention_service.py \
+  src/intric/data_retention/infrastructure/data_retention_worker.py \
+  tests/integration/test_flow_runtime_retention_cleanup.py \
+  tests/unittests/data_retention/test_data_retention_worker.py
+```
+
+```bash
+cd backend && uv run ruff format --check \
+  src/intric/data_retention/infrastructure/data_retention_service.py \
+  src/intric/data_retention/infrastructure/data_retention_worker.py \
+  tests/integration/test_flow_runtime_retention_cleanup.py \
+  tests/unittests/data_retention/test_data_retention_worker.py
+```
+
+```bash
+cd backend && uv run lint-imports --no-cache
+git diff --check -- \
+  backend/src/intric/data_retention/infrastructure/data_retention_service.py \
+  backend/src/intric/data_retention/infrastructure/data_retention_worker.py \
+  backend/tests/integration/test_flow_runtime_retention_cleanup.py \
+  backend/tests/unittests/data_retention/test_data_retention_worker.py \
+  docs/runbooks/flows.md \
+  docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md \
+  docs/refactor/execution/batch-10-operability-cleanup-docs
+./scripts/gate-local/anti_slippage.sh --worktree
+```
+
 ## Remaining Batch 10 Slices
 
 | Slice | Scope | Gate |
 |---|---|---|
-| 10.5 | Evidence/export/runbook/docs cleanup | After event and health signals exist. |
 | 10.6 | Branding/namespace ADR/backlog closure | No package rename; update docs/backlog only unless separately approved. |
+
+## Batch 10 Follow-Ups
+
+| Item | Owner | Reason |
+|---|---|---|
+| Flow audit outbox delivered-row partial index | Flow data model | Measure the anti-join cleanup with a representative delivered-row volume before adding an index such as `created_at WHERE delivery_status='delivered'` or `id WHERE delivery_status='delivered'`. |
+| Flow audit outbox dead-letter replay/ack contract | Flow operability | Dead-letter rows are unresolved audit incidents. They need explicit replay/ack semantics before any retention cleanup can delete them. |
 
 ## Stop Conditions For This Batch
 
