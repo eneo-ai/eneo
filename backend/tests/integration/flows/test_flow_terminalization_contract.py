@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -309,11 +310,50 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
             .all()
         )
         assert len(outbox_rows) == 1
-        assert outbox_rows[0].source == FlowRunLifecycleSource.STALE_RUNNING_RECONCILER.value
+        assert (
+            outbox_rows[0].source
+            == FlowRunLifecycleSource.STALE_RUNNING_RECONCILER.value
+        )
         assert outbox_rows[0].action == "flow_run_failed"
         assert outbox_rows[0].description == (
             "flow_run_failed:stale_running_reconciler"
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_stale_running_query_excludes_awaiting_review_runs(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        run, _flow, run_repo = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        stale_updated_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .values(
+                status=FlowRunStatus.AWAITING_REVIEW.value,
+                updated_at=stale_updated_at,
+            )
+        )
+
+        stale_runs = await run_repo.list_stale_running_runs(
+            tenant_id=admin_user.tenant_id,
+            stale_before=datetime.now(timezone.utc),
+        )
+
+    assert stale_runs == []
 
 
 @pytest.mark.asyncio

@@ -132,11 +132,35 @@ IN_PROGRESS
   - Reconciliation: `docs/refactor/execution/batch-9-human-review-pause-edit-resume/claude-reconciliation-5.md`
 - Outcome: typed review-policy contract complete, write-path validation added, and the repository can open a review checkpoint for a completed step idempotently; executor/API wiring remains out of scope for Slice 9.3 and later
 
+### Slice 9.3 — Executor Pause/Yield
+
+- Source:
+  - `backend/src/intric/flows/runtime/executor.py`
+- Tests:
+  - `backend/tests/integration/flows/test_flow_review_pause_worker_contract.py`
+  - `backend/tests/integration/flows/test_flow_runtime_worker_contract.py`
+  - `backend/tests/integration/flows/test_flow_terminalization_contract.py`
+- Local validation:
+  - `uv run ruff check ...` from `backend/` on Slice 9.3 source/test files — passed
+  - `uv run ruff format --check ...` from `backend/` on Slice 9.3 source/test files — passed
+  - `uv run pyright ...` from `backend/` on executor, run repository, and Slice 9.3 test files — passed, 0 errors
+  - `uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_terminalization_contract.py::test_stale_running_query_excludes_awaiting_review_runs -q` from `backend/` — passed, 3 tests
+  - `git diff --check` — passed
+  - Anti-slippage grep from the project rules on touched Slice 9.3 files and Batch 9 docs — passed, no matches
+- Docker validation: blocked before execution by this Codex process with `Rejected("approval required by policy, but AskForApproval is set to Never")`
+- Claude review:
+  - Iteration 1: green with low-severity coverage suggestions, artifact `.codex/artifacts/claude-peer-loop-batch-9-slice-9-3-executor-pause-yield-review-20260502T172014Z.md`
+  - Iteration 2: green, artifact `.codex/artifacts/claude-peer-loop-batch-9-slice-9-3-executor-pause-yield-review-verification-20260502T172406Z.md`
+  - Reconciliation: `docs/refactor/execution/batch-9-human-review-pause-edit-resume/claude-reconciliation-6.md`
+- Outcome: executor now opens a review checkpoint after successful review-policy step persistence, returns `awaiting_review`, leaves downstream steps pending, and duplicate task delivery skips the paused run without another checkpoint or model call
+
 ## Carry-Forward Risks
 
 - Slice 9.3 must wire `RuntimeStep.review_policy` into the executor pause/yield branch and validate checkpoint step ids against the run's published definition before calling the repository open command.
 - Resume CASes the checkpoint and run, moves the run from `awaiting_review` to `queued`, and dispatches the existing `flows.execute` task. Batch 9 should not add a separate `flows.resume` task unless it deletes code.
 - Frontend generated type updates must not overwrite unrelated local changes.
+- Slice 9.4 must cover last-step review resume where the checkpoint has no downstream step IDs and approval should terminalize the run if no uncompleted steps remain.
+- Slice 9.4 should consume or delete the repository open-result `created` and `audit_outbox_id` fields.
 
 ## Decisions Made During This Batch
 
@@ -153,3 +177,4 @@ IN_PROGRESS
 - `FlowStepReviewPolicy` is the canonical review-policy contract at API, domain, persistence serialization, published definition, and runtime parser boundaries.
 - Review policy cannot be combined with `FlowOutputMode` values classified by `flow_output_mode_has_outbound_delivery`.
 - `FlowRunRepository.open_review_checkpoint_for_completed_step` owns the SQL transition and audit outbox insert; the caller owns published-graph interpretation and downstream `next_step_ids` selection.
+- Executor pause/yield keeps successful step persistence and review checkpoint opening as separate commits; stale-running reconciliation remains the repair owner for crashes between those commits.

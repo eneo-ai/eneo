@@ -692,8 +692,17 @@ class FlowRunExecutor:
                 attempt_no=attempt_no,
             )
 
-            # Track completed step in run state
             state.append_completed(step_result)
+
+            if step.review_policy is not None:
+                return await self._open_review_checkpoint_for_completed_step(
+                    run_id=run_id,
+                    flow_id=flow_id,
+                    tenant_id=tenant_id,
+                    steps=steps,
+                    step=step,
+                    attempt_no=attempt_no,
+                )
 
             if success_plan.should_deliver_webhook:
                 try:
@@ -1086,6 +1095,50 @@ class FlowRunExecutor:
             ),
         )
         await self._commit()
+
+    async def _open_review_checkpoint_for_completed_step(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+        steps: list[RuntimeStep],
+        step: RuntimeStep,
+        attempt_no: int,
+    ) -> dict[str, Any]:
+        opened = await self.flow_run_repo.open_review_checkpoint_for_completed_step(
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=run_id,
+            step_id=step.step_id,
+            step_order=step.step_order,
+            attempt_no=attempt_no,
+            requester_principal=self.principal,
+            next_step_ids=self._next_step_ids_after_reviewed_step(
+                steps=steps,
+                reviewed_step=step,
+            ),
+        )
+        await self._commit()
+        logger.info(
+            "flow_executor.awaiting_review run_id=%s step_order=%d checkpoint_id=%s",
+            run_id,
+            step.step_order,
+            opened.checkpoint.id,
+        )
+        return {"status": opened.run.status.value}
+
+    @staticmethod
+    def _next_step_ids_after_reviewed_step(
+        *,
+        steps: list[RuntimeStep],
+        reviewed_step: RuntimeStep,
+    ) -> tuple[UUID, ...]:
+        return tuple(
+            step.step_id
+            for step in sorted(steps, key=lambda item: item.step_order)
+            if step.step_order > reviewed_step.step_order
+        )
 
     async def _deliver_step_webhook(
         self,
