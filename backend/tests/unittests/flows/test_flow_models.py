@@ -183,7 +183,6 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                     "effective_prompt": "Summarize the report",
                     "model_parameters_json": {"temperature": 0.2},
                     "flow_step_execution_hash": "abc123",
-                    "tool_calls_metadata": [{"name": "search"}],
                     "created_at": "2026-03-20T12:00:01Z",
                     "updated_at": "2026-03-20T12:00:05Z",
                 }
@@ -328,7 +327,6 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     assert response.step_results[0].effective_prompt == "Summarize the report"
     assert response.step_results[0].model_parameters_json == {"temperature": 0.2}
     assert response.step_results[0].flow_step_execution_hash == "abc123"
-    assert response.step_results[0].tool_calls_metadata == [{"name": "search"}]
     assert isinstance(response.debug_export.steps[0].attempts[0], FlowRunDebugAttempt)
     assert response.debug_export.steps[0].attempts[0].response_model == "gpt-4.1-mini"
     assert response.debug_export.steps[0].rag is not None

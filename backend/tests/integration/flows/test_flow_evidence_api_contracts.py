@@ -24,6 +24,12 @@ from intric.flows import (
     FlowStep,
     FlowVersionRepository,
 )
+from intric.flows.flow_retention_tombstone import (
+    FLOW_RETENTION_ACTOR_SOURCE,
+    FlowAttemptRetentionMarker,
+    FlowRetentionTombstone,
+    RunDebugAttemptRetentionCounts,
+)
 from intric.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
@@ -386,6 +392,32 @@ async def _seed_flow_run_contract_data(
         }
 
 
+def _attempt_retention_marker_payload(
+    *,
+    tenant_id: UUID,
+    run_id: UUID,
+    trace_id: str,
+    object_id: UUID,
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    return FlowAttemptRetentionMarker(
+        tombstone=FlowRetentionTombstone(
+            tenant_id=str(tenant_id),
+            run_id=str(run_id),
+            trace_id=trace_id,
+            data_class="run_debug_evidence",
+            object_type="flow_step_attempt",
+            object_id=str(object_id),
+            policy_source="tenant.flow_settings.retention_policy.run_debug_evidence_days",
+            cutoff=now,
+            actor_source=FLOW_RETENTION_ACTOR_SOURCE,
+            counts=RunDebugAttemptRetentionCounts(cleared_field_count=1),
+            timestamp=now,
+            retention_state="retention_purged",
+        )
+    ).to_payload()
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_flow_run_steps_endpoint_rejects_view_only_access_to_other_users_run(
@@ -673,6 +705,83 @@ async def test_flow_run_evidence_export_marks_corrupt_attempt_provenance(
     assert marker["schema_version"] == FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION
     assert marker["status"] == "corrupt"
     assert marker["error_code"] == "flow_attempt_provenance_schema_version_missing"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_evidence_export_marks_corrupt_with_retention_tombstone(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded = await _seed_flow_run_contract_data(
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        attempt_provenance_json={"llm": {"prompt": "missing version"}},
+    )
+    purged_attempt_id = uuid4()
+    async with db_container() as container:
+        session = container.session()
+        run_id = UUID(seeded["run_id"])
+        flow_id = UUID(seeded["flow_id"])
+        now = datetime.now(timezone.utc)
+        session.add(
+            FlowStepAttempts(
+                id=purged_attempt_id,
+                flow_run_id=run_id,
+                flow_id=flow_id,
+                tenant_id=admin_user.tenant_id,
+                step_id=None,
+                step_order=2,
+                attempt_no=2,
+                celery_task_id=None,
+                status="completed",
+                error_code=None,
+                error_message=None,
+                requested_model="gpt-4o-mini",
+                response_model="gpt-4o-mini",
+                provider="openai",
+                finish_reason="stop",
+                provider_response_id=None,
+                num_tokens_input=0,
+                num_tokens_output=0,
+                provenance_json=_attempt_retention_marker_payload(
+                    tenant_id=admin_user.tenant_id,
+                    run_id=run_id,
+                    trace_id=seeded["trace_id"],
+                    object_id=purged_attempt_id,
+                ),
+                started_at=now,
+                finished_at=now,
+            )
+        )
+        await session.flush()
+        auth_service = container.auth_service()
+        admin_token = auth_service.create_access_token_for_user(admin_user)
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export?format=json",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["manifest"]["provenance_persisted_version_status"] == "corrupt"
+    assert payload["manifest"]["retention_state_summary"]["tombstone_count"] == 1
+    assert payload["manifest"]["retention_state_summary"]["retention_purged_count"] == 1
+    assert (
+        payload["summary"]["rag_usage_tracking"]["tracking_state"] == "unknown_corrupt"
+    )
+    assert (
+        payload["summary"]["rag_usage_tracking"]["retention_purged_attempt_count"] == 1
+    )
 
 
 @pytest.mark.asyncio

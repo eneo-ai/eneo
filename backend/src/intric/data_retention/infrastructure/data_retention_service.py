@@ -1,5 +1,6 @@
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, TypedDict, cast
 from uuid import UUID
@@ -22,7 +23,26 @@ from intric.database.tables.questions_table import Questions
 from intric.database.tables.sessions_table import Sessions
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
-from intric.flows.flow_retention_policy import resolve_flow_retention_policy
+from intric.flows.flow_retention_policy import (
+    FlowRetentionPolicy,
+    RetentionDataClass,
+    resolve_flow_retention_policy,
+)
+from intric.flows.flow_retention_tombstone import (
+    FLOW_RETENTION_ACTOR_SOURCE,
+    FlowAttemptRetentionMarker,
+    FlowRetentionDataClass,
+    FlowRetentionObjectType,
+    FlowRetentionState,
+    FlowRetentionTombstone,
+    FlowRetentionTombstoneCounts,
+    GeneratedArtifactRetentionCounts,
+    RunDebugAttemptRetentionCounts,
+    RunDebugStepResultRetentionCounts,
+    append_retention_tombstone,
+    has_retention_tombstone,
+    is_tombstone_only_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +56,16 @@ class FlowRuntimeCleanupCounts(TypedDict):
     generated_artifact_rows: int
     generated_artifact_files: int
     reconciled_artifact_references: int
+
+
+@dataclass(frozen=True)
+class _FlowRuntimeRetentionAction:
+    run_id: UUID
+    tenant_id: UUID
+    trace_id: UUID
+    cutoff: datetime
+    policy_source: str
+    cleanup_timestamp: datetime
 
 
 class DataRetentionService:
@@ -57,13 +87,16 @@ class DataRetentionService:
         async for terminal_runs in self._iter_flow_run_retention_rows(
             older_than=now - timedelta(days=1)
         ):
-            debug_run_ids: set[UUID] = set()
-            artifact_run_ids: set[UUID] = set()
+            debug_actions: dict[UUID, _FlowRuntimeRetentionAction] = {}
+            artifact_actions: dict[UUID, _FlowRuntimeRetentionAction] = {}
 
             for row in terminal_runs:
                 anchor = row["retention_anchor"]
                 if anchor is None:
                     continue
+                run_id = cast(UUID, row["run_id"])
+                tenant_id = cast(UUID, row["tenant_id"])
+                trace_id = cast(UUID, row["trace_id"])
                 policy = resolve_flow_retention_policy(row["flow_settings"])
                 flow_override_days = row["flow_retention_days"]
                 space_default_days = row["space_retention_days"]
@@ -76,7 +109,19 @@ class DataRetentionService:
                 if debug_retention_days is not None and anchor <= now - timedelta(
                     days=debug_retention_days
                 ):
-                    debug_run_ids.add(row["run_id"])
+                    debug_actions[run_id] = _FlowRuntimeRetentionAction(
+                        run_id=run_id,
+                        tenant_id=tenant_id,
+                        trace_id=trace_id,
+                        cutoff=now - timedelta(days=debug_retention_days),
+                        policy_source=_flow_runtime_policy_source(
+                            data_class="run_debug_evidence",
+                            policy=policy,
+                            flow_override_days=flow_override_days,
+                            space_default_days=space_default_days,
+                        ),
+                        cleanup_timestamp=now,
+                    )
 
                 artifact_retention_days = policy.retention_for_class(
                     "generated_artifact",
@@ -86,17 +131,29 @@ class DataRetentionService:
                 if artifact_retention_days is not None and anchor <= now - timedelta(
                     days=artifact_retention_days
                 ):
-                    artifact_run_ids.add(row["run_id"])
+                    artifact_actions[run_id] = _FlowRuntimeRetentionAction(
+                        run_id=run_id,
+                        tenant_id=tenant_id,
+                        trace_id=trace_id,
+                        cutoff=now - timedelta(days=artifact_retention_days),
+                        policy_source=_flow_runtime_policy_source(
+                            data_class="generated_artifact",
+                            policy=policy,
+                            flow_override_days=flow_override_days,
+                            space_default_days=space_default_days,
+                        ),
+                        cleanup_timestamp=now,
+                    )
 
-            if debug_run_ids:
+            if debug_actions:
                 debug_counts = await self._cleanup_old_flow_debug_evidence(
-                    debug_run_ids
+                    debug_actions
                 )
                 counts["debug_step_results"] += debug_counts["debug_step_results"]
                 counts["debug_step_attempts"] += debug_counts["debug_step_attempts"]
-            if artifact_run_ids:
+            if artifact_actions:
                 artifact_counts = await self._cleanup_old_generated_flow_artifacts(
-                    artifact_run_ids
+                    artifact_actions
                 )
                 counts["generated_artifact_rows"] += artifact_counts[
                     "generated_artifact_rows"
@@ -357,6 +414,8 @@ class DataRetentionService:
             stmt = (
                 sa.select(
                     FlowRuns.id.label("run_id"),
+                    FlowRuns.tenant_id.label("tenant_id"),
+                    FlowRuns.trace_id.label("trace_id"),
                     anchor.label("retention_anchor"),
                     Flows.data_retention_days.label("flow_retention_days"),
                     Spaces.data_retention_days.label("space_retention_days"),
@@ -385,9 +444,9 @@ class DataRetentionService:
             yield rows
 
     async def _cleanup_old_flow_debug_evidence(
-        self, run_ids: set[UUID]
+        self, actions_by_run_id: dict[UUID, _FlowRuntimeRetentionAction]
     ) -> FlowRuntimeCleanupCounts:
-        if not run_ids:
+        if not actions_by_run_id:
             return {
                 "debug_step_results": 0,
                 "debug_step_attempts": 0,
@@ -398,16 +457,27 @@ class DataRetentionService:
 
         step_result_stmt = sa.select(
             FlowStepResults.id,
+            FlowStepResults.flow_run_id,
             FlowStepResults.input_payload_json,
             FlowStepResults.effective_prompt,
             FlowStepResults.output_payload_json,
             FlowStepResults.model_parameters_json,
             FlowStepResults.tool_calls_metadata,
-        ).where(FlowStepResults.flow_run_id.in_(run_ids))
+        ).where(FlowStepResults.flow_run_id.in_(set(actions_by_run_id)))
         step_result_rows = await self.session.execute(step_result_stmt)
         debug_step_results = 0
         for row in step_result_rows.fetchall():
+            action = actions_by_run_id[row.flow_run_id]
             pruned_output = _prune_debug_payload(row.output_payload_json)
+            object_id = str(row.id)
+            has_marker = has_retention_tombstone(
+                pruned_output,
+                data_class="run_debug_evidence",
+                object_type="flow_step_result",
+                object_id=object_id,
+                retention_state="retention_purged",
+            )
+            counts = _debug_tombstone_counts(row, row.output_payload_json)
             needs_update = (
                 any(
                     value is not None
@@ -419,46 +489,78 @@ class DataRetentionService:
                     )
                 )
                 or pruned_output != row.output_payload_json
+                or (counts is not None and not has_marker)
             )
             if not needs_update:
                 continue
+            output_payload = (
+                append_retention_tombstone(
+                    pruned_output,
+                    _build_retention_tombstone(
+                        action=action,
+                        data_class="run_debug_evidence",
+                        object_type="flow_step_result",
+                        object_id=object_id,
+                        retention_state="retention_purged",
+                        counts=counts,
+                    ),
+                )
+                if counts is not None and not has_marker
+                else pruned_output
+            )
             result = await self.session.execute(
                 sa.update(FlowStepResults)
                 .where(FlowStepResults.id == row.id)
                 .values(
                     input_payload_json=None,
                     effective_prompt=None,
-                    output_payload_json=pruned_output,
+                    output_payload_json=output_payload,
                     model_parameters_json=None,
                     tool_calls_metadata=None,
                 )
             )
             debug_step_results += result.rowcount or 0
 
-        attempt_stmt = (
-            sa.update(FlowStepAttempts)
-            .where(
-                sa.and_(
-                    FlowStepAttempts.flow_run_id.in_(run_ids),
-                    FlowStepAttempts.provenance_json.is_not(None),
-                )
+        attempt_stmt = sa.select(
+            FlowStepAttempts.id,
+            FlowStepAttempts.flow_run_id,
+            FlowStepAttempts.provenance_json,
+        ).where(
+            sa.and_(
+                FlowStepAttempts.flow_run_id.in_(set(actions_by_run_id)),
+                FlowStepAttempts.provenance_json.is_not(None),
             )
-            .values(provenance_json=None)
         )
-        attempt_result = await self.session.execute(attempt_stmt)
+        attempt_rows = await self.session.execute(attempt_stmt)
+        debug_step_attempts = 0
+        for row in attempt_rows.fetchall():
+            action = actions_by_run_id[row.flow_run_id]
+            if _is_current_attempt_retention_marker(row.provenance_json):
+                continue
+            marker = _build_attempt_retention_marker(
+                action=action,
+                object_id=str(row.id),
+                counts=RunDebugAttemptRetentionCounts(cleared_field_count=1),
+            )
+            attempt_result = await self.session.execute(
+                sa.update(FlowStepAttempts)
+                .where(FlowStepAttempts.id == row.id)
+                .values(provenance_json=marker)
+            )
+            debug_step_attempts += attempt_result.rowcount or 0
 
         return {
             "debug_step_results": debug_step_results,
-            "debug_step_attempts": attempt_result.rowcount or 0,
+            "debug_step_attempts": debug_step_attempts,
             "generated_artifact_rows": 0,
             "generated_artifact_files": 0,
             "reconciled_artifact_references": 0,
         }
 
     async def _cleanup_old_generated_flow_artifacts(
-        self, run_ids: set[UUID]
+        self, actions_by_run_id: dict[UUID, _FlowRuntimeRetentionAction]
     ) -> FlowRuntimeCleanupCounts:
-        if not run_ids:
+        if not actions_by_run_id:
             return {
                 "debug_step_results": 0,
                 "debug_step_attempts": 0,
@@ -469,11 +571,12 @@ class DataRetentionService:
 
         stmt = sa.select(
             FlowStepResults.id,
+            FlowStepResults.flow_run_id,
             FlowStepResults.tenant_id,
             FlowStepResults.output_payload_json,
         ).where(
             sa.and_(
-                FlowStepResults.flow_run_id.in_(run_ids),
+                FlowStepResults.flow_run_id.in_(set(actions_by_run_id)),
                 FlowStepResults.output_payload_json.is_not(None),
             )
         )
@@ -485,11 +588,37 @@ class DataRetentionService:
             file_ids = _extract_generated_file_ids(row.output_payload_json)
             if not file_ids:
                 continue
+            object_id = str(row.id)
+            action = actions_by_run_id[row.flow_run_id]
+            has_marker = has_retention_tombstone(
+                row.output_payload_json,
+                data_class="generated_artifact",
+                object_type="flow_step_result",
+                object_id=object_id,
+                retention_state="artifact_content_purged",
+            )
             pruned_payload = _prune_generated_artifact_payload(row.output_payload_json)
+            output_payload = (
+                append_retention_tombstone(
+                    pruned_payload,
+                    _build_retention_tombstone(
+                        action=action,
+                        data_class="generated_artifact",
+                        object_type="flow_step_result",
+                        object_id=object_id,
+                        retention_state="artifact_content_purged",
+                        counts=GeneratedArtifactRetentionCounts(
+                            referenced_file_count=len(file_ids)
+                        ),
+                    ),
+                )
+                if not has_marker
+                else pruned_payload
+            )
             update_result = await self.session.execute(
                 sa.update(FlowStepResults)
                 .where(FlowStepResults.id == row.id)
-                .values(output_payload_json=pruned_payload)
+                .values(output_payload_json=output_payload)
             )
             updated_rows += update_result.rowcount or 0
             file_ids_by_tenant[row.tenant_id].update(file_ids)
@@ -553,6 +682,8 @@ class DataRetentionService:
             referenced_file_ids: set[UUID] = set()
             for row in batch_rows:
                 payload = row.output_payload_json
+                if is_tombstone_only_payload(payload):
+                    continue
                 if not isinstance(payload, dict):
                     continue
                 file_ids = _extract_generated_file_ids(payload)
@@ -702,6 +833,119 @@ def _prune_debug_payload(payload: Any) -> Any:
     pruned: dict[str, Any] = dict(payload_dict)
     pruned.pop("template_fill_debug", None)
     return pruned
+
+
+def _debug_tombstone_counts(
+    row: Any, output_payload: Any
+) -> RunDebugStepResultRetentionCounts | None:
+    cleared_fields = sum(
+        1
+        for value in (
+            row.input_payload_json,
+            row.effective_prompt,
+            row.model_parameters_json,
+            row.tool_calls_metadata,
+        )
+        if value is not None
+    )
+    pruned_output_keys = int(
+        isinstance(output_payload, dict) and "template_fill_debug" in output_payload
+    )
+    if cleared_fields == 0 and pruned_output_keys == 0:
+        return None
+    return RunDebugStepResultRetentionCounts(
+        cleared_field_count=cleared_fields,
+        pruned_output_key_count=pruned_output_keys,
+    )
+
+
+def _build_retention_tombstone(
+    *,
+    action: _FlowRuntimeRetentionAction,
+    data_class: FlowRetentionDataClass,
+    object_type: FlowRetentionObjectType,
+    object_id: str,
+    retention_state: FlowRetentionState,
+    counts: FlowRetentionTombstoneCounts,
+) -> FlowRetentionTombstone:
+    return FlowRetentionTombstone(
+        tenant_id=str(action.tenant_id),
+        run_id=str(action.run_id),
+        trace_id=str(action.trace_id),
+        data_class=data_class,
+        object_type=object_type,
+        object_id=object_id,
+        policy_source=action.policy_source,
+        cutoff=action.cutoff,
+        actor_source=FLOW_RETENTION_ACTOR_SOURCE,
+        counts=counts,
+        timestamp=action.cleanup_timestamp,
+        retention_state=retention_state,
+    )
+
+
+def _build_attempt_retention_marker(
+    *,
+    action: _FlowRuntimeRetentionAction,
+    object_id: str,
+    counts: RunDebugAttemptRetentionCounts,
+) -> dict[str, Any]:
+    return FlowAttemptRetentionMarker(
+        tombstone=_build_retention_tombstone(
+            action=action,
+            data_class="run_debug_evidence",
+            object_type="flow_step_attempt",
+            object_id=object_id,
+            retention_state="retention_purged",
+            counts=counts,
+        )
+    ).to_payload()
+
+
+def _is_current_attempt_retention_marker(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    try:
+        FlowAttemptRetentionMarker.model_validate(cast(dict[str, Any], payload))
+    except ValueError:
+        return False
+    return True
+
+
+def _flow_runtime_policy_source(
+    *,
+    data_class: RetentionDataClass,
+    policy: FlowRetentionPolicy,
+    flow_override_days: int | None,
+    space_default_days: int | None,
+) -> str:
+    if flow_override_days is not None:
+        return "flow.data_retention_days"
+
+    class_specific_sources = {
+        "source_audio": (
+            policy.source_audio_days,
+            "tenant.flow_settings.retention_policy.source_audio_days",
+        ),
+        "transcript_text": (
+            policy.transcript_text_days,
+            "tenant.flow_settings.retention_policy.transcript_text_days",
+        ),
+        "generated_artifact": (
+            policy.generated_artifact_days,
+            "tenant.flow_settings.retention_policy.generated_artifact_days",
+        ),
+        "run_debug_evidence": (
+            policy.run_debug_evidence_days,
+            "tenant.flow_settings.retention_policy.run_debug_evidence_days",
+        ),
+    }
+    class_specific_days, source = class_specific_sources[data_class]
+    if class_specific_days is not None:
+        return source
+    if space_default_days is not None:
+        return "space.data_retention_days"
+    return "tenant.flow_settings.retention_policy.shared_default_days"
 
 
 def _extract_generated_file_ids(payload: Any) -> set[UUID]:

@@ -14,6 +14,10 @@ from intric.flows.citation_sidecar import (
     summarize_step_citations,
 )
 from intric.flows.domain.flow import JsonObject
+from intric.flows.flow_retention_tombstone import (
+    FlowRetentionTombstone,
+    extract_retention_tombstones,
+)
 from intric.flows.flow_run_evidence_bundle import EvidenceBundle, RedactedEvidenceBundle
 from intric.flows.flow_run_evidence_export_manifest import (
     EVIDENCE_EXPORT_SCHEMA_VERSION,
@@ -45,8 +49,8 @@ from intric.flows.template_reference_analyzer import (
 )
 
 _RETENTION_NOT_TRACKED_NOTE = (
-    "Tombstone tracking is not yet exposed; counts will populate when retention "
-    "tombstones become trackable."
+    "No retention tombstones are present in this export; rows purged before "
+    "tombstone tracking remain indistinguishable from never-tracked evidence."
 )
 _ARTIFACT_PAYLOAD_DERIVED_NOTE = (
     "Canonical file availability is not yet exposed; counts currently come from "
@@ -174,12 +178,9 @@ def _build_manifest(
         redaction_applied=redaction_applied,
         masked_fields_count=masked_fields_count,
         redaction_policy_version=REDACTION_POLICY_VERSION,
-        retention_state_summary=EvidenceRetentionStateSummary(
-            tracking_state="not_tracked",
-            tombstone_count=0,
-            retention_purged_count=0,
-            redacted_for_deletion_count=0,
-            note=_RETENTION_NOT_TRACKED_NOTE,
+        retention_state_summary=_retention_state_summary(
+            bundle_payload,
+            provenance_parse_results=provenance_parse_results,
         ),
         artifact_availability_summary=EvidenceArtifactAvailabilitySummary(
             tracking_state="payload_derived",
@@ -198,9 +199,72 @@ def _provenance_persisted_version_status(
 ) -> EvidenceProvenancePersistedVersionStatus:
     if any(result.status == "corrupt" for result in parse_results):
         return "corrupt"
+    if any(result.status == "retention_purged" for result in parse_results):
+        return "retention_purged"
     if any(result.status == "tracked" for result in parse_results):
         return "tracked"
     return "not_tracked"
+
+
+def _retention_state_summary(
+    bundle_payload: dict[str, Any],
+    *,
+    provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
+) -> EvidenceRetentionStateSummary:
+    tombstones = _collect_retention_tombstones(
+        bundle_payload,
+        provenance_parse_results=provenance_parse_results,
+    )
+    retention_purged_count = sum(
+        1 for marker in tombstones if marker.retention_state == "retention_purged"
+    )
+    artifact_content_purged_count = sum(
+        1
+        for marker in tombstones
+        if marker.retention_state == "artifact_content_purged"
+    )
+    redacted_for_deletion_count = sum(
+        1 for marker in tombstones if marker.retention_state == "redacted_for_deletion"
+    )
+    if not tombstones:
+        return EvidenceRetentionStateSummary(
+            tracking_state="not_tracked",
+            tombstone_count=0,
+            retention_purged_count=0,
+            artifact_content_purged_count=0,
+            redacted_for_deletion_count=0,
+            note=_RETENTION_NOT_TRACKED_NOTE,
+        )
+
+    return EvidenceRetentionStateSummary(
+        tracking_state="tracked",
+        tombstone_count=len(tombstones),
+        retention_purged_count=retention_purged_count,
+        artifact_content_purged_count=artifact_content_purged_count,
+        redacted_for_deletion_count=redacted_for_deletion_count,
+        note=(
+            "Retention tombstones are present: "
+            f"{len(tombstones)} total, "
+            f"{retention_purged_count} retention-purged, "
+            f"{artifact_content_purged_count} artifact-content-purged, "
+            f"{redacted_for_deletion_count} redacted-for-deletion."
+        ),
+    )
+
+
+def _collect_retention_tombstones(
+    bundle_payload: dict[str, Any],
+    *,
+    provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
+) -> tuple[FlowRetentionTombstone, ...]:
+    tombstones: list[FlowRetentionTombstone] = []
+    for result in provenance_parse_results:
+        if result.status == "retention_purged" and result.retention_marker is not None:
+            tombstones.append(result.retention_marker.tombstone)
+    for step_result in _as_json_object_list(bundle_payload.get("step_results")):
+        output_payload = step_result.get("output_payload_json")
+        tombstones.extend(extract_retention_tombstones(output_payload))
+    return tuple(tombstones)
 
 
 def _build_summary(
@@ -352,6 +416,9 @@ def derive_rag_usage_tracking(
 ) -> dict[str, Any]:
     rag_payloads = _rag_payloads_from_parse_results(provenance_parse_results)
     has_corrupt = any(result.status == "corrupt" for result in provenance_parse_results)
+    retention_purged_attempt_count = sum(
+        1 for result in provenance_parse_results if result.status == "retention_purged"
+    )
     if not rag_payloads:
         summary = untracked_rag_summary()
         if has_corrupt:
@@ -360,20 +427,27 @@ def derive_rag_usage_tracking(
                 "One or more attempts have corrupt knowledge/RAG provenance; "
                 "source usage cannot be determined."
             )
-        return summary
-
-    summary = _merge_tracked_rag_summaries(rag_payloads)
-    has_sources = bool(_collect_rag_sources(bundle_payload))
-    if has_corrupt:
-        summary["tracking_state"] = "partial_corrupt"
-        summary["note"] = (
-            "Some attempts have tracked knowledge/RAG provenance, but one or more "
-            "attempts are corrupt; source usage is only partially known."
-        )
-    elif has_sources:
-        summary["tracking_state"] = "tracked_with_sources"
+        elif retention_purged_attempt_count:
+            summary["tracking_state"] = "retention_purged"
+            summary["note"] = (
+                "Knowledge/RAG provenance was retention-purged; absence of sources "
+                "does not prove knowledge was unused."
+            )
     else:
-        summary["tracking_state"] = "tracked_no_sources"
+        summary = _merge_tracked_rag_summaries(rag_payloads)
+        has_sources = bool(_collect_rag_sources(bundle_payload))
+        if has_corrupt:
+            summary["tracking_state"] = "partial_corrupt"
+            summary["note"] = (
+                "Some attempts have tracked knowledge/RAG provenance, but one or more "
+                "attempts are corrupt; source usage is only partially known."
+            )
+        elif has_sources:
+            summary["tracking_state"] = "tracked_with_sources"
+        else:
+            summary["tracking_state"] = "tracked_no_sources"
+    if retention_purged_attempt_count:
+        summary["retention_purged_attempt_count"] = retention_purged_attempt_count
     return summary
 
 

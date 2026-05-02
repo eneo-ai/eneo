@@ -441,7 +441,7 @@ Accepted findings and plan fixes:
 - Data-retention cleanup was audited: `data_retention_service.py` still updates rows when non-tool debug fields are present or output payload pruning changes the payload, so no retention cleanup source change is planned.
 - The anti-slippage grep was corrected so it does not fail on the new truthful RAG note.
 
-No source implementation has started.
+Source implementation remained paused during this plan review.
 
 ### Claude Plan Review 2
 
@@ -537,3 +537,160 @@ Additional verification after Claude green:
 Carry-forward added:
 
 - `frontend/packages/intric-js/src/types/schema.d.ts` remains generated-client drift for evidence tracking examples/types and the new OpenAPI deprecation marker. Do not hand-edit generated output in this backend slice; 7A.7 owns generated/frontend evidence type alignment if the backend evidence schema changes are kept.
+
+## Iteration 6 — 7A.5 Retention Tombstones And Deletion Semantics
+
+The active 7A.5 plan narrows the slice to retention tombstones and deletion semantics:
+
+- destructive debug/artifact cleanup should write reviewable tombstones instead of silently erasing provenance/artifact evidence
+- exact raw prompt/completion byte retention remains out of scope and rejected until a deletion/DSAR contract exists
+- existing owners are used first: `FlowStepAttempts.provenance_json`, `FlowStepResults.output_payload_json`, `Files`, and current evidence export/read-model code
+- no migration, broad evidence ledger, frontend evidence UI rewrite, Batch 8 rerun, Batch 9 review, package rename, or namespace rename starts in this slice
+
+Docker/container check remains blocked by the local Codex approval policy before Docker execution; local/testcontainers validation remains the fallback.
+
+### Claude Plan Review 1
+
+Claude returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`.
+
+Accepted findings and plan fixes:
+
+- Attempt retention markers would be misclassified as corrupt by the strict provenance parser. The plan now requires explicit retention marker schema versions, a retention-purged parse status, parser branch, export-payload behavior, and provenance-status precedence.
+- `EvidenceProvenancePersistedVersionStatus` was a closed literal without a retention-purged state. The plan now calls out the typed public contract change and defers generated frontend schema alignment to 7A.7 instead of hand-editing generated output in this backend slice.
+- Cleanup idempotency was under-specified. The plan now requires no-op behavior for current-version markers and a two-pass cleanup test proving the second run returns zero changed debug/artifact counts.
+- Per-row cleanup context was under-specified. The plan now chooses explicit row-level Python updates with selected tenant id, run id, trace id, policy source, cutoff, and cleanup timestamp context, avoiding SQL JSON construction in this slice.
+- The missing-artifact reconciler was omitted. The plan now requires preserving tombstones and skipping tombstone-only payloads.
+- The output-payload tombstone key was unnamed. The plan now uses the namespaced `flow_retention_tombstones` key and requires an `rg` collision check before implementation.
+- Redaction behavior was ambiguous. The plan now keeps tombstone actor/source PII-free and pins redacted-export marker preservation.
+- Pre-7A.5 rows already purged to `None` are explicitly documented as carry-forward ambiguity rather than silently treated as proof of never-tracked evidence.
+
+Source implementation remained paused during this plan review.
+
+### Claude Plan Review 2
+
+Claude returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`.
+
+Claude agreed the no-migration direction was sound, but required more executable detail before implementation. Accepted fixes:
+
+- Added a required 7A.5 test matrix mirroring the specificity used in previous slices.
+- Named the new status literals: `retention_purged` for attempt provenance parse results and manifest persisted-version status; retention summary tracking remains `not_tracked | tracked`.
+- Pinned RAG tracking behavior for retention-purged attempts so post-7A.5 purge does not collapse into `not_tracked`.
+- Clarified that `redacted_for_deletion_count` remains zero in this slice because tenant/DSAR deletion markers are not implemented.
+- Defined tombstone `counts` as typed per-marker counts of logical objects made unavailable, not batch-job row counts.
+- Required `data_retention_worker` to be a single source constant.
+- Required retention summary `note` to be derived from actual state and counts, not a stale static string.
+- Added carry-forward for a future discriminated envelope if more persisted attempt-state schemas are added.
+
+Source implementation remained paused during this plan review.
+
+### Claude Plan Review 3
+
+Claude returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+
+Claude confirmed the substantive plan issues were resolved and left only low-risk implementation-review notes. Additional plan tightenings applied before source work:
+
+- Added an ordered RAG tracking precedence ladder.
+- Named `retention_purged_attempt_count` as the purged-attempt context field for mixed tracked/purged RAG summaries.
+- Made the HTTP evidence export pin a hard requirement rather than conditional.
+- Added an OpenAPI contract pin for the new `retention_purged` manifest status literal.
+- Required deterministic retention-summary note derivation.
+- Explicitly required `FlowAttemptProvenanceParseResult.to_export_payload()` to return retention marker payloads for `retention_purged`.
+
+The pre-implementation marker collision grep returned no existing source/test writers for `flow_retention_tombstones`, `flow-retention-tombstone`, or `flow-attempt-retention-marker`.
+
+Source implementation proceeded after this green plan review.
+
+### Implementation Summary
+
+Changed source/tests:
+
+- `backend/src/intric/flows/flow_retention_tombstone.py`
+  - Added the canonical Flow retention tombstone schema, attempt-retention marker schema, typed per-marker count models, payload-key constant, actor-source constant, and parsing/appending helpers.
+- `backend/src/intric/data_retention/infrastructure/data_retention_service.py`
+  - Runtime retention now threads tenant/run/trace/cutoff/policy context through cleanup.
+  - Debug cleanup writes step-result tombstones and attempt retention markers before clearing sensitive fields.
+  - Generated artifact cleanup writes artifact-content tombstones before pruning payload references and clearing `Files` content.
+  - Missing-artifact reconciliation preserves tombstones and skips tombstone-only payloads.
+- `backend/src/intric/flows/flow_run_provenance.py`
+  - Attempt provenance parsing now recognizes `flow-attempt-retention-marker.v1` as `retention_purged` instead of corrupt.
+  - Invalid retention markers get the explicit corruption code `flow_attempt_provenance_invalid_retention_marker`.
+- `backend/src/intric/flows/flow_run_export_json.py`
+  - Manifest retention summary now derives counts from tombstones in evidence bundle payloads.
+  - Provenance status precedence is `corrupt > retention_purged > tracked > not_tracked`.
+  - RAG tracking now reports retention-purged attempts explicitly and adds `retention_purged_attempt_count` once at the summary boundary.
+- `backend/src/intric/flows/flow_run_evidence_export_manifest.py`
+  - Manifest status accepts `retention_purged`.
+  - Retention summary requires `artifact_content_purged_count`.
+- `backend/src/intric/flows/flow_run_evidence_bundle.py`
+  - The result-field omission now uses `_RESULT_FIELDS_REPLACED_BY_ATTEMPT_PROVENANCE` instead of an inline exclude set.
+- `backend/src/intric/flows/api/flow_models.py`
+  - Evidence export example matches the tombstone-aware manifest shape.
+  - Removed the public `FlowRunStepPublic.tool_calls_metadata` deprecation surface; Flow/Flow AI Builder are unreleased, so the public compatibility field should not survive these refactors.
+- Tests now pin cleanup idempotency, tombstone counts, invalid retention-marker parsing, redacted marker preservation, HTTP corrupt+tombstone precedence, OpenAPI retention status/count fields, and absence of public result-level `tool_calls_metadata`.
+
+No migration, frontend evidence UI change, Batch 8 rerun work, Batch 9 review work, package rename, or namespace rename started.
+
+### Validation Summary
+
+- `cd backend && uv run pytest tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_run_evidence.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py -q`: 88 passed, 16 warnings.
+- `cd backend && POSTGRES_HOST=placeholder uv run pytest tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_returns_redacted_json_attachment tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_marks_corrupt_attempt_provenance tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_marks_corrupt_with_retention_tombstone -q`: 3 passed, 16 warnings.
+- `cd backend && uv run pyright ...`: 0 errors.
+- `cd backend && uv run ruff check ...`: all checks passed.
+- `cd backend && uv run ruff format --check ...`: 13 files already formatted.
+- `cd backend && uv run lint-imports --no-cache`: 3 contracts kept, 0 broken.
+- `rg -n "flow_retention_tombstones|flow-retention-tombstone|flow-attempt-retention-marker" backend/src backend/tests`: only the new schema constants and one invalid-marker test literal remain.
+- Anti-slippage `rg` across touched source/test files: no matches.
+- `git diff --check -- ...`: passed.
+- `docker ps --format '{{.Names}}'`: blocked before Docker execution by the local Codex approval policy (`AskForApproval is set to Never`); local/testcontainers validation above passed.
+
+Warnings observed were existing deprecation warnings outside Flow evidence and not product regressions.
+
+### Carry-Forward Risks
+
+- Full `tool_calls_metadata` deletion sweep remains and is assigned to the existing PRD-008 / Batch 10 cleanup anchors: `docs/refactor/prd/PRD-008-dead-code-comments-and-readability.md:18` and `docs/refactor/implementation-order.md:25`. Delete these together after Batch 7A finishes the evidence foundation because `backend/src/intric/flows/runtime/executor.py:187-188` still reads runtime output tool calls into attempt provenance:
+  - `backend/src/intric/flows/domain/flow.py:170`
+  - `backend/src/intric/database/tables/flow_tables.py:499`
+  - `backend/src/intric/flows/infrastructure/flow_repo.py:542`
+  - `backend/src/intric/flows/runtime/step_result_builder.py:94`
+  - `backend/src/intric/flows/runtime/step_execution_runtime.py:795`
+  - `backend/src/intric/flows/runtime/step_execution_runtime.py:910`
+  - `backend/src/intric/flows/runtime/step_execution_runtime.py:988`
+  - `backend/src/intric/flows/runtime/template_fill_runtime.py:238`
+  - `backend/src/intric/flows/runtime/models.py:60`
+  - `backend/src/intric/flows/flow_run_evidence_bundle.py:21`
+  - `backend/src/intric/flows/flow_run_evidence_bundle.py:183`
+- `frontend/packages/intric-js/src/types/schema.d.ts` remains generated-client drift for the new retention manifest fields and for the removed public `FlowRunStepPublic.tool_calls_metadata` field. Do not hand-edit generated output in this backend slice; 7A.7 owns generated/frontend evidence type alignment if the backend evidence schema changes are kept.
+- Pre-7A.5 rows already purged to `provenance_json=None` or already-pruned output payloads remain indistinguishable from never-tracked evidence until a human-approved migration/backfill exists.
+- The tombstone payload approach is intentionally no-migration. If DSAR/tenant deletion markers or a fourth tombstone writer appear, revisit whether the attempt/result owners still suffice or whether a dedicated table earns its existence.
+
+### Claude Implementation Review 1
+
+Claude returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`.
+
+Accepted fixes:
+
+- Added coverage for invalid attempt-retention markers and the explicit `flow_attempt_provenance_invalid_retention_marker` corruption code.
+- Replaced the free-form tombstone count dict with typed count models validated against `data_class`, `object_type`, and `retention_state`.
+- Made `artifact_content_purged_count` required in the typed manifest summary.
+- Changed attempt retention counts from the column-name key `provenance_json` to the logical `cleared_field_count`.
+- Collapsed RAG retention count annotation to one summary-boundary assignment.
+- Recorded the broader `tool_calls_metadata` deletion sweep as PRD-008 / Batch 10 carry-forward and replaced the inline evidence-bundle exclude set with a named constant.
+
+Rejected or deferred:
+
+- A new retention table remains out of scope for 7A.5; existing owners are sufficient for current evidence.
+- Concurrency guards beyond idempotent marker checks are deferred because the retained state is deterministic and the current worker path is not introducing a new duplicate-start surface.
+
+### Claude Implementation Review 2-4
+
+- Iteration 2 returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`. Source shape was mostly accepted, but the RAG retention count assignment still had two branch-local writes and the `tool_calls_metadata` cleanup was not recorded with an owning PRD/batch.
+- Iteration 3 returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`. Source findings were closed, but the 7A.5 journal content was nested under the 7A.4 heading and the cleanup carry-forward needed concrete file paths plus a verified PRD-008 / Batch 10 anchor.
+- Iteration 4 returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+
+Claude confirmed the accepted findings were resolved:
+
+- RAG `retention_purged_attempt_count` is assigned once at the summary boundary.
+- `_RESULT_FIELDS_REPLACED_BY_ATTEMPT_PROVENANCE` replaces the inline evidence-bundle exclude set.
+- 7A.5 journal content lives under one coherent iteration heading with chronological plan reviews, implementation summary, validation summary, carry-forward risks, and implementation review.
+- The `tool_calls_metadata` deletion sweep lists concrete file paths and links to existing PRD-008 / Batch 10 anchors.
+- Source has no AI slop comments, process/tooling vocabulary, or new deprecated/legacy/backward-compatibility surface for unreleased Flow / Flow AI Builder.

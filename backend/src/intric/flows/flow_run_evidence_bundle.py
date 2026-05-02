@@ -18,6 +18,8 @@ from intric.flows.flow_run_provenance import (
 )
 from intric.flows.flow_run_redaction import MaskedField, redact_payload_with_manifest
 
+_RESULT_FIELDS_REPLACED_BY_ATTEMPT_PROVENANCE = {"tool_calls_metadata"}
+
 
 @dataclass(frozen=True)
 class EvidenceBundlePayload:
@@ -177,7 +179,9 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
 
 
 def _dump_result_record(item: FlowStepResult) -> dict[str, Any]:
-    return item.model_dump(mode="json", exclude={"tool_calls_metadata"})
+    return item.model_dump(
+        mode="json", exclude=_RESULT_FIELDS_REPLACED_BY_ATTEMPT_PROVENANCE
+    )
 
 
 def _dump_attempt_record(

@@ -188,8 +188,13 @@ def _evidence_export_payload(run: FlowRun) -> dict:
                 "tracking_state": "not_tracked",
                 "tombstone_count": 0,
                 "retention_purged_count": 0,
+                "artifact_content_purged_count": 0,
                 "redacted_for_deletion_count": 0,
-                "note": "Tombstone tracking is not yet exposed.",
+                "note": (
+                    "No retention tombstones are present in this export; rows purged "
+                    "before tombstone tracking remain indistinguishable from "
+                    "never-tracked evidence."
+                ),
             },
             "artifact_availability_summary": {
                 "tracking_state": "payload_derived",

@@ -17,6 +17,14 @@ from intric.flows.flow import (
     FlowStepResult,
     FlowVersion,
 )
+from intric.flows.flow_retention_tombstone import (
+    FLOW_RETENTION_ACTOR_SOURCE,
+    FLOW_RETENTION_TOMBSTONES_KEY,
+    FlowAttemptRetentionMarker,
+    FlowRetentionTombstone,
+    GeneratedArtifactRetentionCounts,
+    RunDebugAttemptRetentionCounts,
+)
 from intric.flows.flow_run_evidence import (
     build_debug_export,
     normalize_debug_step,
@@ -118,11 +126,55 @@ def _attempt_with_provenance(
     )
 
 
+def _attempt_retention_marker_payload(
+    run: FlowRun,
+    *,
+    object_id: str | None = None,
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    return FlowAttemptRetentionMarker(
+        tombstone=FlowRetentionTombstone(
+            tenant_id=str(run.tenant_id),
+            run_id=str(run.id),
+            trace_id=str(run.trace_id),
+            data_class="run_debug_evidence",
+            object_type="flow_step_attempt",
+            object_id=object_id or str(uuid4()),
+            policy_source="tenant.flow_settings.retention_policy.run_debug_evidence_days",
+            cutoff=now,
+            actor_source=FLOW_RETENTION_ACTOR_SOURCE,
+            counts=RunDebugAttemptRetentionCounts(cleared_field_count=1),
+            timestamp=now,
+            retention_state="retention_purged",
+        )
+    ).to_payload()
+
+
+def _step_result_retention_tombstone_payload(run: FlowRun) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    tombstone = FlowRetentionTombstone(
+        tenant_id=str(run.tenant_id),
+        run_id=str(run.id),
+        trace_id=str(run.trace_id),
+        data_class="generated_artifact",
+        object_type="flow_step_result",
+        object_id=str(uuid4()),
+        policy_source="tenant.flow_settings.retention_policy.generated_artifact_days",
+        cutoff=now,
+        actor_source=FLOW_RETENTION_ACTOR_SOURCE,
+        counts=GeneratedArtifactRetentionCounts(referenced_file_count=1),
+        timestamp=now,
+        retention_state="artifact_content_purged",
+    )
+    return {FLOW_RETENTION_TOMBSTONES_KEY: [tombstone.to_payload()]}
+
+
 def _step_result_for_run(
     run: FlowRun,
     *,
     step_id: UUID | None = None,
     tool_calls_metadata: list[dict[str, Any]] | dict[str, Any] | None = None,
+    output_payload_json: dict[str, Any] | None = None,
 ) -> FlowStepResult:
     now = datetime.now(timezone.utc)
     return FlowStepResult(
@@ -135,7 +187,7 @@ def _step_result_for_run(
         assistant_id=uuid4(),
         input_payload_json=None,
         effective_prompt=None,
-        output_payload_json={"text": "done"},
+        output_payload_json=output_payload_json or {"text": "done"},
         model_parameters_json=None,
         num_tokens_input=None,
         num_tokens_output=None,
@@ -404,6 +456,18 @@ def test_parse_attempt_provenance_marks_current_schema_validation_failure() -> N
     assert result.marker.error_code == "flow_attempt_provenance_invalid_current_payload"
 
 
+def test_parse_attempt_provenance_marks_invalid_retention_marker() -> None:
+    result = parse_attempt_provenance(
+        {"schema_version": "flow-attempt-retention-marker.v1"}
+    )
+
+    assert result.status == "corrupt"
+    assert result.marker is not None
+    assert (
+        result.marker.error_code == "flow_attempt_provenance_invalid_retention_marker"
+    )
+
+
 def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
     now = datetime.now(timezone.utc)
     run = FlowRun(
@@ -652,10 +716,11 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
         "tracking_state": "not_tracked",
         "tombstone_count": 0,
         "retention_purged_count": 0,
+        "artifact_content_purged_count": 0,
         "redacted_for_deletion_count": 0,
         "note": (
-            "Tombstone tracking is not yet exposed; counts will populate when "
-            "retention tombstones become trackable."
+            "No retention tombstones are present in this export; rows purged before "
+            "tombstone tracking remain indistinguishable from never-tracked evidence."
         ),
     }
     assert export["manifest"]["artifact_availability_summary"] == {
@@ -740,6 +805,126 @@ def test_evidence_export_manifest_tracks_valid_and_absent_provenance() -> None:
         == FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
     )
     assert export["bundle"]["step_attempts"][1]["provenance_json"] is None
+
+
+def test_attempt_retention_marker_parses_as_retention_purged() -> None:
+    run, _version = _evidence_run_and_version()
+
+    result = parse_attempt_provenance(_attempt_retention_marker_payload(run))
+
+    assert result.status == "retention_purged"
+    assert result.to_export_payload() is not None
+    assert result.to_export_payload()["status"] == "retention_purged"
+    assert result.retention_marker is not None
+    assert result.retention_marker.tombstone.actor_source == FLOW_RETENTION_ACTOR_SOURCE
+
+
+def test_evidence_export_manifest_corrupt_precedes_retention_purged() -> None:
+    run, version = _evidence_run_and_version()
+    corrupt_attempt = _attempt_with_provenance(run, {"rag": {"status": "success"}})
+    purged_attempt = _attempt_with_provenance(
+        run,
+        _attempt_retention_marker_payload(run),
+    )
+
+    export = _render_raw_export(
+        run,
+        version,
+        step_attempts=[corrupt_attempt, purged_attempt],
+    )
+
+    assert export["manifest"]["provenance_persisted_version_status"] == "corrupt"
+    assert export["manifest"]["retention_state_summary"]["tombstone_count"] == 1
+    assert (
+        export["bundle"]["step_attempts"][1]["provenance_json"]["status"]
+        == "retention_purged"
+    )
+
+
+def test_evidence_export_manifest_retention_purged_precedes_tracked() -> None:
+    run, version = _evidence_run_and_version()
+    tracked_attempt = _attempt_with_provenance(
+        run,
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "llm": {"effective_prompt": "Prompt"},
+        },
+    )
+    purged_attempt = _attempt_with_provenance(
+        run,
+        _attempt_retention_marker_payload(run),
+    )
+
+    export = _render_raw_export(
+        run,
+        version,
+        step_attempts=[tracked_attempt, purged_attempt],
+    )
+
+    assert (
+        export["manifest"]["provenance_persisted_version_status"] == "retention_purged"
+    )
+    assert (
+        export["bundle"]["step_attempts"][0]["provenance_json"]["llm"][
+            "effective_prompt"
+        ]["preview"]
+        == "Prompt"
+    )
+    assert export["manifest"]["retention_state_summary"]["retention_purged_count"] == 1
+
+
+def test_evidence_export_retention_summary_counts_payload_tombstones() -> None:
+    run, version = _evidence_run_and_version()
+    result = _step_result_for_run(
+        run,
+        output_payload_json=_step_result_retention_tombstone_payload(run),
+    )
+
+    first_export = _render_raw_export(run, version, step_results=[result])
+    second_export = _render_raw_export(run, version, step_results=[result])
+
+    summary = first_export["manifest"]["retention_state_summary"]
+    assert summary == {
+        "tracking_state": "tracked",
+        "tombstone_count": 1,
+        "retention_purged_count": 0,
+        "artifact_content_purged_count": 1,
+        "redacted_for_deletion_count": 0,
+        "note": (
+            "Retention tombstones are present: 1 total, 0 retention-purged, "
+            "1 artifact-content-purged, 0 redacted-for-deletion."
+        ),
+    }
+    assert (
+        second_export["manifest"]["retention_state_summary"]["note"] == summary["note"]
+    )
+
+
+def test_evidence_export_redacted_preserves_retention_marker_fields() -> None:
+    run, version = _evidence_run_and_version()
+    attempt = _attempt_with_provenance(run, _attempt_retention_marker_payload(run))
+    raw_bundle = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[],
+        step_attempts=[attempt],
+    )
+    export = render_evidence_json_export(
+        bundle=redact_evidence_bundle(raw_bundle),
+        context=_redacted_export_context(),
+    )
+
+    marker = export["bundle"]["step_attempts"][0]["provenance_json"]
+    assert marker["status"] == "retention_purged"
+    assert marker["tombstone"]["actor_source"] == FLOW_RETENTION_ACTOR_SOURCE
+    assert marker["tombstone"]["tenant_id"] == str(run.tenant_id)
+    assert marker["tombstone"]["run_id"] == str(run.id)
+    assert marker["tombstone"]["trace_id"] == str(run.trace_id)
+    assert marker["tombstone"]["counts"] == {"cleared_field_count": 1}
+    assert not any(
+        path.startswith("bundle.step_attempts.0.provenance_json.tombstone")
+        for path in export["redaction"]["masked_paths"]
+    )
 
 
 def test_evidence_export_rag_tracking_reports_not_tracked_without_provenance() -> None:
@@ -897,6 +1082,100 @@ def test_evidence_export_rag_tracking_reports_unknown_for_all_corrupt_attempts()
     assert export["summary"]["rag_sources"] == []
 
 
+def test_evidence_export_rag_tracking_reports_retention_purged_attempts() -> None:
+    run, version = _evidence_run_and_version()
+
+    export = _render_raw_export(
+        run,
+        version,
+        step_attempts=[
+            _attempt_with_provenance(run, _attempt_retention_marker_payload(run))
+        ],
+    )
+
+    tracking = export["summary"]["rag_usage_tracking"]
+    assert tracking["tracking_state"] == "retention_purged"
+    assert tracking["retrieval_tracked"] is False
+    assert tracking["retention_purged_attempt_count"] == 1
+    assert "does not prove knowledge was unused" in tracking["note"]
+
+
+def test_evidence_export_rag_tracking_keeps_tracked_state_with_retention_purged() -> (
+    None
+):
+    run, version = _evidence_run_and_version()
+    tracked = _attempt_with_provenance(
+        run,
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "rag": {
+                "status": "success",
+                "references": [
+                    {
+                        "id": "source-1",
+                        "title": "Knowledge Source",
+                        "usage_state": "retrieved_candidate",
+                    }
+                ],
+            },
+        },
+    )
+    purged = _attempt_with_provenance(run, _attempt_retention_marker_payload(run))
+
+    export = _render_raw_export(run, version, step_attempts=[tracked, purged])
+
+    tracking = export["summary"]["rag_usage_tracking"]
+    assert tracking["tracking_state"] == "tracked_with_sources"
+    assert tracking["retention_purged_attempt_count"] == 1
+
+
+def test_evidence_export_rag_tracking_corrupt_and_retention_purged_precedence() -> None:
+    run, version = _evidence_run_and_version()
+    corrupt = _attempt_with_provenance(run, {"rag": {"status": "success"}})
+    purged = _attempt_with_provenance(run, _attempt_retention_marker_payload(run))
+
+    unknown_export = _render_raw_export(
+        run,
+        version,
+        step_attempts=[corrupt, purged],
+    )
+
+    assert (
+        unknown_export["summary"]["rag_usage_tracking"]["tracking_state"]
+        == "unknown_corrupt"
+    )
+    assert (
+        unknown_export["summary"]["rag_usage_tracking"][
+            "retention_purged_attempt_count"
+        ]
+        == 1
+    )
+
+    tracked = _attempt_with_provenance(
+        run,
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "rag": {"status": "success", "references": []},
+        },
+    )
+    partial_export = _render_raw_export(
+        run,
+        version,
+        step_attempts=[tracked, corrupt, purged],
+    )
+
+    assert (
+        partial_export["summary"]["rag_usage_tracking"]["tracking_state"]
+        == "partial_corrupt"
+    )
+    assert (
+        partial_export["summary"]["rag_usage_tracking"][
+            "retention_purged_attempt_count"
+        ]
+        == 1
+    )
+
+
 def test_evidence_export_omits_result_tool_calls_and_preserves_attempt_provenance() -> (
     None
 ):
@@ -955,8 +1234,13 @@ def test_evidence_export_manifest_rejects_unknown_fields() -> None:
             "tracking_state": "not_tracked",
             "tombstone_count": 0,
             "retention_purged_count": 0,
+            "artifact_content_purged_count": 0,
             "redacted_for_deletion_count": 0,
-            "note": "Tombstone tracking is not yet exposed.",
+            "note": (
+                "No retention tombstones are present in this export; rows purged "
+                "before tombstone tracking remain indistinguishable from "
+                "never-tracked evidence."
+            ),
         },
         "artifact_availability_summary": {
             "tracking_state": "payload_derived",

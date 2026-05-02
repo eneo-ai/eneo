@@ -389,7 +389,7 @@ def test_openapi_flow_consumer_schemas_present(openapi_spec: dict) -> None:
     assert not missing, f"Missing OpenAPI schemas: {sorted(missing)}"
 
 
-def test_openapi_flow_run_step_tool_calls_metadata_is_deprecated(
+def test_openapi_flow_run_step_tool_calls_metadata_is_absent(
     openapi_spec: dict,
 ) -> None:
     schema = (
@@ -397,10 +397,9 @@ def test_openapi_flow_run_step_tool_calls_metadata_is_deprecated(
         .get("schemas", {})
         .get("FlowRunStepPublic", {})
     )
-    tool_calls = schema.get("properties", {}).get("tool_calls_metadata", {})
+    properties = schema.get("properties", {})
 
-    assert tool_calls.get("deprecated") is True
-    assert "attempt provenance" in str(tool_calls.get("description", "")).lower()
+    assert "tool_calls_metadata" not in properties
 
 
 def test_openapi_flow_pagination_response_shape_is_current(
@@ -727,6 +726,18 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
         "raw",
         "redacted",
     }
+    assert _extract_enum_values(
+        openapi_spec, manifest_properties["provenance_persisted_version_status"]
+    ) == {
+        "not_tracked",
+        "tracked",
+        "corrupt",
+        "retention_purged",
+    }
+    retention_summary = _resolve_component_ref(
+        openapi_spec, manifest_properties["retention_state_summary"]
+    )
+    assert "artifact_content_purged_count" in retention_summary.get("properties", {})
     assert manifest_properties["flow_version"].get("type") == "integer"
     assert "anyOf" not in manifest_properties["flow_version"]
     assert not manifest_properties["flow_version"].get("nullable", False)

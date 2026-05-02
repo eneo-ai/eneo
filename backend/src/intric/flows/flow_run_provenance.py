@@ -9,6 +9,10 @@ from typing import Any, Literal, TypeAlias, TypeVar, cast
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from intric.flows.domain.flow import JsonObject
+from intric.flows.flow_retention_tombstone import (
+    FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
+    FlowAttemptRetentionMarker,
+)
 from intric.flows.source_display import (
     format_source_container_display_name,
     format_source_container_label,
@@ -28,7 +32,7 @@ FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION: Literal[
 ] = "flow-attempt-provenance-marker.v1"
 
 FlowAttemptProvenanceParseStatus: TypeAlias = Literal[
-    "not_tracked", "tracked", "corrupt"
+    "not_tracked", "tracked", "corrupt", "retention_purged"
 ]
 FlowAttemptProvenanceCorruptionCode: TypeAlias = Literal[
     "flow_attempt_provenance_invalid_type",
@@ -36,6 +40,7 @@ FlowAttemptProvenanceCorruptionCode: TypeAlias = Literal[
     "flow_attempt_provenance_schema_version_unsupported",
     "flow_attempt_provenance_unknown_top_level_keys",
     "flow_attempt_provenance_invalid_current_payload",
+    "flow_attempt_provenance_invalid_retention_marker",
 ]
 
 
@@ -141,18 +146,33 @@ class FlowAttemptProvenanceParseResult:
     status: FlowAttemptProvenanceParseStatus
     provenance: FlowAttemptProvenance | None = None
     marker: FlowAttemptProvenanceCorruptionMarker | None = None
+    retention_marker: FlowAttemptRetentionMarker | None = None
 
     def __post_init__(self) -> None:
         if self.status == "tracked" and (
-            self.provenance is None or self.marker is not None
+            self.provenance is None
+            or self.marker is not None
+            or self.retention_marker is not None
         ):
             raise ValueError("Tracked attempt provenance requires a provenance value.")
         if self.status == "corrupt" and (
-            self.marker is None or self.provenance is not None
+            self.marker is None
+            or self.provenance is not None
+            or self.retention_marker is not None
         ):
             raise ValueError("Corrupt attempt provenance requires a marker value.")
+        if self.status == "retention_purged" and (
+            self.retention_marker is None
+            or self.provenance is not None
+            or self.marker is not None
+        ):
+            raise ValueError(
+                "Retention-purged attempt provenance requires a retention marker."
+            )
         if self.status == "not_tracked" and (
-            self.provenance is not None or self.marker is not None
+            self.provenance is not None
+            or self.marker is not None
+            or self.retention_marker is not None
         ):
             raise ValueError("Untracked attempt provenance cannot carry payload.")
 
@@ -172,11 +192,19 @@ class FlowAttemptProvenanceParseResult:
     ) -> "FlowAttemptProvenanceParseResult":
         return cls(status="corrupt", marker=marker)
 
+    @classmethod
+    def retention_purged(
+        cls, marker: FlowAttemptRetentionMarker
+    ) -> "FlowAttemptProvenanceParseResult":
+        return cls(status="retention_purged", retention_marker=marker)
+
     def to_export_payload(self) -> dict[str, Any] | None:
         if self.status == "tracked" and self.provenance is not None:
             return self.provenance.to_payload()
         if self.status == "corrupt" and self.marker is not None:
             return self.marker.to_payload()
+        if self.status == "retention_purged" and self.retention_marker is not None:
+            return self.retention_marker.to_payload()
         return None
 
 
@@ -264,6 +292,20 @@ def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
             )
         )
     if schema_version != FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION:
+        if schema_version == FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION:
+            try:
+                return FlowAttemptProvenanceParseResult.retention_purged(
+                    FlowAttemptRetentionMarker.model_validate(raw_payload)
+                )
+            except (TypeError, ValueError, ValidationError):
+                return FlowAttemptProvenanceParseResult.corrupt(
+                    _corruption_marker(
+                        error_code="flow_attempt_provenance_invalid_retention_marker",
+                        message="Attempt retention marker failed schema validation.",
+                        raw=raw_payload,
+                        persisted_schema_version=schema_version,
+                    )
+                )
         return FlowAttemptProvenanceParseResult.corrupt(
             _corruption_marker(
                 error_code="flow_attempt_provenance_schema_version_unsupported",

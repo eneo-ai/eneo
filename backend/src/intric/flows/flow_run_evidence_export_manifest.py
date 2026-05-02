@@ -12,7 +12,7 @@ EVIDENCE_EXPORT_SCHEMA_VERSION: Literal["flow-evidence-export.v3"] = (
 EvidenceExportContentHashInput: TypeAlias = Literal["raw", "redacted"]
 EvidenceExportDetailMode: TypeAlias = Literal["raw", "redacted"]
 EvidenceProvenancePersistedVersionStatus: TypeAlias = Literal[
-    "not_tracked", "tracked", "corrupt"
+    "not_tracked", "tracked", "corrupt", "retention_purged"
 ]
 EvidenceRetentionTrackingState: TypeAlias = Literal["not_tracked", "tracked"]
 EvidenceArtifactAvailabilityTrackingState: TypeAlias = Literal["payload_derived"]
@@ -32,6 +32,7 @@ class EvidenceRetentionStateSummary(BaseModel):
     tracking_state: EvidenceRetentionTrackingState
     tombstone_count: int
     retention_purged_count: int
+    artifact_content_purged_count: int
     redacted_for_deletion_count: int
     note: str
 

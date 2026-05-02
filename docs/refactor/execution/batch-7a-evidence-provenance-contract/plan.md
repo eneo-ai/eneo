@@ -2,9 +2,301 @@
 
 ## Active Next Plan
 
-The active implementation slice is **7A.4 — Evidence single-source normalization**.
+The active implementation slice is **7A.5 — Retention tombstones and deletion semantics**.
 
-Official Batch 8 step rerun does not start until this inserted evidence/provenance foundation reaches a stable checkpoint. 7A.1 is committed at `5563bb71`, 7A.2 is committed at `d3228d83`, and 7A.3 is committed at `1cd68a2d`. 7A.4 now makes evidence export truthful about tool calls and knowledge/RAG tracking without starting migrations or new evidence ledgers.
+Official Batch 8 step rerun does not start until this inserted evidence/provenance foundation reaches a stable checkpoint. 7A.1 is committed at `5563bb71`, 7A.2 is committed at `d3228d83`, 7A.3 is committed at `1cd68a2d`, and 7A.4 is committed at `78506836`. 7A.5 now makes destructive retention visible in the existing evidence owners without adding a broad evidence ledger or starting a migration.
+
+## Scope For 7A.5
+
+### Goals
+
+- Destructive retention cleanup writes reviewable tombstones instead of silently erasing evidence/provenance/artifact content.
+- Evidence export manifest reports tracked retention state and counts when tombstones are present.
+- Evidence export bundle distinguishes available, retention-purged, and artifact-content-purged states where this slice has evidence. `redacted_for_deletion_count` remains explicit and zero until tenant/DSAR deletion markers exist.
+- Exact raw prompt/completion retention remains rejected in this slice; evidence stays preview+hash unless a later retention/deletion design approves exact raw retention.
+- Flow/Flow AI Builder is still unreleased, so this slice removes the 7A.4 public `FlowRunStepPublic.tool_calls_metadata` deprecation surface instead of preserving a deprecated Flow compatibility field.
+- Use existing canonical owners first:
+  - `FlowStepAttempts.provenance_json` for attempt-provenance retention markers
+  - `FlowStepResults.output_payload_json` for step-result/debug/artifact retention markers
+  - `Files` rows for artifact content state, with file content cleared by existing cleanup
+
+### Non-Goals
+
+- No new table, migration, broad evidence ledger, or parallel evidence system.
+- No exact raw prompt/completion byte retention.
+- No tenant/DSAR deletion feature beyond markers for current retention cleanup.
+- No artifact/file ownership migration; 7A.6 owns canonical `FlowRunStepResultFiles` + `Files` export/download ownership.
+- No frontend evidence UI/view-model rewrite; 7A.7 owns frontend evidence alignment.
+- No Batch 8 rerun behavior, Batch 9 human review behavior, package rename, or `intric.*` namespace migration.
+
+### Inventory
+
+| concept | current locations | shipped/persisted data need? | keep/delete/rewrite | canonical owner | deletion condition |
+|---|---|---|---|---|---|
+| Debug evidence cleanup | `backend/src/intric/data_retention/infrastructure/data_retention_service.py:387-456` | No shipped Flow users, but current cleanup destroys prompt/input/model/tool/provenance content. | Rewrite to write tombstones while clearing sensitive fields. | `DataRetentionService` executes cleanup; tombstone value object owns marker shape. | Later migration/table only if existing owners cannot scale. |
+| Attempt provenance purge | `backend/src/intric/data_retention/infrastructure/data_retention_service.py:438-448` | Current behavior sets `FlowStepAttempts.provenance_json=None`, losing reviewability. | Replace with typed retention marker in `FlowStepAttempts.provenance_json`. | Attempt row remains the owner for attempt-level provenance availability. | Marker can be migrated to a table only with human-approved data-model decision. |
+| Step-result debug purge | `backend/src/intric/data_retention/infrastructure/data_retention_service.py:399-436` | Current behavior clears debug fields and prunes output payload without a durable marker. | Append typed tombstone marker to `FlowStepResults.output_payload_json`. | Step result row remains the owner for result-level debug payload availability. | 7A.6 may move artifact-specific marker ownership when file rows become canonical. |
+| Artifact content purge | `backend/src/intric/data_retention/infrastructure/data_retention_service.py:458-523` | Current behavior clears `Files.blob/text/transcription` and prunes generated artifact references. | Append typed tombstone marker with file ids before pruning references. | Step result output payload records artifact purge until 7A.6 normalizes file evidence ownership. | 7A.6 can replace payload-derived artifact marker with file-row ownership. |
+| Missing-artifact reconciler | `backend/src/intric/data_retention/infrastructure/data_retention_service.py:525-596` | Current reconciler scans non-null step-result payloads and prunes missing generated artifact references. | Preserve retention tombstones and skip tombstone-only rows. | `DataRetentionService` owns destructive retention/reconciliation mutation behavior. | 7A.6 may replace payload scanning with canonical file/result-file rows. |
+| Attempt provenance parser | `backend/src/intric/flows/flow_run_provenance.py:243-321` | Parser currently treats any non-current provenance schema as corrupt. | Add explicit retention-purged parse status and marker branch. | `flow_run_provenance.py` owns attempt provenance JSON parsing. | None. |
+| Provenance manifest status | `backend/src/intric/flows/flow_run_evidence_export_manifest.py:14-17` | Manifest status is a closed `not_tracked/tracked/corrupt` literal. | Extend typed status to include retention-purged state. | Export manifest model owns public evidence contract. | 7A.7 owns frontend generated schema alignment if this backend schema is consumed in UI. |
+| Evidence export retention summary | `backend/src/intric/flows/flow_run_export_json.py:174-180` | Manifest currently always says retention tombstone tracking is `not_tracked`. | Rewrite summary to derive counts from tombstones in bundle payloads. | `flow_run_export_json.py` owns export manifest summary. | None. |
+
+### Planned Shape
+
+1. Add a narrow typed tombstone value object, preferably `backend/src/intric/flows/flow_retention_tombstone.py`.
+   - It is not a ledger and has no persistence of its own.
+   - It only defines marker schema/version, payload-key constants, parser helpers, and helper builders.
+   - Use explicit schema versions:
+     - `flow-retention-tombstone.v1` for the tombstone payload.
+     - `flow-attempt-retention-marker.v1` for the attempt-level retention wrapper stored in `FlowStepAttempts.provenance_json`.
+   - Use explicit status literals:
+     - `FlowAttemptProvenanceParseStatus`: add `retention_purged`.
+     - `EvidenceProvenancePersistedVersionStatus`: add `retention_purged`.
+     - `EvidenceRetentionTrackingState` stays `not_tracked | tracked`; any current-version tombstone makes the retention summary tracked.
+   - Use the namespaced output payload key `flow_retention_tombstones` for `FlowStepResults.output_payload_json`; prove zero collision with current writers before implementation.
+   - Required marker fields: schema version, tenant id, run id, trace id, data class, object type/id, policy source, cutoff, actor/source, counts, timestamp, and retention state.
+   - `counts` is a typed per-marker map of logical objects made unavailable by the marker. Examples: debug cleanup records cleared field count and pruned output-key count; artifact cleanup records referenced generated file count. It is not the batch job's row count.
+   - Marker actor/source must be system-level and PII-free, for example `data_retention_worker`; do not write user ids into tombstones in this slice.
+   - Define the actor/source as one constant in `flow_retention_tombstone.py`, not repeated strings.
+2. Thread per-run cleanup context through `cleanup_old_flow_runtime_data()` instead of losing run metadata in bare `set[UUID]` collections.
+   - Include tenant id, run id, trace id, policy source, cutoff, and cleanup timestamp.
+   - Select `FlowRuns.tenant_id`, `FlowRuns.trace_id`, and the effective cutoff context in `_iter_flow_run_retention_rows()`.
+   - Use row-level Python updates for the affected rows in this slice. This favors explicit idempotency and marker shape over clever SQL JSON construction; the existing batch size still bounds rows, and performance risk is documented for later table normalization if needed.
+3. Change debug cleanup:
+   - clear sensitive step-result fields as today
+   - replace attempt `provenance_json=None` with an attempt-level retention marker
+   - append a step-result output tombstone before pruning debug-only payload keys
+   - no-op when the current-version marker already exists, so a second cleanup pass does not mutate timestamps or inflate counts
+4. Change artifact cleanup:
+   - collect generated file ids before pruning
+   - append an artifact-content tombstone to `FlowStepResults.output_payload_json`
+   - continue clearing `Files.blob`, `Files.text`, and `Files.transcription` as today
+   - no-op when the current-version marker already exists for the same data class/object id
+   - update `_reconcile_missing_generated_artifact_references()` to preserve tombstones and skip tombstone-only payloads
+5. Update evidence export:
+   - manifest `retention_state_summary.tracking_state` becomes `tracked` when markers exist
+   - counts include tombstones, `retention_purged`, and `artifact_content_purged`
+   - `redacted_for_deletion_count` remains explicit and `0` in this slice because tenant/DSAR deletion markers are not implemented here
+   - retention summary `note` is derived from the actual state and counts, not a stale static fallback string
+   - bundle attempts with retention marker parse as retention-purged, not corrupt provenance
+   - provenance status precedence is `corrupt > retention_purged > tracked > not_tracked`
+   - RAG tracking state handles retention-purged attempts explicitly:
+     - ordered precedence is `unknown_corrupt > partial_corrupt > tracked_with_sources > tracked_no_sources > retention_purged > not_tracked`
+     - all attempts retention-purged and none corrupt or tracked: `retention_purged`
+     - tracked RAG payloads plus retention markers: keep the tracked state (`tracked_with_sources` or `tracked_no_sources`) and include `retention_purged_attempt_count`
+     - corrupt plus retention markers and no tracked RAG payloads: `unknown_corrupt`
+     - corrupt plus tracked RAG payloads, with or without retention markers: `partial_corrupt`
+   - `FlowAttemptProvenanceParseResult.to_export_payload()` returns the retention marker payload for `retention_purged`, same as it returns provenance for `tracked` and corruption marker payload for `corrupt`.
+6. Reject exact raw prompt/completion retention in this slice and document why: current evidence uses preview+hash and retained output payloads; exact raw bytes are not stored until a deletion/DSAR contract proves hard-delete or key-shred behavior.
+7. Do not attempt to backfill rows already purged to `None` before this slice. Document the ambiguity as carry-forward: those rows remain indistinguishable from never-tracked attempts until a human-approved backfill/migration exists.
+8. Carry forward a possible future `flow-attempt-payload-envelope.v1` discriminated union if more persisted attempt-state schemas are added. This slice uses distinct schema-version discriminators to avoid a migration, but the three-schema-in-one-column shape should not grow indefinitely.
+
+### Behavior Pins Before And With Changes
+
+- Current cleanup clears sensitive debug fields and generated artifact content.
+- Cleanup writes tombstones with tenant id, run id, trace id, data class, object type/id, policy source, cutoff, actor/source, counts, timestamp, and retention state.
+- Attempt provenance retention markers export as retention-purged, not corrupt provenance.
+- A second cleanup pass is a no-op for current-version tombstones and returns zero changed debug/artifact counts.
+- Evidence manifest retention summary reports tracked counts when markers are present.
+- Artifact content purge remains visible after generated artifact references are pruned.
+- Missing-artifact reconciliation preserves tombstones and ignores tombstone-only payloads.
+- Redacted exports preserve PII-free tombstone fields.
+- Mixed provenance status precedence is pinned: corrupt beats retention-purged, retention-purged beats tracked, tracked beats not-tracked.
+- RAG tracking reports post-7A.5 retention purge honestly instead of conflating it with never-tracked evidence.
+- No exact raw prompt/completion payload is stored by this slice.
+- `FlowRunStepPublic` no longer exposes result-level `tool_calls_metadata`; Flow evidence tool-call payloads live in attempt provenance.
+
+### Required Test Cases For 7A.5
+
+1. `FlowStepAttempts.provenance_json` retention marker parses as `retention_purged`, not `corrupt`.
+2. Manifest precedence with one corrupt attempt and one retention-purged attempt returns `provenance_persisted_version_status == "corrupt"` while `retention_state_summary.tombstone_count > 0`.
+3. Manifest precedence with one retention-purged attempt and one tracked attempt returns `provenance_persisted_version_status == "retention_purged"` and keeps tracked payload details in the bundle.
+4. Two consecutive `cleanup_old_flow_runtime_data()` calls are idempotent: the second pass returns zero `debug_step_results`, `debug_step_attempts`, `generated_artifact_rows`, and `generated_artifact_files`.
+5. `_reconcile_missing_generated_artifact_references()` skips tombstone-only `output_payload_json` and preserves tombstones when re-pruning a row that still has generated artifact references.
+6. Marker actor/source is the single constant `data_retention_worker`, and no user id is written into tombstone payloads.
+7. Redacted export preserves marker fields.
+8. HTTP evidence export pins corrupt plus tombstone precedence through the public endpoint.
+9. RAG tracking returns `retention_purged` when every attempt is retention-purged and none are corrupt or tracked.
+10. RAG tracking returns tracked states with `retention_purged_attempt_count` when tracked RAG payloads and retention markers coexist.
+11. RAG tracking returns `unknown_corrupt` for corrupt plus retention markers with no tracked RAG payloads, and `partial_corrupt` when a tracked RAG payload also exists.
+12. The pre-implementation marker collision grep returns no existing source/test writers.
+13. OpenAPI contract tests pin `retention_purged` in the evidence manifest persisted-version status enum.
+14. Retention summary note derivation is deterministic: identical state/counts produce identical notes, and tracked tombstone state produces a different note than `not_tracked`.
+15. Invalid attempt retention markers parse as corrupt with `flow_attempt_provenance_invalid_retention_marker`.
+16. OpenAPI pins absence of public result-level `tool_calls_metadata` instead of a deprecated Flow compatibility field.
+
+### Collision And Compatibility Checks
+
+Before implementation, run:
+
+```bash
+rg -n "flow_retention_tombstones|flow-retention-tombstone|flow-attempt-retention-marker" backend/src backend/tests
+```
+
+Expected before the slice: no source/test writers. If this finds a real existing writer, stop and choose a different marker key/schema version in the plan before implementation.
+
+Pre-7A.5 rows already purged to `provenance_json=None` or already-pruned `output_payload_json` remain `not_tracked` in exports. This is known carry-forward debt, not a silent success state. A one-shot backfill marker is a future migration/data decision, not part of this no-migration slice.
+
+Full result-level `tool_calls_metadata` deletion remains a PRD-008 / Batch 10 cleanup item after Batch 7A finishes the evidence foundation: delete `FlowStepResult.tool_calls_metadata`, the database column, repository persistence slot, runtime write/read slots, generated schema drift, tests for the removed field, and `_RESULT_FIELDS_REPLACED_BY_ATTEMPT_PROVENANCE` in one deliberate slice. 7A.5 removes the public `FlowRunStepPublic` field but does not start that wider persisted-shape cleanup.
+
+### Expected Source/Test Changes For 7A.5
+
+Expected source:
+
+- `backend/.importlinter`
+- `backend/src/intric/flows/flow_retention_tombstone.py`
+- `backend/src/intric/data_retention/infrastructure/data_retention_service.py`
+- `backend/src/intric/flows/flow_run_provenance.py`
+- `backend/src/intric/flows/flow_run_evidence_bundle.py`
+- `backend/src/intric/flows/flow_run_export_json.py`
+- `backend/src/intric/flows/flow_run_evidence_export_manifest.py`
+- `backend/src/intric/flows/api/flow_models.py` if the OpenAPI evidence-export example needs status/count updates
+
+Expected tests:
+
+- `backend/tests/integration/test_flow_runtime_retention_cleanup.py`
+- `backend/tests/unittests/flows/test_flow_run_evidence.py`
+- `backend/tests/integration/flows/test_flow_evidence_api_contracts.py` if HTTP evidence export needs a public pin
+- `backend/tests/unit/test_flow_openapi_contract.py` if the manifest status enum/example changes the public contract
+- `backend/tests/unittests/flows/test_flow_router.py` if the router contract example changes with the manifest example
+- `backend/tests/unittests/flows/test_flow_models.py` if the public Flow step model removes result-level tool-call metadata
+
+Expected docs:
+
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/plan.md`
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/journal.md`
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/retrospective-6.md`
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/claude-reconciliation-6.md`
+
+Do not touch:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+- migrations
+- frontend evidence UI
+- `frontend/packages/intric-js/src/types/schema.d.ts`; 7A.7 owns generated/frontend evidence type alignment if the backend schema change is consumed there
+- package names or `intric.*` namespace paths
+
+### Validation Commands For 7A.5
+
+```bash
+cd backend && uv run pytest \
+  tests/integration/test_flow_runtime_retention_cleanup.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/unit/test_flow_openapi_contract.py \
+  tests/unittests/flows/test_flow_models.py \
+  -q
+```
+
+```bash
+cd backend && POSTGRES_HOST=placeholder uv run pytest \
+  tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_returns_redacted_json_attachment \
+  tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_marks_corrupt_attempt_provenance \
+  tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_marks_corrupt_with_retention_tombstone \
+  -q
+```
+
+`POSTGRES_HOST=placeholder` is the local/testcontainers fallback for the HTTP evidence pins when the long-running app container cannot be used from Codex and local Redis/Postgres services are not available.
+
+```bash
+cd backend && uv run pyright \
+  src/intric/flows/flow_retention_tombstone.py \
+  src/intric/data_retention/infrastructure/data_retention_service.py \
+  src/intric/flows/flow_run_provenance.py \
+  src/intric/flows/flow_run_evidence_bundle.py \
+  src/intric/flows/flow_run_export_json.py \
+  src/intric/flows/flow_run_evidence_export_manifest.py \
+  src/intric/flows/api/flow_models.py \
+  tests/integration/test_flow_runtime_retention_cleanup.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/integration/flows/test_flow_evidence_api_contracts.py \
+  tests/unit/test_flow_openapi_contract.py \
+  tests/unittests/flows/test_flow_router.py \
+  tests/unittests/flows/test_flow_models.py
+```
+
+```bash
+cd backend && uv run ruff check \
+  src/intric/flows/flow_retention_tombstone.py \
+  src/intric/data_retention/infrastructure/data_retention_service.py \
+  src/intric/flows/flow_run_provenance.py \
+  src/intric/flows/flow_run_evidence_bundle.py \
+  src/intric/flows/flow_run_export_json.py \
+  src/intric/flows/flow_run_evidence_export_manifest.py \
+  src/intric/flows/api/flow_models.py \
+  tests/integration/test_flow_runtime_retention_cleanup.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/integration/flows/test_flow_evidence_api_contracts.py \
+  tests/unit/test_flow_openapi_contract.py \
+  tests/unittests/flows/test_flow_router.py \
+  tests/unittests/flows/test_flow_models.py
+```
+
+```bash
+cd backend && uv run ruff format --check \
+  src/intric/flows/flow_retention_tombstone.py \
+  src/intric/data_retention/infrastructure/data_retention_service.py \
+  src/intric/flows/flow_run_provenance.py \
+  src/intric/flows/flow_run_evidence_bundle.py \
+  src/intric/flows/flow_run_export_json.py \
+  src/intric/flows/flow_run_evidence_export_manifest.py \
+  src/intric/flows/api/flow_models.py \
+  tests/integration/test_flow_runtime_retention_cleanup.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/integration/flows/test_flow_evidence_api_contracts.py \
+  tests/unit/test_flow_openapi_contract.py \
+  tests/unittests/flows/test_flow_router.py \
+  tests/unittests/flows/test_flow_models.py
+```
+
+```bash
+cd backend && uv run lint-imports --no-cache
+```
+
+```bash
+rg -n "flow_retention_tombstones|flow-retention-tombstone|flow-attempt-retention-marker" backend/src backend/tests
+```
+
+```bash
+rg -n "provenance_json=None|retention_state_summary=EvidenceRetentionStateSummary\\(\\s*tracking_state=\"not_tracked\"|Batch 7A|7A\\.|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)" \
+  backend/src/intric/data_retention/infrastructure/data_retention_service.py \
+  backend/src/intric/flows/flow_retention_tombstone.py \
+  backend/src/intric/flows/flow_run_provenance.py \
+  backend/src/intric/flows/flow_run_evidence_bundle.py \
+  backend/src/intric/flows/flow_run_export_json.py \
+  backend/src/intric/flows/flow_run_evidence_export_manifest.py \
+  backend/src/intric/flows/api/flow_models.py \
+  backend/tests/integration/test_flow_runtime_retention_cleanup.py \
+  backend/tests/unittests/flows/test_flow_run_evidence.py \
+  backend/tests/integration/flows/test_flow_evidence_api_contracts.py \
+  backend/tests/unit/test_flow_openapi_contract.py \
+  backend/tests/unittests/flows/test_flow_router.py \
+  backend/tests/unittests/flows/test_flow_models.py
+```
+
+```bash
+git diff --check -- \
+  backend/.importlinter \
+  backend/src/intric/flows/flow_retention_tombstone.py \
+  backend/src/intric/data_retention/infrastructure/data_retention_service.py \
+  backend/src/intric/flows/flow_run_provenance.py \
+  backend/src/intric/flows/flow_run_evidence_bundle.py \
+  backend/src/intric/flows/flow_run_export_json.py \
+  backend/src/intric/flows/flow_run_evidence_export_manifest.py \
+  backend/src/intric/flows/api/flow_models.py \
+  backend/tests/integration/test_flow_runtime_retention_cleanup.py \
+  backend/tests/unittests/flows/test_flow_run_evidence.py \
+  backend/tests/unit/test_flow_openapi_contract.py \
+  backend/tests/integration/flows/test_flow_evidence_api_contracts.py \
+  backend/tests/unittests/flows/test_flow_router.py \
+  backend/tests/unittests/flows/test_flow_models.py \
+  docs/refactor/execution/batch-7a-evidence-provenance-contract/plan.md \
+  docs/refactor/execution/batch-7a-evidence-provenance-contract/journal.md \
+  docs/refactor/execution/batch-7a-evidence-provenance-contract/retrospective-6.md \
+  docs/refactor/execution/batch-7a-evidence-provenance-contract/claude-reconciliation-6.md
+```
 
 ## Scope For 7A.4
 

@@ -533,14 +533,6 @@ class FlowRunStepPublic(BaseModel):
     num_tokens_output: int | None = None
     error_message: str | None = None
     flow_step_execution_hash: str | None = None
-    tool_calls_metadata: list[dict[str, Any]] | dict[str, Any] | None = Field(
-        default=None,
-        deprecated=True,
-        description=(
-            "Deprecated for Flow evidence. Use step attempt provenance "
-            "`provenance_json.llm.tool_calls` as the canonical tool-call evidence."
-        ),
-    )
     diagnostics: list[dict[str, Any]] = Field(
         default_factory=lambda: cast(list[dict[str, Any]], [])
     )
@@ -1114,10 +1106,12 @@ class FlowRunEvidenceExportResponse(BaseModel):
                         "tracking_state": "not_tracked",
                         "tombstone_count": 0,
                         "retention_purged_count": 0,
+                        "artifact_content_purged_count": 0,
                         "redacted_for_deletion_count": 0,
                         "note": (
-                            "Tombstone tracking is not yet exposed; counts will "
-                            "populate when retention tombstones become trackable."
+                            "No retention tombstones are present in this export; "
+                            "rows purged before tombstone tracking remain "
+                            "indistinguishable from never-tracked evidence."
                         ),
                     },
                     "artifact_availability_summary": {
