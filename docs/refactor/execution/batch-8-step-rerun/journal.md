@@ -221,27 +221,72 @@ IN_PROGRESS
 - Reconciliation:
   - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-11.md`
   - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-12.md`
-- Outcome: API/dispatch implementation green; commit pending
+- Outcome: API/dispatch implementation green and committed as `72fe29d1 flows: expose step rerun API`
+
+### Slice 8.8 — Runtime Rerun Attempt Lineage
+
+- Scope:
+  - `backend/src/intric/flows/runtime/executor.py`
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - `backend/src/intric/flows/infrastructure/flow_repo.py`
+  - `backend/src/intric/flows/application/flow_run_terminalization.py`
+  - `backend/src/intric/database/tables/flow_tables.py`
+  - `backend/src/intric/flows/api/flow_models.py`
+  - `backend/alembic/versions/20260502_rerun_runtime_lineage.py`
+- Tests:
+  - `backend/tests/integration/flows/test_flow_runtime_worker_contract.py`
+  - `backend/tests/integration/flows/test_flow_run_rerun_repository.py`
+  - `backend/tests/integration/flows/test_flow_terminalization_contract.py`
+  - `backend/tests/unittests/flows/test_flow_executor_runtime.py`
+  - `backend/tests/unittests/flows/test_flow_models.py`
+  - `backend/tests/unit/test_flow_openapi_contract.py`
+  - `backend/tests/unittests/flows/test_flow_rerun_data_model.py`
+- Implementation notes:
+  - Executor attempt numbers now come from persisted attempt history or the accepted rerun operation, not from Celery retry count.
+  - The executor loads the active rerun operation once per run, links invalidated rows to replacement attempts, and records predecessor/rerun-operation lineage on new attempts.
+  - Successful step-result persistence writes `current_attempt_no`; predecessor attempts are marked superseded only after the replacement attempt completes.
+  - Terminalization closes active rerun operations in the same terminalization transaction.
+  - `flow_run_audit_outbox` now records `run_revision` and is unique by `(flow_run_id, run_revision)` so initial completion and rerun completion both emit terminal audit rows.
+  - The rerun operation table has a database-level partial unique index preventing more than one active operation per run.
+  - These schema deltas live in a forward migration instead of rewriting earlier committed migrations.
+- Docker validation:
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/ruff check alembic/versions/20260502_rerun_runtime_lineage.py src/intric/database/tables/flow_tables.py src/intric/flows/api/flow_models.py src/intric/flows/application/flow_run_terminalization.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/runtime/executor.py tests/integration/flows/test_flow_run_rerun_repository.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_rerun_data_model.py` — passed
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pyright --pythonpath .venv/bin/python src/intric/database/tables/flow_tables.py src/intric/flows/api/flow_models.py src/intric/flows/application/flow_run_terminalization.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/runtime/executor.py tests/integration/flows/test_flow_run_rerun_repository.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_rerun_data_model.py` — passed
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/python -m py_compile alembic/versions/20260502_rerun_runtime_lineage.py` — passed
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/alembic heads` — passed, single head `20260502_rerun_runtime_lineage`
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/alembic upgrade head` — passed
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/integration/flows/test_flow_runtime_worker_contract.py::test_flow_run_created_by_service_executes_to_terminal_worker_state tests/integration/flows/test_flow_run_rerun_repository.py::test_rerun_attempt_start_and_success_records_lineage tests/integration/flows/test_flow_terminalization_contract.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_models.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_rerun_data_model.py -q` — passed, 127 tests
+  - `git diff --check` — passed
+  - diff-only forbidden compatibility/session-language grep over backend source, tests, and migrations — passed, no matches
+- Claude review:
+  - Plan review changes required, artifact `.codex/artifacts/claude-peer-loop-batch-8-runtime-rerun-attempt-lineage-plan-20260502T132651Z.md`
+  - Green verification content with noncanonical output header, artifact `.codex/artifacts/claude-peer-loop-batch-8-runtime-rerun-attempt-lineage-verification-20260502T135535Z.md`
+  - Parser-clean green verification, artifact `.codex/artifacts/claude-peer-loop-batch-8-runtime-rerun-attempt-lineage-verification-exact-20260502T135952Z.md`
+- Reconciliation:
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-13.md`
+- Outcome: runtime attempt-lineage implementation green; commit pending
 
 ## Repository Gate
 
 - Branch: `feature/refactor-flows-flowai`
-- HEAD: `55bcc67e flows: add rerun service command`
+- HEAD: `72fe29d1 flows: expose step rerun API`
 - Staged files: none
 - Pending Batch 8 files:
+  - `backend/alembic/versions/20260502_rerun_runtime_lineage.py`
+  - `backend/src/intric/database/tables/flow_tables.py`
   - `backend/src/intric/flows/api/flow_models.py`
-  - `backend/src/intric/flows/api/flow_assembler.py`
-  - `backend/src/intric/flows/api/flow_run_execution_router.py`
-  - `backend/src/intric/flows/api/flow_router_common.py`
-  - `backend/src/intric/flows/application/__init__.py`
-  - `backend/src/intric/flows/application/flow_dispatch.py`
-  - `backend/tests/unittests/flows/test_flow_router.py`
-  - `backend/tests/unit/test_flow_openapi_contract.py`
-  - `backend/tests/unit/test_server_startup_imports.py`
+  - `backend/src/intric/flows/application/flow_run_terminalization.py`
+  - `backend/src/intric/flows/infrastructure/flow_repo.py`
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - `backend/src/intric/flows/runtime/executor.py`
+  - `backend/tests/integration/flows/test_flow_run_rerun_repository.py`
+  - `backend/tests/integration/flows/test_flow_runtime_worker_contract.py`
+  - `backend/tests/unittests/flows/test_flow_executor_runtime.py`
+  - `backend/tests/unittests/flows/test_flow_models.py`
+  - `backend/tests/unittests/flows/test_flow_rerun_data_model.py`
   - `docs/refactor/execution/batch-8-step-rerun/journal.md`
   - `docs/refactor/execution/batch-8-step-rerun/plan.md`
-  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-11.md`
-  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-12.md`
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-13.md`
 - Known do-not-stage local files:
   - `frontend/packages/ui/src/icons/types.d.ts`
   - `scripts/run_codex_review.sh`
@@ -300,7 +345,7 @@ Batch 8 Docker validation uses `eneo-41ae93-eneo-1`. The container does not expo
 | Template-derived dependencies | `backend/src/intric/flows/runtime/step_input_resolution.py:163-201`, `backend/src/intric/flows/runtime/http_orchestration.py:129-155`, `backend/src/intric/flows/runtime/http_orchestration.py:296-328`, `backend/src/intric/flows/runtime/template_fill_runtime.py:402-431`, `backend/src/intric/flows/runtime/step_execution_runtime.py:666-675` | Rerun DAG must scan runtime-interpolated fields, not only `input_source`. |
 | Run revision token | `backend/src/intric/database/tables/base_class.py:35-39` | `updated_at` is display metadata; add `FlowRuns.revision` for compare-and-swap. |
 | Current result files | `backend/src/intric/database/tables/flow_tables.py:526-528`, `backend/src/intric/database/tables/flow_tables.py:695-697` | Add `FlowStepResults.current_attempt_no` so old attempt files do not render as current. |
-| Rerun audit owner | `backend/src/intric/database/tables/flow_tables.py:759-821`, `backend/src/intric/database/tables/flow_tables.py:795` | Keep terminal outbox one row per run; make rerun operation rows the rerun audit fact. |
+| Rerun audit owner | `backend/src/intric/database/tables/flow_tables.py:759-821`, `backend/src/intric/database/tables/flow_tables.py:795` | Keep rerun request actor/reason on operation rows; key terminal audit outbox rows by run revision so rerun terminalization is not suppressed. |
 | Dispatch-after-commit helper | `backend/src/intric/flows/api/flow_run_execution_router.py:212-216`, `backend/src/intric/flows/application/flow_dispatch.py:47-66` | Do not use the current create-run helper for recoverable rerun dispatch unless it is generalized with explicit behavior. |
 
 ## Decisions Made During Planning

@@ -26,7 +26,7 @@ TL;DR:
 | `FlowStepDependencies` exists only as live authoring state. | `backend/src/intric/database/tables/flow_tables.py:193-235` defines live parent/child rows; scoped search found no repository/runtime writer or reader. | Batch 8 computes DAG from the published definition snapshot; do not trust live authoring dependencies for historical runs. |
 | Current result files are attached to the current step-result row. | `backend/src/intric/database/tables/flow_tables.py:526-528` keeps one `FlowStepResults` row per run/step, while `backend/src/intric/database/tables/flow_tables.py:695-697` attaches result files to that row. | Batch 8 must prevent old attempt files from rendering as current after a result row is reset. |
 | Run `updated_at` is not a stable compare-and-swap token. | `backend/src/intric/database/tables/base_class.py:35-39` sets `updated_at` with `onupdate=func.now()`. | Add a monotonic `FlowRuns.revision` lifecycle token and use `expected_run_revision` in rerun requests. |
-| Terminal audit outbox is one row per run. | `backend/src/intric/database/tables/flow_tables.py:759-821` defines `flow_run_audit_outbox` and `backend/src/intric/database/tables/flow_tables.py:795` enforces `UNIQUE(flow_run_id)`. | Rerun operation rows are the canonical rerun audit owner in Batch 8; do not widen the terminal outbox or add a shared audit action for rerun. |
+| Terminal audit outbox must support rerun terminalization. | `backend/src/intric/database/tables/flow_tables.py:759-821` defines `flow_run_audit_outbox`; rerun reuses the same run id and increments `FlowRuns.revision`. | Key terminal audit rows by `(flow_run_id, run_revision)` so each terminal revision is auditable, while rerun request actor/reason details stay on `flow_run_rerun_operations`. |
 | Direct non-interactive Docker calls are blocked in this Codex process, but the plain shell session can run Docker. | `docker ps --format '{{.Names}}' \| sort` was rejected before execution through the direct tool path; the same Docker commands run through the plain shell session. | Keep Docker as canonical validation and record whether each command used the plain shell session. |
 
 ## Canonical Ownership Map
@@ -139,10 +139,12 @@ TL;DR:
   - Add `FlowRuns.revision`.
   - Add `FlowStepResults.current_attempt_no`.
   - Do not add a live `FlowSteps` FK for operation root step id; the published snapshot is the historical owner and live step rows can change after the run.
-- `backend/alembic/versions/<new>_flow_run_rerun_operations.py`
+- `backend/alembic/versions/20260502_rerun_ops.py`
   - Create operation and invalidated-step tables.
   - Add attempt columns and indexes.
   - Down revision should follow `20260430_flow_step_file_mappings` unless another migration lands first.
+- `backend/alembic/versions/20260502_rerun_runtime_lineage.py`
+  - Add active-rerun uniqueness and terminal audit outbox revision keying as a forward migration.
 - `frontend/packages/intric-js/src/types/schema.d.ts`
   - Update generated Flow rerun API contract after OpenAPI is stable.
 - `frontend/apps/web/messages/en.json`
@@ -233,7 +235,7 @@ Constraints and indexes:
 
 The root `rerun_step_id` intentionally does not FK to live `flow_steps`. A rerun is version-pinned to `flow_versions.definition_json`; live authoring steps can be edited or deleted after the run, so a live-step FK would point at the wrong owner.
 
-`flow_run_rerun_operations` is also the Batch 8 audit owner for rerun requests. Do not add `ActionType.FLOW_RUN_RERUN_REQUESTED`, do not call `audit_service.log_async` from the rerun endpoint, and do not widen `flow_run_audit_outbox`; that outbox remains one terminalization row per run.
+`flow_run_rerun_operations` is also the Batch 8 audit owner for rerun requests. Do not add `ActionType.FLOW_RUN_RERUN_REQUESTED` and do not call `audit_service.log_async` from the rerun endpoint. `flow_run_audit_outbox` remains the terminal lifecycle audit owner, keyed by `(flow_run_id, run_revision)` so the initial run and each rerun terminal revision can emit a terminal audit row without mixing rerun request fields into the outbox.
 
 Terminalization closes active rerun operations. If the run is cancelled, active `queued` or `running` rerun operations become `cancelled`. If another terminalization path fails the run while a rerun is active, the operation becomes `failed` with `failure_code = "run_terminalized"`.
 

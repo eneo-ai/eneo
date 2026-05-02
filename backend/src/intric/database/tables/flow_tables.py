@@ -647,6 +647,12 @@ class FlowRunRerunOperations(BasePublic):
         ),
         Index("ix_flow_run_rerun_operations_run_status", "flow_run_id", "status"),
         Index(
+            "uq_flow_run_rerun_operations_one_active_per_run",
+            "flow_run_id",
+            unique=True,
+            postgresql_where=sa.text("status IN ('queued', 'running')"),
+        ),
+        Index(
             "ix_flow_run_rerun_operations_tenant_created_at",
             "tenant_id",
             "created_at",
@@ -1044,6 +1050,10 @@ class FlowRunAuditOutbox(BasePublic):
         nullable=False,
         index=True,
     )
+    run_revision: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default="1",
+    )
     description: Mapped[str] = mapped_column(nullable=False)
     action: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     entity_type: Mapped[str] = mapped_column(sa.String(64), nullable=False)
@@ -1063,7 +1073,11 @@ class FlowRunAuditOutbox(BasePublic):
     error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("flow_run_id", name="uq_flow_run_audit_outbox_run"),
+        UniqueConstraint(
+            "flow_run_id",
+            "run_revision",
+            name="uq_flow_run_audit_outbox_run_revision",
+        ),
         ForeignKeyConstraint(
             ["flow_run_id", "tenant_id"],
             ["flow_runs.id", "flow_runs.tenant_id"],

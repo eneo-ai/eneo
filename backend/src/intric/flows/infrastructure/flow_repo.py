@@ -555,6 +555,8 @@ class FlowRepository:
             FlowStepResultStatus.CANCELLED,
         ):
             payload["finished_at"] = datetime.now(timezone.utc)
+        if result.status == FlowStepResultStatus.COMPLETED:
+            payload["current_attempt_no"] = attempt_no
 
         if result.step_id is None:
             if result.id is None:

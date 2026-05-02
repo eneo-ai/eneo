@@ -28,13 +28,19 @@ from intric.flows.assistant_execution_snapshot import (
 )
 from intric.flows.domain.flow import (
     FlowRun,
+    FlowRunRerunInvalidatedStep,
     FlowRunStatus,
+    FlowStepAttempt,
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowVersion,
     JsonObject,
 )
-from intric.flows.enums import FlowRunTerminalSource, is_terminal_flow_run_status
+from intric.flows.enums import (
+    FlowRunRerunInvalidationRole,
+    FlowRunTerminalSource,
+    is_terminal_flow_run_status,
+)
 from intric.flows.flow_run_provenance import (
     FlowAttemptProvenance,
     LlmProvenance,
@@ -47,7 +53,10 @@ from intric.flows.flow_security_classification import (
 )
 from intric.flows.flow_template_asset_service import FlowTemplateAssetService
 from intric.flows.infrastructure.flow_repo import FlowRepository
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_repo import (
+    FlowRunActiveRerunOperation,
+    FlowRunRepository,
+)
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
 from intric.flows.published_definition import parse_published_runtime_steps
@@ -326,10 +335,11 @@ class FlowRunExecutor:
         retry_count: int,
     ) -> dict[str, Any]:
         logger.info(
-            "flow_executor.start run_id=%s flow_id=%s tenant_id=%s",
+            "flow_executor.start run_id=%s flow_id=%s tenant_id=%s celery_retry_count=%d",
             run_id,
             flow_id,
             tenant_id,
+            retry_count,
         )
         run = await self.flow_run_repo.get(
             run_id=run_id, tenant_id=tenant_id, flow_id=flow_id
@@ -425,6 +435,15 @@ class FlowRunExecutor:
             )
             await self._commit()
             return {"status": "failed", "error": "assistant_snapshot_drift"}
+
+        active_rerun_operation = await self.flow_run_repo.get_active_rerun_operation(
+            run_id=run_id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+        )
+        active_rerun_steps_by_id = self._active_rerun_steps_by_id(
+            active_rerun_operation
+        )
 
         logger.info(
             "flow_executor.steps_parsed run_id=%s step_count=%d", run_id, len(steps)
@@ -522,16 +541,17 @@ class FlowRunExecutor:
                     continue
 
             claimed_result = cast(FlowStepResult, claimed)
-            attempt_no = retry_count + 1
             try:
-                await self.flow_run_repo.create_or_get_attempt_started(
+                started_attempt = await self._start_step_attempt(
                     run_id=run_id,
                     flow_id=flow_id,
                     tenant_id=tenant_id,
-                    step_id=step.step_id,
-                    step_order=step.step_order,
-                    attempt_no=attempt_no,
+                    step=step,
                     celery_task_id=celery_task_id,
+                    active_rerun_operation=active_rerun_operation,
+                    active_rerun_invalidated_step=active_rerun_steps_by_id.get(
+                        step.step_id
+                    ),
                 )
                 await self._commit()
             except Exception:
@@ -541,6 +561,7 @@ class FlowRunExecutor:
                     step=step,
                     claimed=claimed_result,
                 )
+            attempt_no = started_attempt.attempt_no
 
             logger.info(
                 "flow_executor.step_start run_id=%s step_order=%d step_id=%s input_type=%s output_type=%s",
@@ -720,6 +741,91 @@ class FlowRunExecutor:
         )
         await self._commit()
         return {"status": terminalization.run.status.value}
+
+    @staticmethod
+    def _active_rerun_steps_by_id(
+        operation: FlowRunActiveRerunOperation | None,
+    ) -> dict[UUID, FlowRunRerunInvalidatedStep]:
+        if operation is None:
+            return {}
+        return {step.step_id: step for step in operation.invalidated_steps}
+
+    async def _start_step_attempt(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+        step: RuntimeStep,
+        celery_task_id: str | None,
+        active_rerun_operation: FlowRunActiveRerunOperation | None,
+        active_rerun_invalidated_step: FlowRunRerunInvalidatedStep | None,
+    ) -> FlowStepAttempt:
+        attempt_no = await self._resolve_attempt_no(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            step=step,
+            active_rerun_operation=active_rerun_operation,
+            active_rerun_invalidated_step=active_rerun_invalidated_step,
+        )
+        started_attempt = await self.flow_run_repo.create_or_get_attempt_started(
+            run_id=run_id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+            step_id=step.step_id,
+            step_order=step.step_order,
+            attempt_no=attempt_no,
+            celery_task_id=celery_task_id,
+            rerun_operation_id=(
+                active_rerun_operation.operation.id
+                if active_rerun_invalidated_step is not None
+                and active_rerun_operation is not None
+                else None
+            ),
+            predecessor_attempt_id=(
+                active_rerun_invalidated_step.prior_attempt_id
+                if active_rerun_invalidated_step is not None
+                else None
+            ),
+        )
+        if active_rerun_invalidated_step is not None:
+            if active_rerun_operation is None:
+                raise RuntimeError("Rerun step context requires an active operation.")
+            await self.flow_run_repo.link_rerun_invalidated_step_attempt(
+                operation_id=active_rerun_operation.operation.id,
+                tenant_id=tenant_id,
+                step_id=step.step_id,
+                new_attempt_no=started_attempt.attempt_no,
+                new_attempt_id=started_attempt.id,
+            )
+            if active_rerun_invalidated_step.role == FlowRunRerunInvalidationRole.ROOT:
+                await self.flow_run_repo.mark_rerun_operation_running(
+                    operation_id=active_rerun_operation.operation.id,
+                    tenant_id=tenant_id,
+                    root_attempt_id=started_attempt.id,
+                )
+        return started_attempt
+
+    async def _resolve_attempt_no(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step: RuntimeStep,
+        active_rerun_operation: FlowRunActiveRerunOperation | None,
+        active_rerun_invalidated_step: FlowRunRerunInvalidatedStep | None,
+    ) -> int:
+        if (
+            active_rerun_operation is not None
+            and active_rerun_invalidated_step is not None
+            and active_rerun_invalidated_step.role == FlowRunRerunInvalidationRole.ROOT
+        ):
+            return active_rerun_operation.operation.root_attempt_no
+        return await self.flow_run_repo.allocate_next_attempt_no(
+            tenant_id=tenant_id,
+            flow_run_id=run_id,
+            step_id=step.step_id,
+        )
 
     async def _execute_step(
         self,

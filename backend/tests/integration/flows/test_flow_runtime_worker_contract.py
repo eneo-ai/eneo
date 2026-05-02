@@ -11,6 +11,8 @@ from dependency_injector import providers
 from intric.database.database import sessionmanager
 from intric.database.tables.flow_tables import (
     FlowRunAuditOutbox,
+    FlowRunRerunInvalidatedSteps,
+    FlowRunRerunOperations,
     FlowRuns,
     FlowStepAttempts,
     FlowStepResults,
@@ -26,6 +28,7 @@ from intric.flows.domain.flow import (
     FlowStepAttemptStatus,
     FlowStepResultStatus,
 )
+from intric.flows.enums import FlowRunRerunOperationStatus
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
@@ -219,10 +222,16 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
 
         completion_service = SimpleNamespace(
             get_response=AsyncMock(
-                return_value=SimpleNamespace(
-                    completion="The run completed.",
-                    total_token_count=17,
-                )
+                side_effect=[
+                    SimpleNamespace(
+                        completion="The run completed.",
+                        total_token_count=17,
+                    ),
+                    SimpleNamespace(
+                        completion="The rerun completed.",
+                        total_token_count=19,
+                    ),
+                ]
             )
         )
         audit_service = SimpleNamespace(log_async=AsyncMock(return_value=uuid4()))
@@ -320,3 +329,118 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert outbox_row.target_status == FlowRunStatus.COMPLETED.value
         assert outbox_row.entity_id == run.id
         assert outbox_row.description == "flow_run_completed:executor_completed"
+
+        rerun_result = await container.flow_run_service().rerun_step(
+            flow_id=flow.id,
+            run_id=run.id,
+            rerun_step_id=step.id,
+            expected_run_revision=1,
+            reason="Regenerate the answer after review.",
+        )
+        assert rerun_result.created is True
+        assert rerun_result.operation.root_attempt_no == 2
+        assert rerun_result.invalidated_steps[0].prior_attempt_id == attempt_rows[0].id
+
+        rerun_worker_result = await executor.execute(
+            run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            celery_task_id=f"{run_correlation_id}-rerun",
+            retry_count=0,
+        )
+
+        assert rerun_worker_result == {"status": "completed"}
+        rerun_run_row = await session.scalar(
+            sa.select(FlowRuns).where(FlowRuns.id == run.id)
+        )
+        assert rerun_run_row is not None
+        assert rerun_run_row.status == FlowRunStatus.COMPLETED.value
+        assert rerun_run_row.revision == 2
+        assert rerun_run_row.output_payload_json == {
+            "text": "The rerun completed.",
+            "webhook_delivered": False,
+        }
+
+        rerun_step_result = await session.scalar(
+            sa.select(FlowStepResults).where(FlowStepResults.flow_run_id == run.id)
+        )
+        assert rerun_step_result is not None
+        assert rerun_step_result.status == FlowStepResultStatus.COMPLETED.value
+        assert rerun_step_result.current_attempt_no == 2
+        assert rerun_step_result.output_payload_json == {
+            "text": "The rerun completed.",
+            "webhook_delivered": False,
+        }
+
+        rerun_attempt_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowStepAttempts)
+                    .where(FlowStepAttempts.flow_run_id == run.id)
+                    .order_by(FlowStepAttempts.attempt_no.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [attempt.attempt_no for attempt in rerun_attempt_rows] == [1, 2]
+        assert [attempt.status for attempt in rerun_attempt_rows] == [
+            FlowStepAttemptStatus.COMPLETED.value,
+            FlowStepAttemptStatus.COMPLETED.value,
+        ]
+        assert (
+            rerun_attempt_rows[0].superseded_by_attempt_id == rerun_attempt_rows[1].id
+        )
+        assert rerun_attempt_rows[1].predecessor_attempt_id == rerun_attempt_rows[0].id
+        assert rerun_attempt_rows[1].rerun_operation_id == rerun_result.operation.id
+
+        operation_row = await session.scalar(
+            sa.select(FlowRunRerunOperations).where(
+                FlowRunRerunOperations.id == rerun_result.operation.id
+            )
+        )
+        assert operation_row is not None
+        assert operation_row.status == FlowRunRerunOperationStatus.COMPLETED.value
+        assert operation_row.root_attempt_id == rerun_attempt_rows[1].id
+        assert operation_row.started_at is not None
+        assert operation_row.finished_at is not None
+
+        outbox_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox)
+                    .where(FlowRunAuditOutbox.flow_run_id == run.id)
+                    .order_by(FlowRunAuditOutbox.run_revision.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [row.run_revision for row in outbox_rows] == [1, 2]
+        assert [row.target_status for row in outbox_rows] == [
+            FlowRunStatus.COMPLETED.value,
+            FlowRunStatus.COMPLETED.value,
+        ]
+
+        invalidated_row = await session.scalar(
+            sa.select(FlowRunRerunInvalidatedSteps).where(
+                FlowRunRerunInvalidatedSteps.operation_id == rerun_result.operation.id
+            )
+        )
+        assert invalidated_row is not None
+        assert invalidated_row.new_attempt_no == 2
+        assert invalidated_row.new_attempt_id == rerun_attempt_rows[1].id
+
+        rerun_evidence = await container.flow_run_service().get_evidence(run_id=run.id)
+        assert len(rerun_evidence["step_attempts"]) == 2
+        assert [
+            attempt["attempt_no"] for attempt in rerun_evidence["step_attempts"]
+        ] == [
+            1,
+            2,
+        ]
+        assert rerun_evidence["step_results"][0]["current_attempt_no"] == 2
+        assert rerun_evidence["step_results"][0]["output_payload_json"] == {
+            "text": "The rerun completed.",
+            "webhook_delivered": False,
+        }

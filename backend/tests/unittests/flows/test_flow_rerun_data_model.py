@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, UniqueConstraint
+from sqlalchemy import CheckConstraint, Index, UniqueConstraint
 
 from intric.database.tables.flow_tables import (
     FLOW_RUN_RERUN_INVALIDATION_ROLE_VALUES,
@@ -43,6 +43,13 @@ def _check_constraint_sql(table: object, constraint_name: str) -> str:
         ):
             return str(constraint.sqltext)
     raise AssertionError(f"Check constraint {constraint_name} was not found.")
+
+
+def _index_by_name(table: object, index_name: str) -> Index:
+    for index in table.__table__.indexes:
+        if index.name == index_name:
+            return index
+    raise AssertionError(f"Index {index_name} was not found.")
 
 
 def test_rerun_status_and_role_values_are_canonical_enum_values():
@@ -91,6 +98,16 @@ def test_rerun_operation_table_owns_request_identity_and_status():
         "ck_flow_run_rerun_operations_user_principal",
     )
     assert FlowRunRerunOperations.__table__.columns["failure_code"].type.length == 64
+    active_index = _index_by_name(
+        FlowRunRerunOperations,
+        "uq_flow_run_rerun_operations_one_active_per_run",
+    )
+    assert active_index.unique is True
+    assert tuple(column.name for column in active_index.columns) == ("flow_run_id",)
+    assert (
+        str(active_index.dialect_options["postgresql"]["where"])
+        == "status IN ('queued', 'running')"
+    )
 
 
 def test_new_rerun_foreign_key_names_fit_postgres_identifier_limit():

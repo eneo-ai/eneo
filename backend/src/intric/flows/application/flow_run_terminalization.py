@@ -104,7 +104,7 @@ class FlowRunTerminalizer:
                 target_status=target_status,
                 source=source,
                 audit_outbox_id=None,
-        )
+            )
 
         if target_status == FlowRunStatus.COMPLETED:
             active_results = await self.flow_run_repo.count_active_step_results(
@@ -169,6 +169,14 @@ class FlowRunTerminalizer:
                 error_code=error_code or source.value,
                 error_message=error_message,
             )
+
+        await self.flow_run_repo.close_active_rerun_operations_for_terminal_run(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            target_status=target_status,
+            error_code=error_code or source.value,
+            error_message=error_message,
+        )
 
         actor_fields = self._audit_actor_fields(
             run=terminal_run,

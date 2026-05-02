@@ -1146,6 +1146,9 @@ class FlowStepAttemptPublic(BaseModel):
     step_id: UUID | None = None
     step_order: int
     attempt_no: int
+    rerun_operation_id: UUID | None = None
+    predecessor_attempt_id: UUID | None = None
+    superseded_by_attempt_id: UUID | None = None
     celery_task_id: str | None = None
     status: FlowStepAttemptStatus
     error_code: str | None = None

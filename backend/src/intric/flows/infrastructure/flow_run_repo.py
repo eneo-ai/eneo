@@ -75,9 +75,19 @@ class FlowRunRerunCommandResult:
     created: bool
 
 
+@dataclass(frozen=True, slots=True)
+class FlowRunActiveRerunOperation:
+    operation: FlowRunRerunOperation
+    invalidated_steps: tuple[FlowRunRerunInvalidatedStep, ...]
+
+
 _RERUN_ELIGIBLE_RUN_STATUSES = (
     FlowRunStatus.COMPLETED.value,
     FlowRunStatus.FAILED.value,
+)
+_ACTIVE_RERUN_OPERATION_STATUSES = (
+    FlowRunRerunOperationStatus.QUEUED.value,
+    FlowRunRerunOperationStatus.RUNNING.value,
 )
 
 _RERUN_STEP_RESULT_RESET_VALUES: dict[str, object] = {
@@ -699,6 +709,38 @@ class FlowRunRepository:
         )
         return int(getattr(result, "rowcount", 0) or 0)
 
+    async def close_active_rerun_operations_for_terminal_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        target_status: FlowRunStatus,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> int:
+        if target_status not in TERMINAL_FLOW_RUN_STATUSES:
+            raise ValueError("target_status must be terminal")
+
+        values: dict[str, Any] = {
+            "status": FlowRunRerunOperationStatus(target_status.value).value,
+            "finished_at": datetime.now(timezone.utc),
+        }
+        if target_status == FlowRunStatus.COMPLETED:
+            values["failure_code"] = None
+            values["failure_message"] = None
+        else:
+            values["failure_code"] = error_code
+            values["failure_message"] = error_message
+
+        result = await self.session.execute(
+            sa.update(FlowRunRerunOperations)
+            .where(FlowRunRerunOperations.flow_run_id == run_id)
+            .where(FlowRunRerunOperations.tenant_id == tenant_id)
+            .where(FlowRunRerunOperations.status.in_(_ACTIVE_RERUN_OPERATION_STATUSES))
+            .values(**values)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
     async def close_open_step_attempts_for_terminal_run(
         self,
         *,
@@ -743,6 +785,7 @@ class FlowRunRepository:
                 tenant_id=run.tenant_id,
                 flow_id=run.flow_id,
                 flow_run_id=run.id,
+                run_revision=run.revision,
                 description=description,
                 action=action.value,
                 entity_type=entity_type.value,
@@ -933,6 +976,62 @@ class FlowRunRepository:
             return None
         return self.factory.from_flow_step_result_db(row)
 
+    async def get_active_rerun_operation(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+    ) -> FlowRunActiveRerunOperation | None:
+        operation_rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunRerunOperations)
+                    .where(FlowRunRerunOperations.flow_run_id == run_id)
+                    .where(FlowRunRerunOperations.flow_id == flow_id)
+                    .where(FlowRunRerunOperations.tenant_id == tenant_id)
+                    .where(
+                        FlowRunRerunOperations.status.in_(
+                            _ACTIVE_RERUN_OPERATION_STATUSES
+                        )
+                    )
+                    .order_by(FlowRunRerunOperations.created_at.desc())
+                    .limit(2)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not operation_rows:
+            return None
+        if len(operation_rows) > 1:
+            raise BadRequestException(
+                "Flow run has multiple active rerun operations.",
+                code="flow_run_rerun_active_operation_conflict",
+            )
+        operation_row = operation_rows[0]
+        invalidated_rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunRerunInvalidatedSteps)
+                    .where(
+                        FlowRunRerunInvalidatedSteps.operation_id == operation_row.id
+                    )
+                    .where(FlowRunRerunInvalidatedSteps.tenant_id == tenant_id)
+                    .order_by(FlowRunRerunInvalidatedSteps.invalidation_order.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return FlowRunActiveRerunOperation(
+            operation=self.factory.from_flow_run_rerun_operation_db(operation_row),
+            invalidated_steps=tuple(
+                self.factory.from_flow_run_rerun_invalidated_step_db(row)
+                for row in invalidated_rows
+            ),
+        )
+
     async def claim_step_result(
         self,
         *,
@@ -966,6 +1065,19 @@ class FlowRunRepository:
             return None
         return self.factory.from_flow_step_result_db(row)
 
+    async def allocate_next_attempt_no(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_run_id: UUID,
+        step_id: UUID,
+    ) -> int:
+        return await self._next_attempt_no(
+            tenant_id=tenant_id,
+            flow_run_id=flow_run_id,
+            step_id=step_id,
+        )
+
     async def create_or_get_attempt_started(
         self,
         *,
@@ -976,6 +1088,8 @@ class FlowRunRepository:
         step_order: int,
         attempt_no: int,
         celery_task_id: str | None,
+        rerun_operation_id: UUID | None = None,
+        predecessor_attempt_id: UUID | None = None,
     ) -> FlowStepAttempt:
         started_at = datetime.now(timezone.utc)
         insert_stmt = (
@@ -988,6 +1102,8 @@ class FlowRunRepository:
                 step_order=step_order,
                 attempt_no=attempt_no,
                 celery_task_id=celery_task_id,
+                rerun_operation_id=rerun_operation_id,
+                predecessor_attempt_id=predecessor_attempt_id,
                 status=FlowStepAttemptStatus.STARTED.value,
                 started_at=started_at,
             )
@@ -1060,7 +1176,68 @@ class FlowRunRepository:
         )
         if row is None:
             return None
+        if status == FlowStepAttemptStatus.COMPLETED:
+            await self._mark_predecessor_superseded_by_attempt(
+                completed_attempt_row=row,
+                tenant_id=tenant_id,
+            )
         return self.factory.from_flow_step_attempt_db(row)
+
+    async def mark_rerun_operation_running(
+        self,
+        *,
+        operation_id: UUID,
+        tenant_id: UUID,
+        root_attempt_id: UUID | None = None,
+    ) -> None:
+        now_utc = datetime.now(timezone.utc)
+        values: dict[str, Any] = {
+            "status": FlowRunRerunOperationStatus.RUNNING.value,
+            "started_at": sa.func.coalesce(
+                FlowRunRerunOperations.started_at,
+                now_utc,
+            ),
+        }
+        if root_attempt_id is not None:
+            values["root_attempt_id"] = root_attempt_id
+        await self.session.execute(
+            sa.update(FlowRunRerunOperations)
+            .where(FlowRunRerunOperations.id == operation_id)
+            .where(FlowRunRerunOperations.tenant_id == tenant_id)
+            .where(
+                FlowRunRerunOperations.status
+                == FlowRunRerunOperationStatus.QUEUED.value
+            )
+            .values(**values)
+        )
+
+    async def link_rerun_invalidated_step_attempt(
+        self,
+        *,
+        operation_id: UUID,
+        tenant_id: UUID,
+        step_id: UUID,
+        new_attempt_no: int,
+        new_attempt_id: UUID,
+    ) -> None:
+        result = await self.session.execute(
+            sa.update(FlowRunRerunInvalidatedSteps)
+            .where(FlowRunRerunInvalidatedSteps.operation_id == operation_id)
+            .where(FlowRunRerunInvalidatedSteps.tenant_id == tenant_id)
+            .where(FlowRunRerunInvalidatedSteps.step_id == step_id)
+            .where(
+                sa.or_(
+                    FlowRunRerunInvalidatedSteps.new_attempt_id.is_(None),
+                    FlowRunRerunInvalidatedSteps.new_attempt_id == new_attempt_id,
+                )
+            )
+            .values(new_attempt_no=new_attempt_no, new_attempt_id=new_attempt_id)
+        )
+        if int(getattr(result, "rowcount", 0) or 0) == 0:
+            raise BadRequestException(
+                "Rerun invalidated step is already linked to another attempt.",
+                code="flow_run_rerun_attempt_lineage_conflict",
+            )
 
     async def _get_rerun_operation_row(
         self,
@@ -1200,6 +1377,28 @@ class FlowRunRepository:
             .where(FlowStepAttempts.step_id == step_id)
         )
         return int(max_attempt_no or 0) + 1
+
+    async def _mark_predecessor_superseded_by_attempt(
+        self,
+        *,
+        completed_attempt_row: FlowStepAttempts,
+        tenant_id: UUID,
+    ) -> None:
+        if completed_attempt_row.predecessor_attempt_id is None:
+            return
+        await self.session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.id == completed_attempt_row.predecessor_attempt_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(
+                sa.or_(
+                    FlowStepAttempts.superseded_by_attempt_id.is_(None),
+                    FlowStepAttempts.superseded_by_attempt_id
+                    == completed_attempt_row.id,
+                )
+            )
+            .values(superseded_by_attempt_id=completed_attempt_row.id)
+        )
 
 
 def _result_file_from_rows(
