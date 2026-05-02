@@ -2,7 +2,7 @@
 
 ## TL;DR
 1. The refactor needs durable decisions, not only markdown review output.
-2. ADRs should cover lifecycle, published definitions, terminal audit, generated types, permissions, runtime inputs, rerun, review, evidence export, and compatibility deletion.
+2. ADRs should cover lifecycle, published definitions, terminal audit, generated types, permissions, runtime inputs, rerun, review, evidence export, compatibility deletion, and Eneo branding/namespace migration.
 3. Documentation should serve implementation agents, maintainers, API consumers, and operators.
 4. `AGENTS.md` changes are proposal-only until accepted by the user/team.
 5. Success is future work following the architecture without re-reading the whole review.
@@ -103,6 +103,7 @@ flowchart TD
 | Step Rerun Semantics | PRD-003 |
 | Human Review/Pause Semantics | PRD-003 |
 | Evidence Export Semantics | PRD-004 |
+| Eneo Branding And Namespace Migration | PRD-010 |
 | Compatibility Deletion Policy | PRD-001 / PRD-008 |
 
 ## Alternatives Considered

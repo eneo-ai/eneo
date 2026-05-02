@@ -31,6 +31,15 @@ Breaking API and schema changes are allowed before production, but compatibility
 
 Do not preserve two public request shapes "temporarily" without owner, telemetry/check, and deletion date. Do not delete persisted-shape fallbacks solely because production has not launched.
 
+## Proposed Section: Branding And Namespace Policy
+
+- Eneo is the product/platform brand for net-new Flow and Flow AI Builder user-facing names.
+- Keep the Python package namespace at `intric.*` until a dedicated namespace migration ADR inventories imports, deployment entrypoints, generated clients, scripts, database references, and external consumers.
+- Keep the generated client package identity at `@intric/intric-js` until a dedicated package migration is approved.
+- Do not create parallel `eneo.*` Python packages, re-export modules, `@eneo/*` aliases, or dual import namespaces for convenience.
+- Existing technical keys such as `intric_error_code` require wire-contract review before renaming.
+- Flow root import barrels and AI Builder model barrels are cleanup targets after import retargeting; new imports should use canonical domain, API, application, infrastructure, runtime, or event modules.
+
 ## Proposed Section: Flow Runtime Rules
 
 - Runtime state belongs in the database, not worker memory.

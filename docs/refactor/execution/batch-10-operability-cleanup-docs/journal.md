@@ -420,3 +420,73 @@ Strict final green:
 - Claude verdict: `green`
 - Claude green light: `yes`
 - Claude minimum score: `9`
+
+## Iteration 9 — Branding And Namespace ADR Closure
+
+Objective:
+
+- Close the remaining Batch 10 branding/namespace documentation requirement without broad package renames or preserving never-shipped Flow import paths.
+- Keep the user-owned Batch 11 files and `docs/refactor/implementation-order.md` edits out of this slice.
+
+Initial local evidence:
+
+| Check | Result |
+|---|---|
+| `rg -l "from intric\\.flows\\.flow import\|import intric\\.flows\\.flow" backend/src backend/tests \| wc -l` | `46` importing files. |
+| `rg -l "from intric\\.flows\\.ai_builder\\.ai_builder_models import\|import intric\\.flows\\.ai_builder\\.ai_builder_models" backend/src backend/tests \| wc -l` | `112` importing files. |
+| `rg -l "from intric\\.flows\\.(flow_repo\|flow_run_service\|flow_version_repo) import\|import intric\\.flows\\.(flow_repo\|flow_run_service\|flow_version_repo)" backend/src backend/tests \| wc -l` | `0` importing files. |
+| `rg -n "\\bIntric\\b\|\\bEneo\\b" backend/src/intric/flows backend/tests/unittests/flows backend/tests/integration/flows docs/runbooks/flows.md docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md --glob '*.py' --glob '*.md'` | AI Builder prompt/framework text already uses Eneo; no Flow product-facing `Intric` backend string found. |
+| `rg -n '"[^"]*flow[^"]*"\\s*:\\s*"[^"]*(Intric\|Eneo)\|"[^"]*(Intric\|Eneo)[^"]*flow[^"]*"' frontend/apps/web/messages/en.json frontend/apps/web/messages/sv.json` | No Flow translation hits. |
+| `rg -n "intric_logo" frontend/apps/web/messages/en.json frontend/apps/web/messages/sv.json frontend/apps/web/src --glob '!**/node_modules/**'` | English `intric_logo` still rendered `Intric logo`; Swedish already rendered `Eneo-logotyp`; one source call site used `m.intric_logo()`. |
+
+Claude plan review:
+
+| Pass | Artifact | Verdict |
+|---|---|---|
+| Initial plan review | `.codex/artifacts/claude-peer-loop-batch-10-branding-namespace-closure-plan-20260502T225646Z.md` | `changes_required`, `GREEN_LIGHT: no`, minimum score `6` |
+| Plan verification 1 | `.codex/artifacts/claude-peer-loop-batch-10-branding-namespace-closure-plan-verification-20260502T230603Z.md` | `changes_required`, `GREEN_LIGHT: no`, minimum score `7` |
+| Plan verification 2 | `.codex/artifacts/claude-peer-loop-batch-10-branding-namespace-closure-plan-verification-2-20260502T230935Z.md` | `green`, `GREEN_LIGHT: yes`, minimum score `8` |
+
+Accepted plan changes:
+
+| Claude finding | Change |
+|---|---|
+| Translation/audit/telemetry branding cleanup could not be silently deferred. | Plan now fixes the concrete English `intric_logo` mismatch, records no Flow product-facing audit/telemetry `Intric` strings, and adds a pre-release branding sweep follow-up. |
+| Validation grep was too broad and unenforceable. | Plan now gates only `docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md` for the forbidden current-architecture phrases and separately checks the translation value. |
+| Import-barrel deletion was underspecified. | Plan now separates zero-importer Flow barrels from high-touch `flow.py` and `ai_builder_models.py` retargeting. |
+| Existing `Compatibility Deletion Policy` ADR tightening was separate scope. | Moved it to a follow-up instead of changing the existing ADR row in Slice 10.6. |
+| `intric_error_code` is a wire/API concern. | Added a follow-up for namespace ADR review of the Flow error key; Phase 5 rules now say technical keys require wire-contract review before renaming. |
+| Generated Paraglide output should not be staged. | Plan cites `AGENTS.md`, `CLAUDE.md`, and the Paraglide gitignore; compile is validation only. |
+
+Implementation result:
+
+| Area | Change |
+|---|---|
+| Architecture map | Replaced import-preserving wording with import-barrel/canonical-owner/deletion-candidate wording; removed current-architecture `legacy drift` wording. |
+| ADR backlog | Added `Eneo Branding And Namespace Migration` with alternatives and a recommended default that rejects parallel namespaces and points import barrels toward deletion after proof. |
+| PRD-010 | Added Eneo branding/namespace migration to the TL;DR and ADR inventory. |
+| Phase 5 rules proposal | Added a `Branding And Namespace Policy` section covering Eneo product names, `intric.*`, `@intric/intric-js`, no parallel namespaces, `intric_error_code`, and import-barrel cleanup. |
+| Frontend i18n | Changed English `intric_logo` value from `Intric logo` to `Eneo logo`; did not rename the key. |
+| Follow-ups | Added zero-importer barrel deletion, imported-barrel retargeting, compatibility-deletion ADR default, translation-key migration, Flow error-key namespace review, and pre-release branding sweep. |
+
+Validation before Claude implementation review:
+
+| Command | Result |
+|---|---|
+| `git diff --check -- frontend/apps/web/messages/en.json docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md docs/refactor/architecture-decision-backlog.md docs/refactor/prd/PRD-010-documentation-and-adrs.md docs/refactor/phase5/agents-md-additions.md docs/refactor/execution/batch-10-operability-cleanup-docs` | Passed |
+| `cd frontend/apps/web && bun run i18n:compile` | Passed |
+| `rg -n "compatibility shims\|compatibility aggregator\|legacy drift\|keeps older imports\|useful for compatibility\|backwards compatibility\|deprecated" docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md` | Passed: no output |
+| `rg -n '"intric_logo": "Intric logo"' frontend/apps/web/messages/en.json frontend/apps/web/src/lib/paraglide` | Passed: no output |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean` |
+| `rg -l "from intric\\.flows\\.(flow_repo\|flow_run_service\|flow_version_repo) import\|import intric\\.flows\\.(flow_repo\|flow_run_service\|flow_version_repo)" backend/src backend/tests \| wc -l` | `0` |
+
+Claude implementation review:
+
+- Claude artifact: `.codex/artifacts/claude-peer-loop-batch-10-branding-namespace-closure-implementation-20260502T231554Z.md`
+- Claude verdict: `green`
+- Claude green light: `yes`
+- Claude minimum score: `8`
+
+Accepted procedural note:
+
+- Claude noted that closure docs were not yet present during implementation review. This journal entry plus `claude-reconciliation-6.md` and `retrospective-6.md` are added in the same slice commit.

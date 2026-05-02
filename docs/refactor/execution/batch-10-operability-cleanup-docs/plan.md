@@ -858,11 +858,113 @@ git diff --check -- \
 ./scripts/gate-local/anti_slippage.sh --worktree
 ```
 
+## Slice 10.6 — Branding And Namespace ADR Closure
+
+### Problem
+
+Batch 10 still has one open documentation/decision closure: `docs/refactor/implementation-order.md:50-56` requires translation, audit, telemetry, and docs branding cleanup plus a namespace migration ADR/backlog. Batch 5 already decided not to rename `@intric/intric-js` or create `@eneo/*` aliases during generated-type cleanup (`docs/refactor/execution/batch-5-generated-frontend-types/naming-decision.md:5-15`), and the project policy keeps the Python package namespace at `intric.*` until a dedicated migration spike.
+
+The current architecture map still describes Flow root import barrels as import-preserving glue (`docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md:59-66`, `:1064-1082`). That wording conflicts with the pre-production deletion policy: Flow and Flow AI Builder should not preserve never-shipped paths. These modules still need a source cleanup slice because current import inventory finds `backend/src/intric/flows/flow.py` used from 46 source/test files and `backend/src/intric/flows/ai_builder/ai_builder_models.py` used from 112 source/test files. The docs should make them deletion candidates after retargeting, not a layer to keep.
+
+### Scope
+
+This slice is docs/backlog closure plus one English translation value fix at `frontend/apps/web/messages/en.json:2442`.
+
+In scope:
+
+- Add a namespace/branding ADR entry to `docs/refactor/architecture-decision-backlog.md`.
+- Update `docs/refactor/prd/PRD-010-documentation-and-adrs.md` so the ADR inventory includes the namespace decision.
+- Update `docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md` to describe Flow import barrels as canonical-owner ambiguity/deletion candidates, not compatibility to preserve.
+- Update `docs/refactor/phase5/agents-md-additions.md` so the proposed durable rules include the Eneo branding and namespace policy.
+- Fix the concrete frontend translation mismatch `frontend/apps/web/messages/en.json:2442`, where `intric_logo` still renders `Intric logo` while Swedish already renders `Eneo-logotyp`.
+- Update `journal.md`, `claude-reconciliation-6.md`, and `retrospective-6.md` under `docs/refactor/execution/batch-10-operability-cleanup-docs/`.
+- Respect the user-owned `docs/refactor/implementation-order.md` Batch 11 edits; do not stage that file in this slice unless a separate hunk is required and reviewable.
+
+Out of scope:
+
+- Python package rename from `intric.*` to `eneo.*`.
+- Parallel `eneo.*` Python package, re-export modules, or dual import namespaces.
+- Frontend package rename from `@intric/intric-js`.
+- Flow audit or telemetry source-string changes. Local scans found only technical package paths, logger/import names, and `intric_error_code` wire/error-payload keys in Flow API files, not product-facing `Intric` strings.
+- Deleting source import barrels; this slice records the canonical deletion direction, and a later source cleanup must retarget imports and delete files.
+
+### Source Evidence
+
+| Concept | Evidence | Decision |
+|---|---|---|
+| Batch 10 branding requirement | `docs/refactor/implementation-order.md:50-56` | Close with ADR/backlog and docs cleanup, not package rename. |
+| Slice order | `git log --oneline -5`; `docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md:3` | Slice 10.6 lands after Slice 10.5. Keep the current `Last reviewed: 2026-05-02` date as-is. |
+| Generated client naming | `docs/refactor/execution/batch-5-generated-frontend-types/naming-decision.md:5-15` | Keep `@intric/intric-js`; do not create `@eneo/*` aliases or dual packages. |
+| Flow import forwarding docs | `docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md:59-66`, `:1064-1082` | Rewrite import-preserving wording into canonical-owner/deletion-candidate wording. |
+| AI Builder model barrel | `docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md:193-198` | Mark `ai_builder_models.py` as a barrel/deletion candidate after imports move to canonical model modules. |
+| Builder schema drift wording | `docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md:764-766` | Replace `legacy drift` with `schema/persistence drift`. |
+| Flow import barrel inventory | `rg -l "from intric\\.flows\\.flow import\|import intric\\.flows\\.flow" backend/src backend/tests`; `rg -l "from intric\\.flows\\.ai_builder\\.ai_builder_models import\|import intric\\.flows\\.ai_builder\\.ai_builder_models" backend/src backend/tests` | `flow.py` has 46 importing files; `ai_builder_models.py` has 112 importing files; the root barrels have zero current importers for `flow_repo.py`, `flow_run_service.py`, and `flow_version_repo.py`. |
+| Frontend translation mismatch | `frontend/apps/web/messages/en.json:2442`; `frontend/apps/web/messages/sv.json:2442` | Change English `intric_logo` value from `Intric logo` to `Eneo logo`; leave the key name until a dedicated translation-key migration. |
+| Translation call site | `frontend/apps/web/src/lib/assets/IntricLogoMark.svelte:13`; `rg -n "intric_logo\\(|\\[\\\"intric_logo\\\"\\]|\\['intric_logo'\\]" frontend/apps/web/src` | `m.intric_logo()` has one source call site. Dynamic key lookup was not found. |
+| Translation compile requirement | `AGENTS.md:111`; `CLAUDE.md:622`; `frontend/apps/web/src/lib/paraglide/.gitignore` | Run `bun run i18n:compile` as validation; Paraglide output is ignored and must not be staged. |
+| Flow audit/telemetry branding scan | `rg -n "Intric\|Eneo\|intric\|eneo" backend/src/intric/flows/ai_builder/ai_builder_telemetry.py backend/src/intric/flows/api/flow_trace_audit.py backend/src/intric/flows/runtime/http_audit.py backend/src/intric/flows/application/flow_run_audit_outbox_delivery.py backend/src/intric/flows/application/flow_run_audit_outbox_policy.py backend/src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py` | No product-facing `Intric` strings found; technical `intric.*` imports remain under the namespace policy. |
+| Flow error-key namespace scan | `rg -n "intric_error_code" backend/src/intric/flows` | `intric_error_code` appears in Flow API error payload helpers and generated events. Any rename is a wire-contract decision for the namespace migration ADR, not a docs cleanup. |
+
+### Canonical Owners
+
+| Concept | Canonical home | What not to do |
+|---|---|---|
+| Product/user-facing Flow brand | Eneo, where the surface is net-new or product-facing | Do not mix `Intric` and `Eneo` in one new surface. |
+| Python package namespace | `backend/src/intric` until a dedicated migration spike | Do not create `backend/src/eneo`, `eneo.*` re-exports, or dual import namespaces. |
+| Frontend generated client package identity | Batch 5 naming decision | Do not rename `@intric/intric-js` inside cleanup/docs work. |
+| Flow canonical import paths | Domain/application/infrastructure/API/runtime subpackages | Do not document root Flow barrels as compatibility worth preserving. |
+| Namespace migration decision | `architecture-decision-backlog.md` plus future dedicated ADR | Do not leave package, generated-client, audit, telemetry, or translation naming decisions as scattered TODOs. |
+
+### Implementation Requirements
+
+- Add ADR row: `Eneo Branding And Namespace Migration`.
+- Recommended default: Eneo for new product/user-facing Flow surfaces; keep `intric.*` Python and `@intric/intric-js` package names until dedicated migration inventories consumers and release impact.
+- State explicitly that no parallel `eneo.*` package or `@eneo/*` alias should be introduced for convenience.
+- State explicitly that Flow import barrels are deletion candidates after import retargeting.
+- Fix `frontend/apps/web/messages/en.json:2442` and run the Paraglide compile command.
+- Do not stage generated Paraglide output; it is ignored and compile is validation only.
+- Do not edit `AGENTS.md`; add a new `Branding And Namespace Policy` section to `docs/refactor/phase5/agents-md-additions.md`.
+- Keep the existing `Permission Migration From Legacy Flow Aliases` ADR row title because it describes historical permission grants, not a source/API preservation path for unreleased Flow behavior.
+- Add `Eneo Branding And Namespace Migration` to the PRD-010 ADR table with `PRD-010` as the related PRD.
+- Add a Batch 10 follow-up that owns the source cleanup for Flow import barrels with the current import counts and deletion gate.
+- Add separate follow-ups for the existing compatibility-deletion ADR default and the duplicate `intric_logo`/`eneo_logo` translation-key shape; do not bundle those policy/key migrations into this slice.
+
+### Validation Commands
+
+```bash
+git diff --check -- \
+  frontend/apps/web/messages/en.json \
+  docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md \
+  docs/refactor/architecture-decision-backlog.md \
+  docs/refactor/prd/PRD-010-documentation-and-adrs.md \
+  docs/refactor/phase5/agents-md-additions.md \
+  docs/refactor/execution/batch-10-operability-cleanup-docs
+```
+
+```bash
+cd frontend/apps/web && bun run i18n:compile
+```
+
+```bash
+rg -n "compatibility shims|compatibility aggregator|legacy drift|keeps older imports|useful for compatibility|backwards compatibility|deprecated" \
+  docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md
+```
+
+Expected: no output.
+
+```bash
+rg -n '"intric_logo": "Intric logo"' frontend/apps/web/messages/en.json frontend/apps/web/src/lib/paraglide
+```
+
+Expected: no output.
+
+```bash
+./scripts/gate-local/anti_slippage.sh --worktree
+```
+
 ## Remaining Batch 10 Slices
 
-| Slice | Scope | Gate |
-|---|---|---|
-| 10.6 | Branding/namespace ADR/backlog closure | No package rename; update docs/backlog only unless separately approved. |
+No remaining Batch 10 implementation slices after Slice 10.6.
 
 ## Batch 10 Follow-Ups
 
@@ -870,6 +972,12 @@ git diff --check -- \
 |---|---|---|
 | Flow audit outbox delivered-row partial index | Flow data model | Measure the anti-join cleanup with a representative delivered-row volume before adding an index such as `created_at WHERE delivery_status='delivered'` or `id WHERE delivery_status='delivered'`. |
 | Flow audit outbox dead-letter replay/ack contract | Flow operability | Dead-letter rows are unresolved audit incidents. They need explicit replay/ack semantics before any retention cleanup can delete them. |
+| Zero-importer Flow barrel deletion | Flow backend architecture | Delete `flow_repo.py`, `flow_run_service.py`, and `flow_version_repo.py` after confirming zero static and dynamic import/string references in the deletion slice. |
+| Imported Flow barrel deletion | Flow backend architecture | Retarget the 46 `intric.flows.flow` importing files and 112 `ai_builder_models` importing files to canonical domain/API/event modules, prove zero remaining importers, then delete `flow.py` and `ai_builder_models.py`. |
+| Compatibility deletion ADR default | Flow architecture | In a separate policy slice, amend the existing ADR row with explicit gates for never-shipped source/API preservation, persisted row-shape fallbacks, and external consumer contracts. |
+| Translation key migration | Frontend i18n | Decide whether `intric_logo` should be retargeted to `eneo_logo` or deleted after its single `m.intric_logo()` call site moves; keep value-only cleanup in Slice 10.6. |
+| Flow error-key namespace review | API maintainer | Treat `intric_error_code` as a Flow API wire contract during the namespace migration ADR; do not rename it as a branding cleanup. |
+| Flow branding surface sweep before release | Product/platform owners | Before any Flow or Flow AI Builder feature is enabled in a production tenant config, re-scan translations, audit labels, telemetry event names, generated-client docs, and examples for product-facing `Intric` references while leaving technical `intric.*` namespace references to the dedicated migration ADR. |
 
 ## Stop Conditions For This Batch
 

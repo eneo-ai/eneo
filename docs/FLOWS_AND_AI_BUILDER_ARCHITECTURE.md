@@ -56,14 +56,14 @@ Core backend layers:
 - Runtime execution: `backend/src/intric/flows/runtime/`
 - SQLAlchemy tables: `backend/src/intric/database/tables/flow_tables.py`
 
-Compatibility shims still exist under `backend/src/intric/flows/`, for example:
+Root-level import barrels still exist under `backend/src/intric/flows/`, for example:
 
 - `backend/src/intric/flows/flow.py`
 - `backend/src/intric/flows/flow_repo.py`
 - `backend/src/intric/flows/flow_run_service.py`
 - `backend/src/intric/flows/flow_version_repo.py`
 
-These shims keep older imports working while the newer package layout is used internally. This is useful for compatibility, but it also means reviewers should check both the canonical location and the shim before assuming an import boundary.
+These barrels obscure canonical ownership. Because Flow and Flow AI Builder are unreleased, new imports should use the canonical domain, application, infrastructure, API, or runtime modules. A source cleanup should retarget remaining imports before deleting the barrels.
 
 ### API Router Composition
 
@@ -194,7 +194,7 @@ Core files:
   - `ai_builder_domain_models.py`
   - `ai_builder_api_models.py`
   - `ai_builder_event_models.py`
-  - `ai_builder_models.py` compatibility aggregator
+  - `ai_builder_models.py` model barrel; deletion candidate after callers move to the domain/API/event modules
 - Planning state: `planning_state.py`
 - Planner/orchestration:
   - `ai_builder_planner.py`
@@ -763,7 +763,7 @@ Notes:
 
 Review target:
 
-- `BuilderSession` domain model contains `requirements_version`, but the SQLAlchemy table does not appear to contain a matching column. This may be dead domain state, incomplete persistence, or legacy drift. Verify before changing behavior.
+- `BuilderSession` domain model contains `requirements_version`, but the SQLAlchemy table does not appear to contain a matching column. This may be dead domain state, incomplete persistence, or schema drift between domain and table. Verify before changing behavior.
 
 #### `builder_session_files`
 
@@ -1052,7 +1052,7 @@ Fields:
 Why it matters:
 
 - Strict Pydantic parsing is good, but old rows must be migrated correctly.
-- Compatibility shims must not hide corrupt state.
+- Import barrels must not hide corrupt state behind ambiguous owners.
 - Duplicate sources of truth can reappear if plan envelope/spec discipline is loosened.
 
 Review questions:
@@ -1061,7 +1061,7 @@ Review questions:
 - Are JSONB migrations idempotent and covered by migration tests?
 - Is malformed historical data repaired or failed loudly with actionable errors?
 
-### 4. Compatibility Shims and Legacy Naming
+### 4. Import Barrels And Naming Drift
 
 Files:
 
@@ -1072,14 +1072,14 @@ Files:
 
 Why it matters:
 
-- They help avoid breaking imports.
-- They also make it less obvious which module is canonical.
+- They make it less obvious which module is canonical.
+- They increase the chance new code imports from the wrong owner.
 
 Review questions:
 
-- Are shims documented as shims?
-- Are new imports using canonical paths?
-- Is there a future cleanup path, or are shims permanent public API?
+- Which source/test files still import each barrel?
+- What canonical module should each importer use?
+- Which test or import scan proves zero remaining dependencies before deletion?
 
 ### 5. Runtime Output and Document Rendering
 
