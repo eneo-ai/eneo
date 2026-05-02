@@ -81,6 +81,7 @@ class FlowMcpPolicy(str, Enum):
 class FlowRunStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
+    AWAITING_REVIEW = "awaiting_review"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -118,6 +119,7 @@ CANCELLABLE_FLOW_RUN_STATUSES = frozenset(
     {
         FlowRunStatus.QUEUED,
         FlowRunStatus.RUNNING,
+        FlowRunStatus.AWAITING_REVIEW,
     }
 )
 
@@ -154,6 +156,31 @@ class FlowRunLifecycleSource(str, Enum):
     STALE_RUNNING_RECONCILER = "stale_running_reconciler"
     USER_CANCEL = "user_cancel"
     DISPATCH_FAILURE = "dispatch_failure"
+    REVIEW_REJECTED = "review_rejected"
+    REVIEW_CHECKPOINT_OPENED = "review_checkpoint_opened"
+    REVIEW_CHECKPOINT_EDITED = "review_checkpoint_edited"
+    REVIEW_CHECKPOINT_APPROVED = "review_checkpoint_approved"
+    REVIEW_CHECKPOINT_REJECTED = "review_checkpoint_rejected"
+    REVIEW_CHECKPOINT_RESUMED = "review_checkpoint_resumed"
+    REVIEW_CHECKPOINT_CANCELLED = "review_checkpoint_cancelled"
+
+
+class FlowRunReviewCheckpointState(str, Enum):
+    AWAITING_REVIEW = FlowRunStatus.AWAITING_REVIEW.value
+    EDITED = "edited"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    RESUMED = "resumed"
+    CANCELLED = FlowRunStatus.CANCELLED.value
+
+
+ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES = frozenset(
+    {
+        FlowRunReviewCheckpointState.AWAITING_REVIEW,
+        FlowRunReviewCheckpointState.EDITED,
+        FlowRunReviewCheckpointState.APPROVED,
+    }
+)
 
 
 class FlowStepResultStatus(str, Enum):

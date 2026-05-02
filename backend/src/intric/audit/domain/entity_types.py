@@ -32,4 +32,5 @@ class EntityType(str, Enum):
     MCP_SERVER_TOOL = "mcp_server_tool"
     FLOW = "flow"
     FLOW_RUN = "flow_run"
+    FLOW_RUN_REVIEW_CHECKPOINT = "flow_run_review_checkpoint"
     AI_BUILDER_SESSION = "ai_builder_session"

@@ -64,6 +64,38 @@ IN_PROGRESS
 - Docker validation: blocked before execution by this Codex process with `Rejected("approval required by policy, but AskForApproval is set to Never")`
 - Outcome: mechanical rename complete; no enum string values or runtime behavior changed
 
+### Slice 9.1 — Status And Checkpoint Data Model
+
+- Source:
+  - `backend/src/intric/flows/enums.py`
+  - `backend/src/intric/database/tables/flow_tables.py`
+  - `backend/src/intric/flows/domain/flow.py`
+  - `backend/src/intric/flows/flow_factory.py`
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - `backend/src/intric/flows/application/flow_run_terminalization.py`
+  - `backend/src/intric/audit/domain/action_types.py`
+  - `backend/src/intric/audit/domain/entity_types.py`
+  - `backend/src/intric/audit/domain/category_mappings.py`
+  - `backend/alembic/versions/20260502_review_checkpoints.py`
+- Tests:
+  - `backend/tests/unittests/flows/test_flow_run_status_predicates.py`
+  - `backend/tests/unittests/flows/test_flow_review_checkpoint_data_model.py`
+  - `backend/tests/unittests/flows/test_flow_enums.py`
+  - `backend/tests/integration/flows/test_flow_run_review_checkpoint_repository.py`
+  - `backend/tests/integration/flows/test_flow_run_rerun_repository.py::test_non_rerunnable_run_status_rejects_without_mutation`
+- Local validation:
+  - `.venv/bin/ruff check` on Slice 9.1 source/test/migration files — passed
+  - `.venv/bin/ruff format --check` on Slice 9.1 source/test/migration files — passed
+  - `uv run pyright` on Slice 9.1 source/test/migration files — passed, 0 errors
+  - `uv run python -m py_compile alembic/versions/20260502_review_checkpoints.py` — passed
+  - `.venv/bin/pytest tests/unittests/flows/test_flow_run_status_predicates.py tests/unittests/flows/test_flow_review_checkpoint_data_model.py tests/unittests/flows/test_flow_enums.py tests/integration/flows/test_flow_run_review_checkpoint_repository.py tests/integration/flows/test_flow_run_rerun_repository.py::test_non_rerunnable_run_status_rejects_without_mutation -q` — passed, 23 tests
+- Docker validation: blocked before execution by this Codex process with `Rejected("approval required by policy, but AskForApproval is set to Never")`
+- Claude review:
+  - Iteration 1: changes required, artifact `.codex/artifacts/claude-peer-loop-batch-9-slice-9-1-review-checkpoint-data-model-20260502T162800Z.md`
+  - Iteration 2: green, artifact `.codex/artifacts/claude-peer-loop-batch-9-slice-9-1-review-checkpoint-data-model-verification-20260502T163623Z.md`
+  - Reconciliation: `docs/refactor/execution/batch-9-human-review-pause-edit-resume/claude-reconciliation-4.md`
+- Outcome: data-model foundation complete; runtime/API producers remain out of scope for Slice 9.2 and later
+
 ## Carry-Forward Risks
 
 - Review policy wire shape is pinned as `{"review_policy": {"mode": "view" | "edit"}}`; Slice 9.2 still needs API/schema tests before source implementation.
@@ -80,3 +112,5 @@ IN_PROGRESS
 - The active checkpoint read endpoint uses existing flow view semantics.
 - Review checkpoint outbox rows are keyed by checkpoint revision; terminal outbox rows remain keyed by run revision.
 - Slice 9.0a is the next implementation slice before checkpoint data-model work.
+- Slice 9.1 stores checkpoint `step_id` as a historical UUID and does not FK it to mutable `flow_steps`; Slice 9.2 must validate it against the run's published flow version before checkpoint creation.
+- Slice 9.1 makes `awaiting_review` cancellable through terminalization, but active checkpoint closure on run cancellation remains a Slice 9.4 responsibility.

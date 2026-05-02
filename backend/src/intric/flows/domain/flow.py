@@ -15,6 +15,7 @@ from intric.flows.enums import (
     FlowOutputType,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
+    FlowRunReviewCheckpointState,
     FlowRunStatus,
     FlowRuntimeInputFormat,
     FlowStepAttemptStatus,
@@ -258,5 +259,35 @@ class FlowRunRerunInvalidatedStep(BaseModel):
     prior_attempt_id: Optional[UUID] = None
     new_attempt_no: Optional[int] = None
     new_attempt_id: Optional[UUID] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowRunReviewCheckpoint(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID
+    step_id: UUID
+    step_order: int
+    attempt_no: int
+    state: FlowRunReviewCheckpointState
+    revision: int = 1
+    schema_version: int = 1
+    original_payload_json: JsonObject | None = None
+    current_payload_json: JsonObject | None = None
+    requester_user_id: UUID | None = None
+    requester_principal_type: PrincipalType
+    decided_by_user_id: UUID | None = None
+    decided_by_principal_type: PrincipalType | None = None
+    next_step_ids_json: list[UUID] | None = None
+    resume_idempotency_key: str | None = None
+    edited_at: datetime | None = None
+    approved_at: datetime | None = None
+    rejected_at: datetime | None = None
+    resumed_at: datetime | None = None
+    cancelled_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

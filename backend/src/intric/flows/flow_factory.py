@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from intric.database.tables.flow_tables import (
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
+    FlowRunReviewCheckpoints,
     FlowRuns,
     Flows,
     FlowStepAttempts,
@@ -15,6 +16,7 @@ from intric.flows.domain.flow import (
     FlowRun,
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
+    FlowRunReviewCheckpoint,
     FlowSparse,
     FlowStep,
     FlowStepAttempt,
@@ -61,3 +63,9 @@ class FlowFactory:
         invalidated_step_in_db: FlowRunRerunInvalidatedSteps,
     ) -> FlowRunRerunInvalidatedStep:
         return FlowRunRerunInvalidatedStep.model_validate(invalidated_step_in_db)
+
+    def from_flow_run_review_checkpoint_db(
+        self,
+        checkpoint_in_db: FlowRunReviewCheckpoints,
+    ) -> FlowRunReviewCheckpoint:
+        return FlowRunReviewCheckpoint.model_validate(checkpoint_in_db)

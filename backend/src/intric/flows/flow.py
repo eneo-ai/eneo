@@ -1,8 +1,10 @@
-"""Compatibility shim for Flow domain models."""
+"""Top-level Flow domain exports."""
 
 from intric.flows.domain.flow import (
     Flow,
     FlowRun,
+    FlowRunReviewCheckpoint,
+    FlowRunReviewCheckpointState,
     FlowRunStatus,
     FlowRuntimeInputConfig,
     FlowSparse,
@@ -21,6 +23,8 @@ from intric.flows.domain.flow import (
 __all__ = [
     "Flow",
     "FlowRun",
+    "FlowRunReviewCheckpoint",
+    "FlowRunReviewCheckpointState",
     "FlowRunStatus",
     "FlowRuntimeInputConfig",
     "FlowSparse",

@@ -33,6 +33,7 @@ from intric.flows.enums import (
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
+    FlowRunReviewCheckpointState,
     FlowRunStatus,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
@@ -52,6 +53,24 @@ FLOW_RUN_RERUN_INVALIDATION_ROLE_VALUES = tuple(
     item.value for item in FlowRunRerunInvalidationRole
 )
 FLOW_RUN_LIFECYCLE_SOURCE_VALUES = tuple(item.value for item in FlowRunLifecycleSource)
+FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES = tuple(
+    item.value for item in FlowRunReviewCheckpointState
+)
+FLOW_RUN_ACTIVE_REVIEW_CHECKPOINT_STATE_VALUES = (
+    FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
+    FlowRunReviewCheckpointState.EDITED.value,
+    FlowRunReviewCheckpointState.APPROVED.value,
+)
+FLOW_RUN_AUDIT_TARGET_STATUS_VALUES = tuple(
+    dict.fromkeys(
+        (
+            FlowRunStatus.COMPLETED.value,
+            FlowRunStatus.FAILED.value,
+            FlowRunStatus.CANCELLED.value,
+            *FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES,
+        )
+    )
+)
 FLOW_STEP_RESULT_STATUS_VALUES = tuple(item.value for item in FlowStepResultStatus)
 FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(item.value for item in FlowStepAttemptStatus)
 FLOW_RUN_STEP_RESULT_FILE_SOURCE_VALUES = ("generated_output", "declared_artifact")
@@ -418,7 +437,7 @@ class FlowRuns(BasePublic):
             name="ck_flow_runs_principal_identity",
         ),
         CheckConstraint(
-            "status IN ('queued','running','completed','failed','cancelled')",
+            f"status IN ({_check_values(FLOW_RUN_STATUS_VALUES)})",
             name="ck_flow_runs_status",
         ),
         ForeignKeyConstraint(
@@ -883,6 +902,166 @@ class FlowRunRerunInvalidatedSteps(BasePublic):
     )
 
 
+class FlowRunReviewCheckpoints(BasePublic):
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Tenants.id,
+            ondelete="CASCADE",
+            name="fk_review_checkpoints_tenant",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Flows.id,
+            ondelete="CASCADE",
+            name="fk_review_checkpoints_flow",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    step_order: Mapped[int] = mapped_column(nullable=False)
+    attempt_no: Mapped[int] = mapped_column(nullable=False)
+    state: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default=FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
+    )
+    revision: Mapped[int] = mapped_column(nullable=False, server_default="1")
+    schema_version: Mapped[int] = mapped_column(nullable=False, server_default="1")
+    original_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    current_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    requester_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            Users.id,
+            ondelete="SET NULL",
+            name="fk_review_checkpoints_requester_user",
+        ),
+        nullable=True,
+    )
+    requester_principal_type: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+    )
+    decided_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            Users.id,
+            ondelete="SET NULL",
+            name="fk_review_checkpoints_decided_by_user",
+        ),
+        nullable=True,
+    )
+    decided_by_principal_type: Mapped[Optional[str]] = mapped_column(
+        sa.String(32),
+        nullable=True,
+    )
+    next_step_ids_json: Mapped[Optional[list[str]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    resume_idempotency_key: Mapped[Optional[str]] = mapped_column(
+        sa.String(255),
+        nullable=True,
+    )
+    edited_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    approved_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    rejected_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    resumed_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"state IN ({_check_values(FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES)})",
+            name="ck_flow_run_review_checkpoints_state",
+        ),
+        CheckConstraint(
+            "revision >= 1",
+            name="ck_flow_run_review_checkpoints_revision",
+        ),
+        CheckConstraint(
+            "schema_version >= 1",
+            name="ck_flow_run_review_checkpoints_schema_version",
+        ),
+        CheckConstraint(
+            "requester_principal_type IN ('user','service_key')",
+            name="ck_flow_run_review_checkpoints_requester_principal",
+        ),
+        CheckConstraint(
+            "decided_by_principal_type IS NULL "
+            "OR decided_by_principal_type IN ('user','service_key')",
+            name="ck_flow_run_review_checkpoints_decider_principal",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_review_checkpoints_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_review_checkpoints_run_flow",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            name="uq_flow_run_review_checkpoints_run_step_attempt",
+        ),
+        Index(
+            "uq_flow_run_review_checkpoints_one_active_per_run",
+            "flow_run_id",
+            unique=True,
+            postgresql_where=sa.text(
+                "state IN ('awaiting_review', 'edited', 'approved')"
+            ),
+        ),
+        Index(
+            "uq_flow_run_review_checkpoints_resume_key",
+            "tenant_id",
+            "flow_run_id",
+            "resume_idempotency_key",
+            unique=True,
+            postgresql_where=sa.text("resume_idempotency_key IS NOT NULL"),
+        ),
+        Index(
+            "ix_flow_run_review_checkpoints_run_step_attempt",
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+        ),
+        Index(
+            "ix_flow_run_review_checkpoints_tenant_created_at",
+            "tenant_id",
+            "created_at",
+        ),
+    )
+
+
 class FlowRunStepInputFiles(BasePublic):
     flow_run_id: Mapped[UUID] = mapped_column(
         nullable=False,
@@ -1054,6 +1233,11 @@ class FlowRunAuditOutbox(BasePublic):
         nullable=False,
         server_default="1",
     )
+    review_checkpoint_id: Mapped[Optional[UUID]] = mapped_column(
+        nullable=True,
+        index=True,
+    )
+    checkpoint_revision: Mapped[Optional[int]] = mapped_column(nullable=True)
     description: Mapped[str] = mapped_column(nullable=False)
     action: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     entity_type: Mapped[str] = mapped_column(sa.String(64), nullable=False)
@@ -1073,10 +1257,19 @@ class FlowRunAuditOutbox(BasePublic):
     error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
 
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_flow_run_audit_outbox_run_revision",
             "flow_run_id",
             "run_revision",
-            name="uq_flow_run_audit_outbox_run_revision",
+            unique=True,
+            postgresql_where=sa.text("review_checkpoint_id IS NULL"),
+        ),
+        Index(
+            "uq_flow_run_audit_outbox_checkpoint_revision",
+            "review_checkpoint_id",
+            "checkpoint_revision",
+            unique=True,
+            postgresql_where=sa.text("review_checkpoint_id IS NOT NULL"),
         ),
         ForeignKeyConstraint(
             ["flow_run_id", "tenant_id"],
@@ -1090,9 +1283,23 @@ class FlowRunAuditOutbox(BasePublic):
             ondelete="RESTRICT",
             name="fk_flow_run_audit_outbox_run_flow",
         ),
+        ForeignKeyConstraint(
+            ["review_checkpoint_id"],
+            ["flow_run_review_checkpoints.id"],
+            ondelete="RESTRICT",
+            name="fk_flow_run_audit_outbox_review_checkpoint",
+        ),
         CheckConstraint(
-            "target_status IN ('completed','failed','cancelled')",
+            f"target_status IN ({_check_values(FLOW_RUN_AUDIT_TARGET_STATUS_VALUES)})",
             name="ck_flow_run_audit_outbox_target_status",
+        ),
+        CheckConstraint(
+            "("
+            "(review_checkpoint_id IS NULL AND checkpoint_revision IS NULL) "
+            "OR "
+            "(review_checkpoint_id IS NOT NULL AND checkpoint_revision IS NOT NULL)"
+            ")",
+            name="ck_flow_run_audit_outbox_checkpoint_key",
         ),
         CheckConstraint(
             "description = action || ':' || source",

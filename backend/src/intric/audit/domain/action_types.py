@@ -91,6 +91,12 @@ class ActionType(str, Enum):
     FLOW_RUN_ARTIFACT_DOWNLOADED = "flow_run_artifact_downloaded"
     FLOW_EVIDENCE_VIEWED = "flow_evidence_viewed"
     FLOW_EVIDENCE_EXPORTED_JSON = "flow_evidence_exported_json"
+    FLOW_RUN_REVIEW_CHECKPOINT_OPENED = "flow_run_review_checkpoint_opened"
+    FLOW_RUN_REVIEW_CHECKPOINT_EDITED = "flow_run_review_checkpoint_edited"
+    FLOW_RUN_REVIEW_CHECKPOINT_APPROVED = "flow_run_review_checkpoint_approved"
+    FLOW_RUN_REVIEW_CHECKPOINT_REJECTED = "flow_run_review_checkpoint_rejected"
+    FLOW_RUN_REVIEW_CHECKPOINT_RESUMED = "flow_run_review_checkpoint_resumed"
+    FLOW_RUN_REVIEW_CHECKPOINT_CANCELLED = "flow_run_review_checkpoint_cancelled"
 
     # AI Builder Actions
     AI_BUILDER_SESSION_CREATED = "ai_builder_session_created"

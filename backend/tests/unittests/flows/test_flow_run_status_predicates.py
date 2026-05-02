@@ -21,9 +21,15 @@ def test_flow_run_status_sets_partition_current_statuses() -> None:
         FlowRunStatus.FAILED,
         FlowRunStatus.CANCELLED,
     }
-    assert CANCELLABLE_FLOW_RUN_STATUSES == ACTIVE_FLOW_RUN_STATUSES
+    assert CANCELLABLE_FLOW_RUN_STATUSES == {
+        FlowRunStatus.QUEUED,
+        FlowRunStatus.RUNNING,
+        FlowRunStatus.AWAITING_REVIEW,
+    }
     assert ACTIVE_FLOW_RUN_STATUSES.isdisjoint(TERMINAL_FLOW_RUN_STATUSES)
-    assert ACTIVE_FLOW_RUN_STATUSES | TERMINAL_FLOW_RUN_STATUSES == set(FlowRunStatus)
+    assert ACTIVE_FLOW_RUN_STATUSES | TERMINAL_FLOW_RUN_STATUSES | {
+        FlowRunStatus.AWAITING_REVIEW
+    } == set(FlowRunStatus)
 
 
 def test_flow_run_status_predicates_accept_enum_and_wire_values() -> None:
@@ -32,7 +38,10 @@ def test_flow_run_status_predicates_accept_enum_and_wire_values() -> None:
     assert is_terminal_flow_run_status(FlowRunStatus.FAILED)
     assert is_terminal_flow_run_status("cancelled")
     assert is_cancellable_flow_run_status(FlowRunStatus.QUEUED)
+    assert is_cancellable_flow_run_status("awaiting_review")
 
+    assert not is_active_flow_run_status(FlowRunStatus.AWAITING_REVIEW)
     assert not is_active_flow_run_status(FlowRunStatus.COMPLETED)
+    assert not is_terminal_flow_run_status(FlowRunStatus.AWAITING_REVIEW)
     assert not is_terminal_flow_run_status(FlowRunStatus.RUNNING)
     assert not is_cancellable_flow_run_status(FlowRunStatus.FAILED)

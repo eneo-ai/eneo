@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING
 from intric.flows.domain.flow import (
     Flow,
     FlowRun,
+    FlowRunReviewCheckpoint,
+    FlowRunReviewCheckpointState,
     FlowRunStatus,
     FlowSparse,
     FlowStep,
@@ -52,6 +54,8 @@ __all__ = [
     "FlowStep",
     "FlowVersion",
     "FlowRun",
+    "FlowRunReviewCheckpoint",
+    "FlowRunReviewCheckpointState",
     "FlowRunStatus",
     "FlowStepResult",
     "FlowStepResultStatus",

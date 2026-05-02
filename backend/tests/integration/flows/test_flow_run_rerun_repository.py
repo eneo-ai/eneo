@@ -1020,10 +1020,11 @@ async def test_stale_revision_rejects_without_mutation(
     [
         FlowRunStatus.QUEUED,
         FlowRunStatus.RUNNING,
+        FlowRunStatus.AWAITING_REVIEW,
         FlowRunStatus.CANCELLED,
     ],
 )
-async def test_active_or_cancelled_run_rejects_without_mutation(
+async def test_non_rerunnable_run_status_rejects_without_mutation(
     db_container,
     completion_model_factory,
     space_factory,

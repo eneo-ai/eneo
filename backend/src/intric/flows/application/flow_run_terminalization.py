@@ -11,7 +11,10 @@ from intric.audit.domain.entity_types import EntityType
 from intric.flows.domain.flow import FlowRun, FlowRunStatus, JsonObject
 from intric.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
 from intric.flows.flow import FlowStepAttemptStatus, FlowStepResultStatus
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_repo import (
+    FlowRunRepository,
+    flow_run_audit_description,
+)
 from intric.flows.principal import FlowAuditActorFields, FlowPrincipal
 
 logger = logging.getLogger(__name__)
@@ -186,7 +189,7 @@ class FlowRunTerminalizer:
         action = self._action_for_status(target_status)
         outbox_id = await self.flow_run_repo.insert_terminal_audit_outbox(
             run=terminal_run,
-            description=f"{action.value}:{source.value}",
+            description=flow_run_audit_description(action=action, source=source),
             action=action,
             entity_type=EntityType.FLOW_RUN,
             actor_id=actor_fields["actor_id"],

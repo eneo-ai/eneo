@@ -18,6 +18,7 @@ from intric.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
+    FlowRunReviewCheckpoints,
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
@@ -30,6 +31,7 @@ from intric.flows.domain.flow import (
     FlowRun,
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
+    FlowRunReviewCheckpoint,
     FlowRunStatus,
     FlowStepAttempt,
     FlowStepAttemptStatus,
@@ -38,11 +40,14 @@ from intric.flows.domain.flow import (
     JsonObject,
 )
 from intric.flows.enums import (
+    ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
     ACTIVE_FLOW_RUN_STATUSES,
+    CANCELLABLE_FLOW_RUN_STATUSES,
     TERMINAL_FLOW_RUN_STATUSES,
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
+    FlowRunReviewCheckpointState,
 )
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.flow_run_rerun_graph import RerunInvalidatedStep
@@ -89,6 +94,26 @@ _ACTIVE_RERUN_OPERATION_STATUSES = (
     FlowRunRerunOperationStatus.QUEUED.value,
     FlowRunRerunOperationStatus.RUNNING.value,
 )
+_ACTIVE_REVIEW_CHECKPOINT_STATES = tuple(
+    state.value for state in ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES
+)
+_CANCELLABLE_RUN_STATUSES = tuple(
+    status.value for status in CANCELLABLE_FLOW_RUN_STATUSES
+)
+_REVIEW_CHECKPOINT_TIMESTAMP_BY_STATE = {
+    FlowRunReviewCheckpointState.EDITED: "edited_at",
+    FlowRunReviewCheckpointState.APPROVED: "approved_at",
+    FlowRunReviewCheckpointState.REJECTED: "rejected_at",
+    FlowRunReviewCheckpointState.RESUMED: "resumed_at",
+    FlowRunReviewCheckpointState.CANCELLED: "cancelled_at",
+}
+
+
+def flow_run_audit_description(
+    *, action: ActionType, source: FlowRunLifecycleSource
+) -> str:
+    return f"{action.value}:{source.value}"
+
 
 _RERUN_STEP_RESULT_RESET_VALUES: dict[str, object] = {
     "status": FlowStepResultStatus.PENDING.value,
@@ -221,6 +246,135 @@ class FlowRunRepository:
         if run_row is None:
             raise NotFoundException("Flow run not found.")
         return self.factory.from_flow_run_db(run_row)
+
+    async def create_or_get_review_checkpoint_for_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        step_id: UUID,
+        step_order: int,
+        attempt_no: int,
+        original_payload_json: JsonObject | None,
+        current_payload_json: JsonObject | None,
+        requester_principal_type: PrincipalType,
+        requester_user_id: UUID | None,
+        next_step_ids: Sequence[UUID] | None = None,
+    ) -> FlowRunReviewCheckpoint:
+        next_step_ids_json = (
+            [str(next_step_id) for next_step_id in next_step_ids]
+            if next_step_ids is not None
+            else None
+        )
+        checkpoint_row = await self.session.scalar(
+            pg_insert(FlowRunReviewCheckpoints)
+            .values(
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+                flow_run_id=flow_run_id,
+                step_id=step_id,
+                step_order=step_order,
+                attempt_no=attempt_no,
+                state=FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
+                revision=1,
+                schema_version=1,
+                original_payload_json=original_payload_json,
+                current_payload_json=current_payload_json,
+                requester_principal_type=requester_principal_type.value,
+                requester_user_id=requester_user_id,
+                next_step_ids_json=next_step_ids_json,
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_flow_run_review_checkpoints_run_step_attempt",
+            )
+            .returning(FlowRunReviewCheckpoints)
+        )
+        if checkpoint_row is None:
+            checkpoint_row = await self.session.scalar(
+                sa.select(FlowRunReviewCheckpoints)
+                .where(FlowRunReviewCheckpoints.flow_run_id == flow_run_id)
+                .where(FlowRunReviewCheckpoints.step_id == step_id)
+                .where(FlowRunReviewCheckpoints.attempt_no == attempt_no)
+                .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+            )
+        if checkpoint_row is None:
+            raise NotFoundException("Could not create or fetch review checkpoint.")
+        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
+
+    async def get_active_review_checkpoint(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> FlowRunReviewCheckpoint | None:
+        checkpoint_rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunReviewCheckpoints)
+                    .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+                    .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+                    .where(
+                        FlowRunReviewCheckpoints.state.in_(
+                            _ACTIVE_REVIEW_CHECKPOINT_STATES
+                        )
+                    )
+                    .order_by(FlowRunReviewCheckpoints.created_at.desc())
+                    .limit(2)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not checkpoint_rows:
+            return None
+        if len(checkpoint_rows) > 1:
+            raise BadRequestException(
+                "Flow run has multiple active review checkpoints.",
+                code="flow_review_active_checkpoint_conflict",
+            )
+        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_rows[0])
+
+    async def transition_review_checkpoint_state(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        allowed_source_states: Sequence[FlowRunReviewCheckpointState],
+        target_state: FlowRunReviewCheckpointState,
+        decided_by_user_id: UUID | None = None,
+        decided_by_principal_type: PrincipalType | None = None,
+        resume_idempotency_key: str | None = None,
+    ) -> FlowRunReviewCheckpoint | None:
+        now_utc = datetime.now(timezone.utc)
+        values: dict[str, Any] = {
+            "state": target_state.value,
+            "revision": FlowRunReviewCheckpoints.revision + 1,
+        }
+        timestamp_field = _REVIEW_CHECKPOINT_TIMESTAMP_BY_STATE.get(target_state)
+        if timestamp_field is not None:
+            values[timestamp_field] = now_utc
+        if decided_by_user_id is not None:
+            values["decided_by_user_id"] = decided_by_user_id
+        if decided_by_principal_type is not None:
+            values["decided_by_principal_type"] = decided_by_principal_type.value
+        if resume_idempotency_key is not None:
+            values["resume_idempotency_key"] = resume_idempotency_key
+
+        source_state_values = tuple(state.value for state in allowed_source_states)
+        checkpoint_row = await self.session.scalar(
+            sa.update(FlowRunReviewCheckpoints)
+            .where(FlowRunReviewCheckpoints.id == checkpoint_id)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+            .where(FlowRunReviewCheckpoints.revision == expected_revision)
+            .where(FlowRunReviewCheckpoints.state.in_(source_state_values))
+            .values(**values)
+            .returning(FlowRunReviewCheckpoints)
+        )
+        if checkpoint_row is None:
+            return None
+        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
 
     async def get_latest_completed_attempt_id_for_step(
         self,
@@ -655,11 +809,16 @@ class FlowRunRepository:
         if cancelled_at is not None:
             values["cancelled_at"] = cancelled_at
 
+        source_statuses = (
+            _CANCELLABLE_RUN_STATUSES
+            if target_status == FlowRunStatus.CANCELLED
+            else self._ACTIVE_STATUSES
+        )
         stmt = (
             sa.update(FlowRuns)
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
-            .where(FlowRuns.status.in_(self._ACTIVE_STATUSES))
+            .where(FlowRuns.status.in_(source_statuses))
         )
         if stale_before is not None:
             stmt = stmt.where(FlowRuns.updated_at <= stale_before)
@@ -802,6 +961,47 @@ class FlowRunRepository:
         )
         if outbox_id is None:
             raise RuntimeError("Flow run audit outbox insert did not return an id.")
+        return outbox_id
+
+    async def insert_review_checkpoint_audit_outbox(
+        self,
+        *,
+        checkpoint: FlowRunReviewCheckpoint,
+        run_revision: int,
+        action: ActionType,
+        actor_id: UUID | None,
+        actor_type: ActorType,
+        actor_api_key_id: UUID | None,
+        source: FlowRunLifecycleSource,
+        target_state: FlowRunReviewCheckpointState,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> UUID:
+        outbox_id = await self.session.scalar(
+            sa.insert(FlowRunAuditOutbox)
+            .values(
+                tenant_id=checkpoint.tenant_id,
+                flow_id=checkpoint.flow_id,
+                flow_run_id=checkpoint.flow_run_id,
+                run_revision=run_revision,
+                review_checkpoint_id=checkpoint.id,
+                checkpoint_revision=checkpoint.revision,
+                description=flow_run_audit_description(action=action, source=source),
+                action=action.value,
+                entity_type=EntityType.FLOW_RUN_REVIEW_CHECKPOINT.value,
+                entity_id=checkpoint.id,
+                actor_id=actor_id,
+                actor_type=actor_type.value,
+                actor_api_key_id=actor_api_key_id,
+                source=source.value,
+                target_status=target_state.value,
+                error_code=error_code,
+                error_message=error_message,
+            )
+            .returning(FlowRunAuditOutbox.id)
+        )
+        if outbox_id is None:
+            raise RuntimeError("Review checkpoint audit outbox insert returned no id.")
         return outbox_id
 
     async def update_input_payload(
@@ -996,6 +1196,7 @@ class FlowRunRepository:
         return _result_file_from_rows(result_file_row, file_row)
 
     async def mark_running_if_claimable(self, *, run_id: UUID, tenant_id: UUID) -> bool:
+        now_utc = datetime.now(timezone.utc)
         result = await self.session.execute(
             sa.update(FlowRuns)
             .where(FlowRuns.id == run_id)
@@ -1003,7 +1204,7 @@ class FlowRunRepository:
             .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
             .values(
                 status=FlowRunStatus.RUNNING.value,
-                started_at=datetime.now(timezone.utc),
+                started_at=sa.func.coalesce(FlowRuns.started_at, now_utc),
             )
         )
         return bool(getattr(result, "rowcount", 0))
