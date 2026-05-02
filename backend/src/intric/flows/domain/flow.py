@@ -13,11 +13,14 @@ from intric.flows.enums import (
     FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
+    FlowRunRerunInvalidationRole,
+    FlowRunRerunOperationStatus,
     FlowRunStatus,
     FlowRuntimeInputFormat,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
+    RerunDependencyKind,
 )
 
 JsonObject: TypeAlias = dict[str, Any]
@@ -136,6 +139,7 @@ class FlowRun(BaseModel):
     user_id: Optional[UUID] = None
     tenant_id: UUID
     trace_id: UUID
+    revision: int = 1
     status: FlowRunStatus
     cancelled_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
@@ -158,6 +162,7 @@ class FlowStepResult(BaseModel):
     step_id: Optional[UUID] = None
     step_order: int
     assistant_id: Optional[UUID] = None
+    current_attempt_no: Optional[int] = None
     input_payload_json: JsonObject | None = None
     effective_prompt: Optional[str] = None
     output_payload_json: JsonObject | None = None
@@ -184,6 +189,9 @@ class FlowStepAttempt(BaseModel):
     step_id: Optional[UUID] = None
     step_order: int
     attempt_no: int
+    rerun_operation_id: Optional[UUID] = None
+    predecessor_attempt_id: Optional[UUID] = None
+    superseded_by_attempt_id: Optional[UUID] = None
     celery_task_id: Optional[str] = None
     status: FlowStepAttemptStatus
     error_code: Optional[str] = None
@@ -196,7 +204,59 @@ class FlowStepAttempt(BaseModel):
     num_tokens_input: Optional[int] = None
     num_tokens_output: Optional[int] = None
     provenance_json: JsonObject | None = None
+    input_payload_json: JsonObject | None = None
+    output_payload_json: JsonObject | None = None
+    flow_step_execution_hash: Optional[str] = None
     started_at: datetime
     finished_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowRunRerunOperation(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID
+    rerun_step_id: UUID
+    rerun_step_order: int
+    root_attempt_no: int
+    root_attempt_id: Optional[UUID] = None
+    status: FlowRunRerunOperationStatus
+    request_fingerprint: str
+    expected_run_revision: int
+    accepted_run_revision: int
+    reason: str
+    input_payload_json: JsonObject | None = None
+    step_inputs_json: JsonObject | None = None
+    requested_by_principal_type: PrincipalType
+    requested_by_user_id: UUID
+    failure_code: Optional[str] = None
+    failure_message: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowRunRerunInvalidatedStep(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    operation_id: UUID
+    tenant_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID
+    step_id: UUID
+    step_order: int
+    invalidation_order: int
+    role: FlowRunRerunInvalidationRole
+    dependency_sources_json: list[RerunDependencyKind]
+    prior_step_result_id: Optional[UUID] = None
+    prior_attempt_id: Optional[UUID] = None
+    new_attempt_no: Optional[int] = None
+    new_attempt_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime

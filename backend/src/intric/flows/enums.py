@@ -11,6 +11,23 @@ class FlowInputSource(str, Enum):
     HTTP_POST = "http_post"
 
 
+class RerunDependencyKind(str, Enum):
+    INPUT_SOURCE_PREVIOUS_STEP = "input_source.previous_step"
+    INPUT_SOURCE_ALL_PREVIOUS_STEPS = "input_source.all_previous_steps"
+    INPUT_BINDINGS_QUESTION = "input_bindings.question"
+    INPUT_CONFIG_URL = "input_config.url"
+    INPUT_CONFIG_HEADERS = "input_config.headers"
+    INPUT_CONFIG_BODY_TEMPLATE = "input_config.body_template"
+    INPUT_CONFIG_BODY_JSON = "input_config.body_json"
+    OUTPUT_CONFIG_URL = "output_config.url"
+    OUTPUT_CONFIG_HEADERS = "output_config.headers"
+    OUTPUT_CONFIG_BODY_TEMPLATE = "output_config.body_template"
+    OUTPUT_CONFIG_BODY_JSON = "output_config.body_json"
+    OUTPUT_CONFIG_BINDINGS = "output_config.bindings"
+    ASSISTANT_SNAPSHOT_INSTRUCTIONS = "assistant_snapshot.instructions"
+    RUNTIME_ALIAS_PREVIOUS_STEP = "runtime_alias.previous_step"
+
+
 class AIBuilderInputSource(str, Enum):
     FLOW_INPUT = FlowInputSource.FLOW_INPUT.value
     PREVIOUS_STEP = FlowInputSource.PREVIOUS_STEP.value
@@ -67,6 +84,21 @@ class FlowRunStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+# Rerun operation values currently mirror run statuses, but the operation
+# lifecycle is a separate persisted contract.
+class FlowRunRerunOperationStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class FlowRunRerunInvalidationRole(str, Enum):
+    ROOT = "root"
+    DOWNSTREAM = "downstream"
 
 
 ACTIVE_FLOW_RUN_STATUSES = frozenset(

@@ -30,6 +30,8 @@ from intric.flows.enums import (
     FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
+    FlowRunRerunInvalidationRole,
+    FlowRunRerunOperationStatus,
     FlowRunStatus,
     FlowRunTerminalSource,
     FlowStepAttemptStatus,
@@ -43,6 +45,12 @@ FLOW_STEP_OUTPUT_MODE_VALUES = tuple(item.value for item in FlowOutputMode)
 FLOW_STEP_OUTPUT_TYPE_VALUES = tuple(item.value for item in FlowOutputType)
 FLOW_STEP_MCP_POLICY_VALUES = tuple(item.value for item in FlowMcpPolicy)
 FLOW_RUN_STATUS_VALUES = tuple(item.value for item in FlowRunStatus)
+FLOW_RUN_RERUN_OPERATION_STATUS_VALUES = tuple(
+    item.value for item in FlowRunRerunOperationStatus
+)
+FLOW_RUN_RERUN_INVALIDATION_ROLE_VALUES = tuple(
+    item.value for item in FlowRunRerunInvalidationRole
+)
 FLOW_RUN_TERMINAL_SOURCE_VALUES = tuple(item.value for item in FlowRunTerminalSource)
 FLOW_STEP_RESULT_STATUS_VALUES = tuple(item.value for item in FlowStepResultStatus)
 FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(item.value for item in FlowStepAttemptStatus)
@@ -363,6 +371,14 @@ class FlowRuns(BasePublic):
         sa.String(64),
         nullable=True,
     )
+    revision: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default="1",
+        comment=(
+            "Monotonic lifecycle token for rerun/resume compare-and-swap; "
+            "updated_at is display metadata."
+        ),
+    )
     status: Mapped[str] = mapped_column(
         sa.String(32),
         nullable=False,
@@ -477,6 +493,10 @@ class FlowStepResults(BasePublic):
         ForeignKey(Assistants.id, ondelete="SET NULL"),
         nullable=True,
     )
+    current_attempt_no: Mapped[Optional[int]] = mapped_column(
+        nullable=True,
+        server_default="1",
+    )
     input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
     )
@@ -532,6 +552,113 @@ class FlowStepResults(BasePublic):
     )
 
 
+class FlowRunRerunOperations(BasePublic):
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Tenants.id,
+            ondelete="CASCADE",
+            name="fk_rerun_operations_tenant",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Flows.id,
+            ondelete="CASCADE",
+            name="fk_rerun_operations_flow",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    rerun_step_id: Mapped[UUID] = mapped_column(nullable=False)
+    rerun_step_order: Mapped[int] = mapped_column(nullable=False)
+    root_attempt_no: Mapped[int] = mapped_column(nullable=False)
+    root_attempt_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "flow_step_attempts.id",
+            ondelete="SET NULL",
+            name="fk_rerun_operations_root_attempt",
+        ),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default=FlowRunRerunOperationStatus.QUEUED.value,
+    )
+    request_fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    expected_run_revision: Mapped[int] = mapped_column(nullable=False)
+    accepted_run_revision: Mapped[int] = mapped_column(nullable=False)
+    reason: Mapped[str] = mapped_column(sa.Text(), nullable=False)
+    input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    step_inputs_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    requested_by_principal_type: Mapped[str] = mapped_column(
+        sa.String(32), nullable=False
+    )
+    requested_by_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Users.id,
+            ondelete="RESTRICT",
+            name="fk_rerun_operations_requested_by_user",
+        ),
+        nullable=False,
+    )
+    failure_code: Mapped[Optional[str]] = mapped_column(sa.String(64), nullable=True)
+    failure_message: Mapped[Optional[str]] = mapped_column(nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({_check_values(FLOW_RUN_RERUN_OPERATION_STATUS_VALUES)})",
+            name="ck_flow_run_rerun_operations_status",
+        ),
+        CheckConstraint(
+            "requested_by_principal_type = 'user'",
+            name="ck_flow_run_rerun_operations_user_principal",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_rerun_operations_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_rerun_operations_run_flow",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "flow_run_id",
+            "request_fingerprint",
+            name="uq_flow_run_rerun_operations_request_fingerprint",
+        ),
+        Index("ix_flow_run_rerun_operations_run_status", "flow_run_id", "status"),
+        Index(
+            "ix_flow_run_rerun_operations_tenant_created_at",
+            "tenant_id",
+            "created_at",
+        ),
+        Index(
+            "ix_flow_run_rerun_operations_run_step",
+            "flow_run_id",
+            "rerun_step_id",
+        ),
+    )
+
+
 class FlowStepAttempts(BasePublic):
     flow_run_id: Mapped[UUID] = mapped_column(
         ForeignKey(FlowRuns.id, ondelete="CASCADE"),
@@ -554,6 +681,30 @@ class FlowStepAttempts(BasePublic):
     )
     step_order: Mapped[int] = mapped_column(nullable=False)
     attempt_no: Mapped[int] = mapped_column(nullable=False)
+    rerun_operation_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            FlowRunRerunOperations.id,
+            ondelete="SET NULL",
+            name="fk_step_attempts_rerun_operation",
+        ),
+        nullable=True,
+    )
+    predecessor_attempt_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "flow_step_attempts.id",
+            ondelete="SET NULL",
+            name="fk_step_attempts_predecessor",
+        ),
+        nullable=True,
+    )
+    superseded_by_attempt_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "flow_step_attempts.id",
+            ondelete="SET NULL",
+            name="fk_step_attempts_superseded_by",
+        ),
+        nullable=True,
+    )
     celery_task_id: Mapped[Optional[str]] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     error_code: Mapped[Optional[str]] = mapped_column(nullable=True)
@@ -568,6 +719,13 @@ class FlowStepAttempts(BasePublic):
     provenance_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
     )
+    input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    output_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    flow_step_execution_hash: Mapped[Optional[str]] = mapped_column(nullable=True)
     started_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False
     )
@@ -602,6 +760,119 @@ class FlowStepAttempts(BasePublic):
             "flow_id",
             "step_id",
             "attempt_no",
+        ),
+        Index("ix_flow_step_attempts_rerun_operation", "rerun_operation_id"),
+        Index("ix_flow_step_attempts_predecessor_attempt", "predecessor_attempt_id"),
+        Index(
+            "ix_flow_step_attempts_superseded_by_attempt",
+            "superseded_by_attempt_id",
+        ),
+    )
+
+
+class FlowRunRerunInvalidatedSteps(BasePublic):
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            FlowRunRerunOperations.id,
+            ondelete="CASCADE",
+            name="fk_rerun_invalidated_steps_operation",
+        ),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Tenants.id,
+            ondelete="CASCADE",
+            name="fk_rerun_invalidated_steps_tenant",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Flows.id,
+            ondelete="CASCADE",
+            name="fk_rerun_invalidated_steps_flow",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    step_order: Mapped[int] = mapped_column(nullable=False)
+    invalidation_order: Mapped[int] = mapped_column(nullable=False)
+    role: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    dependency_sources_json: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'[]'::jsonb"),
+    )
+    prior_step_result_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            FlowStepResults.id,
+            ondelete="SET NULL",
+            name="fk_rerun_invalidated_steps_prior_result",
+        ),
+        nullable=True,
+    )
+    prior_attempt_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            FlowStepAttempts.id,
+            ondelete="SET NULL",
+            name="fk_rerun_invalidated_steps_prior_attempt",
+        ),
+        nullable=True,
+    )
+    new_attempt_no: Mapped[Optional[int]] = mapped_column(nullable=True)
+    new_attempt_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            FlowStepAttempts.id,
+            ondelete="SET NULL",
+            name="fk_rerun_invalidated_steps_new_attempt",
+        ),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"role IN ({_check_values(FLOW_RUN_RERUN_INVALIDATION_ROLE_VALUES)})",
+            name="ck_flow_run_rerun_invalidated_steps_role",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_rerun_invalidated_steps_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_rerun_invalidated_steps_run_flow",
+        ),
+        UniqueConstraint(
+            "operation_id",
+            "step_id",
+            name="uq_flow_run_rerun_invalidated_steps_operation_step",
+        ),
+        UniqueConstraint(
+            "operation_id",
+            "invalidation_order",
+            name="uq_flow_run_rerun_invalidated_steps_operation_order",
+        ),
+        Index(
+            "ix_flow_run_rerun_invalidated_steps_run_step",
+            "flow_run_id",
+            "step_id",
+        ),
+        Index(
+            "ix_flow_run_rerun_invalidated_steps_prior_attempt",
+            "prior_attempt_id",
+        ),
+        Index(
+            "ix_flow_run_rerun_invalidated_steps_new_attempt",
+            "new_attempt_id",
         ),
     )
 
