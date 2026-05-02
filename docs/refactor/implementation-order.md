@@ -23,6 +23,7 @@ TL;DR:
 | 8 | PRD-003 step rerun | Batches 3, 4, 5 | DAG-aware rerun endpoint/command, `flow_run_rerun_operations`, audit, idempotency, and evidence invalidation. | Rerun API+worker test; permission matrix; frontend status test |
 | 9 | PRD-003 human review pause/edit/resume | Batches 3, 4, 5, 8 optional | DB state machine plus thin Celery resume task; checkpoint/yield/resume feature with audit/evidence/frontend support. | Pause/resume runtime integration; duplicate resume; stale edit conflict; evidence export; frontend journey |
 | 10 | PRD-009 full operability, PRD-007/008 cleanup, PRD-010 docs | All prior batches as needed | Runbooks, dashboards/metrics, dead test deletion, readability cleanup, ADRs updated. | Full targeted backend/frontend suites; docs diff review |
+| 11 | PRD-011 Flow AI Builder reliability; PRD-005 support | Batch 10 committed or explicitly waived | Flow AI Builder skeleton-as-contract mechanics, Swedish slot resolver evals, form-field/resource goldens, provider-aware structured outputs, local manual API smoke suite, and no-repair happy path gates. | AI Builder goldens/eval harness; six-prompt local manual scorecard smoke suite; create/edit/apply regressions; structured-output fallback tests; pyright/ruff/import checks |
 
 ## Post-Batch-0 Governance Gate
 
@@ -67,6 +68,12 @@ Use `phase3/reconciled-plan.md`, accepted ADRs, and `phase0/baseline.md` as supp
 Per-batch execution artifacts live under `docs/refactor/execution/batch-{N}-{name}/`. Start each batch by copying the templates from `docs/refactor/execution/batch-template/` into that batch directory, then follow `docs/refactor/execution/loop-protocol.md`.
 
 Do not mix Batch 8 or 9 runtime feature work into earlier foundation batches.
+
+Batch 11 is a post-operability Flow AI Builder reliability batch. It is not a
+package/namespace rename, frontend redesign, or runtime/data-model batch. It may
+start only after Batch 10 source state is committed or explicitly waived by the
+user, because Batch 11 should not mix AI Builder reliability work with
+operability cleanup commits.
 
 ## Branch Strategy
 

@@ -1,0 +1,459 @@
+# Batch 11 — Flow AI Builder Reliability Plan
+
+## TL;DR
+
+1. Batch 11 is a Flow AI Builder reliability/rebuild batch, not a continuation of Batch 10 operability source work.
+2. The first reliability target is backend-owned Flow mechanics: architecture-derived skeletons must be the contract, and the LLM should fill semantics only.
+3. Swedish-first intent understanding should move from keyword gates to a typed slot resolver with a frozen eval corpus.
+4. LiteLLM structured outputs are required as provider-aware defense-in-depth, not as the primary fix for architecture-class failures.
+5. Implementation must happen in small slices with measurable success thresholds and Claude review before each commit.
+
+## Current Repository State
+
+| Item | Current value | Decision |
+|---|---|---|
+| Branch | `feature/refactor-flows-flowai` | Continue on this branch only unless user changes branch policy. |
+| Current HEAD at Batch 11 implementation start | `832f4c1b flows: close branding namespace docs` | Batch 10 is committed through the documentation/ADR closure slice. |
+| Staged files | none | Safe for docs planning. |
+| Known unrelated dirty files | `scripts/run_codex_review.sh`, `PRODUCT.md`, `docs/refactor/goals.md` | Do not stage or commit as part of Batch 11 planning. |
+| Source implementation in first pass | 11.0a reliability corpus | Start with the lowest-risk reliability gate before measurement hooks or behavior changes. |
+
+## Read-First Inputs For The Implementation Agent
+
+1. `AGENTS.md`
+2. `docs/refactor/implementation-order.md`
+3. `docs/refactor/execution/loop-protocol.md`
+4. `docs/refactor/execution/retrospective-checklist.md`
+5. `docs/refactor/execution/implementation-bootstrap.md`
+6. `docs/refactor/execution/batch-10-operability-cleanup-docs/plan.md`
+7. `docs/refactor/execution/batch-10-operability-cleanup-docs/journal.md`
+8. latest Batch 10 retrospective and Claude reconciliation
+9. `docs/refactor/prd/PRD-005-ai-builder-architecture.md`
+10. `docs/refactor/prd/PRD-011-flow-ai-builder-reliability.md`
+11. `docs/refactor/ai-builder-prompt-contract.md`
+12. `docs/engineering/maintainability-standards.md`
+13. `docs/engineering/api-design-standard.md`
+14. `docs/engineering/testing-standard.md`
+15. `docs/engineering/comment-and-readability-standard.md`
+16. `docs/refactor/execution/batch-11-flow-ai-builder-reliability/manual-eval-runbook.md`
+
+## Problem Statement
+
+Flow AI Builder must reliably generate valid Eneo Flows from Swedish and English user intent without relying on repair as the normal success path. The reported Swedish audio-to-DOCX failure showed the current mismatch:
+
+- UI confirmation had already understood runtime input as `Ljud` and final result as `DOCX`.
+- The final proposal then failed quality because no compiled step had `input_type="audio"` or `output_mode="transcribe_only"`.
+- Proposal repair could not honestly fix that, because the create proposal contract tells the LLM not to emit low-level mechanics such as `input_type` or `output_mode`.
+
+Batch 11 therefore treats Flow mechanics as backend-owned. The LLM should choose semantic content and refs inside a server-derived skeleton, not rediscover the Flow framework.
+
+## Canonical Ownership Inventory
+
+| Concept | Current owner | Evidence | Batch 11 action |
+|---|---|---|---|
+| Engine legal Flow tuples | `backend/src/intric/flows/flow_capability_manifest.py` | FCM is engine truth in `flow_capability_manifest.py:1-20`; `transcribe_only` requires audio-to-text in `flow_capability_manifest.py:516-557`; chain compatibility is checked in `flow_capability_manifest.py:970-978`. | Reuse as the validation truth. |
+| Resolved planning state | `backend/src/intric/flows/ai_builder/planning_state.py` | PlanningState is the persisted typed JSONB source in `planning_state.py:1-24`; slots and architecture types are declared in `planning_state.py:111-158`. | Add typed resolver output here; do not create a parallel state bag. |
+| Architecture derivation | `backend/src/intric/flows/ai_builder/ai_builder_architecture_derivation.py` | `derive_architecture_commit_draft` maps PlanningState to architecture tuples in `ai_builder_architecture_derivation.py:27-67`; audio non-text output maps to `audio_to_artifact_report` in `ai_builder_architecture_derivation.py:169-194`. | Promote derived architecture into the `materialize_step_skeleton` precondition. |
+| Pattern archetypes | `backend/src/intric/flows/ai_builder/pattern_registry.py` | Pattern Registry is planner-facing and versioned, while FCM remains engine truth. | Reuse; add only earned archetypes such as form-field lifecycle. |
+| Outline compile | `backend/src/intric/flows/ai_builder/ai_builder_create_outline.py` | `outline_flow` strips backend-owned mechanics in `ai_builder_create_outline.py:68-96`; `_apply_server_pattern_chain` is called from `compile_outline_to_create_draft` in `ai_builder_create_outline.py:515-540`. | Change from opportunistic mechanics injection to skeleton fill. |
+| Pattern chain expansion | `backend/src/intric/flows/ai_builder/ai_builder_outline_pattern_chains.py` | Audio pattern expansion is predicate-driven in `ai_builder_outline_pattern_chains.py:261-315`. | Reuse or promote into canonical `materialize_step_skeleton`; avoid a parallel path. |
+| Intent resolution | `backend/src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py` | Current audio/document/text inference uses bilingual markers and free-text checks in `ai_builder_input_architecture_policy.py:32-248` and `:443-488`. | Demote keyword logic to resolver prior after a typed LLM resolver is measured. |
+| Enabled MCP resources | `ai_builder_mcp_resources.py`, `ai_builder_mcp_intent.py` | Resources are normalized in `ai_builder_mcp_resources.py:29-88`; selected refs are enforced in `ai_builder_mcp_intent.py:388-433`. | Reuse and enum-bind refs in LLM materials. |
+| Flow capability prompt material | `ai_builder_flow_capability_reference.py` | Structured reference block is generated from typed Flow sources in `ai_builder_flow_capability_reference.py:18-75`. | Strengthen this owner; do not invent a new manifest layer. |
+| LiteLLM provider adapter | `TenantModelAdapter` | Supported params are checked in `tenant_model_adapter.py:214-236`; completions use `drop_params=True` in `tenant_model_adapter.py:578-607`. | Add a provider-aware structured-output rail only after materialization and resolver contracts are clear. |
+
+## Architecture Direction
+
+```mermaid
+flowchart TD
+  U["User intent, attachments, enabled resources"] --> R["Typed slot resolver"]
+  R --> P["PlanningState resolved slots"]
+  P --> A["Server-derived architecture commit"]
+  A --> S["materialize_step_skeleton"]
+  S --> L["LLM semantic fill"]
+  L --> D["Flow draft spec"]
+  D --> V["FCM + critic validation"]
+  V --> C["Preview / approve / apply"]
+```
+
+### Backend Decides
+
+- runtime input type
+- step input and output types
+- output mode
+- input source
+- runtime upload ownership
+- chain compatibility
+- required skeleton roles
+- form-field declaration/use validation
+- enabled model, assistant, knowledge, MCP server, and MCP tool allow-lists
+
+### LLM Decides
+
+- step names
+- task/prompt content
+- semantic instructions
+- secondary input field proposals
+- exact allowed refs from backend-supplied allow-lists
+- follow-up question wording when a required slot is unknown
+- Swedish phrasing for user-facing plan text
+
+### Repair Is Limited To
+
+- malformed JSON or tool-call shape
+- unresolved refs that can be corrected from the same allow-list
+- localized field-level fixes
+
+Repair must not redesign Flow architecture, invent mechanics, or hide a backend materialization bug.
+
+Architecture-class invariant failures must raise a typed internal error such as
+`AIBuilderArchitectureError` with a sanitized public code and full structured
+log context. They must not enter semantic/proposal repair.
+
+## Slice Plan
+
+### 11.0 — Measurement Baseline And Production-Failure Corpus
+
+Goal:
+Measure current behavior and freeze the reliability corpus before changing mechanics.
+
+Deliverables:
+
+- first-attempt compile success event/metric
+- repair invocation reason event/metric
+- `materialize_step_skeleton` path event/metric once skeleton code exists
+- structured-output path event/metric once 11.5 exists
+- journal baseline for current AI Builder goldens and known failures
+- local manual API smoke-suite runbook and harness plan for six stable Swedish prompts plus revise-plan and edit-existing-flow scenarios
+- frozen reliability corpus in the existing AI Builder benchmark case owner with:
+  - the reported Swedish audio-to-DOCX failure
+  - at least five additional captured Swedish prompts from telemetry, journals, or manual reproduction
+  - expected slots and expected high-level Flow shape
+  - a manifest/minimum-count test so cases cannot be removed silently
+
+Do not:
+
+- change proposal behavior
+- add a generic metrics manager
+- touch frontend
+
+Validation:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder tests/integration/flows/test_ai_builder_session_api_regressions.py -q
+cd backend && uv run pyright <touched files>
+cd backend && uv run ruff check <touched files>
+cd backend && uv run ruff format --check <touched files>
+cd backend && uv run lint-imports --no-cache
+git diff --check -- <touched paths>
+```
+
+Exit gate:
+
+- baseline numbers are written to the journal before 11.1 starts
+- reliability corpus exists and has an integrity/minimum-count test
+- later reliability pass-rate targets use the reliability corpus, not goldens authored later in the batch
+- manual smoke-suite harness shape, dry-run validation, redacted scorecard schema, workspace/model fixture requirements, create/revise/edit coverage, and initial baseline procedure are documented before behavior changes
+- manual smoke-suite regressions are either fixed or promoted into automated corpus/tests before a slice commits
+
+#### 11.0a — Frozen Reliability Corpus
+
+Goal:
+Create the canonical automated corpus target before adding instrumentation or
+changing proposal behavior.
+
+Canonical owner:
+`backend/tests/integration/flows/ai_builder/benchmark/cases.py` owns AI Builder
+prompt fixtures. 11.0a extends that owner with typed reliability cases rather
+than creating a parallel JSON corpus. The existing `BENCHMARK_CASES` tuple
+continues to own deterministic discovery measurements; the new reliability
+tuple owns Flow-shape expectations for reported/manual failures.
+
+Deliverables:
+
+- Frozen typed reliability cases using dataclasses and closed source/domain tags.
+- The reported Swedish audio-to-DOCX failure plus the six stable Swedish manual-runbook prompts.
+- Named type contract: `CorpusSource`, `DomainCoupling`, `BehavioralRisk`, `ExpectedSlot`, `ExpectedStepShape`, `ExpectedFlowShape`, and `ReliabilityCorpusCase`.
+- Expected slot values using the existing requirement-slot names from `ai_builder_slot_vocabulary.py`.
+- Expected high-level Flow shape as a named typed contract, including ordered step tuples using engine values from `intric.flows.enums`.
+- Unit test that validates minimum count of seven, unique IDs, Swedish language, closed source tags, canonical slot names, Flow enum values, FCM-legal step tuples, content-based reported audio-to-DOCX presence with an explicit `audio -> text / transcribe_only` step, enum-derived coverage with typed exclusions, domain-neutrality tags, and `BehavioralRisk` coverage.
+
+Do not:
+
+- call the LLM
+- change planner, compiler, repair, validator, or runtime behavior
+- add a harness script in this slice
+- introduce JSON/YAML fixture parsing or new dependencies
+- hardcode production behavior for the corpus prompts
+
+Validation:
+
+```bash
+cd backend && uv run pytest tests/integration/flows/ai_builder/benchmark/test_reliability_corpus.py tests/integration/flows/ai_builder/benchmark/test_baseline_benchmark.py -q
+cd backend && uv run pyright tests/integration/flows/ai_builder/benchmark/cases.py tests/integration/flows/ai_builder/benchmark/test_reliability_corpus.py
+cd backend && uv run ruff check tests/integration/flows/ai_builder/benchmark/cases.py tests/integration/flows/ai_builder/benchmark/test_reliability_corpus.py
+cd backend && uv run ruff format --check tests/integration/flows/ai_builder/benchmark/cases.py tests/integration/flows/ai_builder/benchmark/test_reliability_corpus.py
+cd backend && uv run lint-imports --no-cache
+git diff --check -- backend/tests/integration/flows/ai_builder/benchmark/cases.py backend/tests/integration/flows/ai_builder/benchmark/test_reliability_corpus.py docs/refactor/execution/batch-11-flow-ai-builder-reliability docs/refactor/prd/PRD-011-flow-ai-builder-reliability.md docs/refactor/implementation-order.md
+```
+
+Exit gate:
+
+- reliability corpus and integrity test are committed before 11.0b measurement hooks
+- Batch 11 journal records that behavior baseline numbers are still pending for 11.0b
+- no source behavior changes are mixed into the corpus commit
+- Flow enum exclusion lists are typed to enum members, include one-line rationales, and cannot reference removed enum values
+
+### 11.1 — StepSkeleton Materialization
+
+Goal:
+Make backend-derived Flow mechanics mandatory and deterministic.
+
+Plan requirements before implementation:
+
+| Required inventory | Output |
+|---|---|
+| Existing architecture derivation callers | file:line list and decision |
+| Existing pattern chain realizers | role, predicate, kept/moved/rewritten |
+| Critic invariants | architecture / semantic / hybrid classification |
+| Edit-path compile behavior | fill missing / preserve valid / reject incompatible |
+| New owner choice | prefer reuse/rename of existing pattern-chain owner; create a narrow new file only if current owner cannot become canonical without parallel logic |
+
+Deliverables:
+
+- `StepSkeleton` typed value object.
+- Mandatory skeleton materialization from PlanningState, FCM, and Pattern Registry.
+- `compile_outline_to_create_draft` fills semantic content into skeleton slots.
+- Critic invariants no longer ask repair to solve backend-owned mechanics.
+- Canaries for audio-to-DOCX, audio-to-PDF, document-to-DOCX template/fill, document-to-PDF, text-to-JSON, JSON-to-text/JSON, and multi-step chains.
+- Typed architecture failure surface, for example `AIBuilderArchitectureError`, that bypasses repair and reaches existing SSE/API error translation with a sanitized code.
+
+Skeleton fill rules:
+
+Use the `Skeleton Fill Contract` in `docs/refactor/prd/PRD-011-flow-ai-builder-reliability.md`. The implementation plan must not duplicate or weaken that contract.
+
+Internal split:
+
+- 11.1a: typed step slots and `materialize_step_skeleton` owner.
+- 11.1b: skeleton fill rules and compile integration.
+- 11.1c: critic invariant classification, architecture failure surface, and canary tests. Split 11.1c further before implementation if the plan exceeds the slice LOC ceiling.
+
+Success gate:
+
+- zero chain-materialization regressions on the canary suite
+- audio-to-DOCX compiles without repair
+- no LLM output field is required to echo backend-owned mechanics
+- fixed PlanningState/FCM tuple tests produce FCM-legal chains
+- Swedish corpus pass-rate is not claimed until 11.2 lands
+
+### 11.2 — Swedish Slot Resolver
+
+Goal:
+Use a typed resolver to understand Swedish and English intent without brittle keyword gates.
+
+Plan requirements before implementation:
+
+- inventory current slot values from `ai_builder_slot_vocabulary.py`
+- inventory current keyword gates in `ai_builder_input_architecture_policy.py`
+- design resolver schema with legal enum values and `unknown`
+- define confidence/follow-up threshold
+- define where keyword evidence becomes a JSON prior
+- define audit/log fields for model, tenant, confidence, capability path, and latency
+
+Deliverables:
+
+- typed resolver result model
+- frozen Swedish eval corpus under the canonical AI Builder corpus owner chosen in 11.2
+- resolver accuracy test
+- follow-up question behavior for unknown/ambiguous slots
+- keyword logic kept as prior in this slice, not deleted
+
+Success gate:
+
+- initial target: at least 85% resolver accuracy on a frozen Swedish corpus with at least 80 labeled cases
+- no corpus shrinkage without explicit test failure or review note
+- no hardcoded transcription/document-summary special cases
+- keyword prior deletion criterion is written before implementation, starting from: resolver matches or improves on keyword decisions for at least 95% of the corpus and no reviewed production sample over seven days shows a resolver/keyword disagreement on an architecture-class slot
+
+### 11.3 — Form Fields And Resource Semantics
+
+Goal:
+Make secondary form fields and enabled resources reliable without overloading prompts.
+
+Deliverables:
+
+- inventory proving whether existing Pattern Registry can express form-field declaration, use, and downstream reference
+- form-field lifecycle archetype only if existing Pattern Registry cannot express the lifecycle without parallel semantics
+- invariant that `uses_form_fields` references resolve to declared fields
+- goldens for declare-only, chain, and multi-reference form-field flows
+- LLM material listing enabled models, assistants, knowledge bases, MCP servers, and MCP tools as exact refs
+- ref validation for chosen MCP/knowledge/assistant resources
+
+Success gate:
+
+- missing or stale form-field refs fail with typed diagnostics
+- resource refs are exact, enabled, and tenant/workspace-safe
+
+### 11.4 — Goldens Matrix And Edit Parity
+
+Goal:
+Make coverage gaps visible and prevent future Pattern Registry / FCM drift. Goldens are coverage gates, not the baseline reliability corpus.
+
+Deliverables:
+
+- matrix harness across FCM capabilities, Pattern Registry compositions, and create/edit paths
+- domain-neutral goldens for simple and complex flows
+- edit-path twin or explicit exception for each create golden
+- anti-bias guard against fixtures/prompts that drift into one domain
+
+Success gate:
+
+- missing supported cells fail the test suite
+- at least 20% of goldens exercise edit-path parity initially
+- form-field chain coverage target begins at 30% after 11.3 lands
+
+### 11.5 — LiteLLM Structured Output Rail
+
+Goal:
+Reduce JSON/shape repair by using provider-supported structured outputs while preserving provider portability.
+
+Official LiteLLM reference:
+<https://docs.litellm.ai/docs/completion/json_mode>
+
+Plan requirements before implementation:
+
+- inspect current `TenantModelAdapter` param support/drop behavior
+- make `TenantModelAdapter` the single provider-capability owner
+- use explicit model config as the authoritative override and LiteLLM support checks as evidence
+- define capability path: `strict_json_schema`, `json_object`, `prompt_with_pydantic_validation`
+- define Pydantic validation boundary
+- define fallback behavior and logging
+- keep tool calls orthogonal to structured-output mode; do not model tool calls as a fallback rung
+
+Deliverables:
+
+- typed structured-output request path for planner JSON, `outline_flow`, `edit_flow`, and parse repair. Semantic repair joins this rail only when its output contract is a typed JSON object and the slice plan proves the benefit.
+- tests for every capability path
+- parse-repair metrics before/after comparison
+
+Success gate:
+
+- parse-repair invocations drop for schema-capable models
+- tenants without structured output support do not regress
+- architecture-class success does not depend on structured outputs
+
+## Behavior And Quality Gates
+
+| Gate | Required result |
+|---|---|
+| First-attempt compile success | >= 90% on reliability corpus after 11.1 and 11.2 |
+| Repair invocation rate | < 10% on reliability corpus after 11.1 and 11.2 |
+| Swedish resolver accuracy | >= 85% on at least 80 labeled cases |
+| Chain canaries | 0 regressions |
+| Provider capability tests | all declared capability paths covered |
+| Edit parity | each create golden has an edit twin or explicit documented exception |
+| Resource refs | no unknown or unavailable refs accepted |
+| Manual smoke suite | no median regression on six stable prompts, revise-plan scenarios, or scoped edit-existing-flow scenarios unless promoted into automated tests with rationale |
+
+## Capability Reference Rollout
+
+| Slice | Addition | Trigger condition |
+|---|---|---|
+| 11.1 | Step-slot summary block for the LLM. | Add only if the LLM must fill semantic fields against named slots. |
+| 11.3 | Enabled resource enum/ref material. | Add when form-field/resource semantics need exact ref selection in proposal generation. |
+| 11.5 | Structured-output format hints. | Add only when the selected provider path makes the hint actionable. |
+
+## Validation Command Set
+
+Exact commands must be resolved per slice, but the implementation agent should start from:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder -q
+```
+
+```bash
+cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py -q
+```
+
+```bash
+cd backend && uv run pyright <touched source and test files>
+```
+
+```bash
+cd backend && uv run ruff check <touched source and test files>
+```
+
+```bash
+cd backend && uv run ruff format --check <touched source and test files>
+```
+
+```bash
+cd backend && uv run lint-imports --no-cache
+```
+
+```bash
+git diff --check -- <touched paths>
+```
+
+If Docker is available, prefer:
+
+```bash
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 uv run pytest <focused tests> -q
+```
+
+Record the backend container name in the journal before interpreting failures.
+
+## Claude / Review Requirements
+
+For every implementation slice:
+
+1. Run `/plan` first.
+2. Run Claude plan review.
+3. Implement only after plan reconciliation.
+4. Validate.
+5. Run retrospective.
+6. Run Claude implementation review.
+7. Fix accepted findings.
+8. Stop at commit boundary.
+
+## Stop Conditions
+
+Stop and report before source changes if:
+
+- the slice would require migrations, runtime/Celery changes, or package naming changes
+- `materialize_step_skeleton` would become a pass-through wrapper around existing functions
+- the slot resolver cannot define a measurable corpus/eval gate
+- structured output requires weakening schema types
+- a source diff exceeds roughly 800 LOC or becomes hard to review
+- unknown dirty files appear
+- Claude finds an accepted product/architecture blocker after two reconciliation rounds
+- manual smoke-suite regression exposes a new architecture-class failure that is not promoted into an automated fixture/test
+
+## Comment And Naming Hygiene
+
+- Use `StepSkeleton` for the typed slot value object.
+- Use `materialize_step_skeleton` for the pure function that derives ordered slots from committed architecture.
+- Avoid module or docstrings that restate dataclass fields.
+- Do not add comments that narrate control flow.
+
+## Explicit Do-Not-Touch List
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+- `docs/refactor/goals.md` unless the user promotes it
+- package/namespace rename work
+- Flow runtime, Celery, migrations, data model, evidence export, or Batch 10 operability code unless explicitly scoped
+- CI execution of the manual AI Builder smoke suite
+- raw manual-eval transcripts, uploaded files, unredacted response bodies, or production keys in committed docs
+
+## Suggested Commit Sequence
+
+1. `flows: measure ai builder compile reliability`
+2. `flows: derive ai builder step mechanics from typed slots`
+3. `flows: resolve ai builder slots with Swedish evals`
+4. `flows: validate ai builder fields and refs`
+5. `flows: add ai builder golden coverage matrix`
+6. `flows: use structured outputs for ai builder proposals`
+
+Do not combine these into one commit. Slice 11.1 may split across 11.1a, 11.1b, and 11.1c commits if a sub-slice approaches the LOC ceiling.
