@@ -5,6 +5,10 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.assistant_execution_snapshot import stable_hash
+from intric.flows.flow_review_policy import (
+    FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
+    FlowStepReviewMode,
+)
 from intric.flows.published_definition import (
     FLOW_DEFINITION_FLOW_ID_INVALID,
     FLOW_DEFINITION_SCHEMA_VERSION,
@@ -71,6 +75,43 @@ def test_parser_round_trips_definition_and_runtime_steps() -> None:
     assert parsed.steps == definition["steps"]
     assert len(runtime_steps) == 1
     assert runtime_steps[0].step_order == 1
+
+
+def test_parser_round_trips_step_review_policy() -> None:
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[{**_step(order=1), "review_policy": {"mode": "edit"}}],
+    )
+
+    runtime_steps = parse_published_runtime_steps(definition)
+
+    assert runtime_steps[0].review_policy is not None
+    assert runtime_steps[0].review_policy.mode == FlowStepReviewMode.EDIT
+
+
+def test_parser_rejects_review_policy_for_outbound_delivery() -> None:
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[
+            {
+                **_step(order=1),
+                "output_mode": "http_post",
+                "output_config": {"url": "https://example.test/hook"},
+                "review_policy": {"mode": "view"},
+            }
+        ],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        parse_published_runtime_steps(definition)
+
+    assert exc_info.value.code == FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED
 
 
 @pytest.mark.parametrize(

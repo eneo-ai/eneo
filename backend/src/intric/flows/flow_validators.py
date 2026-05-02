@@ -23,6 +23,7 @@ from intric.flows.flow_capability_manifest import (
     FlowOutputType,
     is_citation_capable_step,
 )
+from intric.flows.flow_review_policy import parse_flow_step_review_policy
 from intric.flows.flow_validators_form import (
     normalize_legacy_form_schema,
     validate_form_schema,
@@ -104,6 +105,7 @@ def validate_steps(
     for step in sorted_steps:
         seen.add(step.step_order)
         _validate_step_enum_values(step)
+        _validate_review_policy(step)
         _validate_citation_mode(step)
         if step.input_source in ("http_get", "http_post"):
             validate_http_input_config(step=step)
@@ -212,6 +214,13 @@ def _validate_citation_mode(step: FlowStep) -> None:
         raise BadRequestException(
             f"Step {step.step_order}: citation_mode 'inline_inref_sidecar' requires an LLM-backed text step."
         )
+
+
+def _validate_review_policy(step: FlowStep) -> None:
+    parse_flow_step_review_policy(
+        raw_policy=step.review_policy,
+        output_mode=FlowOutputMode(step.output_mode),
+    )
 
 
 def _validate_output_contract_compatibility(*, step: FlowStep) -> None:

@@ -184,6 +184,9 @@ class FlowSteps(BasePublic):
     output_config: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
     )
+    review_policy: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     __table_args__ = (
         UniqueConstraint("flow_id", "step_order", name="uq_flow_steps_flow_step_order"),

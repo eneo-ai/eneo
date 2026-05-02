@@ -67,6 +67,10 @@ class FlowOutputMode(str, Enum):
     TEMPLATE_FILL = "template_fill"
 
 
+def flow_output_mode_has_outbound_delivery(mode: FlowOutputMode) -> bool:
+    return mode == FlowOutputMode.HTTP_POST
+
+
 class AIBuilderOutputMode(str, Enum):
     PASS_THROUGH = FlowOutputMode.PASS_THROUGH.value
     TRANSCRIBE_ONLY = FlowOutputMode.TRANSCRIBE_ONLY.value

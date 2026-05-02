@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from intric.flows.domain.flow import FlowStepResult
+from intric.flows.flow_review_policy import FlowStepReviewPolicy
 
 
 def _empty_step_diagnostics() -> list["StepDiagnostic"]:
@@ -38,6 +39,7 @@ class RuntimeStep:
     plan_step_ref: str | None = None
     existing_step_ref: str | None = None
     assistant_snapshot: dict[str, Any] | None = None
+    review_policy: FlowStepReviewPolicy | None = None
 
 
 @dataclass(frozen=True)

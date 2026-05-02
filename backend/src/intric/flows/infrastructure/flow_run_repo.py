@@ -86,6 +86,14 @@ class FlowRunActiveRerunOperation:
     invalidated_steps: tuple[FlowRunRerunInvalidatedStep, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class FlowRunReviewCheckpointOpenResult:
+    checkpoint: FlowRunReviewCheckpoint
+    run: FlowRun
+    created: bool
+    audit_outbox_id: UUID | None
+
+
 _RERUN_ELIGIBLE_RUN_STATUSES = (
     FlowRunStatus.COMPLETED.value,
     FlowRunStatus.FAILED.value,
@@ -301,6 +309,134 @@ class FlowRunRepository:
         if checkpoint_row is None:
             raise NotFoundException("Could not create or fetch review checkpoint.")
         return self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
+
+    async def open_review_checkpoint_for_completed_step(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        step_id: UUID,
+        step_order: int,
+        attempt_no: int,
+        requester_principal: FlowPrincipal,
+        next_step_ids: Sequence[UUID],
+    ) -> FlowRunReviewCheckpointOpenResult:
+        """Open a checkpoint for a step the caller resolved from the published run graph.
+
+        The repository persists downstream step IDs for resume decisions, but it
+        does not infer graph topology while holding run locks.
+        """
+        run_row = await self.session.scalar(
+            sa.select(FlowRuns)
+            .where(FlowRuns.id == flow_run_id)
+            .where(FlowRuns.flow_id == flow_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if run_row is None:
+            raise NotFoundException("Flow run not found.")
+
+        existing_checkpoint_row = await self.session.scalar(
+            sa.select(FlowRunReviewCheckpoints)
+            .where(FlowRunReviewCheckpoints.flow_run_id == flow_run_id)
+            .where(FlowRunReviewCheckpoints.step_id == step_id)
+            .where(FlowRunReviewCheckpoints.attempt_no == attempt_no)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+        )
+        if existing_checkpoint_row is not None:
+            return FlowRunReviewCheckpointOpenResult(
+                checkpoint=self.factory.from_flow_run_review_checkpoint_db(
+                    existing_checkpoint_row
+                ),
+                run=self.factory.from_flow_run_db(run_row),
+                created=False,
+                audit_outbox_id=None,
+            )
+
+        if run_row.status != FlowRunStatus.RUNNING.value:
+            raise BadRequestException(
+                "Flow run must be running before opening a review checkpoint.",
+                code="flow_review_checkpoint_run_not_running",
+                context={"status": run_row.status},
+            )
+
+        active_checkpoint = await self.get_active_review_checkpoint(
+            run_id=flow_run_id,
+            tenant_id=tenant_id,
+        )
+        if active_checkpoint is not None:
+            raise BadRequestException(
+                "Flow run already has an active review checkpoint.",
+                code="flow_review_checkpoint_active_conflict",
+                context={"checkpoint_id": str(active_checkpoint.id)},
+            )
+
+        step_result_row = await self.session.scalar(
+            sa.select(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == flow_run_id)
+            .where(FlowStepResults.step_id == step_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if (
+            step_result_row is None
+            or step_result_row.status != FlowStepResultStatus.COMPLETED.value
+            or step_result_row.current_attempt_no != attempt_no
+        ):
+            raise BadRequestException(
+                "Completed step result is required before opening a review checkpoint.",
+                code="flow_review_checkpoint_step_result_incomplete",
+            )
+
+        checkpoint = await self.create_or_get_review_checkpoint_for_attempt(
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+            step_id=step_id,
+            step_order=step_order,
+            attempt_no=attempt_no,
+            original_payload_json=step_result_row.output_payload_json,
+            current_payload_json=step_result_row.output_payload_json,
+            requester_principal_type=requester_principal.principal_type,
+            requester_user_id=requester_principal.principal_user_id,
+            next_step_ids=next_step_ids,
+        )
+        updated_run_row = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == flow_run_id)
+            .where(FlowRuns.flow_id == flow_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.RUNNING.value)
+            .values(
+                status=FlowRunStatus.AWAITING_REVIEW.value,
+                revision=FlowRuns.revision + 1,
+            )
+            .returning(FlowRuns)
+        )
+        if updated_run_row is None:
+            raise BadRequestException(
+                "Flow run changed state before review checkpoint opened.",
+                code="flow_review_checkpoint_run_not_running",
+            )
+
+        actor_fields = requester_principal.audit_actor_fields()
+        outbox_id = await self.insert_review_checkpoint_audit_outbox(
+            checkpoint=checkpoint,
+            run_revision=updated_run_row.revision,
+            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED,
+            actor_id=actor_fields["actor_id"],
+            actor_type=actor_fields["actor_type"],
+            actor_api_key_id=actor_fields["actor_api_key_id"],
+            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_OPENED,
+            target_state=FlowRunReviewCheckpointState.AWAITING_REVIEW,
+        )
+        return FlowRunReviewCheckpointOpenResult(
+            checkpoint=checkpoint,
+            run=self.factory.from_flow_run_db(updated_run_row),
+            created=True,
+            audit_outbox_id=outbox_id,
+        )
 
     async def get_active_review_checkpoint(
         self,

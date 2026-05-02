@@ -46,6 +46,7 @@ class FlowAssembler:
             mcp_policy=step.mcp_policy,
             input_config=step.input_config,
             output_config=step.output_config,
+            review_policy=step.review_policy,
         )
 
     def to_public(self, flow: Flow) -> FlowPublic:

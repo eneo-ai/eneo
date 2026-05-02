@@ -9,6 +9,8 @@ from intric.database.tables.flow_tables import (
     FLOW_STEP_OUTPUT_TYPE_VALUES,
 )
 from intric.flows.domain.flow import JsonObject
+from intric.flows.enums import FlowOutputMode
+from intric.flows.flow_review_policy import parse_flow_step_review_policy
 from intric.flows.output_modes import ALLOWED_OUTPUT_MODES, transcribe_only_violation
 from intric.flows.runtime.models import RuntimeStep
 from intric.flows.runtime_input import build_runtime_input_config
@@ -140,6 +142,10 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
             raise BadRequestException(
                 "Transcribe-only steps require runtime_input.input_format 'audio'."
             )
+        review_policy = parse_flow_step_review_policy(
+            raw_policy=item_dict.get("review_policy"),
+            output_mode=FlowOutputMode(output_mode),
+        )
         user_description_raw: object = item_dict.get("user_description")
         plan_step_ref_raw: object = item_dict.get("plan_step_ref")
         existing_step_ref_raw: object = item_dict.get("existing_step_ref")
@@ -173,6 +179,7 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
                 input_type=input_type,
                 input_contract=input_contract,
                 assistant_snapshot=assistant_snapshot,
+                review_policy=review_policy,
             )
         )
     step_orders = [step.step_order for step in parsed]

@@ -23,6 +23,7 @@ from intric.flows.enums import (
     FlowTemplateAssetStatus,
     RerunDependencyKind,
 )
+from intric.flows.flow_review_policy import FlowStepReviewPolicy
 from intric.flows.flow_run_evidence_export_manifest import EvidenceExportManifest
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.exceptions import BadRequestException
@@ -296,6 +297,7 @@ class FlowStepCreateRequest(BaseModel):
     mcp_policy: FlowMcpPolicy
     input_config: dict[str, Any] | None = None
     output_config: dict[str, Any] | None = None
+    review_policy: FlowStepReviewPolicy | None = None
 
 
 class FlowCreateRequest(BaseModel):
@@ -380,6 +382,7 @@ class FlowStepPublic(BaseModel):
     mcp_policy: FlowMcpPolicy
     input_config: dict[str, Any] | None = None
     output_config: dict[str, Any] | None = None
+    review_policy: FlowStepReviewPolicy | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

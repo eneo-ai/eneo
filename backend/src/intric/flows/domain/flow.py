@@ -23,6 +23,7 @@ from intric.flows.enums import (
     FlowTemplateAssetStatus,
     RerunDependencyKind,
 )
+from intric.flows.flow_review_policy import FlowStepReviewPolicy
 
 JsonObject: TypeAlias = dict[str, Any]
 ToolCallMetadata: TypeAlias = dict[str, Any]
@@ -48,6 +49,7 @@ class FlowStep(BaseModel):
     mcp_policy: FlowMcpPolicy
     input_config: JsonObject | None = None
     output_config: JsonObject | None = None
+    review_policy: FlowStepReviewPolicy | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

@@ -762,6 +762,11 @@ class FlowService:
             "assistant_snapshot": assistant_snapshot,
             "input_config": step.input_config,
             "output_config": output_config,
+            "review_policy": (
+                step.review_policy.model_dump(mode="json")
+                if step.review_policy is not None
+                else None
+            ),
         }
 
     def _ensure_flow_is_mutable(self, flow: Flow) -> None:

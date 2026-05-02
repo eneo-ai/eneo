@@ -6,6 +6,11 @@ import pytest
 
 from intric.flows.enums import FlowOutputMode, FlowOutputType
 from intric.flows.flow import FlowStep
+from intric.flows.flow_review_policy import (
+    FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
+    FlowStepReviewMode,
+    FlowStepReviewPolicy,
+)
 from intric.flows.flow_validators import validate_form_schema, validate_steps
 from intric.flows.flow_validators_form import (
     normalize_legacy_form_schema,
@@ -286,6 +291,31 @@ def test_validate_steps_allows_inline_citation_mode_for_text_llm_steps() -> None
             )
         ]
     )
+
+
+def test_validate_steps_allows_review_policy_on_in_process_output() -> None:
+    validate_steps(
+        [
+            _step(
+                review_policy=FlowStepReviewPolicy(mode=FlowStepReviewMode.EDIT),
+            )
+        ]
+    )
+
+
+def test_validate_steps_rejects_review_policy_for_http_post_output() -> None:
+    with pytest.raises(BadRequestException) as exc_info:
+        validate_steps(
+            [
+                _step(
+                    output_mode=FlowOutputMode.HTTP_POST,
+                    output_config={"url": "https://example.test/review"},
+                    review_policy={"mode": "view"},
+                )
+            ]
+        )
+
+    assert exc_info.value.code == FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED
 
 
 def test_normalize_legacy_form_schema_maps_legacy_string_type_to_text():

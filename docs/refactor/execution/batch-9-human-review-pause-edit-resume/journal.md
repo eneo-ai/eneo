@@ -96,9 +96,45 @@ IN_PROGRESS
   - Reconciliation: `docs/refactor/execution/batch-9-human-review-pause-edit-resume/claude-reconciliation-4.md`
 - Outcome: data-model foundation complete; runtime/API producers remain out of scope for Slice 9.2 and later
 
+### Slice 9.2 — Review Policy Contract And Checkpoint Open Command
+
+- Source:
+  - `backend/src/intric/flows/flow_review_policy.py`
+  - `backend/src/intric/flows/enums.py`
+  - `backend/src/intric/database/tables/flow_tables.py`
+  - `backend/src/intric/flows/domain/flow.py`
+  - `backend/src/intric/flows/api/flow_models.py`
+  - `backend/src/intric/flows/api/flow_assembler.py`
+  - `backend/src/intric/flows/application/flow_service.py`
+  - `backend/src/intric/flows/infrastructure/flow_repo.py`
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - `backend/src/intric/flows/runtime/models.py`
+  - `backend/src/intric/flows/runtime/step_definition_parser.py`
+  - `backend/src/intric/flows/flow_validators.py`
+  - `backend/alembic/versions/20260502_flow_step_review_policy.py`
+- Tests:
+  - `backend/tests/unittests/flows/test_flow_review_policy.py`
+  - `backend/tests/unittests/flows/test_flow_validators.py`
+  - `backend/tests/unittests/flows/test_published_definition_contract.py`
+  - `backend/tests/integration/flows/test_flow_run_review_checkpoint_repository.py`
+- Local validation:
+  - `uv run ruff check ...` from `backend/` on Slice 9.2 source/test files — passed
+  - `uv run ruff format --check ...` from `backend/` on Slice 9.2 source/test files — passed
+  - `uv run pyright ...` from `backend/` on Slice 9.2 source/test files — passed, 0 errors
+  - `uv run python -m py_compile alembic/versions/20260502_flow_step_review_policy.py` from repo root — passed
+  - `uv run pytest tests/unittests/flows/test_flow_review_policy.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_published_definition_contract.py tests/integration/flows/test_flow_run_review_checkpoint_repository.py -q` from `backend/` — passed, 54 tests
+  - `git diff --check` — passed
+  - `rg -n "review_policy=\\{" backend/src` — passed, no source matches
+- Docker validation: blocked before execution by this Codex process with `Rejected("approval required by policy, but AskForApproval is set to Never")`
+- Claude review:
+  - Iteration 1: changes required, artifact `.codex/artifacts/claude-peer-loop-batch-9-slice-9-2-review-policy-open-command-20260502T165110Z.md`
+  - Iteration 2: green, artifact `.codex/artifacts/claude-peer-loop-batch-9-slice-9-2-review-policy-open-command-verification-20260502T170329Z.md`
+  - Reconciliation: `docs/refactor/execution/batch-9-human-review-pause-edit-resume/claude-reconciliation-5.md`
+- Outcome: typed review-policy contract complete, write-path validation added, and the repository can open a review checkpoint for a completed step idempotently; executor/API wiring remains out of scope for Slice 9.3 and later
+
 ## Carry-Forward Risks
 
-- Review policy wire shape is pinned as `{"review_policy": {"mode": "view" | "edit"}}`; Slice 9.2 still needs API/schema tests before source implementation.
+- Slice 9.3 must wire `RuntimeStep.review_policy` into the executor pause/yield branch and validate checkpoint step ids against the run's published definition before calling the repository open command.
 - Resume CASes the checkpoint and run, moves the run from `awaiting_review` to `queued`, and dispatches the existing `flows.execute` task. Batch 9 should not add a separate `flows.resume` task unless it deletes code.
 - Frontend generated type updates must not overwrite unrelated local changes.
 
@@ -114,3 +150,6 @@ IN_PROGRESS
 - Slice 9.0a is the next implementation slice before checkpoint data-model work.
 - Slice 9.1 stores checkpoint `step_id` as a historical UUID and does not FK it to mutable `flow_steps`; Slice 9.2 must validate it against the run's published flow version before checkpoint creation.
 - Slice 9.1 makes `awaiting_review` cancellable through terminalization, but active checkpoint closure on run cancellation remains a Slice 9.4 responsibility.
+- `FlowStepReviewPolicy` is the canonical review-policy contract at API, domain, persistence serialization, published definition, and runtime parser boundaries.
+- Review policy cannot be combined with `FlowOutputMode` values classified by `flow_output_mode_has_outbound_delivery`.
+- `FlowRunRepository.open_review_checkpoint_for_completed_step` owns the SQL transition and audit outbox insert; the caller owns published-graph interpretation and downstream `next_step_ids` selection.
