@@ -14,6 +14,7 @@ from intric.flows.enums import (
     FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
+    FlowRunRerunOperationStatus,
     FlowRunStatus,
     FlowRuntimeInputFormat,
     FlowStepAttemptStatus,
@@ -105,6 +106,7 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "user_id": "00000000-0000-0000-0000-000000000030",
     "tenant_id": "00000000-0000-0000-0000-000000000010",
     "trace_id": "00000000-0000-0000-0000-000000000302",
+    "revision": 1,
     "status": "queued",
     "cancelled_at": None,
     "started_at": None,
@@ -220,6 +222,34 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
 FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE: dict[str, Any] = {
     "run": FLOW_RUN_PUBLIC_EXAMPLE,
     "redispatched_count": 1,
+}
+
+FLOW_RUN_STEP_RERUN_REQUEST_EXAMPLE: dict[str, Any] = {
+    "expected_run_revision": 7,
+    "reason": "The HR reviewer corrected the transcription for step 1.",
+    "input_payload_json": {"reviewer_note": "Use the corrected spelling of Alex."},
+    "step_inputs": {
+        "00000000-0000-0000-0000-000000000101": {
+            "file_ids": ["00000000-0000-0000-0000-000000000701"]
+        }
+    },
+}
+
+FLOW_RUN_STEP_RERUN_RESPONSE_EXAMPLE: dict[str, Any] = {
+    "operation_id": "00000000-0000-0000-0000-000000000801",
+    "run": {
+        **FLOW_RUN_PUBLIC_EXAMPLE,
+        "revision": 8,
+        "status": "queued",
+        "output_payload_json": None,
+    },
+    "rerun_step_id": "00000000-0000-0000-0000-000000000101",
+    "new_attempt_no": 2,
+    "invalidated_step_ids": [
+        "00000000-0000-0000-0000-000000000101",
+        "00000000-0000-0000-0000-000000000102",
+    ],
+    "status": "queued",
 }
 
 GRAPH_RESPONSE_EXAMPLE: dict[str, Any] = {
@@ -469,6 +499,12 @@ class FlowRunPublic(BaseModel):
     user_id: UUID | None = None
     tenant_id: UUID
     trace_id: UUID
+    revision: int = Field(
+        description=(
+            "Monotonic run lifecycle compare token. Step-rerun requests use this "
+            "value as `expected_run_revision`."
+        ),
+    )
     status: FlowRunStatus
     cancelled_at: datetime | None = None
     started_at: datetime | None = None
@@ -558,6 +594,49 @@ class FlowRunRedispatchResponse(BaseModel):
 
     run: FlowRunPublic
     redispatched_count: int
+
+
+class FlowRunStepRerunRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_STEP_RERUN_REQUEST_EXAMPLE},
+    )
+
+    expected_run_revision: int = Field(
+        ge=1,
+        description="Run revision observed by the caller before requesting the rerun.",
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1024,
+        description="Human-readable reason for accepting the rerun operation.",
+    )
+    input_payload_json: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional inline payload overrides for the rerun root step.",
+    )
+    step_inputs: dict[UUID, StepRunInput] | None = Field(
+        default=None,
+        description="Optional file inputs keyed by the rerun root step id.",
+    )
+
+
+class FlowRunStepRerunResponse(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RUN_STEP_RERUN_RESPONSE_EXAMPLE}
+    )
+
+    operation_id: UUID
+    run: FlowRunPublic = Field(
+        description=(
+            "Current persisted run state. On idempotent replay, `run.revision` may "
+            "have advanced past the request's `expected_run_revision`."
+        )
+    )
+    rerun_step_id: UUID
+    new_attempt_no: int
+    invalidated_step_ids: list[UUID]
+    status: FlowRunRerunOperationStatus
 
 
 class GraphNode(BaseModel):

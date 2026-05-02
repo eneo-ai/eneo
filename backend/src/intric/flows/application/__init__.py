@@ -8,18 +8,26 @@ _EXPORTS = {
         "intric.flows.application.flow_dispatch",
         "dispatch_flow_run_after_commit",
     ),
+    "dispatch_flow_run_recoverably_after_commit": (
+        "intric.flows.application.flow_dispatch",
+        "dispatch_flow_run_recoverably_after_commit",
+    ),
     "FlowRunService": ("intric.flows.application.flow_run_service", "FlowRunService"),
     "FlowService": ("intric.flows.application.flow_service", "FlowService"),
 }
 
 __all__ = [
     "dispatch_flow_run_after_commit",
+    "dispatch_flow_run_recoverably_after_commit",
     "FlowRunService",
     "FlowService",
 ]
 
 if TYPE_CHECKING:
-    from intric.flows.application.flow_dispatch import dispatch_flow_run_after_commit
+    from intric.flows.application.flow_dispatch import (
+        dispatch_flow_run_after_commit,
+        dispatch_flow_run_recoverably_after_commit,
+    )
     from intric.flows.application.flow_run_service import FlowRunService
     from intric.flows.application.flow_service import FlowService
 

@@ -94,6 +94,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/runs/": {"get", "post"},
     "/api/v1/flows/{id}/runs/{run_id}/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/cancel/": {"post"},
+    "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/": {"post"},
     "/api/v1/flows/{id}/runs/{run_id}/redispatch/": {"post"},
     "/api/v1/flows/{id}/runs/{run_id}/evidence/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/evidence/export": {"get"},
@@ -106,6 +107,8 @@ REQUIRED_SCHEMAS = {
     "FlowInputPolicyPublic",
     "FlowRuntimePublic",
     "FlowRunContractPublic",
+    "FlowRunStepRerunRequest",
+    "FlowRunStepRerunResponse",
     "FlowRuntimeInputContractPublic",
     "FlowRunStepPublic",
     "FlowInputLimitsPublic",
@@ -143,6 +146,10 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
     ("/api/v1/flows/{id}/files/", "post"): "upload_flow_file",
     ("/api/v1/flows/{id}/runs/{run_id}/", "get"): "get_flow_run_alias",
     ("/api/v1/flows/{id}/runs/{run_id}/cancel/", "post"): "cancel_flow_run_alias",
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
+        "post",
+    ): "rerun_flow_run_step",
     (
         "/api/v1/flows/{id}/runs/{run_id}/redispatch/",
         "post",
@@ -204,6 +211,10 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
         "/api/v1/flows/{id}/runs/{run_id}/cancel/",
         "post",
     ): {"403", "404", "422"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
+        "post",
+    ): {"400", "403", "404", "422"},
     (
         "/api/v1/flows/{id}/runs/{run_id}/redispatch/",
         "post",
@@ -267,6 +278,10 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
         "/api/v1/flows/{id}/runs/{run_id}/cancel/",
         "post",
     ): {"403", "404"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
+        "post",
+    ): {"400", "403", "404"},
     (
         "/api/v1/flows/{id}/runs/{run_id}/redispatch/",
         "post",
@@ -345,6 +360,7 @@ def test_openapi_flow_run_control_paths_include_flow_and_run_ids(
     paths = openapi_spec.get("paths", {})
     targets = (
         ("/api/v1/flows/{id}/runs/{run_id}/cancel/", "post"),
+        ("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/", "post"),
         ("/api/v1/flows/{id}/runs/{run_id}/redispatch/", "post"),
         ("/api/v1/flows/{id}/runs/{run_id}/evidence/", "get"),
     )
@@ -355,6 +371,10 @@ def test_openapi_flow_run_control_paths_include_flow_and_run_ids(
         assert {"id", "run_id"} <= names, (
             f"{method.upper()} {path} must declare path params id and run_id"
         )
+        if "{step_id}" in path:
+            assert "step_id" in names, (
+                f"{method.upper()} {path} must declare path param step_id"
+            )
 
 
 def test_openapi_flow_consumer_error_contracts(openapi_spec: dict) -> None:
@@ -576,6 +596,74 @@ def test_openapi_flow_run_create_schema_removes_top_level_file_ids(
     properties = schema.get("properties", {})
     assert "file_ids" not in properties
     assert "step_inputs" in properties
+
+
+def test_openapi_flow_run_step_rerun_contract(openapi_spec: dict) -> None:
+    operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
+        "post",
+    )
+    request_schema = (
+        operation.get("requestBody", {})
+        .get("content", {})
+        .get("application/json", {})
+        .get("schema", {})
+    )
+    request_resolved = _resolve_component_ref(openapi_spec, request_schema)
+    assert request_resolved.get("title") == "FlowRunStepRerunRequest"
+    assert request_resolved.get("additionalProperties") is False
+    assert set(request_resolved.get("required", [])) == {
+        "expected_run_revision",
+        "reason",
+    }
+
+    request_properties = request_resolved.get("properties", {})
+    expected_revision = request_properties.get("expected_run_revision", {})
+    reason = request_properties.get("reason", {})
+    assert expected_revision.get("minimum") == 1
+    assert reason.get("minLength") == 1
+    assert reason.get("maxLength") == 1024
+    assert "file_ids" not in request_properties
+    assert "step_inputs" in request_properties
+
+    response_schema = (
+        operation.get("responses", {})
+        .get("202", {})
+        .get("content", {})
+        .get("application/json", {})
+        .get("schema", {})
+    )
+    response_resolved = _resolve_component_ref(openapi_spec, response_schema)
+    assert response_resolved.get("title") == "FlowRunStepRerunResponse"
+
+    response_properties = response_resolved.get("properties", {})
+    run_description = str(response_properties.get("run", {}).get("description", ""))
+    assert "current persisted run state" in run_description.lower()
+    assert "expected_run_revision" in run_description
+
+    operation_description = " ".join(
+        str(operation.get("description", "")).lower().split()
+    )
+    assert "202 accepted" in operation_description
+    assert "idempotent replay" in operation_description
+    assert "use the response `status`" in operation_description
+
+
+def test_openapi_flow_run_revision_documents_rerun_compare_token(
+    openapi_spec: dict,
+) -> None:
+    schema = (
+        openapi_spec.get("components", {}).get("schemas", {}).get("FlowRunPublic", {})
+    )
+    properties = schema.get("properties", {})
+    revision = properties.get("revision", {})
+
+    assert revision.get("type") == "integer"
+    assert "revision" in set(schema.get("required", []))
+    description = str(revision.get("description", ""))
+    assert "compare token" in description.lower()
+    assert "expected_run_revision" in description
 
 
 def test_openapi_flow_step_create_schema_exposes_enum_constraints(
@@ -845,6 +933,10 @@ def test_openapi_flow_run_operation_error_responses_use_general_error_model(
     paths = openapi_spec.get("paths", {})
     run_operation_codes: dict[tuple[str, str], tuple[str, ...]] = {
         ("/api/v1/flows/{id}/runs/{run_id}/cancel/", "post"): ("403", "404"),
+        (
+            "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
+            "post",
+        ): ("400", "403", "404"),
         ("/api/v1/flows/{id}/runs/{run_id}/redispatch/", "post"): ("403", "404"),
         ("/api/v1/flows/{id}/runs/{run_id}/evidence/", "get"): ("403", "404"),
     }

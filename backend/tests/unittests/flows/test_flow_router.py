@@ -56,10 +56,14 @@ from intric.flows.api.flow_models import (
     FlowInputSource,
     FlowInputType,
     FlowRunCreateRequest,
+    FlowRunStepRerunRequest,
     FlowStepCreateRequest,
     FlowUpdateRequest,
 )
-from intric.flows.api.flow_router_common import dispatch_flow_run_after_commit
+from intric.flows.api.flow_router_common import (
+    dispatch_flow_run_after_commit,
+    dispatch_flow_run_recoverably_after_commit,
+)
 from intric.flows.api.flow_run_evidence_router import (
     export_flow_run_evidence_alias,
     get_flow_run_evidence_alias,
@@ -70,6 +74,7 @@ from intric.flows.api.flow_run_execution_router import (
     get_flow_run_alias,
     list_flow_runs_alias,
     redispatch_flow_run_alias,
+    rerun_flow_run_step,
 )
 from intric.flows.api.flow_run_steps_router import (
     generate_flow_run_artifact_signed_url,
@@ -86,6 +91,7 @@ from intric.flows.api.flow_upload_router import (
     upload_flow_file,
     upload_flow_runtime_file,
 )
+from intric.flows.enums import FlowRunRerunOperationStatus
 from intric.flows.flow import (
     Flow,
     FlowRun,
@@ -157,6 +163,31 @@ def _run(flow_id, tenant_id):
         job_id=None,
         created_at=now,
         updated_at=now,
+    )
+
+
+def _rerun_result(
+    run: FlowRun,
+    step_id,
+    *,
+    created=True,
+    status=FlowRunRerunOperationStatus.QUEUED,
+    invalidated_step_ids=None,
+):
+    invalidated_ids = tuple(invalidated_step_ids or (step_id,))
+    return SimpleNamespace(
+        operation=SimpleNamespace(
+            id=uuid4(),
+            rerun_step_id=step_id,
+            root_attempt_no=2,
+            status=status,
+        ),
+        run=run,
+        invalidated_steps=tuple(
+            SimpleNamespace(step_id=invalidated_id)
+            for invalidated_id in invalidated_ids
+        ),
+        created=created,
     )
 
 
@@ -879,6 +910,276 @@ async def test_create_flow_run_handles_missing_headers_object():
 
 
 @pytest.mark.asyncio
+async def test_rerun_flow_run_step_calls_service_and_schedules_recoverable_dispatch(
+    monkeypatch,
+):
+    container = MagicMock()
+    flow_id = uuid4()
+    step_id = uuid4()
+    input_file_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"revision": 2, "status": FlowRunStatus.QUEUED}
+    )
+    rerun_result = _rerun_result(run, step_id, invalidated_step_ids=(step_id, uuid4()))
+    run_service = AsyncMock()
+    run_service.rerun_step.return_value = rerun_result
+    run_service.build_dispatch_request = MagicMock(
+        return_value={
+            "run_id": run.id,
+            "flow_id": flow_id,
+            "tenant_id": user.tenant_id,
+            "user_id": user.id,
+        }
+    )
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_run_service.return_value = run_service
+    container.flow_service.return_value = flow_service
+    container.user.return_value = user
+    container.audit_service.return_value = AsyncMock()
+    _enable_space_access(container, user_permissions=[Permission.FLOWS_MANAGE])
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    background_tasks = BackgroundTasks()
+    response = await rerun_flow_run_step(
+        id=flow_id,
+        run_id=run.id,
+        step_id=step_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        rerun_in=FlowRunStepRerunRequest(
+            expected_run_revision=1,
+            reason="Reviewer accepted corrected transcription",
+            input_payload_json={"reviewer_note": "corrected"},
+            step_inputs={step_id: {"file_ids": [input_file_id]}},
+        ),
+        background_tasks=background_tasks,
+        container=container,
+    )
+
+    assert response.operation_id == rerun_result.operation.id
+    assert response.run.id == run.id
+    assert response.run.revision == 2
+    assert response.rerun_step_id == step_id
+    assert response.new_attempt_no == 2
+    assert response.invalidated_step_ids == [
+        step.step_id for step in rerun_result.invalidated_steps
+    ]
+    assert response.status == FlowRunRerunOperationStatus.QUEUED
+    run_service.rerun_step.assert_awaited_once_with(
+        flow_id=flow_id,
+        run_id=run.id,
+        rerun_step_id=step_id,
+        expected_run_revision=1,
+        reason="Reviewer accepted corrected transcription",
+        input_payload_json={"reviewer_note": "corrected"},
+        step_inputs={step_id: {"file_ids": [input_file_id]}},
+    )
+    assert len(background_tasks.tasks) == 1
+    scheduled = background_tasks.tasks[0]
+    assert scheduled.func is dispatch_flow_run_recoverably_after_commit
+    assert scheduled.kwargs == {
+        "run_id": run.id,
+        "flow_id": flow_id,
+        "tenant_id": user.tenant_id,
+        "user_id": user.id,
+    }
+    container.audit_service.return_value.log_async.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rerun_flow_run_step_replay_does_not_schedule_dispatch(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    step_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
+    rerun_result = _rerun_result(
+        run,
+        step_id,
+        created=False,
+        status=FlowRunRerunOperationStatus.COMPLETED,
+    )
+    run_service = AsyncMock()
+    run_service.rerun_step.return_value = rerun_result
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_run_service.return_value = run_service
+    container.flow_service.return_value = flow_service
+    container.user.return_value = user
+    container.audit_service.return_value = AsyncMock()
+    _enable_space_access(container, user_permissions=[Permission.FLOWS_MANAGE])
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    background_tasks = BackgroundTasks()
+    response = await rerun_flow_run_step(
+        id=flow_id,
+        run_id=run.id,
+        step_id=step_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        rerun_in=FlowRunStepRerunRequest(
+            expected_run_revision=1,
+            reason="Replay existing request",
+        ),
+        background_tasks=background_tasks,
+        container=container,
+    )
+
+    assert response.status == FlowRunRerunOperationStatus.COMPLETED
+    assert background_tasks.tasks == []
+    run_service.build_dispatch_request.assert_not_called()
+    container.audit_service.return_value.log_async.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rerun_flow_run_step_stale_revision_does_not_schedule_dispatch(
+    monkeypatch,
+):
+    container = MagicMock()
+    flow_id = uuid4()
+    run_id = uuid4()
+    step_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run_service = AsyncMock()
+    run_service.rerun_step.side_effect = BadRequestException(
+        "Flow run revision is stale.",
+        code="flow_run_rerun_stale_revision",
+    )
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_run_service.return_value = run_service
+    container.flow_service.return_value = flow_service
+    container.user.return_value = user
+    _enable_space_access(container, user_permissions=[Permission.FLOWS_MANAGE])
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    background_tasks = BackgroundTasks()
+    with pytest.raises(BadRequestException) as exc_info:
+        await rerun_flow_run_step(
+            id=flow_id,
+            run_id=run_id,
+            step_id=step_id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            rerun_in=FlowRunStepRerunRequest(
+                expected_run_revision=1,
+                reason="Stale request",
+            ),
+            background_tasks=background_tasks,
+            container=container,
+        )
+
+    assert exc_info.value.code == "flow_run_rerun_stale_revision"
+    assert background_tasks.tasks == []
+    run_service.build_dispatch_request.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("permissions", "expected_code"),
+    [
+        ([Permission.FLOWS_VIEW], "insufficient_tenant_permission"),
+        ([Permission.FLOWS_RUN], "insufficient_tenant_permission"),
+        ([], "insufficient_tenant_permission"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_rerun_flow_run_step_permission_matrix_denies_non_managers(
+    monkeypatch,
+    permissions,
+    expected_code,
+):
+    container = MagicMock()
+    flow_id = uuid4()
+    step_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4(), permissions=permissions)
+    flow = _flow(flow_id)
+    flow.owner_user_id = user.id
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    run_service = AsyncMock()
+    container.flow_service.return_value = flow_service
+    container.flow_run_service.return_value = run_service
+    container.user.return_value = user
+    _enable_space_access(container, user_permissions=permissions)
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await rerun_flow_run_step(
+            id=flow_id,
+            run_id=uuid4(),
+            step_id=step_id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            rerun_in=FlowRunStepRerunRequest(
+                expected_run_revision=1,
+                reason="Ownership alone is not enough",
+            ),
+            background_tasks=BackgroundTasks(),
+            container=container,
+        )
+
+    assert exc_info.value.code == expected_code
+    run_service.rerun_step.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rerun_flow_run_step_permission_matrix_denies_service_key_principal(
+    monkeypatch,
+):
+    container = MagicMock()
+    flow_id = uuid4()
+    user = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS_MANAGE],
+        active_api_key=_service_key(),
+    )
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    run_service = AsyncMock()
+    container.flow_service.return_value = flow_service
+    container.flow_run_service.return_value = run_service
+    container.user.return_value = user
+    _enable_space_access(container, user_permissions=[Permission.FLOWS_MANAGE])
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await rerun_flow_run_step(
+            id=flow_id,
+            run_id=uuid4(),
+            step_id=uuid4(),
+            request=SimpleNamespace(state=SimpleNamespace()),
+            rerun_in=FlowRunStepRerunRequest(
+                expected_run_revision=1,
+                reason="Service keys cannot rerun",
+            ),
+            background_tasks=BackgroundTasks(),
+            container=container,
+        )
+
+    assert exc_info.value.code == "flow_service_key_principal_not_supported"
+    run_service.rerun_step.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatch):
     container = MagicMock()
     template_asset_service = AsyncMock()
@@ -1282,6 +1583,170 @@ async def test_dispatch_flow_run_after_commit_dispatches_without_status_update_o
         user_id=user_id,
     )
     run_repo.update_status.assert_not_awaited()
+    terminalizer.terminalize_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_flow_run_recoverably_after_commit_dispatches_without_terminalization(
+    monkeypatch,
+):
+    run_repo = AsyncMock()
+    terminalizer = AsyncMock()
+    backend = MagicMock()
+    backend.dispatch = AsyncMock()
+    fake_session = MagicMock()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return fake_session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeContainer:
+        def flow_execution_backend(self):
+            return backend
+
+        def flow_run_repo(self):
+            return run_repo
+
+        def flow_run_terminalizer(self):
+            return terminalizer
+
+    monkeypatch.setattr(
+        flow_dispatch_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+    monkeypatch.setattr(
+        flow_dispatch_module, "Container", lambda session: _FakeContainer()
+    )
+
+    run_id = uuid4()
+    flow_id = uuid4()
+    tenant_id = uuid4()
+    user_id = uuid4()
+
+    await dispatch_flow_run_recoverably_after_commit(
+        run_id=run_id,
+        flow_id=flow_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+
+    backend.dispatch.assert_awaited_once_with(
+        run_id=run_id,
+        flow_id=flow_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    run_repo.update_status.assert_not_awaited()
+    terminalizer.terminalize_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_flow_run_recoverably_after_commit_logs_without_terminalization(
+    monkeypatch,
+    caplog,
+):
+    terminalizer = AsyncMock()
+    backend = MagicMock()
+    backend.dispatch = AsyncMock(side_effect=RuntimeError("broker down"))
+    fake_session = MagicMock()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return fake_session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeContainer:
+        def flow_execution_backend(self):
+            return backend
+
+        def flow_run_terminalizer(self):
+            return terminalizer
+
+    monkeypatch.setattr(
+        flow_dispatch_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+    monkeypatch.setattr(
+        flow_dispatch_module, "Container", lambda session: _FakeContainer()
+    )
+
+    caplog.set_level("ERROR", logger=flow_dispatch_module.logger.name)
+    run_id = uuid4()
+    flow_id = uuid4()
+    tenant_id = uuid4()
+
+    await dispatch_flow_run_recoverably_after_commit(
+        run_id=run_id,
+        flow_id=flow_id,
+        tenant_id=tenant_id,
+        user_id=uuid4(),
+    )
+
+    assert "flow_recoverable_dispatch_after_commit_failed" in caplog.text
+    terminalizer.terminalize_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_after_commit_wrappers_share_dispatch_core(monkeypatch):
+    terminalizer = AsyncMock()
+    backend = MagicMock()
+    dispatch_core = AsyncMock()
+    fake_session = MagicMock()
+
+    class _BeginContext:
+        async def __aenter__(self):
+            return fake_session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return fake_session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    fake_session.begin = lambda: _BeginContext()
+
+    class _FakeContainer:
+        def flow_execution_backend(self):
+            return backend
+
+        def flow_run_terminalizer(self):
+            return terminalizer
+
+    monkeypatch.setattr(
+        flow_dispatch_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+    monkeypatch.setattr(
+        flow_dispatch_module, "Container", lambda session: _FakeContainer()
+    )
+    monkeypatch.setattr(flow_dispatch_module, "_dispatch_via_backend", dispatch_core)
+
+    dispatch_kwargs = {
+        "run_id": uuid4(),
+        "flow_id": uuid4(),
+        "tenant_id": uuid4(),
+        "user_id": uuid4(),
+    }
+
+    await dispatch_flow_run_after_commit(**dispatch_kwargs)
+    await dispatch_flow_run_recoverably_after_commit(**dispatch_kwargs)
+
+    assert dispatch_core.await_count == 2
+    first_call, second_call = dispatch_core.await_args_list
+    assert first_call.args == second_call.args == (backend,)
+    assert first_call.kwargs == second_call.kwargs
+    assert first_call.kwargs == {
+        **dispatch_kwargs,
+        "principal_type": None,
+        "principal_user_id": None,
+        "principal_api_key_id": None,
+    }
     terminalizer.terminalize_run.assert_not_awaited()
 
 

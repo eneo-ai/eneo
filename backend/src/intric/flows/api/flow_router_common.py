@@ -26,6 +26,9 @@ from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.main.container.container import Container
 
 dispatch_flow_run_after_commit = flow_dispatch.dispatch_flow_run_after_commit
+dispatch_flow_run_recoverably_after_commit = (
+    flow_dispatch.dispatch_flow_run_recoverably_after_commit
+)
 
 
 def find_classification_overrides(

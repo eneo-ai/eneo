@@ -111,8 +111,8 @@ TL;DR:
   - Add operation/invalidation/attempt-lineage rows to evidence bundle payload.
 - `backend/src/intric/flows/flow_run_export_json.py`
   - Add rerun lineage summary and ensure manifest/export content hash covers the lineage payload.
-- `backend/src/intric/flows/api/flow_run_steps_router.py`
-  - Add the rerun endpoint under the step-owned runtime route.
+- `backend/src/intric/flows/api/flow_run_execution_router.py`
+  - Add the step-scoped rerun endpoint under the run-lifecycle router because rerun mutates run state.
 - `backend/src/intric/flows/api/flow_models.py`
   - Add `FlowRunStepRerunRequest`, `FlowRunStepRerunResponse`, and public rerun lineage models.
 - `backend/src/intric/flows/api/flow_assembler.py`
@@ -357,8 +357,8 @@ Error codes:
 - `flow_run_rerun_step_not_found` for a step absent from the run's published snapshot
 - `flow_run_rerun_step_incomplete` when an invalidated current result row is missing or the root step has no completed current result
 - `flow_run_rerun_reason_required` for empty or whitespace-only reason values
-- `flow_run_rerun_reason_too_long` for reason values over 1024 characters
 - `flow_run_rerun_step_inputs_invalid` for step input payloads outside the rerun root
+- HTTP request validation errors (`422`) for structurally invalid rerun requests, including reason values over 1024 characters and `expected_run_revision < 1`
 - existing permission errors from the Flow access policy
 
 Concurrent reruns do not get a second public conflict code in Batch 8. A same-fingerprint replay returns the existing operation, while a different request after revision advancement returns `flow_run_rerun_stale_revision`.
@@ -646,6 +646,151 @@ git diff --check
 ```
 
 The focused test names may be adjusted only if the final names remain service-command-specific and are recorded in the journal.
+
+## Slice 8.7 API Contract And Recoverable Dispatch
+
+The API slice exposes the service command without moving rerun ownership into the router. It also adds the recoverable dispatch path required by the Batch 8 algorithm: dispatch failure after the repository command commits must leave the run queued so stale queued redispatch can recover it.
+
+### Canonical Owners
+
+| Concept | Canonical owner | Decision |
+|---|---|---|
+| Public rerun request/response schemas | `backend/src/intric/flows/api/flow_models.py` | Add narrow `FlowRunStepRerunRequest` and `FlowRunStepRerunResponse` models next to the existing runtime API schemas. Reuse `StepRunInput` for root step file inputs. |
+| Rerun response assembly | `backend/src/intric/flows/api/flow_assembler.py` | Add a typed assembler method so the router does not hand-shape nested run fields or invalidated-step IDs. |
+| Rerun HTTP endpoint | `backend/src/intric/flows/api/flow_run_execution_router.py` | Add `POST /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/` under the run-lifecycle router. The path remains step-scoped, but the file owner is the execution router because rerun mutates run lifecycle state. |
+| Recoverable dispatch-after-commit | `backend/src/intric/flows/application/flow_dispatch.py` | Add a recoverable dispatch wrapper that shares a private dispatch core with the create-run helper. The wrappers differ only in failure policy: create-run terminalizes, rerun logs and leaves queued state recoverable. |
+| Application dispatch export | `backend/src/intric/flows/application/__init__.py` | Re-export the recoverable dispatch helper through the existing lazy application export pattern so import-safety tests pin the canonical path. |
+| Flow run revision token | `FlowRunPublic` in `flow_models.py` | Expose `revision` because API consumers need the compare token for `expected_run_revision`. `updated_at` remains display metadata. Add a field description making clear that the current public consumer is the rerun endpoint. |
+
+### Request Contract
+
+Add:
+
+```python
+class FlowRunStepRerunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_run_revision: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=1024)
+    input_payload_json: dict[str, Any] | None = None
+    step_inputs: dict[UUID, StepRunInput] | None = None
+```
+
+Rules:
+
+- `expected_run_revision` is required and must be `>= 1`. Malformed compare tokens are `422`; honest stale compare tokens remain `flow_run_rerun_stale_revision`.
+- `reason` is required and must be at most 1024 characters at the HTTP boundary.
+- The service still strips the reason and returns `flow_run_rerun_reason_required` for whitespace-only values. Its too-long check remains a defensive application-layer guard for non-HTTP callers, not the primary public HTTP surface.
+- `step_inputs` may include only the rerun root step. The service owns root-only validation because it has the published snapshot.
+- Unknown top-level request keys are rejected by `extra="forbid"`. Do not add a `file_ids`-specific removed-field validator because rerun never shipped that request shape.
+
+### Response Contract
+
+Add:
+
+```python
+class FlowRunStepRerunResponse(BaseModel):
+    operation_id: UUID
+    run: FlowRunPublic
+    rerun_step_id: UUID
+    new_attempt_no: int
+    invalidated_step_ids: list[UUID]
+    status: FlowRunRerunOperationStatus
+```
+
+`new_attempt_no` is the root operation's allocated root attempt number. Downstream attempt numbers are executor-owned and remain absent until the worker claims each invalidated step.
+
+On idempotent replay, `result.run` reflects the current persisted run row, including any revision bumps from worker progress after the original acceptance. `result.created` is `false`, and `operation.status` reflects the current operation status.
+
+`FlowRunStepRerunResponse.run` must have an OpenAPI description explaining that it is the current persisted run state; on idempotent replay, `run.revision` may have advanced past the request's `expected_run_revision`. `FlowRunPublic.revision` must be required in the OpenAPI component.
+
+### Endpoint Contract
+
+Add to `flow_run_execution_router.py`:
+
+- path: `/{id}/runs/{run_id}/steps/{step_id}/rerun/`
+- method: `POST`
+- status: `202 Accepted`
+- operation ID: `rerun_flow_run_step`
+- permission: `FlowApiAction.RERUN`
+- service-key principals: denied by `FlowAccessPolicy`
+- response model: `FlowRunStepRerunResponse`
+- response status: `202` for both created operations and idempotent replays. The endpoint description must explain that `202` means the rerun request was accepted or replayed; operation lifecycle is reported by the response `status` field.
+
+Router behavior:
+
+1. Enforce flow scope with `FlowApiAction.RERUN`.
+2. Convert `step_inputs` from `StepRunInput` models to plain Python data.
+3. Call `FlowRunService.rerun_step(...)`.
+4. If `result.created` is true, schedule the recoverable dispatch helper with `run_service.build_dispatch_request(result.run)`.
+5. If `result.created` is false, return the replayed operation and do not schedule another dispatch.
+6. Return the assembler-built response.
+
+The router must not call `audit_service.log_async` for rerun. `flow_run_rerun_operations` is the Batch 8 audit fact and owns actor/reason/idempotency.
+
+### Recoverable Dispatch Contract
+
+Add `dispatch_flow_run_recoverably_after_commit(...)` next to `dispatch_flow_run_after_commit(...)`.
+
+- It dispatches through the normal `FlowExecutionBackend`.
+- It accepts the same ID/principal payload as `dispatch_flow_run_after_commit(...)`.
+- Both public helpers share one private dispatch core so dispatch payload assembly has one owner.
+- On dispatch failure, it logs and returns without terminalizing the run.
+- It does not mark the rerun operation failed. A queued run plus active queued operation is recoverable by stale queued redispatch.
+- It is exposed through `flow_router_common.py` for router scheduling, matching the current create-run dispatch import pattern.
+- It is also re-exported from `intric.flows.application` through the existing lazy export pattern and covered by startup import tests.
+
+Do not duplicate backend dispatch payload assembly between helpers. Keep the different failure policies explicit in the public helper names.
+
+### OpenAPI / Consumer Contract Pins
+
+Update `backend/tests/unit/test_flow_openapi_contract.py` to prove:
+
+- required path `/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/`
+- operation ID `rerun_flow_run_step`
+- request schema `FlowRunStepRerunRequest`
+- response schema `FlowRunStepRerunResponse` under status `202`
+- required error responses: `400`, `403`, `404`, `422`
+- `FlowRunPublic` exposes `revision`
+- `FlowRunPublic.revision` is required in the component schema
+- rerun request requires `expected_run_revision` and `reason`
+- rerun request schema has `expected_run_revision >= 1`, `reason` max length 1024, and rejects unknown top-level keys
+- `FlowRunPublic.revision` has a description that scopes Batch 8 compare-token use to rerun
+- `FlowRunStepRerunResponse.run` documents current persisted run state and replay revision advancement
+
+### Router And Dispatch Tests
+
+Add focused tests in `backend/tests/unittests/flows/test_flow_router.py`:
+
+- router calls `rerun_step(...)` with path IDs, `expected_run_revision`, reason, optional inline payload, and step input file IDs
+- created rerun schedules `dispatch_flow_run_recoverably_after_commit(...)` once using `build_dispatch_request(result.run)`
+- replayed rerun response does not schedule dispatch
+- stale revision from `rerun_step(...)` propagates and does not schedule dispatch
+- endpoint permission matrix rejects `FLOWS_VIEW`, `FLOWS_RUN`, original-run ownership alone, and service-key principals before calling `rerun_step(...)`; `FLOWS_MANAGE` is accepted
+- response includes `operation_id`, nested run with `revision`, root `new_attempt_no`, invalidated step IDs, and operation status
+- recoverable dispatch helper dispatches successfully without terminalization
+- recoverable dispatch helper logs dispatch failure and does not terminalize the run
+- shared dispatch core test spies on the private core and asserts both public wrappers call it with equivalent dispatch kwargs for the same input
+- startup import tests assert the recoverable dispatch helper is available through the canonical application package export without changing import side effects
+
+### Slice 8.7 Validation Commands
+
+Run these before Claude implementation review:
+
+```bash
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unittests/flows/test_flow_router.py -k 'rerun_flow_run_step or recoverably_after_commit or dispatch_after_commit_wrappers_share_dispatch_core' -q
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unit/test_flow_openapi_contract.py -k 'rerun or revision' -q
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unit/test_server_startup_imports.py -q
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/ruff check src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_run_execution_router.py src/intric/flows/api/flow_router_common.py src/intric/flows/application/__init__.py src/intric/flows/application/flow_dispatch.py tests/unittests/flows/test_flow_router.py tests/unit/test_flow_openapi_contract.py tests/unit/test_server_startup_imports.py
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pyright --pythonpath .venv/bin/python src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_run_execution_router.py src/intric/flows/api/flow_router_common.py src/intric/flows/application/__init__.py src/intric/flows/application/flow_dispatch.py tests/unittests/flows/test_flow_router.py tests/unit/test_flow_openapi_contract.py tests/unit/test_server_startup_imports.py
+git diff --check
+```
+
+Run this guard before commit:
+
+```bash
+git diff -- backend/src/intric/flows backend/tests/unittests/flows/test_flow_router.py backend/tests/unit/test_flow_openapi_contract.py backend/tests/unit/test_server_startup_imports.py | rg '^\+.*(deprecated|legacy|backwards compat|backward compat|compatibility shim|rerun.*redispatch|redispatch.*rerun)' || true
+```
 
 ## Validation Commands
 

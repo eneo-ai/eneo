@@ -101,6 +101,10 @@ def test_flow_canonical_layer_imports_are_available() -> None:
         application.dispatch_flow_run_after_commit
         is flow_dispatch.dispatch_flow_run_after_commit
     )
+    assert (
+        application.dispatch_flow_run_recoverably_after_commit
+        is flow_dispatch.dispatch_flow_run_recoverably_after_commit
+    )
 
 
 def test_flow_and_ai_builder_routes_have_unique_contracts_and_docs() -> None:
@@ -153,6 +157,7 @@ def test_flow_and_ai_builder_request_models_expose_openapi_examples() -> None:
         flow_models.FlowCreateRequest,
         flow_models.FlowUpdateRequest,
         flow_models.FlowRunCreateRequest,
+        flow_models.FlowRunStepRerunRequest,
         flow_models.FlowAssistantCreateRequest,
         ai_builder_models.CreateSessionRequest,
         ai_builder_models.SendMessageRequest,
@@ -178,6 +183,7 @@ def test_flow_and_ai_builder_response_models_expose_openapi_examples() -> None:
         flow_models.FlowRunPublic,
         flow_models.FlowRunStepPublic,
         flow_models.FlowRunRedispatchResponse,
+        flow_models.FlowRunStepRerunResponse,
         flow_models.FlowTemplateAssetPublic,
         flow_models.FlowTemplateInspectionPublic,
         flow_models.FlowRunContractPublic,

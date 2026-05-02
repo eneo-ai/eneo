@@ -187,22 +187,61 @@ IN_PROGRESS
   - final green verification: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-service-command-final-verification-20260502T122938Z.md`
 - Reconciliation:
   - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-10.md`
-- Outcome: service command green; commit pending
+- Outcome: service command green and committed as `55bcc67e flows: add rerun service command`
+
+### Slice 8.7 — API Contract And Recoverable Dispatch
+
+- Plan: `docs/refactor/execution/batch-8-step-rerun/plan.md`
+- Scope:
+  - `backend/src/intric/flows/api/flow_models.py`
+  - `backend/src/intric/flows/api/flow_assembler.py`
+  - `backend/src/intric/flows/api/flow_run_execution_router.py`
+  - `backend/src/intric/flows/api/flow_router_common.py`
+  - `backend/src/intric/flows/application/__init__.py`
+  - `backend/src/intric/flows/application/flow_dispatch.py`
+  - `backend/tests/unittests/flows/test_flow_router.py`
+  - `backend/tests/unit/test_flow_openapi_contract.py`
+  - `backend/tests/unit/test_server_startup_imports.py`
+- Local validation: not used; direct Docker tool calls remained blocked before execution, so validation ran through a plain PTY shell.
+- Docker validation:
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unittests/flows/test_flow_router.py -k 'rerun_flow_run_step or recoverably_after_commit or dispatch_after_commit_wrappers_share_dispatch_core' -q` — passed, 10 selected
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unit/test_flow_openapi_contract.py -k 'rerun or revision' -q` — passed, 2 selected
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unit/test_server_startup_imports.py -q` — passed, 10 tests
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/ruff check src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_run_execution_router.py src/intric/flows/api/flow_router_common.py src/intric/flows/application/__init__.py src/intric/flows/application/flow_dispatch.py tests/unittests/flows/test_flow_router.py tests/unit/test_flow_openapi_contract.py tests/unit/test_server_startup_imports.py` — passed
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pyright --pythonpath .venv/bin/python src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_run_execution_router.py src/intric/flows/api/flow_router_common.py src/intric/flows/application/__init__.py src/intric/flows/application/flow_dispatch.py tests/unittests/flows/test_flow_router.py tests/unit/test_flow_openapi_contract.py tests/unit/test_server_startup_imports.py` — passed, 0 errors
+  - `git diff --check` — passed
+  - `rg -n "FlowRunPublic\\(" backend/src backend/tests` — passed, no direct constructors beyond the class definition
+  - diff-only forbidden compatibility/phase-language greps — passed, no matches
+- Claude review: green after implementation nits, artifacts:
+  - changes required: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-api-dispatch-plan-20260502T124100Z.md`
+  - green verification: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-api-dispatch-plan-verification-20260502T124545Z.md`
+  - implementation green: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-api-dispatch-implementation-20260502T130441Z.md`
+  - post-nit verification green content with noncanonical output header: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-api-dispatch-implementation-verification-20260502T131101Z.md`
+  - parser-clean green verification: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-api-dispatch-implementation-verification-exact-20260502T131211Z.md`
+- Reconciliation:
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-11.md`
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-12.md`
+- Outcome: API/dispatch implementation green; commit pending
 
 ## Repository Gate
 
 - Branch: `feature/refactor-flows-flowai`
-- HEAD: `a3849c27 flows: add rerun repository command`
+- HEAD: `55bcc67e flows: add rerun service command`
 - Staged files: none
 - Pending Batch 8 files:
-  - `backend/src/intric/flows/application/flow_run_service.py`
-  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
-  - `backend/tests/integration/flows/test_flow_run_rerun_repository.py`
-  - `backend/tests/unittests/flows/test_flow_run_service.py`
-  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-9.md`
-  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-10.md`
+  - `backend/src/intric/flows/api/flow_models.py`
+  - `backend/src/intric/flows/api/flow_assembler.py`
+  - `backend/src/intric/flows/api/flow_run_execution_router.py`
+  - `backend/src/intric/flows/api/flow_router_common.py`
+  - `backend/src/intric/flows/application/__init__.py`
+  - `backend/src/intric/flows/application/flow_dispatch.py`
+  - `backend/tests/unittests/flows/test_flow_router.py`
+  - `backend/tests/unit/test_flow_openapi_contract.py`
+  - `backend/tests/unit/test_server_startup_imports.py`
   - `docs/refactor/execution/batch-8-step-rerun/journal.md`
   - `docs/refactor/execution/batch-8-step-rerun/plan.md`
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-11.md`
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-12.md`
 - Known do-not-stage local files:
   - `frontend/packages/ui/src/icons/types.d.ts`
   - `scripts/run_codex_review.sh`

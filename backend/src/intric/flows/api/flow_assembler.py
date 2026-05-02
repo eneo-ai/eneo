@@ -6,12 +6,21 @@ from intric.flows.api.flow_models import (
     FlowPublic,
     FlowRunPublic,
     FlowRunStepPublic,
+    FlowRunStepRerunResponse,
     FlowRuntimePathsPublic,
     FlowRuntimePublic,
     FlowSparsePublic,
     FlowStepCreateRequest,
 )
-from intric.flows.domain.flow import Flow, FlowRun, FlowSparse, FlowStep, FlowStepResult
+from intric.flows.domain.flow import (
+    Flow,
+    FlowRun,
+    FlowRunRerunInvalidatedStep,
+    FlowRunRerunOperation,
+    FlowSparse,
+    FlowStep,
+    FlowStepResult,
+)
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.http_transport import (
     HttpAuthoredConfig,
@@ -106,6 +115,23 @@ class FlowAssembler:
                 "diagnostics": list(diagnostics),
                 "result_files": list(result_files),
             }
+        )
+
+    def to_rerun_response(
+        self,
+        *,
+        operation: FlowRunRerunOperation,
+        run: FlowRun,
+        invalidated_steps: Sequence[FlowRunRerunInvalidatedStep],
+        result_files: Sequence[FlowRunStepResultFile] = (),
+    ) -> FlowRunStepRerunResponse:
+        return FlowRunStepRerunResponse(
+            operation_id=operation.id,
+            run=self.to_run_public(run, result_files=result_files),
+            rerun_step_id=operation.rerun_step_id,
+            new_attempt_no=operation.root_attempt_no,
+            invalidated_step_ids=[step.step_id for step in invalidated_steps],
+            status=operation.status,
         )
 
     @staticmethod

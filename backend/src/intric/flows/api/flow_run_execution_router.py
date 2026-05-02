@@ -24,6 +24,8 @@ from intric.flows.api.flow_models import (
     FlowRunCreateRequest,
     FlowRunPublic,
     FlowRunRedispatchResponse,
+    FlowRunStepRerunRequest,
+    FlowRunStepRerunResponse,
 )
 from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -102,6 +104,17 @@ This is the canonical run control endpoint for flow consumers. Current runtime l
 is policy-based: callers can cancel their own runs, tenant admins can cancel runs across the
 tenant, same-space admins and owners can cancel runs for flows in their space, and service-key
 principals can cancel only their own runs.
+    """
+
+_FLOW_RUN_STEP_RERUN_DESCRIPTION = """
+Request a rerun for one completed step in an existing flow run.
+
+The endpoint returns `202 Accepted` for both a newly accepted rerun and an idempotent
+replay of the same rerun request. Use the response `status` to track the rerun operation
+lifecycle. On replay, the nested `run` is the current persisted run state, so
+`run.revision` can be newer than the submitted `expected_run_revision`.
+
+Rerun is a run lifecycle mutation and currently requires flow management access.
     """
 
 
@@ -371,6 +384,85 @@ async def cancel_flow_run_alias(
     await run_service.get_run(run_id=run_id, flow_id=id)
     run = await run_service.cancel_run(run_id=run_id)
     return FlowAssembler().to_run_public(run)
+
+
+@router.post(
+    "/{id}/runs/{run_id}/steps/{step_id}/rerun/",
+    response_model=FlowRunStepRerunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="rerun_flow_run_step",
+    summary="Rerun flow run step",
+    description=_FLOW_RUN_STEP_RERUN_DESCRIPTION,
+    responses={
+        400: error_response(
+            description=(
+                "Rerun request is invalid for the current run state. Representative "
+                "machine-readable codes include: flow_run_rerun_stale_revision, "
+                "flow_run_rerun_invalid_transition, flow_run_rerun_step_not_found, "
+                "flow_run_rerun_step_incomplete, flow_run_rerun_step_inputs_invalid, "
+                "flow_run_rerun_reason_required, and flow_run_rerun_reason_too_long."
+            ),
+            message="Flow run revision is stale.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="flow_run_rerun_stale_revision",
+        ),
+        403: error_response(
+            description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="You do not have permission to rerun flows.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_tenant_permission",
+            context={"auth_layer": "tenant_role"},
+        ),
+        404: error_response(
+            description="Run not found for this flow and tenant.",
+            message="Flow run not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def rerun_flow_run_step(
+    id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],
+    run_id: Annotated[UUID, Path(description="Identifier of the run to mutate.")],
+    step_id: Annotated[UUID, Path(description="Identifier of the step to rerun.")],
+    request: Request,
+    rerun_in: FlowRunStepRerunRequest,
+    background_tasks: BackgroundTasks,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await common.enforce_flow_scope_for_request(
+        request,
+        container,
+        flow_id=id,
+        required_access=common.FlowApiAction.RERUN,
+    )
+    run_service = _get_flow_run_service(container)
+    result = await run_service.rerun_step(
+        flow_id=id,
+        run_id=run_id,
+        rerun_step_id=step_id,
+        expected_run_revision=rerun_in.expected_run_revision,
+        reason=rerun_in.reason,
+        input_payload_json=rerun_in.input_payload_json,
+        step_inputs=(
+            {
+                input_step_id: step_input.model_dump(mode="python")
+                for input_step_id, step_input in rerun_in.step_inputs.items()
+            }
+            if rerun_in.step_inputs is not None
+            else None
+        ),
+    )
+    if result.created:
+        background_tasks.add_task(
+            common.dispatch_flow_run_recoverably_after_commit,
+            **run_service.build_dispatch_request(result.run),
+        )
+    return FlowAssembler().to_rerun_response(
+        operation=result.operation,
+        run=result.run,
+        invalidated_steps=result.invalidated_steps,
+    )
 
 
 @router.post(
